@@ -1,24 +1,27 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt};
 
 use aivi_base::{Diagnostic, DiagnosticCode, DiagnosticLabel, SourceSpan};
 use aivi_typing::{
-    Kind, KindCheckError, KindCheckErrorKind, KindChecker, KindExprId,
-    KindParameterId as TypingKindParameterId, KindRecordField, KindStore,
+    BuiltinSourceProvider, GateCarrier, GatePlanner, GateResultKind, Kind, KindCheckError,
+    KindCheckErrorKind, KindChecker, KindExprId, KindParameterId as TypingKindParameterId,
+    KindRecordField, KindStore, RecurrencePlanner, RecurrenceTargetEvidence,
+    RecurrenceWakeupPlanner, SourceContractType, SourceRecurrenceWakeupContext,
 };
 
 use crate::{
     arena::{Arena, ArenaId},
     hir::{
-        BuiltinType, ClusterFinalizer, ControlNode, ControlNodeKind, DecoratorPayload,
+        ApplicativeSpineHead, BuiltinType, ControlNode, ControlNodeKind, DecoratorPayload,
         DomainMemberKind, ExprKind, Item, LiteralSuffixResolution, MarkupAttributeValue,
         MarkupNodeKind, Module, Name, NamePath, PatternKind, PipeStageKind, ResolutionState,
-        SourceMetadata, TermReference, TermResolution, TextLiteral, TextSegment, TypeKind,
-        TypeReference, TypeResolution,
+        SignalItem, SourceDecorator, SourceMetadata, TermReference, TermResolution, TextLiteral,
+        TextSegment, TypeKind, TypeReference, TypeResolution,
     },
     ids::{
         BindingId, ClusterId, ControlNodeId, DecoratorId, ExprId, ImportId, ItemId, MarkupNodeId,
         PatternId, TypeId, TypeParameterId,
     },
+    source_contract_resolution::{SourceContractResolutionErrorKind, SourceContractTypeResolver},
 };
 
 /// Validation strictness for HIR modules.
@@ -83,6 +86,9 @@ impl Validator<'_> {
         self.validate_clusters();
         self.validate_items();
         self.validate_type_kinds();
+        self.validate_source_contract_types();
+        self.validate_gate_semantics();
+        self.validate_recurrence_targets();
     }
 
     fn validate_roots(&mut self) {
@@ -502,10 +508,11 @@ impl Validator<'_> {
     fn validate_clusters(&mut self) {
         for (_, cluster) in self.module.clusters().iter() {
             self.check_span("cluster", cluster.span);
-            for member in cluster.members.iter() {
-                self.require_expr(cluster.span, "cluster", "cluster member", *member);
+            let spine = cluster.normalized_spine();
+            for member in spine.apply_arguments() {
+                self.require_expr(cluster.span, "cluster", "cluster member", member);
             }
-            if let ClusterFinalizer::Explicit(finalizer) = cluster.finalizer {
+            if let ApplicativeSpineHead::Expr(finalizer) = spine.pure_head() {
                 self.require_expr(cluster.span, "cluster", "cluster finalizer", finalizer);
             }
         }
@@ -857,6 +864,641 @@ impl Validator<'_> {
                     }
                 }
                 Item::Use(_) | Item::Export(_) => {}
+            }
+        }
+    }
+
+    fn validate_source_contract_types(&mut self) {
+        if self.mode != ValidationMode::RequireResolvedNames {
+            return;
+        }
+
+        let decorators = self
+            .module
+            .decorators()
+            .iter()
+            .map(|(_, decorator)| decorator.clone())
+            .collect::<Vec<_>>();
+        let mut resolver = SourceContractTypeResolver::new(self.module);
+
+        for decorator in decorators {
+            let DecoratorPayload::Source(source) = decorator.payload else {
+                continue;
+            };
+            self.validate_source_decorator_contract_types(&source, &mut resolver);
+        }
+    }
+
+    fn validate_source_decorator_contract_types(
+        &mut self,
+        source: &crate::hir::SourceDecorator,
+        resolver: &mut SourceContractTypeResolver<'_>,
+    ) {
+        let Some(provider) = source.provider.as_ref() else {
+            return;
+        };
+        if provider.segments().len() < 2 {
+            return;
+        }
+        let provider_key = provider_key_text(provider);
+        let Some(provider) = BuiltinSourceProvider::parse(&provider_key) else {
+            return;
+        };
+        let Some(options) = source.options else {
+            return;
+        };
+        let ExprKind::Record(record) = &self.module.exprs()[options].kind else {
+            return;
+        };
+
+        for field in &record.fields {
+            let Some(option) = provider.contract().option(field.label.text()) else {
+                continue;
+            };
+            if let Err(error) = resolver.resolve(option.ty()) {
+                self.emit_source_contract_resolution_error(
+                    field.span,
+                    provider.key(),
+                    field.label.text(),
+                    option.ty(),
+                    error.kind(),
+                );
+            }
+        }
+    }
+
+    fn emit_source_contract_resolution_error(
+        &mut self,
+        span: SourceSpan,
+        provider_key: &str,
+        option_name: &str,
+        expected: SourceContractType,
+        error: &SourceContractResolutionErrorKind,
+    ) {
+        match error {
+            SourceContractResolutionErrorKind::MissingType { name } => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "source option `{option_name}` for `{provider_key}` expects `{expected}`, but `{name}` is not available as a same-module type"
+                    ))
+                    .with_code(code("missing-source-contract-type"))
+                    .with_primary_label(
+                        span,
+                        format!(
+                            "declare a same-module `type` or `domain` named `{name}` to satisfy this source contract"
+                        ),
+                    )
+                    .with_note(
+                        "current source-contract type resolution maps RFC helper names only through compiler builtins plus unique same-module `type`/`domain` items; imported helpers and option-value typing remain later work",
+                    ),
+                );
+            }
+            SourceContractResolutionErrorKind::AmbiguousType { name } => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "source option `{option_name}` for `{provider_key}` expects `{expected}`, but `{name}` is ambiguous in this module"
+                    ))
+                    .with_code(code("ambiguous-source-contract-type"))
+                    .with_primary_label(
+                        span,
+                        format!(
+                            "this source contract cannot choose a unique same-module `type` or `domain` named `{name}`"
+                        ),
+                    ),
+                );
+            }
+            SourceContractResolutionErrorKind::ArityMismatch {
+                name,
+                expected,
+                actual,
+                item,
+            } => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "source option `{option_name}` for `{provider_key}` expects `{expected}`, but `{name}` has {}",
+                        type_argument_phrase(*actual)
+                    ))
+                    .with_code(code("source-contract-type-arity"))
+                    .with_primary_label(
+                        span,
+                        format!(
+                            "this source contract needs `{name}` to accept {}",
+                            type_argument_phrase(*expected)
+                        ),
+                    )
+                    .with_secondary_label(
+                        self.module.items()[*item].span(),
+                        format!("`{name}` is declared here with {}", type_argument_phrase(*actual)),
+                    )
+                    .with_note(
+                        "current source-contract type resolution checks only builtins and same-module type/domain arities before ordinary option expression typing exists",
+                    ),
+                );
+            }
+        }
+    }
+
+    fn validate_gate_semantics(&mut self) {
+        if self.mode != ValidationMode::RequireResolvedNames {
+            return;
+        }
+
+        let items = self
+            .module
+            .items()
+            .iter()
+            .map(|(_, item)| item.clone())
+            .collect::<Vec<_>>();
+        let mut typing = GateTypeContext::new(self.module);
+
+        for item in items {
+            match item {
+                Item::Value(item) => {
+                    self.validate_gate_expr_tree(item.body, &GateExprEnv::default(), &mut typing);
+                }
+                Item::Function(item) => {
+                    let env = self.gate_env_for_function(&item, &mut typing);
+                    self.validate_gate_expr_tree(item.body, &env, &mut typing);
+                }
+                Item::Signal(item) => {
+                    if let Some(body) = item.body {
+                        self.validate_gate_expr_tree(body, &GateExprEnv::default(), &mut typing);
+                    }
+                }
+                Item::Instance(item) => {
+                    for member in item.members {
+                        self.validate_gate_expr_tree(
+                            member.body,
+                            &GateExprEnv::default(),
+                            &mut typing,
+                        );
+                    }
+                }
+                Item::Type(_)
+                | Item::Class(_)
+                | Item::Domain(_)
+                | Item::Use(_)
+                | Item::Export(_) => {}
+            }
+        }
+    }
+
+    fn validate_recurrence_targets(&mut self) {
+        if self.mode != ValidationMode::RequireResolvedNames {
+            return;
+        }
+
+        let items = self
+            .module
+            .items()
+            .iter()
+            .map(|(_, item)| item.clone())
+            .collect::<Vec<_>>();
+        let decorators = self
+            .module
+            .decorators()
+            .iter()
+            .map(|(_, decorator)| decorator.clone())
+            .collect::<Vec<_>>();
+        let mut typing = GateTypeContext::new(self.module);
+
+        for item in items {
+            match item {
+                Item::Value(item) => {
+                    let target = item.annotation.and_then(|annotation| {
+                        typing.recurrence_target_hint_for_annotation(annotation)
+                    });
+                    self.validate_recurrence_expr_tree(item.body, target, None);
+                }
+                Item::Function(item) => {
+                    let target = item.annotation.and_then(|annotation| {
+                        typing.recurrence_target_hint_for_annotation(annotation)
+                    });
+                    self.validate_recurrence_expr_tree(item.body, target, None);
+                }
+                Item::Signal(item) => {
+                    if let Some(body) = item.body {
+                        let wakeup = self.recurrence_wakeup_hint_for_signal(&item);
+                        self.validate_recurrence_expr_tree(
+                            body,
+                            Some(RecurrenceTargetHint::Evidence(
+                                RecurrenceTargetEvidence::SignalItemBody,
+                            )),
+                            wakeup,
+                        );
+                    }
+                }
+                Item::Instance(item) => {
+                    for member in item.members {
+                        let target = member.annotation.and_then(|annotation| {
+                            typing.recurrence_target_hint_for_annotation(annotation)
+                        });
+                        self.validate_recurrence_expr_tree(member.body, target, None);
+                    }
+                }
+                Item::Type(_)
+                | Item::Class(_)
+                | Item::Domain(_)
+                | Item::Use(_)
+                | Item::Export(_) => {}
+            }
+        }
+
+        for decorator in decorators {
+            match decorator.payload {
+                DecoratorPayload::Bare => {}
+                DecoratorPayload::Call(call) => {
+                    for argument in call.arguments {
+                        self.validate_recurrence_expr_tree(argument, None, None);
+                    }
+                    if let Some(options) = call.options {
+                        self.validate_recurrence_expr_tree(options, None, None);
+                    }
+                }
+                DecoratorPayload::Source(source) => {
+                    for argument in source.arguments {
+                        self.validate_recurrence_expr_tree(argument, None, None);
+                    }
+                    if let Some(options) = source.options {
+                        self.validate_recurrence_expr_tree(options, None, None);
+                    }
+                }
+            }
+        }
+    }
+
+    fn validate_recurrence_expr_tree(
+        &mut self,
+        root: ExprId,
+        root_target: Option<RecurrenceTargetHint>,
+        root_wakeup: Option<RecurrenceWakeupHint>,
+    ) {
+        let module = self.module;
+        walk_expr_tree(module, root, |_, expr, is_root| {
+            if let ExprKind::Pipe(pipe) = &expr.kind {
+                let target = if is_root { root_target.as_ref() } else { None };
+                let wakeup = if is_root { root_wakeup.as_ref() } else { None };
+                self.validate_recurrence_pipe(pipe, target, wakeup, is_root);
+            }
+        });
+    }
+
+    fn validate_recurrence_pipe(
+        &mut self,
+        pipe: &crate::hir::PipeExpr,
+        target: Option<&RecurrenceTargetHint>,
+        wakeup: Option<&RecurrenceWakeupHint>,
+        is_root: bool,
+    ) {
+        let suffix = match pipe.recurrence_suffix() {
+            Ok(Some(suffix)) => suffix,
+            Ok(None) | Err(_) => return,
+        };
+        let start_span = suffix.start_stage().span;
+        let target_valid = match target {
+            Some(RecurrenceTargetHint::Evidence(evidence)) => {
+                let _plan = RecurrencePlanner::plan(Some(*evidence))
+                    .expect("explicit recurrence target evidence should always plan");
+                true
+            }
+            Some(RecurrenceTargetHint::UnsupportedType { ty, span }) => {
+                self.emit_unsupported_recurrence_target(start_span, *span, ty);
+                false
+            }
+            None => {
+                self.emit_unknown_recurrence_target(start_span, is_root);
+                false
+            }
+        };
+        if !target_valid {
+            return;
+        }
+        match wakeup {
+            Some(RecurrenceWakeupHint::BuiltinSource(context)) => {
+                if RecurrenceWakeupPlanner::plan_source(*context).is_err() {
+                    self.emit_missing_recurrence_wakeup(start_span, wakeup);
+                }
+            }
+            Some(RecurrenceWakeupHint::CustomSource { .. }) | None => {
+                self.emit_missing_recurrence_wakeup(start_span, wakeup);
+            }
+        }
+    }
+
+    fn recurrence_wakeup_hint_for_signal(&self, item: &SignalItem) -> Option<RecurrenceWakeupHint> {
+        let source = self.signal_source_decorator(item)?;
+        let provider = source.provider.as_ref()?;
+        let provider_key = provider
+            .segments()
+            .iter()
+            .map(|segment| segment.text())
+            .collect::<Vec<_>>()
+            .join(".");
+        let provider = match BuiltinSourceProvider::parse(&provider_key) {
+            Some(provider) => provider,
+            None => {
+                return Some(RecurrenceWakeupHint::CustomSource {
+                    provider_path: provider.clone(),
+                });
+            }
+        };
+        let mut context = SourceRecurrenceWakeupContext::new(provider);
+        if item
+            .source_metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.is_reactive)
+        {
+            context = context.with_reactive_inputs();
+        }
+        if let Some(options) = source.options {
+            if let ExprKind::Record(record) = &self.module.exprs()[options].kind {
+                for field in &record.fields {
+                    context = match field.label.text() {
+                        "retry" => context.with_retry_policy(),
+                        "refreshEvery" => context.with_polling_policy(),
+                        "refreshOn" | "reloadOn" | "restartOn" => context.with_signal_trigger(),
+                        _ => context,
+                    };
+                }
+            }
+        }
+        Some(RecurrenceWakeupHint::BuiltinSource(context))
+    }
+
+    fn signal_source_decorator<'a>(&'a self, item: &SignalItem) -> Option<&'a SourceDecorator> {
+        item.header.decorators.iter().find_map(|decorator_id| {
+            let decorator = self.module.decorators().get(*decorator_id)?;
+            match &decorator.payload {
+                DecoratorPayload::Source(source) => Some(source),
+                _ => None,
+            }
+        })
+    }
+
+    fn emit_unknown_recurrence_target(&mut self, span: SourceSpan, is_root: bool) {
+        let label = if is_root {
+            "annotate this declaration as `Signal ...` or `Task ...`, or move the recurrence into a `sig` body"
+        } else {
+            "move this recurrent pipe to a declaration body with explicit `Signal ...` or `Task ...` target evidence"
+        };
+        let note = if is_root {
+            "the current recurrence-target slice accepts only direct signal item bodies plus explicit `Signal` or `Task` result annotations"
+        } else {
+            "nested recurrence target inference stays deferred until the compiler has fuller expression typing"
+        };
+        self.diagnostics.push(
+            Diagnostic::error(
+                "the compiler cannot determine a valid recurrence lowering target for this recurrent pipe",
+            )
+            .with_code(code("unknown-recurrence-target"))
+            .with_primary_label(span, label)
+            .with_note(note),
+        );
+    }
+
+    fn emit_unsupported_recurrence_target(
+        &mut self,
+        span: SourceSpan,
+        target_span: SourceSpan,
+        ty: &GateType,
+    ) {
+        self.diagnostics.push(
+            Diagnostic::error(format!("recurrent pipes cannot currently lower into `{ty}`"))
+                .with_code(code("unsupported-recurrence-target"))
+                .with_primary_label(
+                    span,
+                    "this recurrent suffix needs a `Signal`, `Task`, or future `@source` helper target",
+                )
+                .with_secondary_label(
+                    target_span,
+                    format!("the enclosing result annotation resolves to `{ty}`"),
+                )
+                .with_note(
+                    "current recurrence-target checks accept only direct signal item bodies plus explicit `Signal` or `Task` result annotations",
+                ),
+        );
+    }
+
+    fn emit_missing_recurrence_wakeup(
+        &mut self,
+        span: SourceSpan,
+        hint: Option<&RecurrenceWakeupHint>,
+    ) {
+        let mut diagnostic = Diagnostic::error(
+            "the compiler cannot determine an explicit recurrence wakeup for this recurrent pipe",
+        )
+        .with_code(code("missing-recurrence-wakeup"));
+        match hint {
+            Some(RecurrenceWakeupHint::BuiltinSource(context)) => {
+                let (label, note) = match context.provider() {
+                    BuiltinSourceProvider::HttpGet | BuiltinSourceProvider::HttpPost => (
+                        "this request-like source still needs an explicit recurrence wakeup such as `retry`, `refreshEvery`, `refreshOn`, or reactive source inputs",
+                        "plain `http.get` / `http.post` sources issue one request when subscribed; polling, backoff, and refresh proof stay explicit at the current recurrence boundary",
+                    ),
+                    BuiltinSourceProvider::FsRead => (
+                        "this snapshot source still needs an explicit recurrence wakeup such as `reloadOn` or reactive source inputs",
+                        "`fs.read` publishes one snapshot and may be retriggered only explicitly; debounce and read-on-start do not by themselves prove recurrence wakeups",
+                    ),
+                    other => (
+                        "this recurrent pipe still needs an explicit source-backed wakeup proof",
+                        match other {
+                            BuiltinSourceProvider::TimerEvery
+                            | BuiltinSourceProvider::TimerAfter
+                            | BuiltinSourceProvider::FsWatch
+                            | BuiltinSourceProvider::SocketConnect
+                            | BuiltinSourceProvider::MailboxSubscribe
+                            | BuiltinSourceProvider::ProcessSpawn
+                            | BuiltinSourceProvider::WindowKeyDown => {
+                                "this built-in source should already have planned a wakeup; if you hit this diagnostic, keep the failing fixture because the recurrence wakeup adapter is inconsistent"
+                            }
+                            BuiltinSourceProvider::HttpGet
+                            | BuiltinSourceProvider::HttpPost
+                            | BuiltinSourceProvider::FsRead => {
+                                unreachable!("request-like providers are handled above")
+                            }
+                        },
+                    ),
+                };
+                diagnostic = diagnostic.with_primary_label(span, label).with_note(note);
+            }
+            Some(RecurrenceWakeupHint::CustomSource { provider_path }) => {
+                diagnostic = diagnostic
+                    .with_primary_label(
+                        span,
+                        "the compiler cannot yet prove a recurrence wakeup from this custom `@source` provider",
+                    )
+                    .with_secondary_label(
+                        provider_path.span(),
+                        "current recurrence wakeup checks know only compiler-built-in source provider semantics",
+                    )
+                    .with_note(
+                        "custom provider-defined triggers remain deferred until source-provider contracts carry explicit wakeup metadata",
+                    );
+            }
+            None => {
+                diagnostic = diagnostic
+                    .with_primary_label(
+                        span,
+                        "this recurrent pipe needs an explicit timer, backoff policy, source event, or provider-defined trigger",
+                    )
+                    .with_note(
+                        "the current wakeup slice can prove recurrence wakeups only from compiler-known `@source` contexts; plain `Signal` / `Task` bodies still need future explicit timer/backoff evidence",
+                    );
+            }
+        }
+        self.diagnostics.push(diagnostic);
+    }
+
+    fn validate_gate_expr_tree(
+        &mut self,
+        root: ExprId,
+        env: &GateExprEnv,
+        typing: &mut GateTypeContext<'_>,
+    ) {
+        let module = self.module;
+        walk_expr_tree(module, root, |_, expr, _| {
+            if let ExprKind::Pipe(pipe) = &expr.kind {
+                self.validate_gate_pipe(pipe, env, typing);
+            }
+        });
+    }
+
+    fn validate_gate_pipe(
+        &mut self,
+        pipe: &crate::hir::PipeExpr,
+        env: &GateExprEnv,
+        typing: &mut GateTypeContext<'_>,
+    ) {
+        let mut current = typing.infer_expr(pipe.head, env, None).ty;
+        for stage in pipe.stages.iter() {
+            let Some(subject) = current.clone() else {
+                break;
+            };
+            match &stage.kind {
+                PipeStageKind::Transform { expr } => {
+                    current = typing.infer_transform_stage(*expr, env, &subject);
+                }
+                PipeStageKind::Tap { expr } => {
+                    let _ = typing.infer_pipe_body(*expr, env, &subject);
+                    current = Some(subject);
+                }
+                PipeStageKind::Gate { expr } => {
+                    current = self.validate_gate_stage(stage.span, *expr, env, &subject, typing);
+                }
+                PipeStageKind::Case { .. }
+                | PipeStageKind::Map { .. }
+                | PipeStageKind::Apply { .. }
+                | PipeStageKind::FanIn { .. }
+                | PipeStageKind::Truthy { .. }
+                | PipeStageKind::Falsy { .. }
+                | PipeStageKind::RecurStart { .. }
+                | PipeStageKind::RecurStep { .. } => {
+                    current = None;
+                }
+            }
+        }
+    }
+
+    fn validate_gate_stage(
+        &mut self,
+        _stage_span: SourceSpan,
+        predicate: ExprId,
+        env: &GateExprEnv,
+        subject: &GateType,
+        typing: &mut GateTypeContext<'_>,
+    ) -> Option<GateType> {
+        let predicate_info = typing.infer_pipe_body(predicate, env, subject);
+        let mut saw_error = false;
+        for issue in predicate_info.issues {
+            self.emit_gate_issue(issue);
+            saw_error = true;
+        }
+        if predicate_info.contains_signal
+            || predicate_info.ty.as_ref().is_some_and(GateType::is_signal)
+        {
+            self.diagnostics.push(
+                Diagnostic::error("gate predicate must be pure and cannot read a signal directly")
+                    .with_code(code("impure-gate-predicate"))
+                    .with_label(DiagnosticLabel::primary(
+                        self.module.exprs()[predicate].span,
+                        "compute a `Bool` from the current subject instead of sampling a signal here",
+                    )),
+            );
+            saw_error = true;
+        }
+        if let Some(predicate_ty) = predicate_info.ty {
+            if !predicate_ty.is_bool() {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "gate predicate must produce `Bool`, found `{predicate_ty}`"
+                    ))
+                    .with_code(code("gate-predicate-not-bool"))
+                    .with_label(DiagnosticLabel::primary(
+                        self.module.exprs()[predicate].span,
+                        "this gate body does not evaluate to `Bool` for the current subject",
+                    )),
+                );
+                saw_error = true;
+            }
+        }
+        if saw_error {
+            return None;
+        }
+
+        let plan = GatePlanner::plan(typing.gate_carrier(subject));
+        Some(typing.apply_gate_plan(plan, subject))
+    }
+
+    fn gate_env_for_function(
+        &self,
+        item: &crate::hir::FunctionItem,
+        typing: &mut GateTypeContext<'_>,
+    ) -> GateExprEnv {
+        let mut env = GateExprEnv::default();
+        for parameter in &item.parameters {
+            let Some(annotation) = parameter.annotation else {
+                continue;
+            };
+            if let Some(ty) = typing.lower_annotation(annotation) {
+                env.locals.insert(parameter.binding, ty);
+            }
+        }
+        env
+    }
+
+    fn emit_gate_issue(&mut self, issue: GateIssue) {
+        match issue {
+            GateIssue::InvalidProjection {
+                span,
+                path,
+                subject,
+            } => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "gate predicate cannot project `{path}` from non-record subject `{subject}`"
+                    ))
+                    .with_code(code("invalid-gate-projection"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "project from a record-valued subject or transform to the desired field first",
+                    )),
+                );
+            }
+            GateIssue::UnknownField {
+                span,
+                path,
+                subject,
+            } => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "gate predicate cannot find field `{path}` on subject `{subject}`"
+                    ))
+                    .with_code(code("unknown-gate-field"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "use a field that exists on the current subject",
+                    )),
+                );
             }
         }
     }
@@ -1635,6 +2277,1083 @@ fn item_type_name(item: &Item) -> String {
 }
 
 #[derive(Clone, Copy, Debug)]
+enum ExprWalkWork {
+    Expr { expr: ExprId, is_root: bool },
+    Markup(MarkupNodeId),
+    Control(ControlNodeId),
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct GateExprEnv {
+    pub(crate) locals: HashMap<BindingId, GateType>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct GateExprInfo {
+    pub(crate) ty: Option<GateType>,
+    pub(crate) contains_signal: bool,
+    pub(crate) issues: Vec<GateIssue>,
+}
+
+impl GateExprInfo {
+    fn merge(&mut self, other: Self) {
+        self.contains_signal |= other.contains_signal;
+        self.issues.extend(other.issues);
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum GateIssue {
+    InvalidProjection {
+        span: SourceSpan,
+        path: String,
+        subject: String,
+    },
+    UnknownField {
+        span: SourceSpan,
+        path: String,
+        subject: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum RecurrenceTargetHint {
+    Evidence(RecurrenceTargetEvidence),
+    UnsupportedType { ty: GateType, span: SourceSpan },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum RecurrenceWakeupHint {
+    BuiltinSource(SourceRecurrenceWakeupContext),
+    CustomSource { provider_path: NamePath },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GateRecordField {
+    pub name: String,
+    pub ty: GateType,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GateType {
+    Primitive(BuiltinType),
+    Tuple(Vec<GateType>),
+    Record(Vec<GateRecordField>),
+    Arrow {
+        parameter: Box<GateType>,
+        result: Box<GateType>,
+    },
+    List(Box<GateType>),
+    Option(Box<GateType>),
+    Result {
+        error: Box<GateType>,
+        value: Box<GateType>,
+    },
+    Validation {
+        error: Box<GateType>,
+        value: Box<GateType>,
+    },
+    Signal(Box<GateType>),
+    Task {
+        error: Box<GateType>,
+        value: Box<GateType>,
+    },
+    Domain {
+        item: ItemId,
+        name: String,
+        arguments: Vec<GateType>,
+    },
+    OpaqueItem {
+        item: ItemId,
+        name: String,
+        arguments: Vec<GateType>,
+    },
+}
+
+impl GateType {
+    pub(crate) fn is_bool(&self) -> bool {
+        matches!(self, Self::Primitive(BuiltinType::Bool))
+    }
+
+    pub(crate) fn is_signal(&self) -> bool {
+        matches!(self, Self::Signal(_))
+    }
+
+    pub(crate) fn gate_carrier(&self) -> GateCarrier {
+        match self {
+            Self::Signal(_) => GateCarrier::Signal,
+            _ => GateCarrier::Ordinary,
+        }
+    }
+
+    pub(crate) fn gate_payload(&self) -> &Self {
+        match self {
+            Self::Signal(inner) => inner,
+            other => other,
+        }
+    }
+
+    pub(crate) fn recurrence_target_evidence(&self) -> Option<RecurrenceTargetEvidence> {
+        match self {
+            Self::Signal(_) => Some(RecurrenceTargetEvidence::ExplicitSignalAnnotation),
+            Self::Task { .. } => Some(RecurrenceTargetEvidence::ExplicitTaskAnnotation),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn same_shape(&self, other: &Self) -> bool {
+        self == other
+    }
+}
+
+impl fmt::Display for GateType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GateType::Primitive(builtin) => write!(f, "{}", builtin_type_name(*builtin)),
+            GateType::Tuple(elements) => {
+                write!(f, "(")?;
+                for (index, element) in elements.iter().enumerate() {
+                    if index > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{element}")?;
+                }
+                write!(f, ")")
+            }
+            GateType::Record(fields) => {
+                write!(f, "{{ ")?;
+                for (index, field) in fields.iter().enumerate() {
+                    if index > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: {}", field.name, field.ty)?;
+                }
+                write!(f, " }}")
+            }
+            GateType::Arrow { parameter, result } => write!(f, "{parameter} -> {result}"),
+            GateType::List(element) => write!(f, "List {element}"),
+            GateType::Option(element) => write!(f, "Option {element}"),
+            GateType::Result { error, value } => write!(f, "Result {error} {value}"),
+            GateType::Validation { error, value } => {
+                write!(f, "Validation {error} {value}")
+            }
+            GateType::Signal(element) => write!(f, "Signal {element}"),
+            GateType::Task { error, value } => write!(f, "Task {error} {value}"),
+            GateType::Domain {
+                name, arguments, ..
+            }
+            | GateType::OpaqueItem {
+                name, arguments, ..
+            } => {
+                write!(f, "{name}")?;
+                for argument in arguments {
+                    write!(f, " {argument}")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+pub(crate) struct GateTypeContext<'a> {
+    module: &'a Module,
+    item_types: HashMap<ItemId, Option<GateType>>,
+}
+
+impl<'a> GateTypeContext<'a> {
+    pub(crate) fn new(module: &'a Module) -> Self {
+        Self {
+            module,
+            item_types: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn gate_carrier(&self, subject: &GateType) -> GateCarrier {
+        subject.gate_carrier()
+    }
+
+    pub(crate) fn apply_gate_plan(
+        &self,
+        plan: aivi_typing::GatePlan,
+        subject: &GateType,
+    ) -> GateType {
+        match plan.result() {
+            GateResultKind::OptionWrappedSubject => GateType::Option(Box::new(subject.clone())),
+            GateResultKind::PreservedSignalSubject => match subject {
+                GateType::Signal(_) => subject.clone(),
+                other => GateType::Signal(Box::new(other.clone())),
+            },
+        }
+    }
+
+    pub(crate) fn lower_annotation(&mut self, ty: TypeId) -> Option<GateType> {
+        self.lower_type(ty, &HashMap::new(), &mut Vec::new())
+    }
+
+    fn recurrence_target_hint_for_annotation(
+        &mut self,
+        annotation: TypeId,
+    ) -> Option<RecurrenceTargetHint> {
+        let ty = self.lower_annotation(annotation)?;
+        Some(match ty.recurrence_target_evidence() {
+            Some(evidence) => RecurrenceTargetHint::Evidence(evidence),
+            None => RecurrenceTargetHint::UnsupportedType {
+                ty,
+                span: self.module.types()[annotation].span,
+            },
+        })
+    }
+
+    fn item_value_type(&mut self, item_id: ItemId) -> Option<GateType> {
+        if let Some(cached) = self.item_types.get(&item_id) {
+            return cached.clone();
+        }
+        let ty = match &self.module.items()[item_id] {
+            Item::Value(item) => item
+                .annotation
+                .and_then(|annotation| self.lower_annotation(annotation)),
+            Item::Function(item) => {
+                let result = item
+                    .annotation
+                    .and_then(|annotation| self.lower_annotation(annotation))?;
+                let mut parameters = Vec::with_capacity(item.parameters.len());
+                for parameter in &item.parameters {
+                    let annotation = parameter.annotation?;
+                    parameters.push(self.lower_annotation(annotation)?);
+                }
+                let mut ty = result;
+                for parameter in parameters.into_iter().rev() {
+                    ty = GateType::Arrow {
+                        parameter: Box::new(parameter),
+                        result: Box::new(ty),
+                    };
+                }
+                Some(ty)
+            }
+            Item::Signal(item) => item
+                .annotation
+                .and_then(|annotation| self.lower_annotation(annotation)),
+            Item::Type(_)
+            | Item::Class(_)
+            | Item::Domain(_)
+            | Item::Instance(_)
+            | Item::Use(_)
+            | Item::Export(_) => None,
+        };
+        self.item_types.insert(item_id, ty.clone());
+        ty
+    }
+
+    fn lower_type(
+        &mut self,
+        type_id: TypeId,
+        substitutions: &HashMap<TypeParameterId, GateType>,
+        item_stack: &mut Vec<ItemId>,
+    ) -> Option<GateType> {
+        match &self.module.types()[type_id].kind {
+            TypeKind::Name(reference) => {
+                self.lower_type_reference(reference, substitutions, item_stack)
+            }
+            TypeKind::Tuple(elements) => {
+                let mut lowered = Vec::with_capacity(elements.len());
+                for element in elements.iter() {
+                    lowered.push(self.lower_type(*element, substitutions, item_stack)?);
+                }
+                Some(GateType::Tuple(lowered))
+            }
+            TypeKind::Record(fields) => {
+                let mut lowered = Vec::with_capacity(fields.len());
+                for field in fields {
+                    lowered.push(GateRecordField {
+                        name: field.label.text().to_owned(),
+                        ty: self.lower_type(field.ty, substitutions, item_stack)?,
+                    });
+                }
+                Some(GateType::Record(lowered))
+            }
+            TypeKind::Arrow { parameter, result } => Some(GateType::Arrow {
+                parameter: Box::new(self.lower_type(*parameter, substitutions, item_stack)?),
+                result: Box::new(self.lower_type(*result, substitutions, item_stack)?),
+            }),
+            TypeKind::Apply { callee, arguments } => {
+                let mut lowered_arguments = Vec::with_capacity(arguments.len());
+                for argument in arguments.iter() {
+                    lowered_arguments.push(self.lower_type(
+                        *argument,
+                        substitutions,
+                        item_stack,
+                    )?);
+                }
+                self.lower_type_application(*callee, &lowered_arguments, substitutions, item_stack)
+            }
+        }
+    }
+
+    fn lower_type_reference(
+        &mut self,
+        reference: &TypeReference,
+        substitutions: &HashMap<TypeParameterId, GateType>,
+        item_stack: &mut Vec<ItemId>,
+    ) -> Option<GateType> {
+        match reference.resolution.as_ref() {
+            ResolutionState::Unresolved => None,
+            ResolutionState::Resolved(TypeResolution::Builtin(
+                builtin @ (BuiltinType::Int
+                | BuiltinType::Float
+                | BuiltinType::Decimal
+                | BuiltinType::BigInt
+                | BuiltinType::Bool
+                | BuiltinType::Text
+                | BuiltinType::Unit
+                | BuiltinType::Bytes),
+            )) => Some(GateType::Primitive(*builtin)),
+            ResolutionState::Resolved(TypeResolution::Builtin(_)) => None,
+            ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
+                substitutions.get(parameter).cloned()
+            }
+            ResolutionState::Resolved(TypeResolution::Item(item_id)) => {
+                self.lower_type_item(*item_id, &[], item_stack)
+            }
+            ResolutionState::Resolved(TypeResolution::Import(_)) => None,
+        }
+    }
+
+    fn lower_type_application(
+        &mut self,
+        callee: TypeId,
+        arguments: &[GateType],
+        substitutions: &HashMap<TypeParameterId, GateType>,
+        item_stack: &mut Vec<ItemId>,
+    ) -> Option<GateType> {
+        let TypeKind::Name(reference) = &self.module.types()[callee].kind else {
+            return None;
+        };
+        match reference.resolution.as_ref() {
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::List)) => {
+                Some(GateType::List(Box::new(arguments.first()?.clone())))
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Option)) => {
+                Some(GateType::Option(Box::new(arguments.first()?.clone())))
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Result)) => {
+                Some(GateType::Result {
+                    error: Box::new(arguments.first()?.clone()),
+                    value: Box::new(arguments.get(1)?.clone()),
+                })
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Validation)) => {
+                Some(GateType::Validation {
+                    error: Box::new(arguments.first()?.clone()),
+                    value: Box::new(arguments.get(1)?.clone()),
+                })
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Signal)) => {
+                Some(GateType::Signal(Box::new(arguments.first()?.clone())))
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Task)) => {
+                Some(GateType::Task {
+                    error: Box::new(arguments.first()?.clone()),
+                    value: Box::new(arguments.get(1)?.clone()),
+                })
+            }
+            ResolutionState::Resolved(TypeResolution::Item(item_id)) => {
+                self.lower_type_item(*item_id, arguments, item_stack)
+            }
+            ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
+                substitutions.get(parameter).cloned()
+            }
+            ResolutionState::Resolved(TypeResolution::Import(_))
+            | ResolutionState::Resolved(TypeResolution::Builtin(
+                BuiltinType::Int
+                | BuiltinType::Float
+                | BuiltinType::Decimal
+                | BuiltinType::BigInt
+                | BuiltinType::Bool
+                | BuiltinType::Text
+                | BuiltinType::Unit
+                | BuiltinType::Bytes,
+            ))
+            | ResolutionState::Unresolved => None,
+        }
+    }
+
+    fn lower_type_item(
+        &mut self,
+        item_id: ItemId,
+        arguments: &[GateType],
+        item_stack: &mut Vec<ItemId>,
+    ) -> Option<GateType> {
+        let item = &self.module.items()[item_id];
+        let name = item_type_name(item);
+        if item_stack.contains(&item_id) {
+            return Some(GateType::OpaqueItem {
+                item: item_id,
+                name,
+                arguments: arguments.to_vec(),
+            });
+        }
+        item_stack.push(item_id);
+        let lowered = match item {
+            Item::Type(item) => {
+                if item.parameters.len() != arguments.len() {
+                    None
+                } else {
+                    match &item.body {
+                        crate::hir::TypeItemBody::Alias(alias) => {
+                            let substitutions = item
+                                .parameters
+                                .iter()
+                                .copied()
+                                .zip(arguments.iter().cloned())
+                                .collect::<HashMap<_, _>>();
+                            self.lower_type(*alias, &substitutions, item_stack)
+                        }
+                        crate::hir::TypeItemBody::Sum(_) => Some(GateType::OpaqueItem {
+                            item: item_id,
+                            name: item.name.text().to_owned(),
+                            arguments: arguments.to_vec(),
+                        }),
+                    }
+                }
+            }
+            Item::Domain(item) => Some(GateType::Domain {
+                item: item_id,
+                name: item.name.text().to_owned(),
+                arguments: arguments.to_vec(),
+            }),
+            Item::Class(_)
+            | Item::Value(_)
+            | Item::Function(_)
+            | Item::Signal(_)
+            | Item::Instance(_)
+            | Item::Use(_)
+            | Item::Export(_) => None,
+        };
+        let popped = item_stack.pop();
+        debug_assert_eq!(popped, Some(item_id));
+        lowered
+    }
+
+    pub(crate) fn infer_expr(
+        &mut self,
+        expr_id: ExprId,
+        env: &GateExprEnv,
+        ambient: Option<&GateType>,
+    ) -> GateExprInfo {
+        let expr = self.module.exprs()[expr_id].clone();
+        match expr.kind {
+            ExprKind::Name(reference) => self.infer_name(&reference, env),
+            ExprKind::Integer(_) => GateExprInfo {
+                ty: Some(GateType::Primitive(BuiltinType::Int)),
+                ..GateExprInfo::default()
+            },
+            ExprKind::SuffixedInteger(literal) => GateExprInfo {
+                ty: match literal.resolution.as_ref() {
+                    ResolutionState::Resolved(resolution) => {
+                        let domain = &self.module.items()[resolution.domain];
+                        Some(GateType::Domain {
+                            item: resolution.domain,
+                            name: item_type_name(domain),
+                            arguments: Vec::new(),
+                        })
+                    }
+                    ResolutionState::Unresolved => None,
+                },
+                ..GateExprInfo::default()
+            },
+            ExprKind::Text(text) => {
+                let mut info = GateExprInfo {
+                    ty: Some(GateType::Primitive(BuiltinType::Text)),
+                    ..GateExprInfo::default()
+                };
+                for segment in text.segments {
+                    if let TextSegment::Interpolation(interpolation) = segment {
+                        info.merge(self.infer_expr(interpolation.expr, env, ambient));
+                    }
+                }
+                info
+            }
+            ExprKind::Regex(_) => GateExprInfo::default(),
+            ExprKind::Tuple(elements) => {
+                let mut info = GateExprInfo::default();
+                let mut lowered = Vec::with_capacity(elements.len());
+                let mut complete = true;
+                for element in elements.iter() {
+                    let child = self.infer_expr(*element, env, ambient);
+                    complete &= child.ty.is_some();
+                    if let Some(ty) = child.ty.clone() {
+                        lowered.push(ty);
+                    }
+                    info.merge(child);
+                }
+                if complete {
+                    info.ty = Some(GateType::Tuple(lowered));
+                }
+                info
+            }
+            ExprKind::List(elements) => {
+                let mut info = GateExprInfo::default();
+                let mut element_type = None::<GateType>;
+                for element in &elements {
+                    let child = self.infer_expr(*element, env, ambient);
+                    if let Some(child_ty) = child.ty.as_ref() {
+                        match &element_type {
+                            None => element_type = Some(child_ty.clone()),
+                            Some(current) if current.same_shape(child_ty) => {}
+                            Some(_) => element_type = None,
+                        }
+                    }
+                    info.merge(child);
+                }
+                if let Some(element_type) = element_type {
+                    info.ty = Some(GateType::List(Box::new(element_type)));
+                }
+                info
+            }
+            ExprKind::Record(record) => {
+                let mut info = GateExprInfo::default();
+                let mut fields = Vec::with_capacity(record.fields.len());
+                let mut complete = true;
+                for field in record.fields {
+                    let child = self.infer_expr(field.value, env, ambient);
+                    complete &= child.ty.is_some();
+                    if let Some(ty) = child.ty.clone() {
+                        fields.push(GateRecordField {
+                            name: field.label.text().to_owned(),
+                            ty,
+                        });
+                    }
+                    info.merge(child);
+                }
+                if complete {
+                    info.ty = Some(GateType::Record(fields));
+                }
+                info
+            }
+            ExprKind::Projection { base, path } => {
+                let mut info = GateExprInfo::default();
+                let subject = match base {
+                    crate::hir::ProjectionBase::Ambient => ambient.cloned(),
+                    crate::hir::ProjectionBase::Expr(base) => {
+                        let base_info = self.infer_expr(base, env, ambient);
+                        let ty = base_info.ty.clone();
+                        info.merge(base_info);
+                        ty
+                    }
+                };
+                if let Some(subject) = subject {
+                    match self.project_type(&subject, &path) {
+                        Ok(projected) => info.ty = Some(projected),
+                        Err(issue) => info.issues.push(issue),
+                    }
+                } else {
+                    info.issues.push(GateIssue::InvalidProjection {
+                        span: path.span(),
+                        path: name_path_text(&path),
+                        subject: "unknown subject".to_owned(),
+                    });
+                }
+                info
+            }
+            ExprKind::Apply { callee, arguments } => {
+                let mut info = self.infer_expr(callee, env, ambient);
+                let mut current = info.ty.clone();
+                for argument in arguments.iter() {
+                    let argument_info = self.infer_expr(*argument, env, ambient);
+                    let argument_ty = argument_info.ty.clone();
+                    info.merge(argument_info);
+                    current = match (current.as_ref(), argument_ty.as_ref()) {
+                        (Some(callee_ty), Some(argument_ty)) => {
+                            self.apply_function(callee_ty, argument_ty)
+                        }
+                        _ => None,
+                    };
+                }
+                info.ty = current;
+                info
+            }
+            ExprKind::Unary { operator, expr } => {
+                let mut info = self.infer_expr(expr, env, ambient);
+                info.ty = match (operator, info.ty.as_ref()) {
+                    (crate::hir::UnaryOperator::Not, Some(ty)) if ty.is_bool() => {
+                        Some(GateType::Primitive(BuiltinType::Bool))
+                    }
+                    _ => None,
+                };
+                info
+            }
+            ExprKind::Binary {
+                left,
+                operator,
+                right,
+            } => {
+                let mut info = self.infer_expr(left, env, ambient);
+                let left_ty = info.ty.clone();
+                let right_info = self.infer_expr(right, env, ambient);
+                let right_ty = right_info.ty.clone();
+                info.merge(right_info);
+                info.ty = match (left_ty.as_ref(), right_ty.as_ref(), operator) {
+                    (Some(left), Some(right), crate::hir::BinaryOperator::And)
+                    | (Some(left), Some(right), crate::hir::BinaryOperator::Or)
+                        if left.is_bool() && right.is_bool() =>
+                    {
+                        Some(GateType::Primitive(BuiltinType::Bool))
+                    }
+                    (Some(left), Some(right), crate::hir::BinaryOperator::GreaterThan)
+                    | (Some(left), Some(right), crate::hir::BinaryOperator::LessThan)
+                        if is_numeric_gate_type(left) && left.same_shape(right) =>
+                    {
+                        Some(GateType::Primitive(BuiltinType::Bool))
+                    }
+                    (Some(left), Some(right), crate::hir::BinaryOperator::Add)
+                    | (Some(left), Some(right), crate::hir::BinaryOperator::Subtract)
+                        if is_numeric_gate_type(left) && left.same_shape(right) =>
+                    {
+                        Some(left.clone())
+                    }
+                    (Some(left), Some(right), crate::hir::BinaryOperator::Equals)
+                    | (Some(left), Some(right), crate::hir::BinaryOperator::NotEquals)
+                        if left.same_shape(right) =>
+                    {
+                        Some(GateType::Primitive(BuiltinType::Bool))
+                    }
+                    _ => None,
+                };
+                info
+            }
+            ExprKind::Pipe(pipe) => GateExprInfo {
+                ty: self.infer_pipe_result(&pipe, env),
+                ..GateExprInfo::default()
+            },
+            ExprKind::Cluster(_) | ExprKind::Markup(_) => GateExprInfo::default(),
+        }
+    }
+
+    fn infer_name(&mut self, reference: &TermReference, env: &GateExprEnv) -> GateExprInfo {
+        match reference.resolution.as_ref() {
+            ResolutionState::Unresolved => GateExprInfo::default(),
+            ResolutionState::Resolved(TermResolution::Local(binding)) => {
+                let ty = env.locals.get(binding).cloned();
+                GateExprInfo {
+                    contains_signal: ty.as_ref().is_some_and(GateType::is_signal),
+                    ty,
+                    ..GateExprInfo::default()
+                }
+            }
+            ResolutionState::Resolved(TermResolution::Item(item_id)) => {
+                let ty = self.item_value_type(*item_id);
+                GateExprInfo {
+                    contains_signal: ty.as_ref().is_some_and(GateType::is_signal),
+                    ty,
+                    ..GateExprInfo::default()
+                }
+            }
+            ResolutionState::Resolved(TermResolution::Import(_)) => GateExprInfo::default(),
+            ResolutionState::Resolved(TermResolution::Builtin(builtin)) => {
+                let ty = match builtin {
+                    crate::hir::BuiltinTerm::True | crate::hir::BuiltinTerm::False => {
+                        Some(GateType::Primitive(BuiltinType::Bool))
+                    }
+                    crate::hir::BuiltinTerm::None
+                    | crate::hir::BuiltinTerm::Some
+                    | crate::hir::BuiltinTerm::Ok
+                    | crate::hir::BuiltinTerm::Err
+                    | crate::hir::BuiltinTerm::Valid
+                    | crate::hir::BuiltinTerm::Invalid => None,
+                };
+                GateExprInfo {
+                    ty,
+                    ..GateExprInfo::default()
+                }
+            }
+        }
+    }
+
+    pub(crate) fn infer_pipe_body(
+        &mut self,
+        expr_id: ExprId,
+        env: &GateExprEnv,
+        subject: &GateType,
+    ) -> GateExprInfo {
+        let ambient = subject.gate_payload().clone();
+        let mut info = self.infer_expr(expr_id, env, Some(&ambient));
+        if let Some(GateType::Arrow { parameter, result }) = info.ty.clone() {
+            if parameter.same_shape(&ambient) {
+                info.ty = Some(*result);
+            }
+        }
+        info
+    }
+
+    pub(crate) fn infer_transform_stage(
+        &mut self,
+        expr_id: ExprId,
+        env: &GateExprEnv,
+        subject: &GateType,
+    ) -> Option<GateType> {
+        let body = self.infer_pipe_body(expr_id, env, subject);
+        let body_ty = body.ty?;
+        Some(match subject {
+            GateType::Signal(_) => GateType::Signal(Box::new(body_ty)),
+            _ => body_ty,
+        })
+    }
+
+    fn infer_pipe_result(
+        &mut self,
+        pipe: &crate::hir::PipeExpr,
+        env: &GateExprEnv,
+    ) -> Option<GateType> {
+        let mut current = self.infer_expr(pipe.head, env, None).ty?;
+        for stage in pipe.stages.iter() {
+            match &stage.kind {
+                PipeStageKind::Transform { expr } => {
+                    current = self.infer_transform_stage(*expr, env, &current)?;
+                }
+                PipeStageKind::Tap { .. } => {}
+                PipeStageKind::Gate { expr } => {
+                    let predicate = self.infer_pipe_body(*expr, env, &current);
+                    if !predicate.issues.is_empty()
+                        || predicate.contains_signal
+                        || predicate.ty.as_ref().is_some_and(GateType::is_signal)
+                    {
+                        return None;
+                    }
+                    if let Some(predicate_ty) = predicate.ty.as_ref() {
+                        if !predicate_ty.is_bool() {
+                            return None;
+                        }
+                    }
+                    current =
+                        self.apply_gate_plan(GatePlanner::plan(current.gate_carrier()), &current);
+                }
+                PipeStageKind::Case { .. }
+                | PipeStageKind::Map { .. }
+                | PipeStageKind::Apply { .. }
+                | PipeStageKind::FanIn { .. }
+                | PipeStageKind::Truthy { .. }
+                | PipeStageKind::Falsy { .. }
+                | PipeStageKind::RecurStart { .. }
+                | PipeStageKind::RecurStep { .. } => return None,
+            }
+        }
+        Some(current)
+    }
+
+    fn project_type(&self, subject: &GateType, path: &NamePath) -> Result<GateType, GateIssue> {
+        let mut current = subject.clone();
+        for segment in path.segments().iter() {
+            let GateType::Record(fields) = &current else {
+                return Err(GateIssue::InvalidProjection {
+                    span: path.span(),
+                    path: name_path_text(path),
+                    subject: current.to_string(),
+                });
+            };
+            let Some(field) = fields.iter().find(|field| field.name == segment.text()) else {
+                return Err(GateIssue::UnknownField {
+                    span: path.span(),
+                    path: name_path_text(path),
+                    subject: current.to_string(),
+                });
+            };
+            current = field.ty.clone();
+        }
+        Ok(current)
+    }
+
+    fn apply_function(&self, callee: &GateType, argument: &GateType) -> Option<GateType> {
+        let GateType::Arrow { parameter, result } = callee else {
+            return None;
+        };
+        parameter
+            .same_shape(argument)
+            .then(|| result.as_ref().clone())
+    }
+}
+
+fn is_numeric_gate_type(ty: &GateType) -> bool {
+    matches!(
+        ty,
+        GateType::Primitive(
+            BuiltinType::Int | BuiltinType::Float | BuiltinType::Decimal | BuiltinType::BigInt
+        )
+    )
+}
+
+fn name_path_text(path: &NamePath) -> String {
+    format!(
+        ".{}",
+        path.segments()
+            .iter()
+            .map(|segment| segment.text())
+            .collect::<Vec<_>>()
+            .join(".")
+    )
+}
+
+fn provider_key_text(path: &NamePath) -> String {
+    path.segments()
+        .iter()
+        .map(|segment| segment.text())
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+fn type_argument_phrase(count: usize) -> String {
+    format!("{count} type argument{}", if count == 1 { "" } else { "s" })
+}
+
+pub(crate) fn walk_expr_tree(
+    module: &Module,
+    root: ExprId,
+    mut on_expr: impl FnMut(ExprId, &crate::hir::Expr, bool),
+) {
+    let mut work = vec![ExprWalkWork::Expr {
+        expr: root,
+        is_root: true,
+    }];
+    while let Some(task) = work.pop() {
+        match task {
+            ExprWalkWork::Expr {
+                expr: expr_id,
+                is_root,
+            } => {
+                let expr = module.exprs()[expr_id].clone();
+                on_expr(expr_id, &expr, is_root);
+                match expr.kind {
+                    ExprKind::Name(_)
+                    | ExprKind::Integer(_)
+                    | ExprKind::SuffixedInteger(_)
+                    | ExprKind::Regex(_) => {}
+                    ExprKind::Text(text) => {
+                        for segment in text.segments.into_iter().rev() {
+                            if let TextSegment::Interpolation(interpolation) = segment {
+                                work.push(ExprWalkWork::Expr {
+                                    expr: interpolation.expr,
+                                    is_root: false,
+                                });
+                            }
+                        }
+                    }
+                    ExprKind::Tuple(elements) => {
+                        for element in elements.iter().rev() {
+                            work.push(ExprWalkWork::Expr {
+                                expr: *element,
+                                is_root: false,
+                            });
+                        }
+                    }
+                    ExprKind::List(elements) => {
+                        for element in elements.into_iter().rev() {
+                            work.push(ExprWalkWork::Expr {
+                                expr: element,
+                                is_root: false,
+                            });
+                        }
+                    }
+                    ExprKind::Record(record) => {
+                        for field in record.fields.into_iter().rev() {
+                            work.push(ExprWalkWork::Expr {
+                                expr: field.value,
+                                is_root: false,
+                            });
+                        }
+                    }
+                    ExprKind::Projection {
+                        base: crate::hir::ProjectionBase::Expr(base),
+                        ..
+                    } => work.push(ExprWalkWork::Expr {
+                        expr: base,
+                        is_root: false,
+                    }),
+                    ExprKind::Projection { .. } => {}
+                    ExprKind::Apply { callee, arguments } => {
+                        for argument in arguments.iter().rev() {
+                            work.push(ExprWalkWork::Expr {
+                                expr: *argument,
+                                is_root: false,
+                            });
+                        }
+                        work.push(ExprWalkWork::Expr {
+                            expr: callee,
+                            is_root: false,
+                        });
+                    }
+                    ExprKind::Unary { expr, .. } => work.push(ExprWalkWork::Expr {
+                        expr,
+                        is_root: false,
+                    }),
+                    ExprKind::Binary { left, right, .. } => {
+                        work.push(ExprWalkWork::Expr {
+                            expr: right,
+                            is_root: false,
+                        });
+                        work.push(ExprWalkWork::Expr {
+                            expr: left,
+                            is_root: false,
+                        });
+                    }
+                    ExprKind::Pipe(pipe) => {
+                        for stage in pipe.stages.iter().rev() {
+                            match &stage.kind {
+                                PipeStageKind::Transform { expr }
+                                | PipeStageKind::Gate { expr }
+                                | PipeStageKind::Map { expr }
+                                | PipeStageKind::Apply { expr }
+                                | PipeStageKind::Tap { expr }
+                                | PipeStageKind::FanIn { expr }
+                                | PipeStageKind::Truthy { expr }
+                                | PipeStageKind::Falsy { expr }
+                                | PipeStageKind::RecurStart { expr }
+                                | PipeStageKind::RecurStep { expr } => {
+                                    work.push(ExprWalkWork::Expr {
+                                        expr: *expr,
+                                        is_root: false,
+                                    });
+                                }
+                                PipeStageKind::Case { body, .. } => {
+                                    work.push(ExprWalkWork::Expr {
+                                        expr: *body,
+                                        is_root: false,
+                                    });
+                                }
+                            }
+                        }
+                        work.push(ExprWalkWork::Expr {
+                            expr: pipe.head,
+                            is_root: false,
+                        });
+                    }
+                    ExprKind::Cluster(cluster_id) => {
+                        let cluster = module.clusters()[cluster_id].clone();
+                        let spine = cluster.normalized_spine();
+                        for member in spine.apply_arguments() {
+                            work.push(ExprWalkWork::Expr {
+                                expr: member,
+                                is_root: false,
+                            });
+                        }
+                        if let ApplicativeSpineHead::Expr(finalizer) = spine.pure_head() {
+                            work.push(ExprWalkWork::Expr {
+                                expr: finalizer,
+                                is_root: false,
+                            });
+                        }
+                    }
+                    ExprKind::Markup(node_id) => work.push(ExprWalkWork::Markup(node_id)),
+                }
+            }
+            ExprWalkWork::Markup(node_id) => {
+                let node = module.markup_nodes()[node_id].clone();
+                match node.kind {
+                    MarkupNodeKind::Element(element) => {
+                        for child in element.children.into_iter().rev() {
+                            work.push(ExprWalkWork::Markup(child));
+                        }
+                        for attribute in element.attributes.into_iter().rev() {
+                            match attribute.value {
+                                MarkupAttributeValue::Expr(expr) => {
+                                    work.push(ExprWalkWork::Expr {
+                                        expr,
+                                        is_root: false,
+                                    });
+                                }
+                                MarkupAttributeValue::Text(text) => {
+                                    for segment in text.segments.into_iter().rev() {
+                                        if let TextSegment::Interpolation(interpolation) = segment {
+                                            work.push(ExprWalkWork::Expr {
+                                                expr: interpolation.expr,
+                                                is_root: false,
+                                            });
+                                        }
+                                    }
+                                }
+                                MarkupAttributeValue::ImplicitTrue => {}
+                            }
+                        }
+                    }
+                    MarkupNodeKind::Control(control_id) => {
+                        work.push(ExprWalkWork::Control(control_id));
+                    }
+                }
+            }
+            ExprWalkWork::Control(control_id) => {
+                let control = module.control_nodes()[control_id].clone();
+                match control {
+                    ControlNode::Show(node) => {
+                        for child in node.children.into_iter().rev() {
+                            work.push(ExprWalkWork::Markup(child));
+                        }
+                        if let Some(keep_mounted) = node.keep_mounted {
+                            work.push(ExprWalkWork::Expr {
+                                expr: keep_mounted,
+                                is_root: false,
+                            });
+                        }
+                        work.push(ExprWalkWork::Expr {
+                            expr: node.when,
+                            is_root: false,
+                        });
+                    }
+                    ControlNode::Each(node) => {
+                        if let Some(empty) = node.empty {
+                            work.push(ExprWalkWork::Control(empty));
+                        }
+                        for child in node.children.into_iter().rev() {
+                            work.push(ExprWalkWork::Markup(child));
+                        }
+                        if let Some(key) = node.key {
+                            work.push(ExprWalkWork::Expr {
+                                expr: key,
+                                is_root: false,
+                            });
+                        }
+                        work.push(ExprWalkWork::Expr {
+                            expr: node.collection,
+                            is_root: false,
+                        });
+                    }
+                    ControlNode::Empty(node) => {
+                        for child in node.children.into_iter().rev() {
+                            work.push(ExprWalkWork::Markup(child));
+                        }
+                    }
+                    ControlNode::Match(node) => {
+                        for case in node.cases.iter().rev() {
+                            work.push(ExprWalkWork::Control(*case));
+                        }
+                        work.push(ExprWalkWork::Expr {
+                            expr: node.scrutinee,
+                            is_root: false,
+                        });
+                    }
+                    ControlNode::Case(node) => {
+                        for child in node.children.into_iter().rev() {
+                            work.push(ExprWalkWork::Markup(child));
+                        }
+                    }
+                    ControlNode::Fragment(node) => {
+                        for child in node.children.into_iter().rev() {
+                            work.push(ExprWalkWork::Markup(child));
+                        }
+                    }
+                    ControlNode::With(node) => {
+                        for child in node.children.into_iter().rev() {
+                            work.push(ExprWalkWork::Markup(child));
+                        }
+                        work.push(ExprWalkWork::Expr {
+                            expr: node.value,
+                            is_root: false,
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 enum KindBuildFrame {
     Enter(TypeId),
     Exit(TypeId),
@@ -1646,8 +3365,9 @@ mod tests {
 
     use crate::{
         ApplicativeCluster, ClusterFinalizer, ClusterPresentation, ControlNode, Expr, ExprKind,
-        Item, ItemHeader, MarkupNode, MarkupNodeKind, Module, Name, NamePath, Pattern, PatternKind,
-        RecordExpr, ShowControl, TermReference, ValidationMode,
+        IntegerLiteral, Item, ItemHeader, MarkupNode, MarkupNodeKind, Module, Name, NamePath,
+        NonEmpty, Pattern, PatternKind, PipeExpr, PipeStage, PipeStageKind, RecordExpr,
+        ShowControl, TermReference, ValidationMode,
     };
 
     use super::validate_module;
@@ -1723,6 +3443,73 @@ mod tests {
         assert!(report.diagnostics().iter().any(
             |diagnostic| diagnostic.code == Some(DiagnosticCode::new("hir", "unresolved-name"))
         ));
+    }
+
+    #[test]
+    fn recurrence_suffix_reports_malformed_manual_hir() {
+        let pipe_span = span(0, 0, 12);
+        let mut module = Module::new(FileId::new(0));
+
+        let head = module
+            .alloc_expr(Expr {
+                span: span(0, 0, 1),
+                kind: ExprKind::Integer(IntegerLiteral { raw: "0".into() }),
+            })
+            .expect("expression allocation should fit");
+        let start_expr = module
+            .alloc_expr(Expr {
+                span: span(0, 4, 5),
+                kind: ExprKind::Integer(IntegerLiteral { raw: "1".into() }),
+            })
+            .expect("expression allocation should fit");
+        let follow_expr = module
+            .alloc_expr(Expr {
+                span: span(0, 8, 9),
+                kind: ExprKind::Integer(IntegerLiteral { raw: "2".into() }),
+            })
+            .expect("expression allocation should fit");
+        let pipe = module
+            .alloc_expr(Expr {
+                span: pipe_span,
+                kind: ExprKind::Pipe(PipeExpr {
+                    head,
+                    stages: NonEmpty::new(
+                        PipeStage {
+                            span: span(0, 2, 5),
+                            kind: PipeStageKind::RecurStart { expr: start_expr },
+                        },
+                        vec![PipeStage {
+                            span: span(0, 6, 9),
+                            kind: PipeStageKind::Transform { expr: follow_expr },
+                        }],
+                    ),
+                }),
+            })
+            .expect("expression allocation should fit");
+
+        let _ = module
+            .push_item(Item::Value(crate::ValueItem {
+                header: ItemHeader {
+                    span: pipe_span,
+                    decorators: Vec::new(),
+                },
+                name: Name::new("broken", span(0, 0, 6)).expect("valid name"),
+                annotation: None,
+                body: pipe,
+            }))
+            .expect("item allocation should fit");
+
+        let ExprKind::Pipe(pipe) = &module.exprs()[pipe].kind else {
+            panic!("expected manual test expression to stay a pipe");
+        };
+        assert!(
+            matches!(
+                pipe.recurrence_suffix(),
+                Err(crate::PipeRecurrenceShapeError::MissingStep { .. })
+            ),
+            "manual malformed HIR should report a missing recurrence step, got {:?}",
+            pipe.recurrence_suffix()
+        );
     }
 
     #[test]

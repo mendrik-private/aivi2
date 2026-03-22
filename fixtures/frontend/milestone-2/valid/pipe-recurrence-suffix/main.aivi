@@ -1,0 +1,11 @@
+fun step #value =>
+    value
+
+@source timer.every 120 with {
+    immediate: True
+}
+sig retried : Signal Int =
+    0
+     @|> step
+     <|@ step
+     <|@ step

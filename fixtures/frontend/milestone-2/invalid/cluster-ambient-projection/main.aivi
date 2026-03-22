@@ -1,0 +1,9 @@
+type NamePair = NamePair Text Text
+
+sig firstName = "Ada"
+sig lastName = "Lovelace"
+
+sig broken =
+ firstName
+  &|> .display
+   |> NamePair

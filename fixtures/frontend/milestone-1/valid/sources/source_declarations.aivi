@@ -9,29 +9,49 @@ type User = {
 
 type Key = Key Text
 
-type FsEvent =
+type FsWatchEvent =
   | Created
   | Changed
   | Deleted
+
+type ProcessEvent =
+  | Spawned
 
 type DecodeMode =
   | Strict
   | Permissive
 
+type StreamMode =
+  | Ignore
+  | Lines
+  | Bytes
+
+type Map K V =
+  | EmptyMap
+
 domain Duration over Int
     literal s : Int -> Duration
 
-domain Repeat over Int
-    literal x : Int -> Repeat
+domain Retry over Int
+    literal x : Int -> Retry
+
+val authHeaders : Map Text Text = EmptyMap
 
 sig apiHost = "https://api.example.com"
 
 @source http.get "{apiHost}/users" with {
+    headers: authHeaders,
     decode: Strict,
     retry: 3x,
     timeout: 5s
 }
 sig users : Signal (Result HttpError (List User))
+
+@source process.spawn "rg" ["TODO", "."] with {
+    stdout: Lines,
+    stderr: Ignore
+}
+sig grepEvents : Signal ProcessEvent
 
 @source timer.every 120 with {
     immediate: True,
@@ -48,4 +68,4 @@ sig keyDown : Signal Key
 @source fs.watch "/tmp/demo.txt" with {
     events: [Created, Changed, Deleted]
 }
-sig fileEvents : Signal FsEvent
+sig fileEvents : Signal FsWatchEvent

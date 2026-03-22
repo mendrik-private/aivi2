@@ -684,6 +684,139 @@ pub enum PipeStageKind {
     RecurStep { expr: ExprId },
 }
 
+/// Presentation-free structural view of one trailing recurrence suffix inside a pipe.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PipeRecurrenceSuffix<'a> {
+    prefix_stage_count: usize,
+    start_stage: &'a PipeStage,
+    stages: &'a NonEmpty<PipeStage>,
+}
+
+impl<'a> PipeRecurrenceSuffix<'a> {
+    pub fn prefix_stage_count(&self) -> usize {
+        self.prefix_stage_count
+    }
+
+    pub fn prefix_stages(&self) -> impl Iterator<Item = &'a PipeStage> + 'a {
+        self.stages.iter().take(self.prefix_stage_count)
+    }
+
+    pub fn start_stage(&self) -> &'a PipeStage {
+        self.start_stage
+    }
+
+    pub fn start_expr(&self) -> ExprId {
+        match &self.start_stage.kind {
+            PipeStageKind::RecurStart { expr } => *expr,
+            other => {
+                unreachable!("validated recurrence suffixes must start with `@|>`, found {other:?}")
+            }
+        }
+    }
+
+    pub fn step_count(&self) -> usize {
+        self.stages.len() - self.prefix_stage_count - 1
+    }
+
+    pub fn step_stages(&self) -> impl Iterator<Item = &'a PipeStage> + 'a {
+        self.stages.iter().skip(self.prefix_stage_count + 1)
+    }
+
+    pub fn step_exprs(&self) -> impl Iterator<Item = ExprId> + 'a {
+        self.step_stages().map(|stage| match &stage.kind {
+            PipeStageKind::RecurStep { expr } => *expr,
+            other => {
+                unreachable!("validated recurrence suffix steps must use `<|@`, found {other:?}")
+            }
+        })
+    }
+}
+
+/// Structural recurrence-shape error for raw HIR pipes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PipeRecurrenceShapeError {
+    OrphanStep {
+        step_span: SourceSpan,
+    },
+    MissingStep {
+        start_span: SourceSpan,
+        continuation_span: Option<SourceSpan>,
+    },
+    TrailingStage {
+        start_span: SourceSpan,
+        stage_span: SourceSpan,
+    },
+}
+
+impl fmt::Display for PipeRecurrenceShapeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::OrphanStep { .. } => {
+                f.write_str("`<|@` appears without a preceding `@|>` recurrence start")
+            }
+            Self::MissingStep { .. } => {
+                f.write_str("`@|>` is not followed by one or more `<|@` recurrence steps")
+            }
+            Self::TrailingStage { .. } => {
+                f.write_str("a recurrent pipe suffix is followed by a non-`<|@` stage")
+            }
+        }
+    }
+}
+
+impl Error for PipeRecurrenceShapeError {}
+
+impl PipeExpr {
+    pub fn recurrence_suffix(
+        &self,
+    ) -> Result<Option<PipeRecurrenceSuffix<'_>>, PipeRecurrenceShapeError> {
+        let mut suffix_start: Option<(usize, &PipeStage)> = None;
+        let mut saw_step = false;
+
+        for (index, stage) in self.stages.iter().enumerate() {
+            match (suffix_start, &stage.kind) {
+                (None, PipeStageKind::RecurStart { .. }) => {
+                    suffix_start = Some((index, stage));
+                }
+                (None, PipeStageKind::RecurStep { .. }) => {
+                    return Err(PipeRecurrenceShapeError::OrphanStep {
+                        step_span: stage.span,
+                    });
+                }
+                (None, _) => {}
+                (Some(_), PipeStageKind::RecurStep { .. }) => {
+                    saw_step = true;
+                }
+                (Some((_, start_stage)), _) if !saw_step => {
+                    return Err(PipeRecurrenceShapeError::MissingStep {
+                        start_span: start_stage.span,
+                        continuation_span: Some(stage.span),
+                    });
+                }
+                (Some((_, start_stage)), _) => {
+                    return Err(PipeRecurrenceShapeError::TrailingStage {
+                        start_span: start_stage.span,
+                        stage_span: stage.span,
+                    });
+                }
+            }
+        }
+
+        match suffix_start {
+            None => Ok(None),
+            Some((_, start_stage)) if !saw_step => Err(PipeRecurrenceShapeError::MissingStep {
+                start_span: start_stage.span,
+                continuation_span: None,
+            }),
+            Some((prefix_stage_count, start_stage)) => Ok(Some(PipeRecurrenceSuffix {
+                prefix_stage_count,
+                start_stage,
+                stages: &self.stages,
+            })),
+        }
+    }
+}
+
 /// One pattern node owned by the module pattern arena.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pattern {
@@ -915,7 +1048,7 @@ pub struct WithControl {
     pub children: Vec<MarkupNodeId>,
 }
 
-/// Explicit applicative-cluster node preserved for Milestone 2.
+/// Explicit applicative-cluster node preserved through HIR.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApplicativeCluster {
     pub span: SourceSpan,
@@ -934,6 +1067,62 @@ pub enum ClusterPresentation {
 pub enum ClusterFinalizer {
     Explicit(ExprId),
     ImplicitTuple,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TupleConstructorArity(usize);
+
+impl TupleConstructorArity {
+    pub fn new(member_count: usize) -> Option<Self> {
+        (member_count >= 2).then_some(Self(member_count))
+    }
+
+    pub fn get(self) -> usize {
+        self.0
+    }
+
+    fn from_member_count(member_count: usize) -> Self {
+        Self::new(member_count)
+            .expect("applicative clusters always normalize to tuple arities of at least two")
+    }
+}
+
+/// Presentation-free exact RFC §12.5/§12.6 normalization view of one `&|>` cluster.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApplicativeSpine<'a> {
+    pure_head: ApplicativeSpineHead,
+    apply_arguments: &'a AtLeastTwo<ExprId>,
+}
+
+impl<'a> ApplicativeSpine<'a> {
+    pub fn pure_head(&self) -> ApplicativeSpineHead {
+        self.pure_head
+    }
+
+    pub fn apply_arguments(&self) -> impl Iterator<Item = ExprId> + '_ {
+        self.apply_arguments.iter().copied()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ApplicativeSpineHead {
+    Expr(ExprId),
+    TupleConstructor(TupleConstructorArity),
+}
+
+impl ApplicativeCluster {
+    pub fn normalized_spine(&self) -> ApplicativeSpine<'_> {
+        let pure_head = match self.finalizer {
+            ClusterFinalizer::Explicit(expr) => ApplicativeSpineHead::Expr(expr),
+            ClusterFinalizer::ImplicitTuple => ApplicativeSpineHead::TupleConstructor(
+                TupleConstructorArity::from_member_count(self.members.len()),
+            ),
+        };
+        ApplicativeSpine {
+            pure_head,
+            apply_arguments: &self.members,
+        }
+    }
 }
 
 /// Grouped node arenas owned by one HIR module.

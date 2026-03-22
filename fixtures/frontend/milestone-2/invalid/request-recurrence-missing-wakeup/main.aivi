@@ -1,0 +1,8 @@
+fun step #value =>
+    value
+
+@source http.get "/users"
+sig broken : Signal Int =
+    0
+     @|> step
+     <|@ step

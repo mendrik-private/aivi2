@@ -2,10 +2,11 @@ use std::collections::{HashMap, HashSet};
 
 use aivi_base::{Diagnostic, DiagnosticCode, Severity, SourceSpan};
 use aivi_syntax as syn;
+use aivi_typing::BuiltinSourceProvider;
 
 use crate::{
-    ApplicativeCluster, AtLeastTwo, BinaryOperator, Binding, BindingId, BindingKind,
-    BindingPattern, BuiltinTerm, BuiltinType, CaseControl, ClassItem, ClassMember,
+    ApplicativeCluster, ApplicativeSpineHead, AtLeastTwo, BinaryOperator, Binding, BindingId,
+    BindingKind, BindingPattern, BuiltinTerm, BuiltinType, CaseControl, ClassItem, ClassMember,
     ClusterFinalizer, ClusterPresentation, ControlNode, ControlNodeId, Decorator, DecoratorCall,
     DecoratorId, DecoratorPayload, DomainItem, DomainMember, DomainMemberKind, EachControl,
     EmptyControl, ExportItem, Expr, ExprId, ExprKind, FragmentControl, FunctionItem,
@@ -59,6 +60,7 @@ pub fn lower_module(module: &syn::Module) -> LoweringResult {
     }
     let namespaces = lowerer.build_namespaces();
     lowerer.resolve_module(&namespaces);
+    lowerer.validate_cluster_normalization();
     lowerer.populate_signal_metadata();
     LoweringResult::new(lowerer.module, lowerer.diagnostics)
 }
@@ -75,6 +77,22 @@ enum DependencyWork {
     Markup(MarkupNodeId),
     Control(ControlNodeId),
     Cluster(crate::ClusterId),
+}
+
+#[derive(Clone, Copy)]
+enum AmbientProjectionWork {
+    Expr {
+        expr: ExprId,
+        ambient_allowed: bool,
+    },
+    Markup {
+        node: MarkupNodeId,
+        ambient_allowed: bool,
+    },
+    Control {
+        node: ControlNodeId,
+        ambient_allowed: bool,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -680,7 +698,8 @@ impl Lowerer {
             }
         }
         .and_then(|provider_key| {
-            source_option_names(&provider_key).map(|options| (provider_key, options))
+            BuiltinSourceProvider::parse(&provider_key)
+                .map(|provider| (provider_key, provider.contract()))
         });
 
         let Some(options) = source.options else {
@@ -705,11 +724,8 @@ impl Lowerer {
                         .with_secondary_label(previous_span, "previous source option here"),
                 );
             }
-            if let Some((provider_key, allowed_options)) = provider_key.as_ref() {
-                if !allowed_options
-                    .iter()
-                    .any(|allowed| *allowed == field.label.text())
-                {
+            if let Some((provider_key, contract)) = provider_key.as_ref() {
+                if contract.option(field.label.text()).is_none() {
                     self.diagnostics.push(
                         Diagnostic::error(format!(
                             "unknown source option `{}` for `{provider_key}`",
@@ -1137,15 +1153,20 @@ impl Lowerer {
     }
 
     fn validate_pipe_stages(&mut self, stages: &[syn::PipeStage]) {
+        self.validate_pipe_branch_and_join_stages(stages);
+        self.validate_pipe_recurrence_stages(stages);
+    }
+
+    fn validate_pipe_branch_and_join_stages(&mut self, stages: &[syn::PipeStage]) {
         let mut index = 0;
         while index < stages.len() {
-            match stages[index].kind {
+            match &stages[index].kind {
                 syn::PipeStageKind::Truthy { .. } | syn::PipeStageKind::Falsy { .. } => {
                     let run_start = index;
                     let mut truthy = 0usize;
                     let mut falsy = 0usize;
                     while index < stages.len() {
-                        match stages[index].kind {
+                        match &stages[index].kind {
                             syn::PipeStageKind::Truthy { .. } => {
                                 truthy += 1;
                                 index += 1;
@@ -1177,7 +1198,7 @@ impl Lowerer {
                 }
                 syn::PipeStageKind::FanIn { .. } => {
                     if index == 0
-                        || !matches!(stages[index - 1].kind, syn::PipeStageKind::Map { .. })
+                        || !matches!(&stages[index - 1].kind, syn::PipeStageKind::Map { .. })
                     {
                         self.diagnostics.push(
                             Diagnostic::error("`<|*` must immediately follow a `*|>` stage")
@@ -1193,6 +1214,134 @@ impl Lowerer {
                 _ => index += 1,
             }
         }
+    }
+
+    fn validate_pipe_recurrence_stages(&mut self, stages: &[syn::PipeStage]) {
+        #[derive(Clone, Copy)]
+        enum RecurrenceState {
+            Outside,
+            AwaitingStep { start: usize },
+            InSuffix { start: usize },
+            AfterSuffix { start: usize },
+        }
+
+        let mut state = RecurrenceState::Outside;
+        let mut index = 0usize;
+        while index < stages.len() {
+            match state {
+                RecurrenceState::Outside => match &stages[index].kind {
+                    syn::PipeStageKind::RecurStart { .. } => {
+                        state = RecurrenceState::AwaitingStep { start: index };
+                        index += 1;
+                    }
+                    syn::PipeStageKind::RecurStep { .. } => {
+                        self.emit_orphan_recur_step(stages[index].span);
+                        index += 1;
+                    }
+                    _ => index += 1,
+                },
+                RecurrenceState::AwaitingStep { start } => match &stages[index].kind {
+                    syn::PipeStageKind::RecurStep { .. } => {
+                        state = RecurrenceState::InSuffix { start };
+                        index += 1;
+                    }
+                    _ => {
+                        self.emit_unfinished_recurrence(
+                            stages[start].span,
+                            Some(stages[index].span),
+                        );
+                        state = RecurrenceState::AfterSuffix { start };
+                        index += 1;
+                    }
+                },
+                RecurrenceState::InSuffix { start } => match &stages[index].kind {
+                    syn::PipeStageKind::RecurStep { .. } => index += 1,
+                    _ => {
+                        self.emit_illegal_recurrence_continuation(
+                            stages[start].span,
+                            stages[index].span,
+                            "this stage appears after a recurrent pipe suffix",
+                        );
+                        state = RecurrenceState::AfterSuffix { start };
+                        index += 1;
+                    }
+                },
+                RecurrenceState::AfterSuffix { start } => {
+                    if matches!(
+                        &stages[index].kind,
+                        syn::PipeStageKind::RecurStart { .. }
+                            | syn::PipeStageKind::RecurStep { .. }
+                    ) {
+                        self.emit_illegal_recurrence_continuation(
+                            stages[start].span,
+                            stages[index].span,
+                            "this recurrent stage appears after the recurrent suffix has already ended",
+                        );
+                    }
+                    index += 1;
+                }
+            }
+        }
+
+        if let RecurrenceState::AwaitingStep { start } = state {
+            self.emit_unfinished_recurrence(stages[start].span, None);
+        }
+    }
+
+    fn emit_orphan_recur_step(&mut self, span: SourceSpan) {
+        self.diagnostics.push(
+            Diagnostic::error("`<|@` must appear inside a recurrent pipe suffix started by `@|>`")
+                .with_code(code("orphan-recur-step"))
+                .with_primary_label(
+                    span,
+                    "add `@|>` before this recurrence step or remove `<|@`",
+                )
+                .with_note(
+                    "the current structural recurrence form is a trailing suffix shaped `@|> init <|@ step (<|@ step)*`",
+                ),
+        );
+    }
+
+    fn emit_unfinished_recurrence(
+        &mut self,
+        start_span: SourceSpan,
+        continuation_span: Option<SourceSpan>,
+    ) {
+        let mut diagnostic = Diagnostic::error("`@|>` must be followed by one or more `<|@` stages")
+            .with_code(code("unfinished-recurrence"))
+            .with_primary_label(
+                start_span,
+                "this recurrent suffix never receives a recurrence step",
+            )
+            .with_note(
+                "the current structural recurrence form is a trailing suffix shaped `@|> init <|@ step (<|@ step)*`",
+            );
+        if let Some(span) = continuation_span {
+            diagnostic = diagnostic.with_secondary_label(
+                span,
+                "a recurrent suffix cannot continue with this stage before a `<|@` step appears",
+            );
+        }
+        self.diagnostics.push(diagnostic);
+    }
+
+    fn emit_illegal_recurrence_continuation(
+        &mut self,
+        start_span: SourceSpan,
+        span: SourceSpan,
+        label: &'static str,
+    ) {
+        self.diagnostics.push(
+            Diagnostic::error(
+                "a recurrent pipe suffix may only continue with `<|@` stages and must reach pipe end",
+            )
+            .with_code(code("illegal-recurrence-continuation"))
+            .with_primary_label(span, label)
+            .with_secondary_label(start_span, "recurrent suffix started here")
+            .with_note(
+                "keep recurrence as one trailing `@|> ... <|@ ...` suffix until typed/runtime lowering exists",
+            ),
+        );
     }
 
     fn lower_record_expr(&mut self, record: &syn::RecordExpr) -> RecordExpr {
@@ -2268,6 +2417,322 @@ impl Lowerer {
         }
     }
 
+    fn validate_cluster_normalization(&mut self) {
+        let cluster_ids = self
+            .module
+            .clusters()
+            .iter()
+            .map(|(cluster_id, _)| cluster_id)
+            .collect::<Vec<_>>();
+        for cluster_id in cluster_ids {
+            self.validate_cluster_ambient_projections(cluster_id);
+        }
+    }
+
+    fn validate_cluster_ambient_projections(&mut self, cluster_id: crate::ClusterId) {
+        let cluster = self.module.clusters()[cluster_id].clone();
+        let spine = cluster.normalized_spine();
+        for member in spine.apply_arguments() {
+            if let Some(span) = self.find_free_ambient_projection(member) {
+                self.emit_illegal_cluster_ambient_projection(span, cluster.span);
+            }
+        }
+        if let ApplicativeSpineHead::Expr(finalizer) = spine.pure_head() {
+            if let Some(span) = self.find_free_ambient_projection(finalizer) {
+                self.emit_illegal_cluster_ambient_projection(span, cluster.span);
+            }
+        }
+    }
+
+    fn emit_illegal_cluster_ambient_projection(
+        &mut self,
+        span: SourceSpan,
+        cluster_span: SourceSpan,
+    ) {
+        self.diagnostics.push(
+            Diagnostic::error(
+                "ambient-subject projections such as `.field` are illegal inside `&|>` clusters unless a nested expression provides its own subject",
+            )
+            .with_code(code("illegal-cluster-ambient-projection"))
+            .with_primary_label(
+                span,
+                "this projection has no ambient subject inside the applicative cluster",
+            )
+            .with_secondary_label(
+                cluster_span,
+                "cluster members normalize independently before the finalizer runs",
+            )
+            .with_note(
+                "use an explicit base such as `value.field` or a nested pipe with its own head",
+            ),
+        );
+    }
+
+    fn find_free_ambient_projection(&self, root: ExprId) -> Option<SourceSpan> {
+        let mut work = vec![AmbientProjectionWork::Expr {
+            expr: root,
+            ambient_allowed: false,
+        }];
+        while let Some(node) = work.pop() {
+            match node {
+                AmbientProjectionWork::Expr {
+                    expr,
+                    ambient_allowed,
+                } => match &self.module.exprs()[expr].kind {
+                    ExprKind::Name(_)
+                    | ExprKind::Integer(_)
+                    | ExprKind::SuffixedInteger(_)
+                    | ExprKind::Regex(_) => {}
+                    ExprKind::Text(text) => {
+                        for segment in text.segments.iter().rev() {
+                            if let TextSegment::Interpolation(interpolation) = segment {
+                                work.push(AmbientProjectionWork::Expr {
+                                    expr: interpolation.expr,
+                                    ambient_allowed,
+                                });
+                            }
+                        }
+                    }
+                    ExprKind::Tuple(elements) => {
+                        for element in elements.iter().rev() {
+                            work.push(AmbientProjectionWork::Expr {
+                                expr: *element,
+                                ambient_allowed,
+                            });
+                        }
+                    }
+                    ExprKind::List(elements) => {
+                        for element in elements.iter().rev() {
+                            work.push(AmbientProjectionWork::Expr {
+                                expr: *element,
+                                ambient_allowed,
+                            });
+                        }
+                    }
+                    ExprKind::Record(record) => {
+                        for field in record.fields.iter().rev() {
+                            work.push(AmbientProjectionWork::Expr {
+                                expr: field.value,
+                                ambient_allowed,
+                            });
+                        }
+                    }
+                    ExprKind::Projection {
+                        base: ProjectionBase::Ambient,
+                        ..
+                    } if !ambient_allowed => return Some(self.module.exprs()[expr].span),
+                    ExprKind::Projection {
+                        base: ProjectionBase::Ambient,
+                        ..
+                    } => {}
+                    ExprKind::Projection {
+                        base: ProjectionBase::Expr(base),
+                        ..
+                    } => work.push(AmbientProjectionWork::Expr {
+                        expr: *base,
+                        ambient_allowed,
+                    }),
+                    ExprKind::Apply { callee, arguments } => {
+                        for argument in arguments.iter().rev() {
+                            work.push(AmbientProjectionWork::Expr {
+                                expr: *argument,
+                                ambient_allowed,
+                            });
+                        }
+                        work.push(AmbientProjectionWork::Expr {
+                            expr: *callee,
+                            ambient_allowed,
+                        });
+                    }
+                    ExprKind::Unary { expr, .. } => work.push(AmbientProjectionWork::Expr {
+                        expr: *expr,
+                        ambient_allowed,
+                    }),
+                    ExprKind::Binary { left, right, .. } => {
+                        work.push(AmbientProjectionWork::Expr {
+                            expr: *right,
+                            ambient_allowed,
+                        });
+                        work.push(AmbientProjectionWork::Expr {
+                            expr: *left,
+                            ambient_allowed,
+                        });
+                    }
+                    ExprKind::Pipe(pipe) => {
+                        for stage in pipe.stages.iter().rev() {
+                            match &stage.kind {
+                                PipeStageKind::Transform { expr }
+                                | PipeStageKind::Gate { expr }
+                                | PipeStageKind::Map { expr }
+                                | PipeStageKind::Apply { expr }
+                                | PipeStageKind::Tap { expr }
+                                | PipeStageKind::FanIn { expr }
+                                | PipeStageKind::Truthy { expr }
+                                | PipeStageKind::Falsy { expr }
+                                | PipeStageKind::RecurStart { expr }
+                                | PipeStageKind::RecurStep { expr } => {
+                                    work.push(AmbientProjectionWork::Expr {
+                                        expr: *expr,
+                                        ambient_allowed: true,
+                                    });
+                                }
+                                PipeStageKind::Case { body, .. } => {
+                                    work.push(AmbientProjectionWork::Expr {
+                                        expr: *body,
+                                        ambient_allowed: true,
+                                    });
+                                }
+                            }
+                        }
+                        work.push(AmbientProjectionWork::Expr {
+                            expr: pipe.head,
+                            ambient_allowed,
+                        });
+                    }
+                    ExprKind::Cluster(_) => {}
+                    ExprKind::Markup(node) => work.push(AmbientProjectionWork::Markup {
+                        node: *node,
+                        ambient_allowed,
+                    }),
+                },
+                AmbientProjectionWork::Markup {
+                    node,
+                    ambient_allowed,
+                } => match &self.module.markup_nodes()[node].kind {
+                    MarkupNodeKind::Element(element) => {
+                        for child in element.children.iter().rev() {
+                            work.push(AmbientProjectionWork::Markup {
+                                node: *child,
+                                ambient_allowed,
+                            });
+                        }
+                        for attribute in element.attributes.iter().rev() {
+                            match &attribute.value {
+                                MarkupAttributeValue::ImplicitTrue => {}
+                                MarkupAttributeValue::Expr(expr) => {
+                                    work.push(AmbientProjectionWork::Expr {
+                                        expr: *expr,
+                                        ambient_allowed,
+                                    });
+                                }
+                                MarkupAttributeValue::Text(text) => {
+                                    for segment in text.segments.iter().rev() {
+                                        if let TextSegment::Interpolation(interpolation) = segment {
+                                            work.push(AmbientProjectionWork::Expr {
+                                                expr: interpolation.expr,
+                                                ambient_allowed,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    MarkupNodeKind::Control(control) => work.push(AmbientProjectionWork::Control {
+                        node: *control,
+                        ambient_allowed,
+                    }),
+                },
+                AmbientProjectionWork::Control {
+                    node,
+                    ambient_allowed,
+                } => match &self.module.control_nodes()[node] {
+                    ControlNode::Show(show) => {
+                        for child in show.children.iter().rev() {
+                            work.push(AmbientProjectionWork::Markup {
+                                node: *child,
+                                ambient_allowed,
+                            });
+                        }
+                        if let Some(keep_mounted) = show.keep_mounted {
+                            work.push(AmbientProjectionWork::Expr {
+                                expr: keep_mounted,
+                                ambient_allowed,
+                            });
+                        }
+                        work.push(AmbientProjectionWork::Expr {
+                            expr: show.when,
+                            ambient_allowed,
+                        });
+                    }
+                    ControlNode::Each(each) => {
+                        if let Some(empty) = each.empty {
+                            work.push(AmbientProjectionWork::Control {
+                                node: empty,
+                                ambient_allowed,
+                            });
+                        }
+                        for child in each.children.iter().rev() {
+                            work.push(AmbientProjectionWork::Markup {
+                                node: *child,
+                                ambient_allowed,
+                            });
+                        }
+                        if let Some(key) = each.key {
+                            work.push(AmbientProjectionWork::Expr {
+                                expr: key,
+                                ambient_allowed,
+                            });
+                        }
+                        work.push(AmbientProjectionWork::Expr {
+                            expr: each.collection,
+                            ambient_allowed,
+                        });
+                    }
+                    ControlNode::Empty(empty) => {
+                        for child in empty.children.iter().rev() {
+                            work.push(AmbientProjectionWork::Markup {
+                                node: *child,
+                                ambient_allowed,
+                            });
+                        }
+                    }
+                    ControlNode::Match(match_node) => {
+                        for case in match_node.cases.iter().rev() {
+                            work.push(AmbientProjectionWork::Control {
+                                node: *case,
+                                ambient_allowed,
+                            });
+                        }
+                        work.push(AmbientProjectionWork::Expr {
+                            expr: match_node.scrutinee,
+                            ambient_allowed,
+                        });
+                    }
+                    ControlNode::Case(case) => {
+                        for child in case.children.iter().rev() {
+                            work.push(AmbientProjectionWork::Markup {
+                                node: *child,
+                                ambient_allowed,
+                            });
+                        }
+                    }
+                    ControlNode::Fragment(fragment) => {
+                        for child in fragment.children.iter().rev() {
+                            work.push(AmbientProjectionWork::Markup {
+                                node: *child,
+                                ambient_allowed,
+                            });
+                        }
+                    }
+                    ControlNode::With(with_node) => {
+                        for child in with_node.children.iter().rev() {
+                            work.push(AmbientProjectionWork::Markup {
+                                node: *child,
+                                ambient_allowed,
+                            });
+                        }
+                        work.push(AmbientProjectionWork::Expr {
+                            expr: with_node.value,
+                            ambient_allowed,
+                        });
+                    }
+                },
+            }
+        }
+        None
+    }
+
     fn resolve_item(&mut self, item_id: ItemId, namespaces: &Namespaces) {
         let item = self.module.items()[item_id].clone();
         for decorator in item.decorators() {
@@ -2646,8 +3111,9 @@ impl Lowerer {
                         continue;
                     }
                     let cluster = &self.module.clusters()[cluster_id];
-                    work.extend(cluster.members.iter().copied().map(DependencyWork::Expr));
-                    if let ClusterFinalizer::Explicit(expr) = cluster.finalizer {
+                    let spine = cluster.normalized_spine();
+                    work.extend(spine.apply_arguments().map(DependencyWork::Expr));
+                    if let ApplicativeSpineHead::Expr(expr) = spine.pure_head() {
                         work.push(DependencyWork::Expr(expr));
                     }
                 }
@@ -2850,10 +3316,11 @@ impl Lowerer {
         env: &ResolveEnv,
     ) {
         let cluster = self.module.clusters()[cluster_id].clone();
-        for member in cluster.members.iter() {
-            self.resolve_expr(*member, namespaces, env);
+        let spine = cluster.normalized_spine();
+        for member in spine.apply_arguments() {
+            self.resolve_expr(member, namespaces, env);
         }
-        if let ClusterFinalizer::Explicit(expr) = cluster.finalizer {
+        if let ApplicativeSpineHead::Expr(expr) = spine.pure_head() {
             self.resolve_expr(expr, namespaces, env);
         }
     }
@@ -3599,31 +4066,6 @@ fn is_source_decorator(path: &NamePath) -> bool {
     path.segments().len() == 1 && path.segments().first().text() == "source"
 }
 
-fn source_option_names(provider_key: &str) -> Option<&'static [&'static str]> {
-    match provider_key {
-        "http.get" | "http.post" => Some(&[
-            "headers",
-            "query",
-            "body",
-            "decode",
-            "timeout",
-            "retry",
-            "refreshOn",
-            "refreshEvery",
-            "activeWhen",
-        ]),
-        "timer.every" | "timer.after" => Some(&["immediate", "jitter", "coalesce", "activeWhen"]),
-        "fs.watch" => Some(&["events", "recursive"]),
-        "fs.read" => Some(&["decode", "reloadOn", "debounce", "readOnStart"]),
-        "socket.connect" | "mailbox.subscribe" => {
-            Some(&["decode", "buffer", "reconnect", "heartbeat", "activeWhen"])
-        }
-        "process.spawn" => Some(&["cwd", "env", "stdout", "stderr", "restartOn"]),
-        "window.keyDown" => Some(&["capture", "repeat", "focusOnly"]),
-        _ => None,
-    }
-}
-
 fn path_text(path: &NamePath) -> String {
     path.segments()
         .iter()
@@ -3717,9 +4159,9 @@ mod tests {
 
     use super::{lower_module, path_text};
     use crate::{
-        BuiltinType, ClusterFinalizer, DecoratorPayload, DomainMemberKind, ExprKind, Item,
-        LiteralSuffixResolution, ResolutionState, TermResolution, TextSegment, TypeKind,
-        TypeResolution, ValidationMode,
+        ApplicativeSpineHead, BuiltinType, ClusterFinalizer, ClusterPresentation, DecoratorPayload,
+        DomainMemberKind, ExprKind, Item, LiteralSuffixResolution, PipeStageKind, ResolutionState,
+        TermResolution, TextSegment, TypeKind, TypeResolution, ValidationMode,
     };
 
     fn fixture_root() -> PathBuf {
@@ -3797,6 +4239,7 @@ mod tests {
             "milestone-2/valid/domain-literal-suffixes/main.aivi",
             "milestone-2/valid/type-kinds/main.aivi",
             "milestone-2/valid/pipe-branch-and-join/main.aivi",
+            "milestone-2/valid/pipe-recurrence-suffix/main.aivi",
             "milestone-1/valid/records/record_shorthand_and_elision.aivi",
             "milestone-1/valid/sources/source_declarations.aivi",
             "milestone-1/valid/strings/text_and_regex.aivi",
@@ -3835,11 +4278,16 @@ mod tests {
             "milestone-2/invalid/ambiguous-domain-literal-suffix/main.aivi",
             "milestone-2/invalid/unpaired-truthy-falsy/main.aivi",
             "milestone-2/invalid/fanin-without-map/main.aivi",
+            "milestone-2/invalid/cluster-ambient-projection/main.aivi",
+            "milestone-2/invalid/orphan-recur-step/main.aivi",
+            "milestone-2/invalid/unfinished-recurrence/main.aivi",
+            "milestone-2/invalid/recurrence-continuation/main.aivi",
             "milestone-2/invalid/interpolated-pattern-text/main.aivi",
             "milestone-1/invalid/cluster_unfinished_gate.aivi",
             "milestone-1/invalid/source_unknown_option.aivi",
             "milestone-2/invalid/source-duplicate-option/main.aivi",
             "milestone-2/invalid/source-provider-without-variant/main.aivi",
+            "milestone-2/invalid/source-legacy-quantity-option/main.aivi",
         ] {
             let lowered = lower_fixture(path);
             assert!(
@@ -3886,6 +4334,132 @@ mod tests {
                 report.diagnostics()
             );
         }
+    }
+
+    #[test]
+    fn resolved_validation_rejects_recurrence_target_invalid_fixtures() {
+        for (path, code_name) in [
+            (
+                "milestone-2/invalid/unknown-recurrence-target/main.aivi",
+                "unknown-recurrence-target",
+            ),
+            (
+                "milestone-2/invalid/unsupported-recurrence-target/main.aivi",
+                "unsupported-recurrence-target",
+            ),
+        ] {
+            let lowered = lower_fixture(path);
+            assert!(
+                !lowered.has_errors(),
+                "expected {path} to lower cleanly before recurrence target validation, got diagnostics: {:?}",
+                lowered.diagnostics()
+            );
+            let report = lowered
+                .module()
+                .validate(ValidationMode::RequireResolvedNames);
+            assert!(
+                report
+                    .diagnostics()
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == Some(super::code(code_name))),
+                "expected {path} to report {code_name}, got diagnostics: {:?}",
+                report.diagnostics()
+            );
+        }
+    }
+
+    #[test]
+    fn resolved_validation_rejects_source_contract_invalid_fixtures() {
+        for (path, code_name) in [
+            (
+                "milestone-2/invalid/source-contract-missing-type/main.aivi",
+                "missing-source-contract-type",
+            ),
+            (
+                "milestone-2/invalid/source-contract-arity-mismatch/main.aivi",
+                "source-contract-type-arity",
+            ),
+        ] {
+            let lowered = lower_fixture(path);
+            assert!(
+                !lowered.has_errors(),
+                "expected {path} to lower cleanly before source contract validation, got diagnostics: {:?}",
+                lowered.diagnostics()
+            );
+            let report = lowered
+                .module()
+                .validate(ValidationMode::RequireResolvedNames);
+            assert!(
+                report
+                    .diagnostics()
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == Some(super::code(code_name))),
+                "expected {path} to report {code_name}, got diagnostics: {:?}",
+                report.diagnostics()
+            );
+        }
+    }
+
+    #[test]
+    fn resolved_validation_rejects_recurrence_wakeup_invalid_fixtures() {
+        for path in [
+            "milestone-2/invalid/missing-recurrence-wakeup/main.aivi",
+            "milestone-2/invalid/request-recurrence-missing-wakeup/main.aivi",
+        ] {
+            let lowered = lower_fixture(path);
+            assert!(
+                !lowered.has_errors(),
+                "expected {path} to lower cleanly before recurrence wakeup validation, got diagnostics: {:?}",
+                lowered.diagnostics()
+            );
+            let report = lowered
+                .module()
+                .validate(ValidationMode::RequireResolvedNames);
+            assert!(
+                report
+                    .diagnostics()
+                    .iter()
+                    .any(|diagnostic| diagnostic.code
+                        == Some(super::code("missing-recurrence-wakeup"))),
+                "expected {path} to report missing-recurrence-wakeup, got diagnostics: {:?}",
+                report.diagnostics()
+            );
+        }
+    }
+
+    #[test]
+    fn resolved_validation_accepts_request_recurrence_with_retry_policy() {
+        let lowered = lower_text(
+            "request_recurrence_with_retry.aivi",
+            r#"
+domain Retry over Int
+    literal x : Int -> Retry
+
+fun step #value =>
+    value
+
+@source http.get "/users" with {
+    retry: 3x
+}
+sig retried : Signal Int =
+    0
+     @|> step
+     <|@ step
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "request recurrence with retry should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+        let report = lowered
+            .module()
+            .validate(ValidationMode::RequireResolvedNames);
+        assert!(
+            report.is_ok(),
+            "request recurrence with retry should validate cleanly, got diagnostics: {:?}",
+            report.diagnostics()
+        );
     }
 
     #[test]
@@ -4052,6 +4626,98 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_expression_headed_clusters_into_spines() {
+        let lowered = lower_text(
+            "expression-headed-clusters.aivi",
+            "type NamePair = NamePair Text Text\n\
+             sig firstName = \"Ada\"\n\
+             sig lastName = \"Lovelace\"\n\
+             sig headedPair =\n\
+              firstName\n\
+               &|> lastName\n\
+                |> NamePair\n\
+             sig headedTuple =\n\
+              firstName\n\
+               &|> lastName\n",
+        );
+        assert!(
+            !lowered.has_errors(),
+            "expression-headed clusters should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let headed_pair = find_signal(lowered.module(), "headedPair");
+        let pair_body = headed_pair
+            .body
+            .expect("headedPair should lower to a cluster expression");
+        let ExprKind::Cluster(pair_cluster_id) = &lowered.module().exprs()[pair_body].kind else {
+            panic!("expected headedPair to lower as a cluster expression");
+        };
+        let pair_cluster = &lowered.module().clusters()[*pair_cluster_id];
+        assert_eq!(
+            pair_cluster.presentation,
+            ClusterPresentation::ExpressionHeaded,
+            "expression-headed surface form should stay visible in HIR"
+        );
+        let pair_spine = pair_cluster.normalized_spine();
+        let pair_arguments = pair_spine
+            .apply_arguments()
+            .map(|expr_id| match &lowered.module().exprs()[expr_id].kind {
+                ExprKind::Name(reference) => path_text(&reference.path),
+                other => {
+                    panic!("expected normalized cluster argument to stay a name, found {other:?}")
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            pair_arguments,
+            vec!["firstName".to_owned(), "lastName".to_owned()],
+            "normalized applicative spines should preserve cluster member order"
+        );
+        match pair_spine.pure_head() {
+            ApplicativeSpineHead::Expr(expr_id) => match &lowered.module().exprs()[expr_id].kind {
+                ExprKind::Name(reference) => assert_eq!(path_text(&reference.path), "NamePair"),
+                other => panic!("expected explicit spine head to stay a name, found {other:?}"),
+            },
+            other => panic!("expected explicit applicative head, found {other:?}"),
+        }
+
+        let headed_tuple = find_signal(lowered.module(), "headedTuple");
+        let tuple_body = headed_tuple
+            .body
+            .expect("headedTuple should lower to a cluster expression");
+        let ExprKind::Cluster(tuple_cluster_id) = &lowered.module().exprs()[tuple_body].kind else {
+            panic!("expected headedTuple to lower as a cluster expression");
+        };
+        match lowered.module().clusters()[*tuple_cluster_id]
+            .normalized_spine()
+            .pure_head()
+        {
+            ApplicativeSpineHead::TupleConstructor(arity) => assert_eq!(arity.get(), 2),
+            other => panic!("expected implicit tuple applicative head, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn allows_nested_pipe_subjects_inside_clusters() {
+        let lowered = lower_text(
+            "nested-cluster-pipe-subject.aivi",
+            "type NamePair = NamePair Text Text\n\
+             sig firstName = \"Ada\"\n\
+             sig lastName = \"Lovelace\"\n\
+             sig ok =\n\
+              firstName\n\
+               &|> (lastName |> .display)\n\
+                |> NamePair\n",
+        );
+        assert!(
+            !lowered.has_errors(),
+            "nested pipes with their own heads should remain legal inside clusters: {:?}",
+            lowered.diagnostics()
+        );
+    }
+
+    #[test]
     fn rejects_interpolated_pattern_text() {
         let lowered = lower_text(
             "interpolated-pattern-text.aivi",
@@ -4095,6 +4761,28 @@ mod tests {
         assert!(
             report.is_ok(),
             "unfinished cluster errors should keep structurally valid HIR: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn rejects_ambient_projections_inside_clusters() {
+        let lowered = lower_fixture("milestone-2/invalid/cluster-ambient-projection/main.aivi");
+        assert!(
+            lowered.has_errors(),
+            "ambient projections should be rejected inside applicative clusters"
+        );
+        assert!(
+            lowered.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code == Some(super::code("illegal-cluster-ambient-projection"))
+            }),
+            "expected illegal-cluster-ambient-projection diagnostic, got {:?}",
+            lowered.diagnostics()
+        );
+        let report = lowered.module().validate(ValidationMode::Structural);
+        assert!(
+            report.is_ok(),
+            "cluster ambient-projection errors should keep structurally valid HIR: {:?}",
             report.diagnostics()
         );
     }
@@ -4167,6 +4855,191 @@ mod tests {
             "unknown source option errors should keep structurally valid HIR: {:?}",
             report.diagnostics()
         );
+    }
+
+    #[test]
+    fn rejects_legacy_quantity_source_option_names() {
+        let lowered = lower_fixture("milestone-2/invalid/source-legacy-quantity-option/main.aivi");
+        assert!(
+            lowered.has_errors(),
+            "legacy quantity option names should be rejected"
+        );
+        assert!(
+            lowered
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code == Some(super::code("unknown-source-option"))),
+            "expected unknown-source-option diagnostic, got {:?}",
+            lowered.diagnostics()
+        );
+        let report = lowered.module().validate(ValidationMode::Structural);
+        assert!(
+            report.is_ok(),
+            "legacy quantity option errors should keep structurally valid HIR: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn rejects_orphan_recur_steps() {
+        let lowered = lower_fixture("milestone-2/invalid/orphan-recur-step/main.aivi");
+        assert!(
+            lowered.has_errors(),
+            "orphan recurrence steps should be rejected"
+        );
+        assert!(
+            lowered
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code == Some(super::code("orphan-recur-step"))),
+            "expected orphan-recur-step diagnostic, got {:?}",
+            lowered.diagnostics()
+        );
+        let report = lowered.module().validate(ValidationMode::Structural);
+        assert!(
+            report.is_ok(),
+            "orphan recurrence step errors should keep structurally valid HIR: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn rejects_unfinished_recurrence_suffixes() {
+        let lowered = lower_fixture("milestone-2/invalid/unfinished-recurrence/main.aivi");
+        assert!(
+            lowered.has_errors(),
+            "unfinished recurrence suffixes should be rejected"
+        );
+        assert!(
+            lowered
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code == Some(super::code("unfinished-recurrence"))),
+            "expected unfinished-recurrence diagnostic, got {:?}",
+            lowered.diagnostics()
+        );
+        let report = lowered.module().validate(ValidationMode::Structural);
+        assert!(
+            report.is_ok(),
+            "unfinished recurrence errors should keep structurally valid HIR: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn rejects_recurrence_suffix_continuations() {
+        let lowered = lower_fixture("milestone-2/invalid/recurrence-continuation/main.aivi");
+        assert!(
+            lowered.has_errors(),
+            "recurrence suffix continuations should be rejected"
+        );
+        assert!(
+            lowered.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code == Some(super::code("illegal-recurrence-continuation"))
+            }),
+            "expected illegal-recurrence-continuation diagnostic, got {:?}",
+            lowered.diagnostics()
+        );
+        let report = lowered.module().validate(ValidationMode::Structural);
+        assert!(
+            report.is_ok(),
+            "recurrence continuation errors should keep structurally valid HIR: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn does_not_double_report_followup_recurrence_starts() {
+        let lowered = lower_text(
+            "duplicate-recurrence-starts.aivi",
+            "fun step #value => value\nval broken = 0 @|> step @|> step <|@ step\n",
+        );
+        assert!(
+            lowered.has_errors(),
+            "duplicate recurrence starts should still be rejected"
+        );
+        let unfinished = lowered
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.code == Some(super::code("unfinished-recurrence")))
+            .count();
+        let illegal = lowered
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.code == Some(super::code("illegal-recurrence-continuation"))
+            })
+            .count();
+        assert_eq!(
+            unfinished,
+            1,
+            "expected exactly one unfinished-recurrence diagnostic, got {:?}",
+            lowered.diagnostics()
+        );
+        assert_eq!(
+            illegal,
+            1,
+            "expected exactly one illegal-recurrence-continuation diagnostic, got {:?}",
+            lowered.diagnostics()
+        );
+    }
+
+    #[test]
+    fn exposes_trailing_recurrence_suffix_views() {
+        let lowered = lower_text(
+            "recurrence-suffix-view.aivi",
+            "fun keep #value => value\n\
+             fun start #value => value\n\
+             fun step #value => value\n\
+             sig retried = 0 |> keep | keep @|> start <|@ step <|@ step\n",
+        );
+        assert!(
+            !lowered.has_errors(),
+            "valid recurrence suffixes should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let retried = find_signal(lowered.module(), "retried");
+        let body = retried
+            .body
+            .expect("retried should lower to a pipe expression");
+        let ExprKind::Pipe(pipe) = &lowered.module().exprs()[body].kind else {
+            panic!("expected retried to lower as a pipe expression");
+        };
+        let recurrence = pipe
+            .recurrence_suffix()
+            .expect("lowered pipe should satisfy the structural recurrence invariant")
+            .expect("retried should include a recurrence suffix");
+
+        assert_eq!(
+            recurrence.prefix_stage_count(),
+            2,
+            "prefix stages should stay separate from the recurrence suffix"
+        );
+        let prefix_kinds = recurrence
+            .prefix_stages()
+            .map(|stage| match &stage.kind {
+                PipeStageKind::Transform { .. } => "transform",
+                PipeStageKind::Tap { .. } => "tap",
+                other => panic!("expected only non-recurrent prefix stages, found {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(prefix_kinds, vec!["transform", "tap"]);
+        match &lowered.module().exprs()[recurrence.start_expr()].kind {
+            ExprKind::Name(reference) => assert_eq!(path_text(&reference.path), "start"),
+            other => panic!("expected recurrence start expression to stay a name, found {other:?}"),
+        }
+        assert_eq!(recurrence.step_count(), 2);
+        let step_names = recurrence
+            .step_exprs()
+            .map(|expr_id| match &lowered.module().exprs()[expr_id].kind {
+                ExprKind::Name(reference) => path_text(&reference.path),
+                other => {
+                    panic!("expected recurrence step expression to stay a name, found {other:?}")
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(step_names, vec!["step".to_owned(), "step".to_owned()]);
     }
 
     #[test]

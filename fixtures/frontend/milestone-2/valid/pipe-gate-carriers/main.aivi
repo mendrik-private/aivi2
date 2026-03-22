@@ -1,0 +1,21 @@
+type User = {
+    active: Bool,
+    email: Text
+}
+
+type Session = {
+    user: User
+}
+
+val seed:User = { active: True, email: "ada@example.com" }
+
+val maybeActive:Option User =
+    seed
+     ?|> .active
+
+sig sessions:Signal Session = { user: seed }
+
+sig activeUsers:Signal User =
+    sessions
+     |> .user
+     ?|> .active

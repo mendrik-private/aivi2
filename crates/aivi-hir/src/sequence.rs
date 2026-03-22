@@ -43,7 +43,7 @@ impl<T> NonEmpty<T> {
         1 + self.rest.len()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &T> {
         iter::once(&self.first).chain(self.rest.iter())
     }
 
@@ -104,7 +104,7 @@ impl<T> AtLeastTwo<T> {
         2 + self.rest.len()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &T> {
         iter::once(&self.first)
             .chain(iter::once(&self.second))
             .chain(self.rest.iter())

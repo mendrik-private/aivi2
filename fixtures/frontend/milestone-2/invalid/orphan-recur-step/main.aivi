@@ -1,0 +1,6 @@
+fun step #value =>
+    value
+
+val broken =
+    0
+     <|@ step

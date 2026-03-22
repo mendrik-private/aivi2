@@ -8,7 +8,10 @@
 //! or runtime evaluation already exists.
 
 pub mod eq;
+pub mod gate;
 pub mod kind;
+pub mod recurrence;
+pub mod source_contracts;
 
 pub use eq::{
     Class, Closedness, DomainShape, EqContext, EqDerivation, EqDerivationError,
@@ -17,7 +20,18 @@ pub use eq::{
     ShapeErrorKind, SumShape, SumVariant, TypeId, TypeNode, TypeParameterId, TypeReference,
     TypeStore, VariantName,
 };
+pub use gate::{GateCarrier, GatePlan, GatePlanner, GateResultKind};
 pub use kind::{
     Kind, KindCheckError, KindCheckErrorKind, KindChecker, KindExpr, KindExprId, KindParameterId,
     KindRecordField, KindStore, TypeConstructorId,
+};
+pub use recurrence::{
+    BuiltinSourceWakeupCause, RecurrencePlan, RecurrencePlanner, RecurrenceTarget,
+    RecurrenceTargetError, RecurrenceTargetEvidence, RecurrenceWakeupError,
+    RecurrenceWakeupEvidence, RecurrenceWakeupKind, RecurrenceWakeupPlan, RecurrenceWakeupPlanner,
+    SourceRecurrenceWakeupContext,
+};
+pub use source_contracts::{
+    BuiltinSourceProvider, SourceContract, SourceContractType, SourceNominalType,
+    SourceOptionContract, SourceTypeAtom, SourceTypeParameter,
 };

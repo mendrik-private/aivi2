@@ -12,10 +12,9 @@ type Status =
   | Pending
   | Failed Text
 
-fun activeEmails:List Text #users:List User =>
-    users
+fun maybeActiveUser:Option User #user:User =>
+    user
      ?|> (.active and .age > 18)
-     *|> .email
 
 fun statusLabel:Text #status:Status =>
     status

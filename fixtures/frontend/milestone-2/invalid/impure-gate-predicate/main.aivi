@@ -1,0 +1,10 @@
+type User = { active: Bool }
+
+val seed:User = { active: True }
+
+sig users:Signal User = seed
+sig ready:Signal Bool = True
+
+sig filtered:Signal User =
+    users
+     ?|> ready

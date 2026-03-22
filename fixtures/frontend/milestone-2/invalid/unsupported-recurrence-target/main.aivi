@@ -1,0 +1,7 @@
+fun step #value =>
+    value
+
+val broken : Int =
+    0
+     @|> step
+     <|@ step

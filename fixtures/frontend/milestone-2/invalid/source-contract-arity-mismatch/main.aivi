@@ -1,0 +1,31 @@
+type HttpError =
+  | Timeout
+  | DecodeFailure Text
+
+type User = {
+    id: Int,
+    name: Text
+}
+
+type DecodeMode =
+  | Strict
+  | Permissive
+
+type Map K =
+  | EmptyMap
+
+domain Duration over Int
+    literal s : Int -> Duration
+
+domain Retry over Int
+    literal x : Int -> Retry
+
+val authHeaders : Map Text = EmptyMap
+
+@source http.get "/users" with {
+    headers: authHeaders,
+    decode: Strict,
+    retry: 3x,
+    timeout: 5s
+}
+sig users : Signal (Result HttpError (List User))
