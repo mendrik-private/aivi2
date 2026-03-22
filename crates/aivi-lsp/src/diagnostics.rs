@@ -1,7 +1,5 @@
 use aivi_base::{Diagnostic, LspRange, Severity};
-use tower_lsp::lsp_types::{
-    self as lsp, DiagnosticSeverity, NumberOrString, Position, Range, Url,
-};
+use tower_lsp::lsp_types::{self as lsp, DiagnosticSeverity, NumberOrString, Position, Range, Url};
 
 /// Convert an aivi_base::LspRange to a tower-lsp Range.
 pub fn lsp_range(r: LspRange) -> Range {
@@ -38,10 +36,7 @@ pub fn collect_lsp_diagnostics(
         .collect()
 }
 
-fn convert_diagnostic(
-    d: &Diagnostic,
-    source_file: &aivi_base::SourceFile,
-) -> lsp::Diagnostic {
+fn convert_diagnostic(d: &Diagnostic, source_file: &aivi_base::SourceFile) -> lsp::Diagnostic {
     let severity = match d.severity {
         Severity::Error => DiagnosticSeverity::ERROR,
         Severity::Warning => DiagnosticSeverity::WARNING,
@@ -60,8 +55,14 @@ fn convert_diagnostic(
             lsp_range(lsp_r)
         })
         .unwrap_or_else(|| Range {
-            start: Position { line: 0, character: 0 },
-            end: Position { line: 0, character: 0 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 0,
+                character: 0,
+            },
         });
 
     let code = d.code.map(|c| NumberOrString::String(c.to_string()));

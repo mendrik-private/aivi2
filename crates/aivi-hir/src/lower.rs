@@ -12,15 +12,16 @@ use crate::{
     EmptyControl, ExportItem, Expr, ExprId, ExprKind, FragmentControl, FunctionItem,
     FunctionParameter, ImportBinding, ImportBindingMetadata, ImportBundleKind, ImportId,
     ImportValueType, IntegerLiteral, Item, ItemHeader, ItemId, ItemKind, LiteralSuffixResolution,
-    MarkupAttribute, MarkupAttributeValue, MarkupElement, MarkupNode, MarkupNodeId, MarkupNodeKind,
-    MatchControl, Module, Name, NamePath, Pattern, PatternId, PatternKind, PipeExpr, PipeStage,
-    PipeStageKind, ProjectionBase, RecordExpr, RecordExprField, RecordFieldSurface,
-    RecordPatternField, RecurrenceWakeupDecorator, RecurrenceWakeupDecoratorKind, RegexLiteral,
-    ResolutionState, ShowControl, SignalItem, SourceDecorator, SourceLifecycleDependencies,
-    SourceMetadata, SourceProviderContractItem, SourceProviderRef, SuffixedIntegerLiteral,
-    TermReference, TermResolution, TextFragment, TextInterpolation, TextLiteral, TextSegment,
-    TypeField, TypeId, TypeItem, TypeItemBody, TypeKind, TypeNode, TypeParameter, TypeParameterId,
-    TypeReference, TypeResolution, TypeVariant, UnaryOperator, UseItem, ValueItem, WithControl,
+    MapExpr, MapExprEntry, MarkupAttribute, MarkupAttributeValue, MarkupElement, MarkupNode,
+    MarkupNodeId, MarkupNodeKind, MatchControl, Module, Name, NamePath, Pattern, PatternId,
+    PatternKind, PipeExpr, PipeStage, PipeStageKind, ProjectionBase, RecordExpr, RecordExprField,
+    RecordFieldSurface, RecordPatternField, RecurrenceWakeupDecorator,
+    RecurrenceWakeupDecoratorKind, RegexLiteral, ResolutionState, ShowControl, SignalItem,
+    SourceDecorator, SourceLifecycleDependencies, SourceMetadata, SourceProviderContractItem,
+    SourceProviderRef, SuffixedIntegerLiteral, TermReference, TermResolution, TextFragment,
+    TextInterpolation, TextLiteral, TextSegment, TypeField, TypeId, TypeItem, TypeItemBody,
+    TypeKind, TypeNode, TypeParameter, TypeParameterId, TypeReference, TypeResolution, TypeVariant,
+    UnaryOperator, UseItem, ValueItem, WithControl,
 };
 
 pub struct LoweringResult {
@@ -1149,6 +1150,23 @@ impl Lowerer {
                     kind: ExprKind::List(elements),
                 })
             }
+            syn::ExprKind::Map(map) => {
+                let map = self.lower_map_expr(map);
+                self.alloc_expr(Expr {
+                    span: expr.span,
+                    kind: ExprKind::Map(map),
+                })
+            }
+            syn::ExprKind::Set(elements) => {
+                let elements = elements
+                    .iter()
+                    .map(|element| self.lower_expr(element))
+                    .collect();
+                self.alloc_expr(Expr {
+                    span: expr.span,
+                    kind: ExprKind::Set(elements),
+                })
+            }
             syn::ExprKind::Record(record) => {
                 let record = self.lower_record_expr(record);
                 self.alloc_expr(Expr {
@@ -1675,6 +1693,35 @@ impl Lowerer {
                 })
                 .collect(),
         }
+    }
+
+    fn lower_map_expr(&mut self, map: &syn::MapExpr) -> MapExpr {
+        let mut seen_keys = Vec::<(&syn::Expr, SourceSpan)>::with_capacity(map.entries.len());
+        let mut entries = Vec::with_capacity(map.entries.len());
+        for entry in &map.entries {
+            // This slice keeps duplicate-key checking purely structural so later typed equality
+            // semantics can widen it without rewriting the literal surface.
+            if let Some((_, previous_span)) = seen_keys
+                .iter()
+                .find(|(previous_key, _)| surface_exprs_equal(previous_key, &entry.key))
+            {
+                self.diagnostics.push(
+                    Diagnostic::error("duplicate map key")
+                        .with_code(code("duplicate-map-key"))
+                        .with_primary_label(entry.key.span, "this map key is repeated")
+                        .with_secondary_label(*previous_span, "previous map key here"),
+                );
+            }
+            seen_keys.push((&entry.key, entry.key.span));
+            let key = self.lower_expr(&entry.key);
+            let value = self.lower_expr(&entry.value);
+            entries.push(MapExprEntry {
+                span: entry.span,
+                key,
+                value,
+            });
+        }
+        MapExpr { entries }
     }
 
     fn lower_record_expr_as_expr(&mut self, record: &syn::RecordExpr) -> ExprId {
@@ -2829,6 +2876,26 @@ impl Lowerer {
                             });
                         }
                     }
+                    ExprKind::Map(map) => {
+                        for entry in map.entries.iter().rev() {
+                            work.push(AmbientProjectionWork::Expr {
+                                expr: entry.value,
+                                ambient_allowed,
+                            });
+                            work.push(AmbientProjectionWork::Expr {
+                                expr: entry.key,
+                                ambient_allowed,
+                            });
+                        }
+                    }
+                    ExprKind::Set(elements) => {
+                        for element in elements.iter().rev() {
+                            work.push(AmbientProjectionWork::Expr {
+                                expr: *element,
+                                ambient_allowed,
+                            });
+                        }
+                    }
                     ExprKind::Record(record) => {
                         for field in record.fields.iter().rev() {
                             work.push(AmbientProjectionWork::Expr {
@@ -3355,6 +3422,17 @@ impl Lowerer {
                         ExprKind::List(elements) => {
                             work.extend(elements.iter().copied().map(DependencyWork::Expr));
                         }
+                        ExprKind::Map(map) => {
+                            work.extend(map.entries.iter().flat_map(|entry| {
+                                [
+                                    DependencyWork::Expr(entry.key),
+                                    DependencyWork::Expr(entry.value),
+                                ]
+                            }));
+                        }
+                        ExprKind::Set(elements) => {
+                            work.extend(elements.iter().copied().map(DependencyWork::Expr));
+                        }
                         ExprKind::Record(record) => {
                             work.extend(
                                 record
@@ -3616,6 +3694,25 @@ impl Lowerer {
                 Expr {
                     span: expr.span,
                     kind: ExprKind::List(elements),
+                }
+            }
+            ExprKind::Map(map) => {
+                for entry in &map.entries {
+                    self.resolve_expr(entry.key, namespaces, env);
+                    self.resolve_expr(entry.value, namespaces, env);
+                }
+                Expr {
+                    span: expr.span,
+                    kind: ExprKind::Map(map),
+                }
+            }
+            ExprKind::Set(elements) => {
+                for element in &elements {
+                    self.resolve_expr(*element, namespaces, env);
+                }
+                Expr {
+                    span: expr.span,
+                    kind: ExprKind::Set(elements),
                 }
             }
             ExprKind::Record(record) => {
@@ -4592,6 +4689,143 @@ fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMeta
             ImportBundleKind::BuiltinOption,
         )),
         _ => None,
+    }
+}
+
+fn surface_exprs_equal(left: &syn::Expr, right: &syn::Expr) -> bool {
+    match (&left.kind, &right.kind) {
+        (syn::ExprKind::Group(left), _) => surface_exprs_equal(left, right),
+        (_, syn::ExprKind::Group(right)) => surface_exprs_equal(left, right),
+        (syn::ExprKind::Name(left), syn::ExprKind::Name(right)) => left.text == right.text,
+        (syn::ExprKind::Integer(left), syn::ExprKind::Integer(right)) => left.raw == right.raw,
+        (syn::ExprKind::SuffixedInteger(left), syn::ExprKind::SuffixedInteger(right)) => {
+            left.literal.raw == right.literal.raw && left.suffix.text == right.suffix.text
+        }
+        (syn::ExprKind::Text(left), syn::ExprKind::Text(right)) => {
+            left.segments.len() == right.segments.len()
+                && left
+                    .segments
+                    .iter()
+                    .zip(&right.segments)
+                    .all(|(left, right)| match (left, right) {
+                        (syn::TextSegment::Text(left), syn::TextSegment::Text(right)) => {
+                            left.raw == right.raw
+                        }
+                        (
+                            syn::TextSegment::Interpolation(left),
+                            syn::TextSegment::Interpolation(right),
+                        ) => surface_exprs_equal(&left.expr, &right.expr),
+                        _ => false,
+                    })
+        }
+        (syn::ExprKind::Regex(left), syn::ExprKind::Regex(right)) => left.raw == right.raw,
+        (syn::ExprKind::Tuple(left), syn::ExprKind::Tuple(right))
+        | (syn::ExprKind::List(left), syn::ExprKind::List(right))
+        | (syn::ExprKind::Set(left), syn::ExprKind::Set(right)) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(left, right)| surface_exprs_equal(left, right))
+        }
+        (syn::ExprKind::Map(left), syn::ExprKind::Map(right)) => {
+            left.entries.len() == right.entries.len()
+                && left
+                    .entries
+                    .iter()
+                    .zip(&right.entries)
+                    .all(|(left, right)| {
+                        surface_exprs_equal(&left.key, &right.key)
+                            && surface_exprs_equal(&left.value, &right.value)
+                    })
+        }
+        (syn::ExprKind::Record(left), syn::ExprKind::Record(right)) => {
+            left.fields.len() == right.fields.len()
+                && left.fields.iter().zip(&right.fields).all(|(left, right)| {
+                    left.label.text == right.label.text
+                        && match (&left.value, &right.value) {
+                            (Some(left), Some(right)) => surface_exprs_equal(left, right),
+                            (None, None) => true,
+                            (None, Some(value)) | (Some(value), None) => {
+                                matches!(
+                                    &value.kind,
+                                    syn::ExprKind::Name(identifier)
+                                        if identifier.text == left.label.text
+                                )
+                            }
+                        }
+                })
+        }
+        (syn::ExprKind::AmbientProjection(left), syn::ExprKind::AmbientProjection(right)) => {
+            left.fields.len() == right.fields.len()
+                && left
+                    .fields
+                    .iter()
+                    .zip(&right.fields)
+                    .all(|(left, right)| left.text == right.text)
+        }
+        (
+            syn::ExprKind::Projection {
+                base: left_base,
+                path: left_path,
+            },
+            syn::ExprKind::Projection {
+                base: right_base,
+                path: right_path,
+            },
+        ) => {
+            surface_exprs_equal(left_base, right_base)
+                && left_path.fields.len() == right_path.fields.len()
+                && left_path
+                    .fields
+                    .iter()
+                    .zip(&right_path.fields)
+                    .all(|(left, right)| left.text == right.text)
+        }
+        (
+            syn::ExprKind::Apply {
+                callee: left_callee,
+                arguments: left_arguments,
+            },
+            syn::ExprKind::Apply {
+                callee: right_callee,
+                arguments: right_arguments,
+            },
+        ) => {
+            surface_exprs_equal(left_callee, right_callee)
+                && left_arguments.len() == right_arguments.len()
+                && left_arguments
+                    .iter()
+                    .zip(right_arguments)
+                    .all(|(left, right)| surface_exprs_equal(left, right))
+        }
+        (
+            syn::ExprKind::Unary {
+                operator: left_operator,
+                expr: left_expr,
+            },
+            syn::ExprKind::Unary {
+                operator: right_operator,
+                expr: right_expr,
+            },
+        ) => left_operator == right_operator && surface_exprs_equal(left_expr, right_expr),
+        (
+            syn::ExprKind::Binary {
+                left: left_left,
+                operator: left_operator,
+                right: left_right,
+            },
+            syn::ExprKind::Binary {
+                left: right_left,
+                operator: right_operator,
+                right: right_right,
+            },
+        ) => {
+            left_operator == right_operator
+                && surface_exprs_equal(left_left, right_left)
+                && surface_exprs_equal(left_right, right_right)
+        }
+        _ => false,
     }
 }
 
@@ -6537,6 +6771,83 @@ sig updates : Signal Int
             }
             other => panic!("expected suffixed integer expression, found {other:?}"),
         }
+    }
+
+    #[test]
+    fn lowers_map_and_set_literals() {
+        let lowered = lower_text(
+            "map-set-literals.aivi",
+            "val headers = Map { \"x\": 1, \"y\": 2 }\nval tags = Set [\"a\", \"b\"]\n",
+        );
+        assert!(
+            !lowered.has_errors(),
+            "map/set literal source should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let headers_body = lowered
+            .module()
+            .root_items()
+            .iter()
+            .find_map(|item_id| match &lowered.module().items()[*item_id] {
+                Item::Value(item) if item.name.text() == "headers" => Some(item.body),
+                _ => None,
+            })
+            .expect("fixture should contain headers value");
+        match &lowered.module().exprs()[headers_body].kind {
+            ExprKind::Map(map) => {
+                assert_eq!(map.entries.len(), 2);
+                assert!(matches!(
+                    lowered.module().exprs()[map.entries[0].key].kind,
+                    ExprKind::Text(_)
+                ));
+                assert!(matches!(
+                    lowered.module().exprs()[map.entries[0].value].kind,
+                    ExprKind::Integer(_)
+                ));
+            }
+            other => panic!("expected map literal expression, found {other:?}"),
+        }
+
+        let tags_body = lowered
+            .module()
+            .root_items()
+            .iter()
+            .find_map(|item_id| match &lowered.module().items()[*item_id] {
+                Item::Value(item) if item.name.text() == "tags" => Some(item.body),
+                _ => None,
+            })
+            .expect("fixture should contain tags value");
+        match &lowered.module().exprs()[tags_body].kind {
+            ExprKind::Set(elements) => {
+                assert_eq!(elements.len(), 2);
+                assert!(matches!(
+                    lowered.module().exprs()[elements[0]].kind,
+                    ExprKind::Text(_)
+                ));
+            }
+            other => panic!("expected set literal expression, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn duplicate_map_keys_report_hir_diagnostics() {
+        let lowered = lower_text(
+            "duplicate-map-key.aivi",
+            "val headers = Map { \"Authorization\": \"a\", \"Authorization\": \"b\" }\n",
+        );
+        assert!(
+            lowered.has_errors(),
+            "duplicate map key should fail lowering"
+        );
+        assert!(
+            lowered
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code == Some(super::code("duplicate-map-key"))),
+            "expected duplicate-map-key diagnostic, got {:?}",
+            lowered.diagnostics()
+        );
     }
 
     #[test]

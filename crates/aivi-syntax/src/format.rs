@@ -1,11 +1,12 @@
 use crate::cst::{
     BinaryOperator, ClassMember, ClassMemberName, Decorator, DecoratorArguments, DecoratorPayload,
     DomainItem, DomainMember, DomainMemberName, Expr, ExprKind, FunctionParam, Identifier, Item,
-    MarkupAttribute, MarkupAttributeValue, MarkupNode, Module, NamedItem, Pattern, PatternKind,
-    PipeExpr, PipeStage, PipeStageKind, ProjectionPath, QualifiedName, RecordExpr, RecordField,
-    RecordPatternField, SourceDecorator, SourceProviderContractItem, SourceProviderContractMember,
-    SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextLiteral, TextSegment,
-    TypeDeclBody, TypeExpr, TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseItem,
+    MapExpr, MarkupAttribute, MarkupAttributeValue, MarkupNode, Module, NamedItem, Pattern,
+    PatternKind, PipeExpr, PipeStage, PipeStageKind, ProjectionPath, QualifiedName, RecordExpr,
+    RecordField, RecordPatternField, SourceDecorator, SourceProviderContractItem,
+    SourceProviderContractMember, SourceProviderContractSchemaMember, SuffixedIntegerLiteral,
+    TextLiteral, TextSegment, TypeDeclBody, TypeExpr, TypeExprKind, TypeField, TypeVariant,
+    UnaryOperator, UseItem,
 };
 
 const INDENT_WIDTH: usize = 4;
@@ -663,6 +664,8 @@ impl Formatter {
             ExprKind::Markup(node) => self.format_markup_block(node),
             ExprKind::Tuple(elements) => self.format_expr_tuple_block(elements, force_multiline),
             ExprKind::List(elements) => self.format_list_block(elements, force_multiline),
+            ExprKind::Map(map) => self.format_map_block(map, force_multiline),
+            ExprKind::Set(elements) => self.format_set_block(elements, force_multiline),
             ExprKind::Record(record) => self.format_record_block(record, force_multiline),
             ExprKind::Apply { callee, arguments } => {
                 self.format_expr_apply_block(callee, arguments, force_multiline)
@@ -682,6 +685,8 @@ impl Formatter {
             ExprKind::Group(inner) => format!("({})", self.format_expr_inline(inner, 0)),
             ExprKind::Tuple(elements) => self.format_expr_tuple_inline(elements),
             ExprKind::List(elements) => self.format_list_inline(elements),
+            ExprKind::Map(map) => self.format_map_inline(map),
+            ExprKind::Set(elements) => self.format_set_inline(elements),
             ExprKind::Record(record) => self.format_record_inline(record),
             ExprKind::AmbientProjection(path) => self.format_projection_path(path),
             ExprKind::Projection { base, path } => wrap_if_needed(
@@ -818,6 +823,91 @@ impl Formatter {
                     .join(", ")
             )
         }
+    }
+
+    fn format_set_block(&self, elements: &[Expr], force_multiline: bool) -> Block {
+        let inline = self.format_set_inline(elements);
+        if elements.is_empty() || (!force_multiline && display_width(&inline) <= INLINE_LIMIT) {
+            return Block::inline(inline);
+        }
+
+        let mut lines = vec!["Set [".to_owned()];
+        for (index, element) in elements.iter().enumerate() {
+            let suffix = if index + 1 < elements.len() { "," } else { "" };
+            lines.extend(
+                self.format_expr_block(element, false)
+                    .with_suffix_on_last_line(suffix)
+                    .indented(INDENT_WIDTH)
+                    .into_lines(),
+            );
+        }
+        lines.push("]".to_owned());
+        Block::from_lines(lines)
+    }
+
+    fn format_set_inline(&self, elements: &[Expr]) -> String {
+        format_prefixed_list_like(
+            "Set",
+            elements
+                .iter()
+                .map(|element| self.format_expr_inline(element, 0))
+                .collect(),
+        )
+    }
+
+    fn format_map_block(&self, map: &MapExpr, force_multiline: bool) -> Block {
+        let inline = self.format_map_inline(map);
+        if map.entries.is_empty() || (!force_multiline && display_width(&inline) <= INLINE_LIMIT) {
+            return Block::inline(inline);
+        }
+
+        let mut lines = vec!["Map {".to_owned()];
+        for (index, entry) in map.entries.iter().enumerate() {
+            let suffix = if index + 1 < map.entries.len() {
+                ","
+            } else {
+                ""
+            };
+            lines.extend(
+                self.format_map_entry_block(entry)
+                    .with_suffix_on_last_line(suffix)
+                    .indented(INDENT_WIDTH)
+                    .into_lines(),
+            );
+        }
+        lines.push("}".to_owned());
+        Block::from_lines(lines)
+    }
+
+    fn format_map_inline(&self, map: &MapExpr) -> String {
+        format_prefixed_record_like(
+            "Map",
+            map.entries
+                .iter()
+                .map(|entry| self.format_map_entry_inline(entry))
+                .collect(),
+        )
+    }
+
+    fn format_map_entry_block(&self, entry: &crate::cst::MapExprEntry) -> Block {
+        let key = self.format_expr_inline(&entry.key, 0);
+        let block = self.format_expr_block(&entry.value, false);
+        if block.is_inline() {
+            Block::inline(format!(
+                "{key}: {}",
+                block.inline_text().expect("inline block")
+            ))
+        } else {
+            block.prefixed(&format!("{key}: "))
+        }
+    }
+
+    fn format_map_entry_inline(&self, entry: &crate::cst::MapExprEntry) -> String {
+        format!(
+            "{}: {}",
+            self.format_expr_inline(&entry.key, 0),
+            self.format_expr_inline(&entry.value, 0)
+        )
     }
 
     fn format_record_block(&self, record: &RecordExpr, force_multiline: bool) -> Block {
@@ -1264,6 +1354,8 @@ impl Formatter {
         match &expr.kind {
             ExprKind::Tuple(elements) => !elements.is_empty(),
             ExprKind::List(elements) => !elements.is_empty(),
+            ExprKind::Map(map) => !map.entries.is_empty(),
+            ExprKind::Set(elements) => !elements.is_empty(),
             ExprKind::Record(record) => !record.fields.is_empty(),
             ExprKind::Pipe(_) | ExprKind::Markup(_) => true,
             ExprKind::Apply {
@@ -1386,6 +1478,22 @@ fn format_record_like(fields: Vec<String>) -> String {
         "{}".to_owned()
     } else {
         format!("{{ {} }}", fields.join(", "))
+    }
+}
+
+fn format_prefixed_list_like(prefix: &str, elements: Vec<String>) -> String {
+    if elements.is_empty() {
+        format!("{prefix} []")
+    } else {
+        format!("{prefix} [{}]", elements.join(", "))
+    }
+}
+
+fn format_prefixed_record_like(prefix: &str, fields: Vec<String>) -> String {
+    if fields.is_empty() {
+        format!("{prefix} {{}}")
+    } else {
+        format!("{prefix} {{ {} }}", fields.join(", "))
     }
 }
 
@@ -1537,6 +1645,25 @@ mod tests {
                 "\n",
                 "val delay:Duration = 250ms\n",
                 "val applied = wrap 250ms\n",
+            )
+        );
+    }
+
+    #[test]
+    fn formatter_normalizes_map_and_set_literals() {
+        let formatted = format_text(
+            "val headers=Map{\"Authorization\":\"Bearer demo\",\"Accept\":\"application/json\"}\nval tags=Set[1,2,4]\n",
+        );
+        assert_eq!(
+            formatted,
+            concat!(
+                "val headers =\n",
+                "    Map {\n",
+                "        \"Authorization\": \"Bearer demo\",\n",
+                "        \"Accept\": \"application/json\"\n",
+                "    }\n",
+                "\n",
+                "val tags = Set [1, 2, 4]\n",
             )
         );
     }

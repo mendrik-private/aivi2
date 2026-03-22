@@ -32,6 +32,7 @@ pub use decode_generation::{
     SourceDecodeProgram, SourceDecodeProgramBlocker, SourceDecodeProgramNode,
     SourceDecodeProgramOutcome, SourceDecodeProgramReport, generate_source_decode_programs,
 };
+pub use exports::{ExportedName, ExportedNameKind, ExportedNames, exports};
 pub use fanout_elaboration::{
     BlockedFanoutSegment, FanoutElaborationBlocker, FanoutElaborationReport, FanoutJoinPlan,
     FanoutSegmentElaboration, FanoutSegmentOutcome, FanoutSegmentPlan, elaborate_fanouts,
@@ -53,9 +54,9 @@ pub use hir::{
     DomainMember, DomainMemberKind, EachControl, EmptyControl, ExportItem, Expr, ExprKind,
     FragmentControl, FunctionItem, FunctionParameter, ImportBinding, ImportBindingMetadata,
     ImportBundleKind, ImportRecordField, ImportValueType, InstanceItem, InstanceMember,
-    IntegerLiteral, Item, ItemHeader, ItemKind, LiteralSuffixResolution, MarkupAttribute,
-    MarkupAttributeValue, MarkupElement, MarkupNode, MarkupNodeKind, MatchControl, Module,
-    ModuleArenas, Name, NameError, NamePath, NamePathError, Pattern, PatternKind, PipeExpr,
+    IntegerLiteral, Item, ItemHeader, ItemKind, LiteralSuffixResolution, MapExpr, MapExprEntry,
+    MarkupAttribute, MarkupAttributeValue, MarkupElement, MarkupNode, MarkupNodeKind, MatchControl,
+    Module, ModuleArenas, Name, NameError, NamePath, NamePathError, Pattern, PatternKind, PipeExpr,
     PipeRecurrenceShapeError, PipeRecurrenceSuffix, PipeStage, PipeStageKind, ProjectionBase,
     RecordExpr, RecordExprField, RecordFieldSurface, RecordPatternField, RecurrenceWakeupDecorator,
     RecurrenceWakeupDecoratorKind, RegexLiteral, ResolutionState, RootItemError, ShowControl,
@@ -69,6 +70,7 @@ pub use ids::{
     BindingId, ClusterId, ControlNodeId, DecoratorId, ExprId, ImportId, ItemId, MarkupNodeId,
     PatternId, TypeId, TypeParameterId,
 };
+pub use lower::lower_module_with_resolver;
 pub use lower::{LoweringResult, lower_module};
 pub use recurrence_elaboration::{
     BlockedRecurrenceNode, RecurrenceElaborationBlocker, RecurrenceElaborationReport,
@@ -76,6 +78,7 @@ pub use recurrence_elaboration::{
     RecurrenceNonSourceWakeupBinding, RecurrenceRuntimeExpr, RecurrenceRuntimeStageBlocker,
     RecurrenceStagePlan, elaborate_recurrences,
 };
+pub use resolver::{ImportResolver, NullImportResolver};
 pub use sequence::{AtLeastTwo, NonEmpty, SequenceError};
 pub use source_contract_resolution::{
     ResolvedSourceContractType, ResolvedSourceTypeConstructor, SourceContractResolutionError,
@@ -87,13 +90,10 @@ pub use source_lifecycle_elaboration::{
     SourceLifecyclePlan, SourceOptionSignalBinding, SourceReplacementPolicy, SourceStaleWorkPolicy,
     SourceTeardownPolicy, elaborate_source_lifecycles,
 };
+pub use symbols::{LspSymbol, LspSymbolKind, extract_symbols};
 pub use truthy_falsy_elaboration::{
     BlockedTruthyFalsyStage, TruthyFalsyBranchKind, TruthyFalsyBranchPlan,
     TruthyFalsyElaborationBlocker, TruthyFalsyElaborationReport, TruthyFalsyStageElaboration,
     TruthyFalsyStageOutcome, TruthyFalsyStagePlan, elaborate_truthy_falsy,
 };
 pub use validate::{GateRecordField, GateType, ValidationMode, ValidationReport, validate_module};
-pub use exports::{ExportedName, ExportedNameKind, ExportedNames, exports};
-pub use lower::lower_module_with_resolver;
-pub use resolver::{ImportResolver, NullImportResolver};
-pub use symbols::{LspSymbol, LspSymbolKind, extract_symbols};

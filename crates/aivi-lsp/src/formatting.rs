@@ -20,7 +20,10 @@ pub fn format_document(text: &str, path: &std::path::Path) -> Option<Vec<TextEdi
 
     Some(vec![TextEdit {
         range: Range {
-            start: Position { line: 0, character: 0 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
             end: Position {
                 line: line_count,
                 character: last_line_len,

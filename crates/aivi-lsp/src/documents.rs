@@ -36,5 +36,6 @@ pub fn close_document(state: &ServerState, uri: &Url) {
 }
 
 fn uri_to_path(uri: &Url) -> PathBuf {
-    uri.to_file_path().unwrap_or_else(|_| PathBuf::from(uri.as_str()))
+    uri.to_file_path()
+        .unwrap_or_else(|_| PathBuf::from(uri.as_str()))
 }

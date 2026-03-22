@@ -68,7 +68,10 @@ impl TokenKind {
     pub const fn is_trivia(self) -> bool {
         matches!(
             self,
-            TokenKind::Whitespace | TokenKind::Newline | TokenKind::LineComment | TokenKind::DocComment
+            TokenKind::Whitespace
+                | TokenKind::Newline
+                | TokenKind::LineComment
+                | TokenKind::DocComment
         )
     }
 

@@ -154,6 +154,8 @@ pub enum GateRuntimeExprKind {
     Text(GateRuntimeTextLiteral),
     Tuple(Vec<GateRuntimeExpr>),
     List(Vec<GateRuntimeExpr>),
+    Map(Vec<GateRuntimeMapEntry>),
+    Set(Vec<GateRuntimeExpr>),
     Record(Vec<GateRuntimeRecordField>),
     Projection {
         base: GateRuntimeProjectionBase,
@@ -202,6 +204,12 @@ pub enum GateRuntimeTextSegment {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GateRuntimeRecordField {
     pub label: Name,
+    pub value: GateRuntimeExpr,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GateRuntimeMapEntry {
+    pub key: GateRuntimeExpr,
     pub value: GateRuntimeExpr,
 }
 
@@ -633,6 +641,23 @@ pub(crate) fn lower_gate_runtime_expr(
                 .collect::<Result<_, _>>()?,
         ),
         ExprKind::List(elements) => GateRuntimeExprKind::List(
+            elements
+                .iter()
+                .map(|element| lower_gate_runtime_expr(module, *element, env, ambient, typing))
+                .collect::<Result<_, _>>()?,
+        ),
+        ExprKind::Map(map) => GateRuntimeExprKind::Map(
+            map.entries
+                .iter()
+                .map(|entry| {
+                    Ok(GateRuntimeMapEntry {
+                        key: lower_gate_runtime_expr(module, entry.key, env, ambient, typing)?,
+                        value: lower_gate_runtime_expr(module, entry.value, env, ambient, typing)?,
+                    })
+                })
+                .collect::<Result<_, _>>()?,
+        ),
+        ExprKind::Set(elements) => GateRuntimeExprKind::Set(
             elements
                 .iter()
                 .map(|element| lower_gate_runtime_expr(module, *element, env, ambient, typing))

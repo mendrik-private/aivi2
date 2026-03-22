@@ -17,6 +17,7 @@ fn check_accepts_valid_hir_fixtures() {
         "milestone-2/valid/source-provider-contract-declarations/main.aivi",
         "milestone-2/valid/custom-source-provider-wakeup/main.aivi",
         "milestone-2/valid/custom-source-recurrence-wakeup/main.aivi",
+        "milestone-2/valid/map-set-literals/main.aivi",
         "milestone-2/valid/source-decorator-signals/main.aivi",
         "milestone-2/valid/source-option-contract-parameters/main.aivi",
         "milestone-2/valid/source-option-contract-parameter-context-free-builtins/main.aivi",
@@ -65,6 +66,7 @@ fn check_rejects_invalid_hir_fixtures() {
     for relative in [
         "milestone-2/invalid/duplicate-top-level-names/main.aivi",
         "milestone-2/invalid/duplicate-source-provider-contract/main.aivi",
+        "milestone-2/invalid/duplicate-map-literal-key/main.aivi",
         "milestone-2/invalid/unknown-imported-names/main.aivi",
         "milestone-2/invalid/unknown-decorator/main.aivi",
         "milestone-2/invalid/unresolved-names/main.aivi",

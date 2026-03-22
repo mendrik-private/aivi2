@@ -1,0 +1,5 @@
+val headers : Map Text Text =
+    Map {
+        "Authorization": "Bearer demo",
+        "Authorization": "Bearer stale"
+    }

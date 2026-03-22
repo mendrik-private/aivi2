@@ -5,11 +5,11 @@ use crate::{
         BinaryOperator, ClassBody, ClassMember, ClassMemberName, Decorator, DecoratorArguments,
         DecoratorPayload, DomainBody, DomainItem, DomainMember, DomainMemberName, ErrorItem,
         ExportItem, Expr, ExprKind, FunctionParam, Identifier, IntegerLiteral, Item, ItemBase,
-        MarkupAttribute, MarkupAttributeValue, MarkupNode, Module, NamedItem, NamedItemBody,
-        OperatorName, Pattern, PatternKind, PipeCaseArm, PipeExpr, PipeStage, PipeStageKind,
-        ProjectionPath, QualifiedName, RecordExpr, RecordField, RecordPatternField, RegexLiteral,
-        SourceDecorator, SourceProviderContractBody, SourceProviderContractFieldValue,
-        SourceProviderContractItem, SourceProviderContractMember,
+        MapExpr, MapExprEntry, MarkupAttribute, MarkupAttributeValue, MarkupNode, Module,
+        NamedItem, NamedItemBody, OperatorName, Pattern, PatternKind, PipeCaseArm, PipeExpr,
+        PipeStage, PipeStageKind, ProjectionPath, QualifiedName, RecordExpr, RecordField,
+        RecordPatternField, RegexLiteral, SourceDecorator, SourceProviderContractBody,
+        SourceProviderContractFieldValue, SourceProviderContractItem, SourceProviderContractMember,
         SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextFragment,
         TextInterpolation, TextLiteral, TextSegment, TokenRange, TypeDeclBody, TypeExpr,
         TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseItem,
@@ -1524,6 +1524,15 @@ impl<'a> Parser<'a> {
 
         match self.tokens[index].kind() {
             TokenKind::Identifier => {
+                if self.starts_prefixed_collection_literal(index, end, "Map", TokenKind::LBrace) {
+                    return self.parse_map_expr(cursor, end).map(|map| Expr {
+                        span: map.span,
+                        kind: ExprKind::Map(map),
+                    });
+                }
+                if self.starts_prefixed_collection_literal(index, end, "Set", TokenKind::LBracket) {
+                    return self.parse_set_expr(cursor, end);
+                }
                 *cursor = index + 1;
                 let name = self.identifier_from_token(index);
                 Some(Expr {
@@ -1723,6 +1732,32 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_set_expr(&mut self, cursor: &mut usize, end: usize) -> Option<Expr> {
+        let start = self.consume_identifier_text(cursor, end, "Set")?;
+        let _ = self.consume_kind(cursor, end, TokenKind::LBracket)?;
+        let mut elements = Vec::new();
+
+        loop {
+            if self
+                .consume_kind(cursor, end, TokenKind::RBracket)
+                .is_some()
+            {
+                break;
+            }
+            let element = self.parse_expr(cursor, end, ExprStop::list_context())?;
+            elements.push(element);
+            if self.consume_kind(cursor, end, TokenKind::Comma).is_none() {
+                let _ = self.consume_kind(cursor, end, TokenKind::RBracket);
+                break;
+            }
+        }
+
+        Some(Expr {
+            span: self.source_span_for_range(start, *cursor),
+            kind: ExprKind::Set(elements),
+        })
+    }
+
     fn parse_record_expr(&mut self, cursor: &mut usize, end: usize) -> Option<RecordExpr> {
         let start = self.consume_kind(cursor, end, TokenKind::LBrace)?;
         let mut fields = Vec::new();
@@ -1757,6 +1792,35 @@ impl<'a> Parser<'a> {
 
         Some(RecordExpr {
             fields,
+            span: self.source_span_for_range(start, *cursor),
+        })
+    }
+
+    fn parse_map_expr(&mut self, cursor: &mut usize, end: usize) -> Option<MapExpr> {
+        let start = self.consume_identifier_text(cursor, end, "Map")?;
+        let _ = self.consume_kind(cursor, end, TokenKind::LBrace)?;
+        let mut entries = Vec::new();
+
+        loop {
+            if self.consume_kind(cursor, end, TokenKind::RBrace).is_some() {
+                break;
+            }
+            let key = self.parse_expr(cursor, end, ExprStop::record_context())?;
+            let _ = self.consume_kind(cursor, end, TokenKind::Colon)?;
+            let value = self.parse_expr(cursor, end, ExprStop::record_context())?;
+            entries.push(MapExprEntry {
+                span: self.join_spans(key.span, value.span),
+                key,
+                value,
+            });
+            if self.consume_kind(cursor, end, TokenKind::Comma).is_none() {
+                let _ = self.consume_kind(cursor, end, TokenKind::RBrace);
+                break;
+            }
+        }
+
+        Some(MapExpr {
+            entries,
             span: self.source_span_for_range(start, *cursor),
         })
     }
@@ -2648,6 +2712,19 @@ impl<'a> Parser<'a> {
         self.tokens[index].kind() == TokenKind::Identifier
             && self.tokens[index].text(self.source) == expected
     }
+
+    fn starts_prefixed_collection_literal(
+        &self,
+        index: usize,
+        end: usize,
+        prefix: &str,
+        opener: TokenKind,
+    ) -> bool {
+        self.is_identifier_text(index, prefix)
+            && self
+                .peek_nontrivia(index + 1, end)
+                .is_some_and(|next| self.tokens[next].kind() == opener)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -3138,6 +3215,55 @@ export main
                 other => panic!("expected spaced application, got {other:?}"),
             },
             other => panic!("expected spaced value item, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parser_builds_map_and_set_literals_without_consuming_bare_names() {
+        let (_, parsed) = load(
+            "val headers = Map { \"Authorization\": token, \"Accept\": \"application/json\" }\nval tags = Set [1, 2, selected]\nval bare = Map\n",
+        );
+
+        assert!(!parsed.has_errors());
+
+        match &parsed.module.items[0] {
+            Item::Value(item) => match item.expr_body().map(|expr| &expr.kind) {
+                Some(ExprKind::Map(map)) => {
+                    assert_eq!(map.entries.len(), 2);
+                    assert!(matches!(map.entries[0].key.kind, ExprKind::Text(_)));
+                    assert!(matches!(
+                        map.entries[0].value.kind,
+                        ExprKind::Name(ref identifier) if identifier.text == "token"
+                    ));
+                    assert!(matches!(map.entries[1].key.kind, ExprKind::Text(_)));
+                    assert!(matches!(map.entries[1].value.kind, ExprKind::Text(_)));
+                }
+                other => panic!("expected map literal, got {other:?}"),
+            },
+            other => panic!("expected map value item, got {other:?}"),
+        }
+
+        match &parsed.module.items[1] {
+            Item::Value(item) => match item.expr_body().map(|expr| &expr.kind) {
+                Some(ExprKind::Set(elements)) => {
+                    assert_eq!(elements.len(), 3);
+                    assert!(matches!(elements[0].kind, ExprKind::Integer(_)));
+                    assert!(matches!(
+                        elements[2].kind,
+                        ExprKind::Name(ref identifier) if identifier.text == "selected"
+                    ));
+                }
+                other => panic!("expected set literal, got {other:?}"),
+            },
+            other => panic!("expected set value item, got {other:?}"),
+        }
+
+        match &parsed.module.items[2] {
+            Item::Value(item) => match item.expr_body().map(|expr| &expr.kind) {
+                Some(ExprKind::Name(identifier)) => assert_eq!(identifier.text, "Map"),
+                other => panic!("expected bare `Map` name, got {other:?}"),
+            },
+            other => panic!("expected bare value item, got {other:?}"),
         }
     }
 

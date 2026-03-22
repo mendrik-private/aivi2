@@ -1,7 +1,5 @@
 use aivi_hir::{LspSymbol, LspSymbolKind};
-use tower_lsp::lsp_types::{
-    DocumentSymbol, Position, Range, SymbolKind,
-};
+use tower_lsp::lsp_types::{DocumentSymbol, Position, Range, SymbolKind};
 
 /// Convert an aivi LspSymbolKind to LSP SymbolKind.
 fn convert_symbol_kind(kind: LspSymbolKind) -> SymbolKind {
@@ -51,8 +49,14 @@ fn convert_symbol(sym: &LspSymbol, source_file: &aivi_base::SourceFile) -> Docum
     let selection_range = source_file.span_to_lsp_range(sym.selection_span.span());
 
     let lsp_range = |r: aivi_base::LspRange| Range {
-        start: Position { line: r.start.line, character: r.start.character },
-        end: Position { line: r.end.line, character: r.end.character },
+        start: Position {
+            line: r.start.line,
+            character: r.start.character,
+        },
+        end: Position {
+            line: r.end.line,
+            character: r.end.character,
+        },
     };
 
     let children: Vec<DocumentSymbol> = sym
@@ -70,6 +74,10 @@ fn convert_symbol(sym: &LspSymbol, source_file: &aivi_base::SourceFile) -> Docum
         deprecated: None,
         range: lsp_range(range),
         selection_range: lsp_range(selection_range),
-        children: if children.is_empty() { None } else { Some(children) },
+        children: if children.is_empty() {
+            None
+        } else {
+            Some(children)
+        },
     }
 }

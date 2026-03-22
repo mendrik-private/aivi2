@@ -10,7 +10,7 @@ use std::{
 };
 
 use aivi_base::{Diagnostic, SourceDatabase};
-use aivi_hir::{ExportedNames, LspSymbol, LoweringResult, exports, extract_symbols, lower_module};
+use aivi_hir::{ExportedNames, LoweringResult, LspSymbol, exports, extract_symbols, lower_module};
 use aivi_syntax::{Formatter, ParsedModule, parse_module};
 
 /// Result of parsing a source file.
@@ -122,7 +122,13 @@ impl RootDatabase {
         let source_file = &source_db[file_id];
         let parsed = parse_module(source_file);
         let diagnostics: Vec<Diagnostic> = parsed.all_diagnostics().cloned().collect();
-        self.parse_cache.insert(id, ParsedFileResult { parsed, diagnostics });
+        self.parse_cache.insert(
+            id,
+            ParsedFileResult {
+                parsed,
+                diagnostics,
+            },
+        );
     }
 
     fn ensure_hir(&mut self, id: u64) {
@@ -137,7 +143,13 @@ impl RootDatabase {
         let mut diagnostics: Vec<Diagnostic> = parsed_result.diagnostics.clone();
         diagnostics.extend_from_slice(lowered.diagnostics());
         let module = lowered.into_parts().0;
-        self.hir_cache.insert(id, HirModuleResult { module, diagnostics });
+        self.hir_cache.insert(
+            id,
+            HirModuleResult {
+                module,
+                diagnostics,
+            },
+        );
     }
 }
 
@@ -161,21 +173,18 @@ pub fn parsed_file(db: &mut RootDatabase, file: SourceFile) -> ParsedFileResult 
 /// Lower the source file to HIR and return the result.
 pub fn hir_module(db: &mut RootDatabase, file: SourceFile) -> HirModuleResult {
     db.ensure_hir(file.id);
-    db.hir_cache
-        .get(&file.id)
-        .cloned()
-        .unwrap_or_else(|| {
-            let mut source_db = SourceDatabase::new();
-            let file_id = source_db.add_file("<empty>", "");
-            let source_file = &source_db[file_id];
-            let parsed = parse_module(source_file);
-            let lowered = lower_module(&parsed.module);
-            let module = lowered.into_parts().0;
-            HirModuleResult {
-                module,
-                diagnostics: Vec::new(),
-            }
-        })
+    db.hir_cache.get(&file.id).cloned().unwrap_or_else(|| {
+        let mut source_db = SourceDatabase::new();
+        let file_id = source_db.add_file("<empty>", "");
+        let source_file = &source_db[file_id];
+        let parsed = parse_module(source_file);
+        let lowered = lower_module(&parsed.module);
+        let module = lowered.into_parts().0;
+        HirModuleResult {
+            module,
+            diagnostics: Vec::new(),
+        }
+    })
 }
 
 /// Collect all diagnostics (parse + HIR) for the given file.

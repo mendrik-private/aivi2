@@ -39,9 +39,7 @@ impl Backend {
             crate::diagnostics::collect_lsp_diagnostics(&mut db, file, &uri)
         };
 
-        self.client
-            .publish_diagnostics(uri, lsp_diags, None)
-            .await;
+        self.client.publish_diagnostics(uri, lsp_diags, None).await;
     }
 }
 
@@ -115,9 +113,7 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri;
         crate::documents::close_document(&self.state, &uri);
         // Clear diagnostics.
-        self.client
-            .publish_diagnostics(uri, Vec::new(), None)
-            .await;
+        self.client.publish_diagnostics(uri, Vec::new(), None).await;
     }
 
     async fn document_symbol(
@@ -146,10 +142,7 @@ impl LanguageServer for Backend {
         Ok(Some(DocumentSymbolResponse::Nested(doc_symbols)))
     }
 
-    async fn formatting(
-        &self,
-        params: DocumentFormattingParams,
-    ) -> Result<Option<Vec<TextEdit>>> {
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = &params.text_document.uri;
         let maybe_file = self.state.files.get(uri).map(|f| *f);
         let Some(file) = maybe_file else {

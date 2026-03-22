@@ -296,6 +296,18 @@ impl Validator<'_> {
                         self.require_expr(expr.span, "expression", "list element", *element);
                     }
                 }
+                ExprKind::Map(map) => {
+                    for entry in &map.entries {
+                        self.check_span("map entry", entry.span);
+                        self.require_expr(entry.span, "map entry", "entry key", entry.key);
+                        self.require_expr(entry.span, "map entry", "entry value", entry.value);
+                    }
+                }
+                ExprKind::Set(elements) => {
+                    for element in elements {
+                        self.require_expr(expr.span, "expression", "set element", *element);
+                    }
+                }
                 ExprKind::Record(record) => {
                     for field in &record.fields {
                         self.check_span("record field", field.span);
@@ -1266,7 +1278,7 @@ impl Validator<'_> {
                 format!("`{}` expects `{expected_surface}`", field.label.text()),
             )
             .with_note(
-                "current source option typing checks only the resolved-HIR cases it can prove honestly: same-module annotations, same-module unannotated value bodies rechecked through that same proof slice, suffixed domain literals, same-module constructors checked against the expected contract type or re-inferred as bare roots, built-in `Option` / `Result` / `Validation` constructors including bare roots that only prove a local container shape, imported bindings whose compiler-known import metadata lowers into the current closed type surface, tuple/record/list expressions whose nested values stay within that same slice, and reactive `Signal` payloads used as ordinary source configuration values",
+                "current source option typing checks only the resolved-HIR cases it can prove honestly: same-module annotations, same-module unannotated value bodies rechecked through that same proof slice, suffixed domain literals, same-module constructors checked against the expected contract type or re-inferred as bare roots, built-in `Option` / `Result` / `Validation` constructors including bare roots that only prove a local container shape, imported bindings whose compiler-known import metadata lowers into the current closed type surface, tuple/record/list/map/set expressions whose nested values stay within that same slice, and reactive `Signal` payloads used as ordinary source configuration values",
             )
             .with_note(
                 "bare contract-parameter roots now also cover nested same-module generic constructor applications, unannotated local value bodies, tuple/record/list literals, `Some` roots, context-free `None` / `Ok` / `Err` / `Valid` / `Invalid` holes carried through local source-option bindings, and constructor fields whose tuple/record or built-in container shape can be proved locally; imports without compiler-known type metadata and otherwise unproven ordinary expressions still wait for fuller expression typing",
@@ -1337,7 +1349,7 @@ impl Validator<'_> {
                 format!("argument #{} `{schema_name}` expects `{expected_surface}`", index + 1),
             )
             .with_note(
-                "current custom source contract typing reuses the same resolved-HIR proof surface as source options: same-module annotations, same-module unannotated value bodies rechecked through that same proof slice, suffixed domain literals, same-module constructors checked against the expected contract type or re-inferred as bare roots, built-in `Option` / `Result` / `Validation` constructors including bare roots that only prove a local container shape, imported bindings whose compiler-known import metadata lowers into the current closed type surface, tuple/record/list expressions whose nested values stay within that same slice, and reactive `Signal` payloads used as ordinary source configuration values",
+                "current custom source contract typing reuses the same resolved-HIR proof surface as source options: same-module annotations, same-module unannotated value bodies rechecked through that same proof slice, suffixed domain literals, same-module constructors checked against the expected contract type or re-inferred as bare roots, built-in `Option` / `Result` / `Validation` constructors including bare roots that only prove a local container shape, imported bindings whose compiler-known import metadata lowers into the current closed type surface, tuple/record/list/map/set expressions whose nested values stay within that same slice, and reactive `Signal` payloads used as ordinary source configuration values",
             ),
         );
     }
@@ -1956,6 +1968,53 @@ impl Validator<'_> {
                     });
                 }
                 Some(SourceOptionActualType::List(Box::new(element_type?)))
+            }
+            ExprKind::Map(map) => {
+                let mut key_type = None::<SourceOptionActualType>;
+                let mut value_type = None::<SourceOptionActualType>;
+                for entry in &map.entries {
+                    let key = self.infer_source_option_expr_actual_type_inner(
+                        entry.key,
+                        typing,
+                        bindings,
+                        value_stack,
+                    )?;
+                    key_type = Some(match key_type.take() {
+                        None => key,
+                        Some(current) => current.unify(&key)?,
+                    });
+
+                    let value = self.infer_source_option_expr_actual_type_inner(
+                        entry.value,
+                        typing,
+                        bindings,
+                        value_stack,
+                    )?;
+                    value_type = Some(match value_type.take() {
+                        None => value,
+                        Some(current) => current.unify(&value)?,
+                    });
+                }
+                Some(SourceOptionActualType::Map {
+                    key: Box::new(key_type?),
+                    value: Box::new(value_type?),
+                })
+            }
+            ExprKind::Set(elements) => {
+                let mut element_type = None::<SourceOptionActualType>;
+                for element in elements {
+                    let child = self.infer_source_option_expr_actual_type_inner(
+                        *element,
+                        typing,
+                        bindings,
+                        value_stack,
+                    )?;
+                    element_type = Some(match element_type.take() {
+                        None => child,
+                        Some(current) => current.unify(&child)?,
+                    });
+                }
+                Some(SourceOptionActualType::Set(Box::new(element_type?)))
             }
             ExprKind::Tuple(elements) => {
                 let mut lowered = Vec::with_capacity(elements.len());
@@ -3043,6 +3102,26 @@ impl Validator<'_> {
                             }
                         }
                         ExprKind::List(elements) => {
+                            for element in elements.into_iter().rev() {
+                                work.push(CaseExhaustivenessWork::Expr {
+                                    expr: element,
+                                    env: env.clone(),
+                                });
+                            }
+                        }
+                        ExprKind::Map(map) => {
+                            for entry in map.entries.into_iter().rev() {
+                                work.push(CaseExhaustivenessWork::Expr {
+                                    expr: entry.value,
+                                    env: env.clone(),
+                                });
+                                work.push(CaseExhaustivenessWork::Expr {
+                                    expr: entry.key,
+                                    env: env.clone(),
+                                });
+                            }
+                        }
+                        ExprKind::Set(elements) => {
                             for element in elements.into_iter().rev() {
                                 work.push(CaseExhaustivenessWork::Expr {
                                     expr: element,
@@ -6604,6 +6683,58 @@ impl<'a> GateTypeContext<'a> {
                 }
                 info
             }
+            ExprKind::Map(map) => {
+                let mut info = GateExprInfo::default();
+                let mut key_type = None::<GateType>;
+                let mut value_type = None::<GateType>;
+                for entry in &map.entries {
+                    let key = self.infer_expr(entry.key, env, ambient);
+                    if let Some(child_ty) = key.ty.as_ref() {
+                        match &key_type {
+                            None => key_type = Some(child_ty.clone()),
+                            Some(current) if current.same_shape(child_ty) => {}
+                            Some(_) => key_type = None,
+                        }
+                    }
+                    info.merge(key);
+
+                    let value = self.infer_expr(entry.value, env, ambient);
+                    if let Some(child_ty) = value.ty.as_ref() {
+                        match &value_type {
+                            None => value_type = Some(child_ty.clone()),
+                            Some(current) if current.same_shape(child_ty) => {}
+                            Some(_) => value_type = None,
+                        }
+                    }
+                    info.merge(value);
+                }
+                if let (Some(key), Some(value)) = (key_type, value_type) {
+                    info.ty = Some(GateType::Map {
+                        key: Box::new(key),
+                        value: Box::new(value),
+                    });
+                }
+                info
+            }
+            ExprKind::Set(elements) => {
+                let mut info = GateExprInfo::default();
+                let mut element_type = None::<GateType>;
+                for element in elements {
+                    let child = self.infer_expr(element, env, ambient);
+                    if let Some(child_ty) = child.ty.as_ref() {
+                        match &element_type {
+                            None => element_type = Some(child_ty.clone()),
+                            Some(current) if current.same_shape(child_ty) => {}
+                            Some(_) => element_type = None,
+                        }
+                    }
+                    info.merge(child);
+                }
+                if let Some(element_type) = element_type {
+                    info.ty = Some(GateType::Set(Box::new(element_type)));
+                }
+                info
+            }
             ExprKind::Record(record) => {
                 let mut info = GateExprInfo::default();
                 let mut fields = Vec::with_capacity(record.fields.len());
@@ -8090,6 +8221,26 @@ pub(crate) fn walk_expr_tree(
                             });
                         }
                     }
+                    ExprKind::Map(map) => {
+                        for entry in map.entries.into_iter().rev() {
+                            work.push(ExprWalkWork::Expr {
+                                expr: entry.value,
+                                is_root: false,
+                            });
+                            work.push(ExprWalkWork::Expr {
+                                expr: entry.key,
+                                is_root: false,
+                            });
+                        }
+                    }
+                    ExprKind::Set(elements) => {
+                        for element in elements.into_iter().rev() {
+                            work.push(ExprWalkWork::Expr {
+                                expr: element,
+                                is_root: false,
+                            });
+                        }
+                    }
                     ExprKind::Record(record) => {
                         for field in record.fields.into_iter().rev() {
                             work.push(ExprWalkWork::Expr {
@@ -8362,6 +8513,63 @@ mod tests {
             lowered.diagnostics()
         );
         validate_module(lowered.module(), ValidationMode::RequireResolvedNames)
+    }
+
+    #[test]
+    fn gate_typing_infers_map_and_set_literals() {
+        let mut sources = SourceDatabase::new();
+        let file_id = sources.add_file(
+            "map-set-literal-types.aivi",
+            "val headers = Map { \"Authorization\": \"Bearer demo\", \"Accept\": \"application/json\" }\nval tags = Set [\"news\", \"featured\"]\n",
+        );
+        let parsed = parse_module(&sources[file_id]);
+        assert!(
+            !parsed.has_errors(),
+            "map/set typing input should parse cleanly: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+        let lowered = crate::lower_module(&parsed.module);
+        assert!(
+            !lowered.has_errors(),
+            "map/set typing input should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+        let module = lowered.module();
+        let headers_expr = module
+            .root_items()
+            .iter()
+            .find_map(|item_id| match &module.items()[*item_id] {
+                Item::Value(item) if item.name.text() == "headers" => Some(item.body),
+                _ => None,
+            })
+            .expect("expected headers value");
+        let tags_expr = module
+            .root_items()
+            .iter()
+            .find_map(|item_id| match &module.items()[*item_id] {
+                Item::Value(item) if item.name.text() == "tags" => Some(item.body),
+                _ => None,
+            })
+            .expect("expected tags value");
+
+        let mut typing = GateTypeContext::new(module);
+        assert_eq!(
+            typing
+                .infer_expr(headers_expr, &GateExprEnv::default(), None)
+                .ty,
+            Some(GateType::Map {
+                key: Box::new(GateType::Primitive(BuiltinType::Text)),
+                value: Box::new(GateType::Primitive(BuiltinType::Text)),
+            }),
+        );
+        assert_eq!(
+            typing
+                .infer_expr(tags_expr, &GateExprEnv::default(), None)
+                .ty,
+            Some(GateType::Set(Box::new(GateType::Primitive(
+                BuiltinType::Text,
+            )))),
+        );
     }
 
     fn name(text: &str) -> Name {

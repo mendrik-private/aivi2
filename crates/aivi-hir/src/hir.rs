@@ -806,6 +806,8 @@ pub enum ExprKind {
     Regex(RegexLiteral),
     Tuple(AtLeastTwo<ExprId>),
     List(Vec<ExprId>),
+    Map(MapExpr),
+    Set(Vec<ExprId>),
     Record(RecordExpr),
     Projection {
         base: ProjectionBase,
@@ -832,6 +834,18 @@ pub enum ExprKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecordExpr {
     pub fields: Vec<RecordExprField>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MapExpr {
+    pub entries: Vec<MapExprEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MapExprEntry {
+    pub span: SourceSpan,
+    pub key: ExprId,
+    pub value: ExprId,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

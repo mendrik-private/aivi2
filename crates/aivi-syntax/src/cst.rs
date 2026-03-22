@@ -144,6 +144,21 @@ pub struct RecordExpr {
     pub span: SourceSpan,
 }
 
+/// One key/value entry in a `Map { ... }` literal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MapExprEntry {
+    pub key: Expr,
+    pub value: Expr,
+    pub span: SourceSpan,
+}
+
+/// Value-level `Map { ... }` literal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MapExpr {
+    pub entries: Vec<MapExprEntry>,
+    pub span: SourceSpan,
+}
+
 /// Type-level record field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypeField {
@@ -311,6 +326,8 @@ pub enum ExprKind {
     Group(Box<Expr>),
     Tuple(Vec<Expr>),
     List(Vec<Expr>),
+    Map(MapExpr),
+    Set(Vec<Expr>),
     Record(RecordExpr),
     AmbientProjection(ProjectionPath),
     Projection {
