@@ -1,0 +1,20 @@
+domain Duration over Int
+    literal s : Int -> Duration
+
+domain Retry over Int
+    literal x : Int -> Retry
+
+fun step #value =>
+    value
+
+@recur.timer 5s
+sig polled : Signal Int =
+    0
+     @|> step
+     <|@ step
+
+@recur.backoff 3x
+val retried : Task Int =
+    0
+     @|> step
+     <|@ step

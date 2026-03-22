@@ -110,6 +110,38 @@ impl BuiltinSourceWakeupCause {
     }
 }
 
+/// Custom source-side proof the current compiler can carry into recurrence wakeup planning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CustomSourceWakeupCause {
+    ReactiveInputs,
+    DeclaredWakeup(RecurrenceWakeupKind),
+}
+
+impl CustomSourceWakeupCause {
+    pub const fn kind(self) -> RecurrenceWakeupKind {
+        match self {
+            Self::ReactiveInputs => RecurrenceWakeupKind::SourceEvent,
+            Self::DeclaredWakeup(kind) => kind,
+        }
+    }
+}
+
+/// Explicit non-source wakeup proofs the current frontend can carry today.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NonSourceWakeupCause {
+    ExplicitTimer,
+    ExplicitBackoff,
+}
+
+impl NonSourceWakeupCause {
+    pub const fn kind(self) -> RecurrenceWakeupKind {
+        match self {
+            Self::ExplicitTimer => RecurrenceWakeupKind::Timer,
+            Self::ExplicitBackoff => RecurrenceWakeupKind::Backoff,
+        }
+    }
+}
+
 /// Explicit wakeup evidence the current frontend can already prove for recurrent pipes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RecurrenceWakeupEvidence {
@@ -117,24 +149,46 @@ pub enum RecurrenceWakeupEvidence {
         provider: BuiltinSourceProvider,
         cause: BuiltinSourceWakeupCause,
     },
+    CustomSource {
+        cause: CustomSourceWakeupCause,
+    },
+    NonSource { cause: NonSourceWakeupCause },
 }
 
 impl RecurrenceWakeupEvidence {
     pub const fn kind(self) -> RecurrenceWakeupKind {
         match self {
             Self::BuiltinSource { cause, .. } => cause.kind(),
+            Self::CustomSource { cause } => cause.kind(),
+            Self::NonSource { cause } => cause.kind(),
         }
     }
 
-    pub const fn provider(self) -> BuiltinSourceProvider {
+    pub const fn provider(self) -> Option<BuiltinSourceProvider> {
         match self {
-            Self::BuiltinSource { provider, .. } => provider,
+            Self::BuiltinSource { provider, .. } => Some(provider),
+            Self::CustomSource { .. } | Self::NonSource { .. } => None,
         }
     }
 
-    pub const fn builtin_source_cause(self) -> BuiltinSourceWakeupCause {
+    pub const fn builtin_source_cause(self) -> Option<BuiltinSourceWakeupCause> {
         match self {
-            Self::BuiltinSource { cause, .. } => cause,
+            Self::BuiltinSource { cause, .. } => Some(cause),
+            Self::CustomSource { .. } | Self::NonSource { .. } => None,
+        }
+    }
+
+    pub const fn custom_source_cause(self) -> Option<CustomSourceWakeupCause> {
+        match self {
+            Self::BuiltinSource { .. } | Self::NonSource { .. } => None,
+            Self::CustomSource { cause } => Some(cause),
+        }
+    }
+
+    pub const fn non_source_cause(self) -> Option<NonSourceWakeupCause> {
+        match self {
+            Self::BuiltinSource { .. } | Self::CustomSource { .. } => None,
+            Self::NonSource { cause } => Some(cause),
         }
     }
 }
@@ -230,6 +284,45 @@ impl SourceRecurrenceWakeupContext {
     }
 }
 
+/// Focused custom-source wakeup surface that resolved HIR can prove today.
+///
+/// Reactive source arguments/options are provider-independent RFC semantics, so they already prove
+/// source-event wakeups even for custom providers. Any stronger proof must arrive through explicit
+/// provider metadata; the current surface syntax does not populate that hook yet, but later source
+/// contract work can do so without reshaping recurrence planning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct CustomSourceRecurrenceWakeupContext {
+    declared_wakeup: Option<RecurrenceWakeupKind>,
+    has_reactive_inputs: bool,
+}
+
+impl CustomSourceRecurrenceWakeupContext {
+    pub const fn new() -> Self {
+        Self {
+            declared_wakeup: None,
+            has_reactive_inputs: false,
+        }
+    }
+
+    pub const fn declared_wakeup(self) -> Option<RecurrenceWakeupKind> {
+        self.declared_wakeup
+    }
+
+    pub const fn has_reactive_inputs(self) -> bool {
+        self.has_reactive_inputs
+    }
+
+    pub const fn with_declared_wakeup(mut self, kind: RecurrenceWakeupKind) -> Self {
+        self.declared_wakeup = Some(kind);
+        self
+    }
+
+    pub const fn with_reactive_inputs(mut self) -> Self {
+        self.has_reactive_inputs = true;
+        self
+    }
+}
+
 /// Focused planning error for recurrent pipes whose explicit wakeup source is still unknown.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RecurrenceWakeupError {
@@ -266,6 +359,14 @@ impl RecurrencePlanner {
 pub struct RecurrenceWakeupPlanner;
 
 impl RecurrenceWakeupPlanner {
+    pub const fn plan_non_source(
+        cause: NonSourceWakeupCause,
+    ) -> Result<RecurrenceWakeupPlan, RecurrenceWakeupError> {
+        Ok(RecurrenceWakeupPlan::from_evidence(
+            RecurrenceWakeupEvidence::NonSource { cause },
+        ))
+    }
+
     pub const fn plan_source(
         context: SourceRecurrenceWakeupContext,
     ) -> Result<RecurrenceWakeupPlan, RecurrenceWakeupError> {
@@ -311,6 +412,26 @@ impl RecurrenceWakeupPlanner {
         }
         Err(RecurrenceWakeupError::MissingExplicitWakeup)
     }
+
+    pub const fn plan_custom_source(
+        context: CustomSourceRecurrenceWakeupContext,
+    ) -> Result<RecurrenceWakeupPlan, RecurrenceWakeupError> {
+        if let Some(kind) = context.declared_wakeup() {
+            return Ok(RecurrenceWakeupPlan::from_evidence(
+                RecurrenceWakeupEvidence::CustomSource {
+                    cause: CustomSourceWakeupCause::DeclaredWakeup(kind),
+                },
+            ));
+        }
+        if context.has_reactive_inputs() {
+            return Ok(RecurrenceWakeupPlan::from_evidence(
+                RecurrenceWakeupEvidence::CustomSource {
+                    cause: CustomSourceWakeupCause::ReactiveInputs,
+                },
+            ));
+        }
+        Err(RecurrenceWakeupError::MissingExplicitWakeup)
+    }
 }
 
 const fn provider_wakeup_cause(
@@ -336,7 +457,8 @@ const fn provider_wakeup_cause(
 #[cfg(test)]
 mod tests {
     use super::{
-        BuiltinSourceWakeupCause, RecurrencePlan, RecurrencePlanner, RecurrenceTarget,
+        BuiltinSourceWakeupCause, CustomSourceRecurrenceWakeupContext, CustomSourceWakeupCause,
+        NonSourceWakeupCause, RecurrencePlan, RecurrencePlanner, RecurrenceTarget,
         RecurrenceTargetError, RecurrenceTargetEvidence, RecurrenceWakeupError,
         RecurrenceWakeupKind, RecurrenceWakeupPlanner, SourceRecurrenceWakeupContext,
     };
@@ -405,7 +527,7 @@ mod tests {
         assert_eq!(plan.kind(), RecurrenceWakeupKind::Timer);
         assert_eq!(
             plan.evidence().builtin_source_cause(),
-            BuiltinSourceWakeupCause::ProviderTimer
+            Some(BuiltinSourceWakeupCause::ProviderTimer)
         );
     }
 
@@ -416,10 +538,13 @@ mod tests {
         )
         .expect("request retries should prove explicit backoff wakeups");
         assert_eq!(plan.kind(), RecurrenceWakeupKind::Backoff);
-        assert_eq!(plan.evidence().provider(), BuiltinSourceProvider::HttpGet);
+        assert_eq!(
+            plan.evidence().provider(),
+            Some(BuiltinSourceProvider::HttpGet)
+        );
         assert_eq!(
             plan.evidence().builtin_source_cause(),
-            BuiltinSourceWakeupCause::RetryPolicy
+            Some(BuiltinSourceWakeupCause::RetryPolicy)
         );
     }
 
@@ -433,7 +558,7 @@ mod tests {
         assert_eq!(plan.kind(), RecurrenceWakeupKind::Timer);
         assert_eq!(
             plan.evidence().builtin_source_cause(),
-            BuiltinSourceWakeupCause::PollingPolicy
+            Some(BuiltinSourceWakeupCause::PollingPolicy)
         );
     }
 
@@ -446,7 +571,7 @@ mod tests {
         assert_eq!(plan.kind(), RecurrenceWakeupKind::SourceEvent);
         assert_eq!(
             plan.evidence().builtin_source_cause(),
-            BuiltinSourceWakeupCause::TriggerSignal
+            Some(BuiltinSourceWakeupCause::TriggerSignal)
         );
     }
 
@@ -460,7 +585,7 @@ mod tests {
         assert_eq!(plan.kind(), RecurrenceWakeupKind::SourceEvent);
         assert_eq!(
             plan.evidence().builtin_source_cause(),
-            BuiltinSourceWakeupCause::ReactiveInputs
+            Some(BuiltinSourceWakeupCause::ReactiveInputs)
         );
     }
 
@@ -473,7 +598,7 @@ mod tests {
         assert_eq!(plan.kind(), RecurrenceWakeupKind::ProviderDefinedTrigger);
         assert_eq!(
             plan.evidence().builtin_source_cause(),
-            BuiltinSourceWakeupCause::ProviderDefinedTrigger
+            Some(BuiltinSourceWakeupCause::ProviderDefinedTrigger)
         );
     }
 
@@ -491,5 +616,71 @@ mod tests {
             )),
             Err(RecurrenceWakeupError::MissingExplicitWakeup)
         );
+    }
+
+    #[test]
+    fn custom_source_reactive_inputs_plan_source_event_wakeups() {
+        let plan = RecurrenceWakeupPlanner::plan_custom_source(
+            CustomSourceRecurrenceWakeupContext::new().with_reactive_inputs(),
+        )
+        .expect("reactive custom source inputs should prove explicit source-event wakeups");
+        assert_eq!(plan.kind(), RecurrenceWakeupKind::SourceEvent);
+        assert_eq!(
+            plan.evidence().custom_source_cause(),
+            Some(CustomSourceWakeupCause::ReactiveInputs)
+        );
+        assert_eq!(plan.evidence().provider(), None);
+        assert_eq!(plan.evidence().builtin_source_cause(), None);
+    }
+
+    #[test]
+    fn custom_source_declared_wakeups_plan_provider_triggers() {
+        let plan = RecurrenceWakeupPlanner::plan_custom_source(
+            CustomSourceRecurrenceWakeupContext::new()
+                .with_declared_wakeup(RecurrenceWakeupKind::ProviderDefinedTrigger),
+        )
+        .expect("declared custom wakeup metadata should plan explicit provider triggers");
+        assert_eq!(plan.kind(), RecurrenceWakeupKind::ProviderDefinedTrigger);
+        assert_eq!(
+            plan.evidence().custom_source_cause(),
+            Some(CustomSourceWakeupCause::DeclaredWakeup(
+                RecurrenceWakeupKind::ProviderDefinedTrigger
+            ))
+        );
+    }
+
+    #[test]
+    fn custom_sources_without_explicit_trigger_are_rejected() {
+        assert_eq!(
+            RecurrenceWakeupPlanner::plan_custom_source(CustomSourceRecurrenceWakeupContext::new()),
+            Err(RecurrenceWakeupError::MissingExplicitWakeup)
+        );
+    }
+
+    #[test]
+    fn explicit_non_source_timer_witnesses_plan_timer_wakeups() {
+        let plan = RecurrenceWakeupPlanner::plan_non_source(NonSourceWakeupCause::ExplicitTimer)
+            .expect("explicit timer witnesses should prove non-source timer wakeups");
+        assert_eq!(plan.kind(), RecurrenceWakeupKind::Timer);
+        assert_eq!(
+            plan.evidence().non_source_cause(),
+            Some(NonSourceWakeupCause::ExplicitTimer)
+        );
+        assert_eq!(plan.evidence().provider(), None);
+        assert_eq!(plan.evidence().builtin_source_cause(), None);
+    }
+
+    #[test]
+    fn explicit_non_source_backoff_witnesses_plan_backoff_wakeups() {
+        let plan =
+            RecurrenceWakeupPlanner::plan_non_source(NonSourceWakeupCause::ExplicitBackoff)
+                .expect("explicit backoff witnesses should prove non-source backoff wakeups");
+        assert_eq!(plan.kind(), RecurrenceWakeupKind::Backoff);
+        assert_eq!(
+            plan.evidence().non_source_cause(),
+            Some(NonSourceWakeupCause::ExplicitBackoff)
+        );
+        assert_eq!(plan.evidence().provider(), None);
+        assert_eq!(plan.evidence().builtin_source_cause(), None);
     }
 }

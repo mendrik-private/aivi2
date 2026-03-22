@@ -1,0 +1,20 @@
+type HttpError =
+  | Timeout
+
+type User = {
+    id: Int
+}
+
+type DecodeMode =
+  | Strict
+  | Permissive
+
+type StreamMode =
+  | Ignore
+  | Lines
+  | Bytes
+
+@source http.get "/users" with {
+    decode: Lines
+}
+sig users : Signal (Result HttpError (List User))

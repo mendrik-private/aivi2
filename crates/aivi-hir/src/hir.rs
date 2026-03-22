@@ -444,6 +444,15 @@ pub struct SourceMetadata {
     pub provider_key: Option<Box<str>>,
     pub signal_dependencies: Vec<ItemId>,
     pub is_reactive: bool,
+    pub custom_recurrence_wakeup: Option<CustomSourceRecurrenceWakeup>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CustomSourceRecurrenceWakeup {
+    Timer,
+    Backoff,
+    SourceEvent,
+    ProviderDefinedTrigger,
 }
 
 /// One `class` declaration.
@@ -894,6 +903,7 @@ pub struct Decorator {
 pub enum DecoratorPayload {
     Bare,
     Call(DecoratorCall),
+    RecurrenceWakeup(RecurrenceWakeupDecorator),
     Source(SourceDecorator),
 }
 
@@ -901,6 +911,18 @@ pub enum DecoratorPayload {
 pub struct DecoratorCall {
     pub arguments: Vec<ExprId>,
     pub options: Option<ExprId>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RecurrenceWakeupDecoratorKind {
+    Timer,
+    Backoff,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecurrenceWakeupDecorator {
+    pub kind: RecurrenceWakeupDecoratorKind,
+    pub witness: ExprId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

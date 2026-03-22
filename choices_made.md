@@ -1,256 +1,87 @@
 # Choices made for the initial implementation wave
 
-This log records narrow, reviewable implementation choices for ambiguous or staged parts of `AIVI_RFC.md` during the first Rust implementation wave. Each choice intentionally picks the smallest coherent interpretation that preserves the RFC's intent, keeps later refinement cheap, and avoids silently broadening semantics.
+This file is a plain-language summary of the current implementation choices, with one short explanation per section.
 
-1. **Area:** Validation semantics notation (`RFC §8`)
-   - **Ambiguity / decision point:** The RFC asks whether implementation-facing material should keep Haskell-style applicative notation for `Validation`.
-   - **Chosen interpretation:** Keep the `Validation` semantics exactly as specified, but express implementation notes, tests, and diagnostics in AIVI terms (`pure`, `apply`, `Valid`, `Invalid`) rather than Haskell-specific notation.
-   - **Rationale:** This preserves the applicative meaning while avoiding a second surface language in compiler-facing materials.
-   - **Future refinement:** If cross-language comparison becomes useful, add a separate law appendix rather than mixing Haskell notation into core implementation artifacts.
+1. **Validation notation:** Keep the behavior the same, but describe it using AIVI's own terms instead of Haskell terms.
 
-2. **Area:** Ordinary `?|>` gate semantics (`RFC §11.3`)
-   - **Ambiguity / decision point:** “For ordinary value flow, it lowers through the chosen flow carrier” is underspecified.
-   - **Chosen interpretation:** Follow the updated RFC directly: for an ordinary subject `A`, `?|>` lowers to `Option A`, yielding `Some subject` when the predicate is `True` and `None` when it is `False`. For `Signal A`, `?|>` forwards only updates whose predicate is `True`, suppresses `False` updates, keeps result type `Signal A`, and emits no synthetic negative update.
-   - **Rationale:** This now has concrete spec text, gives ordinary expressions a pointwise “keep or drop” form without introducing `if` / `else`, and keeps `Signal` behavior glitch-free and scheduler-friendly.
-   - **Future refinement:** Additional carriers should only be added through explicit RFC text rather than inferred from library conventions.
+2. **`?|>` gate behavior:** This operator means "keep it if the check passes." For changing or live values, only passing updates continue and failures do not create fake opposite updates.
 
-3. **Area:** Reactive text interpolation in `@source` arguments (`RFC §14`)
-   - **Ambiguity / decision point:** The RFC notes that text interpolation with signals must work in source arguments for environment-specific URLs and similar cases.
-   - **Chosen interpretation:** Text-typed source argument expressions, including interpolation, may reference signals. Those signal references become static dependencies of the source node, and a dependency change cancels and recreates the source subscription with freshly rendered text.
-   - **Rationale:** This satisfies the note without introducing signal monads or hidden dependency rewiring; the dependency set remains statically extractable after elaboration.
-   - **Future refinement:** Broaden to other reactive argument shapes only after provider lifecycle semantics are specified end to end.
+3. **Reactive text inside `@source`:** If a source string includes changing values, those values count as dependencies. When they change, the source is rebuilt using the new text.
 
-4. **Area:** HTTP refresh scheduling (`RFC §14.1.2`, HTTP)
-   - **Ambiguity / decision point:** The RFC asks how refreshes should be scheduled, mentioning both signal dependencies and broader lifecycle hooks.
-   - **Chosen interpretation:** The initial wave supports only two refresh triggers: source recreation when statically known reactive text arguments change, and explicit polling/retry composition through timer/recurrence constructs (`timer.*`, `@|>`, `<|@`). There are no implicit database, focus, or window-lifecycle refresh hooks in the bootstrap implementation.
-   - **Rationale:** This keeps refresh behavior explicit, scheduler-owned, and stack-safe, while staying compatible with static dependency extraction.
-   - **Future refinement:** Add explicit lifecycle-trigger options only after their runtime contract is specified precisely.
+4. **HTTP refreshes:** HTTP sources refresh only for explicit reasons, such as changing reactive inputs or timers or retries written in code. There are no hidden refreshes tied to focus, windows, or other app lifecycle events.
 
-5. **Area:** File watching versus file loading (`RFC §14.1.2`, file watching)
-   - **Ambiguity / decision point:** The RFC asks how a watched file should be loaded on change.
-   - **Chosen interpretation:** `fs.watch` remains an event-only source that yields `Signal FsEvent`. Loading and decoding file contents on change is explicit composition via a separate task or source helper triggered by those events. The listed `decode` option is treated as reserved for a future content-emitting file variant, not as behavior of raw `fs.watch`.
-   - **Rationale:** This keeps watch events, file I/O, and decoding as separate effects, which preserves a clean source contract and avoids hiding extra work behind a watcher.
-   - **Future refinement:** Introduce a distinct `fs.read*` or `fs.watchFile*` variant once content-emitting semantics are specified.
+5. **Watching files vs reading files:** Watching a file only reports that something changed. Reading and decoding the file must still be done as a separate step.
 
-6. **Area:** Orphan-instance policy (`RFC §7.1`)
-   - **Ambiguity / decision point:** The RFC says orphan instances are “disallowed or tightly restricted” in v1.
-   - **Chosen interpretation:** The initial implementation disallows orphan instances entirely.
-   - **Rationale:** This is the narrowest coherent choice, maximizes coherence, and avoids adopting an exception policy that would be hard to retract.
-   - **Future refinement:** Revisit only if a concrete orphan policy can be stated without weakening compile-time coherence.
+6. **Orphan instances:** These are fully disallowed for now to keep behavior consistent and easy to reason about.
 
-7. **Area:** Milestone sequencing and architecture gates (`RFC §24`, `AGENTS.md`)
-   - **Ambiguity / decision point:** Staged delivery could blur architectural boundaries if later runtime concerns leak backward into earlier passes.
-   - **Chosen interpretation:** Work proceeds in RFC milestone order, and each milestone must validate its own IR/contracts before the next milestone becomes implementation-critical. This is sequencing only, not a scope reduction.
-   - **Rationale:** It keeps parser, HIR, typing, runtime, and GTK concerns in their proper layers and prevents backend/runtime shortcuts from redefining earlier semantics.
-   - **Future refinement:** Internal task breakdown may change, but the layer order is expected to remain stable.
+7. **Milestone order:** Build the system in milestone order and keep each layer responsible for its own job. Later runtime concerns should not leak back into earlier compiler stages.
 
-8. **Area:** Bootstrap kind-system feature cut (`RFC §6.1`)
-   - **Ambiguity / decision point:** The implementation needs a concrete starting point for higher-kinded support.
-   - **Chosen interpretation:** The bootstrap type system supports only the explicit v1 kind set plus named constructor partial application. Full type-level lambdas remain deferred and are not represented in the initial parser, HIR, or typed-core structures.
-   - **Rationale:** This matches the RFC’s local, predictable inference goals and keeps kind checking small, explicit, and reviewable.
-   - **Future refinement:** Add type-level lambdas only as a separately designed extension with explicit syntax, typing, and diagnostics.
+8. **Advanced type features:** Start with a smaller, predictable set of advanced type features. More powerful type-level features can be added later as a separate design.
 
-9. **Area:** `<each>` key policy in the GTK bridge (`RFC §17.3.2`)
-   - **Ambiguity / decision point:** The RFC requires keys for reorderable/dynamic collections and strongly recommends them otherwise, but proving which collections are “safe enough” to omit keys is itself non-trivial.
-   - **Chosen interpretation:** The initial wave requires `key={...}` on every `<each>` node.
-   - **Rationale:** This preserves child identity deterministically, simplifies keyed GTK child reuse, and avoids heuristic classification of collection dynamics in the first bridge.
-   - **Future refinement:** Relax only if static analysis can soundly identify safe unkeyed cases.
+9. **`<each>` keys:** Every `<each>` must have a key. This keeps repeated UI items stable when they move or change.
 
-10. **Area:** Decoder overrides (`RFC §14.2`)
-    - **Ambiguity / decision point:** The RFC leaves custom decoder overrides possible but does not yet define the full user-facing override mechanism.
-    - **Chosen interpretation:** The initial wave implements compiler-generated structural decoding only. Custom decoder overrides are deferred.
-    - **Rationale:** This keeps source ingestion closed, typed, and testable while the baseline source/runtime contract is still being established.
-    - **Future refinement:** Add override hooks only with explicit typing rules, span-preserving diagnostics, and clear interaction with `Strict`/`Permissive` modes.
+10. **Decoder overrides:** Only the built-in decoding path exists for now. Custom decoder hooks are delayed until the base behavior is fully defined.
 
-11. **Area:** IR ownership and traversal shape (`RFC §3.4–§3.5`, `AGENTS.md`)
-    - **Ambiguity / decision point:** The bootstrap Rust implementation needs a concrete internal representation strategy that respects stack-safety and source mapping requirements.
-    - **Chosen interpretation:** Each IR uses arena-owned nodes addressed by typed IDs, with explicit validation passes at each boundary. Traversals over user-controlled depth must use worklists or other iterative strategies rather than unbounded Rust recursion.
-    - **Rationale:** This encodes invariants in types, preserves stable cross-reference identity without relying on object addresses, and aligns with the stack-safety rules for parser, decoder, scheduler, and tree-walking paths.
-    - **Future refinement:** Internal storage details may change later, but recursive ownership trees are not the baseline.
+11. **Internal data layout:** Use stable internal IDs and iterative walking instead of deep recursion. This makes the compiler safer and more reliable on large inputs.
 
-12. **Area:** Structural equality bootstrap (`RFC §7`, `§18.2`)
-    - **Ambiguity / decision point:** The RFC has a general class/instance mechanism but no concrete equality class, no derivation boundary, and no explicit v1 stance on user-authored `Eq`.
-    - **Chosen interpretation:** Add `class Eq A` with `(==) : A -> A -> Bool`. In the initial wave, `Eq` participates in ordinary coherent compile-time instance resolution, but the compiler supplies `Eq` dictionaries only for the explicitly structural cases: primitive scalars (`Int`, `Float`, `Decimal`, `BigInt`, `Bool`, `Text`, `Unit`), tuples, closed records, closed sums whose payloads are all `Eq`, `List A`/`Option A` when `A` is `Eq`, and `Result E A`/`Validation E A` when both parameters are `Eq`. Constructor-headed product declarations are covered by the closed-sum rule. Scalar equality is same-type only; there is no coercive or approximate comparison. `!=` is treated as surface sugar for `not (x == y)` rather than a second class member.
-    - **Rationale:** This gives AIVI a type-directed structural equality story without inventing open-world equality for runtime/foreign values or requiring manual instance authoring before class resolution, dictionary passing, and diagnostics are implemented end to end.
-    - **Future refinement:** Revisit user-authored `Eq` instances and additional built-ins such as `Bytes`, `Map`, and `Set` only after their laws and runtime semantics are specified precisely. `Signal`, `Task`, function values, and GTK/foreign handles remain outside v1 structural equality.
+12. **Equality support:** Equality is provided automatically only for data shapes that are clearly and safely comparable. Functions, live values, tasks, and outside handles are excluded.
 
-13. **Area:** Milestone 2 HIR ownership and symbol identity (`RFC §3.2`, `§3.5`, `§4.2`, `§24`, `AGENTS.md`)
-    - **Ambiguity / decision point:** The RFC defines what HIR must know, but not the concrete ownership boundary for resolved symbols, binders, imports, and markup/control nodes.
-    - **Chosen interpretation:** The Milestone 2 HIR is a module-owned arena graph with typed IDs for top-level items, local binders, import entries, expression/pattern nodes, and markup nodes. Resolution results point to those IDs, not to CST nodes, raw strings, or pointer identity. Every HIR node and resolution edge keeps the source span needed to report the original surface site.
-    - **Rationale:** This keeps identity stable across later lowering, avoids lifetime coupling back to the CST, and satisfies the RFC’s explicit IR-boundary and diagnostic invariants.
-    - **Future refinement:** Cross-module/package identity can later layer module/package IDs on top of the local typed-ID scheme without changing the Milestone 2 ownership model.
+13. **Early internal program model:** The early compiler model uses stable IDs for items, bindings, and expressions, and it keeps source locations attached. That makes later processing and error reporting more reliable.
 
-14. **Area:** Record shorthand preservation across HIR (`RFC §4.2`, `§9.4`, `§21`, `§24`)
-    - **Ambiguity / decision point:** Record shorthand needs name information, but its field-validity check depends on an expected closed record type that HIR does not yet know.
-    - **Chosen interpretation:** HIR preserves record-construction and record-pattern shorthand as distinct node forms instead of eagerly expanding them to explicit `label: value` pairs. In record expressions, the value side of shorthand resolves to a same-named term binding or import entry in Milestone 2; if none exists, HIR reports an unresolved-name error at that field. In record patterns, shorthand is always a binder pattern named by the field label; field-existence and ambiguity checks wait for the later expected-record-type check.
-    - **Rationale:** This keeps `RFC §9.4` surface sugar available for diagnostics, avoids pretending HIR already knows the expected closed record type, and gives name resolution a coherent story for the value side without broadening pattern semantics.
-    - **Future refinement:** Once typing supplies the expected closed record, later phases may elaborate shorthand to explicit fields while retaining the original shorthand span for diagnostics.
+14. **Record shorthand:** Record shorthand stays in shorthand form during early processing. This preserves better errors and avoids pretending the compiler already knows the full record shape.
 
-15. **Area:** Applicative cluster preservation at HIR (`RFC §4.2`, `§12`, `§21`, `§24`, `§25`)
-    - **Ambiguity / decision point:** The CST represents `&|>` as pipe stages, while the RFC requires HIR to represent pipe clusters explicitly and typed core to normalize them later.
-    - **Chosen interpretation:** Milestone 2 lifts every contiguous `&|>` region into a dedicated HIR applicative-cluster node with an ordered non-empty member list, an explicit-vs-implicit finalizer slot, and a flag recording whether the user wrote the leading-cluster or expression-headed form. An expression-headed cluster contributes its pipe head as the first cluster member. When a cluster reaches pipe end without an explicit finalizer, HIR records the RFC-required implicit tuple finalizer rather than leaving the finalizer absent.
-    - **Rationale:** This preserves the exact `RFC §12` surface boundary, keeps cluster-specific diagnostics attached to user-visible spans, and leaves one coherent applicative story for later typing and normalization.
-    - **Future refinement:** Later passes may cache arity and resolved outer applicative-constructor information, but HIR remains the last IR that preserves the original cluster form.
+15. **Applicative clusters:** These special pipe clusters stay grouped together instead of being flattened too early. That keeps their original meaning and diagnostics intact.
 
-16. **Area:** Markup control-node representation at HIR (`RFC §4.2`, `§17.3`, `§21`, `§24`, `§25`)
-    - **Ambiguity / decision point:** The Milestone 1 CST treats all markup tags uniformly, but Milestone 2 requires explicit HIR nodes for the RFC-defined control forms.
-    - **Chosen interpretation:** HIR splits ordinary markup elements from the current closed control-node set: `Show`, `Each`, `Match`, `Fragment`, and `With`, with `Empty` represented only as an optional branch inside `Each` and `Case` represented only inside `Match`. Their structural fields are lifted out of stringly attributes/children into typed HIR slots (`when`, `keepMounted`, `of`, `as` binder, `key`, `on`, `pattern`, `value`, bodies). Misplaced `<empty>` or `<case>` nodes are HIR errors rather than generic markup nodes.
-    - **Rationale:** This matches `RFC §17.3`, keeps later typing and GTK lowering direct, and avoids carrying control-node meaning as ad-hoc tag-name checks past HIR.
-    - **Future refinement:** Ordinary element nodes can later gain widget-resolution metadata, but the Milestone 2 control-node enum should stay closed to the currently parsed surface forms.
+16. **Special markup tags:** Tags like `show`, `each`, and `match` are treated as real control features, not normal markup. This makes later UI handling much simpler.
 
-17. **Area:** Decorator resolution scope in Milestone 2 (`RFC §4.2`, `§24`, current parser surface`)
-    - **Ambiguity / decision point:** The current parser accepts dotted decorator heads and a structured `@source` payload, but the language does not yet have decorator declarations, aliases, or decorator imports.
-    - **Chosen interpretation:** Milestone 2 uses a closed compiler-known decorator registry with `@source` as the only accepted decorator. Its provider path is preserved exactly as a dotted provider key rather than resolved through ordinary `use` lookup, while its argument and `with { ... }` option expressions lower and resolve like ordinary term expressions. Any non-`@source` decorator is a Milestone 2 lowering error rather than opaque metadata.
-    - **Rationale:** This matches the current fixture corpus and RFC surface without inventing a macro/decorator language that the spec has not declared, while still keeping source payload expressions in the ordinary HIR graph.
-    - **Future refinement:** If AIVI later adds declared decorators, aliases, or decorator imports, that should extend this closed registry into a real decorator namespace intentionally rather than by preserving unknown annotations today.
+17. **Decorators:** Only `@source` is a real decorator right now. Other decorator-like syntax is rejected instead of being carried around as unknown metadata.
 
-18. **Area:** Import and lexical name-resolution scope in Milestone 2 (`RFC §4.2`, `§9.4`, `§17.3`, `§24`)
-    - **Ambiguity / decision point:** The current surface has only unqualified identifier references plus `use module (imports)` with no alias, wildcard, or qualified ordinary-name syntax, but imported names are used by different later subsystems (`aivi.defaults`, `aivi.network`, and similar bundles).
-    - **Chosen interpretation:** Milestone 2 resolves ordinary lexical names through nested term scopes (function parameters, pipe/case binders, record-pattern shorthand binders, `<each as={...}>`, and `<with as={...}>`) over module top-level term bindings, constructors, builtin terms/types, and explicit ordinary member imports. The current ordinary import catalog is intentionally narrow: imports like `use aivi.network (http)` populate ordinary lexical lookup, while bundle imports such as `use aivi.defaults (Option)` are recorded but do not shadow builtin lexical resolution of `Option`. Milestone 2 still does not invent aliasing, wildcard imports, or module-qualified ordinary references.
-    - **Rationale:** This keeps lexical lookup deterministic for the current syntax surface, supports the fixture/module corpus honestly, and avoids fake-import modeling of builtins.
-    - **Future refinement:** Alias syntax, wildcard imports, qualified ordinary references, and richer export/re-export behavior should only arrive as explicit surface features with their own resolution rules.
+18. **Name lookup and imports:** Name lookup stays intentionally simple: local names and a small set of imports work, but there are no aliases, wildcards, or module-qualified names yet. Built-in names also keep priority where needed.
 
-19. **Area:** Post-update RFC staging for domains, pipes, and sources (`RFC §8`, `§11.3`-`§11.7`, `§14`, `§20`)
-    - **Ambiguity / decision point:** The RFC was sharpened mid-implementation: `Validation` notation was normalized, `?|>` / `T|>` / `F|>` / `*|>` / `<|*` / tap / recurrent-flow semantics were made explicit, source refresh and file-read-on-change behavior were tightened, and `domain ... over ...` gained a much richer nominal-data model.
-    - **Chosen interpretation:** These updates change semantic obligations, but not the current Milestone 2 HIR shape. The active HIR pass preserves explicit pipe/control/source structure so later typing/runtime phases can implement the clarified behavior directly. `domain` is not retrofitted into existing `type` lowering; it remains a future dedicated top-level form to implement in a follow-up parser/HIR pass once the Milestone 2 lowering boundary is stable.
-    - **Rationale:** This keeps layer boundaries honest: semantic/runtime clarifications belong to later phases, while nominal `domain` declarations deserve their own syntax/HIR node rather than ad-hoc alias/newtype reuse.
-    - **Future refinement:** Add `domain` parser + HIR support in the planned follow-up, then implement the newly clarified pipe/source/runtime rules in typing, lowering, and scheduler/runtime layers against the already explicit HIR nodes.
- 
-20. **Area:** Domain declaration surface and HIR shape (`RFC §20`)
-    - **Ambiguity / decision point:** The RFC gives domains their own nominal declaration form, carrier type, literal declarations, and operator/method members, but the existing frontend only had `type` / `class`-shaped top-level items.
-    - **Chosen interpretation:** Implement `domain` as a dedicated top-level CST/HIR item. `domain` is a real top-level keyword, while `over` and `literal` are contextual parser keywords used only within domain declarations. The first implementation slice covers declaration parsing/formatting, HIR lowering, namespace participation, exportability, carrier resolution, member-signature preservation, and carrier self-reference rejection. Literal-suffix declarations are supported on the declaration side, but literal-suffix expression use sites such as `250ms` remain a later dedicated follow-up.
-    - **Rationale:** This matches the RFC’s nominal model without pretending domains are aliases or repurposed classes, keeps future elaboration cheap, and avoids dragging literal-resolution semantics into the current HIR wave prematurely.
-    - **Future refinement:** Add literal-suffix expression parsing/elaboration and fuller domain semantics (construction/elimination helpers, additional diagnostics, and later codegen/runtime behavior) on top of the now-stable domain item boundary.
+19. **Recent spec updates:** Recent spec updates change what later stages must do, but they do not force a redesign of the current early compiler shape. `domain` will be added as its own feature instead of being squeezed into older type handling.
 
-21. **Area:** Compiler-derived `Eq` for domains (`RFC §20.9`, `§7.3`)
-    - **Ambiguity / decision point:** The RFC recommends that domains may derive `Eq` from their carrier, but that does not imply domains are interchangeable with carriers, and no opt-out surface exists yet.
-    - **Chosen interpretation:** Extend the focused `aivi-typing` `Eq` planner with an explicit nominal domain type node. A domain derives `Eq` exactly when its carrier derivation succeeds under the current context, and the resulting proof records a distinct domain wrapper step around the carrier proof. Because there is no surface opt-out mechanism yet, the current implementation treats domains as derivable whenever their carriers are derivable.
-    - **Rationale:** This preserves nominal identity in the derivation model, keeps the current equality work aligned with the RFC’s domain guidance, and avoids smuggling domains through generic external references or alias-like collapse.
-    - **Future refinement:** If/when a domain opt-out or explicit derive mechanism is added to the surface language, thread that flag into the domain `Eq` planner as a deliberate extension rather than by changing the nominal proof shape.
+20. **`domain` declarations:** A `domain` declaration is treated as its own real language feature. You can declare domain suffixes now, but using them directly in expressions is handled later.
 
-22. **Area:** Literal-suffix expression parsing and HIR lowering (`RFC §20.5`)
-    - **Ambiguity / decision point:** The RFC allows forms such as `250ms`, but the existing surface grammar already treats adjacency as ordinary application (`f x`) and does not distinguish compact suffix syntax from spaced application.
-    - **Chosen interpretation:** Parse immediate-adjacency integer-plus-identifier forms such as `250ms` as a dedicated suffixed-integer literal node in CST and HIR. Spaced forms such as `250 ms` remain ordinary application. The current implementation covers integer-family suffixes only, because that is the only literal family materially exercised by the RFC examples and current frontend.
-    - **Rationale:** This adds the RFC’s domain-literal surface without weakening ordinary application syntax or inventing hidden whitespace rules. Using an explicit HIR node also keeps compile-time suffix resolution honest instead of pretending a domain literal is an ordinary top-level term.
-    - **Future refinement:** Extend the same explicit-literal approach to other literal families only after their surface syntax and typing rules are specified, and broaden suffix scope beyond same-module declarations when the module/import model grows.
+21. **Equality for domains:** Domains can automatically get equality when their underlying value can be compared. Even so, they still remain their own named types.
 
-23. **Area:** Current scope of compile-time literal-suffix resolution (`RFC §20.5`)
-    - **Ambiguity / decision point:** The RFC discusses suffix ambiguity “in scope,” including imported domains, but the current implementation still has a deliberately narrow ordinary module/import model and no user-module import graph.
-    - **Chosen interpretation:** Compile-time literal suffix resolution currently ranges over visible domain literal declarations in the current module/HIR namespace. A unique suffix resolves to its owning domain literal declaration; multiple matching declarations are a compile-time ambiguity at the use site; no match is an unknown-suffix error.
-    - **Rationale:** This fully implements the local compile-time behavior the current frontend can represent without inventing a broader import/export system than the repository currently has.
-    - **Future refinement:** When user-module imports and re-exports are implemented, extend the same namespace model so imported domain literal declarations participate in suffix scope explicitly.
+22. **Suffix literals like `250ms`:** Compact forms like `250ms` are treated as special suffix literals, while spaced forms like `250 ms` keep their normal meaning. Only integer-based suffixes are supported for now.
 
-24. **Area:** Structural legality checks for sharpened pipe operators (`RFC §11.4.1`, `§11.5.1`)
-    - **Ambiguity / decision point:** Some of the updated pipe rules are purely structural (`T|>` / `F|>` adjacency, `<|*` placement) while others are carrier/runtime dependent. The current codebase has HIR/lowering but not the later typing/runtime layers.
-    - **Chosen interpretation:** Enforce the purely structural rules at HIR lowering time now: a run of truthy/falsy shorthand stages must be exactly one adjacent `T|>` / `F|>` pair, and `<|*` is legal only immediately after `*|>`. Carrier-specific behavior for `?|>`, `*|>`, recurrence, and source lifecycle remains deferred to later typing/runtime layers.
-    - **Rationale:** This closes a real RFC gap in the existing frontend without smuggling type checking or scheduler behavior into Milestone 2.
-    - **Future refinement:** Add typed elaboration/planning for ordinary vs `Signal` carriers and runtime-specific recurrence/source checks once those later layers exist.
+23. **Where suffixes are resolved:** Literal suffixes are resolved only against declarations in the current module for now. No match is an error, and multiple matches are treated as ambiguous.
 
-25. **Area:** Structural text interpolation in syntax and HIR (`RFC §19.1`, `§14`)
-    - **Ambiguity / decision point:** The frontend previously preserved string literals only as raw text plus a boolean interpolation flag, which was not enough for source dependency extraction, and the RFC does not define string-pattern destructuring semantics.
-    - **Chosen interpretation:** Parse text literals eagerly into explicit alternating text fragments and `{ ... }` expression holes in CST and HIR. Raw text fragments preserve the literal interior spelling between holes, while interpolation holes parse as ordinary expressions with their own spans and canonical formatter output. Interpolated text remains legal in expression and markup/source-text positions, but interpolated text literals in pattern position are rejected as an explicit compile-time error.
-    - **Rationale:** This provides the structural representation required by RFC text composition and source reactivity without introducing stringly heuristics, while the pattern-side restriction chooses the narrowest coherent behavior until the RFC gives explicit destructuring semantics.
-    - **Future refinement:** If AIVI later adds string-pattern matching or richer interpolation escapes, extend the segment model intentionally rather than by weakening the current explicit-hole representation.
+24. **Newer pipe operator rules:** Only the obvious shape and ordering rules for the newer pipe operators are enforced at this stage. Deeper behavior that depends on typing or runtime rules is left for later.
 
-26. **Area:** Source reactivity metadata extraction (`RFC §13.1`, `§14`)
-    - **Ambiguity / decision point:** The RFC requires statically known source dependency sets, but the current Milestone 2 HIR has only local module resolution and import bindings do not encode the imported item kind.
-    - **Chosen interpretation:** After name resolution, every `@source`-backed `sig` receives `SourceMetadata` containing the resolved provider key, the sorted same-module set of directly referenced `sig` items reachable through source arguments/options (including text interpolation holes and nested expression structure), and an `is_reactive` flag derived from whether that dependency set is non-empty. Imported references are not treated as signal dependencies in the current implementation because Milestone 2 cannot yet prove that an import names a signal item.
-    - **Rationale:** This matches the RFC’s “statically known dependencies” requirement as far as the current IR can represent honestly, keeps extraction structural rather than string-based, and avoids inventing cross-module signal knowledge that the current import model does not preserve.
-    - **Future refinement:** Once imports resolve to richer item metadata or a typed inter-module graph exists, extend the same metadata pass so imported signal references participate in dependency extraction explicitly.
+25. **Interpolated text structure:** Interpolated text is stored as alternating plain text and expression holes instead of one opaque string. That makes dependency tracking and error reporting clearer.
 
-27. **Area:** General signal dependency metadata in HIR (`RFC §13.1`, `§14`)
-    - **Ambiguity / decision point:** The RFC’s dependency discussion is source-driven, but ordinary derived `sig` items also need a stable structural dependency set if later scheduler/runtime layers are to stay deterministic.
-    - **Chosen interpretation:** Every `sig`, not only `@source`-backed signals, now carries a sorted, duplicate-free same-module `signal_dependencies` list computed after name resolution from ordinary expression structure. For `@source` signals this list is the whole signal-facing dependency set, while `SourceMetadata.signal_dependencies` remains the source-config subset.
-    - **Rationale:** This keeps dependency extraction uniform across signal forms, avoids a special-case metadata path for sources, and gives later layers one coherent place to read resolved signal-to-signal structure.
-    - **Future refinement:** Broaden the same pass to imported signals only when the import model can prove signal item kinds without guessing.
+26. **Source dependency tracking:** Source-backed signals record which local signals they depend on. Imported references are not guessed to be signals yet.
 
-28. **Area:** Structural `@source` diagnostics in HIR lowering (`RFC §14.1.1`)
-    - **Ambiguity / decision point:** Some source-declaration errors are knowable from surface structure alone, while others depend on later typing or runtime provider contracts.
-    - **Chosen interpretation:** Milestone 2 lowering now rejects structurally invalid `@source` forms immediately: missing provider variants, underspecified provider paths such as `http` without a variant, non-record `with` payloads, and duplicate option labels. These remain lowering diagnostics only; they do not change the resolved HIR shape for otherwise valid structure.
-    - **Rationale:** This captures real user mistakes at the earliest honest layer without pretending HIR already knows provider schemas, option value types, or runtime lifecycle semantics.
-    - **Future refinement:** Add richer provider-aware diagnostics only where the RFC gives a closed static contract that can be enforced without leaking typed/runtime behavior into Milestone 2.
+27. **General signal dependency tracking:** All signals, not just source-backed ones, now carry an explicit list of local signal dependencies. This gives later scheduling work one consistent dependency story.
 
-29. **Area:** Built-in source option schemas and domain-valued source options (`RFC §14.1.2`, `§20.5`)
-    - **Ambiguity / decision point:** The RFC lists recommended v1 provider options, while newer examples prefer domain-shaped quantities such as `5s` and `3x` over raw millisecond/count integers.
-    - **Chosen interpretation:** Milestone 2 now uses a provider-keyed structural option registry for the compiler-known built-in source variants and validates option *names* against that registry. For quantity-like options, the registry follows the domain-oriented vocabulary (`timeout`, `refreshEvery`, `jitter`, `debounce`, `heartbeat`) rather than `*Ms` spellings. Option *values* are still just ordinary expressions at this layer, so domain literal forms such as `5s` and `3x` are accepted and resolved normally, but their expected types are not enforced until later typing.
-    - **Rationale:** This lets the frontend reject misspelled source options now, aligns examples with the RFC’s domain-literal direction, and avoids fake type checking in HIR lowering.
-    - **Future refinement:** When typed source schemas exist, validate source option expression types against provider contracts explicitly instead of relying only on option-name legality.
+28. **Early `@source` errors:** The compiler now catches obviously malformed `@source` declarations early, such as missing variants or duplicate options. More detailed provider-specific checks still come later.
 
-30. **Area:** Unfinished applicative-cluster diagnostics (`RFC §12.7`, `§24`)
-    - **Ambiguity / decision point:** The surface fixture corpus already contained unfinished `&|>` clusters such as a cluster followed by `?|>`, but the parser was still rejecting them as syntax even though the RFC positions this as a later pipe-normalization legality rule.
-    - **Chosen interpretation:** Parsing now accepts these pipe shapes structurally and leaves the legality check to HIR lowering. If a contiguous `&|>` region does not end in an explicit cluster finalizer and more pipe stages follow, lowering reports `illegal-unfinished-cluster` and still preserves structurally valid HIR.
-    - **Rationale:** This moves the diagnostic to the correct layer, keeps the CST faithful to the authored surface, and matches the RFC’s Milestone 4 framing without prematurely normalizing clusters in the parser.
-    - **Future refinement:** Extend the same Milestone 4 legality pass with the remaining cluster restrictions and exact normalization once typed applicative constructors are available.
+29. **Built-in source options:** Built-in sources now have a known list of allowed option names using clearer names like `timeout` and `refreshEvery`. The compiler checks the option names now, but not yet whether each value has the perfect type.
 
-31. **Area:** Milestone 3 kind-checking foundation (`RFC §6.1`, `§20.1`, `§20.8`)
-    - **Ambiguity / decision point:** Milestone 3 requires kind checking and named constructor partial application, but the current codebase had only a focused structural `Eq` planner and no reusable kind model.
-    - **Chosen interpretation:** Add a dedicated `aivi-typing::kind` module that models the v1 kind language (`Type` plus right-associative arrows), named type constructors, type parameters, structural type expressions, iterative kind inference, and explicit expected-kind checks. Parameterized domains use the same constructor-kind model as ordinary named constructors.
-    - **Rationale:** This creates the missing type-side foundation without smuggling kind logic into the `Eq` planner, keeps stack-safety explicit via iterative inference, and gives later HIR/typed-core integration a principled API for constructor partial-application checks.
-    - **Future refinement:** Thread this kind model into resolved HIR type expressions, then layer class/instance resolution and typed-core elaboration on top of the same constructor-kind discipline.
+30. **Unfinished applicative clusters:** These shapes are no longer rejected too early by the parser. They are accepted first and then flagged later in the more appropriate validation step.
 
-32. **Area:** HIR-integrated constructor kind validation (`RFC §6.1`, `§24`)
-    - **Ambiguity / decision point:** Once the standalone kind model existed, the next question was how much of it should be enforced directly in resolved HIR without pretending full typing or typed-core elaboration already exists.
-    - **Chosen interpretation:** `aivi-hir` now uses the `aivi-typing::kind` machinery only in `RequireResolvedNames` mode and only for root type positions that already semantically expect a concrete type or a specific constructor arity: alias bodies, variant fields, annotations, class/domain member types, domain carriers, and instance heads. Kinds are derived from builtins plus the parameter counts of resolved `type`, `class`, and `domain` items. Imported type references are intentionally skipped in this first slice because the current import model does not yet preserve constructor-kind metadata.
-    - **Rationale:** This catches real over-/under-application errors at the earliest honest typed boundary, keeps the structural validator mode unchanged, and avoids inventing cross-module kind facts the current HIR cannot justify.
-    - **Future refinement:** Extend the same pass to imported type constructors once import bindings carry kind metadata, then build class/instance resolution and typed-core elaboration on top of these resolved HIR kind checks.
+31. **Type-shape checking foundation:** The project now has a reusable foundation for checking whether advanced type constructors are being used in the right shape. This is groundwork for later type-checking.
 
-33. **Area:** Structural recurrence suffix legality in HIR lowering (`RFC §11.7`)
-    - **Ambiguity / decision point:** The RFC defines recurrence in terms of scheduler-owned runtime nodes, but the current compiler wave only has pipe-stage CST/HIR plus structural validation. Without typed/runtime lowering, the exact extent of a recurrent region is otherwise ambiguous.
-    - **Chosen interpretation:** Milestone 2 accepts only the narrow structural recurrence form it can justify today: one trailing pipe suffix shaped `@|> init <|@ step (<|@ step)*`. `<|@` without a preceding `@|>` is rejected, `@|>` must be followed by at least one `<|@`, and once a recurrent suffix starts no other pipe stage may interleave with or follow it.
-    - **Rationale:** This captures the surface/IR invariant implied by `RFC §11.7` without inventing runtime lowering targets, wakeup semantics, or cancellation behavior in HIR.
-    - **Future refinement:** Later typed/runtime layers still need to prove the lowering target (`Task`, `Signal`, or `@source` helper), explicit wakeup source, cancellation semantics, and stale-work handling for recurrent flows.
+32. **Using that checking in early validation:** That new checking is now used in places where the compiler already has enough trustworthy information. Imported types are still skipped until the import system is richer.
 
-34. **Area:** Exact applicative-cluster normalization view in HIR (`RFC §12.5`, `§12.6`, `§24`)
-    - **Ambiguity / decision point:** The RFC says `&|>` is a surface-only form that normalizes to `pure` / `apply`, but the current compiler wave still stops at HIR plus structural validation. Rewriting HIR into pseudo-`pure` / `apply` terms now would invent class-resolution and typed-core semantics that do not exist yet.
-    - **Chosen interpretation:** HIR keeps explicit `ApplicativeCluster` nodes as the last surface-preserving IR, but now exposes a presentation-free `ApplicativeSpine` view that records the exact normalization shape: one pure head (either the explicit finalizer expression or an implicit tuple-constructor arity) plus the ordered apply arguments. Structural legality checks that are already knowable in HIR, such as rejecting free ambient projections inside cluster members/finalizers, run against that normalized view during lowering.
-    - **Rationale:** This makes RFC §12 normalization explicit and reusable now without pretending the compiler already has applicative instance selection, purity proofs, or backend-facing `pure` / `apply` terms.
-    - **Future refinement:** Once class/instance resolution and typed core exist, elaborate this derived HIR spine into typed `pure` / `apply` core terms and add the later carrier/purity checks there.
+33. **Repeating-flow syntax rules:** Repeating-flow syntax is limited to one narrow, clearly structured trailing form for now. Mixed or messy shapes are rejected.
 
-35. **Area:** Recurrence suffix representation before typed/runtime lowering (`RFC §11.7`, `§24`)
-    - **Ambiguity / decision point:** The RFC says recurrent pipes must lower to scheduler-owned runtime nodes, but the current compiler wave still ends at HIR. After structural legality was enforced, later layers still needed an exact recurrence boundary they could consume without re-deriving it from raw pipe stages or pretending a runtime node already existed.
-    - **Chosen interpretation:** `aivi-hir` keeps explicit `PipeStageKind::RecurStart` / `RecurStep` nodes as the last surface-preserving form, but now exposes a presentation-free `PipeRecurrenceSuffix` view for the one legal trailing recurrence suffix. That view separates the ordinary prefix stages from the `@|>` start stage and ordered `<|@` steps, and it reports malformed manually-built HIR through a typed `PipeRecurrenceShapeError` instead of silently guessing a runtime shape.
-    - **Rationale:** This makes the recurrence boundary explicit and reusable for later typed-core elaboration while keeping HIR honest: it preserves surface structure, avoids fake scheduler semantics, and gives future typed/runtime passes one narrow structural API to consume.
-    - **Future refinement:** Typed/core and runtime-aware layers still need to elaborate `PipeRecurrenceSuffix` into carrier-checked recurrence nodes, prove explicit wakeup sources, and lower those nodes into scheduler-owned runtime IR with cancellation and stale-work semantics.
+34. **Internal view of applicative clusters:** The compiler keeps these clusters in their user-facing form, but also records a clean internal recipe for what they mean. Later stages can use that recipe without re-guessing it.
 
-36. **Area:** Built-in typed source option contract registry (`RFC §14.1.2`, `§14.1.3`)
-    - **Ambiguity / decision point:** The compiler still lacks ordinary expression typing, and the current HIR builtin-type set does not yet name every RFC source contract atom (`Map`, `Retry`, `StreamMode`, etc.). Later typed source option checking nevertheless needs more than a string list of option labels.
-    - **Chosen interpretation:** Add a dedicated type-side built-in source contract registry in `aivi-typing`, keyed by the closed v1 provider variants. Each option now carries a focused contract type surface: primitive scalars, RFC-named nominal atoms (`DecodeMode`, `Duration`, `FsWatchEvent`, `Path`, `Retry`, `StreamMode`), contract-local type parameters `A` / `B`, and the closed constructors `List`, `Map`, and `Signal`. HIR lowering reuses that registry only for option-name legality today. Quantity-style options renamed away from `*Ms` (`timeout`, `refreshEvery`, `jitter`, `debounce`, `heartbeat`) now carry `Duration` in the schema model; `retry` remains an explicit `Retry` contract atom rather than being guessed from current user domains.
-    - **Rationale:** This centralizes the RFC source contract surface in one typed place, keeps structural lowering and later typing aligned, and avoids fake option-value typing before ordinary expression typing exists.
-    - **Future refinement:** Map these contract atoms into real resolved program types and use them as expected types for source argument/option expression checking.
+35. **Internal view of repeating-flow tails:** Repeating-flow syntax stays visible in the early internal model, but the compiler also exposes a clean extracted view of the repeating tail. Later stages can use that directly instead of rebuilding it by hand.
 
-37. **Area:** Gate carrier semantics at the resolved-HIR boundary (`RFC §11.3`, `AGENTS.md`)
-    - **Ambiguity / decision point:** The RFC now makes the ordinary-vs-`Signal` `?|>` split explicit, but the compiler still stops at resolved HIR plus focused typing helpers. Full typed-core elaboration (`Some` / `None`) and scheduler/runtime signal filtering do not exist yet.
-    - **Chosen interpretation:** Introduce a small `aivi-typing::gate` planner for the carrier decision itself, then consume it from resolved HIR validation using only annotation-driven, same-module structural type inference. This slice proves the current ambient subject for ordinary and `Signal` pipes (including carrier-preserving `|>` stages), rejects directly signal-reading gate predicates as impure, and rejects predicates proven to produce a non-`Bool`. When the current slice cannot yet infer a predicate type, it stays silent instead of inventing a stronger language restriction.
-    - **Rationale:** This places the carrier decision in the typing layer, keeps HIR responsible only for adapting existing resolved annotations/expressions into that model, and avoids pretending typed core or runtime filter nodes already exist.
-    - **Future refinement:** Elaborate ordinary gates into explicit `Some` / `None` typed-core terms, lower signal gates into scheduler-owned filter nodes with no synthetic negative updates, and replace the current focused structural inference with the eventual full expression type checker.
+36. **Catalog of source option shapes:** There is now a central catalog describing the expected shape of built-in source options. That gives later checking a single source of truth.
 
+37. **Gate behavior checks:** Gate behavior is checked using only type facts the compiler can already prove today. Obvious mistakes are rejected, while uncertain cases are left open instead of over-restricted.
 
-38. **Area:** Recurrence target planning before full expression typing (`RFC §11.7`, `AGENTS.md`)
-    - **Ambiguity / decision point:** The RFC allows recurrence only when the compiler can lower it to a built-in `Signal`, `Task`, or `@source` helper node, but the current compiler wave still lacks full expression typing. The resolved-HIR pass therefore needs an explicit rule for how much target proof it can recover today without guessing nested expression semantics.
-    - **Chosen interpretation:** Add a focused `aivi-typing::recurrence` planner and consume it from resolved HIR only when the recurrent pipe is itself a declaration body with target evidence the current frontend already knows honestly: signal item bodies or explicit `Signal` / `Task` result annotations. Any other position, including nested subexpressions or ordinary result annotations, is rejected with a dedicated target diagnostic instead of a guessed default recurrence target.
-    - **Rationale:** This keeps recurrence target selection typed, closed, and independently testable now, gives HIR one honest adapter boundary, and avoids inventing scheduler/runtime semantics before wakeup and lowering checks exist.
-    - **Future refinement:** Propagate expected target types through nested expression positions with real expression typing, add explicit `@source` helper witnesses, and combine the resulting target proof with wakeup validation and scheduler-node lowering.
+38. **Where repeating flows are allowed:** Repeating flows are allowed only where the compiler can already prove they target something supported, such as a signal or task declaration. Everything else is rejected instead of guessed.
 
-39. **Area:** Explicit recurrence wakeup proofs before scheduler lowering (`RFC §11.7`, `§14.1.2`, `AGENTS.md`)
-    - **Ambiguity / decision point:** The RFC requires every recurrent pipe to carry an explicit wakeup source (timer, backoff, source event, or provider-defined trigger), but the current compiler wave still lacks full expression typing, custom source-provider contracts, and non-source timer/backoff witnesses in typed core.
-    - **Chosen interpretation:** Extend `aivi-typing::recurrence` with a closed wakeup planner fed only by evidence the current frontend can already prove honestly from built-in `@source` signals. Intrinsic timer/event providers (`timer.*`, `fs.watch`, `window.keyDown`, `mailbox.subscribe`, `socket.connect`, `process.spawn`) prove wakeups directly. Request/snapshot providers (`http.*`, `fs.read`) must also carry an explicit wakeup policy slot (`retry`, `refreshEvery`, `refreshOn`, `reloadOn`, `restartOn`) or reactive source inputs. Plain `Signal` / `Task` recurrence bodies and custom `@source` providers remain rejected for now because the compiler cannot yet prove their wakeup contracts without later typing/provider metadata.
-    - **Rationale:** This keeps wakeup legality at the typing boundary, reuses the existing built-in source contract registry plus resolved source metadata, and avoids fake scheduler lowering or guessed custom-provider semantics.
-    - **Future refinement:** Fold in source option expression typing, declared provider trigger metadata, and non-source timer/backoff witnesses so recurrence wakeup proofs cover custom providers and ordinary `Signal` / `Task` recurrence sites before scheduler-node lowering.
+39. **Required trigger for repeating flows:** Every repeating flow must have a clear trigger the compiler can already recognize, like a built-in timer or event source. Cases without a provable trigger are rejected for now.
 
-40. **Area:** Source contract type resolution before option-expression typing (`RFC §14.1.2`, `§14.1.3`, `AGENTS.md`)
-    - **Ambiguity / decision point:** The built-in source contract registry now records RFC option shapes, but the compiler still lacks full option-expression typing. The next honest slice needs to turn those schema atoms into actual program type constructors without inventing imported helper semantics or guessed value typing.
-    - **Chosen interpretation:** Add a resolved-HIR `SourceContractTypeResolver` that maps each *used* source option contract into the current program-type surface: primitive atoms become compiler builtins, `List`/`Signal` stay builtin constructors, `Map` plus nominal helper atoms (`Retry`, `StreamMode`, `FsWatchEvent`, `Duration`, `DecodeMode`, `Path`) resolve only through unique same-module `type`/`domain` items with arity checks, and contract-local `A`/`B` remain explicit placeholders. Validation now diagnoses missing or arity-mismatched helper declarations on the option site, but it still does not type-check the option expressions themselves.
-    - **Rationale:** This lands a real type-resolution boundary the current layers can justify, keeps source schemas aligned with actual program constructors, and unblocks later option typing without faking import-aware or expression-aware semantics early.
-    - **Future refinement:** Reuse the resolved contract types as expected types for full option-expression checking, and extend the resolver once imported type metadata and richer constructor/kind information exist.
+40. **Resolving source option types:** Source option schemas are now matched to real program types where possible. The compiler still stops short of fully type-checking the option values themselves.
 
-41. **Area:** Gate core plans before a full typed-core IR (`RFC §4.3`, `§11.3`, `AGENTS.md`)
-    - **Ambiguity / decision point:** The RFC now requires ordinary gates to elaborate to explicit `Some` / `None` terms, but the compiler still has no full typed-core crate or general expression type checker.
-    - **Chosen interpretation:** Keep `PipeStageKind::Gate` as the last surface-preserving HIR node, and expose a focused derived `aivi-hir::elaborate_gates` report over resolved HIR. Each ordinary gate stage that the current local inference can justify lowers to typed branch terms `Some ambientSubject` / `None`; each signal gate lowers to a typed filter intent that preserves the `Signal` carrier and records the RFC’s no-negative-update rule. When the current slice cannot prove the gate subject or predicate, the report records explicit blockers instead of guessing a core plan.
-    - **Rationale:** This creates a real typed handoff for later layers without mutating HIR into pseudo core nodes, keeps scheduler behavior out of the current slice, and makes the current inference boundary explicit and testable.
-    - **Future refinement:** Replace the focused report with the eventual general typed-core IR once fuller expression typing exists, and lower signal filter intents into scheduler/runtime nodes there.
+41. **Lowering plan for gates:** The compiler now produces a clear lower-level plan for how gate stages should behave later. If it cannot prove enough today, it records the blocker instead of making something up.
 
-42. **Area:** Signal gate runtime-filter handoff before scheduler IR (`RFC §11.3`, `AGENTS.md`)
-    - **Ambiguity / decision point:** The next gate slice needed a real runtime-facing handoff for `Signal` predicates, but the compiler still lacks a general typed-core crate, lambda IR, and scheduler node layer.
-    - **Chosen interpretation:** Keep `aivi-hir::SignalGateFilter` as the signal-side handoff, but extend it with an explicit typed `GateRuntimeExpr` tree for the pure predicate body after the usual ambient-subject adaptation. The lowered tree mirrors only the pure HIR subset the current local inference can justify—references, literals, text interpolation, records/tuples/lists, projections, application, unary/binary operators, and nested transform/tap/gate pipes whose intermediate subjects remain typable. Unsupported expression forms still surface as explicit blockers rather than guessed runtime behavior.
-    - **Rationale:** This gives later scheduler/runtime work a typed, source-mapped filter program without re-reading raw HIR, preserves the RFC’s no-synthetic-negative-update rule, and avoids inventing a fake general typed-core or scheduler IR too early.
-    - **Future refinement:** Fold `GateRuntimeExpr` into the eventual general typed-core/lambda pipeline and lower signal filter plans into scheduler-owned nodes once the runtime IR exists.
+42. **Runtime handoff for signal filters:** Signal-based filters now lower into a simple typed filter description that future runtime code can use. Only clearly safe expression forms are included for now.

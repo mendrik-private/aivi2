@@ -8,6 +8,7 @@
 //! or runtime evaluation already exists.
 
 pub mod eq;
+pub mod fanout;
 pub mod gate;
 pub mod kind;
 pub mod recurrence;
@@ -20,16 +21,18 @@ pub use eq::{
     ShapeErrorKind, SumShape, SumVariant, TypeId, TypeNode, TypeParameterId, TypeReference,
     TypeStore, VariantName,
 };
+pub use fanout::{FanoutCarrier, FanoutPlan, FanoutPlanner, FanoutResultKind, FanoutStageKind};
 pub use gate::{GateCarrier, GatePlan, GatePlanner, GateResultKind};
 pub use kind::{
     Kind, KindCheckError, KindCheckErrorKind, KindChecker, KindExpr, KindExprId, KindParameterId,
     KindRecordField, KindStore, TypeConstructorId,
 };
 pub use recurrence::{
-    BuiltinSourceWakeupCause, RecurrencePlan, RecurrencePlanner, RecurrenceTarget,
+    BuiltinSourceWakeupCause, CustomSourceRecurrenceWakeupContext, CustomSourceWakeupCause,
+    NonSourceWakeupCause, RecurrencePlan, RecurrencePlanner, RecurrenceTarget,
     RecurrenceTargetError, RecurrenceTargetEvidence, RecurrenceWakeupError,
-    RecurrenceWakeupEvidence, RecurrenceWakeupKind, RecurrenceWakeupPlan, RecurrenceWakeupPlanner,
-    SourceRecurrenceWakeupContext,
+    RecurrenceWakeupEvidence, RecurrenceWakeupKind, RecurrenceWakeupPlan,
+    RecurrenceWakeupPlanner, SourceRecurrenceWakeupContext,
 };
 pub use source_contracts::{
     BuiltinSourceProvider, SourceContract, SourceContractType, SourceNominalType,

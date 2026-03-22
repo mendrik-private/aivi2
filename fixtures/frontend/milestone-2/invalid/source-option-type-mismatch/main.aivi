@@ -1,0 +1,8 @@
+domain Duration over Int
+    literal s : Int -> Duration
+
+@source timer.every 120 with {
+    immediate: 1,
+    jitter: 1
+}
+sig tick : Signal Unit

@@ -1,0 +1,9 @@
+type FsWatchEvent =
+  | Created
+  | Changed
+  | Deleted
+
+@source fs.watch "/tmp/demo.txt" with {
+    events: [Created, True]
+}
+sig fileEvents : Signal FsWatchEvent

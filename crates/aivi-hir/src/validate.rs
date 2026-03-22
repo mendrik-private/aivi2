@@ -2,10 +2,12 @@ use std::{collections::HashMap, fmt};
 
 use aivi_base::{Diagnostic, DiagnosticCode, DiagnosticLabel, SourceSpan};
 use aivi_typing::{
-    BuiltinSourceProvider, GateCarrier, GatePlanner, GateResultKind, Kind, KindCheckError,
+    BuiltinSourceProvider, FanoutCarrier, FanoutPlan, FanoutPlanner, FanoutResultKind,
+    FanoutStageKind, GateCarrier, GatePlanner, GateResultKind, Kind, KindCheckError,
     KindCheckErrorKind, KindChecker, KindExprId, KindParameterId as TypingKindParameterId,
-    KindRecordField, KindStore, RecurrencePlanner, RecurrenceTargetEvidence,
-    RecurrenceWakeupPlanner, SourceContractType, SourceRecurrenceWakeupContext,
+    KindRecordField, KindStore, NonSourceWakeupCause, RecurrencePlanner,
+    RecurrenceTargetEvidence, RecurrenceWakeupPlanner, SourceContractType,
+    SourceRecurrenceWakeupContext,
 };
 
 use crate::{
@@ -13,15 +15,19 @@ use crate::{
     hir::{
         ApplicativeSpineHead, BuiltinType, ControlNode, ControlNodeKind, DecoratorPayload,
         DomainMemberKind, ExprKind, Item, LiteralSuffixResolution, MarkupAttributeValue,
-        MarkupNodeKind, Module, Name, NamePath, PatternKind, PipeStageKind, ResolutionState,
-        SignalItem, SourceDecorator, SourceMetadata, TermReference, TermResolution, TextLiteral,
-        TextSegment, TypeKind, TypeReference, TypeResolution,
+        MarkupNodeKind, Module, Name, NamePath, PatternKind, PipeStageKind,
+        RecurrenceWakeupDecoratorKind, ResolutionState, SignalItem, SourceDecorator,
+        SourceMetadata, TermReference, TermResolution, TextLiteral, TextSegment, TypeItemBody,
+        TypeKind, TypeReference, TypeResolution,
     },
     ids::{
         BindingId, ClusterId, ControlNodeId, DecoratorId, ExprId, ImportId, ItemId, MarkupNodeId,
         PatternId, TypeId, TypeParameterId,
     },
-    source_contract_resolution::{SourceContractResolutionErrorKind, SourceContractTypeResolver},
+    source_contract_resolution::{
+        ResolvedSourceContractType, ResolvedSourceTypeConstructor,
+        SourceContractResolutionErrorKind, SourceContractTypeResolver,
+    },
 };
 
 /// Validation strictness for HIR modules.
@@ -87,6 +93,7 @@ impl Validator<'_> {
         self.validate_items();
         self.validate_type_kinds();
         self.validate_source_contract_types();
+        self.validate_fanout_semantics();
         self.validate_gate_semantics();
         self.validate_recurrence_targets();
     }
@@ -142,6 +149,14 @@ impl Validator<'_> {
                             options,
                         );
                     }
+                }
+                DecoratorPayload::RecurrenceWakeup(wakeup) => {
+                    self.require_expr(
+                        decorator.span,
+                        "decorator",
+                        "recurrence wakeup witness",
+                        wakeup.witness,
+                    );
                 }
                 DecoratorPayload::Source(source) => {
                     if let Some(provider) = &source.provider {
@@ -880,12 +895,13 @@ impl Validator<'_> {
             .map(|(_, decorator)| decorator.clone())
             .collect::<Vec<_>>();
         let mut resolver = SourceContractTypeResolver::new(self.module);
+        let mut typing = GateTypeContext::new(self.module);
 
         for decorator in decorators {
             let DecoratorPayload::Source(source) = decorator.payload else {
                 continue;
             };
-            self.validate_source_decorator_contract_types(&source, &mut resolver);
+            self.validate_source_decorator_contract_types(&source, &mut resolver, &mut typing);
         }
     }
 
@@ -893,6 +909,7 @@ impl Validator<'_> {
         &mut self,
         source: &crate::hir::SourceDecorator,
         resolver: &mut SourceContractTypeResolver<'_>,
+        typing: &mut GateTypeContext<'_>,
     ) {
         let Some(provider) = source.provider.as_ref() else {
             return;
@@ -915,16 +932,186 @@ impl Validator<'_> {
             let Some(option) = provider.contract().option(field.label.text()) else {
                 continue;
             };
-            if let Err(error) = resolver.resolve(option.ty()) {
-                self.emit_source_contract_resolution_error(
+            match resolver.resolve(option.ty()) {
+                Ok(expected) => self.validate_source_option_value(
+                    field,
+                    provider.key(),
+                    option.ty(),
+                    &expected,
+                    typing,
+                ),
+                Err(error) => self.emit_source_contract_resolution_error(
                     field.span,
                     provider.key(),
                     field.label.text(),
                     option.ty(),
                     error.kind(),
-                );
+                ),
             }
         }
+    }
+
+    fn validate_source_option_value(
+        &mut self,
+        field: &crate::hir::RecordExprField,
+        provider_key: &str,
+        expected_surface: SourceContractType,
+        expected_resolved: &ResolvedSourceContractType,
+        typing: &mut GateTypeContext<'_>,
+    ) {
+        let Some(expected) = SourceOptionExpectedType::from_resolved(self.module, expected_resolved)
+        else {
+            return;
+        };
+
+        let mismatch = match self.check_source_option_expr(field.value, &expected, typing) {
+            SourceOptionTypeCheck::Match | SourceOptionTypeCheck::Unknown => return,
+            SourceOptionTypeCheck::Mismatch(mismatch) => mismatch,
+        };
+
+        self.diagnostics.push(
+            Diagnostic::error(format!(
+                "source option `{}` for `{provider_key}` expects `{expected_surface}`, but this expression proves `{}`",
+                field.label.text(),
+                mismatch.actual
+            ))
+            .with_code(code("source-option-type-mismatch"))
+            .with_primary_label(
+                mismatch.span,
+                format!("this source option expression proves `{}`", mismatch.actual),
+            )
+            .with_secondary_label(
+                field.span,
+                format!("`{}` expects `{expected_surface}`", field.label.text()),
+            )
+            .with_note(
+                "current source option typing checks only the resolved-HIR cases it can prove honestly: same-module annotations, suffixed domain literals, same-module nullary constructors, list elements, and reactive `Signal` payloads used as ordinary source configuration values",
+            )
+            .with_note(
+                "imported values, constructor applications, and otherwise unproven expressions still wait for fuller ordinary expression typing",
+            ),
+        );
+    }
+
+    fn check_source_option_expr(
+        &self,
+        expr_id: ExprId,
+        expected: &SourceOptionExpectedType,
+        typing: &mut GateTypeContext<'_>,
+    ) -> SourceOptionTypeCheck {
+        if expected.is_any() {
+            return SourceOptionTypeCheck::Match;
+        }
+
+        if let Some(check) = self.check_source_option_expr_by_inference(expr_id, expected, typing) {
+            return check;
+        }
+
+        match &self.module.exprs()[expr_id].kind {
+            ExprKind::Name(reference) => self.check_source_option_name(reference, expected),
+            ExprKind::List(elements) => {
+                let SourceOptionExpectedType::List(element_expected) = expected else {
+                    return SourceOptionTypeCheck::Unknown;
+                };
+                self.check_source_option_list(elements, element_expected, typing)
+            }
+            _ => SourceOptionTypeCheck::Unknown,
+        }
+    }
+
+    fn check_source_option_expr_by_inference(
+        &self,
+        expr_id: ExprId,
+        expected: &SourceOptionExpectedType,
+        typing: &mut GateTypeContext<'_>,
+    ) -> Option<SourceOptionTypeCheck> {
+        let info = typing.infer_expr(expr_id, &GateExprEnv::default(), None);
+        let actual = info.ty?;
+        Some(if source_option_expected_matches_gate_type(expected, &actual) {
+            SourceOptionTypeCheck::Match
+        } else {
+            SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
+                span: self.module.exprs()[expr_id].span,
+                actual: actual.to_string(),
+            })
+        })
+    }
+
+    fn check_source_option_name(
+        &self,
+        reference: &TermReference,
+        expected: &SourceOptionExpectedType,
+    ) -> SourceOptionTypeCheck {
+        let Some(actual) = self.source_constructor_actual(reference) else {
+            return SourceOptionTypeCheck::Unknown;
+        };
+
+        if actual.field_count == 0 {
+            if expected.matches_named_item(actual.parent_item) {
+                SourceOptionTypeCheck::Match
+            } else {
+                SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
+                    span: reference.path.span(),
+                    actual: actual.parent_name,
+                })
+            }
+        } else {
+            SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
+                span: reference.path.span(),
+                actual: format!("constructor `{}`", actual.constructor_name),
+            })
+        }
+    }
+
+    fn check_source_option_list(
+        &self,
+        elements: &[ExprId],
+        expected: &SourceOptionExpectedType,
+        typing: &mut GateTypeContext<'_>,
+    ) -> SourceOptionTypeCheck {
+        let mut saw_unknown = false;
+
+        for element in elements {
+            match self.check_source_option_expr(*element, expected, typing) {
+                SourceOptionTypeCheck::Match => {}
+                SourceOptionTypeCheck::Mismatch(mismatch) => {
+                    return SourceOptionTypeCheck::Mismatch(mismatch);
+                }
+                SourceOptionTypeCheck::Unknown => saw_unknown = true,
+            }
+        }
+
+        if saw_unknown {
+            SourceOptionTypeCheck::Unknown
+        } else {
+            SourceOptionTypeCheck::Match
+        }
+    }
+
+    fn source_constructor_actual(
+        &self,
+        reference: &TermReference,
+    ) -> Option<SourceOptionConstructorActual> {
+        let ResolutionState::Resolved(TermResolution::Item(item_id)) = reference.resolution.as_ref()
+        else {
+            return None;
+        };
+        let Item::Type(item) = &self.module.items()[*item_id] else {
+            return None;
+        };
+        let TypeItemBody::Sum(variants) = &item.body else {
+            return None;
+        };
+        let constructor_name = reference.path.segments().iter().last()?.text();
+        let variant = variants
+            .iter()
+            .find(|variant| variant.name.text() == constructor_name)?;
+        Some(SourceOptionConstructorActual {
+            parent_item: *item_id,
+            parent_name: item.name.text().to_owned(),
+            constructor_name: constructor_name.to_owned(),
+            field_count: variant.fields.len(),
+        })
     }
 
     fn emit_source_contract_resolution_error(
@@ -994,6 +1181,51 @@ impl Validator<'_> {
                         "current source-contract type resolution checks only builtins and same-module type/domain arities before ordinary option expression typing exists",
                     ),
                 );
+            }
+        }
+    }
+
+    fn validate_fanout_semantics(&mut self) {
+        if self.mode != ValidationMode::RequireResolvedNames {
+            return;
+        }
+
+        let items = self
+            .module
+            .items()
+            .iter()
+            .map(|(_, item)| item.clone())
+            .collect::<Vec<_>>();
+        let mut typing = GateTypeContext::new(self.module);
+
+        for item in items {
+            match item {
+                Item::Value(item) => {
+                    self.validate_fanout_expr_tree(item.body, &GateExprEnv::default(), &mut typing);
+                }
+                Item::Function(item) => {
+                    let env = self.gate_env_for_function(&item, &mut typing);
+                    self.validate_fanout_expr_tree(item.body, &env, &mut typing);
+                }
+                Item::Signal(item) => {
+                    if let Some(body) = item.body {
+                        self.validate_fanout_expr_tree(body, &GateExprEnv::default(), &mut typing);
+                    }
+                }
+                Item::Instance(item) => {
+                    for member in item.members {
+                        self.validate_fanout_expr_tree(
+                            member.body,
+                            &GateExprEnv::default(),
+                            &mut typing,
+                        );
+                    }
+                }
+                Item::Type(_)
+                | Item::Class(_)
+                | Item::Domain(_)
+                | Item::Use(_)
+                | Item::Export(_) => {}
             }
         }
     }
@@ -1068,13 +1300,17 @@ impl Validator<'_> {
                     let target = item.annotation.and_then(|annotation| {
                         typing.recurrence_target_hint_for_annotation(annotation)
                     });
-                    self.validate_recurrence_expr_tree(item.body, target, None);
+                    let wakeup =
+                        self.recurrence_wakeup_hint_for_decorators(&item.header.decorators);
+                    self.validate_recurrence_expr_tree(item.body, target, wakeup);
                 }
                 Item::Function(item) => {
                     let target = item.annotation.and_then(|annotation| {
                         typing.recurrence_target_hint_for_annotation(annotation)
                     });
-                    self.validate_recurrence_expr_tree(item.body, target, None);
+                    let wakeup =
+                        self.recurrence_wakeup_hint_for_decorators(&item.header.decorators);
+                    self.validate_recurrence_expr_tree(item.body, target, wakeup);
                 }
                 Item::Signal(item) => {
                     if let Some(body) = item.body {
@@ -1114,6 +1350,9 @@ impl Validator<'_> {
                     if let Some(options) = call.options {
                         self.validate_recurrence_expr_tree(options, None, None);
                     }
+                }
+                DecoratorPayload::RecurrenceWakeup(wakeup) => {
+                    self.validate_recurrence_expr_tree(wakeup.witness, None, None);
                 }
                 DecoratorPayload::Source(source) => {
                     for argument in source.arguments {
@@ -1179,14 +1418,37 @@ impl Validator<'_> {
                     self.emit_missing_recurrence_wakeup(start_span, wakeup);
                 }
             }
+            Some(RecurrenceWakeupHint::NonSource(cause)) => {
+                if RecurrenceWakeupPlanner::plan_non_source(*cause).is_err() {
+                    self.emit_missing_recurrence_wakeup(start_span, wakeup);
+                }
+            }
             Some(RecurrenceWakeupHint::CustomSource { .. }) | None => {
                 self.emit_missing_recurrence_wakeup(start_span, wakeup);
             }
         }
     }
 
+    fn recurrence_wakeup_hint_for_decorators(
+        &self,
+        decorators: &[DecoratorId],
+    ) -> Option<RecurrenceWakeupHint> {
+        decorators.iter().find_map(|decorator_id| {
+            let decorator = self.module.decorators().get(*decorator_id)?;
+            let DecoratorPayload::RecurrenceWakeup(wakeup) = decorator.payload else {
+                return None;
+            };
+            Some(RecurrenceWakeupHint::NonSource(match wakeup.kind {
+                RecurrenceWakeupDecoratorKind::Timer => NonSourceWakeupCause::ExplicitTimer,
+                RecurrenceWakeupDecoratorKind::Backoff => NonSourceWakeupCause::ExplicitBackoff,
+            }))
+        })
+    }
+
     fn recurrence_wakeup_hint_for_signal(&self, item: &SignalItem) -> Option<RecurrenceWakeupHint> {
-        let source = self.signal_source_decorator(item)?;
+        let Some(source) = self.signal_source_decorator(item) else {
+            return self.recurrence_wakeup_hint_for_decorators(&item.header.decorators);
+        };
         let provider = source.provider.as_ref()?;
         let provider_key = provider
             .segments()
@@ -1335,6 +1597,22 @@ impl Validator<'_> {
                         "custom provider-defined triggers remain deferred until source-provider contracts carry explicit wakeup metadata",
                     );
             }
+            Some(RecurrenceWakeupHint::NonSource(cause)) => {
+                let note = match cause {
+                    NonSourceWakeupCause::ExplicitTimer => {
+                        "this declaration already carries an explicit non-source timer witness; if this diagnostic appears, keep the failing fixture because the recurrence wakeup adapter is inconsistent"
+                    }
+                    NonSourceWakeupCause::ExplicitBackoff => {
+                        "this declaration already carries an explicit non-source backoff witness; if this diagnostic appears, keep the failing fixture because the recurrence wakeup adapter is inconsistent"
+                    }
+                };
+                diagnostic = diagnostic
+                    .with_primary_label(
+                        span,
+                        "this recurrent pipe already carries an explicit non-source wakeup witness",
+                    )
+                    .with_note(note);
+            }
             None => {
                 diagnostic = diagnostic
                     .with_primary_label(
@@ -1342,11 +1620,67 @@ impl Validator<'_> {
                         "this recurrent pipe needs an explicit timer, backoff policy, source event, or provider-defined trigger",
                     )
                     .with_note(
-                        "the current wakeup slice can prove recurrence wakeups only from compiler-known `@source` contexts; plain `Signal` / `Task` bodies still need future explicit timer/backoff evidence",
+                        "add a compiler-known non-source wakeup witness such as `@recur.timer 5s` or `@recur.backoff 3x`, or use a compiler-known `@source` provider with explicit wakeup proof",
                     );
             }
         }
         self.diagnostics.push(diagnostic);
+    }
+
+    fn validate_fanout_expr_tree(
+        &mut self,
+        root: ExprId,
+        env: &GateExprEnv,
+        typing: &mut GateTypeContext<'_>,
+    ) {
+        let module = self.module;
+        walk_expr_tree(module, root, |_, expr, _| {
+            if let ExprKind::Pipe(pipe) = &expr.kind {
+                self.validate_fanout_pipe(pipe, env, typing);
+            }
+        });
+    }
+
+    fn validate_fanout_pipe(
+        &mut self,
+        pipe: &crate::hir::PipeExpr,
+        env: &GateExprEnv,
+        typing: &mut GateTypeContext<'_>,
+    ) {
+        let stages = pipe.stages.iter().collect::<Vec<_>>();
+        let mut current = typing.infer_expr(pipe.head, env, None).ty;
+        for stage in stages {
+            let Some(subject) = current.clone() else {
+                break;
+            };
+            match &stage.kind {
+                PipeStageKind::Transform { expr } => {
+                    current = typing.infer_transform_stage(*expr, env, &subject);
+                }
+                PipeStageKind::Tap { expr } => {
+                    let _ = typing.infer_pipe_body(*expr, env, &subject);
+                    current = Some(subject);
+                }
+                PipeStageKind::Gate { expr } => {
+                    current = typing.infer_gate_stage(*expr, env, &subject);
+                }
+                PipeStageKind::Map { expr } => {
+                    current = self.validate_fanout_map_stage(stage.span, *expr, env, &subject, typing);
+                }
+                PipeStageKind::FanIn { expr } => {
+                    current =
+                        self.validate_fanin_stage(stage.span, *expr, env, &subject, typing);
+                }
+                PipeStageKind::Case { .. }
+                | PipeStageKind::Apply { .. }
+                | PipeStageKind::Truthy { .. }
+                | PipeStageKind::Falsy { .. }
+                | PipeStageKind::RecurStart { .. }
+                | PipeStageKind::RecurStep { .. } => {
+                    current = None;
+                }
+            }
+        }
     }
 
     fn validate_gate_expr_tree(
@@ -1385,10 +1719,14 @@ impl Validator<'_> {
                 PipeStageKind::Gate { expr } => {
                     current = self.validate_gate_stage(stage.span, *expr, env, &subject, typing);
                 }
+                PipeStageKind::Map { expr } => {
+                    current = typing.infer_fanout_map_stage(*expr, env, &subject);
+                }
+                PipeStageKind::FanIn { expr } => {
+                    current = typing.infer_fanin_stage(*expr, env, &subject);
+                }
                 PipeStageKind::Case { .. }
-                | PipeStageKind::Map { .. }
                 | PipeStageKind::Apply { .. }
-                | PipeStageKind::FanIn { .. }
                 | PipeStageKind::Truthy { .. }
                 | PipeStageKind::Falsy { .. }
                 | PipeStageKind::RecurStart { .. }
@@ -1397,6 +1735,73 @@ impl Validator<'_> {
                 }
             }
         }
+    }
+
+    fn validate_fanout_map_stage(
+        &mut self,
+        stage_span: SourceSpan,
+        expr: ExprId,
+        env: &GateExprEnv,
+        subject: &GateType,
+        typing: &mut GateTypeContext<'_>,
+    ) -> Option<GateType> {
+        let Some(carrier) = typing.fanout_carrier(subject) else {
+            self.diagnostics.push(
+                Diagnostic::error(format!(
+                    "fan-out `*|>` requires `List A` or `Signal (List A)`, found `{subject}`"
+                ))
+                .with_code(code("fanout-subject-not-list"))
+                .with_label(DiagnosticLabel::primary(
+                    stage_span,
+                    "map over a list-valued subject or transform to `List` first",
+                )),
+            );
+            return None;
+        };
+        let Some(element_subject) = subject.fanout_element().cloned() else {
+            return None;
+        };
+        let body_info = typing.infer_pipe_body(expr, env, &element_subject);
+        let mut saw_error = false;
+        for issue in body_info.issues {
+            self.emit_fanout_issue(FanoutIssueContext::MapElement, issue);
+            saw_error = true;
+        }
+        if saw_error {
+            return None;
+        }
+        let body_ty = body_info.ty?;
+        Some(typing.apply_fanout_plan(
+            FanoutPlanner::plan(FanoutStageKind::Map, carrier),
+            body_ty,
+        ))
+    }
+
+    fn validate_fanin_stage(
+        &mut self,
+        _stage_span: SourceSpan,
+        expr: ExprId,
+        env: &GateExprEnv,
+        subject: &GateType,
+        typing: &mut GateTypeContext<'_>,
+    ) -> Option<GateType> {
+        let Some(carrier) = typing.fanout_carrier(subject) else {
+            return None;
+        };
+        let body_info = typing.infer_pipe_body(expr, env, subject);
+        let mut saw_error = false;
+        for issue in body_info.issues {
+            self.emit_fanout_issue(FanoutIssueContext::JoinCollection, issue);
+            saw_error = true;
+        }
+        if saw_error {
+            return None;
+        }
+        let body_ty = body_info.ty?;
+        Some(typing.apply_fanout_plan(
+            FanoutPlanner::plan(FanoutStageKind::Join, carrier),
+            body_ty,
+        ))
     }
 
     fn validate_gate_stage(
@@ -1497,6 +1902,87 @@ impl Validator<'_> {
                     .with_label(DiagnosticLabel::primary(
                         span,
                         "use a field that exists on the current subject",
+                    )),
+                );
+            }
+        }
+    }
+
+    fn emit_fanout_issue(&mut self, context: FanoutIssueContext, issue: GateIssue) {
+        match (context, issue) {
+            (
+                FanoutIssueContext::MapElement,
+                GateIssue::InvalidProjection {
+                    span,
+                    path,
+                    subject,
+                },
+            ) => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "fan-out body cannot project `{path}` from non-record element subject `{subject}`"
+                    ))
+                    .with_code(code("invalid-fanout-projection"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "project from each record element or transform to the desired field first",
+                    )),
+                );
+            }
+            (
+                FanoutIssueContext::MapElement,
+                GateIssue::UnknownField {
+                    span,
+                    path,
+                    subject,
+                },
+            ) => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "fan-out body cannot find field `{path}` on element subject `{subject}`"
+                    ))
+                    .with_code(code("unknown-fanout-field"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "use a field that exists on each mapped element",
+                    )),
+                );
+            }
+            (
+                FanoutIssueContext::JoinCollection,
+                GateIssue::InvalidProjection {
+                    span,
+                    path,
+                    subject,
+                },
+            ) => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "fan-in body cannot project `{path}` from non-record collection subject `{subject}`"
+                    ))
+                    .with_code(code("invalid-fanin-projection"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "reduce the mapped collection directly or transform it before projecting",
+                    )),
+                );
+            }
+            (
+                FanoutIssueContext::JoinCollection,
+                GateIssue::UnknownField {
+                    span,
+                    path,
+                    subject,
+                },
+            ) => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "fan-in body cannot find field `{path}` on collection subject `{subject}`"
+                    ))
+                    .with_code(code("unknown-fanin-field"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "use a field that exists on the mapped collection subject",
                     )),
                 );
             }
@@ -2325,6 +2811,7 @@ enum RecurrenceTargetHint {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum RecurrenceWakeupHint {
     BuiltinSource(SourceRecurrenceWakeupContext),
+    NonSource(NonSourceWakeupCause),
     CustomSource { provider_path: NamePath },
 }
 
@@ -3102,6 +3589,184 @@ fn provider_key_text(path: &NamePath) -> String {
 
 fn type_argument_phrase(count: usize) -> String {
     format!("{count} type argument{}", if count == 1 { "" } else { "s" })
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SourceOptionTypeCheck {
+    Match,
+    Mismatch(SourceOptionTypeMismatch),
+    Unknown,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SourceOptionTypeMismatch {
+    span: SourceSpan,
+    actual: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SourceOptionExpectedType {
+    Any,
+    Primitive(BuiltinType),
+    List(Box<Self>),
+    Signal(Box<Self>),
+    Named(SourceOptionNamedType),
+}
+
+impl SourceOptionExpectedType {
+    fn from_resolved(module: &Module, ty: &ResolvedSourceContractType) -> Option<Self> {
+        match ty {
+            ResolvedSourceContractType::Builtin(
+                builtin @ (BuiltinType::Int
+                | BuiltinType::Float
+                | BuiltinType::Decimal
+                | BuiltinType::BigInt
+                | BuiltinType::Bool
+                | BuiltinType::Text
+                | BuiltinType::Unit
+                | BuiltinType::Bytes),
+            ) => Some(Self::Primitive(*builtin)),
+            ResolvedSourceContractType::Builtin(_) => None,
+            ResolvedSourceContractType::ContractParameter(_) => Some(Self::Any),
+            ResolvedSourceContractType::Item(item) => {
+                Some(Self::Named(SourceOptionNamedType::from_item(module, *item, Vec::new())?))
+            }
+            ResolvedSourceContractType::Apply { callee, arguments } => match callee {
+                ResolvedSourceTypeConstructor::Builtin(BuiltinType::List) => Some(Self::List(
+                    Box::new(Self::from_resolved(module, arguments.first()?)?),
+                )),
+                ResolvedSourceTypeConstructor::Builtin(BuiltinType::Signal) => Some(Self::Signal(
+                    Box::new(Self::from_resolved(module, arguments.first()?)?),
+                )),
+                ResolvedSourceTypeConstructor::Builtin(_) => None,
+                ResolvedSourceTypeConstructor::Item(item) => {
+                    let arguments = arguments
+                        .iter()
+                        .map(|argument| Self::from_resolved(module, argument))
+                        .collect::<Option<Vec<_>>>()?;
+                    Some(Self::Named(SourceOptionNamedType::from_item(
+                        module, *item, arguments,
+                    )?))
+                }
+            },
+        }
+    }
+
+    fn is_any(&self) -> bool {
+        matches!(self, Self::Any)
+    }
+
+    fn is_signal_contract(&self) -> bool {
+        matches!(self, Self::Signal(_))
+    }
+
+    fn matches_named_item(&self, item: ItemId) -> bool {
+        matches!(self, Self::Named(named) if named.item == item)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SourceOptionNamedType {
+    item: ItemId,
+    name: String,
+    kind: SourceOptionNamedKind,
+    arguments: Vec<SourceOptionExpectedType>,
+}
+
+impl SourceOptionNamedType {
+    fn from_item(module: &Module, item: ItemId, arguments: Vec<SourceOptionExpectedType>) -> Option<Self> {
+        let item_ref = &module.items()[item];
+        let kind = match item_ref {
+            Item::Domain(_) => SourceOptionNamedKind::Domain,
+            Item::Type(_) => SourceOptionNamedKind::Type,
+            Item::Value(_)
+            | Item::Function(_)
+            | Item::Signal(_)
+            | Item::Class(_)
+            | Item::Instance(_)
+            | Item::Use(_)
+            | Item::Export(_) => return None,
+        };
+        Some(Self {
+            item,
+            name: item_type_name(item_ref),
+            kind,
+            arguments,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SourceOptionNamedKind {
+    Domain,
+    Type,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SourceOptionConstructorActual {
+    parent_item: ItemId,
+    parent_name: String,
+    constructor_name: String,
+    field_count: usize,
+}
+
+fn source_option_expected_matches_gate_type(
+    expected: &SourceOptionExpectedType,
+    actual: &GateType,
+) -> bool {
+    if !expected.is_signal_contract() {
+        if let GateType::Signal(inner) = actual {
+            return source_option_expected_matches_gate_type_inner(expected, inner);
+        }
+    }
+
+    source_option_expected_matches_gate_type_inner(expected, actual)
+}
+
+fn source_option_expected_matches_gate_type_inner(
+    expected: &SourceOptionExpectedType,
+    actual: &GateType,
+) -> bool {
+    match (expected, actual) {
+        (SourceOptionExpectedType::Any, _) => true,
+        (SourceOptionExpectedType::Primitive(expected), GateType::Primitive(actual)) => {
+            expected == actual
+        }
+        (SourceOptionExpectedType::List(expected), GateType::List(actual)) => {
+            source_option_expected_matches_gate_type(expected, actual)
+        }
+        (SourceOptionExpectedType::Signal(expected), GateType::Signal(actual)) => {
+            source_option_expected_matches_gate_type(expected, actual)
+        }
+        (
+            SourceOptionExpectedType::Named(expected),
+            GateType::Domain {
+                item, arguments, ..
+            },
+        ) if expected.kind == SourceOptionNamedKind::Domain && expected.item == *item => {
+            source_option_expected_args_match(&expected.arguments, arguments)
+        }
+        (
+            SourceOptionExpectedType::Named(expected),
+            GateType::OpaqueItem {
+                item, arguments, ..
+            },
+        ) if expected.kind == SourceOptionNamedKind::Type && expected.item == *item => {
+            source_option_expected_args_match(&expected.arguments, arguments)
+        }
+        _ => false,
+    }
+}
+
+fn source_option_expected_args_match(
+    expected: &[SourceOptionExpectedType],
+    actual: &[GateType],
+) -> bool {
+    expected.len() == actual.len()
+        && expected
+            .iter()
+            .zip(actual)
+            .all(|(expected, actual)| source_option_expected_matches_gate_type(expected, actual))
 }
 
 pub(crate) fn walk_expr_tree(

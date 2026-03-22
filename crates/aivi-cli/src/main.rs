@@ -214,12 +214,14 @@ mod tests {
     }
 
     #[test]
-    fn check_accepts_milestone_two_source_fixture() {
-        let result = check_file(&fixture(
+    fn check_accepts_milestone_two_valid_fixtures() {
+        for path in [
             "milestone-2/valid/source-decorator-signals/main.aivi",
-        ))
-        .expect("check should run");
-        assert_eq!(result, ExitCode::SUCCESS);
+            "milestone-2/valid/pipe-recurrence-nonsource-wakeup/main.aivi",
+        ] {
+            let result = check_file(&fixture(path)).expect("check should run");
+            assert_eq!(result, ExitCode::SUCCESS, "expected {path} to pass");
+        }
     }
 
     #[test]

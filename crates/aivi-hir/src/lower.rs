@@ -14,7 +14,8 @@ use crate::{
     LiteralSuffixResolution, MarkupAttribute, MarkupAttributeValue, MarkupElement, MarkupNode,
     MarkupNodeId, MarkupNodeKind, MatchControl, Module, Name, NamePath, Pattern, PatternId,
     PatternKind, PipeExpr, PipeStage, PipeStageKind, ProjectionBase, RecordExpr, RecordExprField,
-    RecordFieldSurface, RecordPatternField, RegexLiteral, ResolutionState, ShowControl, SignalItem,
+    RecordFieldSurface, RecordPatternField, RecurrenceWakeupDecorator,
+    RecurrenceWakeupDecoratorKind, RegexLiteral, ResolutionState, ShowControl, SignalItem,
     SourceDecorator, SourceMetadata, SuffixedIntegerLiteral, TermReference, TermResolution,
     TextFragment, TextInterpolation, TextLiteral, TextSegment, TypeField, TypeId, TypeItem,
     TypeItemBody, TypeKind, TypeNode, TypeParameter, TypeParameterId, TypeReference,
@@ -572,11 +573,15 @@ impl Lowerer {
         target: ItemKind,
         span: SourceSpan,
     ) -> ItemHeader {
-        let decorators = decorators
+        let lowered_decorators = decorators
             .iter()
             .map(|decorator| self.lower_decorator(decorator, target))
             .collect();
-        ItemHeader { span, decorators }
+        self.validate_recurrence_wakeup_decorator_set(decorators, target);
+        ItemHeader {
+            span,
+            decorators: lowered_decorators,
+        }
     }
 
     fn lower_decorator(&mut self, decorator: &syn::Decorator, target: ItemKind) -> DecoratorId {
@@ -635,6 +640,18 @@ impl Lowerer {
                     DecoratorPayload::Source(source)
                 }
             }
+        } else if let Some(kind) = recurrence_wakeup_decorator_kind(&name) {
+            if !matches!(target, ItemKind::Value | ItemKind::Function | ItemKind::Signal) {
+                self.emit_error(
+                    decorator.span,
+                    format!(
+                        "`@{}` is only valid on `val`, `fun`, or `sig` declarations in Milestone 2",
+                        path_text(&name)
+                    ),
+                    code("invalid-recurrence-wakeup-target"),
+                );
+            }
+            self.lower_recurrence_wakeup_decorator_payload(decorator, kind)
         } else {
             self.emit_error(
                 decorator.span,
@@ -643,30 +660,11 @@ impl Lowerer {
             );
             match &decorator.payload {
                 syn::DecoratorPayload::Bare => DecoratorPayload::Bare,
-                syn::DecoratorPayload::Arguments(arguments) => {
-                    DecoratorPayload::Call(DecoratorCall {
-                        arguments: arguments
-                            .arguments
-                            .iter()
-                            .map(|expr| self.lower_expr(expr))
-                            .collect(),
-                        options: arguments
-                            .options
-                            .as_ref()
-                            .map(|record| self.lower_record_expr_as_expr(record)),
-                    })
+                syn::DecoratorPayload::Arguments(_) | syn::DecoratorPayload::Source(_) => {
+                    DecoratorPayload::Call(self.lower_call_like_decorator_payload(
+                        &decorator.payload,
+                    ))
                 }
-                syn::DecoratorPayload::Source(source) => DecoratorPayload::Call(DecoratorCall {
-                    arguments: source
-                        .arguments
-                        .iter()
-                        .map(|expr| self.lower_expr(expr))
-                        .collect(),
-                    options: source
-                        .options
-                        .as_ref()
-                        .map(|record| self.lower_record_expr_as_expr(record)),
-                }),
             }
         };
 
@@ -675,6 +673,102 @@ impl Lowerer {
             name,
             payload,
         })
+    }
+
+    fn lower_recurrence_wakeup_decorator_payload(
+        &mut self,
+        decorator: &syn::Decorator,
+        kind: RecurrenceWakeupDecoratorKind,
+    ) -> DecoratorPayload {
+        let call = self.lower_call_like_decorator_payload(&decorator.payload);
+        if call.options.is_some() || call.arguments.len() != 1 {
+            self.emit_error(
+                decorator.span,
+                format!(
+                    "`@{}` must carry exactly one positional witness expression and no `with {{ ... }}` options",
+                    decorator.name.as_dotted()
+                ),
+                code("invalid-recurrence-wakeup-decorator"),
+            );
+            return DecoratorPayload::Call(call);
+        }
+        DecoratorPayload::RecurrenceWakeup(RecurrenceWakeupDecorator {
+            kind,
+            witness: call.arguments[0],
+        })
+    }
+
+    fn lower_call_like_decorator_payload(
+        &mut self,
+        payload: &syn::DecoratorPayload,
+    ) -> DecoratorCall {
+        match payload {
+            syn::DecoratorPayload::Bare => DecoratorCall {
+                arguments: Vec::new(),
+                options: None,
+            },
+            syn::DecoratorPayload::Arguments(arguments) => DecoratorCall {
+                arguments: arguments
+                    .arguments
+                    .iter()
+                    .map(|expr| self.lower_expr(expr))
+                    .collect(),
+                options: arguments
+                    .options
+                    .as_ref()
+                    .map(|record| self.lower_record_expr_as_expr(record)),
+            },
+            syn::DecoratorPayload::Source(source) => DecoratorCall {
+                arguments: source
+                    .arguments
+                    .iter()
+                    .map(|expr| self.lower_expr(expr))
+                    .collect(),
+                options: source
+                    .options
+                    .as_ref()
+                    .map(|record| self.lower_record_expr_as_expr(record)),
+            },
+        }
+    }
+
+    fn validate_recurrence_wakeup_decorator_set(
+        &mut self,
+        decorators: &[syn::Decorator],
+        target: ItemKind,
+    ) {
+        let source = decorators
+            .iter()
+            .find(|decorator| decorator.name.as_dotted() == "source");
+        let mut first_recurrence: Option<&syn::Decorator> = None;
+        for decorator in decorators {
+            if !is_recurrence_wakeup_decorator_name(&decorator.name) {
+                continue;
+            }
+            if let Some(first) = first_recurrence {
+                self.emit_error(
+                    decorator.span,
+                    format!(
+                        "`@{}` cannot be combined with `@{}`; current non-source recurrence proofs accept at most one wakeup witness per declaration",
+                        decorator.name.as_dotted(),
+                        first.name.as_dotted()
+                    ),
+                    code("duplicate-recurrence-wakeup-decorator"),
+                );
+            } else {
+                first_recurrence = Some(decorator);
+            }
+            if target == ItemKind::Signal && source.is_some() {
+                self.emit_error(
+                    decorator.span,
+                    format!(
+                        "`@{}` is only valid on non-`@source` recurrence declarations in the current wakeup slice",
+                        decorator.name.as_dotted()
+                    ),
+                    code("invalid-source-recurrence-wakeup"),
+                );
+            }
+        }
     }
 
     fn validate_source_decorator_shape(&mut self, span: SourceSpan, source: &SourceDecorator) {
@@ -2893,6 +2987,7 @@ impl Lowerer {
                     .map(|path| path_text(path).into_boxed_str()),
                 is_reactive: !source_dependencies.is_empty(),
                 signal_dependencies: source_dependencies,
+                custom_recurrence_wakeup: None,
             }
         });
         (signal_dependencies, source_metadata)
@@ -3137,6 +3232,9 @@ impl Lowerer {
                 if let Some(options) = call.options {
                     self.resolve_expr(options, namespaces, &env);
                 }
+            }
+            DecoratorPayload::RecurrenceWakeup(wakeup) => {
+                self.resolve_expr(wakeup.witness, namespaces, &env);
             }
             DecoratorPayload::Source(source) => {
                 for argument in &source.arguments {
@@ -4066,6 +4164,18 @@ fn is_source_decorator(path: &NamePath) -> bool {
     path.segments().len() == 1 && path.segments().first().text() == "source"
 }
 
+fn recurrence_wakeup_decorator_kind(path: &NamePath) -> Option<RecurrenceWakeupDecoratorKind> {
+    match path_text(path).as_str() {
+        "recur.timer" => Some(RecurrenceWakeupDecoratorKind::Timer),
+        "recur.backoff" => Some(RecurrenceWakeupDecoratorKind::Backoff),
+        _ => None,
+    }
+}
+
+fn is_recurrence_wakeup_decorator_name(path: &syn::NamePath) -> bool {
+    matches!(path.as_dotted().as_str(), "recur.timer" | "recur.backoff")
+}
+
 fn path_text(path: &NamePath) -> String {
     path.segments()
         .iter()
@@ -4160,8 +4270,9 @@ mod tests {
     use super::{lower_module, path_text};
     use crate::{
         ApplicativeSpineHead, BuiltinType, ClusterFinalizer, ClusterPresentation, DecoratorPayload,
-        DomainMemberKind, ExprKind, Item, LiteralSuffixResolution, PipeStageKind, ResolutionState,
-        TermResolution, TextSegment, TypeKind, TypeResolution, ValidationMode,
+        DomainMemberKind, ExprKind, Item, LiteralSuffixResolution, PipeStageKind,
+        RecurrenceWakeupDecoratorKind, ResolutionState, TermResolution, TextSegment, TypeKind,
+        TypeResolution, ValidationMode,
     };
 
     fn fixture_root() -> PathBuf {
@@ -4231,6 +4342,7 @@ mod tests {
         for path in [
             "milestone-2/valid/local-top-level-refs/main.aivi",
             "milestone-2/valid/use-member-imports/main.aivi",
+            "milestone-2/valid/custom-source-recurrence-wakeup/main.aivi",
             "milestone-2/valid/source-decorator-signals/main.aivi",
             "milestone-2/valid/applicative-clusters/main.aivi",
             "milestone-2/valid/markup-control-nodes/main.aivi",
@@ -4240,6 +4352,7 @@ mod tests {
             "milestone-2/valid/type-kinds/main.aivi",
             "milestone-2/valid/pipe-branch-and-join/main.aivi",
             "milestone-2/valid/pipe-recurrence-suffix/main.aivi",
+            "milestone-2/valid/pipe-recurrence-nonsource-wakeup/main.aivi",
             "milestone-1/valid/records/record_shorthand_and_elision.aivi",
             "milestone-1/valid/sources/source_declarations.aivi",
             "milestone-1/valid/strings/text_and_regex.aivi",
@@ -4401,9 +4514,38 @@ mod tests {
     }
 
     #[test]
+    fn resolved_validation_rejects_source_option_type_invalid_fixtures() {
+        for path in [
+            "milestone-2/invalid/source-option-type-mismatch/main.aivi",
+            "milestone-2/invalid/source-option-constructor-mismatch/main.aivi",
+            "milestone-2/invalid/source-option-list-element-mismatch/main.aivi",
+        ] {
+            let lowered = lower_fixture(path);
+            assert!(
+                !lowered.has_errors(),
+                "expected {path} to lower cleanly before source option value validation, got diagnostics: {:?}",
+                lowered.diagnostics()
+            );
+            let report = lowered
+                .module()
+                .validate(ValidationMode::RequireResolvedNames);
+            assert!(
+                report
+                    .diagnostics()
+                    .iter()
+                    .any(|diagnostic| diagnostic.code
+                        == Some(super::code("source-option-type-mismatch"))),
+                "expected {path} to report source-option-type-mismatch, got diagnostics: {:?}",
+                report.diagnostics()
+            );
+        }
+    }
+
+    #[test]
     fn resolved_validation_rejects_recurrence_wakeup_invalid_fixtures() {
         for path in [
             "milestone-2/invalid/missing-recurrence-wakeup/main.aivi",
+            "milestone-2/invalid/custom-source-recurrence-missing-wakeup/main.aivi",
             "milestone-2/invalid/request-recurrence-missing-wakeup/main.aivi",
         ] {
             let lowered = lower_fixture(path);
@@ -4463,6 +4605,272 @@ sig retried : Signal Int =
     }
 
     #[test]
+    fn resolved_validation_accepts_reactive_source_option_payloads() {
+        let lowered = lower_text(
+            "reactive_source_option_payloads.aivi",
+            r#"
+domain Duration over Int
+    literal s : Int -> Duration
+
+sig enabled : Signal Bool =
+    True
+
+sig jitterValue : Signal Duration =
+    5s
+
+@source timer.every 120 with {
+    immediate: enabled,
+    activeWhen: enabled,
+    jitter: jitterValue
+}
+sig tick : Signal Unit
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "reactive source option payloads should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+        let report = lowered
+            .module()
+            .validate(ValidationMode::RequireResolvedNames);
+        assert!(
+            report.is_ok(),
+            "reactive source option payloads should validate cleanly, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn resolved_validation_accepts_custom_recurrence_with_reactive_inputs() {
+        let lowered = lower_fixture("milestone-2/valid/custom-source-recurrence-wakeup/main.aivi");
+        assert!(
+            !lowered.has_errors(),
+            "custom source recurrence fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+        let report = lowered
+            .module()
+            .validate(ValidationMode::RequireResolvedNames);
+        assert!(
+            report.is_ok(),
+            "custom source recurrence with reactive inputs should validate cleanly, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+
+        let updates = find_signal(lowered.module(), "updates");
+        let metadata = updates
+            .source_metadata
+            .as_ref()
+            .expect("custom source recurrence should still carry source metadata");
+        assert_eq!(metadata.provider_key.as_deref(), Some("custom.feed"));
+        assert!(
+            metadata.is_reactive,
+            "reactive custom source arguments should mark the source metadata as reactive"
+        );
+        assert_eq!(
+            metadata.custom_recurrence_wakeup,
+            None,
+            "surface lowering should not invent custom wakeup metadata"
+        );
+        assert_eq!(
+            signal_dependency_names(lowered.module(), updates),
+            vec!["refresh".to_owned()],
+            "custom source metadata should still track provider-independent reactive dependencies"
+        );
+    }
+
+    #[test]
+    fn manual_custom_source_wakeup_metadata_allows_nonreactive_recurrence() {
+        let lowered = lower_text(
+            "custom_source_declared_wakeup.aivi",
+            r#"
+fun step #value =>
+    value
+
+@source custom.feed 0
+sig retried : Signal Int =
+    0
+     @|> step
+     <|@ step
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "manual custom source wakeup test should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+        let initial_report = lowered
+            .module()
+            .validate(ValidationMode::RequireResolvedNames);
+        assert!(
+            initial_report
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code == Some(super::code("missing-recurrence-wakeup"))),
+            "non-reactive custom sources should still fail without explicit wakeup metadata, got diagnostics: {:?}",
+            initial_report.diagnostics()
+        );
+
+        let mut module = lowered.module().clone();
+        let signal_id = module
+            .root_items()
+            .iter()
+            .copied()
+            .find(|item_id| {
+                matches!(
+                    &module.items()[*item_id],
+                    Item::Signal(item) if item.name.text() == "retried"
+                )
+            })
+            .expect("expected to find `retried` signal item");
+        let Some(Item::Signal(signal)) = module.arenas.items.get_mut(signal_id) else {
+            panic!("expected `retried` item to stay a signal");
+        };
+        let metadata = signal
+            .source_metadata
+            .as_mut()
+            .expect("custom source recurrence should carry source metadata");
+        assert!(
+            !metadata.is_reactive,
+            "non-reactive custom source should start without provider-independent wakeup proof"
+        );
+        metadata.custom_recurrence_wakeup =
+            Some(crate::CustomSourceRecurrenceWakeup::ProviderDefinedTrigger);
+
+        let report = module.validate(ValidationMode::RequireResolvedNames);
+        assert!(
+            report.is_ok(),
+            "explicit custom source wakeup metadata should unblock recurrence validation, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn resolved_validation_accepts_nonsource_recurrence_wakeup_fixture() {
+        let lowered = lower_fixture("milestone-2/valid/pipe-recurrence-nonsource-wakeup/main.aivi");
+        assert!(
+            !lowered.has_errors(),
+            "non-source recurrence wakeup fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+        let report = lowered
+            .module()
+            .validate(ValidationMode::RequireResolvedNames);
+        assert!(
+            report.is_ok(),
+            "non-source recurrence wakeup fixture should validate cleanly, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn lowers_recurrence_wakeup_decorators_into_typed_payloads() {
+        let lowered = lower_fixture("milestone-2/valid/pipe-recurrence-nonsource-wakeup/main.aivi");
+        assert!(
+            !lowered.has_errors(),
+            "non-source recurrence wakeup fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let polled = find_signal(lowered.module(), "polled");
+        let polled_decorator = &lowered.module().decorators()[polled.header.decorators[0]];
+        match &polled_decorator.payload {
+            DecoratorPayload::RecurrenceWakeup(wakeup) => {
+                assert_eq!(wakeup.kind, RecurrenceWakeupDecoratorKind::Timer);
+                assert!(matches!(
+                    lowered.module().exprs()[wakeup.witness].kind,
+                    ExprKind::Integer(_) | ExprKind::SuffixedInteger(_)
+                ));
+            }
+            other => panic!(
+                "expected `polled` to carry a typed recurrence wakeup decorator, found {other:?}"
+            ),
+        }
+
+        let Item::Value(retried) = find_named_item(lowered.module(), "retried") else {
+            panic!("expected `retried` to be a value item");
+        };
+        let retried_decorator = &lowered.module().decorators()[retried.header.decorators[0]];
+        match &retried_decorator.payload {
+            DecoratorPayload::RecurrenceWakeup(wakeup) => {
+                assert_eq!(wakeup.kind, RecurrenceWakeupDecoratorKind::Backoff);
+                assert!(matches!(
+                    lowered.module().exprs()[wakeup.witness].kind,
+                    ExprKind::Integer(_) | ExprKind::SuffixedInteger(_)
+                ));
+            }
+            other => panic!(
+                "expected `retried` to carry a typed recurrence wakeup decorator, found {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn recurrence_wakeup_decorators_reject_invalid_shapes_and_source_mix() {
+        let lowered = lower_text(
+            "invalid_recurrence_wakeup_decorators.aivi",
+            r#"
+domain Duration over Int
+    literal s : Int -> Duration
+
+domain Retry over Int
+    literal x : Int -> Retry
+
+fun step #value =>
+    value
+
+@recur.timer
+sig bare : Signal Int =
+    0
+     @|> step
+     <|@ step
+
+@source http.get "/users"
+@recur.backoff 3x
+sig mixed : Signal Int =
+    0
+     @|> step
+     <|@ step
+
+@recur.timer 5s
+@recur.backoff 3x
+val duplicate : Task Int =
+    0
+     @|> step
+     <|@ step
+"#,
+        );
+        assert!(
+            lowered
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code
+                    == Some(super::code("invalid-recurrence-wakeup-decorator"))),
+            "expected invalid recurrence wakeup shape diagnostic, got {:?}",
+            lowered.diagnostics()
+        );
+        assert!(
+            lowered
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code
+                    == Some(super::code("invalid-source-recurrence-wakeup"))),
+            "expected source/non-source recurrence wakeup conflict diagnostic, got {:?}",
+            lowered.diagnostics()
+        );
+        assert!(
+            lowered
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code
+                    == Some(super::code("duplicate-recurrence-wakeup-decorator"))),
+            "expected duplicate recurrence wakeup decorator diagnostic, got {:?}",
+            lowered.diagnostics()
+        );
+    }
+
+    #[test]
     fn preserves_bodyless_source_signals_and_provider_paths() {
         let lowered = lower_fixture("milestone-2/valid/source-decorator-signals/main.aivi");
         assert!(
@@ -4484,6 +4892,11 @@ sig retried : Signal Int =
             metadata.provider_key.as_deref(),
             Some("http.get"),
             "source metadata should preserve the provider key"
+        );
+        assert_eq!(
+            metadata.custom_recurrence_wakeup,
+            None,
+            "lowering should leave custom-provider wakeup hooks empty until provider metadata exists"
         );
         assert!(
             metadata.is_reactive,
@@ -4520,6 +4933,11 @@ sig retried : Signal Int =
             .as_ref()
             .expect("timer source should still carry source metadata");
         assert_eq!(metadata.provider_key.as_deref(), Some("timer.every"));
+        assert_eq!(
+            metadata.custom_recurrence_wakeup,
+            None,
+            "built-in source metadata should not use the custom-provider wakeup hook"
+        );
         assert!(
             !metadata.is_reactive,
             "non-reactive source arguments should stay non-reactive"
