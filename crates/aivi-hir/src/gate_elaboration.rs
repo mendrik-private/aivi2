@@ -492,7 +492,7 @@ fn elaborate_gate_stage(
     }
 }
 
-fn lower_gate_pipe_body_runtime_expr(
+pub(crate) fn lower_gate_pipe_body_runtime_expr(
     module: &Module,
     expr_id: ExprId,
     env: &GateExprEnv,
@@ -500,7 +500,15 @@ fn lower_gate_pipe_body_runtime_expr(
     typing: &mut GateTypeContext<'_>,
 ) -> Result<GateRuntimeExpr, GateElaborationBlocker> {
     let ambient = subject.gate_payload().clone();
-    let mut lowered = lower_gate_runtime_expr(module, expr_id, env, Some(&ambient), typing)?;
+    let mut lowered = match lower_gate_runtime_expr(module, expr_id, env, Some(&ambient), typing) {
+        Ok(lowered) => lowered,
+        Err(GateElaborationBlocker::UnknownRuntimeExprType { .. }) => {
+            lower_single_parameter_function_pipe_body_runtime_expr(
+                module, expr_id, &ambient, typing,
+            )?
+        }
+        Err(other) => return Err(other),
+    };
     let GateType::Arrow { parameter, result } = lowered.ty.clone() else {
         return Ok(lowered);
     };
@@ -519,7 +527,63 @@ fn lower_gate_pipe_body_runtime_expr(
     Ok(lowered)
 }
 
-fn lower_gate_runtime_expr(
+fn lower_single_parameter_function_pipe_body_runtime_expr(
+    module: &Module,
+    expr_id: ExprId,
+    ambient: &GateType,
+    typing: &mut GateTypeContext<'_>,
+) -> Result<GateRuntimeExpr, GateElaborationBlocker> {
+    let expr = module.exprs()[expr_id].clone();
+    let ExprKind::Name(reference) = expr.kind else {
+        return Err(GateElaborationBlocker::UnknownRuntimeExprType { span: expr.span });
+    };
+    let crate::ResolutionState::Resolved(TermResolution::Item(item_id)) =
+        reference.resolution.as_ref()
+    else {
+        return Err(GateElaborationBlocker::UnknownRuntimeExprType { span: expr.span });
+    };
+    let Item::Function(function) = &module.items()[*item_id] else {
+        return Err(GateElaborationBlocker::UnknownRuntimeExprType { span: expr.span });
+    };
+    if function.parameters.len() != 1 {
+        return Err(GateElaborationBlocker::UnknownRuntimeExprType { span: expr.span });
+    }
+    let parameter = function
+        .parameters
+        .first()
+        .expect("checked single-parameter function above");
+    if let Some(annotation) = parameter.annotation {
+        let parameter_ty = typing
+            .lower_annotation(annotation)
+            .ok_or(GateElaborationBlocker::UnknownRuntimeExprType { span: expr.span })?;
+        if !parameter_ty.same_shape(ambient) {
+            return Err(GateElaborationBlocker::UnknownRuntimeExprType { span: expr.span });
+        }
+    }
+
+    let mut function_env = GateExprEnv::default();
+    function_env
+        .locals
+        .insert(parameter.binding, ambient.clone());
+    let body =
+        lower_gate_runtime_expr(module, function.body, &function_env, Some(ambient), typing)?;
+    let callee = GateRuntimeExpr {
+        span: expr.span,
+        ty: GateType::Arrow {
+            parameter: Box::new(ambient.clone()),
+            result: Box::new(body.ty.clone()),
+        },
+        kind: GateRuntimeExprKind::Reference(GateRuntimeReference::Item(*item_id)),
+    };
+    Ok(GateRuntimeExpr::apply(
+        expr.span,
+        body.ty.clone(),
+        callee,
+        vec![GateRuntimeExpr::ambient_subject(expr.span, ambient.clone())],
+    ))
+}
+
+pub(crate) fn lower_gate_runtime_expr(
     module: &Module,
     expr_id: ExprId,
     env: &GateExprEnv,

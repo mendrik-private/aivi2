@@ -4,8 +4,8 @@ use crate::cst::{
     MarkupAttribute, MarkupAttributeValue, MarkupNode, Module, NamedItem, Pattern, PatternKind,
     PipeExpr, PipeStage, PipeStageKind, ProjectionPath, QualifiedName, RecordExpr, RecordField,
     RecordPatternField, SourceDecorator, SourceProviderContractItem, SourceProviderContractMember,
-    SuffixedIntegerLiteral, TextLiteral, TextSegment, TypeDeclBody, TypeExpr, TypeExprKind,
-    TypeField, TypeVariant, UnaryOperator, UseItem,
+    SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextLiteral, TextSegment,
+    TypeDeclBody, TypeExpr, TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseItem,
 };
 
 const INDENT_WIDTH: usize = 4;
@@ -288,7 +288,7 @@ impl Formatter {
 
         let mut lines = vec![header];
         for member in &body.members {
-            lines.push(self.format_source_provider_contract_member(member));
+            lines.extend(self.format_source_provider_contract_member(member));
         }
         lines
     }
@@ -296,13 +296,48 @@ impl Formatter {
     fn format_source_provider_contract_member(
         &self,
         member: &SourceProviderContractMember,
-    ) -> String {
-        let mut line = format!("{}{}:", spaces(INDENT_WIDTH), self.item_name(&member.name));
-        if let Some(value) = &member.value {
-            line.push(' ');
-            line.push_str(&value.text);
+    ) -> Vec<String> {
+        match member {
+            SourceProviderContractMember::FieldValue(member) => {
+                let mut line = format!("{}{}:", spaces(INDENT_WIDTH), self.item_name(&member.name));
+                if let Some(value) = &member.value {
+                    line.push(' ');
+                    line.push_str(&value.text);
+                }
+                vec![line]
+            }
+            SourceProviderContractMember::OptionSchema(member) => {
+                self.format_source_provider_contract_schema_member("option", member)
+            }
+            SourceProviderContractMember::ArgumentSchema(member) => {
+                self.format_source_provider_contract_schema_member("argument", member)
+            }
         }
-        line
+    }
+
+    fn format_source_provider_contract_schema_member(
+        &self,
+        keyword: &str,
+        member: &SourceProviderContractSchemaMember,
+    ) -> Vec<String> {
+        let prefix = format!(
+            "{}{keyword} {}: ",
+            spaces(INDENT_WIDTH),
+            self.item_name(&member.name)
+        );
+        let Some(annotation) = &member.annotation else {
+            return vec![prefix.trim_end().to_owned()];
+        };
+        let force_break = self.should_force_type_break(display_width(&prefix), annotation);
+        let block = self.format_type_block(annotation, force_break);
+        if block.is_inline() {
+            vec![format!(
+                "{prefix}{}",
+                block.inline_text().expect("inline block")
+            )]
+        } else {
+            block.prefixed(&prefix).into_lines()
+        }
     }
 
     fn format_class_member(&self, member: &ClassMember) -> Vec<String> {
@@ -1478,9 +1513,12 @@ mod tests {
             formatted,
             concat!(
                 "provider custom.feed\n",
+                "    argument path: Text\n",
+                "    option timeout: Duration\n",
                 "    wakeup: providerTrigger\n",
                 "\n",
                 "provider custom.timer\n",
+                "    option activeWhen: Signal Bool\n",
                 "    wakeup: timer\n",
             )
         );

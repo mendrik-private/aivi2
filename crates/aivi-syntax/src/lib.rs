@@ -14,10 +14,10 @@ pub use cst::{
     ItemKind, MarkupAttribute, MarkupAttributeValue, MarkupNode, Module, NamedItem, NamedItemBody,
     OperatorName, Pattern, PatternKind, PipeCaseArm, PipeExpr, PipeStage, PipeStageKind,
     ProjectionPath, QualifiedName, RecordExpr, RecordField, RecordPatternField, RegexLiteral,
-    SourceDecorator, SourceProviderContractBody, SourceProviderContractItem,
-    SourceProviderContractMember, SuffixedIntegerLiteral, TextFragment, TextInterpolation,
-    TextLiteral, TextSegment, TokenRange, TypeDeclBody, TypeExpr, TypeExprKind, TypeField,
-    TypeVariant, UnaryOperator, UseItem,
+    SourceDecorator, SourceProviderContractBody, SourceProviderContractFieldValue,
+    SourceProviderContractItem, SourceProviderContractMember, SourceProviderContractSchemaMember,
+    SuffixedIntegerLiteral, TextFragment, TextInterpolation, TextLiteral, TextSegment, TokenRange,
+    TypeDeclBody, TypeExpr, TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseItem,
 };
 pub use format::Formatter;
 pub use lex::{LexedModule, Token, TokenKind, lex_module};

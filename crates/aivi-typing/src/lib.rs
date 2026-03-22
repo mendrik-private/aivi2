@@ -35,7 +35,8 @@ pub use recurrence::{
     SourceRecurrenceWakeupContext, builtin_source_option_wakeup_cause,
 };
 pub use source_contracts::{
-    BuiltinSourceProvider, SourceContract, SourceContractIntrinsicWakeup, SourceContractType,
-    SourceNominalType, SourceOptionContract, SourceOptionWakeupCause, SourceOptionWakeupContract,
-    SourceRecurrenceContract, SourceTypeAtom, SourceTypeParameter,
+    BuiltinSourceProvider, SourceCancellationPolicy, SourceContract,
+    SourceContractIntrinsicWakeup, SourceContractType, SourceLifecycleContract,
+    SourceNominalType, SourceOptionContract, SourceOptionWakeupCause,
+    SourceOptionWakeupContract, SourceRecurrenceContract, SourceTypeAtom, SourceTypeParameter,
 };

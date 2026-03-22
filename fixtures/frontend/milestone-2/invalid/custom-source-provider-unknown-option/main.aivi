@@ -1,17 +1,11 @@
-type Mode =
-  | Stream
-
 domain Duration over Int
     literal ms : Int -> Duration
 
 provider custom.feed
-    argument path: Text
     option timeout: Duration
-    option mode: Mode
     wakeup: providerTrigger
 
-@source custom.feed "/tmp/demo.txt" with {
-    timeout: 5ms,
-    mode: Stream
+@source custom.feed with {
+    retry: 5ms
 }
 sig updates : Signal Int

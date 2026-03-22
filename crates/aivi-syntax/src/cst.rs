@@ -550,12 +550,28 @@ pub struct DomainItem {
     pub body: Option<DomainBody>,
 }
 
-/// One `provider` contract member such as `wakeup: providerTrigger`.
+/// One untyped `provider` contract field such as `wakeup: providerTrigger`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SourceProviderContractMember {
+pub struct SourceProviderContractFieldValue {
     pub span: SourceSpan,
     pub name: Option<Identifier>,
     pub value: Option<Identifier>,
+}
+
+/// One typed custom-provider contract schema member such as `option timeout: Duration`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceProviderContractSchemaMember {
+    pub span: SourceSpan,
+    pub name: Option<Identifier>,
+    pub annotation: Option<TypeExpr>,
+}
+
+/// One `provider` contract member.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SourceProviderContractMember {
+    FieldValue(SourceProviderContractFieldValue),
+    OptionSchema(SourceProviderContractSchemaMember),
+    ArgumentSchema(SourceProviderContractSchemaMember),
 }
 
 /// Body of a `provider` contract declaration.

@@ -64,18 +64,44 @@ impl BuiltinSourceProvider {
 
     pub const fn contract(self) -> SourceContract {
         match self {
-            Self::HttpGet => SourceContract::new(self, &HTTP_OPTIONS, HTTP_RECURRENCE),
-            Self::HttpPost => SourceContract::new(self, &HTTP_OPTIONS, HTTP_RECURRENCE),
-            Self::TimerEvery => SourceContract::new(self, &TIMER_OPTIONS, TIMER_RECURRENCE),
-            Self::TimerAfter => SourceContract::new(self, &TIMER_OPTIONS, TIMER_RECURRENCE),
-            Self::FsWatch => SourceContract::new(self, &FS_WATCH_OPTIONS, FS_WATCH_RECURRENCE),
-            Self::FsRead => SourceContract::new(self, &FS_READ_OPTIONS, FS_READ_RECURRENCE),
-            Self::SocketConnect => SourceContract::new(self, &SOCKET_OPTIONS, SOCKET_RECURRENCE),
-            Self::MailboxSubscribe => {
-                SourceContract::new(self, &SOCKET_OPTIONS, MAILBOX_RECURRENCE)
+            Self::HttpGet => {
+                SourceContract::new(self, &HTTP_OPTIONS, HTTP_RECURRENCE, HTTP_LIFECYCLE)
             }
-            Self::ProcessSpawn => SourceContract::new(self, &PROCESS_OPTIONS, PROCESS_RECURRENCE),
-            Self::WindowKeyDown => SourceContract::new(self, &WINDOW_OPTIONS, WINDOW_RECURRENCE),
+            Self::HttpPost => {
+                SourceContract::new(self, &HTTP_OPTIONS, HTTP_RECURRENCE, HTTP_LIFECYCLE)
+            }
+            Self::TimerEvery => {
+                SourceContract::new(self, &TIMER_OPTIONS, TIMER_RECURRENCE, TIMER_LIFECYCLE)
+            }
+            Self::TimerAfter => {
+                SourceContract::new(self, &TIMER_OPTIONS, TIMER_RECURRENCE, TIMER_LIFECYCLE)
+            }
+            Self::FsWatch => {
+                SourceContract::new(self, &FS_WATCH_OPTIONS, FS_WATCH_RECURRENCE, STREAM_LIFECYCLE)
+            }
+            Self::FsRead => {
+                SourceContract::new(self, &FS_READ_OPTIONS, FS_READ_RECURRENCE, HTTP_LIFECYCLE)
+            }
+            Self::SocketConnect => {
+                SourceContract::new(self, &SOCKET_OPTIONS, SOCKET_RECURRENCE, STREAM_LIFECYCLE)
+            }
+            Self::MailboxSubscribe => {
+                SourceContract::new(
+                    self,
+                    &SOCKET_OPTIONS,
+                    MAILBOX_RECURRENCE,
+                    STREAM_LIFECYCLE,
+                )
+            }
+            Self::ProcessSpawn => SourceContract::new(
+                self,
+                &PROCESS_OPTIONS,
+                PROCESS_RECURRENCE,
+                STREAM_LIFECYCLE,
+            ),
+            Self::WindowKeyDown => {
+                SourceContract::new(self, &WINDOW_OPTIONS, WINDOW_RECURRENCE, STREAM_LIFECYCLE)
+            }
         }
     }
 }
@@ -86,6 +112,7 @@ pub struct SourceContract {
     provider: BuiltinSourceProvider,
     options: &'static [SourceOptionContract],
     recurrence: SourceRecurrenceContract,
+    lifecycle: SourceLifecycleContract,
 }
 
 impl SourceContract {
@@ -93,11 +120,13 @@ impl SourceContract {
         provider: BuiltinSourceProvider,
         options: &'static [SourceOptionContract],
         recurrence: SourceRecurrenceContract,
+        lifecycle: SourceLifecycleContract,
     ) -> Self {
         Self {
             provider,
             options,
             recurrence,
+            lifecycle,
         }
     }
 
@@ -115,6 +144,10 @@ impl SourceContract {
 
     pub const fn recurrence(self) -> SourceRecurrenceContract {
         self.recurrence
+    }
+
+    pub const fn lifecycle(self) -> SourceLifecycleContract {
+        self.lifecycle
     }
 
     pub const fn intrinsic_wakeup(self) -> Option<SourceContractIntrinsicWakeup> {
@@ -178,6 +211,34 @@ impl SourceRecurrenceContract {
             .iter()
             .find(|option| option.name() == name)
     }
+}
+
+/// Built-in source lifecycle metadata needed before a real runtime exists.
+///
+/// This deliberately stays narrow: the runtime will always need stale-publication suppression when
+/// a source instance is replaced or disposed, but only some providers require an extra best-effort
+/// in-flight cancellation request on top of that generic generation guard.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct SourceLifecycleContract {
+    cancellation: SourceCancellationPolicy,
+}
+
+impl SourceLifecycleContract {
+    pub const fn new(cancellation: SourceCancellationPolicy) -> Self {
+        Self { cancellation }
+    }
+
+    pub const fn cancellation(self) -> SourceCancellationPolicy {
+        self.cancellation
+    }
+}
+
+/// Whether a built-in source should request explicit cancellation of in-flight work when it is
+/// replaced, suspended, or disposed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum SourceCancellationPolicy {
+    ProviderManaged,
+    CancelInFlight,
 }
 
 /// Intrinsic recurrent wakeup that the provider guarantees without extra option slots.
@@ -555,6 +616,12 @@ const WINDOW_RECURRENCE: SourceRecurrenceContract = SourceRecurrenceContract::ne
     Some(SourceContractIntrinsicWakeup::ProviderDefinedTrigger),
     &[],
 );
+const HTTP_LIFECYCLE: SourceLifecycleContract =
+    SourceLifecycleContract::new(SourceCancellationPolicy::CancelInFlight);
+const TIMER_LIFECYCLE: SourceLifecycleContract =
+    SourceLifecycleContract::new(SourceCancellationPolicy::ProviderManaged);
+const STREAM_LIFECYCLE: SourceLifecycleContract =
+    SourceLifecycleContract::new(SourceCancellationPolicy::ProviderManaged);
 
 fn scalar_kind_expr(name: &str, store: &mut KindStore) -> KindExprId {
     let constructor = store.add_constructor(name.to_owned(), Kind::Type);
@@ -692,6 +759,31 @@ mod tests {
                 .wakeup_option("restartOn")
                 .map(|option| option.cause()),
             Some(SourceOptionWakeupCause::TriggerSignal)
+        );
+    }
+
+    #[test]
+    fn exposes_builtin_source_lifecycle_contract_metadata() {
+        let http = BuiltinSourceProvider::HttpGet.contract();
+        let fs_read = BuiltinSourceProvider::FsRead.contract();
+        let timer = BuiltinSourceProvider::TimerEvery.contract();
+        let socket = BuiltinSourceProvider::SocketConnect.contract();
+
+        assert_eq!(
+            http.lifecycle().cancellation(),
+            SourceCancellationPolicy::CancelInFlight
+        );
+        assert_eq!(
+            fs_read.lifecycle().cancellation(),
+            SourceCancellationPolicy::CancelInFlight
+        );
+        assert_eq!(
+            timer.lifecycle().cancellation(),
+            SourceCancellationPolicy::ProviderManaged
+        );
+        assert_eq!(
+            socket.lifecycle().cancellation(),
+            SourceCancellationPolicy::ProviderManaged
         );
     }
 

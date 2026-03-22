@@ -62,7 +62,7 @@ pub fn lower_module(module: &syn::Module) -> LoweringResult {
     let namespaces = lowerer.build_namespaces();
     lowerer.resolve_module(&namespaces);
     lowerer.validate_cluster_normalization();
-    lowerer.populate_signal_metadata();
+    lowerer.populate_signal_metadata(&namespaces);
     LoweringResult::new(lowerer.module, lowerer.diagnostics)
 }
 
@@ -550,43 +550,117 @@ impl Lowerer {
     ) -> crate::CustomSourceContractMetadata {
         let mut contract = crate::CustomSourceContractMetadata::default();
         let mut wakeup_span = None;
+        let mut argument_spans = HashMap::new();
+        let mut option_spans = HashMap::new();
         let Some(body) = body else {
             return contract;
         };
 
         for member in &body.members {
-            let Some(name) = member.name.as_ref() else {
-                continue;
-            };
-            match name.text.as_str() {
-                "wakeup" => {
-                    if let Some(previous_span) = wakeup_span {
+            match member {
+                syn::SourceProviderContractMember::FieldValue(member) => {
+                    let Some(name) = member.name.as_ref() else {
+                        continue;
+                    };
+                    match name.text.as_str() {
+                        "wakeup" => {
+                            if let Some(previous_span) = wakeup_span {
+                                self.diagnostics.push(
+                                    Diagnostic::error(
+                                        "provider contract field `wakeup` is duplicated",
+                                    )
+                                    .with_code(code("duplicate-source-provider-contract-field"))
+                                    .with_primary_label(
+                                        member.span,
+                                        "this `wakeup` field repeats an earlier contract field",
+                                    )
+                                    .with_secondary_label(
+                                        previous_span,
+                                        "previous `wakeup` field declared here",
+                                    ),
+                                );
+                                continue;
+                            }
+                            wakeup_span = Some(member.span);
+                            let Some(value) = member.value.as_ref() else {
+                                continue;
+                            };
+                            contract.recurrence_wakeup =
+                                self.lower_custom_source_contract_wakeup(value);
+                        }
+                        _ => {
+                            self.emit_error(
+                                name.span,
+                                format!("unknown provider contract field `{}`", name.text),
+                                code("unknown-source-provider-contract-field"),
+                            );
+                        }
+                    }
+                }
+                syn::SourceProviderContractMember::ArgumentSchema(member) => {
+                    let Some(name) = member.name.as_ref() else {
+                        continue;
+                    };
+                    if let Some(previous_span) =
+                        argument_spans.insert(name.text.clone(), member.span)
+                    {
                         self.diagnostics.push(
-                            Diagnostic::error("provider contract field `wakeup` is duplicated")
-                                .with_code(code("duplicate-source-provider-contract-field"))
-                                .with_primary_label(
-                                    member.span,
-                                    "this `wakeup` field repeats an earlier contract field",
-                                )
-                                .with_secondary_label(
-                                    previous_span,
-                                    "previous `wakeup` field declared here",
-                                ),
+                            Diagnostic::error(format!(
+                                "provider contract argument `{}` is duplicated",
+                                name.text
+                            ))
+                            .with_code(code("duplicate-source-provider-contract-field"))
+                            .with_primary_label(
+                                member.span,
+                                "this argument schema repeats an earlier declaration",
+                            )
+                            .with_secondary_label(
+                                previous_span,
+                                "previous argument schema declared here",
+                            ),
                         );
                         continue;
                     }
-                    wakeup_span = Some(member.span);
-                    let Some(value) = member.value.as_ref() else {
+                    let Some(annotation) = member.annotation.as_ref() else {
                         continue;
                     };
-                    contract.recurrence_wakeup = self.lower_custom_source_contract_wakeup(value);
+                    contract.arguments.push(crate::CustomSourceArgumentSchema {
+                        span: member.span,
+                        name: self.make_name(&name.text, name.span),
+                        annotation: self.lower_type_expr(annotation),
+                    });
                 }
-                _ => {
-                    self.emit_error(
-                        name.span,
-                        format!("unknown provider contract field `{}`", name.text),
-                        code("unknown-source-provider-contract-field"),
-                    );
+                syn::SourceProviderContractMember::OptionSchema(member) => {
+                    let Some(name) = member.name.as_ref() else {
+                        continue;
+                    };
+                    if let Some(previous_span) = option_spans.insert(name.text.clone(), member.span)
+                    {
+                        self.diagnostics.push(
+                            Diagnostic::error(format!(
+                                "provider contract option `{}` is duplicated",
+                                name.text
+                            ))
+                            .with_code(code("duplicate-source-provider-contract-field"))
+                            .with_primary_label(
+                                member.span,
+                                "this option schema repeats an earlier declaration",
+                            )
+                            .with_secondary_label(
+                                previous_span,
+                                "previous option schema declared here",
+                            ),
+                        );
+                        continue;
+                    }
+                    let Some(annotation) = member.annotation.as_ref() else {
+                        continue;
+                    };
+                    contract.options.push(crate::CustomSourceOptionSchema {
+                        span: member.span,
+                        name: self.make_name(&name.text, name.span),
+                        annotation: self.lower_type_expr(annotation),
+                    });
                 }
             }
         }
@@ -3052,7 +3126,17 @@ impl Lowerer {
                 }
                 Item::Domain(item)
             }
-            Item::SourceProviderContract(item) => Item::SourceProviderContract(item),
+            Item::SourceProviderContract(item) => {
+                let env = ResolveEnv::default();
+                let item = item;
+                for argument in &item.contract.arguments {
+                    self.resolve_type(argument.annotation, namespaces, &env);
+                }
+                for option in &item.contract.options {
+                    self.resolve_type(option.annotation, namespaces, &env);
+                }
+                Item::SourceProviderContract(item)
+            }
             Item::Use(item) => Item::Use(item),
             Item::Export(mut item) => {
                 item.resolution = self.resolve_export_target(&item.target, namespaces);
@@ -3068,7 +3152,7 @@ impl Lowerer {
             .expect("resolved item id should still exist") = resolved;
     }
 
-    fn populate_signal_metadata(&mut self) {
+    fn populate_signal_metadata(&mut self, namespaces: &Namespaces) {
         let item_ids = self
             .module
             .items()
@@ -3077,7 +3161,7 @@ impl Lowerer {
             .collect::<Vec<_>>();
         for item_id in item_ids {
             let (signal_dependencies, source_metadata) = match &self.module.items()[item_id] {
-                Item::Signal(item) => self.compute_signal_metadata(item),
+                Item::Signal(item) => self.compute_signal_metadata(item, namespaces),
                 _ => continue,
             };
             let Some(Item::Signal(item)) = self.module.arenas.items.get_mut(item_id) else {
@@ -3088,7 +3172,11 @@ impl Lowerer {
         }
     }
 
-    fn compute_signal_metadata(&self, item: &SignalItem) -> (Vec<ItemId>, Option<SourceMetadata>) {
+    fn compute_signal_metadata(
+        &self,
+        item: &SignalItem,
+        namespaces: &Namespaces,
+    ) -> (Vec<ItemId>, Option<SourceMetadata>) {
         let source = item.header.decorators.iter().find_map(|decorator_id| {
             let decorator = &self.module.decorators()[*decorator_id];
             match &decorator.payload {
@@ -3121,14 +3209,31 @@ impl Lowerer {
         let signal_dependencies = self.collect_signal_dependencies(work);
         let source_metadata = source.map(|source| {
             let source_dependencies = source_dependencies.unwrap_or_default();
+            let provider = SourceProviderRef::from_path(source.provider.as_ref());
             SourceMetadata {
-                provider: SourceProviderRef::from_path(source.provider.as_ref()),
+                custom_contract: self.resolve_custom_source_contract(&provider, namespaces),
+                provider,
                 is_reactive: !source_dependencies.is_empty(),
                 signal_dependencies: source_dependencies,
-                custom_contract: None,
             }
         });
         (signal_dependencies, source_metadata)
+    }
+
+    fn resolve_custom_source_contract(
+        &self,
+        provider: &SourceProviderRef,
+        namespaces: &Namespaces,
+    ) -> Option<crate::CustomSourceContractMetadata> {
+        let key = provider.custom_key()?;
+        let item_id = match lookup_item(&namespaces.provider_contracts, key) {
+            LookupResult::Unique(item_id) => item_id,
+            LookupResult::Ambiguous | LookupResult::Missing => return None,
+        };
+        let Item::SourceProviderContract(item) = &self.module.items()[item_id] else {
+            unreachable!("provider contract namespace should only contain provider contract items");
+        };
+        Some(item.contract.clone())
     }
 
     fn collect_signal_dependencies(&self, mut work: Vec<DependencyWork>) -> Vec<ItemId> {
@@ -4489,6 +4594,7 @@ mod tests {
             "milestone-2/valid/local-top-level-refs/main.aivi",
             "milestone-2/valid/use-member-imports/main.aivi",
             "milestone-2/valid/source-provider-contract-declarations/main.aivi",
+            "milestone-2/valid/custom-source-provider-wakeup/main.aivi",
             "milestone-2/valid/custom-source-recurrence-wakeup/main.aivi",
             "milestone-2/valid/source-decorator-signals/main.aivi",
             "milestone-2/valid/source-option-contract-parameters/main.aivi",
@@ -4674,6 +4780,7 @@ mod tests {
             "milestone-2/invalid/source-option-constructor-mismatch/main.aivi",
             "milestone-2/invalid/source-option-constructor-application-mismatch/main.aivi",
             "milestone-2/invalid/source-option-list-element-mismatch/main.aivi",
+            "milestone-2/invalid/custom-source-provider-option-type-mismatch/main.aivi",
         ] {
             let lowered = lower_fixture(path);
             assert!(
@@ -4688,6 +4795,46 @@ mod tests {
                 report.diagnostics().iter().any(|diagnostic| diagnostic.code
                     == Some(super::code("source-option-type-mismatch"))),
                 "expected {path} to report source-option-type-mismatch, got diagnostics: {:?}",
+                report.diagnostics()
+            );
+        }
+    }
+
+    #[test]
+    fn resolved_validation_rejects_custom_source_provider_contract_invalid_fixtures() {
+        for (path, code_name) in [
+            (
+                "milestone-2/invalid/custom-source-provider-unknown-option/main.aivi",
+                "unknown-source-option",
+            ),
+            (
+                "milestone-2/invalid/custom-source-provider-argument-count-mismatch/main.aivi",
+                "source-argument-count-mismatch",
+            ),
+            (
+                "milestone-2/invalid/custom-source-provider-argument-type-mismatch/main.aivi",
+                "source-argument-type-mismatch",
+            ),
+            (
+                "milestone-2/invalid/custom-source-provider-unsupported-schema-type/main.aivi",
+                "unsupported-source-provider-contract-type",
+            ),
+        ] {
+            let lowered = lower_fixture(path);
+            assert!(
+                !lowered.has_errors(),
+                "expected {path} to lower cleanly before custom provider contract validation, got diagnostics: {:?}",
+                lowered.diagnostics()
+            );
+            let report = lowered
+                .module()
+                .validate(ValidationMode::RequireResolvedNames);
+            assert!(
+                report
+                    .diagnostics()
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == Some(super::code(code_name))),
+                "expected {path} to report {code_name}, got diagnostics: {:?}",
                 report.diagnostics()
             );
         }
@@ -4835,7 +4982,7 @@ sig tick : Signal Unit
     }
 
     #[test]
-    fn lowers_provider_contract_declarations_without_resolving_source_use_sites() {
+    fn resolves_provider_contract_declarations_onto_source_use_sites() {
         let lowered =
             lower_fixture("milestone-2/valid/source-provider-contract-declarations/main.aivi");
         assert!(
@@ -4861,6 +5008,11 @@ sig tick : Signal Unit
             contract.contract.recurrence_wakeup,
             Some(crate::CustomSourceRecurrenceWakeup::ProviderDefinedTrigger)
         );
+        assert_eq!(contract.contract.arguments.len(), 1);
+        assert_eq!(contract.contract.arguments[0].name.text(), "path");
+        assert_eq!(contract.contract.options.len(), 2);
+        assert_eq!(contract.contract.options[0].name.text(), "timeout");
+        assert_eq!(contract.contract.options[1].name.text(), "mode");
 
         let updates = find_signal(lowered.module(), "updates");
         let metadata = updates
@@ -4872,8 +5024,84 @@ sig tick : Signal Unit
             SourceProviderRef::Custom("custom.feed".into())
         );
         assert_eq!(
+            metadata.custom_contract,
+            Some(crate::CustomSourceContractMetadata {
+                recurrence_wakeup: Some(
+                    crate::CustomSourceRecurrenceWakeup::ProviderDefinedTrigger
+                ),
+                arguments: contract.contract.arguments.clone(),
+                options: contract.contract.options.clone(),
+            }),
+            "same-module provider declarations should resolve onto matching custom @source use sites"
+        );
+    }
+
+    #[test]
+    fn duplicate_provider_contracts_do_not_attach_ambiguous_use_site_metadata() {
+        let lowered = lower_text(
+            "duplicate_provider_contract_use_site.aivi",
+            r#"
+provider custom.feed
+    wakeup: timer
+
+provider custom.feed
+    wakeup: backoff
+
+@source custom.feed
+sig updates : Signal Int
+"#,
+        );
+        assert!(
+            lowered.has_errors(),
+            "duplicate provider contract test should still report lowering errors"
+        );
+
+        let updates = find_signal(lowered.module(), "updates");
+        let metadata = updates
+            .source_metadata
+            .as_ref()
+            .expect("custom source should still carry source metadata");
+        assert_eq!(
+            metadata.provider,
+            SourceProviderRef::Custom("custom.feed".into())
+        );
+        assert_eq!(
             metadata.custom_contract, None,
-            "declaration syntax should not resolve provider metadata onto use sites yet"
+            "ambiguous provider contract lookup must not attach arbitrary custom wakeup metadata"
+        );
+    }
+
+    #[test]
+    fn provider_contract_resolution_is_order_independent_within_module() {
+        let lowered = lower_text(
+            "provider_contract_resolution_order.aivi",
+            r#"
+@source custom.feed
+sig updates : Signal Int
+
+provider custom.feed
+    wakeup: timer
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "same-module provider declarations should resolve regardless of source order: {:?}",
+            lowered.diagnostics()
+        );
+
+        let updates = find_signal(lowered.module(), "updates");
+        let metadata = updates
+            .source_metadata
+            .as_ref()
+            .expect("custom source should still carry source metadata");
+        assert_eq!(
+            metadata.custom_contract,
+            Some(crate::CustomSourceContractMetadata {
+                recurrence_wakeup: Some(crate::CustomSourceRecurrenceWakeup::Timer),
+                arguments: Vec::new(),
+                options: Vec::new(),
+            }),
+            "provider contract resolution should use the module namespace rather than declaration order"
         );
     }
 
@@ -4916,69 +5144,71 @@ provider http.get
     }
 
     #[test]
-    fn manual_custom_source_contract_metadata_allows_nonreactive_recurrence() {
+    fn provider_contract_declarations_report_duplicate_schema_names() {
         let lowered = lower_text(
-            "custom_source_declared_wakeup.aivi",
+            "provider_contract_duplicate_schemas.aivi",
             r#"
-fun step #value =>
-    value
-
-@source custom.feed 0
-sig retried : Signal Int =
-    0
-     @|> step
-     <|@ step
+provider custom.feed
+    argument path: Text
+    argument path: Int
+    option timeout: Text
+    option timeout: Bool
 "#,
         );
         assert!(
-            !lowered.has_errors(),
-            "manual custom source wakeup test should lower cleanly: {:?}",
+            lowered
+                .diagnostics()
+                .iter()
+                .filter(|diagnostic| {
+                    diagnostic.code == Some(super::code("duplicate-source-provider-contract-field"))
+                })
+                .count()
+                >= 2,
+            "expected duplicate schema diagnostics, got diagnostics: {:?}",
             lowered.diagnostics()
         );
-        let initial_report = lowered
+    }
+
+    #[test]
+    fn provider_contract_metadata_allows_nonreactive_recurrence() {
+        let lowered = lower_fixture("milestone-2/valid/custom-source-provider-wakeup/main.aivi");
+        assert!(
+            !lowered.has_errors(),
+            "provider-declared custom source wakeup fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let retried = find_signal(lowered.module(), "retried");
+        let metadata = retried
+            .source_metadata
+            .as_ref()
+            .expect("non-reactive custom recurrence should carry source metadata");
+        assert!(
+            !metadata.is_reactive,
+            "provider-declared recurrence fixture should stay non-reactive"
+        );
+        assert_eq!(
+            metadata.provider,
+            SourceProviderRef::Custom("custom.feed".into())
+        );
+        assert_eq!(
+            metadata.custom_contract,
+            Some(crate::CustomSourceContractMetadata {
+                recurrence_wakeup: Some(
+                    crate::CustomSourceRecurrenceWakeup::ProviderDefinedTrigger
+                ),
+                arguments: Vec::new(),
+                options: Vec::new(),
+            }),
+            "matching provider contracts should populate custom wakeup metadata before validation"
+        );
+
+        let report = lowered
             .module()
             .validate(ValidationMode::RequireResolvedNames);
         assert!(
-            initial_report
-                .diagnostics()
-                .iter()
-                .any(|diagnostic| diagnostic.code == Some(super::code("missing-recurrence-wakeup"))),
-            "non-reactive custom sources should still fail without explicit wakeup metadata, got diagnostics: {:?}",
-            initial_report.diagnostics()
-        );
-
-        let mut module = lowered.module().clone();
-        let signal_id = module
-            .root_items()
-            .iter()
-            .copied()
-            .find(|item_id| {
-                matches!(
-                    &module.items()[*item_id],
-                    Item::Signal(item) if item.name.text() == "retried"
-                )
-            })
-            .expect("expected to find `retried` signal item");
-        let Some(Item::Signal(signal)) = module.arenas.items.get_mut(signal_id) else {
-            panic!("expected `retried` item to stay a signal");
-        };
-        let metadata = signal
-            .source_metadata
-            .as_mut()
-            .expect("custom source recurrence should carry source metadata");
-        assert!(
-            !metadata.is_reactive,
-            "non-reactive custom source should start without provider-independent wakeup proof"
-        );
-        metadata
-            .custom_contract
-            .get_or_insert_with(Default::default)
-            .recurrence_wakeup = Some(crate::CustomSourceRecurrenceWakeup::ProviderDefinedTrigger);
-
-        let report = module.validate(ValidationMode::RequireResolvedNames);
-        assert!(
             report.is_ok(),
-            "explicit custom source wakeup metadata should unblock recurrence validation, got diagnostics: {:?}",
+            "resolved custom provider metadata should unblock recurrence validation, got diagnostics: {:?}",
             report.diagnostics()
         );
     }
@@ -5013,6 +5243,8 @@ sig retried : Signal Int =
             .expect("built-in source should carry source metadata")
             .custom_contract = Some(crate::CustomSourceContractMetadata {
             recurrence_wakeup: Some(crate::CustomSourceRecurrenceWakeup::ProviderDefinedTrigger),
+            arguments: Vec::new(),
+            options: Vec::new(),
         });
 
         let report = module.validate(ValidationMode::RequireResolvedNames);
@@ -5057,6 +5289,8 @@ sig retried : Signal Int =
             .expect("invalid provider shape should still preserve source metadata")
             .custom_contract = Some(crate::CustomSourceContractMetadata {
             recurrence_wakeup: Some(crate::CustomSourceRecurrenceWakeup::ProviderDefinedTrigger),
+            arguments: Vec::new(),
+            options: Vec::new(),
         });
 
         let report = module.validate(ValidationMode::Structural);
@@ -5220,7 +5454,7 @@ val duplicate : Task Int Int =
         );
         assert_eq!(
             metadata.custom_contract, None,
-            "lowering should leave custom-provider contract hooks empty until provider metadata exists"
+            "built-in providers should never attach custom-provider contract hooks"
         );
         assert!(
             metadata.is_reactive,

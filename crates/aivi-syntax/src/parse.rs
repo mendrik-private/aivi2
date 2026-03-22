@@ -8,10 +8,11 @@ use crate::{
         MarkupAttribute, MarkupAttributeValue, MarkupNode, Module, NamedItem, NamedItemBody,
         OperatorName, Pattern, PatternKind, PipeCaseArm, PipeExpr, PipeStage, PipeStageKind,
         ProjectionPath, QualifiedName, RecordExpr, RecordField, RecordPatternField, RegexLiteral,
-        SourceDecorator, SourceProviderContractBody, SourceProviderContractItem,
-        SourceProviderContractMember, SuffixedIntegerLiteral, TextFragment, TextInterpolation,
-        TextLiteral, TextSegment, TokenRange, TypeDeclBody, TypeExpr, TypeExprKind, TypeField,
-        TypeVariant, UnaryOperator, UseItem,
+        SourceDecorator, SourceProviderContractBody, SourceProviderContractFieldValue,
+        SourceProviderContractItem, SourceProviderContractMember,
+        SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextFragment,
+        TextInterpolation, TextLiteral, TextSegment, TokenRange, TypeDeclBody, TypeExpr,
+        TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseItem,
     },
     lex::{LexedModule, Token, TokenKind, lex_fragment, lex_module},
 };
@@ -40,6 +41,10 @@ const MISSING_PROVIDER_CONTRACT_NAME: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-provider-contract-name");
 const MISSING_PROVIDER_CONTRACT_MEMBER_VALUE: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-provider-contract-member-value");
+const MISSING_PROVIDER_CONTRACT_SCHEMA_NAME: DiagnosticCode =
+    DiagnosticCode::new("syntax", "missing-provider-contract-schema-name");
+const MISSING_PROVIDER_CONTRACT_SCHEMA_TYPE: DiagnosticCode =
+    DiagnosticCode::new("syntax", "missing-provider-contract-schema-type");
 const MISSING_FUNCTION_ARROW: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-function-arrow");
 const MISMATCHED_MARKUP_CLOSE: DiagnosticCode =
@@ -680,32 +685,107 @@ impl<'a> Parser<'a> {
     ) -> Option<SourceProviderContractMember> {
         let start = *cursor;
         let name = self.parse_identifier(cursor, end)?;
-        let value = if self.consume_kind(cursor, end, TokenKind::Colon).is_some() {
-            self.parse_identifier(cursor, end).or_else(|| {
-                self.diagnostics.push(
-                    Diagnostic::error("provider contract member is missing its value after `:`")
-                        .with_code(MISSING_PROVIDER_CONTRACT_MEMBER_VALUE)
+        match name.text.as_str() {
+            "option" | "argument" => {
+                let schema_name = self.parse_identifier(cursor, end).or_else(|| {
+                    self.diagnostics.push(
+                        Diagnostic::error("provider contract schema member is missing its name")
+                            .with_code(MISSING_PROVIDER_CONTRACT_SCHEMA_NAME)
+                            .with_primary_label(
+                                name.span,
+                                format!(
+                                    "expected a {} name such as `timeout`",
+                                    if name.text == "option" {
+                                        "source option"
+                                    } else {
+                                        "source argument"
+                                    }
+                                ),
+                            ),
+                    );
+                    None
+                });
+                let annotation = if self.consume_kind(cursor, end, TokenKind::Colon).is_some() {
+                    self.parse_type_expr(cursor, end, TypeStop::default())
+                        .or_else(|| {
+                            self.diagnostics.push(
+                                Diagnostic::error(
+                                    "provider contract schema member is missing its type after `:`",
+                                )
+                                .with_code(MISSING_PROVIDER_CONTRACT_SCHEMA_TYPE)
+                                .with_primary_label(
+                                    schema_name.as_ref().map_or(name.span, |item| item.span),
+                                    format!(
+                                        "expected a {} type such as `Text` or `Signal Bool`",
+                                        if name.text == "option" {
+                                            "source option"
+                                        } else {
+                                            "source argument"
+                                        }
+                                    ),
+                                ),
+                            );
+                            None
+                        })
+                } else {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "provider contract schema member is missing `:` before its type",
+                        )
+                        .with_code(MISSING_PROVIDER_CONTRACT_SCHEMA_TYPE)
                         .with_primary_label(
-                            name.span,
-                            "expected a provider-contract value such as `providerTrigger`",
+                            schema_name.as_ref().map_or(name.span, |item| item.span),
+                            "expected `:` followed by a schema type",
                         ),
-                );
-                None
-            })
-        } else {
-            self.diagnostics.push(
-                Diagnostic::error("provider contract member is missing `:` before its value")
-                    .with_code(MISSING_PROVIDER_CONTRACT_MEMBER_VALUE)
-                    .with_primary_label(name.span, "expected `:` followed by a contract value"),
-            );
-            None
-        };
+                    );
+                    None
+                };
+                let member = SourceProviderContractSchemaMember {
+                    name: schema_name,
+                    annotation,
+                    span: self.source_span_for_range(start, *cursor),
+                };
+                Some(if name.text == "option" {
+                    SourceProviderContractMember::OptionSchema(member)
+                } else {
+                    SourceProviderContractMember::ArgumentSchema(member)
+                })
+            }
+            _ => {
+                let value = if self.consume_kind(cursor, end, TokenKind::Colon).is_some() {
+                    self.parse_identifier(cursor, end).or_else(|| {
+                        self.diagnostics.push(
+                            Diagnostic::error(
+                                "provider contract member is missing its value after `:`",
+                            )
+                            .with_code(MISSING_PROVIDER_CONTRACT_MEMBER_VALUE)
+                            .with_primary_label(
+                                name.span,
+                                "expected a provider-contract value such as `providerTrigger`",
+                            ),
+                        );
+                        None
+                    })
+                } else {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "provider contract member is missing `:` before its value",
+                        )
+                        .with_code(MISSING_PROVIDER_CONTRACT_MEMBER_VALUE)
+                        .with_primary_label(name.span, "expected `:` followed by a contract value"),
+                    );
+                    None
+                };
 
-        Some(SourceProviderContractMember {
-            name: Some(name),
-            value,
-            span: self.source_span_for_range(start, *cursor),
-        })
+                Some(SourceProviderContractMember::FieldValue(
+                    SourceProviderContractFieldValue {
+                        name: Some(name),
+                        value,
+                        span: self.source_span_for_range(start, *cursor),
+                    },
+                ))
+            }
+        }
     }
 
     fn parse_signature_member_name(
@@ -2990,18 +3070,38 @@ export main
                     .body
                     .as_ref()
                     .expect("provider contract should have a body");
-                assert_eq!(body.members.len(), 1);
-                assert_eq!(
-                    body.members[0].name.as_ref().map(|name| name.text.as_str()),
-                    Some("wakeup")
-                );
-                assert_eq!(
-                    body.members[0]
-                        .value
-                        .as_ref()
-                        .map(|value| value.text.as_str()),
-                    Some("providerTrigger")
-                );
+                assert_eq!(body.members.len(), 3);
+                match &body.members[0] {
+                    SourceProviderContractMember::ArgumentSchema(member) => {
+                        assert_eq!(
+                            member.name.as_ref().map(|name| name.text.as_str()),
+                            Some("path")
+                        );
+                    }
+                    other => panic!("expected argument schema member, got {other:?}"),
+                }
+                match &body.members[1] {
+                    SourceProviderContractMember::OptionSchema(member) => {
+                        assert_eq!(
+                            member.name.as_ref().map(|name| name.text.as_str()),
+                            Some("timeout")
+                        );
+                    }
+                    other => panic!("expected option schema member, got {other:?}"),
+                }
+                match &body.members[2] {
+                    SourceProviderContractMember::FieldValue(member) => {
+                        assert_eq!(
+                            member.name.as_ref().map(|name| name.text.as_str()),
+                            Some("wakeup")
+                        );
+                        assert_eq!(
+                            member.value.as_ref().map(|value| value.text.as_str()),
+                            Some("providerTrigger")
+                        );
+                    }
+                    other => panic!("expected wakeup field member, got {other:?}"),
+                }
             }
             other => panic!("expected provider contract item, got {other:?}"),
         }

@@ -15,6 +15,7 @@ fn check_accepts_valid_hir_fixtures() {
         "milestone-2/valid/local-top-level-refs/main.aivi",
         "milestone-2/valid/use-member-imports/main.aivi",
         "milestone-2/valid/source-provider-contract-declarations/main.aivi",
+        "milestone-2/valid/custom-source-provider-wakeup/main.aivi",
         "milestone-2/valid/custom-source-recurrence-wakeup/main.aivi",
         "milestone-2/valid/source-decorator-signals/main.aivi",
         "milestone-2/valid/source-option-contract-parameters/main.aivi",
@@ -99,6 +100,11 @@ fn check_rejects_invalid_hir_fixtures() {
         "milestone-2/invalid/source-option-imported-binding-mismatch/main.aivi",
         "milestone-2/invalid/source-option-constructor-mismatch/main.aivi",
         "milestone-2/invalid/source-option-list-element-mismatch/main.aivi",
+        "milestone-2/invalid/custom-source-provider-unknown-option/main.aivi",
+        "milestone-2/invalid/custom-source-provider-option-type-mismatch/main.aivi",
+        "milestone-2/invalid/custom-source-provider-argument-count-mismatch/main.aivi",
+        "milestone-2/invalid/custom-source-provider-argument-type-mismatch/main.aivi",
+        "milestone-2/invalid/custom-source-provider-unsupported-schema-type/main.aivi",
     ] {
         let path = fixture_path(relative);
         let output = Command::new(env!("CARGO_BIN_EXE_aivi"))

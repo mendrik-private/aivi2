@@ -292,8 +292,9 @@ impl SourceRecurrenceWakeupContext {
 ///
 /// Reactive source arguments/options are provider-independent RFC semantics, so they already prove
 /// source-event wakeups even for custom providers. Any stronger proof must arrive through explicit
-/// provider metadata; the current surface syntax does not populate that hook yet, but later source
-/// contract work can do so without reshaping recurrence planning.
+/// provider metadata. Resolved HIR currently populates that hook only from same-module
+/// `provider qualified.name` declarations, and later richer provider-contract surfaces can extend
+/// it without reshaping recurrence planning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct CustomSourceRecurrenceWakeupContext {
     declared_wakeup: Option<RecurrenceWakeupKind>,
@@ -609,6 +610,40 @@ mod tests {
     }
 
     #[test]
+    fn builtin_intrinsic_wakeups_take_precedence_over_other_proofs() {
+        let plan = RecurrenceWakeupPlanner::plan_source(
+            SourceRecurrenceWakeupContext::new(BuiltinSourceProvider::TimerEvery)
+                .with_polling_policy()
+                .with_retry_policy()
+                .with_signal_trigger()
+                .with_reactive_inputs(),
+        )
+        .expect("intrinsic wakeups should still plan even when other source wakeup proofs exist");
+        assert_eq!(plan.kind(), RecurrenceWakeupKind::Timer);
+        assert_eq!(
+            plan.evidence().builtin_source_cause(),
+            Some(BuiltinSourceWakeupCause::ProviderTimer)
+        );
+    }
+
+    #[test]
+    fn builtin_polling_policies_take_precedence_over_retry_trigger_and_reactivity() {
+        let plan = RecurrenceWakeupPlanner::plan_source(
+            SourceRecurrenceWakeupContext::new(BuiltinSourceProvider::HttpGet)
+                .with_retry_policy()
+                .with_polling_policy()
+                .with_signal_trigger()
+                .with_reactive_inputs(),
+        )
+        .expect("polling policies should stay the canonical non-intrinsic built-in wakeup proof");
+        assert_eq!(plan.kind(), RecurrenceWakeupKind::Timer);
+        assert_eq!(
+            plan.evidence().builtin_source_cause(),
+            Some(BuiltinSourceWakeupCause::PollingPolicy)
+        );
+    }
+
+    #[test]
     fn request_like_sources_without_explicit_trigger_are_rejected() {
         assert_eq!(
             RecurrenceWakeupPlanner::plan_source(SourceRecurrenceWakeupContext::new(
@@ -651,6 +686,23 @@ mod tests {
             plan.evidence().custom_source_cause(),
             Some(CustomSourceWakeupCause::DeclaredWakeup(
                 RecurrenceWakeupKind::ProviderDefinedTrigger
+            ))
+        );
+    }
+
+    #[test]
+    fn custom_declared_wakeups_take_precedence_over_reactive_inputs() {
+        let plan = RecurrenceWakeupPlanner::plan_custom_source(
+            CustomSourceRecurrenceWakeupContext::new()
+                .with_declared_wakeup(RecurrenceWakeupKind::Timer)
+                .with_reactive_inputs(),
+        )
+        .expect("declared custom wakeups should stay canonical over reactive-input fallback");
+        assert_eq!(plan.kind(), RecurrenceWakeupKind::Timer);
+        assert_eq!(
+            plan.evidence().custom_source_cause(),
+            Some(CustomSourceWakeupCause::DeclaredWakeup(
+                RecurrenceWakeupKind::Timer
             ))
         );
     }

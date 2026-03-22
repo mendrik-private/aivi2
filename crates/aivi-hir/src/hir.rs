@@ -504,8 +504,38 @@ pub struct SignalItem {
 pub struct SourceMetadata {
     pub provider: SourceProviderRef,
     pub signal_dependencies: Vec<ItemId>,
+    pub lifecycle_dependencies: SourceLifecycleDependencies,
     pub is_reactive: bool,
     pub custom_contract: Option<CustomSourceContractMetadata>,
+}
+
+impl SourceMetadata {
+    pub fn has_reactive_wakeup_inputs(&self) -> bool {
+        self.lifecycle_dependencies.has_reactive_wakeup_inputs()
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SourceLifecycleDependencies {
+    pub reconfiguration: Vec<ItemId>,
+    pub explicit_triggers: Vec<ItemId>,
+    pub active_when: Vec<ItemId>,
+}
+
+impl SourceLifecycleDependencies {
+    pub fn has_reactive_wakeup_inputs(&self) -> bool {
+        !self.reconfiguration.is_empty() || !self.active_when.is_empty()
+    }
+
+    pub fn merged(&self) -> Vec<ItemId> {
+        let mut dependencies = Vec::new();
+        dependencies.extend(self.reconfiguration.iter().copied());
+        dependencies.extend(self.explicit_triggers.iter().copied());
+        dependencies.extend(self.active_when.iter().copied());
+        dependencies.sort();
+        dependencies.dedup();
+        dependencies
+    }
 }
 
 /// Typed `@source` provider identity preserved into HIR.
@@ -566,12 +596,13 @@ impl SourceProviderRef {
 
 /// Resolved custom-provider facts carried at one `@source` use site.
 ///
-/// Only recurrence-wakeup metadata is populated today. This explicit carrier keeps future
-/// declaration/resolution work local to HIR instead of extending source metadata with more
-/// ad-hoc optional fields.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+/// This keeps provider-local recurrence and schema facts together so later custom-provider typing
+/// can reuse one explicit carrier instead of extending source metadata with ad-hoc optional fields.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CustomSourceContractMetadata {
     pub recurrence_wakeup: Option<CustomSourceRecurrenceWakeup>,
+    pub arguments: Vec<CustomSourceArgumentSchema>,
+    pub options: Vec<CustomSourceOptionSchema>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -580,6 +611,20 @@ pub enum CustomSourceRecurrenceWakeup {
     Backoff,
     SourceEvent,
     ProviderDefinedTrigger,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CustomSourceArgumentSchema {
+    pub span: SourceSpan,
+    pub name: Name,
+    pub annotation: TypeId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CustomSourceOptionSchema {
+    pub span: SourceSpan,
+    pub name: Name,
+    pub annotation: TypeId,
 }
 
 /// One `class` declaration.

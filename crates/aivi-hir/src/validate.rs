@@ -716,7 +716,28 @@ impl Validator<'_> {
                         );
                     }
                 }
-                Item::SourceProviderContract(_) => {}
+                Item::SourceProviderContract(item) => {
+                    for argument in &item.contract.arguments {
+                        self.check_span("provider contract argument", argument.span);
+                        self.check_name(&argument.name);
+                        self.require_type(
+                            argument.span,
+                            "provider contract argument",
+                            "annotation",
+                            argument.annotation,
+                        );
+                    }
+                    for option in &item.contract.options {
+                        self.check_span("provider contract option", option.span);
+                        self.check_name(&option.name);
+                        self.require_type(
+                            option.span,
+                            "provider contract option",
+                            "annotation",
+                            option.annotation,
+                        );
+                    }
+                }
                 Item::Instance(item) => {
                     self.check_type_reference(&item.class);
                     for argument in item.arguments.iter() {
@@ -861,7 +882,22 @@ impl Validator<'_> {
                         );
                     }
                 }
-                Item::SourceProviderContract(_) => {}
+                Item::SourceProviderContract(item) => {
+                    for argument in &item.contract.arguments {
+                        self.check_expected_type_kind(
+                            argument.annotation,
+                            &[],
+                            "provider contract argument annotation",
+                        );
+                    }
+                    for option in &item.contract.options {
+                        self.check_expected_type_kind(
+                            option.annotation,
+                            &[],
+                            "provider contract option annotation",
+                        );
+                    }
+                }
                 Item::Instance(item) => {
                     self.check_type_reference_kind(
                         &item.class,
@@ -895,35 +931,95 @@ impl Validator<'_> {
             return;
         }
 
+        let provider_contracts = self
+            .module
+            .items()
+            .iter()
+            .filter_map(|(_, item)| match item {
+                Item::SourceProviderContract(item) => Some(item.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let module = self.module;
         let decorators = self
             .module
-            .decorators()
+            .items()
             .iter()
-            .map(|(_, decorator)| decorator.clone())
+            .flat_map(|(_, item)| {
+                let source_metadata = match item {
+                    Item::Signal(signal) => signal.source_metadata.clone(),
+                    _ => None,
+                };
+                item.decorators().iter().filter_map(move |decorator_id| {
+                    let decorator = &module.decorators()[*decorator_id];
+                    let DecoratorPayload::Source(source) = &decorator.payload else {
+                        return None;
+                    };
+                    Some((decorator.span, source.clone(), source_metadata.clone()))
+                })
+            })
             .collect::<Vec<_>>();
         let mut resolver = SourceContractTypeResolver::new(self.module);
         let mut typing = GateTypeContext::new(self.module);
 
-        for decorator in decorators {
-            let DecoratorPayload::Source(source) = decorator.payload else {
-                continue;
-            };
-            self.validate_source_decorator_contract_types(&source, &mut resolver, &mut typing);
+        for item in &provider_contracts {
+            self.validate_custom_source_contract_schema_types(item, &mut typing);
+        }
+
+        for (span, source, source_metadata) in decorators {
+            self.validate_source_decorator_contract_types(
+                span,
+                &source,
+                source_metadata.as_ref(),
+                &mut resolver,
+                &mut typing,
+            );
         }
     }
 
     fn validate_source_decorator_contract_types(
         &mut self,
+        source_span: SourceSpan,
         source: &crate::hir::SourceDecorator,
+        source_metadata: Option<&SourceMetadata>,
         resolver: &mut SourceContractTypeResolver<'_>,
         typing: &mut GateTypeContext<'_>,
     ) {
-        let Some(provider) = source.provider.as_ref() else {
-            return;
-        };
-        let Some(provider) = SourceProviderRef::from_path(Some(provider)).builtin() else {
-            return;
-        };
+        let provider = source_metadata
+            .map(|metadata| metadata.provider.clone())
+            .unwrap_or_else(|| SourceProviderRef::from_path(source.provider.as_ref()));
+        match provider {
+            SourceProviderRef::Builtin(provider) => {
+                self.validate_builtin_source_decorator_contract_types(
+                    source, provider, resolver, typing,
+                );
+            }
+            SourceProviderRef::Custom(_) => {
+                let Some(source_metadata) = source_metadata else {
+                    return;
+                };
+                let Some(contract) = source_metadata.custom_contract.as_ref() else {
+                    return;
+                };
+                self.validate_custom_source_decorator_contract_types(
+                    source_span,
+                    &provider,
+                    source,
+                    contract,
+                    typing,
+                );
+            }
+            SourceProviderRef::Missing | SourceProviderRef::InvalidShape(_) => {}
+        }
+    }
+
+    fn validate_builtin_source_decorator_contract_types(
+        &mut self,
+        source: &crate::hir::SourceDecorator,
+        provider: BuiltinSourceProvider,
+        resolver: &mut SourceContractTypeResolver<'_>,
+        typing: &mut GateTypeContext<'_>,
+    ) {
         let Some(options) = source.options else {
             return;
         };
@@ -945,7 +1041,7 @@ impl Validator<'_> {
                     };
                     pending.push(PendingSourceOptionValue {
                         field: field.clone(),
-                        expected_surface: option.ty(),
+                        expected_surface: option.ty().to_string(),
                         expected,
                     });
                 }
@@ -979,7 +1075,7 @@ impl Validator<'_> {
                         self.emit_source_option_value_mismatch(
                             &pending_option.field,
                             provider.key(),
-                            pending_option.expected_surface,
+                            &pending_option.expected_surface,
                             mismatch,
                         );
                         progress = true;
@@ -994,11 +1090,155 @@ impl Validator<'_> {
         }
     }
 
+    fn validate_custom_source_contract_schema_types(
+        &mut self,
+        item: &crate::SourceProviderContractItem,
+        typing: &mut GateTypeContext<'_>,
+    ) {
+        let provider_key = item.provider.key().unwrap_or("<provider>");
+        for argument in &item.contract.arguments {
+            self.validate_custom_source_contract_schema_type(
+                provider_key,
+                "argument",
+                argument.name.text(),
+                argument.span,
+                argument.annotation,
+                typing,
+            );
+        }
+        for option in &item.contract.options {
+            self.validate_custom_source_contract_schema_type(
+                provider_key,
+                "option",
+                option.name.text(),
+                option.span,
+                option.annotation,
+                typing,
+            );
+        }
+    }
+
+    fn validate_custom_source_contract_schema_type(
+        &mut self,
+        provider_key: &str,
+        schema_kind: &str,
+        schema_name: &str,
+        span: SourceSpan,
+        annotation: TypeId,
+        typing: &mut GateTypeContext<'_>,
+    ) {
+        if custom_source_contract_expected_type(self.module, annotation).is_some() {
+            return;
+        }
+        let Some(lowered) = typing.lower_annotation(annotation) else {
+            return;
+        };
+        self.diagnostics.push(
+            Diagnostic::error(format!(
+                "provider contract {schema_kind} `{schema_name}` for `{provider_key}` uses unsupported schema type `{lowered}`"
+            ))
+            .with_code(code("unsupported-source-provider-contract-type"))
+            .with_primary_label(
+                span,
+                "this custom source contract schema falls outside the current closed proof surface",
+            )
+            .with_note(
+                "custom provider schemas currently support only compiler-known primitive types, same-module `type`/`domain` items, and those shapes under `List` or `Signal`",
+            )
+            .with_note(
+                "records, tuples, arrows, `Option`/`Result`/`Task`, imported type constructors, and other richer schema forms remain later work",
+            ),
+        );
+    }
+
+    fn validate_custom_source_decorator_contract_types(
+        &mut self,
+        source_span: SourceSpan,
+        provider: &SourceProviderRef,
+        source: &crate::hir::SourceDecorator,
+        contract: &crate::CustomSourceContractMetadata,
+        typing: &mut GateTypeContext<'_>,
+    ) {
+        let provider_key = provider
+            .key()
+            .expect("custom provider validation requires a preserved provider key");
+        if contract.arguments.len() != source.arguments.len() {
+            self.emit_source_argument_count_mismatch(
+                source_span,
+                provider_key,
+                contract.arguments.len(),
+                source.arguments.len(),
+            );
+        }
+
+        for (index, (argument, schema)) in source
+            .arguments
+            .iter()
+            .copied()
+            .zip(contract.arguments.iter())
+            .enumerate()
+        {
+            let Some((expected, expected_surface)) =
+                custom_source_contract_expected(self.module, schema.annotation, typing)
+            else {
+                continue;
+            };
+            let mut bindings = SourceOptionTypeBindings::default();
+            match self.check_source_option_expr(argument, &expected, typing, &mut bindings) {
+                SourceOptionTypeCheck::Match => {}
+                SourceOptionTypeCheck::Mismatch(mismatch) => self
+                    .emit_source_argument_value_mismatch(
+                        schema.span,
+                        provider_key,
+                        index,
+                        schema.name.text(),
+                        &expected_surface,
+                        mismatch,
+                    ),
+                SourceOptionTypeCheck::Unknown => {}
+            }
+        }
+
+        let Some(options) = source.options else {
+            return;
+        };
+        let ExprKind::Record(record) = &self.module.exprs()[options].kind else {
+            return;
+        };
+        for field in &record.fields {
+            let Some(schema) = contract
+                .options
+                .iter()
+                .find(|schema| schema.name.text() == field.label.text())
+            else {
+                self.emit_unknown_source_option(field.span, provider_key, field.label.text());
+                continue;
+            };
+            let Some((expected, expected_surface)) =
+                custom_source_contract_expected(self.module, schema.annotation, typing)
+            else {
+                continue;
+            };
+            let mut bindings = SourceOptionTypeBindings::default();
+            match self.check_source_option_expr(field.value, &expected, typing, &mut bindings) {
+                SourceOptionTypeCheck::Match => {}
+                SourceOptionTypeCheck::Mismatch(mismatch) => self
+                    .emit_source_option_value_mismatch(
+                        field,
+                        provider_key,
+                        &expected_surface,
+                        mismatch,
+                    ),
+                SourceOptionTypeCheck::Unknown => {}
+            }
+        }
+    }
+
     fn emit_source_option_value_mismatch(
         &mut self,
         field: &crate::hir::RecordExprField,
         provider_key: &str,
-        expected_surface: SourceContractType,
+        expected_surface: &str,
         mismatch: SourceOptionTypeMismatch,
     ) {
         self.diagnostics.push(
@@ -1020,7 +1260,75 @@ impl Validator<'_> {
                 "current source option typing checks only the resolved-HIR cases it can prove honestly: same-module annotations, suffixed domain literals, same-module constructors checked against the expected contract type or a previously bound contract parameter, imported bindings whose compiler-known import metadata lowers into the current closed type surface, list elements, and reactive `Signal` payloads used as ordinary source configuration values",
             )
             .with_note(
-                "bare contract-parameter roots still need the current layer to prove an actual expression type first; generic same-module constructor roots, imported bindings without compiler-known type metadata, constructor fields whose annotations lower outside the current source-option type surface, and otherwise unproven expressions still wait for fuller ordinary expression typing",
+                "bare contract-parameter roots now also cover same-module generic constructor applications when the current layer can prove each constructor field from local type evidence; nested generic constructor arguments, imported bindings without compiler-known type metadata, constructor fields whose annotations lower outside the current source-option type surface, and otherwise unproven expressions still wait for fuller ordinary expression typing",
+            ),
+        );
+    }
+
+    fn emit_unknown_source_option(
+        &mut self,
+        span: SourceSpan,
+        provider_key: &str,
+        option_name: &str,
+    ) {
+        self.diagnostics.push(
+            Diagnostic::error(format!(
+                "unknown source option `{option_name}` for `{provider_key}`"
+            ))
+            .with_code(code("unknown-source-option"))
+            .with_primary_label(
+                span,
+                "this option is not supported for the selected source provider",
+            ),
+        );
+    }
+
+    fn emit_source_argument_count_mismatch(
+        &mut self,
+        span: SourceSpan,
+        provider_key: &str,
+        expected: usize,
+        actual: usize,
+    ) {
+        self.diagnostics.push(
+            Diagnostic::error(format!(
+                "source `{provider_key}` expects {expected} positional argument{}, but this use provides {actual}",
+                if expected == 1 { "" } else { "s" }
+            ))
+            .with_code(code("source-argument-count-mismatch"))
+            .with_primary_label(
+                span,
+                "adjust the `@source` arguments to match the declared provider contract",
+            ),
+        );
+    }
+
+    fn emit_source_argument_value_mismatch(
+        &mut self,
+        span: SourceSpan,
+        provider_key: &str,
+        index: usize,
+        schema_name: &str,
+        expected_surface: &str,
+        mismatch: SourceOptionTypeMismatch,
+    ) {
+        self.diagnostics.push(
+            Diagnostic::error(format!(
+                "source argument #{} `{schema_name}` for `{provider_key}` expects `{expected_surface}`, but this expression proves `{}`",
+                index + 1,
+                mismatch.actual
+            ))
+            .with_code(code("source-argument-type-mismatch"))
+            .with_primary_label(
+                mismatch.span,
+                format!("this source argument expression proves `{}`", mismatch.actual),
+            )
+            .with_secondary_label(
+                span,
+                format!("argument #{} `{schema_name}` expects `{expected_surface}`", index + 1),
+            )
+            .with_note(
+                "current custom source contract typing reuses the same resolved-HIR proof surface as source options: same-module annotations, suffixed domain literals, same-module constructors checked against the expected contract type, imported bindings whose compiler-known import metadata lowers into the current closed type surface, list elements, and reactive `Signal` payloads used as ordinary source configuration values",
             ),
         );
     }
@@ -1130,9 +1438,24 @@ impl Validator<'_> {
                     let Some(monomorphic) =
                         self.source_option_monomorphic_constructor_expected(actual.parent_item)
                     else {
-                        return SourceOptionTypeCheck::Unknown;
+                        return self
+                            .check_source_option_unbound_contract_parameter_constructor_root(
+                                *parameter,
+                                reference.path.span(),
+                                &actual,
+                                arguments,
+                                typing,
+                                bindings,
+                            );
                     };
-                    bind_parameter = Some(*parameter);
+                    bind_parameter = Some((
+                        *parameter,
+                        GateType::OpaqueItem {
+                            item: actual.parent_item,
+                            name: actual.parent_name.clone(),
+                            arguments: Vec::new(),
+                        },
+                    ));
                     Some(monomorphic)
                 }
             }
@@ -1155,15 +1478,8 @@ impl Validator<'_> {
         }
 
         if actual.field_types.is_empty() {
-            if let Some(parameter) = bind_parameter {
-                let matched = bindings.bind_or_match(
-                    parameter,
-                    &GateType::OpaqueItem {
-                        item: actual.parent_item,
-                        name: actual.parent_name.clone(),
-                        arguments: Vec::new(),
-                    },
-                );
+            if let Some((parameter, bound_type)) = bind_parameter.as_ref() {
+                let matched = bindings.bind_or_match(*parameter, bound_type);
                 debug_assert!(
                     matched,
                     "fresh contract-parameter binding should not conflict"
@@ -1197,15 +1513,8 @@ impl Validator<'_> {
         if saw_unknown {
             SourceOptionTypeCheck::Unknown
         } else {
-            if let Some(parameter) = bind_parameter {
-                let matched = bindings.bind_or_match(
-                    parameter,
-                    &GateType::OpaqueItem {
-                        item: actual.parent_item,
-                        name: actual.parent_name,
-                        arguments: Vec::new(),
-                    },
-                );
+            if let Some((parameter, bound_type)) = bind_parameter.as_ref() {
+                let matched = bindings.bind_or_match(*parameter, bound_type);
                 debug_assert!(
                     matched,
                     "fresh contract-parameter binding should not conflict"
@@ -1213,6 +1522,367 @@ impl Validator<'_> {
             }
             SourceOptionTypeCheck::Match
         }
+    }
+
+    fn check_source_option_unbound_contract_parameter_constructor_root(
+        &self,
+        parameter: SourceTypeParameter,
+        constructor_span: SourceSpan,
+        actual: &SourceOptionConstructorActual,
+        arguments: &[ExprId],
+        typing: &mut GateTypeContext<'_>,
+        bindings: &mut SourceOptionTypeBindings,
+    ) -> SourceOptionTypeCheck {
+        match self.infer_source_option_generic_constructor_root(
+            constructor_span,
+            actual,
+            arguments,
+            typing,
+            bindings,
+        ) {
+            SourceOptionGenericConstructorRootCheck::Match(actual_type) => {
+                let matched = bindings.bind_or_match(parameter, &actual_type);
+                debug_assert!(
+                    matched,
+                    "fresh contract-parameter binding should not conflict"
+                );
+                SourceOptionTypeCheck::Match
+            }
+            SourceOptionGenericConstructorRootCheck::Mismatch(mismatch) => {
+                SourceOptionTypeCheck::Mismatch(mismatch)
+            }
+            SourceOptionGenericConstructorRootCheck::Unknown => SourceOptionTypeCheck::Unknown,
+        }
+    }
+
+    fn infer_source_option_generic_constructor_root(
+        &self,
+        constructor_span: SourceSpan,
+        actual: &SourceOptionConstructorActual,
+        arguments: &[ExprId],
+        typing: &mut GateTypeContext<'_>,
+        bindings: &SourceOptionTypeBindings,
+    ) -> SourceOptionGenericConstructorRootCheck {
+        let Item::Type(item) = &self.module.items()[actual.parent_item] else {
+            return SourceOptionGenericConstructorRootCheck::Unknown;
+        };
+        if arguments.len() != actual.field_types.len() {
+            return SourceOptionGenericConstructorRootCheck::Mismatch(SourceOptionTypeMismatch {
+                span: constructor_span,
+                actual: format!("constructor `{}`", actual.constructor_name),
+            });
+        }
+
+        let mut parameter_substitutions = HashMap::<TypeParameterId, GateType>::new();
+        let mut trial_bindings = bindings.clone();
+        let mut pending = arguments
+            .iter()
+            .copied()
+            .zip(actual.field_types.iter().copied())
+            .collect::<Vec<_>>();
+        while !pending.is_empty() {
+            let mut progress = false;
+            let mut remaining = Vec::new();
+            for (argument, field_type) in std::mem::take(&mut pending) {
+                if let Some(expected) = self.source_option_constructor_field_expected_type(
+                    field_type,
+                    &parameter_substitutions,
+                ) {
+                    match self.check_source_option_expr(
+                        argument,
+                        &expected,
+                        typing,
+                        &mut trial_bindings,
+                    ) {
+                        SourceOptionTypeCheck::Match => {
+                            progress = true;
+                            continue;
+                        }
+                        SourceOptionTypeCheck::Mismatch(mismatch) => {
+                            return SourceOptionGenericConstructorRootCheck::Mismatch(mismatch);
+                        }
+                        SourceOptionTypeCheck::Unknown => {}
+                    }
+                }
+
+                let actual_argument = match typing
+                    .infer_expr(argument, &GateExprEnv::default(), None)
+                    .ty
+                {
+                    Some(actual_argument) => actual_argument,
+                    None => {
+                        remaining.push((argument, field_type));
+                        continue;
+                    }
+                };
+                match self.source_option_hir_type_matches_gate_type(
+                    field_type,
+                    &actual_argument,
+                    &mut parameter_substitutions,
+                ) {
+                    Some(true) => progress = true,
+                    Some(false) => {
+                        return SourceOptionGenericConstructorRootCheck::Mismatch(
+                            SourceOptionTypeMismatch {
+                                span: self.module.exprs()[argument].span,
+                                actual: actual_argument.to_string(),
+                            },
+                        );
+                    }
+                    None => remaining.push((argument, field_type)),
+                }
+            }
+            if !progress {
+                break;
+            }
+            pending = remaining;
+        }
+
+        if !pending.is_empty() {
+            return SourceOptionGenericConstructorRootCheck::Unknown;
+        }
+
+        let Some(arguments) = item
+            .parameters
+            .iter()
+            .map(|parameter| parameter_substitutions.get(parameter).cloned())
+            .collect::<Option<Vec<_>>>()
+        else {
+            return SourceOptionGenericConstructorRootCheck::Unknown;
+        };
+        SourceOptionGenericConstructorRootCheck::Match(GateType::OpaqueItem {
+            item: actual.parent_item,
+            name: actual.parent_name.clone(),
+            arguments,
+        })
+    }
+
+    fn source_option_constructor_field_expected_type(
+        &self,
+        field_type: TypeId,
+        substitutions: &HashMap<TypeParameterId, GateType>,
+    ) -> Option<SourceOptionExpectedType> {
+        let substitutions = substitutions
+            .iter()
+            .filter_map(|(parameter, ty)| {
+                SourceOptionExpectedType::from_gate_type(self.module, ty)
+                    .map(|expected| (*parameter, expected))
+            })
+            .collect::<HashMap<_, _>>();
+        SourceOptionExpectedType::from_hir_type(self.module, field_type, &substitutions)
+    }
+
+    fn source_option_hir_type_matches_gate_type(
+        &self,
+        expected: TypeId,
+        actual: &GateType,
+        substitutions: &mut HashMap<TypeParameterId, GateType>,
+    ) -> Option<bool> {
+        if !self.source_option_hir_type_is_signal_contract(expected) {
+            if let GateType::Signal(inner) = actual {
+                return self.source_option_hir_type_matches_gate_type_inner(
+                    expected,
+                    inner,
+                    substitutions,
+                );
+            }
+        }
+
+        self.source_option_hir_type_matches_gate_type_inner(expected, actual, substitutions)
+    }
+
+    fn source_option_hir_type_matches_gate_type_inner(
+        &self,
+        expected: TypeId,
+        actual: &GateType,
+        substitutions: &mut HashMap<TypeParameterId, GateType>,
+    ) -> Option<bool> {
+        match &self.module.types()[expected].kind {
+            TypeKind::Name(reference) => self.source_option_hir_type_reference_matches_gate_type(
+                reference,
+                actual,
+                substitutions,
+            ),
+            TypeKind::Apply { callee, arguments } => {
+                let arguments = arguments.iter().copied().collect::<Vec<_>>();
+                self.source_option_hir_type_application_matches_gate_type(
+                    *callee,
+                    &arguments,
+                    actual,
+                    substitutions,
+                )
+            }
+            TypeKind::Tuple(_) | TypeKind::Record(_) | TypeKind::Arrow { .. } => None,
+        }
+    }
+
+    fn source_option_hir_type_reference_matches_gate_type(
+        &self,
+        reference: &TypeReference,
+        actual: &GateType,
+        substitutions: &mut HashMap<TypeParameterId, GateType>,
+    ) -> Option<bool> {
+        match reference.resolution.as_ref() {
+            ResolutionState::Unresolved => None,
+            ResolutionState::Resolved(TypeResolution::Builtin(
+                builtin @ (BuiltinType::Int
+                | BuiltinType::Float
+                | BuiltinType::Decimal
+                | BuiltinType::BigInt
+                | BuiltinType::Bool
+                | BuiltinType::Text
+                | BuiltinType::Unit
+                | BuiltinType::Bytes),
+            )) => Some(matches!(
+                actual,
+                GateType::Primitive(actual_builtin) if actual_builtin == builtin
+            )),
+            ResolutionState::Resolved(TypeResolution::Builtin(_)) => None,
+            ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
+                Some(match substitutions.entry(*parameter) {
+                    Entry::Occupied(entry) => entry.get().same_shape(actual),
+                    Entry::Vacant(entry) => {
+                        entry.insert(actual.clone());
+                        true
+                    }
+                })
+            }
+            ResolutionState::Resolved(TypeResolution::Item(item_id)) => {
+                self.source_option_hir_item_matches_gate_type(*item_id, &[], actual, substitutions)
+            }
+            ResolutionState::Resolved(TypeResolution::Import(_)) => None,
+        }
+    }
+
+    fn source_option_hir_type_application_matches_gate_type(
+        &self,
+        callee: TypeId,
+        arguments: &[TypeId],
+        actual: &GateType,
+        substitutions: &mut HashMap<TypeParameterId, GateType>,
+    ) -> Option<bool> {
+        let TypeKind::Name(reference) = &self.module.types()[callee].kind else {
+            return None;
+        };
+        match reference.resolution.as_ref() {
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::List)) => {
+                let GateType::List(actual) = actual else {
+                    return Some(false);
+                };
+                self.source_option_hir_type_matches_gate_type(
+                    *arguments.first()?,
+                    actual,
+                    substitutions,
+                )
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Signal)) => {
+                let GateType::Signal(actual) = actual else {
+                    return Some(false);
+                };
+                self.source_option_hir_type_matches_gate_type(
+                    *arguments.first()?,
+                    actual,
+                    substitutions,
+                )
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(_))
+            | ResolutionState::Resolved(TypeResolution::TypeParameter(_))
+            | ResolutionState::Resolved(TypeResolution::Import(_))
+            | ResolutionState::Unresolved => None,
+            ResolutionState::Resolved(TypeResolution::Item(item_id)) => self
+                .source_option_hir_item_matches_gate_type(
+                    *item_id,
+                    arguments,
+                    actual,
+                    substitutions,
+                ),
+        }
+    }
+
+    fn source_option_hir_item_matches_gate_type(
+        &self,
+        item_id: ItemId,
+        expected_arguments: &[TypeId],
+        actual: &GateType,
+        substitutions: &mut HashMap<TypeParameterId, GateType>,
+    ) -> Option<bool> {
+        match &self.module.items()[item_id] {
+            Item::Domain(_) => {
+                let GateType::Domain {
+                    item, arguments, ..
+                } = actual
+                else {
+                    return Some(false);
+                };
+                if *item != item_id {
+                    return Some(false);
+                }
+                self.source_option_hir_type_arguments_match_gate_types(
+                    expected_arguments,
+                    arguments,
+                    substitutions,
+                )
+            }
+            Item::Type(item) => match &item.body {
+                TypeItemBody::Alias(_) => None,
+                TypeItemBody::Sum(_) => {
+                    let GateType::OpaqueItem {
+                        item, arguments, ..
+                    } = actual
+                    else {
+                        return Some(false);
+                    };
+                    if *item != item_id {
+                        return Some(false);
+                    }
+                    self.source_option_hir_type_arguments_match_gate_types(
+                        expected_arguments,
+                        arguments,
+                        substitutions,
+                    )
+                }
+            },
+            Item::Value(_)
+            | Item::Function(_)
+            | Item::Signal(_)
+            | Item::Class(_)
+            | Item::SourceProviderContract(_)
+            | Item::Instance(_)
+            | Item::Use(_)
+            | Item::Export(_) => None,
+        }
+    }
+
+    fn source_option_hir_type_arguments_match_gate_types(
+        &self,
+        expected: &[TypeId],
+        actual: &[GateType],
+        substitutions: &mut HashMap<TypeParameterId, GateType>,
+    ) -> Option<bool> {
+        if expected.len() != actual.len() {
+            return Some(false);
+        }
+        for (expected, actual) in expected.iter().copied().zip(actual) {
+            match self.source_option_hir_type_matches_gate_type(expected, actual, substitutions) {
+                Some(true) => {}
+                Some(false) => return Some(false),
+                None => return None,
+            }
+        }
+        Some(true)
+    }
+
+    fn source_option_hir_type_is_signal_contract(&self, ty: TypeId) -> bool {
+        let TypeKind::Apply { callee, .. } = &self.module.types()[ty].kind else {
+            return false;
+        };
+        let TypeKind::Name(reference) = &self.module.types()[*callee].kind else {
+            return false;
+        };
+        matches!(
+            reference.resolution.as_ref(),
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Signal))
+        )
     }
 
     fn source_option_constructor_field_expectations(
@@ -1667,7 +2337,7 @@ impl Validator<'_> {
                     context = context.with_reactive_inputs();
                 }
                 if let Some(wakeup) = metadata
-                    .and_then(|metadata| metadata.custom_contract)
+                    .and_then(|metadata| metadata.custom_contract.clone())
                     .and_then(|contract| contract.recurrence_wakeup)
                 {
                     context = context.with_declared_wakeup(custom_source_wakeup_kind(wakeup));
@@ -1816,7 +2486,7 @@ impl Validator<'_> {
                         "custom providers do not inherit built-in `retry` / `refreshEvery` / `refreshOn` semantics without their own wakeup contract",
                     )
                     .with_note(
-                        "reactive source arguments/options already prove source-event wakeups for any provider; timer/backoff/provider-trigger proof still needs future source-provider metadata to populate the custom wakeup hook",
+                        "reactive source arguments/options already prove source-event wakeups for any provider; timer/backoff/provider-trigger proof now comes only from a matching same-module `provider qualified.name` declaration such as `provider custom.feed` with `wakeup: ...`",
                     );
             }
             Some(RecurrenceWakeupHint::NonSource(cause)) => {
@@ -3835,12 +4505,51 @@ impl<'a> GateTypeContext<'a> {
     ) -> GateExprInfo {
         let ambient = subject.gate_payload().clone();
         let mut info = self.infer_expr(expr_id, env, Some(&ambient));
+        if info.ty.is_none() {
+            if let Some(function_body) =
+                self.infer_single_parameter_function_pipe_body(expr_id, &ambient)
+            {
+                info = function_body;
+            }
+        }
         if let Some(GateType::Arrow { parameter, result }) = info.ty.clone() {
             if parameter.same_shape(&ambient) {
                 info.ty = Some(*result);
             }
         }
         info
+    }
+
+    fn infer_single_parameter_function_pipe_body(
+        &mut self,
+        expr_id: ExprId,
+        ambient: &GateType,
+    ) -> Option<GateExprInfo> {
+        let ExprKind::Name(reference) = &self.module.exprs()[expr_id].kind else {
+            return None;
+        };
+        let ResolutionState::Resolved(TermResolution::Item(item_id)) =
+            reference.resolution.as_ref()
+        else {
+            return None;
+        };
+        let Item::Function(function) = &self.module.items()[*item_id] else {
+            return None;
+        };
+        if function.parameters.len() != 1 {
+            return None;
+        }
+        let parameter = function.parameters.first()?;
+        if let Some(annotation) = parameter.annotation {
+            let parameter_ty = self.lower_annotation(annotation)?;
+            if !parameter_ty.same_shape(ambient) {
+                return None;
+            }
+        }
+
+        let mut env = GateExprEnv::default();
+        env.locals.insert(parameter.binding, ambient.clone());
+        Some(self.infer_expr(function.body, &env, Some(ambient)))
     }
 
     pub(crate) fn infer_gate_stage(
@@ -4016,6 +4725,13 @@ enum SourceOptionTypeCheck {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+enum SourceOptionGenericConstructorRootCheck {
+    Match(GateType),
+    Mismatch(SourceOptionTypeMismatch),
+    Unknown,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct SourceOptionTypeMismatch {
     span: SourceSpan,
     actual: String,
@@ -4024,8 +4740,25 @@ struct SourceOptionTypeMismatch {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct PendingSourceOptionValue {
     field: crate::hir::RecordExprField,
-    expected_surface: SourceContractType,
+    expected_surface: String,
     expected: SourceOptionExpectedType,
+}
+
+fn custom_source_contract_expected(
+    module: &Module,
+    annotation: TypeId,
+    typing: &mut GateTypeContext<'_>,
+) -> Option<(SourceOptionExpectedType, String)> {
+    let expected = custom_source_contract_expected_type(module, annotation)?;
+    let surface = typing.lower_annotation(annotation)?.to_string();
+    Some((expected, surface))
+}
+
+fn custom_source_contract_expected_type(
+    module: &Module,
+    annotation: TypeId,
+) -> Option<SourceOptionExpectedType> {
+    SourceOptionExpectedType::from_hir_type(module, annotation, &HashMap::new())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -5186,7 +5919,16 @@ mod tests {
                 kind: ExprKind::Integer(IntegerLiteral { raw: "1".into() }),
             })
             .expect("expression allocation should fit");
-        let expr = constructor_expr(&mut module, box_item, "Box", vec![element]);
+        let first_expr = constructor_expr(&mut module, box_item, "Box", vec![element]);
+        let second_element = module
+            .alloc_expr(Expr {
+                span: unit_span(),
+                kind: ExprKind::Integer(IntegerLiteral { raw: "2".into() }),
+            })
+            .expect("expression allocation should fit");
+        let second_expr = constructor_expr(&mut module, box_item, "Box", vec![second_element]);
+        let bool_element = builtin_expr(&mut module, BuiltinTerm::True, "True");
+        let mismatched_expr = constructor_expr(&mut module, box_item, "Box", vec![bool_element]);
         let validator = Validator {
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
@@ -5194,28 +5936,47 @@ mod tests {
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
-        assert!(bindings.bind_or_match(
-            SourceTypeParameter::A,
-            &GateType::OpaqueItem {
-                item: box_item,
-                name: "Box".to_owned(),
-                arguments: vec![GateType::Primitive(BuiltinType::Int)],
-            },
-        ));
 
         assert_eq!(
             validator.check_source_option_expr(
-                expr,
+                first_expr,
                 &SourceOptionExpectedType::ContractParameter(SourceTypeParameter::A),
                 &mut typing,
                 &mut bindings,
             ),
             SourceOptionTypeCheck::Match,
         );
+        assert_eq!(
+            bindings.parameter(SourceTypeParameter::A),
+            Some(&GateType::OpaqueItem {
+                item: box_item,
+                name: "Box".to_owned(),
+                arguments: vec![GateType::Primitive(BuiltinType::Int)],
+            }),
+        );
+        assert_eq!(
+            validator.check_source_option_expr(
+                second_expr,
+                &SourceOptionExpectedType::ContractParameter(SourceTypeParameter::A),
+                &mut typing,
+                &mut bindings,
+            ),
+            SourceOptionTypeCheck::Match,
+        );
+        assert!(matches!(
+            validator.check_source_option_expr(
+                mismatched_expr,
+                &SourceOptionExpectedType::ContractParameter(SourceTypeParameter::A),
+                &mut typing,
+                &mut bindings,
+            ),
+            SourceOptionTypeCheck::Mismatch(_),
+        ));
     }
 
     #[test]
-    fn source_option_root_contract_parameters_still_wait_for_generic_constructor_inference() {
+    fn source_option_root_contract_parameters_bind_generic_constructor_roots_from_concrete_fields()
+    {
         let mut module = Module::new(FileId::new(0));
         let payload = type_parameter(&mut module, "A");
         let payload_ref = module
@@ -5227,14 +5988,31 @@ mod tests {
                 )),
             })
             .expect("parameter type allocation should fit");
-        let box_item = push_sum_type(&mut module, "Box", vec![payload], "Box", vec![payload_ref]);
+        let mode_item = push_sum_type(&mut module, "Mode", Vec::new(), "On", Vec::new());
+        let mode_ref = module
+            .alloc_type(TypeNode {
+                span: unit_span(),
+                kind: TypeKind::Name(TypeReference::resolved(
+                    NamePath::from_vec(vec![name("Mode")]).expect("type path should stay valid"),
+                    TypeResolution::Item(mode_item),
+                )),
+            })
+            .expect("mode type allocation should fit");
+        let box_item = push_sum_type(
+            &mut module,
+            "Box",
+            vec![payload],
+            "Box",
+            vec![mode_ref, payload_ref],
+        );
+        let mode_expr = constructor_expr(&mut module, mode_item, "On", Vec::new());
         let element = module
             .alloc_expr(Expr {
                 span: unit_span(),
                 kind: ExprKind::Integer(IntegerLiteral { raw: "1".into() }),
             })
             .expect("expression allocation should fit");
-        let expr = constructor_expr(&mut module, box_item, "Box", vec![element]);
+        let expr = constructor_expr(&mut module, box_item, "Box", vec![mode_expr, element]);
         let validator = Validator {
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
@@ -5246,6 +6024,69 @@ mod tests {
         assert_eq!(
             validator.check_source_option_expr(
                 expr,
+                &SourceOptionExpectedType::ContractParameter(SourceTypeParameter::A),
+                &mut typing,
+                &mut bindings,
+            ),
+            SourceOptionTypeCheck::Match,
+        );
+        assert_eq!(
+            bindings.parameter(SourceTypeParameter::A),
+            Some(&GateType::OpaqueItem {
+                item: box_item,
+                name: "Box".to_owned(),
+                arguments: vec![GateType::Primitive(BuiltinType::Int)],
+            }),
+        );
+    }
+
+    #[test]
+    fn source_option_root_contract_parameters_still_wait_for_nested_generic_constructor_arguments()
+    {
+        let mut module = Module::new(FileId::new(0));
+        let payload = type_parameter(&mut module, "A");
+        let payload_ref = module
+            .alloc_type(TypeNode {
+                span: unit_span(),
+                kind: TypeKind::Name(TypeReference::resolved(
+                    NamePath::from_vec(vec![name("A")]).expect("parameter path should stay valid"),
+                    TypeResolution::TypeParameter(payload),
+                )),
+            })
+            .expect("parameter type allocation should fit");
+        let inner_item = push_sum_type(
+            &mut module,
+            "Inner",
+            vec![payload],
+            "Inner",
+            vec![payload_ref],
+        );
+        let outer_item = push_sum_type(
+            &mut module,
+            "Outer",
+            vec![payload],
+            "Outer",
+            vec![payload_ref],
+        );
+        let element = module
+            .alloc_expr(Expr {
+                span: unit_span(),
+                kind: ExprKind::Integer(IntegerLiteral { raw: "1".into() }),
+            })
+            .expect("expression allocation should fit");
+        let inner_expr = constructor_expr(&mut module, inner_item, "Inner", vec![element]);
+        let outer_expr = constructor_expr(&mut module, outer_item, "Outer", vec![inner_expr]);
+        let validator = Validator {
+            module: &module,
+            mode: ValidationMode::RequireResolvedNames,
+            diagnostics: Vec::new(),
+        };
+        let mut typing = GateTypeContext::new(&module);
+        let mut bindings = SourceOptionTypeBindings::default();
+
+        assert_eq!(
+            validator.check_source_option_expr(
+                outer_expr,
                 &SourceOptionExpectedType::ContractParameter(SourceTypeParameter::A),
                 &mut typing,
                 &mut bindings,
