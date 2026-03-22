@@ -641,7 +641,10 @@ impl Lowerer {
                 }
             }
         } else if let Some(kind) = recurrence_wakeup_decorator_kind(&name) {
-            if !matches!(target, ItemKind::Value | ItemKind::Function | ItemKind::Signal) {
+            if !matches!(
+                target,
+                ItemKind::Value | ItemKind::Function | ItemKind::Signal
+            ) {
                 self.emit_error(
                     decorator.span,
                     format!(
@@ -661,9 +664,9 @@ impl Lowerer {
             match &decorator.payload {
                 syn::DecoratorPayload::Bare => DecoratorPayload::Bare,
                 syn::DecoratorPayload::Arguments(_) | syn::DecoratorPayload::Source(_) => {
-                    DecoratorPayload::Call(self.lower_call_like_decorator_payload(
-                        &decorator.payload,
-                    ))
+                    DecoratorPayload::Call(
+                        self.lower_call_like_decorator_payload(&decorator.payload),
+                    )
                 }
             }
         };
@@ -4172,7 +4175,7 @@ fn recurrence_wakeup_decorator_kind(path: &NamePath) -> Option<RecurrenceWakeupD
     }
 }
 
-fn is_recurrence_wakeup_decorator_name(path: &syn::NamePath) -> bool {
+fn is_recurrence_wakeup_decorator_name(path: &syn::QualifiedName) -> bool {
     matches!(path.as_dotted().as_str(), "recur.timer" | "recur.backoff")
 }
 
@@ -4344,6 +4347,7 @@ mod tests {
             "milestone-2/valid/use-member-imports/main.aivi",
             "milestone-2/valid/custom-source-recurrence-wakeup/main.aivi",
             "milestone-2/valid/source-decorator-signals/main.aivi",
+            "milestone-2/valid/source-option-constructor-applications/main.aivi",
             "milestone-2/valid/applicative-clusters/main.aivi",
             "milestone-2/valid/markup-control-nodes/main.aivi",
             "milestone-2/valid/class-declarations/main.aivi",
@@ -4351,6 +4355,7 @@ mod tests {
             "milestone-2/valid/domain-literal-suffixes/main.aivi",
             "milestone-2/valid/type-kinds/main.aivi",
             "milestone-2/valid/pipe-branch-and-join/main.aivi",
+            "milestone-2/valid/pipe-fanout-carriers/main.aivi",
             "milestone-2/valid/pipe-recurrence-suffix/main.aivi",
             "milestone-2/valid/pipe-recurrence-nonsource-wakeup/main.aivi",
             "milestone-1/valid/records/record_shorthand_and_elision.aivi",
@@ -4518,6 +4523,7 @@ mod tests {
         for path in [
             "milestone-2/invalid/source-option-type-mismatch/main.aivi",
             "milestone-2/invalid/source-option-constructor-mismatch/main.aivi",
+            "milestone-2/invalid/source-option-constructor-application-mismatch/main.aivi",
             "milestone-2/invalid/source-option-list-element-mismatch/main.aivi",
         ] {
             let lowered = lower_fixture(path);
@@ -4530,11 +4536,8 @@ mod tests {
                 .module()
                 .validate(ValidationMode::RequireResolvedNames);
             assert!(
-                report
-                    .diagnostics()
-                    .iter()
-                    .any(|diagnostic| diagnostic.code
-                        == Some(super::code("source-option-type-mismatch"))),
+                report.diagnostics().iter().any(|diagnostic| diagnostic.code
+                    == Some(super::code("source-option-type-mismatch"))),
                 "expected {path} to report source-option-type-mismatch, got diagnostics: {:?}",
                 report.diagnostics()
             );
@@ -4669,8 +4672,7 @@ sig tick : Signal Unit
             "reactive custom source arguments should mark the source metadata as reactive"
         );
         assert_eq!(
-            metadata.custom_recurrence_wakeup,
-            None,
+            metadata.custom_recurrence_wakeup, None,
             "surface lowering should not invent custom wakeup metadata"
         );
         assert_eq!(
@@ -4835,7 +4837,7 @@ sig mixed : Signal Int =
 
 @recur.timer 5s
 @recur.backoff 3x
-val duplicate : Task Int =
+val duplicate : Task Int Int =
     0
      @|> step
      <|@ step
@@ -4894,8 +4896,7 @@ val duplicate : Task Int =
             "source metadata should preserve the provider key"
         );
         assert_eq!(
-            metadata.custom_recurrence_wakeup,
-            None,
+            metadata.custom_recurrence_wakeup, None,
             "lowering should leave custom-provider wakeup hooks empty until provider metadata exists"
         );
         assert!(
@@ -4934,8 +4935,7 @@ val duplicate : Task Int =
             .expect("timer source should still carry source metadata");
         assert_eq!(metadata.provider_key.as_deref(), Some("timer.every"));
         assert_eq!(
-            metadata.custom_recurrence_wakeup,
-            None,
+            metadata.custom_recurrence_wakeup, None,
             "built-in source metadata should not use the custom-provider wakeup hook"
         );
         assert!(

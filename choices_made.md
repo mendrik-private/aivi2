@@ -34,7 +34,7 @@ This file is a plain-language summary of the current implementation choices, wit
 
 16. **Special markup tags:** Tags like `show`, `each`, and `match` are treated as real control features, not normal markup. This makes later UI handling much simpler.
 
-17. **Decorators:** Only `@source` is a real decorator right now. Other decorator-like syntax is rejected instead of being carried around as unknown metadata.
+17. **Decorators:** Only `@source`, `@recur.timer`, and `@recur.backoff` are real decorators right now. `@source` stays signal-only, while the two `@recur.*` forms are closed non-source recurrence-wakeup witnesses on `val`, `fun`, and non-`@source` `sig` declarations. Other decorator-like syntax is rejected instead of being carried around as unknown metadata.
 
 18. **Name lookup and imports:** Name lookup stays intentionally simple: local names and a small set of imports work, but there are no aliases, wildcards, or module-qualified names yet. Built-in names also keep priority where needed.
 
@@ -78,10 +78,22 @@ This file is a plain-language summary of the current implementation choices, wit
 
 38. **Where repeating flows are allowed:** Repeating flows are allowed only where the compiler can already prove they target something supported, such as a signal or task declaration. Everything else is rejected instead of guessed.
 
-39. **Required trigger for repeating flows:** Every repeating flow must have a clear trigger the compiler can already recognize, like a built-in timer or event source. Cases without a provable trigger are rejected for now.
+39. **Required trigger for repeating flows:** Every repeating flow must have a clear trigger the compiler can already recognize, like a built-in timer or event source, reactive custom-source input, or an explicit non-source `@recur.timer` / `@recur.backoff` witness. Cases without a provable trigger are rejected for now.
 
 40. **Resolving source option types:** Source option schemas are now matched to real program types where possible. The compiler still stops short of fully type-checking the option values themselves.
 
 41. **Lowering plan for gates:** The compiler now produces a clear lower-level plan for how gate stages should behave later. If it cannot prove enough today, it records the blocker instead of making something up.
 
 42. **Runtime handoff for signal filters:** Signal-based filters now lower into a simple typed filter description that future runtime code can use. Only clearly safe expression forms are included for now.
+
+43. **Local source option value checks:** Source option values are now checked only in cases the current resolved HIR can really prove: same-module annotations, suffix literals, same-module constructors, list elements built from those, and reactive `Signal` payloads used as ordinary source configuration values. Imported bindings and other harder expressions still wait for fuller expression typing.
+
+44. **Custom `@source` recurrence wakeups:** Custom providers now get the largest honest wakeup slice the current compiler can prove. Reactive source inputs count as an explicit source-event wakeup for any provider, because RFC reconfiguration on upstream signal changes is provider-independent. Non-reactive custom providers still need future provider-contract metadata, so the compiler now carries an explicit custom wakeup hook in resolved source metadata instead of guessing that built-in option names like `retry` or `refreshOn` mean the same thing for custom providers.
+
+45. **Non-source recurrence wakeup witnesses:** Plain repeating `Signal` and `Task` bodies now prove timer/backoff wakeups only through compiler-known `@recur.timer expr` and `@recur.backoff expr` decorators. Those decorators each take exactly one positional witness expression, reject `with { ... }` options or duplicates, and are not allowed on `@source` signals so the source-backed proof story stays separate.
+
+46. **Fan-out carrier handoff:** `*|>` and an immediate `<|*` now use one focused typed handoff. `*|>` is only proven on `List A` or `Signal (List A)`, its body sees `A` as the ambient subject, and the result preserves ordinary-vs-`Signal` carrier shape without flattening nested collections or signals. `<|*` stays grouped with that map segment and is typed as a normal pipe body over the mapped collection, with `Signal` joins lifted pointwise instead of inventing scheduler/runtime nodes early.
+
+47. **Bidirectional source constructors:** Source option constructor expressions are now checked against the already-resolved expected source-contract type. Same-module constructors may be used nullary or fully applied, and constructor field types are instantiated from the expected type arguments only when those field annotations lower back into the current closed source-option type surface. Imported bindings and contract-parameter-driven holes still stay blocked instead of being guessed.
+
+48. **Built-in source recurrence metadata:** Built-in `@source` contracts now carry recurrence-specific metadata in the same typed contract layer as option legality. HIR wakeup validation reads retry/polling/trigger slots and intrinsic timer/event wakeups from that contract metadata instead of hard-coding provider semantics in multiple places, so future custom-provider declarations can plug into one contract-shaped handoff when the language grows a real provider declaration surface.

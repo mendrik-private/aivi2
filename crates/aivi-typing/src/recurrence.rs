@@ -8,7 +8,9 @@
 
 use std::{error::Error, fmt};
 
-use crate::source_contracts::BuiltinSourceProvider;
+use crate::source_contracts::{
+    BuiltinSourceProvider, SourceContractIntrinsicWakeup, SourceOptionWakeupCause,
+};
 
 /// Closed lowering targets that RFC §11.7 currently permits for recurrent pipes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -152,7 +154,9 @@ pub enum RecurrenceWakeupEvidence {
     CustomSource {
         cause: CustomSourceWakeupCause,
     },
-    NonSource { cause: NonSourceWakeupCause },
+    NonSource {
+        cause: NonSourceWakeupCause,
+    },
 }
 
 impl RecurrenceWakeupEvidence {
@@ -370,7 +374,7 @@ impl RecurrenceWakeupPlanner {
     pub const fn plan_source(
         context: SourceRecurrenceWakeupContext,
     ) -> Result<RecurrenceWakeupPlan, RecurrenceWakeupError> {
-        if let Some(cause) = provider_wakeup_cause(context.provider()) {
+        if let Some(cause) = provider_intrinsic_wakeup_cause(context.provider()) {
             return Ok(RecurrenceWakeupPlan::from_evidence(
                 RecurrenceWakeupEvidence::BuiltinSource {
                     provider: context.provider(),
@@ -434,23 +438,25 @@ impl RecurrenceWakeupPlanner {
     }
 }
 
-const fn provider_wakeup_cause(
+pub const fn builtin_source_option_wakeup_cause(
+    cause: SourceOptionWakeupCause,
+) -> BuiltinSourceWakeupCause {
+    match cause {
+        SourceOptionWakeupCause::RetryPolicy => BuiltinSourceWakeupCause::RetryPolicy,
+        SourceOptionWakeupCause::PollingPolicy => BuiltinSourceWakeupCause::PollingPolicy,
+        SourceOptionWakeupCause::TriggerSignal => BuiltinSourceWakeupCause::TriggerSignal,
+    }
+}
+
+const fn provider_intrinsic_wakeup_cause(
     provider: BuiltinSourceProvider,
 ) -> Option<BuiltinSourceWakeupCause> {
-    match provider {
-        BuiltinSourceProvider::TimerEvery | BuiltinSourceProvider::TimerAfter => {
-            Some(BuiltinSourceWakeupCause::ProviderTimer)
-        }
-        BuiltinSourceProvider::FsWatch
-        | BuiltinSourceProvider::SocketConnect
-        | BuiltinSourceProvider::MailboxSubscribe
-        | BuiltinSourceProvider::ProcessSpawn
-        | BuiltinSourceProvider::WindowKeyDown => {
+    match provider.contract().intrinsic_wakeup() {
+        Some(SourceContractIntrinsicWakeup::Timer) => Some(BuiltinSourceWakeupCause::ProviderTimer),
+        Some(SourceContractIntrinsicWakeup::ProviderDefinedTrigger) => {
             Some(BuiltinSourceWakeupCause::ProviderDefinedTrigger)
         }
-        BuiltinSourceProvider::HttpGet
-        | BuiltinSourceProvider::HttpPost
-        | BuiltinSourceProvider::FsRead => None,
+        None => None,
     }
 }
 
@@ -672,9 +678,8 @@ mod tests {
 
     #[test]
     fn explicit_non_source_backoff_witnesses_plan_backoff_wakeups() {
-        let plan =
-            RecurrenceWakeupPlanner::plan_non_source(NonSourceWakeupCause::ExplicitBackoff)
-                .expect("explicit backoff witnesses should prove non-source backoff wakeups");
+        let plan = RecurrenceWakeupPlanner::plan_non_source(NonSourceWakeupCause::ExplicitBackoff)
+            .expect("explicit backoff witnesses should prove non-source backoff wakeups");
         assert_eq!(plan.kind(), RecurrenceWakeupKind::Backoff);
         assert_eq!(
             plan.evidence().non_source_cause(),

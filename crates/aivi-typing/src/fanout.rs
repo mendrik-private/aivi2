@@ -77,9 +77,7 @@ impl FanoutPlanner {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        FanoutCarrier, FanoutPlan, FanoutPlanner, FanoutResultKind, FanoutStageKind,
-    };
+    use super::{FanoutCarrier, FanoutPlan, FanoutPlanner, FanoutResultKind, FanoutStageKind};
 
     #[test]
     fn ordinary_map_stages_return_mapped_collections_without_lift() {

@@ -64,33 +64,41 @@ impl BuiltinSourceProvider {
 
     pub const fn contract(self) -> SourceContract {
         match self {
-            Self::HttpGet => SourceContract::new(self, &HTTP_OPTIONS),
-            Self::HttpPost => SourceContract::new(self, &HTTP_OPTIONS),
-            Self::TimerEvery => SourceContract::new(self, &TIMER_OPTIONS),
-            Self::TimerAfter => SourceContract::new(self, &TIMER_OPTIONS),
-            Self::FsWatch => SourceContract::new(self, &FS_WATCH_OPTIONS),
-            Self::FsRead => SourceContract::new(self, &FS_READ_OPTIONS),
-            Self::SocketConnect => SourceContract::new(self, &SOCKET_OPTIONS),
-            Self::MailboxSubscribe => SourceContract::new(self, &SOCKET_OPTIONS),
-            Self::ProcessSpawn => SourceContract::new(self, &PROCESS_OPTIONS),
-            Self::WindowKeyDown => SourceContract::new(self, &WINDOW_OPTIONS),
+            Self::HttpGet => SourceContract::new(self, &HTTP_OPTIONS, HTTP_RECURRENCE),
+            Self::HttpPost => SourceContract::new(self, &HTTP_OPTIONS, HTTP_RECURRENCE),
+            Self::TimerEvery => SourceContract::new(self, &TIMER_OPTIONS, TIMER_RECURRENCE),
+            Self::TimerAfter => SourceContract::new(self, &TIMER_OPTIONS, TIMER_RECURRENCE),
+            Self::FsWatch => SourceContract::new(self, &FS_WATCH_OPTIONS, FS_WATCH_RECURRENCE),
+            Self::FsRead => SourceContract::new(self, &FS_READ_OPTIONS, FS_READ_RECURRENCE),
+            Self::SocketConnect => SourceContract::new(self, &SOCKET_OPTIONS, SOCKET_RECURRENCE),
+            Self::MailboxSubscribe => {
+                SourceContract::new(self, &SOCKET_OPTIONS, MAILBOX_RECURRENCE)
+            }
+            Self::ProcessSpawn => SourceContract::new(self, &PROCESS_OPTIONS, PROCESS_RECURRENCE),
+            Self::WindowKeyDown => SourceContract::new(self, &WINDOW_OPTIONS, WINDOW_RECURRENCE),
         }
     }
 }
 
-/// Provider-keyed built-in source option contract.
+/// Provider-keyed built-in source contract metadata.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SourceContract {
     provider: BuiltinSourceProvider,
     options: &'static [SourceOptionContract],
+    recurrence: SourceRecurrenceContract,
 }
 
 impl SourceContract {
     pub const fn new(
         provider: BuiltinSourceProvider,
         options: &'static [SourceOptionContract],
+        recurrence: SourceRecurrenceContract,
     ) -> Self {
-        Self { provider, options }
+        Self {
+            provider,
+            options,
+            recurrence,
+        }
     }
 
     pub const fn provider(self) -> BuiltinSourceProvider {
@@ -103,6 +111,18 @@ impl SourceContract {
 
     pub fn option(self, name: &str) -> Option<&'static SourceOptionContract> {
         self.options.iter().find(|option| option.name() == name)
+    }
+
+    pub const fn recurrence(self) -> SourceRecurrenceContract {
+        self.recurrence
+    }
+
+    pub const fn intrinsic_wakeup(self) -> Option<SourceContractIntrinsicWakeup> {
+        self.recurrence.intrinsic_wakeup()
+    }
+
+    pub fn wakeup_option(self, name: &str) -> Option<&'static SourceOptionWakeupContract> {
+        self.recurrence.option(name)
     }
 }
 
@@ -125,6 +145,75 @@ impl SourceOptionContract {
     pub const fn ty(self) -> SourceContractType {
         self.ty
     }
+}
+
+/// Built-in recurrence semantics attached to a source provider contract.
+///
+/// This stays in the typed source-contract layer so later HIR validation does not hard-code
+/// provider wakeup behavior separately from option legality. Future custom-provider declarations
+/// can populate the same shape once the language has a real declaration surface for them.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SourceRecurrenceContract {
+    intrinsic_wakeup: Option<SourceContractIntrinsicWakeup>,
+    option_wakeups: &'static [SourceOptionWakeupContract],
+}
+
+impl SourceRecurrenceContract {
+    pub const fn new(
+        intrinsic_wakeup: Option<SourceContractIntrinsicWakeup>,
+        option_wakeups: &'static [SourceOptionWakeupContract],
+    ) -> Self {
+        Self {
+            intrinsic_wakeup,
+            option_wakeups,
+        }
+    }
+
+    pub const fn intrinsic_wakeup(self) -> Option<SourceContractIntrinsicWakeup> {
+        self.intrinsic_wakeup
+    }
+
+    pub fn option(self, name: &str) -> Option<&'static SourceOptionWakeupContract> {
+        self.option_wakeups
+            .iter()
+            .find(|option| option.name() == name)
+    }
+}
+
+/// Intrinsic recurrent wakeup that the provider guarantees without extra option slots.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum SourceContractIntrinsicWakeup {
+    Timer,
+    ProviderDefinedTrigger,
+}
+
+/// One provider-defined option slot that proves a recurrent wakeup.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SourceOptionWakeupContract {
+    name: &'static str,
+    cause: SourceOptionWakeupCause,
+}
+
+impl SourceOptionWakeupContract {
+    pub const fn new(name: &'static str, cause: SourceOptionWakeupCause) -> Self {
+        Self { name, cause }
+    }
+
+    pub const fn name(self) -> &'static str {
+        self.name
+    }
+
+    pub const fn cause(self) -> SourceOptionWakeupCause {
+        self.cause
+    }
+}
+
+/// Closed wakeup causes that can be attached to source option slots today.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum SourceOptionWakeupCause {
+    RetryPolicy,
+    PollingPolicy,
+    TriggerSignal,
 }
 
 /// Focused type surface used by built-in source option contracts.
@@ -341,6 +430,12 @@ const HTTP_OPTIONS: [SourceOptionContract; 9] = [
     ),
 ];
 
+const HTTP_WAKEUP_OPTIONS: [SourceOptionWakeupContract; 3] = [
+    SourceOptionWakeupContract::new("retry", SourceOptionWakeupCause::RetryPolicy),
+    SourceOptionWakeupContract::new("refreshOn", SourceOptionWakeupCause::TriggerSignal),
+    SourceOptionWakeupContract::new("refreshEvery", SourceOptionWakeupCause::PollingPolicy),
+];
+
 const TIMER_OPTIONS: [SourceOptionContract; 4] = [
     SourceOptionContract::new("immediate", SourceContractType::bool()),
     SourceOptionContract::new(
@@ -377,6 +472,11 @@ const FS_READ_OPTIONS: [SourceOptionContract; 4] = [
     ),
     SourceOptionContract::new("readOnStart", SourceContractType::bool()),
 ];
+
+const FS_READ_WAKEUP_OPTIONS: [SourceOptionWakeupContract; 1] = [SourceOptionWakeupContract::new(
+    "reloadOn",
+    SourceOptionWakeupCause::TriggerSignal,
+)];
 
 const SOCKET_OPTIONS: [SourceOptionContract; 5] = [
     SourceOptionContract::new(
@@ -418,11 +518,43 @@ const PROCESS_OPTIONS: [SourceOptionContract; 5] = [
     ),
 ];
 
+const PROCESS_WAKEUP_OPTIONS: [SourceOptionWakeupContract; 1] = [SourceOptionWakeupContract::new(
+    "restartOn",
+    SourceOptionWakeupCause::TriggerSignal,
+)];
+
 const WINDOW_OPTIONS: [SourceOptionContract; 3] = [
     SourceOptionContract::new("capture", SourceContractType::bool()),
     SourceOptionContract::new("repeat", SourceContractType::bool()),
     SourceOptionContract::new("focusOnly", SourceContractType::bool()),
 ];
+
+const HTTP_RECURRENCE: SourceRecurrenceContract =
+    SourceRecurrenceContract::new(None, &HTTP_WAKEUP_OPTIONS);
+const TIMER_RECURRENCE: SourceRecurrenceContract =
+    SourceRecurrenceContract::new(Some(SourceContractIntrinsicWakeup::Timer), &[]);
+const FS_WATCH_RECURRENCE: SourceRecurrenceContract = SourceRecurrenceContract::new(
+    Some(SourceContractIntrinsicWakeup::ProviderDefinedTrigger),
+    &[],
+);
+const FS_READ_RECURRENCE: SourceRecurrenceContract =
+    SourceRecurrenceContract::new(None, &FS_READ_WAKEUP_OPTIONS);
+const SOCKET_RECURRENCE: SourceRecurrenceContract = SourceRecurrenceContract::new(
+    Some(SourceContractIntrinsicWakeup::ProviderDefinedTrigger),
+    &[],
+);
+const MAILBOX_RECURRENCE: SourceRecurrenceContract = SourceRecurrenceContract::new(
+    Some(SourceContractIntrinsicWakeup::ProviderDefinedTrigger),
+    &[],
+);
+const PROCESS_RECURRENCE: SourceRecurrenceContract = SourceRecurrenceContract::new(
+    Some(SourceContractIntrinsicWakeup::ProviderDefinedTrigger),
+    &PROCESS_WAKEUP_OPTIONS,
+);
+const WINDOW_RECURRENCE: SourceRecurrenceContract = SourceRecurrenceContract::new(
+    Some(SourceContractIntrinsicWakeup::ProviderDefinedTrigger),
+    &[],
+);
 
 fn scalar_kind_expr(name: &str, store: &mut KindStore) -> KindExprId {
     let constructor = store.add_constructor(name.to_owned(), Kind::Type);
@@ -513,6 +645,54 @@ mod tests {
         assert!(timer.option("jitterMs").is_none());
         assert!(http.option("refreshEvery").is_some());
         assert!(http.option("refreshEveryMs").is_none());
+    }
+
+    #[test]
+    fn exposes_builtin_recurrence_contract_metadata() {
+        let http = BuiltinSourceProvider::HttpGet.contract();
+        let timer = BuiltinSourceProvider::TimerEvery.contract();
+        let fs_read = BuiltinSourceProvider::FsRead.contract();
+        let process = BuiltinSourceProvider::ProcessSpawn.contract();
+
+        assert_eq!(http.intrinsic_wakeup(), None);
+        assert_eq!(
+            http.wakeup_option("retry").map(|option| option.cause()),
+            Some(SourceOptionWakeupCause::RetryPolicy)
+        );
+        assert_eq!(
+            http.wakeup_option("refreshEvery")
+                .map(|option| option.cause()),
+            Some(SourceOptionWakeupCause::PollingPolicy)
+        );
+        assert_eq!(
+            http.wakeup_option("refreshOn").map(|option| option.cause()),
+            Some(SourceOptionWakeupCause::TriggerSignal)
+        );
+
+        assert_eq!(
+            timer.intrinsic_wakeup(),
+            Some(SourceContractIntrinsicWakeup::Timer)
+        );
+        assert_eq!(timer.wakeup_option("immediate"), None);
+
+        assert_eq!(fs_read.intrinsic_wakeup(), None);
+        assert_eq!(
+            fs_read
+                .wakeup_option("reloadOn")
+                .map(|option| option.cause()),
+            Some(SourceOptionWakeupCause::TriggerSignal)
+        );
+
+        assert_eq!(
+            process.intrinsic_wakeup(),
+            Some(SourceContractIntrinsicWakeup::ProviderDefinedTrigger)
+        );
+        assert_eq!(
+            process
+                .wakeup_option("restartOn")
+                .map(|option| option.cause()),
+            Some(SourceOptionWakeupCause::TriggerSignal)
+        );
     }
 
     #[test]

@@ -1,0 +1,28 @@
+type HttpError =
+  | Timeout
+
+type User = {
+    id: Int
+}
+
+type DecodeMode =
+  | Strict
+  | Permissive
+
+type Map K V =
+  | EmptyMap
+  | Entry K V (Map K V)
+
+domain Duration over Int
+    literal s : Int -> Duration
+
+domain Retry over Int
+    literal x : Int -> Retry
+
+@source http.get "/users" with {
+    headers: Entry "Authorization" "Bearer demo" EmptyMap,
+    decode: Strict,
+    retry: 3x,
+    timeout: 5s
+}
+sig users : Signal (Result HttpError (List User))

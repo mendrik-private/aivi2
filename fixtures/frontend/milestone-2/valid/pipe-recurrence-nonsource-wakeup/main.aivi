@@ -14,7 +14,7 @@ sig polled : Signal Int =
      <|@ step
 
 @recur.backoff 3x
-val retried : Task Int =
+val retried : Task Int Int =
     0
      @|> step
      <|@ step

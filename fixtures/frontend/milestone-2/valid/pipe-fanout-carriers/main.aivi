@@ -1,0 +1,33 @@
+type User = {
+    active: Bool,
+    email: Text
+}
+
+fun joinEmails:Text #items:List Text =>
+    "joined"
+
+val users:List User = [
+    { active: True, email: "ada@example.com" }
+]
+
+val emails:List Text =
+    users
+     *|> .email
+
+val joinedEmails:Text =
+    users
+     *|> .email
+     <|* joinEmails
+
+sig liveUsers:Signal (List User) = [
+    { active: True, email: "ada@example.com" }
+]
+
+sig liveEmails:Signal (List Text) =
+    liveUsers
+     *|> .email
+
+sig liveJoinedEmails:Signal Text =
+    liveUsers
+     *|> .email
+     <|* joinEmails

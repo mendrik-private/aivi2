@@ -1,0 +1,10 @@
+fun step #value =>
+    value
+
+sig refresh = 0
+
+@source custom.feed refresh
+sig updates : Signal Int =
+    0
+     @|> step
+     <|@ step

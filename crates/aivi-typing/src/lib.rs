@@ -31,10 +31,11 @@ pub use recurrence::{
     BuiltinSourceWakeupCause, CustomSourceRecurrenceWakeupContext, CustomSourceWakeupCause,
     NonSourceWakeupCause, RecurrencePlan, RecurrencePlanner, RecurrenceTarget,
     RecurrenceTargetError, RecurrenceTargetEvidence, RecurrenceWakeupError,
-    RecurrenceWakeupEvidence, RecurrenceWakeupKind, RecurrenceWakeupPlan,
-    RecurrenceWakeupPlanner, SourceRecurrenceWakeupContext,
+    RecurrenceWakeupEvidence, RecurrenceWakeupKind, RecurrenceWakeupPlan, RecurrenceWakeupPlanner,
+    SourceRecurrenceWakeupContext, builtin_source_option_wakeup_cause,
 };
 pub use source_contracts::{
-    BuiltinSourceProvider, SourceContract, SourceContractType, SourceNominalType,
-    SourceOptionContract, SourceTypeAtom, SourceTypeParameter,
+    BuiltinSourceProvider, SourceContract, SourceContractIntrinsicWakeup, SourceContractType,
+    SourceNominalType, SourceOptionContract, SourceOptionWakeupCause, SourceOptionWakeupContract,
+    SourceRecurrenceContract, SourceTypeAtom, SourceTypeParameter,
 };

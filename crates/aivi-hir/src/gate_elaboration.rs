@@ -390,10 +390,18 @@ fn collect_gate_pipe(
                     GateStageOutcome::Blocked(_) => None,
                 };
             }
+            PipeStageKind::Map { expr } => {
+                current = current
+                    .as_ref()
+                    .and_then(|subject| typing.infer_fanout_map_stage(*expr, env, subject));
+            }
+            PipeStageKind::FanIn { expr } => {
+                current = current
+                    .as_ref()
+                    .and_then(|subject| typing.infer_fanin_stage(*expr, env, subject));
+            }
             PipeStageKind::Case { .. }
-            | PipeStageKind::Map { .. }
             | PipeStageKind::Apply { .. }
-            | PipeStageKind::FanIn { .. }
             | PipeStageKind::Truthy { .. }
             | PipeStageKind::Falsy { .. }
             | PipeStageKind::RecurStart { .. }
@@ -1104,6 +1112,58 @@ sig activeUsers:Signal User =
                 }
             }
             other => panic!("expected signal filter plan, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn keeps_gate_subject_tracking_through_fanout_segments() {
+        let lowered = lower_text(
+            "gate-after-fanout.aivi",
+            r#"
+type User = {
+    email: Text
+}
+
+fun joinEmails:Text #items:List Text =>
+    "joined"
+
+val users:List User = [
+    { email: "ada@example.com" }
+]
+
+val maybeJoined:Option Text =
+    users
+     *|> .email
+     <|* joinEmails
+     ?|> True
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "gate-after-fanout example should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_gates(lowered.module());
+        let ordinary = report
+            .stages()
+            .iter()
+            .find(|stage| item_name(lowered.module(), stage.owner) == "maybeJoined")
+            .expect("expected ordinary gate after fanout");
+
+        match &ordinary.outcome {
+            GateStageOutcome::Ordinary(stage) => {
+                assert_eq!(
+                    stage.input_subject,
+                    GateType::Primitive(BuiltinType::Text),
+                    "gate should see the joined fanout result, not lose the pipe subject"
+                );
+                assert_eq!(
+                    stage.result_type,
+                    GateType::Option(Box::new(GateType::Primitive(BuiltinType::Text)))
+                );
+            }
+            other => panic!("expected ordinary gate after fanout, found {other:?}"),
         }
     }
 

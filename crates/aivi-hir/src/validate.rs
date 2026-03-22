@@ -2,23 +2,23 @@ use std::{collections::HashMap, fmt};
 
 use aivi_base::{Diagnostic, DiagnosticCode, DiagnosticLabel, SourceSpan};
 use aivi_typing::{
-    BuiltinSourceProvider, FanoutCarrier, FanoutPlan, FanoutPlanner, FanoutResultKind,
-    FanoutStageKind, GateCarrier, GatePlanner, GateResultKind, Kind, KindCheckError,
-    KindCheckErrorKind, KindChecker, KindExprId, KindParameterId as TypingKindParameterId,
-    KindRecordField, KindStore, NonSourceWakeupCause, RecurrencePlanner,
-    RecurrenceTargetEvidence, RecurrenceWakeupPlanner, SourceContractType,
-    SourceRecurrenceWakeupContext,
+    BuiltinSourceProvider, BuiltinSourceWakeupCause, CustomSourceRecurrenceWakeupContext,
+    FanoutCarrier, FanoutPlan, FanoutPlanner, FanoutResultKind, FanoutStageKind, GateCarrier,
+    GatePlanner, GateResultKind, Kind, KindCheckError, KindCheckErrorKind, KindChecker, KindExprId,
+    KindParameterId as TypingKindParameterId, KindRecordField, KindStore, NonSourceWakeupCause,
+    RecurrencePlanner, RecurrenceTargetEvidence, RecurrenceWakeupKind, RecurrenceWakeupPlanner,
+    SourceContractType, SourceRecurrenceWakeupContext, builtin_source_option_wakeup_cause,
 };
 
 use crate::{
     arena::{Arena, ArenaId},
     hir::{
-        ApplicativeSpineHead, BuiltinType, ControlNode, ControlNodeKind, DecoratorPayload,
-        DomainMemberKind, ExprKind, Item, LiteralSuffixResolution, MarkupAttributeValue,
-        MarkupNodeKind, Module, Name, NamePath, PatternKind, PipeStageKind,
-        RecurrenceWakeupDecoratorKind, ResolutionState, SignalItem, SourceDecorator,
-        SourceMetadata, TermReference, TermResolution, TextLiteral, TextSegment, TypeItemBody,
-        TypeKind, TypeReference, TypeResolution,
+        ApplicativeSpineHead, BuiltinType, ControlNode, ControlNodeKind,
+        CustomSourceRecurrenceWakeup, DecoratorPayload, DomainMemberKind, ExprKind, Item,
+        LiteralSuffixResolution, MarkupAttributeValue, MarkupNodeKind, Module, Name, NamePath,
+        PatternKind, PipeStageKind, RecurrenceWakeupDecoratorKind, ResolutionState, SignalItem,
+        SourceDecorator, SourceMetadata, TermReference, TermResolution, TextLiteral, TextSegment,
+        TypeItemBody, TypeKind, TypeReference, TypeResolution,
     },
     ids::{
         BindingId, ClusterId, ControlNodeId, DecoratorId, ExprId, ImportId, ItemId, MarkupNodeId,
@@ -959,7 +959,8 @@ impl Validator<'_> {
         expected_resolved: &ResolvedSourceContractType,
         typing: &mut GateTypeContext<'_>,
     ) {
-        let Some(expected) = SourceOptionExpectedType::from_resolved(self.module, expected_resolved)
+        let Some(expected) =
+            SourceOptionExpectedType::from_resolved(self.module, expected_resolved)
         else {
             return;
         };
@@ -985,10 +986,10 @@ impl Validator<'_> {
                 format!("`{}` expects `{expected_surface}`", field.label.text()),
             )
             .with_note(
-                "current source option typing checks only the resolved-HIR cases it can prove honestly: same-module annotations, suffixed domain literals, same-module nullary constructors, list elements, and reactive `Signal` payloads used as ordinary source configuration values",
+                "current source option typing checks only the resolved-HIR cases it can prove honestly: same-module annotations, suffixed domain literals, same-module constructors checked against the expected contract type, list elements, and reactive `Signal` payloads used as ordinary source configuration values",
             )
             .with_note(
-                "imported values, constructor applications, and otherwise unproven expressions still wait for fuller ordinary expression typing",
+                "imported values, constructor fields whose annotations lower outside the current source-option type surface, and otherwise unproven expressions still wait for fuller ordinary expression typing",
             ),
         );
     }
@@ -1008,7 +1009,10 @@ impl Validator<'_> {
         }
 
         match &self.module.exprs()[expr_id].kind {
-            ExprKind::Name(reference) => self.check_source_option_name(reference, expected),
+            ExprKind::Name(reference) => self.check_source_option_name(reference, expected, typing),
+            ExprKind::Apply { callee, arguments } => {
+                self.check_source_option_apply(*callee, arguments, expected, typing)
+            }
             ExprKind::List(elements) => {
                 let SourceOptionExpectedType::List(element_expected) = expected else {
                     return SourceOptionTypeCheck::Unknown;
@@ -1027,40 +1031,125 @@ impl Validator<'_> {
     ) -> Option<SourceOptionTypeCheck> {
         let info = typing.infer_expr(expr_id, &GateExprEnv::default(), None);
         let actual = info.ty?;
-        Some(if source_option_expected_matches_gate_type(expected, &actual) {
-            SourceOptionTypeCheck::Match
-        } else {
-            SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
-                span: self.module.exprs()[expr_id].span,
-                actual: actual.to_string(),
-            })
-        })
+        Some(
+            if source_option_expected_matches_gate_type(expected, &actual) {
+                SourceOptionTypeCheck::Match
+            } else {
+                SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
+                    span: self.module.exprs()[expr_id].span,
+                    actual: actual.to_string(),
+                })
+            },
+        )
     }
 
     fn check_source_option_name(
         &self,
         reference: &TermReference,
         expected: &SourceOptionExpectedType,
+        typing: &mut GateTypeContext<'_>,
+    ) -> SourceOptionTypeCheck {
+        self.check_source_option_constructor(reference, &[], expected, typing)
+    }
+
+    fn check_source_option_apply(
+        &self,
+        callee: ExprId,
+        arguments: &crate::NonEmpty<ExprId>,
+        expected: &SourceOptionExpectedType,
+        typing: &mut GateTypeContext<'_>,
+    ) -> SourceOptionTypeCheck {
+        let ExprKind::Name(reference) = &self.module.exprs()[callee].kind else {
+            return SourceOptionTypeCheck::Unknown;
+        };
+        let arguments = arguments.iter().copied().collect::<Vec<_>>();
+        self.check_source_option_constructor(reference, &arguments, expected, typing)
+    }
+
+    fn check_source_option_constructor(
+        &self,
+        reference: &TermReference,
+        arguments: &[ExprId],
+        expected: &SourceOptionExpectedType,
+        typing: &mut GateTypeContext<'_>,
     ) -> SourceOptionTypeCheck {
         let Some(actual) = self.source_constructor_actual(reference) else {
             return SourceOptionTypeCheck::Unknown;
         };
 
-        if actual.field_count == 0 {
-            if expected.matches_named_item(actual.parent_item) {
-                SourceOptionTypeCheck::Match
-            } else {
-                SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
-                    span: reference.path.span(),
-                    actual: actual.parent_name,
-                })
-            }
-        } else {
-            SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
+        if arguments.len() != actual.field_types.len() {
+            return SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
                 span: reference.path.span(),
                 actual: format!("constructor `{}`", actual.constructor_name),
-            })
+            });
         }
+
+        if !expected.matches_named_item(actual.parent_item) {
+            return SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
+                span: reference.path.span(),
+                actual: actual.parent_name,
+            });
+        }
+
+        if actual.field_types.is_empty() {
+            return SourceOptionTypeCheck::Match;
+        }
+
+        let Some(expected_named) = expected.as_named() else {
+            return SourceOptionTypeCheck::Unknown;
+        };
+        let Some(field_expectations) = self.source_option_constructor_field_expectations(
+            actual.parent_item,
+            expected_named,
+            &actual.field_types,
+        ) else {
+            return SourceOptionTypeCheck::Unknown;
+        };
+
+        let mut saw_unknown = false;
+        for (argument, field_expected) in arguments.iter().zip(&field_expectations) {
+            match self.check_source_option_expr(*argument, field_expected, typing) {
+                SourceOptionTypeCheck::Match => {}
+                SourceOptionTypeCheck::Mismatch(mismatch) => {
+                    return SourceOptionTypeCheck::Mismatch(mismatch);
+                }
+                SourceOptionTypeCheck::Unknown => saw_unknown = true,
+            }
+        }
+
+        if saw_unknown {
+            SourceOptionTypeCheck::Unknown
+        } else {
+            SourceOptionTypeCheck::Match
+        }
+    }
+
+    fn source_option_constructor_field_expectations(
+        &self,
+        parent_item: ItemId,
+        expected_parent: &SourceOptionNamedType,
+        field_types: &[TypeId],
+    ) -> Option<Vec<SourceOptionExpectedType>> {
+        let Item::Type(item) = &self.module.items()[parent_item] else {
+            return None;
+        };
+        if item.parameters.len() != expected_parent.arguments.len() {
+            return None;
+        }
+
+        let substitutions = item
+            .parameters
+            .iter()
+            .copied()
+            .zip(expected_parent.arguments.iter().cloned())
+            .collect::<HashMap<_, _>>();
+
+        field_types
+            .iter()
+            .map(|field| {
+                SourceOptionExpectedType::from_hir_type(self.module, *field, &substitutions)
+            })
+            .collect()
     }
 
     fn check_source_option_list(
@@ -1092,7 +1181,8 @@ impl Validator<'_> {
         &self,
         reference: &TermReference,
     ) -> Option<SourceOptionConstructorActual> {
-        let ResolutionState::Resolved(TermResolution::Item(item_id)) = reference.resolution.as_ref()
+        let ResolutionState::Resolved(TermResolution::Item(item_id)) =
+            reference.resolution.as_ref()
         else {
             return None;
         };
@@ -1110,7 +1200,7 @@ impl Validator<'_> {
             parent_item: *item_id,
             parent_name: item.name.text().to_owned(),
             constructor_name: constructor_name.to_owned(),
-            field_count: variant.fields.len(),
+            field_types: variant.fields.clone(),
         })
     }
 
@@ -1418,12 +1508,17 @@ impl Validator<'_> {
                     self.emit_missing_recurrence_wakeup(start_span, wakeup);
                 }
             }
+            Some(RecurrenceWakeupHint::CustomSource { context, .. }) => {
+                if RecurrenceWakeupPlanner::plan_custom_source(*context).is_err() {
+                    self.emit_missing_recurrence_wakeup(start_span, wakeup);
+                }
+            }
             Some(RecurrenceWakeupHint::NonSource(cause)) => {
                 if RecurrenceWakeupPlanner::plan_non_source(*cause).is_err() {
                     self.emit_missing_recurrence_wakeup(start_span, wakeup);
                 }
             }
-            Some(RecurrenceWakeupHint::CustomSource { .. }) | None => {
+            None => {
                 self.emit_missing_recurrence_wakeup(start_span, wakeup);
             }
         }
@@ -1435,7 +1530,7 @@ impl Validator<'_> {
     ) -> Option<RecurrenceWakeupHint> {
         decorators.iter().find_map(|decorator_id| {
             let decorator = self.module.decorators().get(*decorator_id)?;
-            let DecoratorPayload::RecurrenceWakeup(wakeup) = decorator.payload else {
+            let DecoratorPayload::RecurrenceWakeup(ref wakeup) = decorator.payload else {
                 return None;
             };
             Some(RecurrenceWakeupHint::NonSource(match wakeup.kind {
@@ -1450,6 +1545,7 @@ impl Validator<'_> {
             return self.recurrence_wakeup_hint_for_decorators(&item.header.decorators);
         };
         let provider = source.provider.as_ref()?;
+        let metadata = item.source_metadata.as_ref();
         let provider_key = provider
             .segments()
             .iter()
@@ -1459,27 +1555,42 @@ impl Validator<'_> {
         let provider = match BuiltinSourceProvider::parse(&provider_key) {
             Some(provider) => provider,
             None => {
+                let mut context = CustomSourceRecurrenceWakeupContext::new();
+                if metadata.is_some_and(|metadata| metadata.is_reactive) {
+                    context = context.with_reactive_inputs();
+                }
+                if let Some(wakeup) =
+                    metadata.and_then(|metadata| metadata.custom_recurrence_wakeup)
+                {
+                    context = context.with_declared_wakeup(custom_source_wakeup_kind(wakeup));
+                }
                 return Some(RecurrenceWakeupHint::CustomSource {
                     provider_path: provider.clone(),
+                    context,
                 });
             }
         };
         let mut context = SourceRecurrenceWakeupContext::new(provider);
-        if item
-            .source_metadata
-            .as_ref()
-            .is_some_and(|metadata| metadata.is_reactive)
-        {
+        if metadata.is_some_and(|metadata| metadata.is_reactive) {
             context = context.with_reactive_inputs();
         }
+        let contract = provider.contract();
         if let Some(options) = source.options {
             if let ExprKind::Record(record) = &self.module.exprs()[options].kind {
                 for field in &record.fields {
-                    context = match field.label.text() {
-                        "retry" => context.with_retry_policy(),
-                        "refreshEvery" => context.with_polling_policy(),
-                        "refreshOn" | "reloadOn" | "restartOn" => context.with_signal_trigger(),
-                        _ => context,
+                    let Some(cause) = contract
+                        .wakeup_option(field.label.text())
+                        .map(|option| builtin_source_option_wakeup_cause(option.cause()))
+                    else {
+                        continue;
+                    };
+                    context = match cause {
+                        BuiltinSourceWakeupCause::RetryPolicy => context.with_retry_policy(),
+                        BuiltinSourceWakeupCause::PollingPolicy => context.with_polling_policy(),
+                        BuiltinSourceWakeupCause::TriggerSignal => context.with_signal_trigger(),
+                        BuiltinSourceWakeupCause::ProviderTimer
+                        | BuiltinSourceWakeupCause::ReactiveInputs
+                        | BuiltinSourceWakeupCause::ProviderDefinedTrigger => context,
                     };
                 }
             }
@@ -1583,18 +1694,21 @@ impl Validator<'_> {
                 };
                 diagnostic = diagnostic.with_primary_label(span, label).with_note(note);
             }
-            Some(RecurrenceWakeupHint::CustomSource { provider_path }) => {
+            Some(RecurrenceWakeupHint::CustomSource {
+                provider_path,
+                context: _,
+            }) => {
                 diagnostic = diagnostic
                     .with_primary_label(
                         span,
-                        "the compiler cannot yet prove a recurrence wakeup from this custom `@source` provider",
+                        "this custom `@source` recurrence still needs reactive source inputs or explicit provider wakeup metadata",
                     )
                     .with_secondary_label(
                         provider_path.span(),
-                        "current recurrence wakeup checks know only compiler-built-in source provider semantics",
+                        "custom providers do not inherit built-in `retry` / `refreshEvery` / `refreshOn` semantics without their own wakeup contract",
                     )
                     .with_note(
-                        "custom provider-defined triggers remain deferred until source-provider contracts carry explicit wakeup metadata",
+                        "reactive source arguments/options already prove source-event wakeups for any provider; timer/backoff/provider-trigger proof still needs future source-provider metadata to populate the custom wakeup hook",
                     );
             }
             Some(RecurrenceWakeupHint::NonSource(cause)) => {
@@ -1665,11 +1779,11 @@ impl Validator<'_> {
                     current = typing.infer_gate_stage(*expr, env, &subject);
                 }
                 PipeStageKind::Map { expr } => {
-                    current = self.validate_fanout_map_stage(stage.span, *expr, env, &subject, typing);
+                    current =
+                        self.validate_fanout_map_stage(stage.span, *expr, env, &subject, typing);
                 }
                 PipeStageKind::FanIn { expr } => {
-                    current =
-                        self.validate_fanin_stage(stage.span, *expr, env, &subject, typing);
+                    current = self.validate_fanin_stage(stage.span, *expr, env, &subject, typing);
                 }
                 PipeStageKind::Case { .. }
                 | PipeStageKind::Apply { .. }
@@ -1771,10 +1885,7 @@ impl Validator<'_> {
             return None;
         }
         let body_ty = body_info.ty?;
-        Some(typing.apply_fanout_plan(
-            FanoutPlanner::plan(FanoutStageKind::Map, carrier),
-            body_ty,
-        ))
+        Some(typing.apply_fanout_plan(FanoutPlanner::plan(FanoutStageKind::Map, carrier), body_ty))
     }
 
     fn validate_fanin_stage(
@@ -1798,10 +1909,7 @@ impl Validator<'_> {
             return None;
         }
         let body_ty = body_info.ty?;
-        Some(typing.apply_fanout_plan(
-            FanoutPlanner::plan(FanoutStageKind::Join, carrier),
-            body_ty,
-        ))
+        Some(typing.apply_fanout_plan(FanoutPlanner::plan(FanoutStageKind::Join, carrier), body_ty))
     }
 
     fn validate_gate_stage(
@@ -2363,6 +2471,31 @@ impl Validator<'_> {
                 }
             }
         }
+        if metadata.custom_recurrence_wakeup.is_some() {
+            match metadata.provider_key.as_deref() {
+                Some(provider_key) if BuiltinSourceProvider::parse(provider_key).is_none() => {}
+                Some(_) => self.diagnostics.push(
+                    Diagnostic::error(
+                        "built-in source metadata must not carry custom recurrence wakeup hooks",
+                    )
+                    .with_code(code("invalid-custom-source-wakeup"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "remove the custom wakeup hook and rely on the built-in source planner instead",
+                    )),
+                ),
+                None => self.diagnostics.push(
+                    Diagnostic::error(
+                        "custom recurrence wakeup metadata requires a preserved source provider key",
+                    )
+                    .with_code(code("invalid-custom-source-wakeup"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "store the custom provider key before attaching custom wakeup metadata",
+                    )),
+                ),
+            }
+        }
     }
 
     fn check_signal_dependencies(&mut self, span: SourceSpan, dependencies: &[ItemId]) {
@@ -2802,6 +2935,12 @@ pub(crate) enum GateIssue {
     },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FanoutIssueContext {
+    MapElement,
+    JoinCollection,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum RecurrenceTargetHint {
     Evidence(RecurrenceTargetEvidence),
@@ -2812,7 +2951,10 @@ enum RecurrenceTargetHint {
 enum RecurrenceWakeupHint {
     BuiltinSource(SourceRecurrenceWakeupContext),
     NonSource(NonSourceWakeupCause),
-    CustomSource { provider_path: NamePath },
+    CustomSource {
+        provider_path: NamePath,
+        context: CustomSourceRecurrenceWakeupContext,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2877,6 +3019,27 @@ impl GateType {
         match self {
             Self::Signal(inner) => inner,
             other => other,
+        }
+    }
+
+    pub(crate) fn fanout_carrier(&self) -> Option<FanoutCarrier> {
+        match self {
+            Self::List(_) => Some(FanoutCarrier::Ordinary),
+            Self::Signal(inner) if matches!(inner.as_ref(), Self::List(_)) => {
+                Some(FanoutCarrier::Signal)
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn fanout_element(&self) -> Option<&Self> {
+        match self {
+            Self::List(element) => Some(element),
+            Self::Signal(inner) => match inner.as_ref() {
+                Self::List(element) => Some(element),
+                _ => None,
+            },
+            _ => None,
         }
     }
 
@@ -2955,8 +3118,32 @@ impl<'a> GateTypeContext<'a> {
         }
     }
 
+    pub(crate) fn fanout_carrier(&self, subject: &GateType) -> Option<FanoutCarrier> {
+        subject.fanout_carrier()
+    }
+
     pub(crate) fn gate_carrier(&self, subject: &GateType) -> GateCarrier {
         subject.gate_carrier()
+    }
+
+    pub(crate) fn apply_fanout_plan(&self, plan: FanoutPlan, subject: GateType) -> GateType {
+        match plan.result() {
+            FanoutResultKind::MappedCollection => {
+                let mapped_collection = GateType::List(Box::new(subject));
+                if plan.lifts_pointwise() {
+                    GateType::Signal(Box::new(mapped_collection))
+                } else {
+                    mapped_collection
+                }
+            }
+            FanoutResultKind::JoinedValue => {
+                if plan.lifts_pointwise() {
+                    GateType::Signal(Box::new(subject))
+                } else {
+                    subject
+                }
+            }
+        }
     }
 
     pub(crate) fn apply_gate_plan(
@@ -3472,6 +3659,58 @@ impl<'a> GateTypeContext<'a> {
         info
     }
 
+    pub(crate) fn infer_gate_stage(
+        &mut self,
+        expr_id: ExprId,
+        env: &GateExprEnv,
+        subject: &GateType,
+    ) -> Option<GateType> {
+        let predicate = self.infer_pipe_body(expr_id, env, subject);
+        if !predicate.issues.is_empty()
+            || predicate.contains_signal
+            || predicate.ty.as_ref().is_some_and(GateType::is_signal)
+        {
+            return None;
+        }
+        if let Some(predicate_ty) = predicate.ty.as_ref() {
+            if !predicate_ty.is_bool() {
+                return None;
+            }
+        }
+        Some(self.apply_gate_plan(GatePlanner::plan(subject.gate_carrier()), subject))
+    }
+
+    pub(crate) fn infer_fanout_map_stage(
+        &mut self,
+        expr_id: ExprId,
+        env: &GateExprEnv,
+        subject: &GateType,
+    ) -> Option<GateType> {
+        let carrier = subject.fanout_carrier()?;
+        let element = subject.fanout_element()?;
+        let body = self.infer_pipe_body(expr_id, env, element);
+        if !body.issues.is_empty() {
+            return None;
+        }
+        let body_ty = body.ty?;
+        Some(self.apply_fanout_plan(FanoutPlanner::plan(FanoutStageKind::Map, carrier), body_ty))
+    }
+
+    pub(crate) fn infer_fanin_stage(
+        &mut self,
+        expr_id: ExprId,
+        env: &GateExprEnv,
+        subject: &GateType,
+    ) -> Option<GateType> {
+        let carrier = subject.fanout_carrier()?;
+        let body = self.infer_pipe_body(expr_id, env, subject);
+        if !body.issues.is_empty() {
+            return None;
+        }
+        let body_ty = body.ty?;
+        Some(self.apply_fanout_plan(FanoutPlanner::plan(FanoutStageKind::Join, carrier), body_ty))
+    }
+
     pub(crate) fn infer_transform_stage(
         &mut self,
         expr_id: ExprId,
@@ -3499,25 +3738,16 @@ impl<'a> GateTypeContext<'a> {
                 }
                 PipeStageKind::Tap { .. } => {}
                 PipeStageKind::Gate { expr } => {
-                    let predicate = self.infer_pipe_body(*expr, env, &current);
-                    if !predicate.issues.is_empty()
-                        || predicate.contains_signal
-                        || predicate.ty.as_ref().is_some_and(GateType::is_signal)
-                    {
-                        return None;
-                    }
-                    if let Some(predicate_ty) = predicate.ty.as_ref() {
-                        if !predicate_ty.is_bool() {
-                            return None;
-                        }
-                    }
-                    current =
-                        self.apply_gate_plan(GatePlanner::plan(current.gate_carrier()), &current);
+                    current = self.infer_gate_stage(*expr, env, &current)?;
+                }
+                PipeStageKind::Map { expr } => {
+                    current = self.infer_fanout_map_stage(*expr, env, &current)?;
+                }
+                PipeStageKind::FanIn { expr } => {
+                    current = self.infer_fanin_stage(*expr, env, &current)?;
                 }
                 PipeStageKind::Case { .. }
-                | PipeStageKind::Map { .. }
                 | PipeStageKind::Apply { .. }
-                | PipeStageKind::FanIn { .. }
                 | PipeStageKind::Truthy { .. }
                 | PipeStageKind::Falsy { .. }
                 | PipeStageKind::RecurStart { .. }
@@ -3587,6 +3817,17 @@ fn provider_key_text(path: &NamePath) -> String {
         .join(".")
 }
 
+fn custom_source_wakeup_kind(wakeup: CustomSourceRecurrenceWakeup) -> RecurrenceWakeupKind {
+    match wakeup {
+        CustomSourceRecurrenceWakeup::Timer => RecurrenceWakeupKind::Timer,
+        CustomSourceRecurrenceWakeup::Backoff => RecurrenceWakeupKind::Backoff,
+        CustomSourceRecurrenceWakeup::SourceEvent => RecurrenceWakeupKind::SourceEvent,
+        CustomSourceRecurrenceWakeup::ProviderDefinedTrigger => {
+            RecurrenceWakeupKind::ProviderDefinedTrigger
+        }
+    }
+}
+
 fn type_argument_phrase(count: usize) -> String {
     format!("{count} type argument{}", if count == 1 { "" } else { "s" })
 }
@@ -3628,9 +3869,9 @@ impl SourceOptionExpectedType {
             ) => Some(Self::Primitive(*builtin)),
             ResolvedSourceContractType::Builtin(_) => None,
             ResolvedSourceContractType::ContractParameter(_) => Some(Self::Any),
-            ResolvedSourceContractType::Item(item) => {
-                Some(Self::Named(SourceOptionNamedType::from_item(module, *item, Vec::new())?))
-            }
+            ResolvedSourceContractType::Item(item) => Some(Self::Named(
+                SourceOptionNamedType::from_item(module, *item, Vec::new())?,
+            )),
             ResolvedSourceContractType::Apply { callee, arguments } => match callee {
                 ResolvedSourceTypeConstructor::Builtin(BuiltinType::List) => Some(Self::List(
                     Box::new(Self::from_resolved(module, arguments.first()?)?),
@@ -3652,6 +3893,71 @@ impl SourceOptionExpectedType {
         }
     }
 
+    fn from_hir_type(
+        module: &Module,
+        ty: TypeId,
+        substitutions: &HashMap<TypeParameterId, SourceOptionExpectedType>,
+    ) -> Option<Self> {
+        match &module.types()[ty].kind {
+            TypeKind::Name(reference) => match reference.resolution.as_ref() {
+                ResolutionState::Resolved(TypeResolution::Builtin(
+                    builtin @ (BuiltinType::Int
+                    | BuiltinType::Float
+                    | BuiltinType::Decimal
+                    | BuiltinType::BigInt
+                    | BuiltinType::Bool
+                    | BuiltinType::Text
+                    | BuiltinType::Unit
+                    | BuiltinType::Bytes),
+                )) => Some(Self::Primitive(*builtin)),
+                ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
+                    substitutions.get(parameter).cloned()
+                }
+                ResolutionState::Resolved(TypeResolution::Item(item)) => Some(Self::Named(
+                    SourceOptionNamedType::from_item(module, *item, Vec::new())?,
+                )),
+                ResolutionState::Resolved(TypeResolution::Builtin(_))
+                | ResolutionState::Resolved(TypeResolution::Import(_))
+                | ResolutionState::Unresolved => None,
+            },
+            TypeKind::Apply { callee, arguments } => {
+                let TypeKind::Name(reference) = &module.types()[*callee].kind else {
+                    return None;
+                };
+                match reference.resolution.as_ref() {
+                    ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::List)) => {
+                        Some(Self::List(Box::new(Self::from_hir_type(
+                            module,
+                            *arguments.first(),
+                            substitutions,
+                        )?)))
+                    }
+                    ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Signal)) => {
+                        Some(Self::Signal(Box::new(Self::from_hir_type(
+                            module,
+                            *arguments.first(),
+                            substitutions,
+                        )?)))
+                    }
+                    ResolutionState::Resolved(TypeResolution::Item(item)) => {
+                        let arguments = arguments
+                            .iter()
+                            .map(|argument| Self::from_hir_type(module, *argument, substitutions))
+                            .collect::<Option<Vec<_>>>()?;
+                        Some(Self::Named(SourceOptionNamedType::from_item(
+                            module, *item, arguments,
+                        )?))
+                    }
+                    ResolutionState::Resolved(TypeResolution::Builtin(_))
+                    | ResolutionState::Resolved(TypeResolution::TypeParameter(_))
+                    | ResolutionState::Resolved(TypeResolution::Import(_))
+                    | ResolutionState::Unresolved => None,
+                }
+            }
+            TypeKind::Tuple(_) | TypeKind::Record(_) | TypeKind::Arrow { .. } => None,
+        }
+    }
+
     fn is_any(&self) -> bool {
         matches!(self, Self::Any)
     }
@@ -3662,6 +3968,13 @@ impl SourceOptionExpectedType {
 
     fn matches_named_item(&self, item: ItemId) -> bool {
         matches!(self, Self::Named(named) if named.item == item)
+    }
+
+    fn as_named(&self) -> Option<&SourceOptionNamedType> {
+        let Self::Named(named) = self else {
+            return None;
+        };
+        Some(named)
     }
 }
 
@@ -3674,7 +3987,11 @@ struct SourceOptionNamedType {
 }
 
 impl SourceOptionNamedType {
-    fn from_item(module: &Module, item: ItemId, arguments: Vec<SourceOptionExpectedType>) -> Option<Self> {
+    fn from_item(
+        module: &Module,
+        item: ItemId,
+        arguments: Vec<SourceOptionExpectedType>,
+    ) -> Option<Self> {
         let item_ref = &module.items()[item];
         let kind = match item_ref {
             Item::Domain(_) => SourceOptionNamedKind::Domain,
@@ -3707,7 +4024,7 @@ struct SourceOptionConstructorActual {
     parent_item: ItemId,
     parent_name: String,
     constructor_name: String,
-    field_count: usize,
+    field_types: Vec<TypeId>,
 }
 
 fn source_option_expected_matches_gate_type(
