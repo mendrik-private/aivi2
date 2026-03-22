@@ -7,7 +7,8 @@ use aivi_typing::{
 
 use crate::{
     CustomSourceRecurrenceWakeup, DecoratorId, DecoratorPayload, ExprId, ExprKind, Item, ItemId,
-    Module, PipeExpr, PipeStageKind, SignalItem, SourceDecorator, SourceProviderRef,
+    Module, PipeExpr, PipeStageKind, SignalItem, SourceDecorator, SourceMetadata,
+    SourceProviderRef,
     gate_elaboration::{
         GateElaborationBlocker, GateRuntimeExpr, GateRuntimeUnsupportedKind,
         lower_gate_pipe_body_runtime_expr, lower_gate_runtime_expr,
@@ -26,8 +27,8 @@ use crate::{
 ///   justify lowering.
 ///
 /// The report deliberately keeps the `@|>` start stage distinct from the `<|@` step stages. The
-/// RFC names those roles separately, but the full runtime/source-lifecycle story that will consume
-/// this handoff is still being built.
+/// RFC names those roles separately, and later runtime/backend IR can consume that handoff
+/// directly without collapsing the distinction here.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RecurrenceElaborationReport {
     nodes: Vec<RecurrenceNodeElaboration>,
@@ -558,7 +559,7 @@ fn recurrence_wakeup_hint_for_signal(
         .unwrap_or_else(|| SourceProviderRef::from_path(Some(provider)));
     let Some(provider) = provider_ref.builtin() else {
         let mut context = CustomSourceRecurrenceWakeupContext::new();
-        if metadata.is_some_and(|metadata| metadata.is_reactive) {
+        if metadata.is_some_and(SourceMetadata::has_reactive_wakeup_inputs) {
             context = context.with_reactive_inputs();
         }
         if let Some(wakeup) = metadata
@@ -571,7 +572,7 @@ fn recurrence_wakeup_hint_for_signal(
     };
 
     let mut context = SourceRecurrenceWakeupContext::new(provider);
-    if metadata.is_some_and(|metadata| metadata.is_reactive) {
+    if metadata.is_some_and(SourceMetadata::has_reactive_wakeup_inputs) {
         context = context.with_reactive_inputs();
     }
     let contract = provider.contract();
@@ -844,6 +845,49 @@ mod tests {
                 );
             }
             other => panic!("expected planned custom source recurrence node, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn active_when_source_options_count_as_reactive_wakeups() {
+        let lowered = lower_text(
+            "recurrence_active_when_wakeup.aivi",
+            r#"
+fun step #value =>
+    value
+
+sig enabled = True
+
+@source http.get "/users" with {
+    activeWhen: enabled
+}
+sig gated : Signal Int =
+    0
+     @|> step
+     <|@ step
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "activeWhen recurrence example should lower cleanly before elaboration: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_recurrences(lowered.module());
+        let gated = report
+            .nodes()
+            .iter()
+            .find(|node| item_name(lowered.module(), node.owner) == "gated")
+            .expect("expected recurrence plan for gated");
+        match &gated.outcome {
+            RecurrenceNodeOutcome::Planned(plan) => {
+                assert_eq!(plan.wakeup.kind(), RecurrenceWakeupKind::SourceEvent);
+                assert_eq!(
+                    plan.wakeup.evidence().builtin_source_cause(),
+                    Some(BuiltinSourceWakeupCause::ReactiveInputs)
+                );
+            }
+            other => panic!("expected planned activeWhen recurrence node, found {other:?}"),
         }
     }
 

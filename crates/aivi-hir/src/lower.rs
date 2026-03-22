@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use aivi_base::{Diagnostic, DiagnosticCode, Severity, SourceSpan};
 use aivi_syntax as syn;
+use aivi_typing::SourceOptionWakeupCause;
 
 use crate::{
     ApplicativeCluster, ApplicativeSpineHead, AtLeastTwo, BinaryOperator, Binding, BindingId,
@@ -15,11 +16,11 @@ use crate::{
     MatchControl, Module, Name, NamePath, Pattern, PatternId, PatternKind, PipeExpr, PipeStage,
     PipeStageKind, ProjectionBase, RecordExpr, RecordExprField, RecordFieldSurface,
     RecordPatternField, RecurrenceWakeupDecorator, RecurrenceWakeupDecoratorKind, RegexLiteral,
-    ResolutionState, ShowControl, SignalItem, SourceDecorator, SourceMetadata,
-    SourceProviderContractItem, SourceProviderRef, SuffixedIntegerLiteral, TermReference,
-    TermResolution, TextFragment, TextInterpolation, TextLiteral, TextSegment, TypeField, TypeId,
-    TypeItem, TypeItemBody, TypeKind, TypeNode, TypeParameter, TypeParameterId, TypeReference,
-    TypeResolution, TypeVariant, UnaryOperator, UseItem, ValueItem, WithControl,
+    ResolutionState, ShowControl, SignalItem, SourceDecorator, SourceLifecycleDependencies,
+    SourceMetadata, SourceProviderContractItem, SourceProviderRef, SuffixedIntegerLiteral,
+    TermReference, TermResolution, TextFragment, TextInterpolation, TextLiteral, TextSegment,
+    TypeField, TypeId, TypeItem, TypeItemBody, TypeKind, TypeNode, TypeParameter, TypeParameterId,
+    TypeReference, TypeResolution, TypeVariant, UnaryOperator, UseItem, ValueItem, WithControl,
 };
 
 pub struct LoweringResult {
@@ -1631,7 +1632,7 @@ impl Lowerer {
             .with_primary_label(span, label)
             .with_secondary_label(start_span, "recurrent suffix started here")
             .with_note(
-                "keep recurrence as one trailing `@|> ... <|@ ...` suffix until typed/runtime lowering exists",
+                "keep recurrence as one trailing `@|> ... <|@ ...` suffix so the scheduler-node handoff stays explicit",
             ),
         );
     }
@@ -3212,12 +3213,79 @@ impl Lowerer {
             let provider = SourceProviderRef::from_path(source.provider.as_ref());
             SourceMetadata {
                 custom_contract: self.resolve_custom_source_contract(&provider, namespaces),
+                lifecycle_dependencies: self
+                    .compute_source_lifecycle_dependencies(source, &provider),
                 provider,
                 is_reactive: !source_dependencies.is_empty(),
                 signal_dependencies: source_dependencies,
             }
         });
         (signal_dependencies, source_metadata)
+    }
+
+    fn compute_source_lifecycle_dependencies(
+        &self,
+        source: &SourceDecorator,
+        provider: &SourceProviderRef,
+    ) -> SourceLifecycleDependencies {
+        let mut lifecycle = SourceLifecycleDependencies::default();
+        lifecycle.reconfiguration.extend(
+            self.collect_signal_dependencies(
+                source
+                    .arguments
+                    .iter()
+                    .copied()
+                    .map(DependencyWork::Expr)
+                    .collect(),
+            ),
+        );
+
+        let Some(options) = source.options else {
+            normalize_dependency_list(&mut lifecycle.reconfiguration);
+            return lifecycle;
+        };
+        let option_work = vec![DependencyWork::Expr(options)];
+        let Some(builtin_provider) = provider.builtin() else {
+            lifecycle
+                .reconfiguration
+                .extend(self.collect_signal_dependencies(option_work));
+            normalize_dependency_list(&mut lifecycle.reconfiguration);
+            return lifecycle;
+        };
+        let ExprKind::Record(record) = &self.module.exprs()[options].kind else {
+            lifecycle
+                .reconfiguration
+                .extend(self.collect_signal_dependencies(option_work));
+            normalize_dependency_list(&mut lifecycle.reconfiguration);
+            return lifecycle;
+        };
+
+        let contract = builtin_provider.contract();
+        for field in &record.fields {
+            let dependencies =
+                self.collect_signal_dependencies(vec![DependencyWork::Expr(field.value)]);
+            if field.label.text() == "activeWhen" && contract.option("activeWhen").is_some() {
+                lifecycle.active_when.extend(dependencies);
+                continue;
+            }
+            match contract
+                .wakeup_option(field.label.text())
+                .map(|option| option.cause())
+            {
+                Some(SourceOptionWakeupCause::TriggerSignal) => {
+                    lifecycle.explicit_triggers.extend(dependencies)
+                }
+                Some(
+                    SourceOptionWakeupCause::RetryPolicy | SourceOptionWakeupCause::PollingPolicy,
+                )
+                | None => lifecycle.reconfiguration.extend(dependencies),
+            }
+        }
+
+        normalize_dependency_list(&mut lifecycle.reconfiguration);
+        normalize_dependency_list(&mut lifecycle.explicit_triggers);
+        normalize_dependency_list(&mut lifecycle.active_when);
+        lifecycle
     }
 
     fn resolve_custom_source_contract(
@@ -4308,6 +4376,11 @@ impl Lowerer {
     }
 }
 
+fn normalize_dependency_list(dependencies: &mut Vec<ItemId>) {
+    dependencies.sort();
+    dependencies.dedup();
+}
+
 impl ResolveEnv {
     fn push_term_scope(&mut self, scope: HashMap<String, BindingId>) {
         self.term_scopes.push(scope);
@@ -4583,6 +4656,18 @@ mod tests {
                 Item::Signal(signal) => signal.name.text().to_owned(),
                 other => {
                     panic!("expected signal dependency to point at a signal item, found {other:?}")
+                }
+            })
+            .collect()
+    }
+
+    fn signal_item_names(module: &crate::Module, dependencies: &[crate::ItemId]) -> Vec<String> {
+        dependencies
+            .iter()
+            .map(|item_id| match &module.items()[*item_id] {
+                Item::Signal(signal) => signal.name.text().to_owned(),
+                other => {
+                    panic!("expected source dependency to point at a signal item, found {other:?}")
                 }
             })
             .collect()
@@ -5509,6 +5594,145 @@ val duplicate : Task Int Int =
         assert_eq!(
             tick.signal_dependencies, metadata.signal_dependencies,
             "non-reactive source signals should expose an empty dependency set"
+        );
+    }
+
+    #[test]
+    fn classifies_source_lifecycle_dependency_roles() {
+        let lowered = lower_text(
+            "source_lifecycle_dependency_roles.aivi",
+            r#"
+domain Duration over Int
+    literal s : Int -> Duration
+
+provider custom.feed
+    argument path: Text
+    option activeWhen: Signal Bool
+
+sig apiHost = "https://api.example.com"
+sig refresh = 0
+sig enabled = True
+sig pollInterval : Signal Duration = 5s
+sig path = "/tmp/demo.txt"
+
+@source http.get "{apiHost}/users" with {
+    refreshOn: refresh,
+    activeWhen: enabled,
+    refreshEvery: pollInterval
+}
+sig users : Signal Int
+
+@source custom.feed path with {
+    activeWhen: enabled
+}
+sig updates : Signal Int
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "source lifecycle dependency role fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let users = find_signal(lowered.module(), "users");
+        let metadata = users
+            .source_metadata
+            .as_ref()
+            .expect("built-in source should carry source metadata");
+        assert_eq!(
+            signal_dependency_names(lowered.module(), users),
+            vec![
+                "apiHost".to_owned(),
+                "refresh".to_owned(),
+                "enabled".to_owned(),
+                "pollInterval".to_owned()
+            ]
+        );
+        assert_eq!(
+            metadata.lifecycle_dependencies.merged(),
+            metadata.signal_dependencies,
+            "lifecycle dependency roles should merge back into the overall source dependency set"
+        );
+        assert_eq!(
+            signal_item_names(
+                lowered.module(),
+                &metadata.lifecycle_dependencies.reconfiguration
+            ),
+            vec!["apiHost".to_owned(), "pollInterval".to_owned()]
+        );
+        assert_eq!(
+            signal_item_names(
+                lowered.module(),
+                &metadata.lifecycle_dependencies.explicit_triggers
+            ),
+            vec!["refresh".to_owned()]
+        );
+        assert_eq!(
+            signal_item_names(
+                lowered.module(),
+                &metadata.lifecycle_dependencies.active_when
+            ),
+            vec!["enabled".to_owned()]
+        );
+
+        let updates = find_signal(lowered.module(), "updates");
+        let metadata = updates
+            .source_metadata
+            .as_ref()
+            .expect("custom source should carry source metadata");
+        assert_eq!(
+            signal_item_names(
+                lowered.module(),
+                &metadata.lifecycle_dependencies.reconfiguration
+            ),
+            vec!["enabled".to_owned(), "path".to_owned()]
+        );
+        assert!(
+            metadata.lifecycle_dependencies.explicit_triggers.is_empty(),
+            "custom sources must not invent built-in trigger roles"
+        );
+        assert!(
+            metadata.lifecycle_dependencies.active_when.is_empty(),
+            "custom sources must not invent built-in activeWhen roles"
+        );
+    }
+
+    #[test]
+    fn manual_source_lifecycle_metadata_inconsistency_is_rejected() {
+        let lowered = lower_fixture("milestone-2/valid/source-decorator-signals/main.aivi");
+        assert!(
+            !lowered.has_errors(),
+            "source lifecycle validation fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let mut module = lowered.module().clone();
+        let signal_id = module
+            .root_items()
+            .iter()
+            .copied()
+            .find(|item_id| {
+                matches!(&module.items()[*item_id], Item::Signal(item) if item.name.text() == "users")
+            })
+            .expect("expected to find `users` signal item");
+        let Some(Item::Signal(signal)) = module.arenas.items.get_mut(signal_id) else {
+            panic!("expected `users` item to stay a signal");
+        };
+        signal
+            .source_metadata
+            .as_mut()
+            .expect("source-backed signal should carry source metadata")
+            .lifecycle_dependencies
+            .reconfiguration
+            .clear();
+
+        let report = module.validate(ValidationMode::Structural);
+        assert!(
+            report.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code == Some(super::code("inconsistent-source-lifecycle-dependencies"))
+            }),
+            "inconsistent source lifecycle dependency roles should be rejected, got diagnostics: {:?}",
+            report.diagnostics()
         );
     }
 

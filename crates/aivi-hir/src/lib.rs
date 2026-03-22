@@ -11,6 +11,7 @@ mod lower;
 mod recurrence_elaboration;
 mod sequence;
 mod source_contract_resolution;
+mod source_lifecycle_elaboration;
 mod validate;
 
 pub use arena::{Arena, ArenaId, ArenaOverflow};
@@ -62,5 +63,11 @@ pub use sequence::{AtLeastTwo, NonEmpty, SequenceError};
 pub use source_contract_resolution::{
     ResolvedSourceContractType, ResolvedSourceTypeConstructor, SourceContractResolutionError,
     SourceContractResolutionErrorKind, SourceContractTypeResolver,
+};
+pub use source_lifecycle_elaboration::{
+    BlockedSourceLifecycleNode, SourceInstanceId, SourceLifecycleElaborationBlocker,
+    SourceLifecycleElaborationReport, SourceLifecycleNodeElaboration, SourceLifecycleNodeOutcome,
+    SourceLifecyclePlan, SourceOptionSignalBinding, SourceReplacementPolicy, SourceStaleWorkPolicy,
+    SourceTeardownPolicy, elaborate_source_lifecycles,
 };
 pub use validate::{GateRecordField, GateType, ValidationMode, ValidationReport, validate_module};

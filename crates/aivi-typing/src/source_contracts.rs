@@ -76,9 +76,12 @@ impl BuiltinSourceProvider {
             Self::TimerAfter => {
                 SourceContract::new(self, &TIMER_OPTIONS, TIMER_RECURRENCE, TIMER_LIFECYCLE)
             }
-            Self::FsWatch => {
-                SourceContract::new(self, &FS_WATCH_OPTIONS, FS_WATCH_RECURRENCE, STREAM_LIFECYCLE)
-            }
+            Self::FsWatch => SourceContract::new(
+                self,
+                &FS_WATCH_OPTIONS,
+                FS_WATCH_RECURRENCE,
+                STREAM_LIFECYCLE,
+            ),
             Self::FsRead => {
                 SourceContract::new(self, &FS_READ_OPTIONS, FS_READ_RECURRENCE, HTTP_LIFECYCLE)
             }
@@ -86,19 +89,11 @@ impl BuiltinSourceProvider {
                 SourceContract::new(self, &SOCKET_OPTIONS, SOCKET_RECURRENCE, STREAM_LIFECYCLE)
             }
             Self::MailboxSubscribe => {
-                SourceContract::new(
-                    self,
-                    &SOCKET_OPTIONS,
-                    MAILBOX_RECURRENCE,
-                    STREAM_LIFECYCLE,
-                )
+                SourceContract::new(self, &SOCKET_OPTIONS, MAILBOX_RECURRENCE, STREAM_LIFECYCLE)
             }
-            Self::ProcessSpawn => SourceContract::new(
-                self,
-                &PROCESS_OPTIONS,
-                PROCESS_RECURRENCE,
-                STREAM_LIFECYCLE,
-            ),
+            Self::ProcessSpawn => {
+                SourceContract::new(self, &PROCESS_OPTIONS, PROCESS_RECURRENCE, STREAM_LIFECYCLE)
+            }
             Self::WindowKeyDown => {
                 SourceContract::new(self, &WINDOW_OPTIONS, WINDOW_RECURRENCE, STREAM_LIFECYCLE)
             }

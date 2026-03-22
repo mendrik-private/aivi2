@@ -17,7 +17,7 @@ use aivi_typing::{
 use crate::{
     arena::{Arena, ArenaId},
     hir::{
-        ApplicativeSpineHead, BuiltinType, ControlNode, ControlNodeKind,
+        ApplicativeSpineHead, BuiltinTerm, BuiltinType, ControlNode, ControlNodeKind,
         CustomSourceRecurrenceWakeup, DecoratorPayload, DomainMemberKind, ExprKind,
         ImportBindingMetadata, ImportValueType, Item, LiteralSuffixResolution,
         MarkupAttributeValue, MarkupNodeKind, Module, Name, NamePath, PatternKind, PipeStageKind,
@@ -1257,10 +1257,10 @@ impl Validator<'_> {
                 format!("`{}` expects `{expected_surface}`", field.label.text()),
             )
             .with_note(
-                "current source option typing checks only the resolved-HIR cases it can prove honestly: same-module annotations, suffixed domain literals, same-module constructors checked against the expected contract type or a previously bound contract parameter, imported bindings whose compiler-known import metadata lowers into the current closed type surface, list elements, and reactive `Signal` payloads used as ordinary source configuration values",
+                "current source option typing checks only the resolved-HIR cases it can prove honestly: same-module annotations, same-module unannotated value bodies rechecked through that same proof slice, suffixed domain literals, same-module constructors checked against the expected contract type or re-inferred as bare roots, built-in `Option` / `Result` / `Validation` constructors when local type evidence fixes their surrounding shape, imported bindings whose compiler-known import metadata lowers into the current closed type surface, tuple/record/list expressions whose nested values stay within that same slice, and reactive `Signal` payloads used as ordinary source configuration values",
             )
             .with_note(
-                "bare contract-parameter roots now also cover same-module generic constructor applications when the current layer can prove each constructor field from local type evidence; nested generic constructor arguments, imported bindings without compiler-known type metadata, constructor fields whose annotations lower outside the current source-option type surface, and otherwise unproven expressions still wait for fuller ordinary expression typing",
+                "bare contract-parameter roots now also cover nested same-module generic constructor applications, `Some` roots, and constructor fields whose tuple/record or built-in container shape can be proved locally; root `None` / `Ok` / `Err` / `Valid` / `Invalid` holes without surrounding type evidence, imports without compiler-known type metadata, and otherwise unproven expressions still wait for fuller ordinary expression typing",
             ),
         );
     }
@@ -1328,7 +1328,7 @@ impl Validator<'_> {
                 format!("argument #{} `{schema_name}` expects `{expected_surface}`", index + 1),
             )
             .with_note(
-                "current custom source contract typing reuses the same resolved-HIR proof surface as source options: same-module annotations, suffixed domain literals, same-module constructors checked against the expected contract type, imported bindings whose compiler-known import metadata lowers into the current closed type surface, list elements, and reactive `Signal` payloads used as ordinary source configuration values",
+                "current custom source contract typing reuses the same resolved-HIR proof surface as source options: same-module annotations, same-module unannotated value bodies rechecked through that same proof slice, suffixed domain literals, same-module constructors checked against the expected contract type or re-inferred as bare roots, imported bindings whose compiler-known import metadata lowers into the current closed type surface, tuple/record/list expressions whose nested values stay within that same slice, and reactive `Signal` payloads used as ordinary source configuration values",
             ),
         );
     }
@@ -1340,24 +1340,50 @@ impl Validator<'_> {
         typing: &mut GateTypeContext<'_>,
         bindings: &mut SourceOptionTypeBindings,
     ) -> SourceOptionTypeCheck {
-        if let Some(check) =
-            self.check_source_option_expr_by_inference(expr_id, expected, typing, bindings)
-        {
+        self.check_source_option_expr_inner(expr_id, expected, typing, bindings, &mut Vec::new())
+    }
+
+    fn check_source_option_expr_inner(
+        &self,
+        expr_id: ExprId,
+        expected: &SourceOptionExpectedType,
+        typing: &mut GateTypeContext<'_>,
+        bindings: &mut SourceOptionTypeBindings,
+        value_stack: &mut Vec<ItemId>,
+    ) -> SourceOptionTypeCheck {
+        if let Some(check) = self.check_source_option_expr_by_inference(
+            expr_id,
+            expected,
+            typing,
+            bindings,
+            value_stack,
+        ) {
             return check;
         }
 
         match &self.module.exprs()[expr_id].kind {
             ExprKind::Name(reference) => {
-                self.check_source_option_name(reference, expected, typing, bindings)
+                self.check_source_option_name(reference, expected, typing, bindings, value_stack)
             }
-            ExprKind::Apply { callee, arguments } => {
-                self.check_source_option_apply(*callee, arguments, expected, typing, bindings)
-            }
+            ExprKind::Apply { callee, arguments } => self.check_source_option_apply(
+                *callee,
+                arguments,
+                expected,
+                typing,
+                bindings,
+                value_stack,
+            ),
             ExprKind::List(elements) => {
                 let SourceOptionExpectedType::List(element_expected) = expected else {
                     return SourceOptionTypeCheck::Unknown;
                 };
-                self.check_source_option_list(elements, element_expected, typing, bindings)
+                self.check_source_option_list(
+                    elements,
+                    element_expected,
+                    typing,
+                    bindings,
+                    value_stack,
+                )
             }
             _ => SourceOptionTypeCheck::Unknown,
         }
@@ -1369,9 +1395,14 @@ impl Validator<'_> {
         expected: &SourceOptionExpectedType,
         typing: &mut GateTypeContext<'_>,
         bindings: &mut SourceOptionTypeBindings,
+        value_stack: &mut Vec<ItemId>,
     ) -> Option<SourceOptionTypeCheck> {
-        let info = typing.infer_expr(expr_id, &GateExprEnv::default(), None);
-        let actual = info.ty?;
+        let actual = self.infer_source_option_expr_actual_type_inner(
+            expr_id,
+            typing,
+            bindings,
+            value_stack,
+        )?;
         Some(
             if source_option_expected_matches_gate_type(expected, &actual, bindings) {
                 SourceOptionTypeCheck::Match
@@ -1390,8 +1421,35 @@ impl Validator<'_> {
         expected: &SourceOptionExpectedType,
         typing: &mut GateTypeContext<'_>,
         bindings: &mut SourceOptionTypeBindings,
+        value_stack: &mut Vec<ItemId>,
     ) -> SourceOptionTypeCheck {
-        self.check_source_option_constructor(reference, &[], expected, typing, bindings)
+        if let Some(check) = self.check_source_option_unannotated_value_item(
+            reference,
+            expected,
+            typing,
+            bindings,
+            value_stack,
+        ) {
+            return check;
+        }
+        if let Some(check) = self.check_source_option_builtin_constructor(
+            reference,
+            &[],
+            expected,
+            typing,
+            bindings,
+            value_stack,
+        ) {
+            return check;
+        }
+        self.check_source_option_constructor(
+            reference,
+            &[],
+            expected,
+            typing,
+            bindings,
+            value_stack,
+        )
     }
 
     fn check_source_option_apply(
@@ -1401,12 +1459,185 @@ impl Validator<'_> {
         expected: &SourceOptionExpectedType,
         typing: &mut GateTypeContext<'_>,
         bindings: &mut SourceOptionTypeBindings,
+        value_stack: &mut Vec<ItemId>,
     ) -> SourceOptionTypeCheck {
         let ExprKind::Name(reference) = &self.module.exprs()[callee].kind else {
             return SourceOptionTypeCheck::Unknown;
         };
         let arguments = arguments.iter().copied().collect::<Vec<_>>();
-        self.check_source_option_constructor(reference, &arguments, expected, typing, bindings)
+        if let Some(check) = self.check_source_option_builtin_constructor(
+            reference,
+            &arguments,
+            expected,
+            typing,
+            bindings,
+            value_stack,
+        ) {
+            return check;
+        }
+        self.check_source_option_constructor(
+            reference,
+            &arguments,
+            expected,
+            typing,
+            bindings,
+            value_stack,
+        )
+    }
+
+    fn check_source_option_unannotated_value_item(
+        &self,
+        reference: &TermReference,
+        expected: &SourceOptionExpectedType,
+        typing: &mut GateTypeContext<'_>,
+        bindings: &mut SourceOptionTypeBindings,
+        value_stack: &mut Vec<ItemId>,
+    ) -> Option<SourceOptionTypeCheck> {
+        let ResolutionState::Resolved(TermResolution::Item(item_id)) =
+            reference.resolution.as_ref()
+        else {
+            return None;
+        };
+        let Item::Value(item) = &self.module.items()[*item_id] else {
+            return None;
+        };
+        if item.annotation.is_some() {
+            return None;
+        }
+        if value_stack.contains(item_id) {
+            return Some(SourceOptionTypeCheck::Unknown);
+        }
+
+        value_stack.push(*item_id);
+        let check =
+            self.check_source_option_expr_inner(item.body, expected, typing, bindings, value_stack);
+        let popped = value_stack.pop();
+        debug_assert_eq!(popped, Some(*item_id));
+        Some(check)
+    }
+
+    fn check_source_option_builtin_constructor(
+        &self,
+        reference: &TermReference,
+        arguments: &[ExprId],
+        expected: &SourceOptionExpectedType,
+        typing: &mut GateTypeContext<'_>,
+        bindings: &mut SourceOptionTypeBindings,
+        value_stack: &mut Vec<ItemId>,
+    ) -> Option<SourceOptionTypeCheck> {
+        let ResolutionState::Resolved(TermResolution::Builtin(builtin)) =
+            reference.resolution.as_ref()
+        else {
+            return None;
+        };
+
+        let synthesized_expected = match expected {
+            SourceOptionExpectedType::ContractParameter(parameter) => {
+                bindings.parameter(*parameter).and_then(|bound| {
+                    SourceOptionExpectedType::from_gate_type(
+                        self.module,
+                        bound,
+                        SourceOptionTypeSurface::Expression,
+                    )
+                })
+            }
+            _ => None,
+        };
+        let expected = synthesized_expected.as_ref().unwrap_or(expected);
+
+        let constructor_actual = format!("builtin constructor `{}`", builtin_term_name(*builtin));
+        Some(match (builtin, arguments) {
+            (BuiltinTerm::None, []) => match expected {
+                SourceOptionExpectedType::Option(_) => SourceOptionTypeCheck::Match,
+                SourceOptionExpectedType::ContractParameter(_) => return None,
+                _ => SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
+                    span: reference.path.span(),
+                    actual: constructor_actual,
+                }),
+            },
+            (BuiltinTerm::None, _) => SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
+                span: reference.path.span(),
+                actual: constructor_actual,
+            }),
+            (BuiltinTerm::Some, [argument]) => {
+                let SourceOptionExpectedType::Option(payload_expected) = expected else {
+                    if matches!(expected, SourceOptionExpectedType::ContractParameter(_)) {
+                        return None;
+                    }
+                    return Some(SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
+                        span: reference.path.span(),
+                        actual: constructor_actual,
+                    }));
+                };
+                self.check_source_option_expr_inner(
+                    *argument,
+                    payload_expected,
+                    typing,
+                    bindings,
+                    value_stack,
+                )
+            }
+            (BuiltinTerm::Ok, [argument]) => {
+                let SourceOptionExpectedType::Result { value, .. } = expected else {
+                    if matches!(expected, SourceOptionExpectedType::ContractParameter(_)) {
+                        return None;
+                    }
+                    return Some(SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
+                        span: reference.path.span(),
+                        actual: constructor_actual,
+                    }));
+                };
+                self.check_source_option_expr_inner(*argument, value, typing, bindings, value_stack)
+            }
+            (BuiltinTerm::Err, [argument]) => {
+                let SourceOptionExpectedType::Result { error, .. } = expected else {
+                    if matches!(expected, SourceOptionExpectedType::ContractParameter(_)) {
+                        return None;
+                    }
+                    return Some(SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
+                        span: reference.path.span(),
+                        actual: constructor_actual,
+                    }));
+                };
+                self.check_source_option_expr_inner(*argument, error, typing, bindings, value_stack)
+            }
+            (BuiltinTerm::Valid, [argument]) => {
+                let SourceOptionExpectedType::Validation { value, .. } = expected else {
+                    if matches!(expected, SourceOptionExpectedType::ContractParameter(_)) {
+                        return None;
+                    }
+                    return Some(SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
+                        span: reference.path.span(),
+                        actual: constructor_actual,
+                    }));
+                };
+                self.check_source_option_expr_inner(*argument, value, typing, bindings, value_stack)
+            }
+            (BuiltinTerm::Invalid, [argument]) => {
+                let SourceOptionExpectedType::Validation { error, .. } = expected else {
+                    if matches!(expected, SourceOptionExpectedType::ContractParameter(_)) {
+                        return None;
+                    }
+                    return Some(SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
+                        span: reference.path.span(),
+                        actual: constructor_actual,
+                    }));
+                };
+                self.check_source_option_expr_inner(*argument, error, typing, bindings, value_stack)
+            }
+            (BuiltinTerm::True | BuiltinTerm::False, _) => return None,
+            (
+                BuiltinTerm::Some
+                | BuiltinTerm::Ok
+                | BuiltinTerm::Err
+                | BuiltinTerm::Valid
+                | BuiltinTerm::Invalid,
+                _,
+            ) => SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
+                span: reference.path.span(),
+                actual: constructor_actual,
+            }),
+        })
     }
 
     fn check_source_option_constructor(
@@ -1416,6 +1647,7 @@ impl Validator<'_> {
         expected: &SourceOptionExpectedType,
         typing: &mut GateTypeContext<'_>,
         bindings: &mut SourceOptionTypeBindings,
+        value_stack: &mut Vec<ItemId>,
     ) -> SourceOptionTypeCheck {
         let Some(actual) = self.source_constructor_actual(reference) else {
             return SourceOptionTypeCheck::Unknown;
@@ -1425,9 +1657,11 @@ impl Validator<'_> {
         let synthesized_expected = match expected {
             SourceOptionExpectedType::ContractParameter(parameter) => {
                 if let Some(bound) = bindings.parameter(*parameter) {
-                    let Some(bound_expected) =
-                        SourceOptionExpectedType::from_gate_type(self.module, bound)
-                    else {
+                    let Some(bound_expected) = SourceOptionExpectedType::from_gate_type(
+                        self.module,
+                        bound,
+                        SourceOptionTypeSurface::Expression,
+                    ) else {
                         return SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
                             span: reference.path.span(),
                             actual: actual.parent_name.clone(),
@@ -1446,6 +1680,7 @@ impl Validator<'_> {
                                 arguments,
                                 typing,
                                 bindings,
+                                value_stack,
                             );
                     };
                     bind_parameter = Some((
@@ -1501,7 +1736,13 @@ impl Validator<'_> {
 
         let mut saw_unknown = false;
         for (argument, field_expected) in arguments.iter().zip(&field_expectations) {
-            match self.check_source_option_expr(*argument, field_expected, typing, bindings) {
+            match self.check_source_option_expr_inner(
+                *argument,
+                field_expected,
+                typing,
+                bindings,
+                value_stack,
+            ) {
                 SourceOptionTypeCheck::Match => {}
                 SourceOptionTypeCheck::Mismatch(mismatch) => {
                     return SourceOptionTypeCheck::Mismatch(mismatch);
@@ -1532,6 +1773,7 @@ impl Validator<'_> {
         arguments: &[ExprId],
         typing: &mut GateTypeContext<'_>,
         bindings: &mut SourceOptionTypeBindings,
+        value_stack: &mut Vec<ItemId>,
     ) -> SourceOptionTypeCheck {
         match self.infer_source_option_generic_constructor_root(
             constructor_span,
@@ -1539,6 +1781,7 @@ impl Validator<'_> {
             arguments,
             typing,
             bindings,
+            value_stack,
         ) {
             SourceOptionGenericConstructorRootCheck::Match(actual_type) => {
                 let matched = bindings.bind_or_match(parameter, &actual_type);
@@ -1562,6 +1805,7 @@ impl Validator<'_> {
         arguments: &[ExprId],
         typing: &mut GateTypeContext<'_>,
         bindings: &SourceOptionTypeBindings,
+        value_stack: &mut Vec<ItemId>,
     ) -> SourceOptionGenericConstructorRootCheck {
         let Item::Type(item) = &self.module.items()[actual.parent_item] else {
             return SourceOptionGenericConstructorRootCheck::Unknown;
@@ -1588,11 +1832,12 @@ impl Validator<'_> {
                     field_type,
                     &parameter_substitutions,
                 ) {
-                    match self.check_source_option_expr(
+                    match self.check_source_option_expr_inner(
                         argument,
                         &expected,
                         typing,
                         &mut trial_bindings,
+                        value_stack,
                     ) {
                         SourceOptionTypeCheck::Match => {
                             progress = true;
@@ -1605,10 +1850,12 @@ impl Validator<'_> {
                     }
                 }
 
-                let actual_argument = match typing
-                    .infer_expr(argument, &GateExprEnv::default(), None)
-                    .ty
-                {
+                let actual_argument = match self.infer_source_option_expr_actual_type_inner(
+                    argument,
+                    typing,
+                    &trial_bindings,
+                    value_stack,
+                ) {
                     Some(actual_argument) => actual_argument,
                     None => {
                         remaining.push((argument, field_type));
@@ -1657,6 +1904,210 @@ impl Validator<'_> {
         })
     }
 
+    fn infer_source_option_expr_actual_type_inner(
+        &self,
+        expr_id: ExprId,
+        typing: &mut GateTypeContext<'_>,
+        bindings: &SourceOptionTypeBindings,
+        value_stack: &mut Vec<ItemId>,
+    ) -> Option<GateType> {
+        if let Some(actual) = typing.infer_expr(expr_id, &GateExprEnv::default(), None).ty {
+            return Some(actual);
+        }
+
+        match &self.module.exprs()[expr_id].kind {
+            ExprKind::Name(reference) => {
+                self.infer_source_option_name_actual_type(reference, typing, bindings, value_stack)
+            }
+            ExprKind::Apply { callee, arguments } => {
+                let ExprKind::Name(reference) = &self.module.exprs()[*callee].kind else {
+                    return None;
+                };
+                let arguments = arguments.iter().copied().collect::<Vec<_>>();
+                self.infer_source_option_constructor_like_actual_type(
+                    reference,
+                    &arguments,
+                    typing,
+                    bindings,
+                    value_stack,
+                )
+            }
+            ExprKind::List(elements) => {
+                let mut element_type = None::<GateType>;
+                for element in elements {
+                    let child = self.infer_source_option_expr_actual_type_inner(
+                        *element,
+                        typing,
+                        bindings,
+                        value_stack,
+                    )?;
+                    match &element_type {
+                        None => element_type = Some(child),
+                        Some(current) if current.same_shape(&child) => {}
+                        Some(_) => return None,
+                    }
+                }
+                Some(GateType::List(Box::new(element_type?)))
+            }
+            ExprKind::Tuple(elements) => {
+                let mut lowered = Vec::with_capacity(elements.len());
+                for element in elements.iter() {
+                    lowered.push(self.infer_source_option_expr_actual_type_inner(
+                        *element,
+                        typing,
+                        bindings,
+                        value_stack,
+                    )?);
+                }
+                Some(GateType::Tuple(lowered))
+            }
+            ExprKind::Record(record) => {
+                let mut fields = Vec::with_capacity(record.fields.len());
+                for field in &record.fields {
+                    fields.push(GateRecordField {
+                        name: field.label.text().to_owned(),
+                        ty: self.infer_source_option_expr_actual_type_inner(
+                            field.value,
+                            typing,
+                            bindings,
+                            value_stack,
+                        )?,
+                    });
+                }
+                Some(GateType::Record(fields))
+            }
+            _ => None,
+        }
+    }
+
+    fn infer_source_option_name_actual_type(
+        &self,
+        reference: &TermReference,
+        typing: &mut GateTypeContext<'_>,
+        bindings: &SourceOptionTypeBindings,
+        value_stack: &mut Vec<ItemId>,
+    ) -> Option<GateType> {
+        match reference.resolution.as_ref() {
+            ResolutionState::Unresolved => None,
+            ResolutionState::Resolved(TermResolution::Local(_)) => None,
+            ResolutionState::Resolved(TermResolution::Import(import_id)) => {
+                typing.import_value_type(*import_id)
+            }
+            ResolutionState::Resolved(TermResolution::Builtin(builtin)) => self
+                .infer_source_option_builtin_actual_type(
+                    *builtin,
+                    &[],
+                    typing,
+                    bindings,
+                    value_stack,
+                ),
+            ResolutionState::Resolved(TermResolution::Item(item_id)) => {
+                if let Some(actual) = typing.item_value_type(*item_id) {
+                    return Some(actual);
+                }
+                match &self.module.items()[*item_id] {
+                    Item::Value(item) if item.annotation.is_none() => {
+                        if value_stack.contains(item_id) {
+                            return None;
+                        }
+                        value_stack.push(*item_id);
+                        let actual = self.infer_source_option_expr_actual_type_inner(
+                            item.body,
+                            typing,
+                            bindings,
+                            value_stack,
+                        );
+                        let popped = value_stack.pop();
+                        debug_assert_eq!(popped, Some(*item_id));
+                        actual
+                    }
+                    _ => self.infer_source_option_constructor_actual_type(
+                        reference,
+                        &[],
+                        typing,
+                        bindings,
+                        value_stack,
+                    ),
+                }
+            }
+        }
+    }
+
+    fn infer_source_option_constructor_like_actual_type(
+        &self,
+        reference: &TermReference,
+        arguments: &[ExprId],
+        typing: &mut GateTypeContext<'_>,
+        bindings: &SourceOptionTypeBindings,
+        value_stack: &mut Vec<ItemId>,
+    ) -> Option<GateType> {
+        if let ResolutionState::Resolved(TermResolution::Builtin(builtin)) =
+            reference.resolution.as_ref()
+        {
+            return self.infer_source_option_builtin_actual_type(
+                *builtin,
+                arguments,
+                typing,
+                bindings,
+                value_stack,
+            );
+        }
+        self.infer_source_option_constructor_actual_type(
+            reference,
+            arguments,
+            typing,
+            bindings,
+            value_stack,
+        )
+    }
+
+    fn infer_source_option_builtin_actual_type(
+        &self,
+        builtin: BuiltinTerm,
+        arguments: &[ExprId],
+        typing: &mut GateTypeContext<'_>,
+        bindings: &SourceOptionTypeBindings,
+        value_stack: &mut Vec<ItemId>,
+    ) -> Option<GateType> {
+        match (builtin, arguments) {
+            (BuiltinTerm::True | BuiltinTerm::False, []) => {
+                Some(GateType::Primitive(BuiltinType::Bool))
+            }
+            (BuiltinTerm::Some, [argument]) => Some(GateType::Option(Box::new(
+                self.infer_source_option_expr_actual_type_inner(
+                    *argument,
+                    typing,
+                    bindings,
+                    value_stack,
+                )?,
+            ))),
+            _ => None,
+        }
+    }
+
+    fn infer_source_option_constructor_actual_type(
+        &self,
+        reference: &TermReference,
+        arguments: &[ExprId],
+        typing: &mut GateTypeContext<'_>,
+        bindings: &SourceOptionTypeBindings,
+        value_stack: &mut Vec<ItemId>,
+    ) -> Option<GateType> {
+        let actual = self.source_constructor_actual(reference)?;
+        match self.infer_source_option_generic_constructor_root(
+            reference.path.span(),
+            &actual,
+            arguments,
+            typing,
+            bindings,
+            value_stack,
+        ) {
+            SourceOptionGenericConstructorRootCheck::Match(actual_type) => Some(actual_type),
+            SourceOptionGenericConstructorRootCheck::Mismatch(_)
+            | SourceOptionGenericConstructorRootCheck::Unknown => None,
+        }
+    }
+
     fn source_option_constructor_field_expected_type(
         &self,
         field_type: TypeId,
@@ -1665,11 +2116,20 @@ impl Validator<'_> {
         let substitutions = substitutions
             .iter()
             .filter_map(|(parameter, ty)| {
-                SourceOptionExpectedType::from_gate_type(self.module, ty)
-                    .map(|expected| (*parameter, expected))
+                SourceOptionExpectedType::from_gate_type(
+                    self.module,
+                    ty,
+                    SourceOptionTypeSurface::Expression,
+                )
+                .map(|expected| (*parameter, expected))
             })
             .collect::<HashMap<_, _>>();
-        SourceOptionExpectedType::from_hir_type(self.module, field_type, &substitutions)
+        SourceOptionExpectedType::from_hir_type(
+            self.module,
+            field_type,
+            &substitutions,
+            SourceOptionTypeSurface::Expression,
+        )
     }
 
     fn source_option_hir_type_matches_gate_type(
@@ -1712,7 +2172,50 @@ impl Validator<'_> {
                     substitutions,
                 )
             }
-            TypeKind::Tuple(_) | TypeKind::Record(_) | TypeKind::Arrow { .. } => None,
+            TypeKind::Tuple(elements) => {
+                let GateType::Tuple(actual_elements) = actual else {
+                    return Some(false);
+                };
+                if elements.len() != actual_elements.len() {
+                    return Some(false);
+                }
+                for (expected, actual) in elements.iter().copied().zip(actual_elements) {
+                    match self.source_option_hir_type_matches_gate_type(
+                        expected,
+                        actual,
+                        substitutions,
+                    ) {
+                        Some(true) => {}
+                        Some(false) => return Some(false),
+                        None => return None,
+                    }
+                }
+                Some(true)
+            }
+            TypeKind::Record(fields) => {
+                let GateType::Record(actual_fields) = actual else {
+                    return Some(false);
+                };
+                if fields.len() != actual_fields.len() {
+                    return Some(false);
+                }
+                for (expected, actual) in fields.iter().zip(actual_fields) {
+                    if expected.label.text() != actual.name {
+                        return Some(false);
+                    }
+                    match self.source_option_hir_type_matches_gate_type(
+                        expected.ty,
+                        &actual.ty,
+                        substitutions,
+                    ) {
+                        Some(true) => {}
+                        Some(false) => return Some(false),
+                        None => return None,
+                    }
+                }
+                Some(true)
+            }
+            TypeKind::Arrow { .. } => None,
         }
     }
 
@@ -1775,6 +2278,62 @@ impl Validator<'_> {
                     substitutions,
                 )
             }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Option)) => {
+                let GateType::Option(actual) = actual else {
+                    return Some(false);
+                };
+                self.source_option_hir_type_matches_gate_type(
+                    *arguments.first()?,
+                    actual,
+                    substitutions,
+                )
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Result)) => {
+                let GateType::Result {
+                    error: actual_error,
+                    value: actual_value,
+                } = actual
+                else {
+                    return Some(false);
+                };
+                match self.source_option_hir_type_matches_gate_type(
+                    *arguments.first()?,
+                    actual_error,
+                    substitutions,
+                ) {
+                    Some(true) => {}
+                    Some(false) => return Some(false),
+                    None => return None,
+                }
+                self.source_option_hir_type_matches_gate_type(
+                    *arguments.get(1)?,
+                    actual_value,
+                    substitutions,
+                )
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Validation)) => {
+                let GateType::Validation {
+                    error: actual_error,
+                    value: actual_value,
+                } = actual
+                else {
+                    return Some(false);
+                };
+                match self.source_option_hir_type_matches_gate_type(
+                    *arguments.first()?,
+                    actual_error,
+                    substitutions,
+                ) {
+                    Some(true) => {}
+                    Some(false) => return Some(false),
+                    None => return None,
+                }
+                self.source_option_hir_type_matches_gate_type(
+                    *arguments.get(1)?,
+                    actual_value,
+                    substitutions,
+                )
+            }
             ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Signal)) => {
                 let GateType::Signal(actual) = actual else {
                     return Some(false);
@@ -1782,6 +2341,29 @@ impl Validator<'_> {
                 self.source_option_hir_type_matches_gate_type(
                     *arguments.first()?,
                     actual,
+                    substitutions,
+                )
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Task)) => {
+                let GateType::Task {
+                    error: actual_error,
+                    value: actual_value,
+                } = actual
+                else {
+                    return Some(false);
+                };
+                match self.source_option_hir_type_matches_gate_type(
+                    *arguments.first()?,
+                    actual_error,
+                    substitutions,
+                ) {
+                    Some(true) => {}
+                    Some(false) => return Some(false),
+                    None => return None,
+                }
+                self.source_option_hir_type_matches_gate_type(
+                    *arguments.get(1)?,
+                    actual_value,
                     substitutions,
                 )
             }
@@ -1908,7 +2490,12 @@ impl Validator<'_> {
         field_types
             .iter()
             .map(|field| {
-                SourceOptionExpectedType::from_hir_type(self.module, *field, &substitutions)
+                SourceOptionExpectedType::from_hir_type(
+                    self.module,
+                    *field,
+                    &substitutions,
+                    SourceOptionTypeSurface::Expression,
+                )
             })
             .collect()
     }
@@ -1919,11 +2506,18 @@ impl Validator<'_> {
         expected: &SourceOptionExpectedType,
         typing: &mut GateTypeContext<'_>,
         bindings: &mut SourceOptionTypeBindings,
+        value_stack: &mut Vec<ItemId>,
     ) -> SourceOptionTypeCheck {
         let mut saw_unknown = false;
 
         for element in elements {
-            match self.check_source_option_expr(*element, expected, typing, bindings) {
+            match self.check_source_option_expr_inner(
+                *element,
+                expected,
+                typing,
+                bindings,
+                value_stack,
+            ) {
                 SourceOptionTypeCheck::Match => {}
                 SourceOptionTypeCheck::Mismatch(mismatch) => {
                     return SourceOptionTypeCheck::Mismatch(mismatch);
@@ -2333,7 +2927,7 @@ impl Validator<'_> {
             Some(provider) => provider,
             None => {
                 let mut context = CustomSourceRecurrenceWakeupContext::new();
-                if metadata.is_some_and(|metadata| metadata.is_reactive) {
+                if metadata.is_some_and(SourceMetadata::has_reactive_wakeup_inputs) {
                     context = context.with_reactive_inputs();
                 }
                 if let Some(wakeup) = metadata
@@ -2349,7 +2943,7 @@ impl Validator<'_> {
             }
         };
         let mut context = SourceRecurrenceWakeupContext::new(provider);
-        if metadata.is_some_and(|metadata| metadata.is_reactive) {
+        if metadata.is_some_and(SourceMetadata::has_reactive_wakeup_inputs) {
             context = context.with_reactive_inputs();
         }
         let contract = provider.contract();
@@ -3234,20 +3828,33 @@ impl Validator<'_> {
     }
 
     fn check_source_metadata(&mut self, span: SourceSpan, metadata: &SourceMetadata) {
-        for dependency in &metadata.signal_dependencies {
-            self.require_item(span, "source metadata", "signal dependency", *dependency);
-            if let Some(item) = self.module.items().get(*dependency) {
-                if !matches!(item, Item::Signal(_)) {
-                    self.diagnostics.push(
-                        Diagnostic::error("source metadata dependency must point at a signal item")
-                            .with_code(code("invalid-source-dependency"))
-                            .with_label(DiagnosticLabel::primary(
-                                span,
-                                "update the source metadata to reference only signal items",
-                            )),
-                    );
-                }
-            }
+        self.check_source_dependency_list(span, "source metadata", &metadata.signal_dependencies);
+        self.check_source_dependency_list(
+            span,
+            "source lifecycle reconfiguration",
+            &metadata.lifecycle_dependencies.reconfiguration,
+        );
+        self.check_source_dependency_list(
+            span,
+            "source lifecycle trigger",
+            &metadata.lifecycle_dependencies.explicit_triggers,
+        );
+        self.check_source_dependency_list(
+            span,
+            "source lifecycle activeWhen",
+            &metadata.lifecycle_dependencies.active_when,
+        );
+        if metadata.lifecycle_dependencies.merged() != metadata.signal_dependencies {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    "source lifecycle dependency roles must stay consistent with source metadata dependencies",
+                )
+                .with_code(code("inconsistent-source-lifecycle-dependencies"))
+                .with_label(DiagnosticLabel::primary(
+                    span,
+                    "recompute source lifecycle dependency roles after name resolution",
+                )),
+            );
         }
         if metadata.custom_contract.is_some() {
             match &metadata.provider {
@@ -3283,6 +3890,48 @@ impl Validator<'_> {
                     )),
                 ),
             }
+        }
+    }
+
+    fn check_source_dependency_list(
+        &mut self,
+        span: SourceSpan,
+        role: &str,
+        dependencies: &[ItemId],
+    ) {
+        let mut previous = None;
+        for dependency in dependencies {
+            self.require_item(span, "source lifecycle", "signal dependency", *dependency);
+            if let Some(item) = self.module.items().get(*dependency) {
+                if !matches!(item, Item::Signal(_)) {
+                    self.diagnostics.push(
+                        Diagnostic::error(format!(
+                            "{role} dependency must point at a signal item"
+                        ))
+                        .with_code(code("invalid-source-lifecycle-dependency"))
+                        .with_label(DiagnosticLabel::primary(
+                            span,
+                            "update the source lifecycle dependency list to reference only signal items",
+                        )),
+                    );
+                }
+            }
+            if let Some(previous) = previous {
+                if previous >= *dependency {
+                    self.diagnostics.push(
+                        Diagnostic::error(format!(
+                            "{role} dependency lists must stay sorted and duplicate-free"
+                        ))
+                        .with_code(code("unordered-source-lifecycle-dependencies"))
+                        .with_label(DiagnosticLabel::primary(
+                            span,
+                            "normalize source lifecycle dependency ordering after resolution",
+                        )),
+                    );
+                    break;
+                }
+            }
+            previous = Some(*dependency);
         }
     }
 
@@ -3671,6 +4320,19 @@ fn builtin_type_name(builtin: BuiltinType) -> &'static str {
         BuiltinType::Validation => "Validation",
         BuiltinType::Signal => "Signal",
         BuiltinType::Task => "Task",
+    }
+}
+
+fn builtin_term_name(builtin: BuiltinTerm) -> &'static str {
+    match builtin {
+        BuiltinTerm::True => "True",
+        BuiltinTerm::False => "False",
+        BuiltinTerm::None => "None",
+        BuiltinTerm::Some => "Some",
+        BuiltinTerm::Ok => "Ok",
+        BuiltinTerm::Err => "Err",
+        BuiltinTerm::Valid => "Valid",
+        BuiltinTerm::Invalid => "Invalid",
     }
 }
 
@@ -4758,7 +5420,12 @@ fn custom_source_contract_expected_type(
     module: &Module,
     annotation: TypeId,
 ) -> Option<SourceOptionExpectedType> {
-    SourceOptionExpectedType::from_hir_type(module, annotation, &HashMap::new())
+    SourceOptionExpectedType::from_hir_type(
+        module,
+        annotation,
+        &HashMap::new(),
+        SourceOptionTypeSurface::Contract,
+    )
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -4766,8 +5433,17 @@ enum SourceOptionExpectedType {
     Primitive(BuiltinType),
     List(Box<Self>),
     Signal(Box<Self>),
+    Option(Box<Self>),
+    Result { error: Box<Self>, value: Box<Self> },
+    Validation { error: Box<Self>, value: Box<Self> },
     Named(SourceOptionNamedType),
     ContractParameter(SourceTypeParameter),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SourceOptionTypeSurface {
+    Contract,
+    Expression,
 }
 
 impl SourceOptionExpectedType {
@@ -4815,6 +5491,7 @@ impl SourceOptionExpectedType {
         module: &Module,
         ty: TypeId,
         substitutions: &HashMap<TypeParameterId, SourceOptionExpectedType>,
+        surface: SourceOptionTypeSurface,
     ) -> Option<Self> {
         match &module.types()[ty].kind {
             TypeKind::Name(reference) => match reference.resolution.as_ref() {
@@ -4848,6 +5525,7 @@ impl SourceOptionExpectedType {
                             module,
                             *arguments.first(),
                             substitutions,
+                            surface,
                         )?)))
                     }
                     ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Signal)) => {
@@ -4855,12 +5533,61 @@ impl SourceOptionExpectedType {
                             module,
                             *arguments.first(),
                             substitutions,
+                            surface,
                         )?)))
+                    }
+                    ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Option))
+                        if surface == SourceOptionTypeSurface::Expression =>
+                    {
+                        Some(Self::Option(Box::new(Self::from_hir_type(
+                            module,
+                            *arguments.first(),
+                            substitutions,
+                            surface,
+                        )?)))
+                    }
+                    ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Result))
+                        if surface == SourceOptionTypeSurface::Expression =>
+                    {
+                        Some(Self::Result {
+                            error: Box::new(Self::from_hir_type(
+                                module,
+                                *arguments.first(),
+                                substitutions,
+                                surface,
+                            )?),
+                            value: Box::new(Self::from_hir_type(
+                                module,
+                                *arguments.iter().nth(1)?,
+                                substitutions,
+                                surface,
+                            )?),
+                        })
+                    }
+                    ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Validation))
+                        if surface == SourceOptionTypeSurface::Expression =>
+                    {
+                        Some(Self::Validation {
+                            error: Box::new(Self::from_hir_type(
+                                module,
+                                *arguments.first(),
+                                substitutions,
+                                surface,
+                            )?),
+                            value: Box::new(Self::from_hir_type(
+                                module,
+                                *arguments.iter().nth(1)?,
+                                substitutions,
+                                surface,
+                            )?),
+                        })
                     }
                     ResolutionState::Resolved(TypeResolution::Item(item)) => {
                         let arguments = arguments
                             .iter()
-                            .map(|argument| Self::from_hir_type(module, *argument, substitutions))
+                            .map(|argument| {
+                                Self::from_hir_type(module, *argument, substitutions, surface)
+                            })
                             .collect::<Option<Vec<_>>>()?;
                         Some(Self::Named(SourceOptionNamedType::from_item(
                             module, *item, arguments,
@@ -4876,15 +5603,36 @@ impl SourceOptionExpectedType {
         }
     }
 
-    fn from_gate_type(module: &Module, ty: &GateType) -> Option<Self> {
+    fn from_gate_type(
+        module: &Module,
+        ty: &GateType,
+        surface: SourceOptionTypeSurface,
+    ) -> Option<Self> {
         match ty {
             GateType::Primitive(builtin) => Some(Self::Primitive(*builtin)),
-            GateType::List(element) => {
-                Some(Self::List(Box::new(Self::from_gate_type(module, element)?)))
-            }
-            GateType::Signal(element) => Some(Self::Signal(Box::new(Self::from_gate_type(
-                module, element,
+            GateType::List(element) => Some(Self::List(Box::new(Self::from_gate_type(
+                module, element, surface,
             )?))),
+            GateType::Signal(element) => Some(Self::Signal(Box::new(Self::from_gate_type(
+                module, element, surface,
+            )?))),
+            GateType::Option(element) if surface == SourceOptionTypeSurface::Expression => Some(
+                Self::Option(Box::new(Self::from_gate_type(module, element, surface)?)),
+            ),
+            GateType::Result { error, value } if surface == SourceOptionTypeSurface::Expression => {
+                Some(Self::Result {
+                    error: Box::new(Self::from_gate_type(module, error, surface)?),
+                    value: Box::new(Self::from_gate_type(module, value, surface)?),
+                })
+            }
+            GateType::Validation { error, value }
+                if surface == SourceOptionTypeSurface::Expression =>
+            {
+                Some(Self::Validation {
+                    error: Box::new(Self::from_gate_type(module, error, surface)?),
+                    value: Box::new(Self::from_gate_type(module, value, surface)?),
+                })
+            }
             GateType::Domain {
                 item, arguments, ..
             }
@@ -4893,7 +5641,7 @@ impl SourceOptionExpectedType {
             } => {
                 let arguments = arguments
                     .iter()
-                    .map(|argument| Self::from_gate_type(module, argument))
+                    .map(|argument| Self::from_gate_type(module, argument, surface))
                     .collect::<Option<Vec<_>>>()?;
                 Some(Self::Named(SourceOptionNamedType::from_item(
                     module, *item, arguments,
@@ -5027,6 +5775,29 @@ fn source_option_expected_matches_gate_type_inner(
         }
         (SourceOptionExpectedType::Signal(expected), GateType::Signal(actual)) => {
             source_option_expected_matches_gate_type(expected, actual, bindings)
+        }
+        (SourceOptionExpectedType::Option(expected), GateType::Option(actual)) => {
+            source_option_expected_matches_gate_type(expected, actual, bindings)
+        }
+        (
+            SourceOptionExpectedType::Result { error, value },
+            GateType::Result {
+                error: actual_error,
+                value: actual_value,
+            },
+        ) => {
+            source_option_expected_matches_gate_type(error, actual_error, bindings)
+                && source_option_expected_matches_gate_type(value, actual_value, bindings)
+        }
+        (
+            SourceOptionExpectedType::Validation { error, value },
+            GateType::Validation {
+                error: actual_error,
+                value: actual_value,
+            },
+        ) => {
+            source_option_expected_matches_gate_type(error, actual_error, bindings)
+                && source_option_expected_matches_gate_type(value, actual_value, bindings)
         }
         (
             SourceOptionExpectedType::Named(expected),
@@ -5455,6 +6226,16 @@ mod tests {
                 )),
             })
             .expect("builtin expression allocation should fit")
+    }
+
+    fn item_expr(module: &mut Module, item: crate::ItemId, text: &str) -> crate::ExprId {
+        let path = NamePath::from_vec(vec![name(text)]).expect("item path should stay valid");
+        module
+            .alloc_expr(Expr {
+                span: unit_span(),
+                kind: ExprKind::Name(TermReference::resolved(path, TermResolution::Item(item))),
+            })
+            .expect("item expression allocation should fit")
     }
 
     #[test]
@@ -6041,8 +6822,7 @@ mod tests {
     }
 
     #[test]
-    fn source_option_root_contract_parameters_still_wait_for_nested_generic_constructor_arguments()
-    {
+    fn source_option_root_contract_parameters_bind_nested_generic_constructor_arguments() {
         let mut module = Module::new(FileId::new(0));
         let payload = type_parameter(&mut module, "A");
         let payload_ref = module
@@ -6091,9 +6871,437 @@ mod tests {
                 &mut typing,
                 &mut bindings,
             ),
-            SourceOptionTypeCheck::Unknown,
+            SourceOptionTypeCheck::Match,
         );
-        assert_eq!(bindings.parameter(SourceTypeParameter::A), None);
+        assert_eq!(
+            bindings.parameter(SourceTypeParameter::A),
+            Some(&GateType::OpaqueItem {
+                item: outer_item,
+                name: "Outer".to_owned(),
+                arguments: vec![GateType::OpaqueItem {
+                    item: inner_item,
+                    name: "Inner".to_owned(),
+                    arguments: vec![GateType::Primitive(BuiltinType::Int)],
+                }],
+            }),
+        );
+    }
+
+    #[test]
+    fn source_option_root_contract_parameters_bind_unannotated_local_value_bodies() {
+        let mut module = Module::new(FileId::new(0));
+        let payload = type_parameter(&mut module, "A");
+        let payload_ref = module
+            .alloc_type(TypeNode {
+                span: unit_span(),
+                kind: TypeKind::Name(TypeReference::resolved(
+                    NamePath::from_vec(vec![name("A")]).expect("parameter path should stay valid"),
+                    TypeResolution::TypeParameter(payload),
+                )),
+            })
+            .expect("parameter type allocation should fit");
+        let box_item = push_sum_type(&mut module, "Box", vec![payload], "Box", vec![payload_ref]);
+        let element = module
+            .alloc_expr(Expr {
+                span: unit_span(),
+                kind: ExprKind::Integer(IntegerLiteral { raw: "1".into() }),
+            })
+            .expect("expression allocation should fit");
+        let boxed_expr = constructor_expr(&mut module, box_item, "Box", vec![element]);
+        let boxed_item = module
+            .push_item(Item::Value(crate::ValueItem {
+                header: ItemHeader {
+                    span: unit_span(),
+                    decorators: Vec::new(),
+                },
+                name: name("boxed"),
+                annotation: None,
+                body: boxed_expr,
+            }))
+            .expect("value item allocation should fit");
+        let expr = item_expr(&mut module, boxed_item, "boxed");
+        let validator = Validator {
+            module: &module,
+            mode: ValidationMode::RequireResolvedNames,
+            diagnostics: Vec::new(),
+        };
+        let mut typing = GateTypeContext::new(&module);
+        let mut bindings = SourceOptionTypeBindings::default();
+
+        assert_eq!(
+            validator.check_source_option_expr(
+                expr,
+                &SourceOptionExpectedType::ContractParameter(SourceTypeParameter::A),
+                &mut typing,
+                &mut bindings,
+            ),
+            SourceOptionTypeCheck::Match,
+        );
+        assert_eq!(
+            bindings.parameter(SourceTypeParameter::A),
+            Some(&GateType::OpaqueItem {
+                item: box_item,
+                name: "Box".to_owned(),
+                arguments: vec![GateType::Primitive(BuiltinType::Int)],
+            }),
+        );
+    }
+
+    #[test]
+    fn source_option_root_contract_parameters_bind_builtin_some_constructor_roots() {
+        let mut module = Module::new(FileId::new(0));
+        let element = module
+            .alloc_expr(Expr {
+                span: unit_span(),
+                kind: ExprKind::Integer(IntegerLiteral { raw: "1".into() }),
+            })
+            .expect("expression allocation should fit");
+        let some_callee = builtin_expr(&mut module, BuiltinTerm::Some, "Some");
+        let some_expr = module
+            .alloc_expr(Expr {
+                span: unit_span(),
+                kind: ExprKind::Apply {
+                    callee: some_callee,
+                    arguments: NonEmpty::new(element, Vec::new()),
+                },
+            })
+            .expect("builtin constructor application should fit");
+        let validator = Validator {
+            module: &module,
+            mode: ValidationMode::RequireResolvedNames,
+            diagnostics: Vec::new(),
+        };
+        let mut typing = GateTypeContext::new(&module);
+        let mut bindings = SourceOptionTypeBindings::default();
+
+        assert_eq!(
+            validator.check_source_option_expr(
+                some_expr,
+                &SourceOptionExpectedType::ContractParameter(SourceTypeParameter::A),
+                &mut typing,
+                &mut bindings,
+            ),
+            SourceOptionTypeCheck::Match,
+        );
+        assert_eq!(
+            bindings.parameter(SourceTypeParameter::A),
+            Some(&GateType::Option(Box::new(GateType::Primitive(
+                BuiltinType::Int,
+            )))),
+        );
+    }
+
+    #[test]
+    fn source_option_root_contract_parameters_bind_fixed_point_builtin_none_fields() {
+        let mut module = Module::new(FileId::new(0));
+        let payload = type_parameter(&mut module, "A");
+        let payload_ref = module
+            .alloc_type(TypeNode {
+                span: unit_span(),
+                kind: TypeKind::Name(TypeReference::resolved(
+                    NamePath::from_vec(vec![name("A")]).expect("parameter path should stay valid"),
+                    TypeResolution::TypeParameter(payload),
+                )),
+            })
+            .expect("parameter type allocation should fit");
+        let option_callee = builtin_type(&mut module, BuiltinType::Option);
+        let option_payload = module
+            .alloc_type(TypeNode {
+                span: unit_span(),
+                kind: TypeKind::Apply {
+                    callee: option_callee,
+                    arguments: NonEmpty::new(payload_ref, Vec::new()),
+                },
+            })
+            .expect("option type allocation should fit");
+        let pair_item = push_sum_type(
+            &mut module,
+            "Pair",
+            vec![payload],
+            "Pair",
+            vec![payload_ref, option_payload],
+        );
+        let element = module
+            .alloc_expr(Expr {
+                span: unit_span(),
+                kind: ExprKind::Integer(IntegerLiteral { raw: "1".into() }),
+            })
+            .expect("expression allocation should fit");
+        let none_expr = builtin_expr(&mut module, BuiltinTerm::None, "None");
+        let expr = constructor_expr(&mut module, pair_item, "Pair", vec![element, none_expr]);
+        let validator = Validator {
+            module: &module,
+            mode: ValidationMode::RequireResolvedNames,
+            diagnostics: Vec::new(),
+        };
+        let mut typing = GateTypeContext::new(&module);
+        let mut bindings = SourceOptionTypeBindings::default();
+
+        assert_eq!(
+            validator.check_source_option_expr(
+                expr,
+                &SourceOptionExpectedType::ContractParameter(SourceTypeParameter::A),
+                &mut typing,
+                &mut bindings,
+            ),
+            SourceOptionTypeCheck::Match,
+        );
+        assert_eq!(
+            bindings.parameter(SourceTypeParameter::A),
+            Some(&GateType::OpaqueItem {
+                item: pair_item,
+                name: "Pair".to_owned(),
+                arguments: vec![GateType::Primitive(BuiltinType::Int)],
+            }),
+        );
+    }
+
+    #[test]
+    fn source_option_root_contract_parameters_bind_fixed_point_builtin_result_fields() {
+        let mut module = Module::new(FileId::new(0));
+        let payload = type_parameter(&mut module, "A");
+        let payload_ref = module
+            .alloc_type(TypeNode {
+                span: unit_span(),
+                kind: TypeKind::Name(TypeReference::resolved(
+                    NamePath::from_vec(vec![name("A")]).expect("parameter path should stay valid"),
+                    TypeResolution::TypeParameter(payload),
+                )),
+            })
+            .expect("parameter type allocation should fit");
+        let text_ref = builtin_type(&mut module, BuiltinType::Text);
+        let result_callee = builtin_type(&mut module, BuiltinType::Result);
+        let result_payload = module
+            .alloc_type(TypeNode {
+                span: unit_span(),
+                kind: TypeKind::Apply {
+                    callee: result_callee,
+                    arguments: NonEmpty::new(text_ref, vec![payload_ref]),
+                },
+            })
+            .expect("result type allocation should fit");
+        let outcome_item = push_sum_type(
+            &mut module,
+            "OutcomeBox",
+            vec![payload],
+            "OutcomeBox",
+            vec![payload_ref, result_payload],
+        );
+        let element = module
+            .alloc_expr(Expr {
+                span: unit_span(),
+                kind: ExprKind::Integer(IntegerLiteral { raw: "1".into() }),
+            })
+            .expect("expression allocation should fit");
+        let ok_value = module
+            .alloc_expr(Expr {
+                span: unit_span(),
+                kind: ExprKind::Integer(IntegerLiteral { raw: "2".into() }),
+            })
+            .expect("expression allocation should fit");
+        let ok_callee = builtin_expr(&mut module, BuiltinTerm::Ok, "Ok");
+        let ok_expr = module
+            .alloc_expr(Expr {
+                span: unit_span(),
+                kind: ExprKind::Apply {
+                    callee: ok_callee,
+                    arguments: NonEmpty::new(ok_value, Vec::new()),
+                },
+            })
+            .expect("builtin constructor application should fit");
+        let expr = constructor_expr(
+            &mut module,
+            outcome_item,
+            "OutcomeBox",
+            vec![element, ok_expr],
+        );
+        let validator = Validator {
+            module: &module,
+            mode: ValidationMode::RequireResolvedNames,
+            diagnostics: Vec::new(),
+        };
+        let mut typing = GateTypeContext::new(&module);
+        let mut bindings = SourceOptionTypeBindings::default();
+
+        assert_eq!(
+            validator.check_source_option_expr(
+                expr,
+                &SourceOptionExpectedType::ContractParameter(SourceTypeParameter::A),
+                &mut typing,
+                &mut bindings,
+            ),
+            SourceOptionTypeCheck::Match,
+        );
+        assert_eq!(
+            bindings.parameter(SourceTypeParameter::A),
+            Some(&GateType::OpaqueItem {
+                item: outcome_item,
+                name: "OutcomeBox".to_owned(),
+                arguments: vec![GateType::Primitive(BuiltinType::Int)],
+            }),
+        );
+    }
+
+    #[test]
+    fn source_option_root_contract_parameters_bind_tuple_constructor_fields() {
+        let mut module = Module::new(FileId::new(0));
+        let payload = type_parameter(&mut module, "A");
+        let payload_ref = module
+            .alloc_type(TypeNode {
+                span: unit_span(),
+                kind: TypeKind::Name(TypeReference::resolved(
+                    NamePath::from_vec(vec![name("A")]).expect("parameter path should stay valid"),
+                    TypeResolution::TypeParameter(payload),
+                )),
+            })
+            .expect("parameter type allocation should fit");
+        let bool_ref = builtin_type(&mut module, BuiltinType::Bool);
+        let tuple_field = module
+            .alloc_type(TypeNode {
+                span: unit_span(),
+                kind: TypeKind::Tuple(crate::AtLeastTwo::new(payload_ref, bool_ref, Vec::new())),
+            })
+            .expect("tuple type allocation should fit");
+        let pair_box = push_sum_type(
+            &mut module,
+            "PairBox",
+            vec![payload],
+            "PairBox",
+            vec![tuple_field],
+        );
+        let value_expr = module
+            .alloc_expr(Expr {
+                span: unit_span(),
+                kind: ExprKind::Integer(IntegerLiteral { raw: "1".into() }),
+            })
+            .expect("expression allocation should fit");
+        let bool_expr = builtin_expr(&mut module, BuiltinTerm::True, "True");
+        let tuple_expr = module
+            .alloc_expr(Expr {
+                span: unit_span(),
+                kind: ExprKind::Tuple(crate::AtLeastTwo::new(value_expr, bool_expr, Vec::new())),
+            })
+            .expect("tuple expression allocation should fit");
+        let expr = constructor_expr(&mut module, pair_box, "PairBox", vec![tuple_expr]);
+        let validator = Validator {
+            module: &module,
+            mode: ValidationMode::RequireResolvedNames,
+            diagnostics: Vec::new(),
+        };
+        let mut typing = GateTypeContext::new(&module);
+        let mut bindings = SourceOptionTypeBindings::default();
+
+        assert_eq!(
+            validator.check_source_option_expr(
+                expr,
+                &SourceOptionExpectedType::ContractParameter(SourceTypeParameter::A),
+                &mut typing,
+                &mut bindings,
+            ),
+            SourceOptionTypeCheck::Match,
+        );
+        assert_eq!(
+            bindings.parameter(SourceTypeParameter::A),
+            Some(&GateType::OpaqueItem {
+                item: pair_box,
+                name: "PairBox".to_owned(),
+                arguments: vec![GateType::Primitive(BuiltinType::Int)],
+            }),
+        );
+    }
+
+    #[test]
+    fn source_option_root_contract_parameters_bind_record_constructor_fields() {
+        let mut module = Module::new(FileId::new(0));
+        let payload = type_parameter(&mut module, "A");
+        let payload_ref = module
+            .alloc_type(TypeNode {
+                span: unit_span(),
+                kind: TypeKind::Name(TypeReference::resolved(
+                    NamePath::from_vec(vec![name("A")]).expect("parameter path should stay valid"),
+                    TypeResolution::TypeParameter(payload),
+                )),
+            })
+            .expect("parameter type allocation should fit");
+        let bool_ref = builtin_type(&mut module, BuiltinType::Bool);
+        let record_field = module
+            .alloc_type(TypeNode {
+                span: unit_span(),
+                kind: TypeKind::Record(vec![
+                    crate::TypeField {
+                        span: unit_span(),
+                        label: name("value"),
+                        ty: payload_ref,
+                    },
+                    crate::TypeField {
+                        span: unit_span(),
+                        label: name("enabled"),
+                        ty: bool_ref,
+                    },
+                ]),
+            })
+            .expect("record type allocation should fit");
+        let config_box = push_sum_type(
+            &mut module,
+            "ConfigBox",
+            vec![payload],
+            "ConfigBox",
+            vec![record_field],
+        );
+        let value_expr = module
+            .alloc_expr(Expr {
+                span: unit_span(),
+                kind: ExprKind::Integer(IntegerLiteral { raw: "1".into() }),
+            })
+            .expect("expression allocation should fit");
+        let bool_expr = builtin_expr(&mut module, BuiltinTerm::True, "True");
+        let record_expr = module
+            .alloc_expr(Expr {
+                span: unit_span(),
+                kind: ExprKind::Record(RecordExpr {
+                    fields: vec![
+                        crate::RecordExprField {
+                            span: unit_span(),
+                            label: name("value"),
+                            value: value_expr,
+                            surface: crate::RecordFieldSurface::Explicit,
+                        },
+                        crate::RecordExprField {
+                            span: unit_span(),
+                            label: name("enabled"),
+                            value: bool_expr,
+                            surface: crate::RecordFieldSurface::Explicit,
+                        },
+                    ],
+                }),
+            })
+            .expect("record expression allocation should fit");
+        let expr = constructor_expr(&mut module, config_box, "ConfigBox", vec![record_expr]);
+        let validator = Validator {
+            module: &module,
+            mode: ValidationMode::RequireResolvedNames,
+            diagnostics: Vec::new(),
+        };
+        let mut typing = GateTypeContext::new(&module);
+        let mut bindings = SourceOptionTypeBindings::default();
+
+        assert_eq!(
+            validator.check_source_option_expr(
+                expr,
+                &SourceOptionExpectedType::ContractParameter(SourceTypeParameter::A),
+                &mut typing,
+                &mut bindings,
+            ),
+            SourceOptionTypeCheck::Match,
+        );
+        assert_eq!(
+            bindings.parameter(SourceTypeParameter::A),
+            Some(&GateType::OpaqueItem {
+                item: config_box,
+                name: "ConfigBox".to_owned(),
+                arguments: vec![GateType::Primitive(BuiltinType::Int)],
+            }),
+        );
     }
 
     #[test]
