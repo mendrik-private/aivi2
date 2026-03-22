@@ -56,6 +56,13 @@ impl LoweringResult {
 }
 
 pub fn lower_module(module: &syn::Module) -> LoweringResult {
+    lower_module_with_resolver(module, None)
+}
+
+pub fn lower_module_with_resolver(
+    module: &syn::Module,
+    _resolver: Option<&dyn crate::resolver::ImportResolver>,
+) -> LoweringResult {
     let mut lowerer = Lowerer::new(module.file);
     for item in &module.items {
         lowerer.lower_item(item);
@@ -4553,6 +4560,8 @@ fn builtin_type(name: &str) -> Option<BuiltinType> {
         "Unit" => Some(BuiltinType::Unit),
         "Bytes" => Some(BuiltinType::Bytes),
         "List" => Some(BuiltinType::List),
+        "Map" => Some(BuiltinType::Map),
+        "Set" => Some(BuiltinType::Set),
         "Option" => Some(BuiltinType::Option),
         "Result" => Some(BuiltinType::Result),
         "Validation" => Some(BuiltinType::Validation),

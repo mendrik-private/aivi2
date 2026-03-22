@@ -1,0 +1,15 @@
+[package]
+name = "aivi-query"
+edition.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+aivi-base = { workspace = true }
+aivi-syntax = { workspace = true }
+aivi-hir = { workspace = true }
+aivi-typing = { workspace = true }
+parking_lot = "0.12"
+
+[lints]
+workspace = true

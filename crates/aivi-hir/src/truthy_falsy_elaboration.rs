@@ -1,11 +1,11 @@
 use aivi_base::SourceSpan;
 
 use crate::{
-    validate::{
-        truthy_falsy_pair_stages, walk_expr_tree, GateExprEnv, GateIssue, GateType,
-        GateTypeContext, TruthyFalsyPairStages,
-    },
     BuiltinTerm, ExprId, ExprKind, Item, ItemId, Module, PipeExpr, PipeStageKind,
+    validate::{
+        GateExprEnv, GateIssue, GateType, GateTypeContext, TruthyFalsyPairStages,
+        truthy_falsy_pair_stages, walk_expr_tree,
+    },
 };
 
 /// Focused truthy/falsy branch plans derived from resolved HIR.
@@ -419,10 +419,10 @@ mod tests {
     use aivi_syntax::parse_module;
 
     use super::{
-        elaborate_truthy_falsy, TruthyFalsyBranchKind, TruthyFalsyElaborationBlocker,
-        TruthyFalsyStageOutcome,
+        TruthyFalsyBranchKind, TruthyFalsyElaborationBlocker, TruthyFalsyStageOutcome,
+        elaborate_truthy_falsy,
     };
-    use crate::{lower_module, BuiltinTerm, BuiltinType, GateType, Item, ValidationMode};
+    use crate::{BuiltinTerm, BuiltinType, GateType, Item, ValidationMode, lower_module};
 
     fn fixture_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

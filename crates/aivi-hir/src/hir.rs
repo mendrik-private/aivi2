@@ -10,7 +10,7 @@ use crate::{
         PatternId, TypeId, TypeParameterId,
     },
     sequence::{AtLeastTwo, NonEmpty, SequenceError},
-    validate::{validate_module, ValidationMode, ValidationReport},
+    validate::{ValidationMode, ValidationReport, validate_module},
 };
 
 /// One source-stable surface name preserved into HIR for diagnostics.
@@ -217,6 +217,8 @@ pub enum BuiltinType {
     Unit,
     Bytes,
     List,
+    Map,
+    Set,
     Option,
     Result,
     Validation,
@@ -263,6 +265,11 @@ pub enum ImportValueType {
         result: Box<Self>,
     },
     List(Box<Self>),
+    Map {
+        key: Box<Self>,
+        value: Box<Self>,
+    },
+    Set(Box<Self>),
     Option(Box<Self>),
     Result {
         error: Box<Self>,
@@ -1379,6 +1386,11 @@ impl Module {
             root_items: Vec::new(),
             arenas: ModuleArenas::default(),
         }
+    }
+
+    /// Create a valid but empty module. Used as a cycle-recovery placeholder.
+    pub fn empty() -> Self {
+        Self::default()
     }
 
     pub const fn file(&self) -> FileId {

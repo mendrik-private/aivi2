@@ -7,5 +7,6 @@ pub mod source;
 
 pub use diagnostic::{Diagnostic, DiagnosticCode, DiagnosticLabel, LabelStyle, Severity};
 pub use source::{
-    ByteIndex, FileId, LineColumn, SourceDatabase, SourceFile, SourceSpan, Span, Spanned,
+    ByteIndex, FileId, LineColumn, LspPosition, LspRange, SourceDatabase, SourceFile, SourceSpan,
+    Span, Spanned,
 };

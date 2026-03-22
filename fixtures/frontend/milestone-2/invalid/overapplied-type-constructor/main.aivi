@@ -1,1 +1,2 @@
-type Broken = (Option Text Text)
+type BrokenMap = (Map Text Text Text)
+type BrokenSet = (Set Text Text)

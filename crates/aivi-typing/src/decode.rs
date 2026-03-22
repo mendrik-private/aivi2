@@ -42,6 +42,10 @@ impl DecodePlanId {
     fn index(self) -> usize {
         self.0 as usize
     }
+
+    pub fn as_usize(self) -> usize {
+        self.index()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

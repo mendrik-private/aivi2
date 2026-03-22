@@ -1,0 +1,18 @@
+type Screen =
+  | Loading
+  | Ready Text
+  | Failed Text
+
+val current:Screen = Loading
+
+val screenView =
+    <with value={current} as={screen}>
+        <match on={screen}>
+            <case pattern={Loading}>
+                <Label text="Loading..." />
+            </case>
+            <case pattern={Ready title}>
+                <Label text={title} />
+            </case>
+        </match>
+    </with>

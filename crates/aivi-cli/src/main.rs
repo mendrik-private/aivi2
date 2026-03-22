@@ -4,6 +4,7 @@ use std::{
     env,
     ffi::OsString,
     fs,
+    io::{self, Read},
     path::{Path, PathBuf},
     process::ExitCode,
 };
@@ -31,21 +32,43 @@ fn run() -> Result<ExitCode, String> {
         return Ok(ExitCode::from(2));
     };
 
-    let (command, path) = if first == OsString::from("check") {
-        (Command::Check, take_path(args)?)
-    } else if first == OsString::from("lex") {
-        (Command::Lex, take_path(args)?)
-    } else if first == OsString::from("fmt") {
-        (Command::Fmt, take_path(args)?)
-    } else {
-        (Command::Check, PathBuf::from(first))
+    if first == OsString::from("check") {
+        return check_file(&take_path(args)?);
+    }
+
+    if first == OsString::from("lex") {
+        return lex_file(&take_path(args)?);
+    }
+
+    if first == OsString::from("lsp") {
+        return run_lsp(args);
+    }
+
+    if first == OsString::from("fmt") {
+        return run_fmt(args);
+    }
+
+    // Default: treat the first argument as a path and run `check`.
+    check_file(&PathBuf::from(first))
+}
+
+fn run_fmt(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
+    let Some(next) = args.next() else {
+        return Err("expected a path or --stdin/--check argument after `fmt`".to_owned());
     };
 
-    match command {
-        Command::Check => check_file(&path),
-        Command::Lex => lex_file(&path),
-        Command::Fmt => format_file(&path),
+    if next == OsString::from("--stdin") {
+        return format_stdin();
     }
+
+    if next == OsString::from("--check") {
+        // Collect remaining paths; if none given use no-op (no files = no changes).
+        let paths: Vec<PathBuf> = args.map(PathBuf::from).collect();
+        return format_check(&paths);
+    }
+
+    // Treat as a file path — format to stdout (legacy behaviour).
+    format_file(&PathBuf::from(next))
 }
 
 fn take_path(mut args: impl Iterator<Item = OsString>) -> Result<PathBuf, String> {
@@ -160,10 +183,55 @@ fn format_file(path: &Path) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
+fn format_stdin() -> Result<ExitCode, String> {
+    let mut source = String::new();
+    io::stdin()
+        .read_to_string(&mut source)
+        .map_err(|e| format!("failed to read stdin: {e}"))?;
+    let mut sources = SourceDatabase::new();
+    let file_id = sources.add_file("<stdin>", source);
+    let file = &sources[file_id];
+    let parsed = parse_module(file);
+    // Per plan/02: tolerate parse errors, emit formatted output regardless.
+    let formatter = Formatter;
+    print!("{}", formatter.format(&parsed.module));
+    Ok(ExitCode::SUCCESS)
+}
+
+fn format_check(paths: &[PathBuf]) -> Result<ExitCode, String> {
+    let mut any_changed = false;
+    for path in paths {
+        let (sources, file_id) = load_source(path)?;
+        let file = &sources[file_id];
+        let parsed = parse_module(file);
+        let formatter = Formatter;
+        let formatted = formatter.format(&parsed.module);
+        if formatted != file.text() {
+            println!("{}", path.display());
+            any_changed = true;
+        }
+    }
+    if any_changed {
+        Ok(ExitCode::FAILURE)
+    } else {
+        Ok(ExitCode::SUCCESS)
+    }
+}
+
+fn run_lsp(_args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
+    tokio::runtime::Runtime::new()
+        .map_err(|e| format!("failed to create tokio runtime: {e}"))?
+        .block_on(aivi_lsp::run())
+        .map_err(|e| format!("LSP server error: {e}"))?;
+    Ok(ExitCode::SUCCESS)
+}
+
 fn print_usage() {
-    eprintln!("usage:\n  aivi <path>\n  aivi check <path>\n  aivi lex <path>\n  aivi fmt <path>");
     eprintln!(
-        "commands:\n  check  Lex, parse, lower, and validate a module\n  lex    Dump the lossless token stream\n  fmt    Canonically format the supported surface subset"
+        "usage:\n  aivi <path>\n  aivi check <path>\n  aivi lex <path>\n  aivi fmt <path>\n  aivi fmt --stdin\n  aivi fmt --check [path...]\n  aivi lsp"
+    );
+    eprintln!(
+        "commands:\n  check  Lex, parse, lower, and validate a module\n  lex    Dump the lossless token stream\n  fmt    Canonically format the supported surface subset\n  lsp    Start the language server"
     );
     eprintln!(
         "milestone-2 surface items: {:?}",
@@ -193,13 +261,6 @@ fn print_usage() {
             TokenKind::PipeFanIn,
         ]
     );
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Command {
-    Check,
-    Lex,
-    Fmt,
 }
 
 #[cfg(test)]

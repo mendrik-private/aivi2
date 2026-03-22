@@ -284,6 +284,8 @@ mod tests {
             BuiltinType::Unit => "Unit",
             BuiltinType::Bytes => "Bytes",
             BuiltinType::List => "List",
+            BuiltinType::Map => "Map",
+            BuiltinType::Set => "Set",
             BuiltinType::Option => "Option",
             BuiltinType::Result => "Result",
             BuiltinType::Validation => "Validation",

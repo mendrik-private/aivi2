@@ -1,0 +1,199 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "AIVI",
+  "scopeName": "source.aivi",
+  "fileTypes": [".aivi"],
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#doc-comment" },
+    { "include": "#decorator" },
+    { "include": "#use-declaration" },
+    { "include": "#type-declaration" },
+    { "include": "#class-declaration" },
+    { "include": "#instance-declaration" },
+    { "include": "#fun-declaration" },
+    { "include": "#val-declaration" },
+    { "include": "#sig-declaration" },
+    { "include": "#provider-declaration" },
+    { "include": "#pipe-operators" },
+    { "include": "#markup-tag" },
+    { "include": "#string-interpolated" },
+    { "include": "#number-literal" },
+    { "include": "#constructor-ref" },
+    { "include": "#labeled-parameter" },
+    { "include": "#keyword" },
+    { "include": "#operator" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.double-dash.aivi",
+      "match": "--(?!-).*$"
+    },
+    "doc-comment": {
+      "name": "comment.block.documentation.aivi",
+      "match": "---.*$"
+    },
+    "decorator": {
+      "name": "meta.decorator.aivi",
+      "match": "(@)(source|recur\\.timer|recur\\.backoff)\\b",
+      "captures": {
+        "1": { "name": "punctuation.decorator.aivi" },
+        "2": { "name": "entity.name.label.aivi" }
+      }
+    },
+    "use-declaration": {
+      "name": "meta.use.aivi",
+      "begin": "\\b(use)\\b",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration.aivi" }
+      },
+      "end": "(?=\\n(?!\\s*[a-z]))",
+      "patterns": [
+        {
+          "match": "[a-z][a-zA-Z0-9_]*(?:\\.[a-z][a-zA-Z0-9_]*)*",
+          "name": "entity.name.namespace.aivi"
+        },
+        {
+          "match": "[a-z][a-zA-Z0-9_]*",
+          "name": "variable.other.aivi"
+        }
+      ]
+    },
+    "type-declaration": {
+      "match": "\\b(type)\\s+([A-Z][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.declaration.aivi" },
+        "2": { "name": "entity.name.type.aivi" }
+      }
+    },
+    "class-declaration": {
+      "match": "\\b(class)\\s+([A-Z][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.declaration.aivi" },
+        "2": { "name": "entity.name.type.aivi" }
+      }
+    },
+    "instance-declaration": {
+      "match": "\\b(instance)\\s+([A-Z][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.declaration.aivi" },
+        "2": { "name": "entity.name.type.aivi" }
+      }
+    },
+    "fun-declaration": {
+      "match": "\\b(fun)\\s+([a-z][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.declaration.aivi" },
+        "2": { "name": "entity.name.function.aivi" }
+      }
+    },
+    "val-declaration": {
+      "match": "\\b(val)\\s+([a-z][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.declaration.aivi" },
+        "2": { "name": "variable.other.aivi" }
+      }
+    },
+    "sig-declaration": {
+      "match": "\\b(sig)\\s+([a-z][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.declaration.aivi" },
+        "2": { "name": "variable.other.aivi" }
+      }
+    },
+    "provider-declaration": {
+      "match": "\\b(provider)\\s+([a-z][a-zA-Z0-9_.]*)",
+      "captures": {
+        "1": { "name": "keyword.declaration.aivi" },
+        "2": { "name": "entity.name.label.aivi" }
+      }
+    },
+    "pipe-operators": {
+      "name": "keyword.operator.pipe.aivi",
+      "match": "\\|>|\\?\\|>|\\|\\|>|\\*\\|>|&\\|>|@\\|>|<\\|@|<\\|\\*|T\\|>|F\\|>"
+    },
+    "markup-tag": {
+      "patterns": [
+        {
+          "name": "punctuation.definition.tag.aivi",
+          "match": "</[A-Za-z][a-zA-Z0-9_]*>"
+        },
+        {
+          "match": "<([A-Za-z][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "entity.name.tag.aivi" }
+          }
+        }
+      ]
+    },
+    "string-interpolated": {
+      "name": "string.quoted.double.aivi",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "meta.embedded.expression.aivi",
+          "begin": "\\{",
+          "end": "\\}",
+          "patterns": [{ "include": "$self" }]
+        },
+        {
+          "name": "constant.character.escape.aivi",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "number-literal": {
+      "patterns": [
+        {
+          "name": "constant.numeric.suffix.aivi",
+          "match": "\\b\\d+[a-z]+\\b"
+        },
+        {
+          "name": "constant.numeric.float.aivi",
+          "match": "\\b\\d+\\.\\d+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.aivi",
+          "match": "\\b\\d[\\d_]*\\b"
+        }
+      ]
+    },
+    "constructor-ref": {
+      "name": "support.class.aivi",
+      "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+    },
+    "labeled-parameter": {
+      "name": "variable.parameter.aivi",
+      "match": "#[a-z][a-zA-Z0-9_]*"
+    },
+    "keyword": {
+      "name": "keyword.declaration.aivi",
+      "match": "\\b(type|val|fun|sig|class|instance|domain|provider|use|export)\\b"
+    },
+    "operator": {
+      "patterns": [
+        {
+          "name": "keyword.operator.arrow.aivi",
+          "match": "=>"
+        },
+        {
+          "name": "keyword.operator.type.aivi",
+          "match": "->"
+        },
+        {
+          "name": "keyword.operator.assign.aivi",
+          "match": "(?<![=!<>])=(?!=)"
+        },
+        {
+          "name": "keyword.operator.type.aivi",
+          "match": ":"
+        },
+        {
+          "name": "storage.type.aivi",
+          "match": "\\b(Int|Float|Decimal|BigInt|Bool|Text|Unit|Bytes|List|Map|Set|Option|Result|Validation|Signal|Task)\\b"
+        }
+      ]
+    }
+  }
+}

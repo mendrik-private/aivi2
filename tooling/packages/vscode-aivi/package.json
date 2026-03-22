@@ -1,0 +1,136 @@
+{
+  "name": "vscode-aivi",
+  "displayName": "AIVI",
+  "description": "AIVI language support — syntax, diagnostics, formatting, and intelligence",
+  "version": "0.1.0",
+  "publisher": "aivi-lang",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Programming Languages", "Formatters", "Linters"],
+  "keywords": ["aivi", "functional", "reactive", "gtk", "linux"],
+  "license": "MIT",
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "languages": [
+      {
+        "id": "aivi",
+        "aliases": ["AIVI", "aivi"],
+        "extensions": [".aivi"],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/aivi-file.svg",
+          "dark": "./icons/aivi-file.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "aivi",
+        "scopeName": "source.aivi",
+        "path": "./syntaxes/aivi.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "aivi",
+        "path": "./snippets/aivi.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "aivi.restartServer",
+        "title": "AIVI: Restart Language Server"
+      },
+      {
+        "command": "aivi.showOutputChannel",
+        "title": "AIVI: Show Output Channel"
+      },
+      {
+        "command": "aivi.formatDocument",
+        "title": "AIVI: Format Document",
+        "when": "editorLangId == aivi"
+      },
+      {
+        "command": "aivi.checkFile",
+        "title": "AIVI: Check Current File",
+        "when": "editorLangId == aivi"
+      },
+      {
+        "command": "aivi.openCompilerLog",
+        "title": "AIVI: Open Compiler Log"
+      }
+    ],
+    "configuration": {
+      "title": "AIVI",
+      "properties": {
+        "aivi.compiler.path": {
+          "type": "string",
+          "default": "aivi",
+          "description": "Path to the aivi compiler binary."
+        },
+        "aivi.compiler.args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Extra arguments passed to the compiler."
+        },
+        "aivi.compiler.timeout": {
+          "type": "number",
+          "default": 5000,
+          "description": "Compiler request timeout in milliseconds."
+        },
+        "aivi.diagnostics.debounceMs": {
+          "type": "number",
+          "default": 200,
+          "description": "Delay before triggering diagnostics after a document change."
+        },
+        "aivi.inlayHints.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inferred type inlay hints."
+        },
+        "aivi.inlayHints.maxLength": {
+          "type": "number",
+          "default": 30,
+          "description": "Maximum character length of an inlay hint before truncation."
+        },
+        "aivi.codeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show code lens annotations."
+        },
+        "aivi.completion.autoImport": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically insert use declarations for completion items."
+        },
+        "aivi.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Trace communication between VSCode and the language server."
+        },
+        "aivi.format.onSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically format AIVI files on save."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "vite build",
+    "watch": "vite build --watch",
+    "test": "echo 'no tests yet'"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.0.0"
+  }
+}

@@ -9,6 +9,10 @@ const UNTERMINATED_REGEX: DiagnosticCode = DiagnosticCode::new("syntax", "unterm
 pub enum TokenKind {
     Whitespace,
     Newline,
+    /// Line comment (`-- ...`), trivia.
+    LineComment,
+    /// Doc comment (`--- ...`), trivia.
+    DocComment,
     Identifier,
     Integer,
     StringLiteral,
@@ -62,7 +66,10 @@ pub enum TokenKind {
 
 impl TokenKind {
     pub const fn is_trivia(self) -> bool {
-        matches!(self, TokenKind::Whitespace | TokenKind::Newline)
+        matches!(
+            self,
+            TokenKind::Whitespace | TokenKind::Newline | TokenKind::LineComment | TokenKind::DocComment
+        )
     }
 
     pub const fn is_top_level_keyword(self) -> bool {
@@ -206,6 +213,35 @@ fn lex_range(source: &SourceFile, range: std::ops::Range<usize>) -> LexedModule 
         }
 
         let line_start = at_line_start;
+
+        // Handle doc comments (`---`) before regular comments (`--`).
+        if bytes[cursor..range.end].starts_with(b"---") {
+            let start = cursor;
+            while cursor < range.end && bytes[cursor] != b'\n' {
+                cursor += 1;
+            }
+            tokens.push(Token::new(
+                TokenKind::DocComment,
+                source.span(start..cursor),
+                line_start,
+            ));
+            at_line_start = false;
+            continue;
+        }
+
+        if bytes[cursor..range.end].starts_with(b"--") {
+            let start = cursor;
+            while cursor < range.end && bytes[cursor] != b'\n' {
+                cursor += 1;
+            }
+            tokens.push(Token::new(
+                TokenKind::LineComment,
+                source.span(start..cursor),
+                line_start,
+            ));
+            at_line_start = false;
+            continue;
+        }
 
         if bytes[cursor..range.end].starts_with(b"rx\"") {
             let start = cursor;

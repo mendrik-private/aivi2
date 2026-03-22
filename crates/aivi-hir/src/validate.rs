@@ -1,20 +1,20 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, HashSet, hash_map::Entry},
     fmt,
 };
 
 use aivi_base::{ByteIndex, Diagnostic, DiagnosticCode, DiagnosticLabel, SourceSpan, Span};
 use aivi_typing::{
-    builtin_source_option_wakeup_cause, BuiltinSourceProvider, BuiltinSourceWakeupCause,
-    CustomSourceRecurrenceWakeupContext, FanoutCarrier, FanoutPlan, FanoutPlanner,
-    FanoutResultKind, FanoutStageKind, GateCarrier, GatePlanner, GateResultKind, Kind,
-    KindCheckError, KindCheckErrorKind, KindChecker, KindExprId,
+    BuiltinSourceProvider, BuiltinSourceWakeupCause, CustomSourceRecurrenceWakeupContext,
+    FanoutCarrier, FanoutPlan, FanoutPlanner, FanoutResultKind, FanoutStageKind, GateCarrier,
+    GatePlanner, GateResultKind, Kind, KindCheckError, KindCheckErrorKind, KindChecker, KindExprId,
     KindParameterId as TypingKindParameterId, KindRecordField, KindStore, NonSourceWakeupCause,
     RecurrencePlanner, RecurrenceTargetEvidence, RecurrenceWakeupKind, RecurrenceWakeupPlanner,
     SourceContractType, SourceRecurrenceWakeupContext, SourceTypeParameter,
+    builtin_source_option_wakeup_cause,
 };
 use regex_syntax::{
-    ast::Span as RegexSpan, Error as RegexSyntaxError, ParserBuilder as RegexParserBuilder,
+    Error as RegexSyntaxError, ParserBuilder as RegexParserBuilder, ast::Span as RegexSpan,
 };
 
 use crate::{
@@ -107,6 +107,7 @@ impl Validator<'_> {
         self.validate_fanout_semantics();
         self.validate_gate_semantics();
         self.validate_truthy_falsy_semantics();
+        self.validate_case_exhaustiveness();
         self.validate_recurrence_targets();
     }
 
@@ -2354,6 +2355,39 @@ impl Validator<'_> {
                     substitutions,
                 )
             }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Map)) => {
+                let SourceOptionActualType::Map {
+                    key: actual_key,
+                    value: actual_value,
+                } = actual
+                else {
+                    return Some(matches!(actual, SourceOptionActualType::Hole));
+                };
+                match self.source_option_hir_type_matches_actual_type(
+                    *arguments.first()?,
+                    actual_key,
+                    substitutions,
+                ) {
+                    Some(true) => {}
+                    Some(false) => return Some(false),
+                    None => return None,
+                }
+                self.source_option_hir_type_matches_actual_type(
+                    *arguments.get(1)?,
+                    actual_value,
+                    substitutions,
+                )
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Set)) => {
+                let SourceOptionActualType::Set(actual) = actual else {
+                    return Some(matches!(actual, SourceOptionActualType::Hole));
+                };
+                self.source_option_hir_type_matches_actual_type(
+                    *arguments.first()?,
+                    actual,
+                    substitutions,
+                )
+            }
             ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Option)) => {
                 let SourceOptionActualType::Option(actual) = actual else {
                     return Some(matches!(actual, SourceOptionActualType::Hole));
@@ -2864,6 +2898,703 @@ impl Validator<'_> {
                 | Item::Export(_) => {}
             }
         }
+    }
+
+    fn validate_case_exhaustiveness(&mut self) {
+        if self.mode != ValidationMode::RequireResolvedNames {
+            return;
+        }
+
+        let items = self
+            .module
+            .items()
+            .iter()
+            .map(|(_, item)| item.clone())
+            .collect::<Vec<_>>();
+        let decorators = self
+            .module
+            .decorators()
+            .iter()
+            .map(|(_, decorator)| decorator.clone())
+            .collect::<Vec<_>>();
+        let mut typing = GateTypeContext::new(self.module);
+
+        for item in items {
+            match item {
+                Item::Value(item) => self.validate_case_exhaustiveness_expr_tree(
+                    item.body,
+                    &GateExprEnv::default(),
+                    &mut typing,
+                ),
+                Item::Function(item) => {
+                    let env = self.gate_env_for_function(&item, &mut typing);
+                    self.validate_case_exhaustiveness_expr_tree(item.body, &env, &mut typing);
+                }
+                Item::Signal(item) => {
+                    if let Some(body) = item.body {
+                        self.validate_case_exhaustiveness_expr_tree(
+                            body,
+                            &GateExprEnv::default(),
+                            &mut typing,
+                        );
+                    }
+                }
+                Item::Instance(item) => {
+                    for member in item.members {
+                        self.validate_case_exhaustiveness_expr_tree(
+                            member.body,
+                            &GateExprEnv::default(),
+                            &mut typing,
+                        );
+                    }
+                }
+                Item::Type(_)
+                | Item::Class(_)
+                | Item::Domain(_)
+                | Item::SourceProviderContract(_)
+                | Item::Use(_)
+                | Item::Export(_) => {}
+            }
+        }
+
+        for decorator in decorators {
+            match decorator.payload {
+                DecoratorPayload::Bare => {}
+                DecoratorPayload::Call(call) => {
+                    for argument in call.arguments {
+                        self.validate_case_exhaustiveness_expr_tree(
+                            argument,
+                            &GateExprEnv::default(),
+                            &mut typing,
+                        );
+                    }
+                    if let Some(options) = call.options {
+                        self.validate_case_exhaustiveness_expr_tree(
+                            options,
+                            &GateExprEnv::default(),
+                            &mut typing,
+                        );
+                    }
+                }
+                DecoratorPayload::RecurrenceWakeup(wakeup) => self
+                    .validate_case_exhaustiveness_expr_tree(
+                        wakeup.witness,
+                        &GateExprEnv::default(),
+                        &mut typing,
+                    ),
+                DecoratorPayload::Source(source) => {
+                    for argument in source.arguments {
+                        self.validate_case_exhaustiveness_expr_tree(
+                            argument,
+                            &GateExprEnv::default(),
+                            &mut typing,
+                        );
+                    }
+                    if let Some(options) = source.options {
+                        self.validate_case_exhaustiveness_expr_tree(
+                            options,
+                            &GateExprEnv::default(),
+                            &mut typing,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn validate_case_exhaustiveness_expr_tree(
+        &mut self,
+        root: ExprId,
+        env: &GateExprEnv,
+        typing: &mut GateTypeContext<'_>,
+    ) {
+        let mut work = vec![CaseExhaustivenessWork::Expr {
+            expr: root,
+            env: env.clone(),
+        }];
+
+        while let Some(frame) = work.pop() {
+            match frame {
+                CaseExhaustivenessWork::Expr { expr, env } => {
+                    let Some(expr) = self.module.exprs().get(expr).cloned() else {
+                        continue;
+                    };
+                    match expr.kind {
+                        ExprKind::Name(_)
+                        | ExprKind::Integer(_)
+                        | ExprKind::SuffixedInteger(_)
+                        | ExprKind::Regex(_) => {}
+                        ExprKind::Text(text) => {
+                            for segment in text.segments.into_iter().rev() {
+                                if let TextSegment::Interpolation(interpolation) = segment {
+                                    work.push(CaseExhaustivenessWork::Expr {
+                                        expr: interpolation.expr,
+                                        env: env.clone(),
+                                    });
+                                }
+                            }
+                        }
+                        ExprKind::Tuple(elements) => {
+                            for element in elements.iter().rev() {
+                                work.push(CaseExhaustivenessWork::Expr {
+                                    expr: *element,
+                                    env: env.clone(),
+                                });
+                            }
+                        }
+                        ExprKind::List(elements) => {
+                            for element in elements.into_iter().rev() {
+                                work.push(CaseExhaustivenessWork::Expr {
+                                    expr: element,
+                                    env: env.clone(),
+                                });
+                            }
+                        }
+                        ExprKind::Record(record) => {
+                            for field in record.fields.into_iter().rev() {
+                                work.push(CaseExhaustivenessWork::Expr {
+                                    expr: field.value,
+                                    env: env.clone(),
+                                });
+                            }
+                        }
+                        ExprKind::Projection {
+                            base: crate::hir::ProjectionBase::Expr(base),
+                            ..
+                        } => work.push(CaseExhaustivenessWork::Expr { expr: base, env }),
+                        ExprKind::Projection { .. } => {}
+                        ExprKind::Apply { callee, arguments } => {
+                            for argument in arguments.iter().rev() {
+                                work.push(CaseExhaustivenessWork::Expr {
+                                    expr: *argument,
+                                    env: env.clone(),
+                                });
+                            }
+                            work.push(CaseExhaustivenessWork::Expr { expr: callee, env });
+                        }
+                        ExprKind::Unary { expr, .. } => {
+                            work.push(CaseExhaustivenessWork::Expr { expr, env });
+                        }
+                        ExprKind::Binary { left, right, .. } => {
+                            work.push(CaseExhaustivenessWork::Expr {
+                                expr: right,
+                                env: env.clone(),
+                            });
+                            work.push(CaseExhaustivenessWork::Expr { expr: left, env });
+                        }
+                        ExprKind::Pipe(pipe) => {
+                            work.push(CaseExhaustivenessWork::Expr {
+                                expr: pipe.head,
+                                env: env.clone(),
+                            });
+                            let stages = pipe.stages.iter().collect::<Vec<_>>();
+                            let mut current = self.infer_case_expr_type(pipe.head, &env, typing);
+                            let mut stage_index = 0usize;
+                            while stage_index < stages.len() {
+                                let stage = stages[stage_index];
+                                match &stage.kind {
+                                    PipeStageKind::Transform { expr } => {
+                                        work.push(CaseExhaustivenessWork::Expr {
+                                            expr: *expr,
+                                            env: env.clone(),
+                                        });
+                                        current = current.as_ref().and_then(|subject| {
+                                            typing.infer_transform_stage(*expr, &env, subject)
+                                        });
+                                        stage_index += 1;
+                                    }
+                                    PipeStageKind::Tap { expr } => {
+                                        work.push(CaseExhaustivenessWork::Expr {
+                                            expr: *expr,
+                                            env: env.clone(),
+                                        });
+                                        stage_index += 1;
+                                    }
+                                    PipeStageKind::Gate { expr } => {
+                                        work.push(CaseExhaustivenessWork::Expr {
+                                            expr: *expr,
+                                            env: env.clone(),
+                                        });
+                                        current = current.as_ref().and_then(|subject| {
+                                            typing.infer_gate_stage(*expr, &env, subject)
+                                        });
+                                        stage_index += 1;
+                                    }
+                                    PipeStageKind::Map { expr } => {
+                                        work.push(CaseExhaustivenessWork::Expr {
+                                            expr: *expr,
+                                            env: env.clone(),
+                                        });
+                                        current = current.as_ref().and_then(|subject| {
+                                            typing.infer_fanout_map_stage(*expr, &env, subject)
+                                        });
+                                        stage_index += 1;
+                                    }
+                                    PipeStageKind::FanIn { expr } => {
+                                        work.push(CaseExhaustivenessWork::Expr {
+                                            expr: *expr,
+                                            env: env.clone(),
+                                        });
+                                        current = current.as_ref().and_then(|subject| {
+                                            typing.infer_fanin_stage(*expr, &env, subject)
+                                        });
+                                        stage_index += 1;
+                                    }
+                                    PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
+                                        let Some(pair) =
+                                            truthy_falsy_pair_stages(&stages, stage_index)
+                                        else {
+                                            let branch_expr = match &stage.kind {
+                                                PipeStageKind::Truthy { expr }
+                                                | PipeStageKind::Falsy { expr } => *expr,
+                                                _ => unreachable!(
+                                                    "truthy/falsy branch extraction should stay aligned"
+                                                ),
+                                            };
+                                            work.push(CaseExhaustivenessWork::Expr {
+                                                expr: branch_expr,
+                                                env: env.clone(),
+                                            });
+                                            current = None;
+                                            stage_index += 1;
+                                            continue;
+                                        };
+                                        work.push(CaseExhaustivenessWork::Expr {
+                                            expr: pair.falsy_expr,
+                                            env: env.clone(),
+                                        });
+                                        work.push(CaseExhaustivenessWork::Expr {
+                                            expr: pair.truthy_expr,
+                                            env: env.clone(),
+                                        });
+                                        current = current.as_ref().and_then(|subject| {
+                                            typing.infer_truthy_falsy_pair(&pair, &env, subject)
+                                        });
+                                        stage_index = pair.next_index;
+                                    }
+                                    PipeStageKind::Case { .. } => {
+                                        let case_start = stage_index;
+                                        while stage_index < stages.len()
+                                            && matches!(
+                                                stages[stage_index].kind,
+                                                PipeStageKind::Case { .. }
+                                            )
+                                        {
+                                            stage_index += 1;
+                                        }
+                                        let case_stages = &stages[case_start..stage_index];
+                                        if let Some(subject) = current.clone() {
+                                            self.validate_pipe_case_run(
+                                                case_stages,
+                                                &subject,
+                                                typing,
+                                            );
+                                            for case_stage in case_stages.iter().rev() {
+                                                let PipeStageKind::Case { pattern, body } =
+                                                    &case_stage.kind
+                                                else {
+                                                    continue;
+                                                };
+                                                work.push(CaseExhaustivenessWork::Expr {
+                                                    expr: *body,
+                                                    env: self.case_branch_env(
+                                                        &env, *pattern, &subject, typing,
+                                                    ),
+                                                });
+                                            }
+                                        } else {
+                                            for case_stage in case_stages.iter().rev() {
+                                                let PipeStageKind::Case { body, .. } =
+                                                    &case_stage.kind
+                                                else {
+                                                    continue;
+                                                };
+                                                work.push(CaseExhaustivenessWork::Expr {
+                                                    expr: *body,
+                                                    env: env.clone(),
+                                                });
+                                            }
+                                        }
+                                        current = None;
+                                    }
+                                    PipeStageKind::Apply { expr }
+                                    | PipeStageKind::RecurStart { expr }
+                                    | PipeStageKind::RecurStep { expr } => {
+                                        work.push(CaseExhaustivenessWork::Expr {
+                                            expr: *expr,
+                                            env: env.clone(),
+                                        });
+                                        current = None;
+                                        stage_index += 1;
+                                    }
+                                }
+                            }
+                        }
+                        ExprKind::Cluster(cluster_id) => {
+                            let Some(cluster) = self.module.clusters().get(cluster_id).cloned()
+                            else {
+                                continue;
+                            };
+                            let spine = cluster.normalized_spine();
+                            for member in spine.apply_arguments() {
+                                work.push(CaseExhaustivenessWork::Expr {
+                                    expr: member,
+                                    env: env.clone(),
+                                });
+                            }
+                            if let ApplicativeSpineHead::Expr(finalizer) = spine.pure_head() {
+                                work.push(CaseExhaustivenessWork::Expr {
+                                    expr: finalizer,
+                                    env,
+                                });
+                            }
+                        }
+                        ExprKind::Markup(node_id) => {
+                            work.push(CaseExhaustivenessWork::Markup { node: node_id, env });
+                        }
+                    }
+                }
+                CaseExhaustivenessWork::Markup { node, env } => {
+                    let Some(node) = self.module.markup_nodes().get(node).cloned() else {
+                        continue;
+                    };
+                    match node.kind {
+                        MarkupNodeKind::Element(element) => {
+                            for child in element.children.into_iter().rev() {
+                                work.push(CaseExhaustivenessWork::Markup {
+                                    node: child,
+                                    env: env.clone(),
+                                });
+                            }
+                            for attribute in element.attributes.into_iter().rev() {
+                                match attribute.value {
+                                    MarkupAttributeValue::Expr(expr) => {
+                                        work.push(CaseExhaustivenessWork::Expr {
+                                            expr,
+                                            env: env.clone(),
+                                        });
+                                    }
+                                    MarkupAttributeValue::Text(text) => {
+                                        for segment in text.segments.into_iter().rev() {
+                                            if let TextSegment::Interpolation(interpolation) =
+                                                segment
+                                            {
+                                                work.push(CaseExhaustivenessWork::Expr {
+                                                    expr: interpolation.expr,
+                                                    env: env.clone(),
+                                                });
+                                            }
+                                        }
+                                    }
+                                    MarkupAttributeValue::ImplicitTrue => {}
+                                }
+                            }
+                        }
+                        MarkupNodeKind::Control(control_id) => {
+                            work.push(CaseExhaustivenessWork::Control {
+                                node: control_id,
+                                env,
+                            });
+                        }
+                    }
+                }
+                CaseExhaustivenessWork::Control { node, env } => {
+                    let Some(control) = self.module.control_nodes().get(node).cloned() else {
+                        continue;
+                    };
+                    match control {
+                        ControlNode::Show(node) => {
+                            for child in node.children.into_iter().rev() {
+                                work.push(CaseExhaustivenessWork::Markup {
+                                    node: child,
+                                    env: env.clone(),
+                                });
+                            }
+                            if let Some(keep_mounted) = node.keep_mounted {
+                                work.push(CaseExhaustivenessWork::Expr {
+                                    expr: keep_mounted,
+                                    env: env.clone(),
+                                });
+                            }
+                            work.push(CaseExhaustivenessWork::Expr {
+                                expr: node.when,
+                                env,
+                            });
+                        }
+                        ControlNode::Each(node) => {
+                            if let Some(empty) = node.empty {
+                                work.push(CaseExhaustivenessWork::Control {
+                                    node: empty,
+                                    env: env.clone(),
+                                });
+                            }
+                            let child_env = self.each_child_env(&env, &node, typing);
+                            for child in node.children.into_iter().rev() {
+                                work.push(CaseExhaustivenessWork::Markup {
+                                    node: child,
+                                    env: child_env.clone(),
+                                });
+                            }
+                            if let Some(key) = node.key {
+                                work.push(CaseExhaustivenessWork::Expr {
+                                    expr: key,
+                                    env: child_env,
+                                });
+                            }
+                            work.push(CaseExhaustivenessWork::Expr {
+                                expr: node.collection,
+                                env,
+                            });
+                        }
+                        ControlNode::Empty(node) => {
+                            for child in node.children.into_iter().rev() {
+                                work.push(CaseExhaustivenessWork::Markup {
+                                    node: child,
+                                    env: env.clone(),
+                                });
+                            }
+                        }
+                        ControlNode::Match(node) => {
+                            let subject = self.infer_case_expr_type(node.scrutinee, &env, typing);
+                            if let Some(subject) = subject.as_ref() {
+                                self.validate_match_control_exhaustiveness(&node, subject, typing);
+                            }
+                            for case in node.cases.iter().rev() {
+                                let case_env = subject
+                                    .as_ref()
+                                    .and_then(|subject| {
+                                        match self.module.control_nodes().get(*case) {
+                                            Some(ControlNode::Case(case_node)) => {
+                                                Some(self.case_branch_env(
+                                                    &env,
+                                                    case_node.pattern,
+                                                    subject,
+                                                    typing,
+                                                ))
+                                            }
+                                            _ => None,
+                                        }
+                                    })
+                                    .unwrap_or_else(|| env.clone());
+                                work.push(CaseExhaustivenessWork::Control {
+                                    node: *case,
+                                    env: case_env,
+                                });
+                            }
+                            work.push(CaseExhaustivenessWork::Expr {
+                                expr: node.scrutinee,
+                                env,
+                            });
+                        }
+                        ControlNode::Case(node) => {
+                            for child in node.children.into_iter().rev() {
+                                work.push(CaseExhaustivenessWork::Markup {
+                                    node: child,
+                                    env: env.clone(),
+                                });
+                            }
+                        }
+                        ControlNode::Fragment(node) => {
+                            for child in node.children.into_iter().rev() {
+                                work.push(CaseExhaustivenessWork::Markup {
+                                    node: child,
+                                    env: env.clone(),
+                                });
+                            }
+                        }
+                        ControlNode::With(node) => {
+                            let child_env = self.with_child_env(&env, &node, typing);
+                            for child in node.children.into_iter().rev() {
+                                work.push(CaseExhaustivenessWork::Markup {
+                                    node: child,
+                                    env: child_env.clone(),
+                                });
+                            }
+                            work.push(CaseExhaustivenessWork::Expr {
+                                expr: node.value,
+                                env,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn validate_pipe_case_run(
+        &mut self,
+        case_stages: &[&crate::hir::PipeStage],
+        subject: &GateType,
+        typing: &mut GateTypeContext<'_>,
+    ) {
+        let Some(shape) = typing.case_subject_shape(subject) else {
+            return;
+        };
+        let mut covered = HashSet::new();
+        let mut has_catch_all = false;
+        for stage in case_stages {
+            let PipeStageKind::Case { pattern, .. } = &stage.kind else {
+                continue;
+            };
+            match typing.case_pattern_coverage(*pattern, &shape) {
+                CasePatternCoverage::CatchAll => {
+                    has_catch_all = true;
+                    break;
+                }
+                CasePatternCoverage::Constructor(key) => {
+                    covered.insert(key);
+                }
+                CasePatternCoverage::None => {}
+            }
+        }
+        if has_catch_all {
+            return;
+        }
+        let missing = shape
+            .constructors
+            .iter()
+            .filter(|constructor| !covered.contains(&constructor.key))
+            .cloned()
+            .collect::<Vec<_>>();
+        if missing.is_empty() {
+            return;
+        }
+        let span = case_stages
+            .first()
+            .map(|stage| stage.span)
+            .unwrap_or_else(SourceSpan::default);
+        self.emit_non_exhaustive_case_diagnostic(CaseSiteKind::PipeCase, span, subject, &missing);
+    }
+
+    fn validate_match_control_exhaustiveness(
+        &mut self,
+        match_node: &crate::hir::MatchControl,
+        subject: &GateType,
+        typing: &mut GateTypeContext<'_>,
+    ) {
+        let Some(shape) = typing.case_subject_shape(subject) else {
+            return;
+        };
+        let mut covered = HashSet::new();
+        let mut has_catch_all = false;
+        for case in match_node.cases.iter() {
+            let Some(ControlNode::Case(case_node)) = self.module.control_nodes().get(*case) else {
+                continue;
+            };
+            match typing.case_pattern_coverage(case_node.pattern, &shape) {
+                CasePatternCoverage::CatchAll => {
+                    has_catch_all = true;
+                    break;
+                }
+                CasePatternCoverage::Constructor(key) => {
+                    covered.insert(key);
+                }
+                CasePatternCoverage::None => {}
+            }
+        }
+        if has_catch_all {
+            return;
+        }
+        let missing = shape
+            .constructors
+            .iter()
+            .filter(|constructor| !covered.contains(&constructor.key))
+            .cloned()
+            .collect::<Vec<_>>();
+        if missing.is_empty() {
+            return;
+        }
+        self.emit_non_exhaustive_case_diagnostic(
+            CaseSiteKind::MatchControl,
+            match_node.span,
+            subject,
+            &missing,
+        );
+    }
+
+    fn emit_non_exhaustive_case_diagnostic(
+        &mut self,
+        site_kind: CaseSiteKind,
+        span: SourceSpan,
+        subject: &GateType,
+        missing: &[CaseConstructorShape],
+    ) {
+        let missing_list = missing_case_list(missing);
+        let mut diagnostic = Diagnostic::error(format!(
+            "{} over `{subject}` is not exhaustive; missing {missing_list}",
+            site_kind.display_name()
+        ))
+        .with_code(code("non-exhaustive-case-pattern"))
+        .with_primary_label(span, missing_case_label(missing));
+
+        for constructor in missing {
+            if let Some(declared_at) = constructor.span {
+                diagnostic = diagnostic.with_secondary_label(
+                    declared_at,
+                    format!("`{}` is declared here", constructor.display),
+                );
+            }
+        }
+
+        diagnostic = diagnostic.with_note(
+            "current resolved-HIR exhaustiveness checking covers only ordinary `Bool`, `Option`, `Result`, `Validation`, and same-module closed sums whose scrutinee type is already known here; signal-lifted case splits, imported sums, and harder unannotated scrutinee inference remain later work",
+        );
+        self.diagnostics.push(diagnostic);
+    }
+
+    fn infer_case_expr_type(
+        &mut self,
+        expr_id: ExprId,
+        env: &GateExprEnv,
+        typing: &mut GateTypeContext<'_>,
+    ) -> Option<GateType> {
+        if !self.module.exprs().contains(expr_id) {
+            return None;
+        }
+        typing.infer_expr(expr_id, env, None).ty
+    }
+
+    fn case_branch_env(
+        &mut self,
+        env: &GateExprEnv,
+        pattern: PatternId,
+        subject: &GateType,
+        typing: &mut GateTypeContext<'_>,
+    ) -> GateExprEnv {
+        let mut branch_env = env.clone();
+        branch_env
+            .locals
+            .extend(typing.case_pattern_bindings(pattern, subject).locals);
+        branch_env
+    }
+
+    fn each_child_env(
+        &mut self,
+        env: &GateExprEnv,
+        each: &crate::hir::EachControl,
+        typing: &mut GateTypeContext<'_>,
+    ) -> GateExprEnv {
+        let mut child_env = env.clone();
+        if let Some(element_ty) = self
+            .infer_case_expr_type(each.collection, env, typing)
+            .and_then(|collection| collection.fanout_element().cloned())
+        {
+            child_env.locals.insert(each.binding, element_ty);
+        }
+        child_env
+    }
+
+    fn with_child_env(
+        &mut self,
+        env: &GateExprEnv,
+        with_node: &crate::hir::WithControl,
+        typing: &mut GateTypeContext<'_>,
+    ) -> GateExprEnv {
+        let mut child_env = env.clone();
+        if let Some(value_ty) = self.infer_case_expr_type(with_node.value, env, typing) {
+            child_env.locals.insert(with_node.binding, value_ty);
+        }
+        child_env
     }
 
     fn validate_recurrence_targets(&mut self) {
@@ -4793,8 +5524,12 @@ fn builtin_kind(builtin: BuiltinType) -> Kind {
         | BuiltinType::Text
         | BuiltinType::Unit
         | BuiltinType::Bytes => Kind::Type,
-        BuiltinType::List | BuiltinType::Option | BuiltinType::Signal => Kind::constructor(1),
-        BuiltinType::Result | BuiltinType::Validation | BuiltinType::Task => Kind::constructor(2),
+        BuiltinType::List | BuiltinType::Set | BuiltinType::Option | BuiltinType::Signal => {
+            Kind::constructor(1)
+        }
+        BuiltinType::Map | BuiltinType::Result | BuiltinType::Validation | BuiltinType::Task => {
+            Kind::constructor(2)
+        }
     }
 }
 
@@ -4809,6 +5544,8 @@ fn builtin_type_name(builtin: BuiltinType) -> &'static str {
         BuiltinType::Unit => "Unit",
         BuiltinType::Bytes => "Bytes",
         BuiltinType::List => "List",
+        BuiltinType::Map => "Map",
+        BuiltinType::Set => "Set",
         BuiltinType::Option => "Option",
         BuiltinType::Result => "Result",
         BuiltinType::Validation => "Validation",
@@ -4847,6 +5584,22 @@ enum ExprWalkWork {
     Expr { expr: ExprId, is_root: bool },
     Markup(MarkupNodeId),
     Control(ControlNodeId),
+}
+
+#[derive(Clone, Debug)]
+enum CaseExhaustivenessWork {
+    Expr {
+        expr: ExprId,
+        env: GateExprEnv,
+    },
+    Markup {
+        node: MarkupNodeId,
+        env: GateExprEnv,
+    },
+    Control {
+        node: ControlNodeId,
+        env: GateExprEnv,
+    },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -4929,6 +5682,55 @@ pub struct GateRecordField {
     pub ty: GateType,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum CaseConstructorKey {
+    Builtin(BuiltinTerm),
+    SameModuleVariant { item: ItemId, name: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CaseConstructorShape {
+    key: CaseConstructorKey,
+    display: String,
+    span: Option<SourceSpan>,
+    field_types: Option<Vec<GateType>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CaseSubjectShape {
+    constructors: Vec<CaseConstructorShape>,
+}
+
+impl CaseSubjectShape {
+    fn constructor(&self, key: &CaseConstructorKey) -> Option<&CaseConstructorShape> {
+        self.constructors
+            .iter()
+            .find(|constructor| &constructor.key == key)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum CasePatternCoverage {
+    CatchAll,
+    Constructor(CaseConstructorKey),
+    None,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CaseSiteKind {
+    PipeCase,
+    MatchControl,
+}
+
+impl CaseSiteKind {
+    const fn display_name(self) -> &'static str {
+        match self {
+            Self::PipeCase => "case split",
+            Self::MatchControl => "match control",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GateType {
     Primitive(BuiltinType),
@@ -4939,6 +5741,11 @@ pub enum GateType {
         result: Box<GateType>,
     },
     List(Box<GateType>),
+    Map {
+        key: Box<GateType>,
+        value: Box<GateType>,
+    },
+    Set(Box<GateType>),
     Option(Box<GateType>),
     Result {
         error: Box<GateType>,
@@ -5048,6 +5855,8 @@ impl fmt::Display for GateType {
             }
             GateType::Arrow { parameter, result } => write!(f, "{parameter} -> {result}"),
             GateType::List(element) => write!(f, "List {element}"),
+            GateType::Map { key, value } => write!(f, "Map {key} {value}"),
+            GateType::Set(element) => write!(f, "Set {element}"),
             GateType::Option(element) => write!(f, "Option {element}"),
             GateType::Result { error, value } => write!(f, "Result {error} {value}"),
             GateType::Validation { error, value } => {
@@ -5126,11 +5935,241 @@ impl<'a> GateTypeContext<'a> {
             | GateType::Record(_)
             | GateType::Arrow { .. }
             | GateType::List(_)
+            | GateType::Map { .. }
+            | GateType::Set(_)
             | GateType::Signal(_)
             | GateType::Task { .. }
             | GateType::Domain { .. }
             | GateType::OpaqueItem { .. } => None,
         }
+    }
+
+    fn case_subject_shape(&mut self, subject: &GateType) -> Option<CaseSubjectShape> {
+        match subject {
+            GateType::Primitive(BuiltinType::Bool) => Some(CaseSubjectShape {
+                constructors: vec![
+                    CaseConstructorShape {
+                        key: CaseConstructorKey::Builtin(BuiltinTerm::True),
+                        display: "True".to_owned(),
+                        span: None,
+                        field_types: Some(Vec::new()),
+                    },
+                    CaseConstructorShape {
+                        key: CaseConstructorKey::Builtin(BuiltinTerm::False),
+                        display: "False".to_owned(),
+                        span: None,
+                        field_types: Some(Vec::new()),
+                    },
+                ],
+            }),
+            GateType::Option(payload) => Some(CaseSubjectShape {
+                constructors: vec![
+                    CaseConstructorShape {
+                        key: CaseConstructorKey::Builtin(BuiltinTerm::Some),
+                        display: "Some".to_owned(),
+                        span: None,
+                        field_types: Some(vec![payload.as_ref().clone()]),
+                    },
+                    CaseConstructorShape {
+                        key: CaseConstructorKey::Builtin(BuiltinTerm::None),
+                        display: "None".to_owned(),
+                        span: None,
+                        field_types: Some(Vec::new()),
+                    },
+                ],
+            }),
+            GateType::Result { error, value } => Some(CaseSubjectShape {
+                constructors: vec![
+                    CaseConstructorShape {
+                        key: CaseConstructorKey::Builtin(BuiltinTerm::Ok),
+                        display: "Ok".to_owned(),
+                        span: None,
+                        field_types: Some(vec![value.as_ref().clone()]),
+                    },
+                    CaseConstructorShape {
+                        key: CaseConstructorKey::Builtin(BuiltinTerm::Err),
+                        display: "Err".to_owned(),
+                        span: None,
+                        field_types: Some(vec![error.as_ref().clone()]),
+                    },
+                ],
+            }),
+            GateType::Validation { error, value } => Some(CaseSubjectShape {
+                constructors: vec![
+                    CaseConstructorShape {
+                        key: CaseConstructorKey::Builtin(BuiltinTerm::Valid),
+                        display: "Valid".to_owned(),
+                        span: None,
+                        field_types: Some(vec![value.as_ref().clone()]),
+                    },
+                    CaseConstructorShape {
+                        key: CaseConstructorKey::Builtin(BuiltinTerm::Invalid),
+                        display: "Invalid".to_owned(),
+                        span: None,
+                        field_types: Some(vec![error.as_ref().clone()]),
+                    },
+                ],
+            }),
+            GateType::OpaqueItem {
+                item, arguments, ..
+            } => self.same_module_case_subject_shape(*item, arguments),
+            GateType::Primitive(_)
+            | GateType::Tuple(_)
+            | GateType::Record(_)
+            | GateType::Arrow { .. }
+            | GateType::List(_)
+            | GateType::Map { .. }
+            | GateType::Set(_)
+            | GateType::Signal(_)
+            | GateType::Task { .. }
+            | GateType::Domain { .. } => None,
+        }
+    }
+
+    fn same_module_case_subject_shape(
+        &mut self,
+        item_id: ItemId,
+        arguments: &[GateType],
+    ) -> Option<CaseSubjectShape> {
+        let Item::Type(item) = &self.module.items()[item_id] else {
+            return None;
+        };
+        let TypeItemBody::Sum(variants) = &item.body else {
+            return None;
+        };
+        if item.parameters.len() != arguments.len() {
+            return None;
+        }
+        let substitutions = item
+            .parameters
+            .iter()
+            .copied()
+            .zip(arguments.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        let constructors = variants
+            .iter()
+            .map(|variant| CaseConstructorShape {
+                key: CaseConstructorKey::SameModuleVariant {
+                    item: item_id,
+                    name: variant.name.text().to_owned(),
+                },
+                display: variant.name.text().to_owned(),
+                span: Some(variant.span),
+                field_types: self.lower_case_variant_fields(&variant.fields, &substitutions),
+            })
+            .collect::<Vec<_>>();
+        Some(CaseSubjectShape { constructors })
+    }
+
+    fn lower_case_variant_fields(
+        &mut self,
+        fields: &[TypeId],
+        substitutions: &HashMap<TypeParameterId, GateType>,
+    ) -> Option<Vec<GateType>> {
+        let mut lowered = Vec::with_capacity(fields.len());
+        for field in fields {
+            lowered.push(self.lower_type(*field, substitutions, &mut Vec::new())?);
+        }
+        Some(lowered)
+    }
+
+    fn case_pattern_coverage(
+        &mut self,
+        pattern_id: PatternId,
+        subject: &CaseSubjectShape,
+    ) -> CasePatternCoverage {
+        let Some(pattern) = self.module.patterns().get(pattern_id).cloned() else {
+            return CasePatternCoverage::None;
+        };
+        match pattern.kind {
+            PatternKind::Wildcard | PatternKind::Binding(_) => CasePatternCoverage::CatchAll,
+            PatternKind::Constructor { callee, .. } | PatternKind::UnresolvedName(callee) => {
+                let Some(key) = case_constructor_key(&callee) else {
+                    return CasePatternCoverage::None;
+                };
+                if subject.constructor(&key).is_some() {
+                    CasePatternCoverage::Constructor(key)
+                } else {
+                    CasePatternCoverage::None
+                }
+            }
+            PatternKind::Integer(_)
+            | PatternKind::Text(_)
+            | PatternKind::Tuple(_)
+            | PatternKind::Record(_) => CasePatternCoverage::None,
+        }
+    }
+
+    fn case_pattern_bindings(&mut self, pattern_id: PatternId, subject: &GateType) -> GateExprEnv {
+        let mut env = GateExprEnv::default();
+        let mut work = vec![(pattern_id, subject.clone())];
+        while let Some((pattern_id, subject_ty)) = work.pop() {
+            let Some(pattern) = self.module.patterns().get(pattern_id).cloned() else {
+                continue;
+            };
+            match pattern.kind {
+                PatternKind::Wildcard
+                | PatternKind::Integer(_)
+                | PatternKind::Text(_)
+                | PatternKind::UnresolvedName(_) => {}
+                PatternKind::Binding(binding) => {
+                    env.locals.insert(binding.binding, subject_ty);
+                }
+                PatternKind::Tuple(elements) => {
+                    let GateType::Tuple(subject_elements) = &subject_ty else {
+                        continue;
+                    };
+                    if elements.len() != subject_elements.len() {
+                        continue;
+                    }
+                    let element_pairs = elements
+                        .iter()
+                        .zip(subject_elements.iter())
+                        .collect::<Vec<_>>();
+                    for (element, element_ty) in element_pairs.into_iter().rev() {
+                        work.push((*element, element_ty.clone()));
+                    }
+                }
+                PatternKind::Record(fields) => {
+                    let GateType::Record(subject_fields) = &subject_ty else {
+                        continue;
+                    };
+                    for field in fields.into_iter().rev() {
+                        let Some(field_ty) = subject_fields
+                            .iter()
+                            .find(|candidate| candidate.name == field.label.text())
+                            .map(|field_ty| field_ty.ty.clone())
+                        else {
+                            continue;
+                        };
+                        work.push((field.pattern, field_ty));
+                    }
+                }
+                PatternKind::Constructor { callee, arguments } => {
+                    let Some(field_types) = self.case_pattern_field_types(&callee, &subject_ty)
+                    else {
+                        continue;
+                    };
+                    if field_types.len() != arguments.len() {
+                        continue;
+                    }
+                    for (argument, field_ty) in arguments.into_iter().zip(field_types).rev() {
+                        work.push((argument, field_ty));
+                    }
+                }
+            }
+        }
+        env
+    }
+
+    fn case_pattern_field_types(
+        &mut self,
+        callee: &TermReference,
+        subject: &GateType,
+    ) -> Option<Vec<GateType>> {
+        let key = case_constructor_key(callee)?;
+        let subject = self.case_subject_shape(subject)?;
+        subject.constructor(&key)?.field_types.clone()
     }
 
     pub(crate) fn apply_fanout_plan(&self, plan: FanoutPlan, subject: GateType) -> GateType {
@@ -5261,6 +6300,13 @@ impl<'a> GateTypeContext<'a> {
             ImportValueType::List(element) => {
                 GateType::List(Box::new(self.lower_import_value_type(element)))
             }
+            ImportValueType::Map { key, value } => GateType::Map {
+                key: Box::new(self.lower_import_value_type(key)),
+                value: Box::new(self.lower_import_value_type(value)),
+            },
+            ImportValueType::Set(element) => {
+                GateType::Set(Box::new(self.lower_import_value_type(element)))
+            }
             ImportValueType::Option(element) => {
                 GateType::Option(Box::new(self.lower_import_value_type(element)))
             }
@@ -5369,6 +6415,15 @@ impl<'a> GateTypeContext<'a> {
         match reference.resolution.as_ref() {
             ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::List)) => {
                 Some(GateType::List(Box::new(arguments.first()?.clone())))
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Map)) => {
+                Some(GateType::Map {
+                    key: Box::new(arguments.first()?.clone()),
+                    value: Box::new(arguments.get(1)?.clone()),
+                })
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Set)) => {
+                Some(GateType::Set(Box::new(arguments.first()?.clone())))
             }
             ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Option)) => {
                 Some(GateType::Option(Box::new(arguments.first()?.clone())))
@@ -6007,6 +7062,40 @@ fn name_path_text(path: &NamePath) -> String {
     )
 }
 
+fn case_constructor_key(reference: &TermReference) -> Option<CaseConstructorKey> {
+    match reference.resolution.as_ref() {
+        ResolutionState::Resolved(TermResolution::Builtin(builtin)) => {
+            Some(CaseConstructorKey::Builtin(*builtin))
+        }
+        ResolutionState::Resolved(TermResolution::Item(item_id)) => {
+            Some(CaseConstructorKey::SameModuleVariant {
+                item: *item_id,
+                name: reference.path.segments().iter().last()?.text().to_owned(),
+            })
+        }
+        ResolutionState::Unresolved
+        | ResolutionState::Resolved(TermResolution::Local(_))
+        | ResolutionState::Resolved(TermResolution::Import(_)) => None,
+    }
+}
+
+fn missing_case_list(missing: &[CaseConstructorShape]) -> String {
+    missing
+        .iter()
+        .map(|constructor| format!("`{}`", constructor.display))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn missing_case_label(missing: &[CaseConstructorShape]) -> String {
+    let cases = missing_case_list(missing);
+    if missing.len() == 1 {
+        format!("add a case for {cases}, or use `_` to make the catch-all explicit")
+    } else {
+        format!("add cases for {cases}, or use `_` to make the catch-all explicit")
+    }
+}
+
 fn custom_source_wakeup_kind(wakeup: CustomSourceRecurrenceWakeup) -> RecurrenceWakeupKind {
     match wakeup {
         CustomSourceRecurrenceWakeup::Timer => RecurrenceWakeupKind::Timer,
@@ -6075,6 +7164,8 @@ fn custom_source_contract_expected_type(
 enum SourceOptionExpectedType {
     Primitive(BuiltinType),
     List(Box<Self>),
+    Map { key: Box<Self>, value: Box<Self> },
+    Set(Box<Self>),
     Signal(Box<Self>),
     Option(Box<Self>),
     Result { error: Box<Self>, value: Box<Self> },
@@ -6096,6 +7187,11 @@ enum SourceOptionActualType {
         result: Box<Self>,
     },
     List(Box<Self>),
+    Map {
+        key: Box<Self>,
+        value: Box<Self>,
+    },
+    Set(Box<Self>),
     Option(Box<Self>),
     Result {
         error: Box<Self>,
@@ -6158,6 +7254,13 @@ impl SourceOptionExpectedType {
                 ResolvedSourceTypeConstructor::Builtin(BuiltinType::List) => Some(Self::List(
                     Box::new(Self::from_resolved(module, arguments.first()?)?),
                 )),
+                ResolvedSourceTypeConstructor::Builtin(BuiltinType::Map) => Some(Self::Map {
+                    key: Box::new(Self::from_resolved(module, arguments.first()?)?),
+                    value: Box::new(Self::from_resolved(module, arguments.get(1)?)?),
+                }),
+                ResolvedSourceTypeConstructor::Builtin(BuiltinType::Set) => Some(Self::Set(
+                    Box::new(Self::from_resolved(module, arguments.first()?)?),
+                )),
                 ResolvedSourceTypeConstructor::Builtin(BuiltinType::Signal) => Some(Self::Signal(
                     Box::new(Self::from_resolved(module, arguments.first()?)?),
                 )),
@@ -6210,6 +7313,34 @@ impl SourceOptionExpectedType {
                 match reference.resolution.as_ref() {
                     ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::List)) => {
                         Some(Self::List(Box::new(Self::from_hir_type(
+                            module,
+                            *arguments.first(),
+                            substitutions,
+                            surface,
+                        )?)))
+                    }
+                    ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Map))
+                        if surface == SourceOptionTypeSurface::Expression =>
+                    {
+                        Some(Self::Map {
+                            key: Box::new(Self::from_hir_type(
+                                module,
+                                *arguments.first(),
+                                substitutions,
+                                surface,
+                            )?),
+                            value: Box::new(Self::from_hir_type(
+                                module,
+                                *arguments.iter().nth(1)?,
+                                substitutions,
+                                surface,
+                            )?),
+                        })
+                    }
+                    ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Set))
+                        if surface == SourceOptionTypeSurface::Expression =>
+                    {
+                        Some(Self::Set(Box::new(Self::from_hir_type(
                             module,
                             *arguments.first(),
                             substitutions,
@@ -6301,6 +7432,15 @@ impl SourceOptionExpectedType {
             GateType::List(element) => Some(Self::List(Box::new(Self::from_gate_type(
                 module, element, surface,
             )?))),
+            GateType::Map { key, value } if surface == SourceOptionTypeSurface::Expression => {
+                Some(Self::Map {
+                    key: Box::new(Self::from_gate_type(module, key, surface)?),
+                    value: Box::new(Self::from_gate_type(module, value, surface)?),
+                })
+            }
+            GateType::Set(element) if surface == SourceOptionTypeSurface::Expression => Some(
+                Self::Set(Box::new(Self::from_gate_type(module, element, surface)?)),
+            ),
             GateType::Signal(element) => Some(Self::Signal(Box::new(Self::from_gate_type(
                 module, element, surface,
             )?))),
@@ -6338,6 +7478,8 @@ impl SourceOptionExpectedType {
             GateType::Tuple(_)
             | GateType::Record(_)
             | GateType::Arrow { .. }
+            | GateType::Map { .. }
+            | GateType::Set(_)
             | GateType::Option(_)
             | GateType::Result { .. }
             | GateType::Validation { .. }
@@ -6382,6 +7524,11 @@ impl SourceOptionActualType {
                 result: Box::new(Self::from_gate_type(result)),
             },
             GateType::List(element) => Self::List(Box::new(Self::from_gate_type(element))),
+            GateType::Map { key, value } => Self::Map {
+                key: Box::new(Self::from_gate_type(key)),
+                value: Box::new(Self::from_gate_type(value)),
+            },
+            GateType::Set(element) => Self::Set(Box::new(Self::from_gate_type(element))),
             GateType::Option(element) => Self::Option(Box::new(Self::from_gate_type(element))),
             GateType::Result { error, value } => Self::Result {
                 error: Box::new(Self::from_gate_type(error)),
@@ -6443,6 +7590,11 @@ impl SourceOptionActualType {
                 result: Box::new(result.to_gate_type()?),
             }),
             Self::List(element) => Some(GateType::List(Box::new(element.to_gate_type()?))),
+            Self::Map { key, value } => Some(GateType::Map {
+                key: Box::new(key.to_gate_type()?),
+                value: Box::new(value.to_gate_type()?),
+            }),
+            Self::Set(element) => Some(GateType::Set(Box::new(element.to_gate_type()?))),
             Self::Option(element) => Some(GateType::Option(Box::new(element.to_gate_type()?))),
             Self::Result { error, value } => Some(GateType::Result {
                 error: Box::new(error.to_gate_type()?),
@@ -6525,6 +7677,20 @@ impl SourceOptionActualType {
                 result: Box::new(left_result.unify(right_result)?),
             }),
             (Self::List(left), Self::List(right)) => Some(Self::List(Box::new(left.unify(right)?))),
+            (
+                Self::Map {
+                    key: left_key,
+                    value: left_value,
+                },
+                Self::Map {
+                    key: right_key,
+                    value: right_value,
+                },
+            ) => Some(Self::Map {
+                key: Box::new(left_key.unify(right_key)?),
+                value: Box::new(left_value.unify(right_value)?),
+            }),
+            (Self::Set(left), Self::Set(right)) => Some(Self::Set(Box::new(left.unify(right)?))),
             (Self::Option(left), Self::Option(right)) => {
                 Some(Self::Option(Box::new(left.unify(right)?)))
             }
@@ -6646,6 +7812,8 @@ impl fmt::Display for SourceOptionActualType {
             }
             Self::Arrow { parameter, result } => write!(f, "{parameter} -> {result}"),
             Self::List(element) => write!(f, "List {element}"),
+            Self::Map { key, value } => write!(f, "Map {key} {value}"),
+            Self::Set(element) => write!(f, "Set {element}"),
             Self::Option(element) => write!(f, "Option {element}"),
             Self::Result { error, value } => write!(f, "Result {error} {value}"),
             Self::Validation { error, value } => write!(f, "Validation {error} {value}"),
@@ -6786,6 +7954,21 @@ fn source_option_expected_matches_actual_type_inner(
         ) => expected == actual,
         (SourceOptionExpectedType::List(_), SourceOptionActualType::Hole) => true,
         (SourceOptionExpectedType::List(expected), SourceOptionActualType::List(actual)) => {
+            source_option_expected_matches_actual_type(expected, actual, bindings)
+        }
+        (SourceOptionExpectedType::Map { .. }, SourceOptionActualType::Hole) => true,
+        (
+            SourceOptionExpectedType::Map { key, value },
+            SourceOptionActualType::Map {
+                key: actual_key,
+                value: actual_value,
+            },
+        ) => {
+            source_option_expected_matches_actual_type(key, actual_key, bindings)
+                && source_option_expected_matches_actual_type(value, actual_value, bindings)
+        }
+        (SourceOptionExpectedType::Set(_), SourceOptionActualType::Hole) => true,
+        (SourceOptionExpectedType::Set(expected), SourceOptionActualType::Set(actual)) => {
             source_option_expected_matches_actual_type(expected, actual, bindings)
         }
         (SourceOptionExpectedType::Signal(_), SourceOptionActualType::Hole) => true,
@@ -7163,6 +8346,24 @@ mod tests {
         validate_module(lowered.module(), ValidationMode::Structural)
     }
 
+    fn validate_resolved_text(path: &str, text: &str) -> ValidationReport {
+        let mut sources = SourceDatabase::new();
+        let file_id = sources.add_file(path, text);
+        let parsed = parse_module(&sources[file_id]);
+        assert!(
+            !parsed.has_errors(),
+            "test input should parse before resolved HIR validation: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+        let lowered = crate::lower_module(&parsed.module);
+        assert!(
+            !lowered.has_errors(),
+            "test input should lower before resolved HIR validation: {:?}",
+            lowered.diagnostics()
+        );
+        validate_module(lowered.module(), ValidationMode::RequireResolvedNames)
+    }
+
     fn name(text: &str) -> Name {
         Name::new(text, unit_span()).expect("test name should stay valid")
     }
@@ -7178,6 +8379,8 @@ mod tests {
             BuiltinType::Unit => "Unit",
             BuiltinType::Bytes => "Bytes",
             BuiltinType::List => "List",
+            BuiltinType::Map => "Map",
+            BuiltinType::Set => "Set",
             BuiltinType::Option => "Option",
             BuiltinType::Result => "Result",
             BuiltinType::Validation => "Validation",
@@ -7359,10 +8562,12 @@ mod tests {
 
         let report = validate_module(&module, ValidationMode::Structural);
         assert!(!report.is_ok());
-        assert!(report
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("missing expression 99")));
+        assert!(
+            report
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("missing expression 99"))
+        );
     }
 
     #[test]
@@ -7456,6 +8661,114 @@ mod tests {
                 .iter()
                 .any(|label| label.style == LabelStyle::Primary && !label.message.is_empty()),
             "expected regex validation to keep the parser-provided primary error span",
+        );
+    }
+
+    #[test]
+    fn case_exhaustiveness_reports_missing_same_module_sum_constructors() {
+        let report = validate_resolved_text(
+            "pattern_non_exhaustive_sum.aivi",
+            r#"type Status =
+  | Paid
+  | Pending
+  | Failed Text
+
+fun statusLabel:Text #status:Status =>
+    status
+     ||> Paid => "paid"
+"#,
+        );
+        let diagnostic = report
+            .diagnostics()
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.code == Some(DiagnosticCode::new("hir", "non-exhaustive-case-pattern"))
+            })
+            .expect("non-exhaustive sum cases should produce a HIR diagnostic");
+
+        assert_eq!(
+            diagnostic.message,
+            "case split over `Status` is not exhaustive; missing `Pending`, `Failed`"
+        );
+        assert!(
+            diagnostic.labels.iter().any(|label| {
+                label.style == LabelStyle::Primary
+                    && label.message.contains("add cases for `Pending`, `Failed`")
+            }),
+            "expected a primary label listing the missing constructors, got {:?}",
+            diagnostic.labels
+        );
+    }
+
+    #[test]
+    fn case_exhaustiveness_accepts_builtin_case_pairs() {
+        let report = validate_resolved_text(
+            "builtin_exhaustive_cases.aivi",
+            r#"fun boolLabel:Text #ready:Bool =>
+    ready
+     ||> True => "ready"
+     ||> False => "waiting"
+
+fun maybeLabel:Text #maybeUser:(Option Text) =>
+    maybeUser
+     ||> Some name => name
+     ||> None => "login"
+
+fun resultLabel:Text #status:(Result Text Text) =>
+    status
+     ||> Ok body => body
+     ||> Err message => message
+
+fun validationLabel:Text #status:(Validation Text Text) =>
+    status
+     ||> Valid body => body
+     ||> Invalid message => message
+"#,
+        );
+
+        assert!(
+            report.is_ok(),
+            "expected builtin case pairs to validate cleanly, got {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn match_control_exhaustiveness_uses_with_binding_types() {
+        let report = validate_resolved_text(
+            "non_exhaustive_match_control.aivi",
+            r#"type Screen =
+  | Loading
+  | Ready Text
+  | Failed Text
+
+val current:Screen =
+    Loading
+
+val screenView =
+    <with value={current} as={screen}>
+        <match on={screen}>
+            <case pattern={Loading}>
+                <Label text="Loading..." />
+            </case>
+            <case pattern={Ready title}>
+                <Label text={title} />
+            </case>
+        </match>
+    </with>
+"#,
+        );
+        let diagnostic = report
+            .diagnostics()
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.code == Some(DiagnosticCode::new("hir", "non-exhaustive-case-pattern"))
+            })
+            .expect("non-exhaustive markup match should produce a HIR diagnostic");
+
+        assert_eq!(
+            diagnostic.message,
+            "match control over `Screen` is not exhaustive; missing `Failed`"
         );
     }
 
@@ -7569,10 +8882,12 @@ mod tests {
             .expect("item allocation should fit");
 
         let report = validate_module(&module, ValidationMode::Structural);
-        assert!(report
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("branch-only control node kind")));
+        assert!(
+            report
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("branch-only control node kind"))
+        );
     }
 
     #[test]
@@ -7594,7 +8909,7 @@ mod tests {
                 span: shared_span,
                 kind: MarkupNodeKind::Element(crate::MarkupElement {
                     name: NamePath::from_vec(vec![
-                        Name::new("Label", span(0, 0, 5)).expect("valid name")
+                        Name::new("Label", span(0, 0, 5)).expect("valid name"),
                     ])
                     .expect("single segment path"),
                     attributes: Vec::new(),

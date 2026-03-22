@@ -5,6 +5,8 @@ members = [
     "crates/aivi-syntax",
     "crates/aivi-cli",
     "crates/aivi-typing",
+    "crates/aivi-query",
+    "crates/aivi-lsp",
 ]
 resolver = "3"
 
@@ -18,6 +20,8 @@ aivi-base = { path = "crates/aivi-base" }
 aivi-hir = { path = "crates/aivi-hir" }
 aivi-syntax = { path = "crates/aivi-syntax" }
 aivi-typing = { path = "crates/aivi-typing" }
+aivi-query = { path = "crates/aivi-query" }
+aivi-lsp = { path = "crates/aivi-lsp" }
 regex-syntax = "0.8.10"
 
 [workspace.lints.rust]

@@ -8,6 +8,8 @@ rust-version.workspace = true
 aivi-base.workspace = true
 aivi-hir.workspace = true
 aivi-syntax.workspace = true
+aivi-lsp = { path = "../aivi-lsp" }
+tokio = { version = "1", features = ["rt"] }
 
 [[bin]]
 name = "aivi"

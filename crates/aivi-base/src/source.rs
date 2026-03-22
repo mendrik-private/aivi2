@@ -151,6 +151,20 @@ pub struct LineColumn {
     pub column: usize,
 }
 
+/// LSP-compatible position (0-based line/character, UTF-16 code units).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LspPosition {
+    pub line: u32,
+    pub character: u32,
+}
+
+/// LSP-compatible range (start/end positions).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LspRange {
+    pub start: LspPosition,
+    pub end: LspPosition,
+}
+
 /// Immutable source file with precomputed line starts.
 #[derive(Clone, Debug)]
 pub struct SourceFile {
@@ -240,6 +254,44 @@ impl SourceFile {
         self.line_span(zero_based_line).map(|span| self.slice(span))
     }
 
+    /// Convert a byte offset to an LSP position (0-based line, UTF-16 character offset).
+    pub fn offset_to_lsp_position(&self, offset: ByteIndex) -> LspPosition {
+        let clamped = offset.as_usize().min(self.text.len());
+        let line_index = self
+            .line_starts
+            .partition_point(|candidate| candidate.as_usize() <= clamped)
+            .saturating_sub(1);
+        let line_start = self.line_starts[line_index].as_usize();
+        let line_slice = &self.text[line_start..clamped];
+        LspPosition {
+            line: line_index as u32,
+            character: utf16_len(line_slice) as u32,
+        }
+    }
+
+    /// Convert an LSP position (0-based, UTF-16 character offset) to a byte offset.
+    pub fn lsp_position_to_offset(&self, pos: LspPosition) -> ByteIndex {
+        let line_idx = (pos.line as usize).min(self.line_starts.len().saturating_sub(1));
+        let line_start = self.line_starts[line_idx].as_usize();
+        let line_end = self
+            .line_starts
+            .get(line_idx + 1)
+            .copied()
+            .unwrap_or_else(|| ByteIndex::new(self.text.len() as u32))
+            .as_usize();
+        let line_text = &self.text[line_start..line_end];
+        let byte_offset = utf16_to_byte_offset(line_text, pos.character as usize);
+        ByteIndex::new((line_start + byte_offset) as u32)
+    }
+
+    /// Convert a span to an LSP range.
+    pub fn span_to_lsp_range(&self, span: Span) -> LspRange {
+        LspRange {
+            start: self.offset_to_lsp_position(span.start()),
+            end: self.offset_to_lsp_position(span.end()),
+        }
+    }
+
     pub fn line_column(&self, offset: ByteIndex) -> LineColumn {
         let clamped = offset.as_usize().min(self.text.len());
         let line_index = self
@@ -295,6 +347,31 @@ impl Index<FileId> for SourceDatabase {
     fn index(&self, index: FileId) -> &Self::Output {
         self.file(index).expect("invalid source file id")
     }
+}
+
+/// Compute the number of UTF-16 code units in a string slice.
+fn utf16_len(s: &str) -> usize {
+    s.chars()
+        .map(|c| if (c as u32) > 0xFFFF { 2 } else { 1 })
+        .sum()
+}
+
+/// Convert a UTF-16 code unit offset within a line to a byte offset.
+fn utf16_to_byte_offset(line: &str, utf16_chars: usize) -> usize {
+    let mut remaining = utf16_chars;
+    let mut byte_offset = 0;
+    for c in line.chars() {
+        if remaining == 0 {
+            break;
+        }
+        let width = if (c as u32) > 0xFFFF { 2 } else { 1 };
+        if remaining < width {
+            break;
+        }
+        remaining -= width;
+        byte_offset += c.len_utf8();
+    }
+    byte_offset
 }
 
 fn compute_line_starts(text: &str) -> Arc<[ByteIndex]> {

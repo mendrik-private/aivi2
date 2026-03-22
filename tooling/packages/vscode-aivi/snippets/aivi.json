@@ -1,0 +1,107 @@
+{
+  "Type declaration (sum)": {
+    "prefix": "type",
+    "body": ["type ${1:Name} =", "    | ${2:Constructor}"],
+    "description": "Declare a sum type"
+  },
+  "Type declaration (record)": {
+    "prefix": "typerec",
+    "body": ["type ${1:Name} = {", "    ${2:field}: ${3:Type},", "}"],
+    "description": "Declare a record type"
+  },
+  "Function declaration": {
+    "prefix": "fun",
+    "body": ["fun ${1:name}: ${2:ReturnType} #${3:param}: ${4:ParamType} =>", "    ${5:body}"],
+    "description": "Declare a function"
+  },
+  "Value binding": {
+    "prefix": "val",
+    "body": ["val ${1:name} = ${2:expr}"],
+    "description": "Declare a value binding"
+  },
+  "Signal binding": {
+    "prefix": "sig",
+    "body": ["sig ${1:name} =", "    ${2:expr}"],
+    "description": "Declare a signal"
+  },
+  "HTTP source signal": {
+    "prefix": "source-http",
+    "body": [
+      "@source http.${1|get,post,put,delete|} \"${2:/path}\" with {",
+      "    decode: Strict,",
+      "    timeout: ${3:5s},",
+      "}",
+      "sig ${4:name} : Signal (Result HttpError ${5:Type})"
+    ],
+    "description": "Declare an HTTP source signal"
+  },
+  "Timer source signal": {
+    "prefix": "source-timer",
+    "body": ["@source timer.every ${1:1000}", "sig ${2:tick} : Signal Unit"],
+    "description": "Declare a timer source signal"
+  },
+  "File watch source": {
+    "prefix": "source-watch",
+    "body": [
+      "@source fs.watch \"${1:path}\" with {",
+      "    events: [${2:Changed}],",
+      "}",
+      "sig ${3:fileEvents} : Signal FsEvent"
+    ],
+    "description": "Declare a file-watch source signal"
+  },
+  "Applicative cluster": {
+    "prefix": "cluster",
+    "body": [" &|> ${1:first}", " &|> ${2:second}", "  |> ${3:Constructor}"],
+    "description": "Applicative cluster pipe spine"
+  },
+  "Case split pipe": {
+    "prefix": "cases",
+    "body": [" ||> ${1:PatternA} => ${2:expr}", " ||> ${3:PatternB} => ${4:expr}"],
+    "description": "Case split (||>) pipe arms"
+  },
+  "Class declaration": {
+    "prefix": "class",
+    "body": ["class ${1:Name} ${2:A}", "    ${3:method} : ${4:Type}"],
+    "description": "Declare a type class"
+  },
+  "Instance declaration": {
+    "prefix": "instance",
+    "body": [
+      "instance ${1:Class} ${2:Type}",
+      "    ${3:method} ${4:args} =",
+      "        ${5:body}"
+    ],
+    "description": "Declare a class instance"
+  },
+  "Use import": {
+    "prefix": "use",
+    "body": ["use ${1:module} (${2:name})"],
+    "description": "Import from a module"
+  },
+  "Match markup": {
+    "prefix": "match",
+    "body": [
+      "<match on={${1:expr}}>",
+      "    <case pattern={${2:Pattern}}>",
+      "        ${3:child}",
+      "    </case>",
+      "</match>"
+    ],
+    "description": "Match control node in markup"
+  },
+  "Each markup": {
+    "prefix": "each",
+    "body": [
+      "<each of={${1:items}} as={${2:item}} key={${2:item}.${3:id}}>",
+      "    ${4:child}",
+      "</each>"
+    ],
+    "description": "Each (list rendering) control node"
+  },
+  "Show markup": {
+    "prefix": "show",
+    "body": ["<show when={${1:condition}}>", "    ${2:child}", "</show>"],
+    "description": "Conditional show control node"
+  }
+}

@@ -1,0 +1,47 @@
+type Screen =
+  | Loading
+  | Ready Text
+  | Failed Text
+
+val current:Screen = Loading
+
+fun boolLabel:Text #ready:Bool =>
+    ready
+     ||> True => "ready"
+     ||> False => "waiting"
+
+fun maybeLabel:Text #maybeUser:(Option Text) =>
+    maybeUser
+     ||> Some name => name
+     ||> None => "login"
+
+fun resultLabel:Text #status:(Result Text Text) =>
+    status
+     ||> Ok body => body
+     ||> Err message => message
+
+fun validationLabel:Text #status:(Validation Text Text) =>
+    status
+     ||> Valid body => body
+     ||> Invalid message => message
+
+fun screenLabel:Text #screen:Screen =>
+    screen
+     ||> Loading => "loading"
+     ||> Ready title => title
+     ||> Failed reason => reason
+
+val screenView =
+    <with value={current} as={screen}>
+        <match on={screen}>
+            <case pattern={Loading}>
+                <Label text="Loading..." />
+            </case>
+            <case pattern={Ready title}>
+                <Label text={title} />
+            </case>
+            <case pattern={Failed reason}>
+                <Label text={reason} />
+            </case>
+        </match>
+    </with>

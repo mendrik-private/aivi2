@@ -34,12 +34,11 @@ pub use kind::{
     KindRecordField, KindStore, TypeConstructorId,
 };
 pub use recurrence::{
-    builtin_source_option_wakeup_cause, BuiltinSourceWakeupCause,
-    CustomSourceRecurrenceWakeupContext, CustomSourceWakeupCause, NonSourceWakeupCause,
-    RecurrencePlan, RecurrencePlanner, RecurrenceTarget, RecurrenceTargetError,
-    RecurrenceTargetEvidence, RecurrenceWakeupError, RecurrenceWakeupEvidence,
-    RecurrenceWakeupKind, RecurrenceWakeupPlan, RecurrenceWakeupPlanner,
-    SourceRecurrenceWakeupContext,
+    BuiltinSourceWakeupCause, CustomSourceRecurrenceWakeupContext, CustomSourceWakeupCause,
+    NonSourceWakeupCause, RecurrencePlan, RecurrencePlanner, RecurrenceTarget,
+    RecurrenceTargetError, RecurrenceTargetEvidence, RecurrenceWakeupError,
+    RecurrenceWakeupEvidence, RecurrenceWakeupKind, RecurrenceWakeupPlan, RecurrenceWakeupPlanner,
+    SourceRecurrenceWakeupContext, builtin_source_option_wakeup_cause,
 };
 pub use source_contracts::{
     BuiltinSourceProvider, SourceCancellationPolicy, SourceContract, SourceContractIntrinsicWakeup,

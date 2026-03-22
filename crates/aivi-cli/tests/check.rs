@@ -22,6 +22,7 @@ fn check_accepts_valid_hir_fixtures() {
         "milestone-2/valid/source-option-contract-parameter-context-free-builtins/main.aivi",
         "milestone-2/valid/source-option-imported-binding-match/main.aivi",
         "milestone-2/valid/applicative-clusters/main.aivi",
+        "milestone-2/valid/case-exhaustiveness/main.aivi",
         "milestone-2/valid/markup-control-nodes/main.aivi",
         "milestone-2/valid/class-declarations/main.aivi",
         "milestone-2/valid/domain-declarations/main.aivi",
@@ -92,6 +93,7 @@ fn check_rejects_invalid_hir_fixtures() {
         "milestone-2/invalid/request-recurrence-missing-wakeup/main.aivi",
         "milestone-2/invalid/interpolated-pattern-text/main.aivi",
         "milestone-1/invalid/cluster_unfinished_gate.aivi",
+        "milestone-1/invalid/pattern_non_exhaustive_sum.aivi",
         "milestone-1/invalid/regex_bad_pattern.aivi",
         "milestone-1/invalid/regex_invalid_quantifier.aivi",
         "milestone-1/invalid/source_unknown_option.aivi",
@@ -113,6 +115,7 @@ fn check_rejects_invalid_hir_fixtures() {
         "milestone-2/invalid/custom-source-provider-argument-count-mismatch/main.aivi",
         "milestone-2/invalid/custom-source-provider-argument-type-mismatch/main.aivi",
         "milestone-2/invalid/custom-source-provider-unsupported-schema-type/main.aivi",
+        "milestone-2/invalid/non-exhaustive-match-control/main.aivi",
     ] {
         let path = fixture_path(relative);
         let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
@@ -158,5 +161,29 @@ fn check_reports_regex_validation_from_hir() {
     assert!(
         !stderr.contains("syntax::invalid-regex-literal"),
         "regex validation should no longer be reported from syntax, got stderr: {stderr}"
+    );
+}
+
+#[test]
+fn check_reports_non_exhaustive_case_from_hir() {
+    let path = fixture_path("milestone-1/invalid/pattern_non_exhaustive_sum.aivi");
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        !output.status.success(),
+        "expected non-exhaustive case fixture to fail check"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("hir::non-exhaustive-case-pattern"),
+        "expected HIR case exhaustiveness diagnostic, got stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("case split over `Status` is not exhaustive; missing `Pending`, `Failed`"),
+        "expected explicit non-exhaustive case message, got stderr: {stderr}"
     );
 }

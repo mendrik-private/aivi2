@@ -61,6 +61,21 @@ pub struct SourceDecodePlan {
     pub mode: DecodeMode,
     pub payload_annotation: HirTypeId,
     pub schema: DecodeSchema,
+    pub structural_types: TypeStore,
+    pub domain_bindings: Vec<SourceDecodeDomainBinding>,
+}
+
+impl SourceDecodePlan {
+    pub fn domain_binding(&self, ty: StructuralTypeId) -> Option<&SourceDecodeDomainBinding> {
+        self.domain_bindings.iter().find(|binding| binding.ty == ty)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceDecodeDomainBinding {
+    pub ty: StructuralTypeId,
+    pub domain_item: ItemId,
+    pub arguments: Vec<StructuralTypeId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -155,13 +170,15 @@ fn elaborate_source_decode_signal(
 
     let payload_annotation = lowered.as_ref().map(|lowered| lowered.payload_annotation);
 
-    if let (Some(mode), Some(lowered)) = (mode, lowered.as_ref()) {
-        match DecodePlanner::plan(&lowered.types, lowered.subject, mode) {
+    if let (Some(mode), Some(lowered)) = (mode, lowered) {
+        match DecodePlanner::plan(&lowered.structural_types, lowered.subject, mode) {
             Ok(schema) if blockers.is_empty() => {
                 return SourceDecodeNodeOutcome::Planned(SourceDecodePlan {
                     mode,
                     payload_annotation: lowered.payload_annotation,
                     schema,
+                    structural_types: lowered.structural_types,
+                    domain_bindings: lowered.domain_bindings,
                 });
             }
             Ok(_) => {}
@@ -280,25 +297,45 @@ fn signal_source_decorator<'a>(
 
 struct LoweredDecodeType {
     payload_annotation: HirTypeId,
-    types: TypeStore,
+    structural_types: TypeStore,
     subject: StructuralTypeId,
+    domain_bindings: Vec<SourceDecodeDomainBinding>,
 }
 
-struct DecodeTypeLowerer<'a> {
+pub(crate) struct DecodeTypeLowerer<'a> {
     module: &'a Module,
     types: TypeStore,
     parameters: HashMap<HirTypeParameterId, StructuralTypeParameterId>,
     externals: HashMap<String, ExternalTypeId>,
+    domain_bindings: Vec<SourceDecodeDomainBinding>,
 }
 
 impl<'a> DecodeTypeLowerer<'a> {
     fn new(module: &'a Module) -> Self {
+        Self::with_type_store(module, TypeStore::new())
+    }
+
+    pub(crate) fn with_type_store(module: &'a Module, types: TypeStore) -> Self {
         Self {
             module,
-            types: TypeStore::new(),
+            types,
             parameters: HashMap::new(),
             externals: HashMap::new(),
+            domain_bindings: Vec::new(),
         }
+    }
+
+    pub(crate) fn types(&self) -> &TypeStore {
+        &self.types
+    }
+
+    pub(crate) fn lower_type_with_substitutions(
+        &mut self,
+        type_id: HirTypeId,
+        substitutions: &HashMap<HirTypeParameterId, StructuralTypeId>,
+    ) -> Option<StructuralTypeId> {
+        self.lower_type(type_id, substitutions, &mut Vec::new())
+            .ok()
     }
 
     fn lower_source_signal_payload(
@@ -313,8 +350,9 @@ impl<'a> DecodeTypeLowerer<'a> {
             .map_err(DecodeTypeLoweringError::into_blocker)?;
         Ok(LoweredDecodeType {
             payload_annotation,
-            types: self.types,
+            structural_types: self.types,
             subject,
+            domain_bindings: self.domain_bindings,
         })
     }
 
@@ -486,6 +524,8 @@ impl<'a> DecodeTypeLowerer<'a> {
                             SourceDecodeUnsupportedTypeKind::Task,
                         )),
                         BuiltinType::List
+                        | BuiltinType::Map
+                        | BuiltinType::Set
                         | BuiltinType::Option
                         | BuiltinType::Result
                         | BuiltinType::Validation => {
@@ -645,7 +685,13 @@ impl<'a> DecodeTypeLowerer<'a> {
                 let carrier = self.lower_type(item.carrier, &item_substitutions, item_stack);
                 let popped = item_stack.pop();
                 debug_assert_eq!(popped, Some(item_id));
-                Ok(self.types.domain(item.name.text(), carrier?))
+                let ty = self.types.domain(item.name.text(), carrier?);
+                self.domain_bindings.push(SourceDecodeDomainBinding {
+                    ty,
+                    domain_item: item_id,
+                    arguments: arguments.to_vec(),
+                });
+                Ok(ty)
             }
             Item::Class(_)
             | Item::Value(_)
@@ -776,6 +822,8 @@ fn builtin_scalar(builtin: BuiltinType) -> Option<PrimitiveType> {
         BuiltinType::Unit => Some(PrimitiveType::Unit),
         BuiltinType::Bytes => Some(PrimitiveType::Bytes),
         BuiltinType::List
+        | BuiltinType::Map
+        | BuiltinType::Set
         | BuiltinType::Option
         | BuiltinType::Result
         | BuiltinType::Validation
@@ -795,6 +843,8 @@ fn builtin_type_name(builtin: BuiltinType) -> &'static str {
         BuiltinType::Unit => "Unit",
         BuiltinType::Bytes => "Bytes",
         BuiltinType::List => "List",
+        BuiltinType::Map => "Map",
+        BuiltinType::Set => "Set",
         BuiltinType::Option => "Option",
         BuiltinType::Result => "Result",
         BuiltinType::Validation => "Validation",
@@ -832,10 +882,10 @@ mod tests {
     };
 
     use super::{
-        elaborate_source_decodes, SourceDecodeElaborationBlocker, SourceDecodeNodeOutcome,
-        SourceDecodeUnsupportedTypeKind,
+        SourceDecodeElaborationBlocker, SourceDecodeNodeOutcome, SourceDecodeUnsupportedTypeKind,
+        elaborate_source_decodes,
     };
-    use crate::{lower_module, Item};
+    use crate::{Item, lower_module};
 
     fn lower_text(path: &str, text: &str) -> crate::LoweringResult {
         let mut sources = SourceDatabase::new();

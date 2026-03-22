@@ -278,7 +278,7 @@ pub enum ShapeErrorKind {
     InvalidTupleArity { found: usize },
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TypeStore {
     nodes: Vec<TypeNode>,
     parameters: Vec<Box<str>>,

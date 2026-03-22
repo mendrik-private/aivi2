@@ -425,7 +425,9 @@ mod tests {
         let _ = store.add_constructor("Text", Kind::Type);
         let _ = store.add_constructor("Option", Kind::constructor(1));
         let _ = store.add_constructor("List", Kind::constructor(1));
+        let _ = store.add_constructor("Set", Kind::constructor(1));
         let _ = store.add_constructor("Signal", Kind::constructor(1));
+        let _ = store.add_constructor("Map", Kind::constructor(2));
         let _ = store.add_constructor("Result", Kind::constructor(2));
         let _ = store.add_constructor("Task", Kind::constructor(2));
         store
@@ -458,6 +460,26 @@ mod tests {
         let applied = store.apply_expr(option_ctor, text_expr);
 
         assert_eq!(KindChecker.infer(&store, applied), Ok(Kind::Type));
+    }
+
+    #[test]
+    fn infers_map_partial_application_and_fully_applied_set_types() {
+        let mut store = builtin_store();
+        let map = store.add_constructor("MapAlias", Kind::constructor(2));
+        let set = store.add_constructor("SetAlias", Kind::constructor(1));
+        let text = store.add_constructor("TextAlias", Kind::Type);
+
+        let map_expr = store.constructor_expr(map);
+        let set_expr = store.constructor_expr(set);
+        let text_expr = store.constructor_expr(text);
+        let map_text = store.apply_expr(map_expr, text_expr);
+        let set_text = store.apply_expr(set_expr, text_expr);
+
+        assert_eq!(
+            KindChecker.infer(&store, map_text),
+            Ok(Kind::constructor(1))
+        );
+        assert_eq!(KindChecker.infer(&store, set_text), Ok(Kind::Type));
     }
 
     #[test]

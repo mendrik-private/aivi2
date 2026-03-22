@@ -7,16 +7,33 @@ type Profile = {
     login: Result HttpError Text,
     queued: Validation Text Int,
     watching: Signal Bool,
-    background: Task HttpError Int
+    background: Task HttpError Int,
+    headers: Map Text Text,
+    tags: Set Text
 }
 
 type HttpResult A = (Result HttpError A)
 type LoadedProfile = (HttpResult Profile)
+type HeaderMap = (Map Text Text)
+type TagSet = (Set Text)
+type PendingProfiles = (Task HttpError (Map Text Profile))
 
 domain ResourceId A over A
     wrap : A -> ResourceId A
     unwrap : ResourceId A -> A
 
+domain HeaderBag over Map Text Text
+    lookup : Text -> HeaderBag -> Option Text
+
+domain Tags over Set Text
+    contains : Text -> Tags -> Bool
+
 type ResourceText = (ResourceId Text)
+
+fun keepHeaders:Map Text Text #headers:Map Text Text =>
+    headers
+
+fun keepTags:Set Text #tags:Set Text =>
+    tags
 
 val defaultNickname : Option Text = None

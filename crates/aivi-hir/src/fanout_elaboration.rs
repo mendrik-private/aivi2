@@ -2,10 +2,10 @@ use aivi_base::SourceSpan;
 use aivi_typing::{FanoutCarrier, FanoutPlanner, FanoutStageKind};
 
 use crate::{
-    validate::{
-        truthy_falsy_pair_stages, walk_expr_tree, GateExprEnv, GateIssue, GateType, GateTypeContext,
-    },
     ExprId, Item, ItemId, Module, PipeExpr, PipeStageKind,
+    validate::{
+        GateExprEnv, GateIssue, GateType, GateTypeContext, truthy_falsy_pair_stages, walk_expr_tree,
+    },
 };
 
 /// Focused fan-out plans derived from resolved HIR.
@@ -404,8 +404,8 @@ mod tests {
     use aivi_syntax::parse_module;
     use aivi_typing::FanoutCarrier;
 
-    use super::{elaborate_fanouts, FanoutElaborationBlocker, FanoutSegmentOutcome};
-    use crate::{lower_module, BuiltinType, GateType, Item, ValidationMode};
+    use super::{FanoutElaborationBlocker, FanoutSegmentOutcome, elaborate_fanouts};
+    use crate::{BuiltinType, GateType, Item, ValidationMode, lower_module};
 
     fn fixture_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
