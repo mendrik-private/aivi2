@@ -1,0 +1,18 @@
+type Pair = Pair Text Text
+
+type SaveState =
+  | Saved
+  | Dirty Text
+
+sig documentTitle = "Notes"
+sig documentBody = "Hello"
+
+sig draft =
+   &|> documentTitle
+ &|> documentBody
+    |> Pair
+
+fun label:Text #state:SaveState =>
+  state
+    ||> Saved => "saved"
+   ||> Dirty message => "dirty {message}"

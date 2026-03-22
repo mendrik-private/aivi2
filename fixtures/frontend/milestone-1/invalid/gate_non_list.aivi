@@ -1,0 +1,7 @@
+type User = { active: Bool }
+
+val currentUser:User = { active: True }
+
+val activeUser =
+    currentUser
+     ?|> .active

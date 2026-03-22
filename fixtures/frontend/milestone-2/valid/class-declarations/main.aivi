@@ -1,0 +1,8 @@
+class Eq A
+    (==) : A -> A -> Bool
+
+class Display A
+    display : A -> Text
+
+fun equivalent:Bool #left:Int #right:Int =>
+    left == right and left != 0

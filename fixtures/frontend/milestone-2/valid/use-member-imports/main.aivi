@@ -1,0 +1,11 @@
+use aivi.network (
+    http
+    socket
+)
+
+fun joinProviders:Text #left:Text #right:Text =>
+    "{left}/{right}"
+
+val primaryProvider = http
+val fallbackProvider = socket
+val providerPair = joinProviders primaryProvider fallbackProvider

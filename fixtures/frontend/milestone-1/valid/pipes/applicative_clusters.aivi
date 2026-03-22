@@ -1,0 +1,23 @@
+type UserDraft = UserDraft Text Text Int
+type NamePair = NamePair Text Text
+
+sig nameText = "Ada"
+sig emailText = "ada@example.com"
+sig ageValue = 36
+sig firstName = "Ada"
+sig lastName = "Lovelace"
+
+sig validatedUser =
+ &|> nameText
+ &|> emailText
+ &|> ageValue
+  |> UserDraft
+
+sig namePair =
+ &|> firstName
+ &|> lastName
+  |> NamePair
+
+sig tupledNames =
+ &|> firstName
+ &|> lastName

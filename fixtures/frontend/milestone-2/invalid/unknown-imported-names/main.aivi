@@ -1,0 +1,7 @@
+use aivi.network (
+    http
+    mailbox
+)
+
+val primaryProvider = http
+val secondaryProvider = mailbox

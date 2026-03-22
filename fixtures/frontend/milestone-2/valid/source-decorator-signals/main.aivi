@@ -1,0 +1,27 @@
+type HttpError =
+  | Timeout
+  | DecodeFailure Text
+
+type User = {
+    id: Int,
+    name: Text
+}
+
+type DecodeMode =
+  | Strict
+  | Permissive
+
+sig apiHost = "https://api.example.com"
+
+@source http.get "{apiHost}/users" with {
+    decode: Strict,
+    retry: 3,
+    timeoutMs: 5000
+}
+sig users : Signal (Result HttpError (List User))
+
+@source timer.every 120 with {
+    immediate: True,
+    coalesce: True
+}
+sig tick : Signal Unit

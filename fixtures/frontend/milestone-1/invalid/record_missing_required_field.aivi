@@ -1,0 +1,8 @@
+type Config = {
+    host: Text,
+    port: Int
+}
+
+val config:Config = {
+    host: "localhost"
+}

@@ -1,0 +1,45 @@
+type Item = {
+    id: Int,
+    title: Text
+}
+
+type Screen =
+  | Loading
+  | Ready (List Item)
+  | Failed Text
+
+fun itemLabel:Text #item:Item =>
+    item.title
+
+val header = "Users"
+
+val screen =
+    Ready [
+        { id: 1, title: "Alpha" },
+        { id: 2, title: "Beta" }
+    ]
+
+val screenView =
+    <fragment>
+        <Label text={header} />
+        <show when={True} keepMounted={True}>
+            <with value={screen} as={currentScreen}>
+                <match on={currentScreen}>
+                    <case pattern={Loading}>
+                        <Label text="Loading..." />
+                    </case>
+                    <case pattern={Ready items}>
+                        <each of={items} as={item} key={item.id}>
+                            <Row title={itemLabel item} />
+                            <empty>
+                                <Label text="No items" />
+                            </empty>
+                        </each>
+                    </case>
+                    <case pattern={Failed reason}>
+                        <Label text="Error {reason}" />
+                    </case>
+                </match>
+            </with>
+        </show>
+    </fragment>

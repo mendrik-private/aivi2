@@ -1,0 +1,21 @@
+type UserDraft = UserDraft Text Text Int
+type NamePair = NamePair Text Text
+
+val defaultAge = 36
+
+sig nameText = "Ada"
+sig emailText = "ada@example.com"
+sig ageValue = defaultAge
+sig firstName = "Ada"
+sig lastName = "Lovelace"
+
+sig validatedUser =
+ &|> nameText
+ &|> emailText
+ &|> ageValue
+  |> UserDraft
+
+sig namePair =
+ &|> firstName
+ &|> lastName
+  |> NamePair

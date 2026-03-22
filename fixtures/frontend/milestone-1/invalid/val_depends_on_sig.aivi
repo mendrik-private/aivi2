@@ -1,0 +1,3 @@
+sig tick = currentTime
+
+val later = tick

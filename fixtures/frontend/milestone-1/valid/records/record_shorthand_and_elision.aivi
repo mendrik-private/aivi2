@@ -1,0 +1,23 @@
+use aivi.defaults (Option)
+
+type Profile = {
+    name: Text,
+    nickname: Option Text,
+    bio: Option Text
+}
+
+val name = "Ada"
+val nickname = Some "Countess"
+
+val richProfile:Profile = {
+    name,
+    nickname
+}
+
+val minimalProfile:Profile = {
+    name: "Grace"
+}
+
+fun profileName:Text #profile:Profile =>
+    profile
+     ||> { name, nickname } => name

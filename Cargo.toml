@@ -1,0 +1,21 @@
+[workspace]
+members = [
+    "crates/aivi-base",
+    "crates/aivi-syntax",
+    "crates/aivi-cli",
+    "crates/aivi-typing",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+rust-version = "1.85"
+
+[workspace.dependencies]
+aivi-base = { path = "crates/aivi-base" }
+aivi-syntax = { path = "crates/aivi-syntax" }
+aivi-typing = { path = "crates/aivi-typing" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

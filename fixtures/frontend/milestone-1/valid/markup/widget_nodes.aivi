@@ -1,0 +1,7 @@
+val hero =
+    <Window title="Milestone 1">
+        <Box orientation={Vertical} spacing={12}>
+            <Label text="Frontend fixture corpus" />
+            <Button label="Refresh" />
+        </Box>
+    </Window>

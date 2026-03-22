@@ -1,0 +1,17 @@
+type Status = Idle | Busy
+
+fun statusLabel:Text #status:Status =>
+    status
+     ||> Idle => "Idle"
+     ||> Busy => "Busy"
+
+val main =
+    <Window title="Milestone 1">
+        <Box orientation={Vertical} spacing={12}>
+            <Label text="Frontend fixture corpus" />
+            <Label text={statusLabel Idle} />
+        </Box>
+    </Window>
+
+export statusLabel
+export main

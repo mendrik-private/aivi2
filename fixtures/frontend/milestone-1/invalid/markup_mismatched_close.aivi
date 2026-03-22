@@ -1,0 +1,4 @@
+val brokenView =
+    <show when={True}>
+        <Label text="Ready" />
+    </each>

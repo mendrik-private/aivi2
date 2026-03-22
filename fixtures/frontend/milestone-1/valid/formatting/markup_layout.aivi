@@ -1,0 +1,14 @@
+fun formatCount:Text #count:Int =>
+    "{count} unread"
+
+val count = 3
+
+val dashboard =
+    <fragment>
+      <Label text="Inbox" />
+        <show when={True} keepMounted={True}>
+      <with value={formatCount count} as={label}>
+            <Label text={label} />
+      </with>
+        </show>
+    </fragment>

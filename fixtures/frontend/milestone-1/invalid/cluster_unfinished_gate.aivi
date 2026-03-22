@@ -1,0 +1,10 @@
+type UserDraft = UserDraft Text Text
+
+sig nameText = "Ada"
+sig emailText = "ada@example.com"
+
+sig brokenDraft =
+ &|> nameText
+ &|> emailText
+  ?|> .ready
+   |> UserDraft

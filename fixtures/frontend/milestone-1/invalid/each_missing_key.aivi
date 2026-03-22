@@ -1,0 +1,4 @@
+val listView =
+    <each of={items} as={item}>
+        <Row item={item} />
+    </each>

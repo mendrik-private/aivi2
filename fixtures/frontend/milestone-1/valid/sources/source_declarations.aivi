@@ -1,0 +1,45 @@
+type HttpError =
+  | Timeout
+  | DecodeFailure Text
+
+type User = {
+    id: Int,
+    name: Text
+}
+
+type Key = Key Text
+
+type FsEvent =
+  | Created
+  | Changed
+  | Deleted
+
+type DecodeMode =
+  | Strict
+  | Permissive
+
+sig apiHost = "https://api.example.com"
+
+@source http.get "{apiHost}/users" with {
+    decode: Strict,
+    retry: 3,
+    timeoutMs: 5000
+}
+sig users : Signal (Result HttpError (List User))
+
+@source timer.every 120 with {
+    immediate: True,
+    coalesce: True
+}
+sig tick : Signal Unit
+
+@source window.keyDown with {
+    repeat: False,
+    focusOnly: True
+}
+sig keyDown : Signal Key
+
+@source fs.watch "/tmp/demo.txt" with {
+    events: [Created, Changed, Deleted]
+}
+sig fileEvents : Signal FsEvent

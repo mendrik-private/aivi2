@@ -1,0 +1,23 @@
+type User = {
+    name: Text,
+    email: Text
+}
+
+fun formatUser:Text #user:User =>
+    user
+     ||> { name, email } => "{name} <{email}>"
+
+val user:User = {
+    name: "Ada",
+    email: "ada@example.com"
+}
+
+val userCard =
+    <show when={True} keepMounted={True}>
+        <fragment>
+            <with value={formatUser user} as={label}>
+                <Label text={label} />
+            </with>
+            <Label text="{user.email}" />
+        </fragment>
+    </show>

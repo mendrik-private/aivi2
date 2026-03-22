@@ -1,0 +1,39 @@
+type User = {
+    active: Bool,
+    age: Int,
+    email: Text
+}
+
+type Shipping = { status: Text }
+type Order = { shipping: Shipping }
+
+type Status =
+  | Paid
+  | Pending
+  | Failed Text
+
+fun activeEmails:List Text #users:List User =>
+    users
+     ?|> (.active and .age > 18)
+     *|> .email
+
+fun statusLabel:Text #status:Status =>
+    status
+     ||> Paid => "paid"
+     ||> Pending => "pending"
+     ||> Failed reason => "failed {reason}"
+
+fun startOrWait:Text #ready:Bool =>
+    ready
+     T|> "start"
+     F|> "wait"
+
+fun observeShipping:Text #shipping:Shipping =>
+    shipping
+     |> .status
+
+fun shippingStatus:Text #order:Order =>
+    order
+     |> .shipping
+     | observeShipping
+     |> .status

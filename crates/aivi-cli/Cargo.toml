@@ -1,0 +1,16 @@
+[package]
+name = "aivi-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+aivi-base.workspace = true
+aivi-syntax.workspace = true
+
+[[bin]]
+name = "aivi"
+path = "src/main.rs"
+
+[lints]
+workspace = true

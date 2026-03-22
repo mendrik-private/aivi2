@@ -1,0 +1,182 @@
+#![forbid(unsafe_code)]
+
+use std::{
+    env,
+    ffi::OsString,
+    fs,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
+
+use aivi_base::{FileId, Severity, SourceDatabase};
+use aivi_syntax::{Formatter, ItemKind, TokenKind, lex_module, parse_module};
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(code) => code,
+        Err(message) => {
+            eprintln!("{message}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn run() -> Result<ExitCode, String> {
+    let mut args = env::args_os();
+    let _binary = args.next();
+
+    let Some(first) = args.next() else {
+        print_usage();
+        return Ok(ExitCode::from(2));
+    };
+
+    let (command, path) = if first == OsString::from("check") {
+        (Command::Check, take_path(args)?)
+    } else if first == OsString::from("lex") {
+        (Command::Lex, take_path(args)?)
+    } else if first == OsString::from("fmt") {
+        (Command::Fmt, take_path(args)?)
+    } else {
+        (Command::Check, PathBuf::from(first))
+    };
+
+    match command {
+        Command::Check => check_file(&path),
+        Command::Lex => lex_file(&path),
+        Command::Fmt => format_file(&path),
+    }
+}
+
+fn take_path(mut args: impl Iterator<Item = OsString>) -> Result<PathBuf, String> {
+    args.next()
+        .map(PathBuf::from)
+        .ok_or_else(|| "expected a path argument".to_owned())
+}
+
+fn load_source(path: &Path) -> Result<(SourceDatabase, FileId), String> {
+    let text = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let mut sources = SourceDatabase::new();
+    let file_id = sources.add_file(path.to_path_buf(), text);
+    Ok((sources, file_id))
+}
+
+fn check_file(path: &Path) -> Result<ExitCode, String> {
+    let (sources, file_id) = load_source(path)?;
+    let file = &sources[file_id];
+    let parsed = parse_module(file);
+    let mut saw_error = false;
+
+    for diagnostic in parsed.all_diagnostics() {
+        eprintln!("{}\n", diagnostic.render(&sources));
+        if diagnostic.severity == Severity::Error {
+            saw_error = true;
+        }
+    }
+
+    if saw_error {
+        Ok(ExitCode::FAILURE)
+    } else {
+        println!(
+            "syntax ok: {} ({} item{})",
+            path.display(),
+            parsed.module.items.len(),
+            if parsed.module.items.len() == 1 {
+                ""
+            } else {
+                "s"
+            }
+        );
+        Ok(ExitCode::SUCCESS)
+    }
+}
+
+fn lex_file(path: &Path) -> Result<ExitCode, String> {
+    let (sources, file_id) = load_source(path)?;
+    let file = &sources[file_id];
+    let lexed = lex_module(file);
+
+    for token in lexed
+        .tokens()
+        .iter()
+        .filter(|token| !token.kind().is_trivia())
+    {
+        println!(
+            "{kind:?} @{start}..{end} {text:?}{line_start}",
+            kind = token.kind(),
+            start = token.span().start().as_u32(),
+            end = token.span().end().as_u32(),
+            text = token.text(file),
+            line_start = if token.line_start() {
+                " [line-start]"
+            } else {
+                ""
+            },
+        );
+    }
+
+    if lexed.has_errors() {
+        for diagnostic in lexed.diagnostics() {
+            eprintln!("{}\n", diagnostic.render(&sources));
+        }
+        Ok(ExitCode::FAILURE)
+    } else {
+        Ok(ExitCode::SUCCESS)
+    }
+}
+
+fn format_file(path: &Path) -> Result<ExitCode, String> {
+    let (sources, file_id) = load_source(path)?;
+    let file = &sources[file_id];
+    let parsed = parse_module(file);
+    if parsed.has_errors() {
+        for diagnostic in parsed.all_diagnostics() {
+            eprintln!("{}\n", diagnostic.render(&sources));
+        }
+        return Ok(ExitCode::FAILURE);
+    }
+
+    let formatter = Formatter;
+    print!("{}", formatter.format(&parsed.module));
+    Ok(ExitCode::SUCCESS)
+}
+
+fn print_usage() {
+    eprintln!("usage:\n  aivi <path>\n  aivi check <path>\n  aivi lex <path>\n  aivi fmt <path>");
+    eprintln!(
+        "commands:\n  check  Lex and parse a module, reporting diagnostics\n  lex    Dump the lossless token stream\n  fmt    Canonically format the supported Milestone 1 subset"
+    );
+    eprintln!(
+        "milestone-1 surface items: {:?}",
+        [
+            ItemKind::Type,
+            ItemKind::Value,
+            ItemKind::Function,
+            ItemKind::Signal,
+            ItemKind::Class,
+            ItemKind::Use,
+            ItemKind::Export,
+        ]
+    );
+    eprintln!(
+        "core pipe operators: {:?}",
+        [
+            TokenKind::PipeTransform,
+            TokenKind::PipeGate,
+            TokenKind::PipeCase,
+            TokenKind::PipeMap,
+            TokenKind::PipeApply,
+            TokenKind::PipeRecurStart,
+            TokenKind::PipeRecurStep,
+            TokenKind::PipeTap,
+            TokenKind::PipeFanIn,
+        ]
+    );
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Command {
+    Check,
+    Lex,
+    Fmt,
+}

@@ -1,0 +1,35 @@
+type Item = {
+    id: Int,
+    title: Text
+}
+
+type Screen =
+  | Loading
+  | Ready (List Item)
+  | Failed Text
+
+val screen =
+    Ready [
+        { id: 1, title: "Alpha" },
+        { id: 2, title: "Beta" }
+    ]
+
+val screenView =
+    <match on={screen}>
+        <case pattern={Loading}>
+            <Label text="Loading..." />
+        </case>
+        <case pattern={Ready items}>
+            <each of={items} as={item} key={item.id}>
+                <Row title={item.title} />
+                <empty>
+                    <Label text="No items" />
+                </empty>
+            </each>
+        </case>
+        <case pattern={Failed reason}>
+            <show when={True}>
+                <Label text="Error {reason}" />
+            </show>
+        </case>
+    </match>

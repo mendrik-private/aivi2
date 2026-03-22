@@ -1,0 +1,17 @@
+type Screen =
+  | Loading
+  | Ready Text
+
+val screenTitle = "Milestone 2"
+val refreshStep = 10
+
+fun titleFor:Text #screen:Screen =>
+    screen
+     ||> Loading => "Loading"
+     ||> Ready title => title
+
+val currentScreen = Ready screenTitle
+val pageTitle = titleFor currentScreen
+
+sig refreshMs = 30
+sig nextRefresh = refreshMs + refreshStep
