@@ -1,0 +1,7 @@
+.gitignore
+tsconfig.json
+vite.config.ts
+src/
+dist/*.map
+node_modules/
+out/

@@ -123,13 +123,15 @@
   "scripts": {
     "build": "vite build",
     "watch": "vite build --watch",
-    "test": "echo 'no tests yet'"
+    "test": "echo 'no tests yet'",
+    "package": "vsce package --no-dependencies --allow-missing-repository"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
     "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.0.0",
     "typescript": "^5.4.0",
     "vite": "^5.0.0"
   }
