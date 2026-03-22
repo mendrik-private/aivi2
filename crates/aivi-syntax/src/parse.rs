@@ -3218,10 +3218,7 @@ export main
 
     #[test]
     fn parser_flags_only_syntax_invalid_fixtures() {
-        for relative in [
-            "invalid/markup_mismatched_close.aivi",
-            "invalid/regex_bad_pattern.aivi",
-        ] {
+        for relative in ["invalid/markup_mismatched_close.aivi"] {
             let parsed = parse_fixture(relative);
             assert!(
                 parsed.has_errors(),
@@ -3236,6 +3233,8 @@ export main
             "invalid/record_missing_required_field.aivi",
             "invalid/each_missing_key.aivi",
             "invalid/gate_non_list.aivi",
+            "invalid/regex_bad_pattern.aivi",
+            "invalid/regex_invalid_quantifier.aivi",
             "invalid/cluster_unfinished_gate.aivi",
         ] {
             let parsed = parse_fixture(relative);

@@ -64,7 +64,7 @@ This file is a plain-language summary of the current implementation choices, wit
 
 31. **Type-shape checking foundation:** The project now has a reusable foundation for checking whether advanced type constructors are being used in the right shape. This is groundwork for later type-checking.
 
-32. **Using that checking in early validation:** That new checking is now used in places where the compiler already has enough trustworthy information. Imported types are still skipped until the import system is richer.
+32. **Using that checking in early validation:** That new checking is now used in places where the compiler already has enough trustworthy information. Same-module types are checked directly, and imported type constructors participate too only when the closed Milestone 2 import catalog carries explicit constructor-kind metadata. Imports without that metadata still stay skipped instead of being guessed.
 
 33. **Repeating-flow syntax rules:** Repeating-flow syntax is limited to one narrow, clearly structured trailing form for now. Mixed or messy shapes are rejected.
 
@@ -125,3 +125,7 @@ This file is a plain-language summary of the current implementation choices, wit
 60. **Bare source-root actual typing:** Source option root checking now has its own closed actual-type fallback instead of relying only on ordinary expression inference. It can recursively prove same-module constructor roots, unannotated local `val` bodies, tuple/record/list literals, and `Some` roots directly, while locally expected container shapes can also validate `None` / `Ok` / `Err` / `Valid` / `Invalid` once sibling bindings or concrete field annotations fix the missing type arguments.
 
 61. **Context-free source builtin holes:** Provider-local source-option bindings may now carry a narrow partial actual-type proof for bare `None` / `Ok` / `Err` / `Valid` / `Invalid` roots. Those partial proofs keep only the built-in container shape plus anonymous wildcard leaves, refine when later local evidence arrives, and do not widen into general ordinary-expression inference.
+
+62. **Regex literal validation layer:** Regex literal well-formedness now belongs to HIR validation instead of lexing. The compiler currently uses the Rust `regex-syntax` grammar only to accept or reject `rx"..."` literals at compile time, which keeps the validation slice explicit without pretending runtime lowering semantics already exist.
+
+63. **Truthy/falsy branch handoff:** Resolved HIR now gives `T|>` / `F|>` one deterministic ordinary-carrier handoff: only builtin `Bool`, `Option`, `Result`, and `Validation` subjects elaborate today, each pair chooses the RFC’s canonical builtin constructors directly, one-payload branches type their body against that payload as the ambient pipe subject, zero-payload branches do not invent an ambient payload, and branch result mismatches are rejected only when the current local proof surface can really see both branch types. Signal-lifted branching, user-defined truthy/falsy carriers, and bare `_` spellings that still depend on the separate ambient-subject gap remain later work instead of being guessed here.

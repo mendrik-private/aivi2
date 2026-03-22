@@ -2,10 +2,12 @@ use aivi_base::SourceSpan;
 use aivi_typing::{GatePlanner, GateResultKind};
 
 use crate::{
+    validate::{
+        truthy_falsy_pair_stages, walk_expr_tree, GateExprEnv, GateIssue, GateType, GateTypeContext,
+    },
     BinaryOperator, BindingId, BuiltinTerm, ExprId, ExprKind, IntegerLiteral, Item, ItemId, Module,
     Name, NamePath, PipeExpr, PipeStageKind, ProjectionBase, SuffixedIntegerLiteral,
     TermResolution, TextFragment, TextSegment, UnaryOperator,
-    validate::{GateExprEnv, GateIssue, GateType, GateTypeContext, walk_expr_tree},
 };
 
 /// Focused gate-core plans derived from resolved HIR.
@@ -365,19 +367,24 @@ fn collect_gate_pipe(
     typing: &mut GateTypeContext<'_>,
     stages: &mut Vec<GateStageElaboration>,
 ) {
+    let stages_in_pipe = pipe.stages.iter().collect::<Vec<_>>();
     let mut current = typing.infer_expr(pipe.head, env, None).ty;
-    for (stage_index, stage) in pipe.stages.iter().enumerate() {
+    let mut stage_index = 0usize;
+    while stage_index < stages_in_pipe.len() {
+        let stage = stages_in_pipe[stage_index];
         match &stage.kind {
             PipeStageKind::Transform { expr } => {
                 current = current
                     .as_ref()
                     .and_then(|subject| typing.infer_transform_stage(*expr, env, subject));
+                stage_index += 1;
             }
             PipeStageKind::Tap { expr } => {
                 if let Some(subject) = current.clone() {
                     let _ = typing.infer_pipe_body(*expr, env, &subject);
                     current = Some(subject);
                 }
+                stage_index += 1;
             }
             PipeStageKind::Gate { expr } => {
                 let outcome = elaborate_gate_stage(module, *expr, env, current.as_ref(), typing);
@@ -394,24 +401,37 @@ fn collect_gate_pipe(
                     GateStageOutcome::SignalFilter(stage) => Some(stage.result_type),
                     GateStageOutcome::Blocked(_) => None,
                 };
+                stage_index += 1;
             }
             PipeStageKind::Map { expr } => {
                 current = current
                     .as_ref()
                     .and_then(|subject| typing.infer_fanout_map_stage(*expr, env, subject));
+                stage_index += 1;
             }
             PipeStageKind::FanIn { expr } => {
                 current = current
                     .as_ref()
                     .and_then(|subject| typing.infer_fanin_stage(*expr, env, subject));
+                stage_index += 1;
+            }
+            PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
+                let Some(pair) = truthy_falsy_pair_stages(&stages_in_pipe, stage_index) else {
+                    current = None;
+                    stage_index += 1;
+                    continue;
+                };
+                current = current
+                    .as_ref()
+                    .and_then(|subject| typing.infer_truthy_falsy_pair(&pair, env, subject));
+                stage_index = pair.next_index;
             }
             PipeStageKind::Case { .. }
             | PipeStageKind::Apply { .. }
-            | PipeStageKind::Truthy { .. }
-            | PipeStageKind::Falsy { .. }
             | PipeStageKind::RecurStart { .. }
             | PipeStageKind::RecurStep { .. } => {
                 current = None;
+                stage_index += 1;
             }
         }
     }
@@ -917,10 +937,10 @@ mod tests {
     use aivi_syntax::parse_module;
 
     use super::{
-        GateCoreExprKind, GateElaborationBlocker, GateRuntimeExprKind, GateRuntimeProjectionBase,
-        GateRuntimeReference, GateStageOutcome, elaborate_gates,
+        elaborate_gates, GateCoreExprKind, GateElaborationBlocker, GateRuntimeExprKind,
+        GateRuntimeProjectionBase, GateRuntimeReference, GateStageOutcome,
     };
-    use crate::{BuiltinType, GateType, Item, lower_module};
+    use crate::{lower_module, BuiltinType, GateType, Item};
 
     fn fixture_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1240,6 +1260,38 @@ val maybeJoined:Option Text =
     }
 
     #[test]
+    fn keeps_gate_subject_tracking_through_truthy_falsy_pairs() {
+        let lowered = lower_fixture("milestone-2/valid/pipe-truthy-falsy-carriers/main.aivi");
+        assert!(
+            !lowered.has_errors(),
+            "truthy/falsy fixture should lower cleanly before gate elaboration: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_gates(lowered.module());
+        let ordinary = report
+            .stages()
+            .iter()
+            .find(|stage| item_name(lowered.module(), stage.owner) == "maybeDisplay")
+            .expect("expected ordinary gate after truthy/falsy pair");
+
+        match &ordinary.outcome {
+            GateStageOutcome::Ordinary(stage) => {
+                assert_eq!(
+                    stage.input_subject,
+                    GateType::Primitive(BuiltinType::Text),
+                    "gate should see the truthy/falsy branch result, not lose the pipe subject"
+                );
+                assert_eq!(
+                    stage.result_type,
+                    GateType::Option(Box::new(GateType::Primitive(BuiltinType::Text)))
+                );
+            }
+            other => panic!("expected ordinary gate after truthy/falsy pair, found {other:?}"),
+        }
+    }
+
+    #[test]
     fn blocks_non_bool_gate_predicates() {
         let lowered = lower_fixture("milestone-2/invalid/gate-predicate-not-bool/main.aivi");
         let report = elaborate_gates(lowered.module());
@@ -1274,12 +1326,10 @@ val maybeJoined:Option Text =
 
         match &blocked.outcome {
             GateStageOutcome::Blocked(stage) => {
-                assert!(
-                    stage
-                        .blockers
-                        .iter()
-                        .any(|blocker| blocker == &GateElaborationBlocker::ImpurePredicate)
-                );
+                assert!(stage
+                    .blockers
+                    .iter()
+                    .any(|blocker| blocker == &GateElaborationBlocker::ImpurePredicate));
             }
             other => panic!("expected blocked gate stage, found {other:?}"),
         }

@@ -28,6 +28,7 @@ fn check_accepts_valid_hir_fixtures() {
         "milestone-2/valid/domain-literal-suffixes/main.aivi",
         "milestone-2/valid/type-kinds/main.aivi",
         "milestone-2/valid/pipe-branch-and-join/main.aivi",
+        "milestone-2/valid/pipe-truthy-falsy-carriers/main.aivi",
         "milestone-2/valid/pipe-fanout-carriers/main.aivi",
         "milestone-2/valid/pipe-gate-carriers/main.aivi",
         "milestone-2/valid/pipe-recurrence-suffix/main.aivi",
@@ -72,6 +73,9 @@ fn check_rejects_invalid_hir_fixtures() {
         "milestone-2/invalid/domain-recursive-carrier/main.aivi",
         "milestone-2/invalid/ambiguous-domain-literal-suffix/main.aivi",
         "milestone-2/invalid/unpaired-truthy-falsy/main.aivi",
+        "milestone-2/invalid/truthy-falsy-noncanonical-subject/main.aivi",
+        "milestone-2/invalid/truthy-falsy-branch-type-mismatch/main.aivi",
+        "milestone-2/invalid/truthy-falsy-payloadless-projection/main.aivi",
         "milestone-2/invalid/fanin-without-map/main.aivi",
         "milestone-2/invalid/fanout-non-list-subject/main.aivi",
         "milestone-2/invalid/fanin-invalid-projection/main.aivi",
@@ -88,8 +92,11 @@ fn check_rejects_invalid_hir_fixtures() {
         "milestone-2/invalid/request-recurrence-missing-wakeup/main.aivi",
         "milestone-2/invalid/interpolated-pattern-text/main.aivi",
         "milestone-1/invalid/cluster_unfinished_gate.aivi",
+        "milestone-1/invalid/regex_bad_pattern.aivi",
+        "milestone-1/invalid/regex_invalid_quantifier.aivi",
         "milestone-1/invalid/source_unknown_option.aivi",
         "milestone-2/invalid/overapplied-type-constructor/main.aivi",
+        "milestone-2/invalid/imported-overapplied-type-constructor/main.aivi",
         "milestone-2/invalid/underapplied-domain-constructor/main.aivi",
         "milestone-2/invalid/source-duplicate-option/main.aivi",
         "milestone-2/invalid/source-provider-without-variant/main.aivi",
@@ -124,4 +131,32 @@ fn check_rejects_invalid_hir_fixtures() {
             "expected diagnostics on stderr for {relative}"
         );
     }
+}
+
+#[test]
+fn check_reports_regex_validation_from_hir() {
+    let path = fixture_path("milestone-1/invalid/regex_invalid_quantifier.aivi");
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        !output.status.success(),
+        "expected regex fixture to fail check"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("hir::invalid-regex-literal"),
+        "expected HIR regex diagnostic, got stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("regex literal is not valid under the current compile-time regex grammar"),
+        "expected explicit regex validation message, got stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("syntax::invalid-regex-literal"),
+        "regex validation should no longer be reported from syntax, got stderr: {stderr}"
+    );
 }

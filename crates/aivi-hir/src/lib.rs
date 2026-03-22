@@ -3,6 +3,7 @@
 //! Milestone 2 HIR boundary with typed IDs, module-owned arenas, and structural validation.
 
 pub mod arena;
+mod decode_elaboration;
 mod fanout_elaboration;
 mod gate_elaboration;
 mod hir;
@@ -12,20 +13,26 @@ mod recurrence_elaboration;
 mod sequence;
 mod source_contract_resolution;
 mod source_lifecycle_elaboration;
+mod truthy_falsy_elaboration;
 mod validate;
 
 pub use arena::{Arena, ArenaId, ArenaOverflow};
+pub use decode_elaboration::{
+    elaborate_source_decodes, BlockedSourceDecodeNode, SourceDecodeElaborationBlocker,
+    SourceDecodeElaborationReport, SourceDecodeNodeElaboration, SourceDecodeNodeOutcome,
+    SourceDecodePlan, SourceDecodeUnsupportedTypeKind,
+};
 pub use fanout_elaboration::{
-    BlockedFanoutSegment, FanoutElaborationBlocker, FanoutElaborationReport, FanoutJoinPlan,
-    FanoutSegmentElaboration, FanoutSegmentOutcome, FanoutSegmentPlan, elaborate_fanouts,
+    elaborate_fanouts, BlockedFanoutSegment, FanoutElaborationBlocker, FanoutElaborationReport,
+    FanoutJoinPlan, FanoutSegmentElaboration, FanoutSegmentOutcome, FanoutSegmentPlan,
 };
 pub use gate_elaboration::{
-    BlockedGateStage, GateCoreExpr, GateCoreExprKind, GateElaborationBlocker,
+    elaborate_gates, BlockedGateStage, GateCoreExpr, GateCoreExprKind, GateElaborationBlocker,
     GateElaborationReport, GateRuntimeExpr, GateRuntimeExprKind, GateRuntimePipeExpr,
     GateRuntimePipeStage, GateRuntimePipeStageKind, GateRuntimeProjectionBase,
     GateRuntimeRecordField, GateRuntimeReference, GateRuntimeTextLiteral, GateRuntimeTextSegment,
     GateRuntimeUnsupportedKind, GateRuntimeUnsupportedPipeStageKind, GateStageElaboration,
-    GateStageOutcome, OrdinaryGateStage, SignalGateFilter, elaborate_gates,
+    GateStageOutcome, OrdinaryGateStage, SignalGateFilter,
 };
 pub use hir::{
     ApplicativeCluster, ApplicativeSpine, ApplicativeSpineHead, BinaryOperator, Binding,
@@ -52,12 +59,12 @@ pub use ids::{
     BindingId, ClusterId, ControlNodeId, DecoratorId, ExprId, ImportId, ItemId, MarkupNodeId,
     PatternId, TypeId, TypeParameterId,
 };
-pub use lower::{LoweringResult, lower_module};
+pub use lower::{lower_module, LoweringResult};
 pub use recurrence_elaboration::{
-    BlockedRecurrenceNode, RecurrenceElaborationBlocker, RecurrenceElaborationReport,
-    RecurrenceNodeElaboration, RecurrenceNodeOutcome, RecurrenceNodePlan,
-    RecurrenceNonSourceWakeupBinding, RecurrenceRuntimeExpr, RecurrenceRuntimeStageBlocker,
-    RecurrenceStagePlan, elaborate_recurrences,
+    elaborate_recurrences, BlockedRecurrenceNode, RecurrenceElaborationBlocker,
+    RecurrenceElaborationReport, RecurrenceNodeElaboration, RecurrenceNodeOutcome,
+    RecurrenceNodePlan, RecurrenceNonSourceWakeupBinding, RecurrenceRuntimeExpr,
+    RecurrenceRuntimeStageBlocker, RecurrenceStagePlan,
 };
 pub use sequence::{AtLeastTwo, NonEmpty, SequenceError};
 pub use source_contract_resolution::{
@@ -65,9 +72,15 @@ pub use source_contract_resolution::{
     SourceContractResolutionErrorKind, SourceContractTypeResolver,
 };
 pub use source_lifecycle_elaboration::{
-    BlockedSourceLifecycleNode, SourceInstanceId, SourceLifecycleElaborationBlocker,
-    SourceLifecycleElaborationReport, SourceLifecycleNodeElaboration, SourceLifecycleNodeOutcome,
-    SourceLifecyclePlan, SourceOptionSignalBinding, SourceReplacementPolicy, SourceStaleWorkPolicy,
-    SourceTeardownPolicy, elaborate_source_lifecycles,
+    elaborate_source_lifecycles, BlockedSourceLifecycleNode, SourceInstanceId,
+    SourceLifecycleElaborationBlocker, SourceLifecycleElaborationReport,
+    SourceLifecycleNodeElaboration, SourceLifecycleNodeOutcome, SourceLifecyclePlan,
+    SourceOptionSignalBinding, SourceReplacementPolicy, SourceStaleWorkPolicy,
+    SourceTeardownPolicy,
 };
-pub use validate::{GateRecordField, GateType, ValidationMode, ValidationReport, validate_module};
+pub use truthy_falsy_elaboration::{
+    elaborate_truthy_falsy, BlockedTruthyFalsyStage, TruthyFalsyBranchKind, TruthyFalsyBranchPlan,
+    TruthyFalsyElaborationBlocker, TruthyFalsyElaborationReport, TruthyFalsyStageElaboration,
+    TruthyFalsyStageOutcome, TruthyFalsyStagePlan,
+};
+pub use validate::{validate_module, GateRecordField, GateType, ValidationMode, ValidationReport};

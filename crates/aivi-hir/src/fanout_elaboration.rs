@@ -2,8 +2,10 @@ use aivi_base::SourceSpan;
 use aivi_typing::{FanoutCarrier, FanoutPlanner, FanoutStageKind};
 
 use crate::{
+    validate::{
+        truthy_falsy_pair_stages, walk_expr_tree, GateExprEnv, GateIssue, GateType, GateTypeContext,
+    },
     ExprId, Item, ItemId, Module, PipeExpr, PipeStageKind,
-    validate::{GateExprEnv, GateIssue, GateType, GateTypeContext, walk_expr_tree},
 };
 
 /// Focused fan-out plans derived from resolved HIR.
@@ -227,10 +229,19 @@ fn collect_fanout_pipe(
                     .and_then(|subject| typing.infer_fanin_stage(*expr, env, subject));
                 stage_index += 1;
             }
+            PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
+                let Some(pair) = truthy_falsy_pair_stages(&stages, stage_index) else {
+                    current = None;
+                    stage_index += 1;
+                    continue;
+                };
+                current = current
+                    .as_ref()
+                    .and_then(|subject| typing.infer_truthy_falsy_pair(&pair, env, subject));
+                stage_index = pair.next_index;
+            }
             PipeStageKind::Case { .. }
             | PipeStageKind::Apply { .. }
-            | PipeStageKind::Truthy { .. }
-            | PipeStageKind::Falsy { .. }
             | PipeStageKind::RecurStart { .. }
             | PipeStageKind::RecurStep { .. } => {
                 current = None;
@@ -393,8 +404,8 @@ mod tests {
     use aivi_syntax::parse_module;
     use aivi_typing::FanoutCarrier;
 
-    use super::{FanoutElaborationBlocker, FanoutSegmentOutcome, elaborate_fanouts};
-    use crate::{BuiltinType, GateType, Item, ValidationMode, lower_module};
+    use super::{elaborate_fanouts, FanoutElaborationBlocker, FanoutSegmentOutcome};
+    use crate::{lower_module, BuiltinType, GateType, Item, ValidationMode};
 
     fn fixture_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

@@ -1,12 +1,13 @@
 #![forbid(unsafe_code)]
 
 //! Milestone 3 type-side semantics, starting with explicit kind-checking foundations and
-//! compiler-derived `Eq` derivation plans.
+//! compiler-derived `Eq` plus structural decode derivation plans.
 //!
 //! The crate intentionally models only the focused structural fragments needed by the current
 //! implementation wave. It does not pretend full instance resolution, typed-core elaboration,
 //! or runtime evaluation already exists.
 
+pub mod decode;
 pub mod eq;
 pub mod fanout;
 pub mod gate;
@@ -14,6 +15,11 @@ pub mod kind;
 pub mod recurrence;
 pub mod source_contracts;
 
+pub use decode::{
+    DecodeDomainRule, DecodeExtraFieldPolicy, DecodeFieldPlan, DecodeFieldRequirement, DecodeMode,
+    DecodePathSegment, DecodePlanId, DecodePlanner, DecodePlanningError, DecodePlanningErrorKind,
+    DecodeSchema, DecodeStep, DecodeSumStrategy, DecodeVariantPlan,
+};
 pub use eq::{
     Class, Closedness, DomainShape, EqContext, EqDerivation, EqDerivationError,
     EqDerivationErrorKind, EqDeriver, EqFieldPlan, EqPathSegment, EqPlanId, EqStep, EqVariantPlan,
@@ -28,11 +34,12 @@ pub use kind::{
     KindRecordField, KindStore, TypeConstructorId,
 };
 pub use recurrence::{
-    BuiltinSourceWakeupCause, CustomSourceRecurrenceWakeupContext, CustomSourceWakeupCause,
-    NonSourceWakeupCause, RecurrencePlan, RecurrencePlanner, RecurrenceTarget,
-    RecurrenceTargetError, RecurrenceTargetEvidence, RecurrenceWakeupError,
-    RecurrenceWakeupEvidence, RecurrenceWakeupKind, RecurrenceWakeupPlan, RecurrenceWakeupPlanner,
-    SourceRecurrenceWakeupContext, builtin_source_option_wakeup_cause,
+    builtin_source_option_wakeup_cause, BuiltinSourceWakeupCause,
+    CustomSourceRecurrenceWakeupContext, CustomSourceWakeupCause, NonSourceWakeupCause,
+    RecurrencePlan, RecurrencePlanner, RecurrenceTarget, RecurrenceTargetError,
+    RecurrenceTargetEvidence, RecurrenceWakeupError, RecurrenceWakeupEvidence,
+    RecurrenceWakeupKind, RecurrenceWakeupPlan, RecurrenceWakeupPlanner,
+    SourceRecurrenceWakeupContext,
 };
 pub use source_contracts::{
     BuiltinSourceProvider, SourceCancellationPolicy, SourceContract, SourceContractIntrinsicWakeup,

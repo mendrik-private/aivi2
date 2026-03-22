@@ -18,6 +18,7 @@ aivi-base = { path = "crates/aivi-base" }
 aivi-hir = { path = "crates/aivi-hir" }
 aivi-syntax = { path = "crates/aivi-syntax" }
 aivi-typing = { path = "crates/aivi-typing" }
+regex-syntax = "0.8.10"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

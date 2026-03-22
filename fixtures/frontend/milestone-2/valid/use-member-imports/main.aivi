@@ -1,7 +1,12 @@
 use aivi.network (
     http
     socket
+    Request
+    Channel
 )
+
+type PrimaryRequest = (Request Text)
+type ProviderChannel = (Channel Text Text)
 
 fun joinProviders:Text #left:Text #right:Text =>
     "{left}/{right}"

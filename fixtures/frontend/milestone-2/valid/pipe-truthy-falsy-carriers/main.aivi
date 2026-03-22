@@ -1,0 +1,47 @@
+type User = {
+    name: Text
+}
+
+type LoadError = {
+    message: Text
+}
+
+type FormError = {
+    message: Text
+}
+
+val ready:Bool = True
+val start:Text = "start"
+val wait:Text = "wait"
+
+val readyText:Text =
+    ready
+     T|> start
+     F|> wait
+
+val maybeUser:Option User = Some { name: "Ada" }
+
+val greeting:Text =
+    maybeUser
+     T|> .name
+     F|> "guest"
+
+val maybeDisplay:Option Text =
+    maybeUser
+     F|> "guest"
+     T|> .name
+     ?|> True
+
+val loaded:Result LoadError User = Err { message: "offline" }
+
+val rendered:Text =
+    loaded
+     T|> .name
+     F|> .message
+
+val submitted:Validation FormError User = Valid { name: "Grace" }
+
+val summary:Text =
+    submitted
+     T|> .name
+     F|> .message

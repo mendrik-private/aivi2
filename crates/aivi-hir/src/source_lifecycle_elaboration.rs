@@ -290,11 +290,11 @@ mod tests {
     use aivi_syntax::parse_module;
 
     use super::{
-        SourceCancellationPolicy, SourceLifecycleElaborationBlocker, SourceLifecycleNodeOutcome,
-        SourceReplacementPolicy, SourceStaleWorkPolicy, SourceTeardownPolicy,
-        elaborate_source_lifecycles,
+        elaborate_source_lifecycles, SourceCancellationPolicy, SourceLifecycleElaborationBlocker,
+        SourceLifecycleNodeOutcome, SourceReplacementPolicy, SourceStaleWorkPolicy,
+        SourceTeardownPolicy,
     };
-    use crate::{Item, SourceProviderRef, lower_module};
+    use crate::{lower_module, Item, SourceProviderRef};
 
     fn fixture_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

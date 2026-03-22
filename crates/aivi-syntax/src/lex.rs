@@ -3,8 +3,6 @@ use aivi_base::{Diagnostic, DiagnosticCode, SourceFile, Span};
 const UNEXPECTED_CHARACTER: DiagnosticCode = DiagnosticCode::new("syntax", "unexpected-character");
 const UNTERMINATED_STRING: DiagnosticCode = DiagnosticCode::new("syntax", "unterminated-string");
 const UNTERMINATED_REGEX: DiagnosticCode = DiagnosticCode::new("syntax", "unterminated-regex");
-const INVALID_REGEX_LITERAL: DiagnosticCode =
-    DiagnosticCode::new("syntax", "invalid-regex-literal");
 
 /// Token kinds required for the Milestone 1 surface grammar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -229,16 +227,6 @@ fn lex_range(source: &SourceFile, range: std::ops::Range<usize>) -> LexedModule 
                         "expected a closing `\"`",
                     ),
                 );
-            } else {
-                let body_start = start + 3;
-                let body_end = cursor.saturating_sub(1);
-                if let Err(message) = validate_regex_body(&text[body_start..body_end]) {
-                    diagnostics.push(
-                        Diagnostic::error("regex literal is not well-formed")
-                            .with_code(INVALID_REGEX_LITERAL)
-                            .with_primary_label(source.source_span(start..cursor), message),
-                    );
-                }
             }
             at_line_start = false;
             continue;
@@ -457,48 +445,4 @@ fn scan_quoted_body(text: &str, bytes: &[u8], start: usize, end: usize) -> (usiz
     }
 
     (cursor, terminated)
-}
-
-fn validate_regex_body(body: &str) -> Result<(), &'static str> {
-    let mut paren_depth = 0usize;
-    let mut bracket_depth = 0usize;
-    let mut escaped = false;
-
-    for character in body.chars() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-
-        match character {
-            '\\' => escaped = true,
-            '[' => bracket_depth += 1,
-            ']' => {
-                if bracket_depth == 0 {
-                    return Err("this regex closes a character class that was never opened");
-                }
-                bracket_depth -= 1;
-            }
-            '(' if bracket_depth == 0 => paren_depth += 1,
-            ')' if bracket_depth == 0 => {
-                if paren_depth == 0 {
-                    return Err("this regex closes a group that was never opened");
-                }
-                paren_depth -= 1;
-            }
-            _ => {}
-        }
-    }
-
-    if escaped {
-        return Err("this regex ends with an unfinished escape sequence");
-    }
-    if bracket_depth != 0 {
-        return Err("this regex leaves a character class unclosed");
-    }
-    if paren_depth != 0 {
-        return Err("this regex leaves a group unclosed");
-    }
-
-    Ok(())
 }

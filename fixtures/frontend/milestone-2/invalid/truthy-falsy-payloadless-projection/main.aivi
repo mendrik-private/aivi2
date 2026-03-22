@@ -1,0 +1,6 @@
+val ready:Bool = True
+
+val branch =
+    ready
+     T|> .name
+     F|> "wait"

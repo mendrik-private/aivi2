@@ -124,7 +124,7 @@ pub enum TypeReference {
     External(ExternalTypeId),
 }
 
-/// The small structural type language needed for focused `Eq` derivation planning.
+/// The small structural type language shared by focused `Eq` and decode planning.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TypeNode {
     Primitive(PrimitiveType),

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use aivi_base::{Diagnostic, DiagnosticCode, Severity, SourceSpan};
 use aivi_syntax as syn;
-use aivi_typing::SourceOptionWakeupCause;
+use aivi_typing::{Kind, SourceOptionWakeupCause};
 
 use crate::{
     ApplicativeCluster, ApplicativeSpineHead, AtLeastTwo, BinaryOperator, Binding, BindingId,
@@ -2680,32 +2680,6 @@ impl Lowerer {
         for import_id in item.imports.iter() {
             let import = self.module.imports()[*import_id].clone();
             let metadata = import.metadata.clone();
-            let (ImportBindingMetadata::Value { .. } | ImportBindingMetadata::Bundle(_)) = metadata
-            else {
-                let message = if is_known_module(&module_name) {
-                    format!(
-                        "module `{module_name}` does not export `{}` in Milestone 2",
-                        import.imported_name.text()
-                    )
-                } else {
-                    format!("unknown import module `{module_name}`")
-                };
-                let error_code = if is_known_module(&module_name) {
-                    code("unknown-imported-name")
-                } else {
-                    code("unknown-import-module")
-                };
-                self.diagnostics.push(
-                    Diagnostic::error(message)
-                        .with_code(error_code)
-                        .with_primary_label(
-                            import.span,
-                            "this import cannot be resolved by the current Milestone 2 catalog",
-                        )
-                        .with_secondary_label(item.header.span, "declared by this `use` item"),
-                );
-                continue;
-            };
             match metadata {
                 ImportBindingMetadata::Value { .. } => insert_site(
                     &mut namespaces.term_imports,
@@ -2713,8 +2687,38 @@ impl Lowerer {
                     *import_id,
                     import.span,
                 ),
+                ImportBindingMetadata::TypeConstructor { .. } => insert_site(
+                    &mut namespaces.type_imports,
+                    import.local_name.text(),
+                    *import_id,
+                    import.span,
+                ),
                 ImportBindingMetadata::Bundle(_) => {}
-                ImportBindingMetadata::Unknown => unreachable!("handled above"),
+                ImportBindingMetadata::Unknown => {
+                    let message = if is_known_module(&module_name) {
+                        format!(
+                            "module `{module_name}` does not export `{}` in Milestone 2",
+                            import.imported_name.text()
+                        )
+                    } else {
+                        format!("unknown import module `{module_name}`")
+                    };
+                    let error_code = if is_known_module(&module_name) {
+                        code("unknown-imported-name")
+                    } else {
+                        code("unknown-import-module")
+                    };
+                    self.diagnostics.push(
+                        Diagnostic::error(message)
+                            .with_code(error_code)
+                            .with_primary_label(
+                                import.span,
+                                "this import cannot be resolved by the current Milestone 2 catalog",
+                            )
+                            .with_secondary_label(item.header.span, "declared by this `use` item"),
+                    );
+                    continue;
+                }
             }
         }
     }
@@ -4569,6 +4573,12 @@ fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMeta
                 ty: ImportValueType::Primitive(BuiltinType::Text),
             })
         }
+        ("aivi.network", "Request") => Some(ImportBindingMetadata::TypeConstructor {
+            kind: Kind::constructor(1),
+        }),
+        ("aivi.network", "Channel") => Some(ImportBindingMetadata::TypeConstructor {
+            kind: Kind::constructor(2),
+        }),
         ("aivi.defaults", "Option") => Some(ImportBindingMetadata::Bundle(
             ImportBundleKind::BuiltinOption,
         )),
@@ -4586,7 +4596,7 @@ mod tests {
 
     use aivi_base::SourceDatabase;
     use aivi_syntax::parse_module;
-    use aivi_typing::BuiltinSourceProvider;
+    use aivi_typing::{BuiltinSourceProvider, Kind};
 
     use super::{lower_module, path_text};
     use crate::{
@@ -6334,7 +6344,7 @@ sig updates : Signal Int
     }
 
     #[test]
-    fn use_member_imports_preserve_compiler_known_value_types() {
+    fn use_member_imports_preserve_compiler_known_metadata() {
         let lowered = lower_fixture("milestone-2/valid/use-member-imports/main.aivi");
         assert!(
             !lowered.has_errors(),
@@ -6364,6 +6374,59 @@ sig updates : Signal Int
                 .iter()
                 .all(|ty| matches!(ty, ImportValueType::Primitive(BuiltinType::Text))),
             "expected http/socket imports to lower as Text-valued bindings, got {text_imports:?}"
+        );
+
+        let request_import = lowered.module().imports().iter().find_map(|(_, import)| {
+            match (&*import.local_name.text(), &import.metadata) {
+                ("Request", ImportBindingMetadata::TypeConstructor { kind }) => Some(kind),
+                _ => None,
+            }
+        });
+        assert_eq!(
+            request_import,
+            Some(&Kind::constructor(1)),
+            "expected Request import to preserve unary constructor kind metadata"
+        );
+
+        let channel_import = lowered.module().imports().iter().find_map(|(_, import)| {
+            match (&*import.local_name.text(), &import.metadata) {
+                ("Channel", ImportBindingMetadata::TypeConstructor { kind }) => Some(kind),
+                _ => None,
+            }
+        });
+        assert_eq!(
+            channel_import,
+            Some(&Kind::constructor(2)),
+            "expected Channel import to preserve binary constructor kind metadata"
+        );
+
+        let imported_type_refs = lowered
+            .module()
+            .types()
+            .iter()
+            .filter_map(|(_, ty)| match &ty.kind {
+                TypeKind::Name(reference)
+                    if matches!(
+                        reference.path.segments().first().text(),
+                        "Request" | "Channel"
+                    ) =>
+                {
+                    Some(reference)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            imported_type_refs.len(),
+            2,
+            "expected Request/Channel references in lowered HIR"
+        );
+        assert!(
+            imported_type_refs.iter().all(|reference| matches!(
+                reference.resolution,
+                ResolutionState::Resolved(TypeResolution::Import(_))
+            )),
+            "imported type references should resolve through import bindings: {imported_type_refs:?}"
         );
     }
 

@@ -1,19 +1,20 @@
 use aivi_base::SourceSpan;
 use aivi_typing::{
-    BuiltinSourceWakeupCause, CustomSourceRecurrenceWakeupContext, NonSourceWakeupCause,
-    RecurrencePlan, RecurrencePlanner, RecurrenceTargetEvidence, RecurrenceWakeupPlan,
-    RecurrenceWakeupPlanner, SourceRecurrenceWakeupContext, builtin_source_option_wakeup_cause,
+    builtin_source_option_wakeup_cause, BuiltinSourceWakeupCause,
+    CustomSourceRecurrenceWakeupContext, NonSourceWakeupCause, RecurrencePlan, RecurrencePlanner,
+    RecurrenceTargetEvidence, RecurrenceWakeupPlan, RecurrenceWakeupPlanner,
+    SourceRecurrenceWakeupContext,
 };
 
 use crate::{
+    gate_elaboration::{
+        lower_gate_pipe_body_runtime_expr, lower_gate_runtime_expr, GateElaborationBlocker,
+        GateRuntimeExpr, GateRuntimeUnsupportedKind,
+    },
+    validate::{truthy_falsy_pair_stages, walk_expr_tree, GateExprEnv, GateType, GateTypeContext},
     CustomSourceRecurrenceWakeup, DecoratorId, DecoratorPayload, ExprId, ExprKind, Item, ItemId,
     Module, PipeExpr, PipeStageKind, SignalItem, SourceDecorator, SourceMetadata,
     SourceProviderRef,
-    gate_elaboration::{
-        GateElaborationBlocker, GateRuntimeExpr, GateRuntimeUnsupportedKind,
-        lower_gate_pipe_body_runtime_expr, lower_gate_runtime_expr,
-    },
-    validate::{GateExprEnv, GateType, GateTypeContext, walk_expr_tree},
 };
 
 /// Focused scheduler-node plans derived from validated recurrence suffixes.
@@ -479,28 +480,43 @@ fn infer_recurrence_input_subject(
     env: &GateExprEnv,
     typing: &mut GateTypeContext<'_>,
 ) -> Option<GateType> {
+    let stages = pipe
+        .stages
+        .iter()
+        .take(prefix_stage_count)
+        .collect::<Vec<_>>();
     let mut current = typing.infer_expr(pipe.head, env, None).ty?;
-    for stage in pipe.stages.iter().take(prefix_stage_count) {
+    let mut stage_index = 0usize;
+    while stage_index < stages.len() {
+        let stage = stages[stage_index];
         match &stage.kind {
             PipeStageKind::Transform { expr } => {
                 current = typing.infer_transform_stage(*expr, env, &current)?;
+                stage_index += 1;
             }
             PipeStageKind::Tap { expr } => {
                 let _ = typing.infer_pipe_body(*expr, env, &current);
+                stage_index += 1;
             }
             PipeStageKind::Gate { expr } => {
                 current = typing.infer_gate_stage(*expr, env, &current)?;
+                stage_index += 1;
             }
             PipeStageKind::Map { expr } => {
                 current = typing.infer_fanout_map_stage(*expr, env, &current)?;
+                stage_index += 1;
             }
             PipeStageKind::FanIn { expr } => {
                 current = typing.infer_fanin_stage(*expr, env, &current)?;
+                stage_index += 1;
+            }
+            PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
+                let pair = truthy_falsy_pair_stages(&stages, stage_index)?;
+                current = typing.infer_truthy_falsy_pair(&pair, env, &current)?;
+                stage_index = pair.next_index;
             }
             PipeStageKind::Case { .. }
             | PipeStageKind::Apply { .. }
-            | PipeStageKind::Truthy { .. }
-            | PipeStageKind::Falsy { .. }
             | PipeStageKind::RecurStart { .. }
             | PipeStageKind::RecurStep { .. } => return None,
         }
@@ -678,8 +694,8 @@ mod tests {
         BuiltinSourceWakeupCause, CustomSourceWakeupCause, RecurrenceTarget, RecurrenceWakeupKind,
     };
 
-    use super::{RecurrenceElaborationBlocker, RecurrenceNodeOutcome, elaborate_recurrences};
-    use crate::{GateRuntimeExprKind, GateType, Item, lower_module};
+    use super::{elaborate_recurrences, RecurrenceElaborationBlocker, RecurrenceNodeOutcome};
+    use crate::{lower_module, GateRuntimeExprKind, GateType, Item};
 
     fn fixture_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

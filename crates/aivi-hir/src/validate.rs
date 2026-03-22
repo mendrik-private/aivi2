@@ -1,17 +1,20 @@
 use std::{
-    collections::{HashMap, hash_map::Entry},
+    collections::{hash_map::Entry, HashMap},
     fmt,
 };
 
-use aivi_base::{Diagnostic, DiagnosticCode, DiagnosticLabel, SourceSpan};
+use aivi_base::{ByteIndex, Diagnostic, DiagnosticCode, DiagnosticLabel, SourceSpan, Span};
 use aivi_typing::{
-    BuiltinSourceProvider, BuiltinSourceWakeupCause, CustomSourceRecurrenceWakeupContext,
-    FanoutCarrier, FanoutPlan, FanoutPlanner, FanoutResultKind, FanoutStageKind, GateCarrier,
-    GatePlanner, GateResultKind, Kind, KindCheckError, KindCheckErrorKind, KindChecker, KindExprId,
+    builtin_source_option_wakeup_cause, BuiltinSourceProvider, BuiltinSourceWakeupCause,
+    CustomSourceRecurrenceWakeupContext, FanoutCarrier, FanoutPlan, FanoutPlanner,
+    FanoutResultKind, FanoutStageKind, GateCarrier, GatePlanner, GateResultKind, Kind,
+    KindCheckError, KindCheckErrorKind, KindChecker, KindExprId,
     KindParameterId as TypingKindParameterId, KindRecordField, KindStore, NonSourceWakeupCause,
     RecurrencePlanner, RecurrenceTargetEvidence, RecurrenceWakeupKind, RecurrenceWakeupPlanner,
     SourceContractType, SourceRecurrenceWakeupContext, SourceTypeParameter,
-    builtin_source_option_wakeup_cause,
+};
+use regex_syntax::{
+    ast::Span as RegexSpan, Error as RegexSyntaxError, ParserBuilder as RegexParserBuilder,
 };
 
 use crate::{
@@ -82,6 +85,9 @@ struct Validator<'a> {
     diagnostics: Vec<Diagnostic>,
 }
 
+const REGEX_LITERAL_PREFIX_LEN: usize = 3;
+const REGEX_NEST_LIMIT: u32 = 256;
+
 impl Validator<'_> {
     fn run(&mut self) {
         self.validate_roots();
@@ -100,6 +106,7 @@ impl Validator<'_> {
         self.validate_source_contract_types();
         self.validate_fanout_semantics();
         self.validate_gate_semantics();
+        self.validate_truthy_falsy_semantics();
         self.validate_recurrence_targets();
     }
 
@@ -274,7 +281,8 @@ impl Validator<'_> {
             self.check_span("expression", expr.span);
             match &expr.kind {
                 ExprKind::Name(reference) => self.check_term_reference(reference),
-                ExprKind::Integer(_) | ExprKind::Regex(_) => {}
+                ExprKind::Integer(_) => {}
+                ExprKind::Regex(regex) => self.check_regex_literal(expr.span, regex),
                 ExprKind::Text(text) => self.check_text_literal(expr.span, text),
                 ExprKind::SuffixedInteger(literal) => self.check_suffixed_integer(literal),
                 ExprKind::Tuple(elements) => {
@@ -2806,6 +2814,58 @@ impl Validator<'_> {
         }
     }
 
+    fn validate_truthy_falsy_semantics(&mut self) {
+        if self.mode != ValidationMode::RequireResolvedNames {
+            return;
+        }
+
+        let items = self
+            .module
+            .items()
+            .iter()
+            .map(|(_, item)| item.clone())
+            .collect::<Vec<_>>();
+        let mut typing = GateTypeContext::new(self.module);
+
+        for item in items {
+            match item {
+                Item::Value(item) => self.validate_truthy_falsy_expr_tree(
+                    item.body,
+                    &GateExprEnv::default(),
+                    &mut typing,
+                ),
+                Item::Function(item) => {
+                    let env = self.gate_env_for_function(&item, &mut typing);
+                    self.validate_truthy_falsy_expr_tree(item.body, &env, &mut typing);
+                }
+                Item::Signal(item) => {
+                    if let Some(body) = item.body {
+                        self.validate_truthy_falsy_expr_tree(
+                            body,
+                            &GateExprEnv::default(),
+                            &mut typing,
+                        );
+                    }
+                }
+                Item::Instance(item) => {
+                    for member in item.members {
+                        self.validate_truthy_falsy_expr_tree(
+                            member.body,
+                            &GateExprEnv::default(),
+                            &mut typing,
+                        );
+                    }
+                }
+                Item::Type(_)
+                | Item::Class(_)
+                | Item::Domain(_)
+                | Item::SourceProviderContract(_)
+                | Item::Use(_)
+                | Item::Export(_) => {}
+            }
+        }
+    }
+
     fn validate_recurrence_targets(&mut self) {
         if self.mode != ValidationMode::RequireResolvedNames {
             return;
@@ -3203,35 +3263,50 @@ impl Validator<'_> {
     ) {
         let stages = pipe.stages.iter().collect::<Vec<_>>();
         let mut current = typing.infer_expr(pipe.head, env, None).ty;
-        for stage in stages {
+        let mut stage_index = 0usize;
+        while stage_index < stages.len() {
+            let stage = stages[stage_index];
             let Some(subject) = current.clone() else {
                 break;
             };
             match &stage.kind {
                 PipeStageKind::Transform { expr } => {
                     current = typing.infer_transform_stage(*expr, env, &subject);
+                    stage_index += 1;
                 }
                 PipeStageKind::Tap { expr } => {
                     let _ = typing.infer_pipe_body(*expr, env, &subject);
                     current = Some(subject);
+                    stage_index += 1;
                 }
                 PipeStageKind::Gate { expr } => {
                     current = typing.infer_gate_stage(*expr, env, &subject);
+                    stage_index += 1;
                 }
                 PipeStageKind::Map { expr } => {
                     current =
                         self.validate_fanout_map_stage(stage.span, *expr, env, &subject, typing);
+                    stage_index += 1;
                 }
                 PipeStageKind::FanIn { expr } => {
                     current = self.validate_fanin_stage(stage.span, *expr, env, &subject, typing);
+                    stage_index += 1;
+                }
+                PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
+                    let Some(pair) = truthy_falsy_pair_stages(&stages, stage_index) else {
+                        current = None;
+                        stage_index += 1;
+                        continue;
+                    };
+                    current = typing.infer_truthy_falsy_pair(&pair, env, &subject);
+                    stage_index = pair.next_index;
                 }
                 PipeStageKind::Case { .. }
                 | PipeStageKind::Apply { .. }
-                | PipeStageKind::Truthy { .. }
-                | PipeStageKind::Falsy { .. }
                 | PipeStageKind::RecurStart { .. }
                 | PipeStageKind::RecurStep { .. } => {
                     current = None;
+                    stage_index += 1;
                 }
             }
         }
@@ -3257,38 +3332,184 @@ impl Validator<'_> {
         env: &GateExprEnv,
         typing: &mut GateTypeContext<'_>,
     ) {
+        let stages = pipe.stages.iter().collect::<Vec<_>>();
         let mut current = typing.infer_expr(pipe.head, env, None).ty;
-        for stage in pipe.stages.iter() {
+        let mut stage_index = 0usize;
+        while stage_index < stages.len() {
+            let stage = stages[stage_index];
             let Some(subject) = current.clone() else {
                 break;
             };
             match &stage.kind {
                 PipeStageKind::Transform { expr } => {
                     current = typing.infer_transform_stage(*expr, env, &subject);
+                    stage_index += 1;
                 }
                 PipeStageKind::Tap { expr } => {
                     let _ = typing.infer_pipe_body(*expr, env, &subject);
                     current = Some(subject);
+                    stage_index += 1;
                 }
                 PipeStageKind::Gate { expr } => {
                     current = self.validate_gate_stage(stage.span, *expr, env, &subject, typing);
+                    stage_index += 1;
                 }
                 PipeStageKind::Map { expr } => {
                     current = typing.infer_fanout_map_stage(*expr, env, &subject);
+                    stage_index += 1;
                 }
                 PipeStageKind::FanIn { expr } => {
                     current = typing.infer_fanin_stage(*expr, env, &subject);
+                    stage_index += 1;
+                }
+                PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
+                    let Some(pair) = truthy_falsy_pair_stages(&stages, stage_index) else {
+                        current = None;
+                        stage_index += 1;
+                        continue;
+                    };
+                    current = typing.infer_truthy_falsy_pair(&pair, env, &subject);
+                    stage_index = pair.next_index;
                 }
                 PipeStageKind::Case { .. }
                 | PipeStageKind::Apply { .. }
-                | PipeStageKind::Truthy { .. }
-                | PipeStageKind::Falsy { .. }
                 | PipeStageKind::RecurStart { .. }
                 | PipeStageKind::RecurStep { .. } => {
                     current = None;
+                    stage_index += 1;
                 }
             }
         }
+    }
+
+    fn validate_truthy_falsy_expr_tree(
+        &mut self,
+        root: ExprId,
+        env: &GateExprEnv,
+        typing: &mut GateTypeContext<'_>,
+    ) {
+        let module = self.module;
+        walk_expr_tree(module, root, |_, expr, _| {
+            if let ExprKind::Pipe(pipe) = &expr.kind {
+                self.validate_truthy_falsy_pipe(pipe, env, typing);
+            }
+        });
+    }
+
+    fn validate_truthy_falsy_pipe(
+        &mut self,
+        pipe: &crate::hir::PipeExpr,
+        env: &GateExprEnv,
+        typing: &mut GateTypeContext<'_>,
+    ) {
+        let stages = pipe.stages.iter().collect::<Vec<_>>();
+        let mut current = typing.infer_expr(pipe.head, env, None).ty;
+        let mut stage_index = 0usize;
+        while stage_index < stages.len() {
+            let stage = stages[stage_index];
+            let Some(subject) = current.clone() else {
+                break;
+            };
+            match &stage.kind {
+                PipeStageKind::Transform { expr } => {
+                    current = typing.infer_transform_stage(*expr, env, &subject);
+                    stage_index += 1;
+                }
+                PipeStageKind::Tap { expr } => {
+                    let _ = typing.infer_pipe_body(*expr, env, &subject);
+                    current = Some(subject);
+                    stage_index += 1;
+                }
+                PipeStageKind::Gate { expr } => {
+                    current = typing.infer_gate_stage(*expr, env, &subject);
+                    stage_index += 1;
+                }
+                PipeStageKind::Map { expr } => {
+                    current = typing.infer_fanout_map_stage(*expr, env, &subject);
+                    stage_index += 1;
+                }
+                PipeStageKind::FanIn { expr } => {
+                    current = typing.infer_fanin_stage(*expr, env, &subject);
+                    stage_index += 1;
+                }
+                PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
+                    let Some(pair) = truthy_falsy_pair_stages(&stages, stage_index) else {
+                        current = None;
+                        stage_index += 1;
+                        continue;
+                    };
+                    current = self.validate_truthy_falsy_pair(&pair, env, &subject, typing);
+                    stage_index = pair.next_index;
+                }
+                PipeStageKind::Case { .. }
+                | PipeStageKind::Apply { .. }
+                | PipeStageKind::RecurStart { .. }
+                | PipeStageKind::RecurStep { .. } => {
+                    current = None;
+                    stage_index += 1;
+                }
+            }
+        }
+    }
+
+    fn validate_truthy_falsy_pair(
+        &mut self,
+        pair: &TruthyFalsyPairStages<'_>,
+        env: &GateExprEnv,
+        subject: &GateType,
+        typing: &mut GateTypeContext<'_>,
+    ) -> Option<GateType> {
+        let Some(subject_plan) = typing.truthy_falsy_subject_plan(subject) else {
+            self.emit_unsupported_truthy_falsy_subject(pair, subject);
+            return None;
+        };
+        let truthy_has_payload = subject_plan.truthy_payload.is_some();
+        let falsy_has_payload = subject_plan.falsy_payload.is_some();
+        let truthy_info = typing.infer_truthy_falsy_branch(
+            pair.truthy_expr,
+            env,
+            subject_plan.truthy_payload.as_ref(),
+        );
+        let falsy_info = typing.infer_truthy_falsy_branch(
+            pair.falsy_expr,
+            env,
+            subject_plan.falsy_payload.as_ref(),
+        );
+        let truthy_ty = truthy_info.ty.clone();
+        let falsy_ty = falsy_info.ty.clone();
+        let mut saw_error = false;
+        for issue in truthy_info.issues {
+            self.emit_truthy_falsy_issue(
+                crate::TruthyFalsyBranchKind::Truthy,
+                truthy_has_payload,
+                issue,
+            );
+            saw_error = true;
+        }
+        for issue in falsy_info.issues {
+            self.emit_truthy_falsy_issue(
+                crate::TruthyFalsyBranchKind::Falsy,
+                falsy_has_payload,
+                issue,
+            );
+            saw_error = true;
+        }
+        if saw_error {
+            return None;
+        }
+
+        let Some(truthy_ty) = truthy_ty else {
+            return None;
+        };
+        let Some(falsy_ty) = falsy_ty else {
+            return None;
+        };
+        if !truthy_ty.same_shape(&falsy_ty) {
+            self.emit_truthy_falsy_branch_type_mismatch(pair, &truthy_ty, &falsy_ty);
+            return None;
+        }
+
+        Some(truthy_ty)
     }
 
     fn validate_fanout_map_stage(
@@ -3454,6 +3675,108 @@ impl Validator<'_> {
                 );
             }
         }
+    }
+
+    fn emit_unsupported_truthy_falsy_subject(
+        &mut self,
+        pair: &TruthyFalsyPairStages<'_>,
+        subject: &GateType,
+    ) {
+        self.diagnostics.push(
+            Diagnostic::error(format!(
+                "`T|>` / `F|>` currently requires an ordinary `Bool`, `Option A`, `Result E A`, or `Validation E A` subject, found `{subject}`"
+            ))
+            .with_code(code("truthy-falsy-subject-not-canonical"))
+            .with_primary_label(
+                pair.truthy_stage.span,
+                "this branch pair cannot choose one of the RFC's canonical builtin truthy/falsy constructor pairs",
+            )
+            .with_secondary_label(pair.falsy_stage.span, "paired truthy/falsy stage involved here")
+            .with_note(
+                "current resolved-HIR truthy/falsy elaboration proves only builtin ordinary carriers; signal-lifted branching and user-defined truthy/falsy overloads remain later work",
+            ),
+        );
+    }
+
+    fn emit_truthy_falsy_issue(
+        &mut self,
+        branch: crate::TruthyFalsyBranchKind,
+        has_payload: bool,
+        issue: GateIssue,
+    ) {
+        let branch_name = match branch {
+            crate::TruthyFalsyBranchKind::Truthy => "truthy",
+            crate::TruthyFalsyBranchKind::Falsy => "falsy",
+        };
+        match issue {
+            GateIssue::InvalidProjection {
+                span,
+                path,
+                subject,
+            } => {
+                let diagnostic = if !has_payload && subject == "unknown subject" {
+                    Diagnostic::error(format!(
+                        "{branch_name} branch cannot use ambient projection `{path}` because this branch matches a constructor with no payload"
+                    ))
+                    .with_code(code("invalid-truthy-falsy-projection"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "this branch has no matched payload subject; use a literal or named value here, or switch to `||>` for an explicit pattern",
+                    ))
+                } else {
+                    Diagnostic::error(format!(
+                        "{branch_name} branch cannot project `{path}` from matched payload subject `{subject}`"
+                    ))
+                    .with_code(code("invalid-truthy-falsy-projection"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "project from the matched payload or transform it before branching",
+                    ))
+                };
+                self.diagnostics.push(diagnostic);
+            }
+            GateIssue::UnknownField {
+                span,
+                path,
+                subject,
+            } => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "{branch_name} branch cannot find field `{path}` on matched payload subject `{subject}`"
+                    ))
+                    .with_code(code("unknown-truthy-falsy-field"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "use a field that exists on the matched branch payload",
+                    )),
+                );
+            }
+        }
+    }
+
+    fn emit_truthy_falsy_branch_type_mismatch(
+        &mut self,
+        pair: &TruthyFalsyPairStages<'_>,
+        truthy: &GateType,
+        falsy: &GateType,
+    ) {
+        self.diagnostics.push(
+            Diagnostic::error(format!(
+                "`T|>` and `F|>` must elaborate to one shared branch result type, found `{truthy}` and `{falsy}`"
+            ))
+            .with_code(code("truthy-falsy-branch-type-mismatch"))
+            .with_primary_label(
+                pair.truthy_stage.span,
+                format!("the `T|>` branch proves `{truthy}`"),
+            )
+            .with_secondary_label(
+                pair.falsy_stage.span,
+                format!("the `F|>` branch proves `{falsy}`"),
+            )
+            .with_note(
+                "truthy/falsy shorthand is surface sugar over one deterministic two-arm case split, so both branches must agree on one result type",
+            ),
+        );
     }
 
     fn emit_fanout_issue(&mut self, context: FanoutIssueContext, issue: GateIssue) {
@@ -3735,7 +4058,16 @@ impl Validator<'_> {
                 );
                 store.constructor_expr(constructor)
             }
-            ResolutionState::Resolved(TypeResolution::Import(_)) => return None,
+            ResolutionState::Resolved(TypeResolution::Import(import_id)) => {
+                let constructor = store.add_constructor(
+                    self.module.imports()[*import_id]
+                        .local_name
+                        .text()
+                        .to_owned(),
+                    self.import_type_kind(*import_id)?,
+                );
+                store.constructor_expr(constructor)
+            }
         };
         spans.insert(expr, reference.span());
         Some(expr)
@@ -3760,6 +4092,16 @@ impl Validator<'_> {
                 );
                 None
             }
+        }
+    }
+
+    fn import_type_kind(&self, import_id: ImportId) -> Option<Kind> {
+        let import = &self.module.imports()[import_id];
+        match &import.metadata {
+            ImportBindingMetadata::TypeConstructor { kind } => Some(kind.clone()),
+            ImportBindingMetadata::Value { .. }
+            | ImportBindingMetadata::Bundle(_)
+            | ImportBindingMetadata::Unknown => None,
         }
     }
 
@@ -3892,6 +4234,31 @@ impl Validator<'_> {
                     );
                 }
             }
+        }
+    }
+
+    fn check_regex_literal(&mut self, literal_span: SourceSpan, regex: &crate::hir::RegexLiteral) {
+        let Some(pattern) = regex_literal_body(&regex.raw) else {
+            self.diagnostics.push(
+                Diagnostic::error("regex literal lost its `rx\"...\"` wrapper before validation")
+                    .with_code(code("malformed-regex-literal"))
+                    .with_primary_label(
+                        literal_span,
+                        "preserve the original surface literal while lowering into HIR",
+                    ),
+            );
+            return;
+        };
+
+        let mut builder = RegexParserBuilder::new();
+        builder.nest_limit(REGEX_NEST_LIMIT);
+        let mut parser = builder.build();
+        if let Err(error) = parser.parse(pattern) {
+            self.diagnostics.push(invalid_regex_literal_diagnostic(
+                literal_span,
+                &regex.raw,
+                &error,
+            ));
         }
     }
 
@@ -4357,6 +4724,65 @@ fn code(name: &'static str) -> DiagnosticCode {
     DiagnosticCode::new("hir", name)
 }
 
+fn regex_literal_body(raw: &str) -> Option<&str> {
+    raw.strip_prefix("rx\"")
+        .and_then(|pattern| pattern.strip_suffix('\"'))
+}
+
+fn invalid_regex_literal_diagnostic(
+    literal_span: SourceSpan,
+    raw: &str,
+    error: &RegexSyntaxError,
+) -> Diagnostic {
+    let diagnostic = Diagnostic::error(
+        "regex literal is not valid under the current compile-time regex grammar",
+    )
+    .with_code(code("invalid-regex-literal"));
+    match error {
+        RegexSyntaxError::Parse(error) => {
+            let mut diagnostic = diagnostic.with_primary_label(
+                regex_span_in_literal(literal_span, raw, error.span()),
+                error.kind().to_string(),
+            );
+            if let Some(auxiliary) = error.auxiliary_span() {
+                diagnostic = diagnostic.with_secondary_label(
+                    regex_span_in_literal(literal_span, raw, auxiliary),
+                    "the original conflicting regex fragment is here",
+                );
+            }
+            diagnostic
+        }
+        RegexSyntaxError::Translate(error) => diagnostic.with_primary_label(
+            regex_span_in_literal(literal_span, raw, error.span()),
+            error.kind().to_string(),
+        ),
+        _ => diagnostic.with_primary_label(
+            literal_span,
+            "this regex literal failed compile-time validation",
+        ),
+    }
+}
+
+fn regex_span_in_literal(
+    literal_span: SourceSpan,
+    raw: &str,
+    regex_span: &RegexSpan,
+) -> SourceSpan {
+    let body_len = regex_literal_body(raw).map_or(0, str::len);
+    let start_offset = regex_span.start.offset.min(body_len);
+    let end_offset = regex_span.end.offset.max(start_offset).min(body_len);
+    let literal_start = literal_span.span().start().as_usize();
+    let body_start = literal_start + REGEX_LITERAL_PREFIX_LEN;
+    let start = body_start + start_offset;
+    let end = body_start + end_offset;
+    let start = u32::try_from(start).expect("regex literal start offset should fit in ByteIndex");
+    let end = u32::try_from(end).expect("regex literal end offset should fit in ByteIndex");
+    SourceSpan::new(
+        literal_span.file(),
+        Span::new(ByteIndex::new(start), ByteIndex::new(end)),
+    )
+}
+
 fn builtin_kind(builtin: BuiltinType) -> Kind {
     match builtin {
         BuiltinType::Int
@@ -4454,6 +4880,25 @@ pub(crate) enum GateIssue {
         path: String,
         subject: String,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TruthyFalsySubjectPlan {
+    pub(crate) truthy_constructor: BuiltinTerm,
+    pub(crate) truthy_payload: Option<GateType>,
+    pub(crate) falsy_constructor: BuiltinTerm,
+    pub(crate) falsy_payload: Option<GateType>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TruthyFalsyPairStages<'a> {
+    pub(crate) truthy_index: usize,
+    pub(crate) truthy_stage: &'a crate::hir::PipeStage,
+    pub(crate) truthy_expr: ExprId,
+    pub(crate) falsy_index: usize,
+    pub(crate) falsy_stage: &'a crate::hir::PipeStage,
+    pub(crate) falsy_expr: ExprId,
+    pub(crate) next_index: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4647,6 +5092,47 @@ impl<'a> GateTypeContext<'a> {
         subject.gate_carrier()
     }
 
+    pub(crate) fn truthy_falsy_subject_plan(
+        &self,
+        subject: &GateType,
+    ) -> Option<TruthyFalsySubjectPlan> {
+        match subject {
+            GateType::Primitive(BuiltinType::Bool) => Some(TruthyFalsySubjectPlan {
+                truthy_constructor: BuiltinTerm::True,
+                truthy_payload: None,
+                falsy_constructor: BuiltinTerm::False,
+                falsy_payload: None,
+            }),
+            GateType::Option(payload) => Some(TruthyFalsySubjectPlan {
+                truthy_constructor: BuiltinTerm::Some,
+                truthy_payload: Some(payload.as_ref().clone()),
+                falsy_constructor: BuiltinTerm::None,
+                falsy_payload: None,
+            }),
+            GateType::Result { error, value } => Some(TruthyFalsySubjectPlan {
+                truthy_constructor: BuiltinTerm::Ok,
+                truthy_payload: Some(value.as_ref().clone()),
+                falsy_constructor: BuiltinTerm::Err,
+                falsy_payload: Some(error.as_ref().clone()),
+            }),
+            GateType::Validation { error, value } => Some(TruthyFalsySubjectPlan {
+                truthy_constructor: BuiltinTerm::Valid,
+                truthy_payload: Some(value.as_ref().clone()),
+                falsy_constructor: BuiltinTerm::Invalid,
+                falsy_payload: Some(error.as_ref().clone()),
+            }),
+            GateType::Primitive(_)
+            | GateType::Tuple(_)
+            | GateType::Record(_)
+            | GateType::Arrow { .. }
+            | GateType::List(_)
+            | GateType::Signal(_)
+            | GateType::Task { .. }
+            | GateType::Domain { .. }
+            | GateType::OpaqueItem { .. } => None,
+        }
+    }
+
     pub(crate) fn apply_fanout_plan(&self, plan: FanoutPlan, subject: GateType) -> GateType {
         match plan.result() {
             FanoutResultKind::MappedCollection => {
@@ -4744,7 +5230,9 @@ impl<'a> GateTypeContext<'a> {
         let import = &self.module.imports()[import_id];
         match &import.metadata {
             ImportBindingMetadata::Value { ty } => Some(self.lower_import_value_type(ty)),
-            ImportBindingMetadata::Bundle(_) | ImportBindingMetadata::Unknown => None,
+            ImportBindingMetadata::TypeConstructor { .. }
+            | ImportBindingMetadata::Bundle(_)
+            | ImportBindingMetadata::Unknown => None,
         }
     }
 
@@ -5250,6 +5738,46 @@ impl<'a> GateTypeContext<'a> {
         info
     }
 
+    pub(crate) fn infer_truthy_falsy_branch(
+        &mut self,
+        expr_id: ExprId,
+        env: &GateExprEnv,
+        payload_subject: Option<&GateType>,
+    ) -> GateExprInfo {
+        match payload_subject {
+            Some(subject) => self.infer_pipe_body(expr_id, env, subject),
+            None => self.infer_expr(expr_id, env, None),
+        }
+    }
+
+    pub(crate) fn infer_truthy_falsy_pair(
+        &mut self,
+        pair: &TruthyFalsyPairStages<'_>,
+        env: &GateExprEnv,
+        subject: &GateType,
+    ) -> Option<GateType> {
+        let subject_plan = self.truthy_falsy_subject_plan(subject)?;
+        let truthy = self.infer_truthy_falsy_branch(
+            pair.truthy_expr,
+            env,
+            subject_plan.truthy_payload.as_ref(),
+        );
+        if !truthy.issues.is_empty() {
+            return None;
+        }
+        let falsy = self.infer_truthy_falsy_branch(
+            pair.falsy_expr,
+            env,
+            subject_plan.falsy_payload.as_ref(),
+        );
+        if !falsy.issues.is_empty() {
+            return None;
+        }
+        let truthy_ty = truthy.ty?;
+        let falsy_ty = falsy.ty?;
+        truthy_ty.same_shape(&falsy_ty).then_some(truthy_ty)
+    }
+
     fn infer_single_parameter_function_pipe_body(
         &mut self,
         expr_id: ExprId,
@@ -5353,26 +5881,38 @@ impl<'a> GateTypeContext<'a> {
         pipe: &crate::hir::PipeExpr,
         env: &GateExprEnv,
     ) -> Option<GateType> {
+        let stages = pipe.stages.iter().collect::<Vec<_>>();
         let mut current = self.infer_expr(pipe.head, env, None).ty?;
-        for stage in pipe.stages.iter() {
+        let mut stage_index = 0usize;
+        while stage_index < stages.len() {
+            let stage = stages[stage_index];
             match &stage.kind {
                 PipeStageKind::Transform { expr } => {
                     current = self.infer_transform_stage(*expr, env, &current)?;
+                    stage_index += 1;
                 }
-                PipeStageKind::Tap { .. } => {}
+                PipeStageKind::Tap { .. } => {
+                    stage_index += 1;
+                }
                 PipeStageKind::Gate { expr } => {
                     current = self.infer_gate_stage(*expr, env, &current)?;
+                    stage_index += 1;
                 }
                 PipeStageKind::Map { expr } => {
                     current = self.infer_fanout_map_stage(*expr, env, &current)?;
+                    stage_index += 1;
                 }
                 PipeStageKind::FanIn { expr } => {
                     current = self.infer_fanin_stage(*expr, env, &current)?;
+                    stage_index += 1;
+                }
+                PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
+                    let pair = truthy_falsy_pair_stages(&stages, stage_index)?;
+                    current = self.infer_truthy_falsy_pair(&pair, env, &current)?;
+                    stage_index = pair.next_index;
                 }
                 PipeStageKind::Case { .. }
                 | PipeStageKind::Apply { .. }
-                | PipeStageKind::Truthy { .. }
-                | PipeStageKind::Falsy { .. }
                 | PipeStageKind::RecurStart { .. }
                 | PipeStageKind::RecurStep { .. } => return None,
             }
@@ -5419,6 +5959,41 @@ fn is_numeric_gate_type(ty: &GateType) -> bool {
             BuiltinType::Int | BuiltinType::Float | BuiltinType::Decimal | BuiltinType::BigInt
         )
     )
+}
+
+pub(crate) fn truthy_falsy_pair_stages<'a>(
+    stages: &[&'a crate::hir::PipeStage],
+    index: usize,
+) -> Option<TruthyFalsyPairStages<'a>> {
+    let first = *stages.get(index)?;
+    let second = *stages.get(index + 1)?;
+    match (&first.kind, &second.kind) {
+        (
+            PipeStageKind::Truthy { expr: truthy_expr },
+            PipeStageKind::Falsy { expr: falsy_expr },
+        ) => Some(TruthyFalsyPairStages {
+            truthy_index: index,
+            truthy_stage: first,
+            truthy_expr: *truthy_expr,
+            falsy_index: index + 1,
+            falsy_stage: second,
+            falsy_expr: *falsy_expr,
+            next_index: index + 2,
+        }),
+        (
+            PipeStageKind::Falsy { expr: falsy_expr },
+            PipeStageKind::Truthy { expr: truthy_expr },
+        ) => Some(TruthyFalsyPairStages {
+            truthy_index: index + 1,
+            truthy_stage: second,
+            truthy_expr: *truthy_expr,
+            falsy_index: index,
+            falsy_stage: first,
+            falsy_expr: *falsy_expr,
+            next_index: index + 2,
+        }),
+        _ => None,
+    }
 }
 
 fn name_path_text(path: &NamePath) -> String {
@@ -6541,16 +7116,20 @@ enum KindBuildFrame {
 
 #[cfg(test)]
 mod tests {
-    use aivi_base::{ByteIndex, DiagnosticCode, FileId, SourceSpan, Span};
+    use aivi_base::{
+        ByteIndex, DiagnosticCode, FileId, LabelStyle, SourceDatabase, SourceSpan, Span,
+    };
+    use aivi_syntax::parse_module;
     use aivi_typing::SourceTypeParameter;
 
     use crate::{
         ApplicativeCluster, Binding, BindingKind, BuiltinTerm, BuiltinType, ClusterFinalizer,
         ClusterPresentation, ControlNode, Expr, ExprKind, FunctionItem, FunctionParameter,
-        IntegerLiteral, Item, ItemHeader, MarkupNode, MarkupNodeKind, Module, Name, NamePath,
-        NonEmpty, Pattern, PatternKind, PipeExpr, PipeStage, PipeStageKind, RecordExpr,
-        ShowControl, TermReference, TermResolution, TypeItem, TypeItemBody, TypeKind, TypeNode,
-        TypeParameter, TypeReference, TypeResolution, TypeVariant, ValidationMode,
+        ImportBinding, ImportBindingMetadata, IntegerLiteral, Item, ItemHeader, MarkupNode,
+        MarkupNodeKind, Module, Name, NamePath, NonEmpty, Pattern, PatternKind, PipeExpr,
+        PipeStage, PipeStageKind, RecordExpr, ShowControl, TermReference, TermResolution, TypeItem,
+        TypeItemBody, TypeKind, TypeNode, TypeParameter, TypeReference, TypeResolution,
+        TypeVariant, ValidationMode,
     };
 
     use super::*;
@@ -6564,6 +7143,24 @@ mod tests {
 
     fn unit_span() -> SourceSpan {
         span(0, 0, 1)
+    }
+
+    fn validate_text(path: &str, text: &str) -> ValidationReport {
+        let mut sources = SourceDatabase::new();
+        let file_id = sources.add_file(path, text);
+        let parsed = parse_module(&sources[file_id]);
+        assert!(
+            !parsed.has_errors(),
+            "test input should parse before HIR validation: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+        let lowered = crate::lower_module(&parsed.module);
+        assert!(
+            !lowered.has_errors(),
+            "test input should lower before HIR validation: {:?}",
+            lowered.diagnostics()
+        );
+        validate_module(lowered.module(), ValidationMode::Structural)
     }
 
     fn name(text: &str) -> Name {
@@ -6601,6 +7198,27 @@ mod tests {
                 )),
             })
             .expect("builtin type allocation should fit")
+    }
+
+    fn imported_type(module: &mut Module, text: &str, kind: Kind) -> crate::TypeId {
+        let import_id = module
+            .alloc_import(ImportBinding {
+                span: unit_span(),
+                imported_name: name(text),
+                local_name: name(text),
+                metadata: ImportBindingMetadata::TypeConstructor { kind },
+            })
+            .expect("import allocation should fit");
+        let path = NamePath::from_vec(vec![name(text)]).expect("single-segment path");
+        module
+            .alloc_type(TypeNode {
+                span: unit_span(),
+                kind: TypeKind::Name(TypeReference::resolved(
+                    path,
+                    TypeResolution::Import(import_id),
+                )),
+            })
+            .expect("imported type allocation should fit")
     }
 
     fn type_parameter(module: &mut Module, text: &str) -> crate::TypeParameterId {
@@ -6741,12 +7359,10 @@ mod tests {
 
         let report = validate_module(&module, ValidationMode::Structural);
         assert!(!report.is_ok());
-        assert!(
-            report
-                .diagnostics()
-                .iter()
-                .any(|diagnostic| diagnostic.message.contains("missing expression 99"))
-        );
+        assert!(report
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("missing expression 99")));
     }
 
     #[test]
@@ -6778,6 +7394,69 @@ mod tests {
         assert!(report.diagnostics().iter().any(
             |diagnostic| diagnostic.code == Some(DiagnosticCode::new("hir", "unresolved-name"))
         ));
+    }
+
+    #[test]
+    fn imported_type_constructor_metadata_participates_in_kind_validation() {
+        let mut module = Module::new(FileId::new(0));
+        let request = imported_type(&mut module, "Request", Kind::constructor(1));
+        let text = builtin_type(&mut module, BuiltinType::Text);
+        let broken_alias = module
+            .alloc_type(TypeNode {
+                span: unit_span(),
+                kind: TypeKind::Apply {
+                    callee: request,
+                    arguments: NonEmpty::new(text, vec![text]),
+                },
+            })
+            .expect("type application allocation should fit");
+        let _ = module
+            .push_item(Item::Type(TypeItem {
+                header: ItemHeader {
+                    span: unit_span(),
+                    decorators: Vec::new(),
+                },
+                name: name("Broken"),
+                parameters: Vec::new(),
+                body: TypeItemBody::Alias(broken_alias),
+            }))
+            .expect("type item allocation should fit");
+
+        let report = validate_module(&module, ValidationMode::RequireResolvedNames);
+        assert!(
+            report.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code == Some(DiagnosticCode::new("hir", "invalid-type-application"))
+            }),
+            "expected imported constructor kind metadata to trigger over-application diagnostics, got {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn regex_literal_validation_reports_hir_diagnostics() {
+        let report = validate_text(
+            "regex_invalid_quantifier.aivi",
+            "val brokenPattern = rx\"a{2,1}\"\n",
+        );
+        let diagnostic = report
+            .diagnostics()
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.code == Some(DiagnosticCode::new("hir", "invalid-regex-literal"))
+            })
+            .expect("invalid regex literal should produce a HIR diagnostic");
+
+        assert_eq!(
+            diagnostic.message,
+            "regex literal is not valid under the current compile-time regex grammar"
+        );
+        assert!(
+            diagnostic
+                .labels
+                .iter()
+                .any(|label| label.style == LabelStyle::Primary && !label.message.is_empty()),
+            "expected regex validation to keep the parser-provided primary error span",
+        );
     }
 
     #[test]
@@ -6890,12 +7569,10 @@ mod tests {
             .expect("item allocation should fit");
 
         let report = validate_module(&module, ValidationMode::Structural);
-        assert!(
-            report
-                .diagnostics()
-                .iter()
-                .any(|diagnostic| diagnostic.message.contains("branch-only control node kind"))
-        );
+        assert!(report
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("branch-only control node kind")));
     }
 
     #[test]
@@ -6917,7 +7594,7 @@ mod tests {
                 span: shared_span,
                 kind: MarkupNodeKind::Element(crate::MarkupElement {
                     name: NamePath::from_vec(vec![
-                        Name::new("Label", span(0, 0, 5)).expect("valid name"),
+                        Name::new("Label", span(0, 0, 5)).expect("valid name")
                     ])
                     .expect("single segment path"),
                     attributes: Vec::new(),

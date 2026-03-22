@@ -1,7 +1,7 @@
 use std::{error::Error, fmt};
 
 use aivi_base::{FileId, SourceSpan};
-use aivi_typing::BuiltinSourceProvider;
+use aivi_typing::{BuiltinSourceProvider, Kind};
 
 use crate::{
     arena::{Arena, ArenaOverflow},
@@ -10,7 +10,7 @@ use crate::{
         PatternId, TypeId, TypeParameterId,
     },
     sequence::{AtLeastTwo, NonEmpty, SequenceError},
-    validate::{ValidationMode, ValidationReport, validate_module},
+    validate::{validate_module, ValidationMode, ValidationReport},
 };
 
 /// One source-stable surface name preserved into HIR for diagnostics.
@@ -233,6 +233,7 @@ pub enum BuiltinType {
 pub enum ImportBindingMetadata {
     Unknown,
     Value { ty: ImportValueType },
+    TypeConstructor { kind: Kind },
     Bundle(ImportBundleKind),
 }
 
