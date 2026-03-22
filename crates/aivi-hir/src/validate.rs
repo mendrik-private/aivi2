@@ -930,8 +930,9 @@ impl Validator<'_> {
                         }
                         TypeKind::Tuple(elements) => {
                             stack.push(KindBuildFrame::Exit(type_id));
-                            for element in elements.iter().rev() {
-                                stack.push(KindBuildFrame::Enter(*element));
+                            let elements = elements.iter().copied().collect::<Vec<_>>();
+                            for element in elements.into_iter().rev() {
+                                stack.push(KindBuildFrame::Enter(element));
                             }
                         }
                         TypeKind::Record(fields) => {
@@ -947,8 +948,9 @@ impl Validator<'_> {
                         }
                         TypeKind::Apply { callee, arguments } => {
                             stack.push(KindBuildFrame::Exit(type_id));
-                            for argument in arguments.iter().rev() {
-                                stack.push(KindBuildFrame::Enter(*argument));
+                            let arguments = arguments.iter().copied().collect::<Vec<_>>();
+                            for argument in arguments.into_iter().rev() {
+                                stack.push(KindBuildFrame::Enter(argument));
                             }
                             stack.push(KindBuildFrame::Enter(*callee));
                         }
@@ -966,7 +968,9 @@ impl Validator<'_> {
                         TypeKind::Record(fields) => store.record_expr(
                             fields
                                 .iter()
-                                .map(|field| KindRecordField::new(field.label.text(), lowered[&field.ty]))
+                                .map(|field| {
+                                    KindRecordField::new(field.label.text(), lowered[&field.ty])
+                                })
                                 .collect::<Vec<_>>(),
                         ),
                         TypeKind::Arrow { parameter, result } => {
@@ -981,7 +985,9 @@ impl Validator<'_> {
                             expr
                         }
                     };
-                    spans.entry(expr).or_insert(self.module.types()[type_id].span);
+                    spans
+                        .entry(expr)
+                        .or_insert(self.module.types()[type_id].span);
                     lowered.insert(type_id, expr);
                 }
             }
@@ -998,7 +1004,8 @@ impl Validator<'_> {
         let mut store = KindStore::default();
         let mut spans = HashMap::new();
         let mut parameter_map = self.kind_parameter_map(parameters, &mut store);
-        let root = self.kind_expr_for_reference(reference, &mut store, &mut spans, &mut parameter_map)?;
+        let root =
+            self.kind_expr_for_reference(reference, &mut store, &mut spans, &mut parameter_map)?;
         Some((store, root, spans))
     }
 
@@ -1010,7 +1017,10 @@ impl Validator<'_> {
         let mut parameter_map = HashMap::new();
         for parameter in parameters {
             let kind_parameter = store.add_parameter(
-                self.module.type_parameters()[*parameter].name.text().to_owned(),
+                self.module.type_parameters()[*parameter]
+                    .name
+                    .text()
+                    .to_owned(),
             );
             parameter_map.insert(*parameter, kind_parameter);
         }
@@ -1027,16 +1037,17 @@ impl Validator<'_> {
         let expr = match reference.resolution.as_ref() {
             ResolutionState::Unresolved => return None,
             ResolutionState::Resolved(TypeResolution::Builtin(builtin)) => {
-                let constructor = store.add_constructor(
-                    builtin_type_name(*builtin),
-                    builtin_kind(*builtin),
-                );
+                let constructor =
+                    store.add_constructor(builtin_type_name(*builtin), builtin_kind(*builtin));
                 store.constructor_expr(constructor)
             }
             ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
                 let parameter = *parameters.entry(*parameter).or_insert_with(|| {
                     store.add_parameter(
-                        self.module.type_parameters()[*parameter].name.text().to_owned(),
+                        self.module.type_parameters()[*parameter]
+                            .name
+                            .text()
+                            .to_owned(),
                     )
                 });
                 store.parameter_expr(parameter)

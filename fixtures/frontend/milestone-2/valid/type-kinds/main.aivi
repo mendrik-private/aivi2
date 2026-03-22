@@ -10,13 +10,13 @@ type Profile = {
     background: Task HttpError Int
 }
 
-type HttpResult A = Result HttpError A
-type LoadedProfile = HttpResult Profile
+type HttpResult A = (Result HttpError A)
+type LoadedProfile = (HttpResult Profile)
 
 domain ResourceId A over A
     wrap : A -> ResourceId A
     unwrap : ResourceId A -> A
 
-type ResourceText = ResourceId Text
+type ResourceText = (ResourceId Text)
 
 val defaultNickname : Option Text = None

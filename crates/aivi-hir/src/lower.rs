@@ -3795,6 +3795,7 @@ mod tests {
             "milestone-2/valid/class-declarations/main.aivi",
             "milestone-2/valid/domain-declarations/main.aivi",
             "milestone-2/valid/domain-literal-suffixes/main.aivi",
+            "milestone-2/valid/type-kinds/main.aivi",
             "milestone-2/valid/pipe-branch-and-join/main.aivi",
             "milestone-1/valid/records/record_shorthand_and_elision.aivi",
             "milestone-1/valid/sources/source_declarations.aivi",
@@ -3850,6 +3851,38 @@ mod tests {
             assert!(
                 report.is_ok(),
                 "expected {path} to keep structurally valid HIR, got diagnostics: {:?}",
+                report.diagnostics()
+            );
+        }
+    }
+
+    #[test]
+    fn resolved_validation_rejects_kind_invalid_fixtures() {
+        for (path, code_name) in [
+            (
+                "milestone-2/invalid/overapplied-type-constructor/main.aivi",
+                "invalid-type-application",
+            ),
+            (
+                "milestone-2/invalid/underapplied-domain-constructor/main.aivi",
+                "expected-kind-mismatch",
+            ),
+        ] {
+            let lowered = lower_fixture(path);
+            assert!(
+                !lowered.has_errors(),
+                "expected {path} to lower cleanly before kind validation, got diagnostics: {:?}",
+                lowered.diagnostics()
+            );
+            let report = lowered
+                .module()
+                .validate(ValidationMode::RequireResolvedNames);
+            assert!(
+                report
+                    .diagnostics()
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == Some(super::code(code_name))),
+                "expected {path} to report {code_name}, got diagnostics: {:?}",
                 report.diagnostics()
             );
         }

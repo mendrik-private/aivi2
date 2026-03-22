@@ -20,6 +20,7 @@ fn check_accepts_valid_hir_fixtures() {
         "milestone-2/valid/class-declarations/main.aivi",
         "milestone-2/valid/domain-declarations/main.aivi",
         "milestone-2/valid/domain-literal-suffixes/main.aivi",
+        "milestone-2/valid/type-kinds/main.aivi",
         "milestone-2/valid/pipe-branch-and-join/main.aivi",
         "milestone-1/valid/records/record_shorthand_and_elision.aivi",
         "milestone-1/valid/sources/source_declarations.aivi",
@@ -64,6 +65,8 @@ fn check_rejects_invalid_hir_fixtures() {
         "milestone-2/invalid/interpolated-pattern-text/main.aivi",
         "milestone-1/invalid/cluster_unfinished_gate.aivi",
         "milestone-1/invalid/source_unknown_option.aivi",
+        "milestone-2/invalid/overapplied-type-constructor/main.aivi",
+        "milestone-2/invalid/underapplied-domain-constructor/main.aivi",
         "milestone-2/invalid/source-duplicate-option/main.aivi",
         "milestone-2/invalid/source-provider-without-variant/main.aivi",
     ] {
