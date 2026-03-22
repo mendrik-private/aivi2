@@ -4,196 +4,454 @@
   "scopeName": "source.aivi",
   "fileTypes": [".aivi"],
   "patterns": [
-    { "include": "#comment" },
-    { "include": "#doc-comment" },
-    { "include": "#decorator" },
-    { "include": "#use-declaration" },
-    { "include": "#type-declaration" },
-    { "include": "#class-declaration" },
-    { "include": "#instance-declaration" },
-    { "include": "#fun-declaration" },
-    { "include": "#val-declaration" },
-    { "include": "#sig-declaration" },
-    { "include": "#provider-declaration" },
     { "include": "#pipe-operators" },
-    { "include": "#markup-tag" },
-    { "include": "#string-interpolated" },
-    { "include": "#number-literal" },
-    { "include": "#constructor-ref" },
-    { "include": "#labeled-parameter" },
-    { "include": "#keyword" },
-    { "include": "#operator" }
+    { "include": "#doc-comment" },
+    { "include": "#line-comment" },
+    { "include": "#string" },
+    { "include": "#decorator" },
+    { "include": "#declaration" },
+    { "include": "#markup" },
+    { "include": "#record-key" },
+    { "include": "#type-expression" },
+    { "include": "#operators" },
+    { "include": "#number" },
+    { "include": "#labeled-param" },
+    { "include": "#constructor" },
+    { "include": "#builtin-keyword" }
   ],
   "repository": {
-    "comment": {
-      "name": "comment.line.double-dash.aivi",
-      "match": "--(?!-).*$"
-    },
+
     "doc-comment": {
       "name": "comment.block.documentation.aivi",
-      "match": "---.*$"
-    },
-    "decorator": {
-      "name": "meta.decorator.aivi",
-      "match": "(@)(source|recur\\.timer|recur\\.backoff)\\b",
-      "captures": {
-        "1": { "name": "punctuation.decorator.aivi" },
-        "2": { "name": "entity.name.label.aivi" }
-      }
-    },
-    "use-declaration": {
-      "name": "meta.use.aivi",
-      "begin": "\\b(use)\\b",
+      "begin": "---",
+      "end": "$",
       "beginCaptures": {
-        "1": { "name": "keyword.declaration.aivi" }
+        "0": { "name": "punctuation.definition.comment.aivi" }
       },
-      "end": "(?=\\n(?!\\s*[a-z]))",
       "patterns": [
         {
-          "match": "[a-z][a-zA-Z0-9_]*(?:\\.[a-z][a-zA-Z0-9_]*)*",
-          "name": "entity.name.namespace.aivi"
+          "match": "@(param|returns|return|since|deprecated|see|throws|example)\\b",
+          "name": "keyword.other.documentation.aivi"
         },
         {
-          "match": "[a-z][a-zA-Z0-9_]*",
-          "name": "variable.other.aivi"
-        }
-      ]
-    },
-    "type-declaration": {
-      "match": "\\b(type)\\s+([A-Z][a-zA-Z0-9_]*)",
-      "captures": {
-        "1": { "name": "keyword.declaration.aivi" },
-        "2": { "name": "entity.name.type.aivi" }
-      }
-    },
-    "class-declaration": {
-      "match": "\\b(class)\\s+([A-Z][a-zA-Z0-9_]*)",
-      "captures": {
-        "1": { "name": "keyword.declaration.aivi" },
-        "2": { "name": "entity.name.type.aivi" }
-      }
-    },
-    "instance-declaration": {
-      "match": "\\b(instance)\\s+([A-Z][a-zA-Z0-9_]*)",
-      "captures": {
-        "1": { "name": "keyword.declaration.aivi" },
-        "2": { "name": "entity.name.type.aivi" }
-      }
-    },
-    "fun-declaration": {
-      "match": "\\b(fun)\\s+([a-z][a-zA-Z0-9_]*)",
-      "captures": {
-        "1": { "name": "keyword.declaration.aivi" },
-        "2": { "name": "entity.name.function.aivi" }
-      }
-    },
-    "val-declaration": {
-      "match": "\\b(val)\\s+([a-z][a-zA-Z0-9_]*)",
-      "captures": {
-        "1": { "name": "keyword.declaration.aivi" },
-        "2": { "name": "variable.other.aivi" }
-      }
-    },
-    "sig-declaration": {
-      "match": "\\b(sig)\\s+([a-z][a-zA-Z0-9_]*)",
-      "captures": {
-        "1": { "name": "keyword.declaration.aivi" },
-        "2": { "name": "variable.other.aivi" }
-      }
-    },
-    "provider-declaration": {
-      "match": "\\b(provider)\\s+([a-z][a-zA-Z0-9_.]*)",
-      "captures": {
-        "1": { "name": "keyword.declaration.aivi" },
-        "2": { "name": "entity.name.label.aivi" }
-      }
-    },
-    "pipe-operators": {
-      "name": "keyword.operator.pipe.aivi",
-      "match": "\\|>|\\?\\|>|\\|\\|>|\\*\\|>|&\\|>|@\\|>|<\\|@|<\\|\\*|T\\|>|F\\|>"
-    },
-    "markup-tag": {
-      "patterns": [
-        {
-          "name": "punctuation.definition.tag.aivi",
-          "match": "</[A-Za-z][a-zA-Z0-9_]*>"
-        },
-        {
-          "match": "<([A-Za-z][a-zA-Z0-9_]*)",
+          "match": "(@\\w+)\\s+(\\w+)",
           "captures": {
-            "1": { "name": "entity.name.tag.aivi" }
+            "1": { "name": "keyword.other.documentation.tag.aivi" },
+            "2": { "name": "variable.other.documentation.tag.name.aivi" }
+          }
+        },
+        {
+          "match": "\\[([A-Za-z][a-zA-Z0-9_.]*)]",
+          "captures": {
+            "1": { "name": "entity.name.type.aivi" }
           }
         }
       ]
     },
-    "string-interpolated": {
+
+    "line-comment": {
+      "name": "comment.line.double-dash.aivi",
+      "match": "--(?!-).*$"
+    },
+
+    "string": {
       "name": "string.quoted.double.aivi",
       "begin": "\"",
       "end": "\"",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.aivi" } },
+      "endCaptures":   { "0": { "name": "punctuation.definition.string.end.aivi" } },
       "patterns": [
         {
-          "name": "meta.embedded.expression.aivi",
+          "name": "meta.interpolation.aivi",
           "begin": "\\{",
           "end": "\\}",
+          "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.aivi" } },
+          "endCaptures":   { "0": { "name": "punctuation.section.interpolation.end.aivi" } },
+          "patterns": [{ "include": "$self" }]
+        },
+        { "name": "constant.character.escape.aivi", "match": "\\\\." }
+      ]
+    },
+
+    "decorator": {
+      "patterns": [
+        {
+          "comment": "@source provider.method",
+          "match": "(@)(source)\\s+([a-z][a-zA-Z0-9_]*)(\\.)((?:get|post|put|delete|patch|every|watch|[a-z][a-zA-Z0-9_]*))",
+          "captures": {
+            "1": { "name": "punctuation.definition.decorator.aivi" },
+            "2": { "name": "keyword.decorator.source.aivi" },
+            "3": { "name": "entity.name.label.provider.aivi" },
+            "4": { "name": "punctuation.accessor.aivi" },
+            "5": { "name": "entity.name.label.method.aivi" }
+          }
+        },
+        {
+          "comment": "@recur.timer / @recur.backoff",
+          "match": "(@)(recur)(\\.)(timer|backoff|interval|schedule)",
+          "captures": {
+            "1": { "name": "punctuation.definition.decorator.aivi" },
+            "2": { "name": "keyword.decorator.recur.aivi" },
+            "3": { "name": "punctuation.accessor.aivi" },
+            "4": { "name": "entity.name.label.method.aivi" }
+          }
+        },
+        {
+          "comment": "generic @decorator — must start with a letter (not | which belongs to @|>)",
+          "match": "(@)([a-zA-Z][a-zA-Z0-9_.]*)",
+          "captures": {
+            "1": { "name": "punctuation.definition.decorator.aivi" },
+            "2": { "name": "entity.name.label.decorator.aivi" }
+          }
+        }
+      ]
+    },
+
+    "declaration": {
+      "patterns": [
+        {
+          "comment": "type Name <params>",
+          "match": "\\b(type)\\s+([A-Z][a-zA-Z0-9_]*)((?:\\s+[a-z][a-zA-Z0-9_]*)*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.type.aivi" },
+            "2": { "name": "entity.name.type.aivi" },
+            "3": { "name": "variable.parameter.type.aivi" }
+          }
+        },
+        {
+          "comment": "class Name TypeParam",
+          "match": "\\b(class)\\s+([A-Z][a-zA-Z0-9_]*)((?:\\s+[a-z][a-zA-Z0-9_]*)*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.class.aivi" },
+            "2": { "name": "entity.name.class.aivi" },
+            "3": { "name": "variable.parameter.type.aivi" }
+          }
+        },
+        {
+          "comment": "instance Class Type",
+          "match": "\\b(instance)\\s+([A-Z][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.instance.aivi" },
+            "2": { "name": "entity.name.type.aivi" }
+          }
+        },
+        {
+          "comment": "fun name",
+          "match": "\\b(fun)\\s+([a-z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.fun.aivi" },
+            "2": { "name": "entity.name.function.aivi" }
+          }
+        },
+        {
+          "comment": "val name",
+          "match": "\\b(val)\\s+([a-z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.val.aivi" },
+            "2": { "name": "entity.name.variable.aivi" }
+          }
+        },
+        {
+          "comment": "sig name",
+          "match": "\\b(sig)\\s+([a-z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.sig.aivi" },
+            "2": { "name": "entity.name.variable.signal.aivi" }
+          }
+        },
+        {
+          "comment": "domain Name",
+          "match": "\\b(domain)\\s+([A-Z][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.domain.aivi" },
+            "2": { "name": "entity.name.type.aivi" }
+          }
+        },
+        {
+          "comment": "provider path.name",
+          "match": "\\b(provider)\\s+([a-z][a-zA-Z0-9_.]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.provider.aivi" },
+            "2": { "name": "entity.name.label.provider.aivi" }
+          }
+        },
+        {
+          "comment": "use module.path",
+          "begin": "\\b(use)\\s+",
+          "beginCaptures": { "1": { "name": "keyword.control.import.aivi" } },
+          "end": "(?=\\n(?![ \\t]))",
+          "patterns": [
+            {
+              "match": "([a-z][a-zA-Z0-9_]*)(?:\\.[a-z][a-zA-Z0-9_]*)+",
+              "name": "entity.name.namespace.aivi"
+            },
+            {
+              "match": "\\b([A-Z][a-zA-Z0-9_]*)\\b",
+              "name": "entity.name.type.aivi"
+            },
+            {
+              "match": "\\b([a-z_][a-zA-Z0-9_]*)\\b",
+              "name": "variable.other.import.aivi"
+            },
+            { "include": "#line-comment" }
+          ]
+        },
+        {
+          "comment": "export name",
+          "match": "\\b(export)\\s+([a-z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.export.aivi" },
+            "2": { "name": "entity.name.variable.aivi" }
+          }
+        }
+      ]
+    },
+
+    "pipe-operators": {
+      "comment": "Ordered longest-first. Must be included FIRST in top-level patterns so @|>, T|>, F|> are never split.",
+      "patterns": [
+        {
+          "name": "keyword.operator.pipe.fanin.aivi",
+          "match": "<\\|\\*"
+        },
+        {
+          "name": "keyword.operator.pipe.recur-step.aivi",
+          "match": "<\\|@"
+        },
+        {
+          "name": "keyword.operator.pipe.case.aivi",
+          "match": "\\|\\|>"
+        },
+        {
+          "name": "keyword.operator.pipe.gate.aivi",
+          "match": "\\?\\|>"
+        },
+        {
+          "name": "keyword.operator.pipe.map.aivi",
+          "match": "\\*\\|>"
+        },
+        {
+          "name": "keyword.operator.pipe.apply.aivi",
+          "match": "&\\|>"
+        },
+        {
+          "name": "keyword.operator.pipe.recur-start.aivi",
+          "match": "@\\|>"
+        },
+        {
+          "name": "keyword.operator.pipe.truthy.aivi",
+          "match": "T\\|>"
+        },
+        {
+          "name": "keyword.operator.pipe.falsy.aivi",
+          "match": "F\\|>"
+        },
+        {
+          "name": "keyword.operator.pipe.transform.aivi",
+          "match": "\\|>"
+        },
+        {
+          "name": "keyword.operator.pipe.tap.aivi",
+          "match": "(?<![<\\?\\*&@|])\\|(?![>@\\*])"
+        }
+      ]
+    },
+
+    "markup": {
+      "patterns": [
+        {
+          "comment": "closing control tag  </show> </each> ...",
+          "match": "(</)\\s*(show|each|match|case|fragment|empty|with|gate)\\s*(>)",
+          "captures": {
+            "1": { "name": "punctuation.definition.tag.aivi" },
+            "2": { "name": "entity.name.tag.control.aivi" },
+            "3": { "name": "punctuation.definition.tag.aivi" }
+          }
+        },
+        {
+          "comment": "closing component tag  </MyComponent>",
+          "match": "(</)([A-Z][a-zA-Z0-9_]*)(>)",
+          "captures": {
+            "1": { "name": "punctuation.definition.tag.aivi" },
+            "2": { "name": "entity.name.tag.component.aivi" },
+            "3": { "name": "punctuation.definition.tag.aivi" }
+          }
+        },
+        {
+          "comment": "closing html/gtk/xml tag  </div> </gtk:Box>",
+          "match": "(</)([a-z][a-zA-Z0-9_:-]*)(>)",
+          "captures": {
+            "1": { "name": "punctuation.definition.tag.aivi" },
+            "2": { "name": "entity.name.tag.html.aivi" },
+            "3": { "name": "punctuation.definition.tag.aivi" }
+          }
+        },
+        {
+          "comment": "opening control elements  <show <each <match ...",
+          "begin": "(<)(show|each|match|case|fragment|empty|with|gate)(?=[\\s>/])",
+          "end": "/?>",
+          "beginCaptures": {
+            "1": { "name": "punctuation.definition.tag.aivi" },
+            "2": { "name": "entity.name.tag.control.aivi" }
+          },
+          "endCaptures": { "0": { "name": "punctuation.definition.tag.aivi" } },
+          "patterns": [{ "include": "#markup-attributes" }]
+        },
+        {
+          "comment": "opening user component  <MyComponent",
+          "begin": "(<)([A-Z][a-zA-Z0-9_]*)(?=[\\s>/])",
+          "end": "/?>",
+          "beginCaptures": {
+            "1": { "name": "punctuation.definition.tag.aivi" },
+            "2": { "name": "entity.name.tag.component.aivi" }
+          },
+          "endCaptures": { "0": { "name": "punctuation.definition.tag.aivi" } },
+          "patterns": [{ "include": "#markup-attributes" }]
+        },
+        {
+          "comment": "opening html/gtk/xml element  <div <gtk:Box",
+          "begin": "(<)([a-z][a-zA-Z0-9_:-]*)(?=[\\s>/])",
+          "end": "/?>",
+          "beginCaptures": {
+            "1": { "name": "punctuation.definition.tag.aivi" },
+            "2": { "name": "entity.name.tag.html.aivi" }
+          },
+          "endCaptures": { "0": { "name": "punctuation.definition.tag.aivi" } },
+          "patterns": [{ "include": "#markup-attributes" }]
+        }
+      ]
+    },
+
+    "markup-attributes": {
+      "patterns": [
+        {
+          "begin": "([a-zA-Z_][a-zA-Z0-9_-]*)\\s*(=)\\s*(\\{)",
+          "end": "\\}",
+          "beginCaptures": {
+            "1": { "name": "entity.other.attribute-name.aivi" },
+            "2": { "name": "keyword.operator.assign.aivi" },
+            "3": { "name": "punctuation.section.interpolation.begin.aivi" }
+          },
+          "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.aivi" } },
           "patterns": [{ "include": "$self" }]
         },
         {
-          "name": "constant.character.escape.aivi",
-          "match": "\\\\."
+          "begin": "([a-zA-Z_][a-zA-Z0-9_-]*)\\s*(=)\\s*(\")",
+          "end": "\"",
+          "beginCaptures": {
+            "1": { "name": "entity.other.attribute-name.aivi" },
+            "2": { "name": "keyword.operator.assign.aivi" },
+            "3": { "name": "punctuation.definition.string.begin.aivi" }
+          },
+          "endCaptures": { "0": { "name": "punctuation.definition.string.end.aivi" } },
+          "contentName": "string.quoted.double.aivi"
+        },
+        {
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_-]*)\\b(?!\\s*=)",
+          "name": "entity.other.attribute-name.aivi"
         }
       ]
     },
-    "number-literal": {
+
+    "record-key": {
+      "comment": "Identifier immediately followed by : in record/struct position",
+      "match": "\\b([a-z_][a-zA-Z0-9_]*)(?=\\s*:(?!:))",
+      "captures": {
+        "1": { "name": "variable.other.property.aivi" }
+      }
+    },
+
+    "type-expression": {
       "patterns": [
         {
-          "name": "constant.numeric.suffix.aivi",
-          "match": "\\b\\d+[a-z]+\\b"
+          "comment": "built-in types",
+          "name": "support.type.builtin.aivi",
+          "match": "\\b(Int|Float|Decimal|BigInt|Bool|Text|Unit|Bytes|List|Map|Set|Option|Result|Validation|Signal|Task|Regex)\\b"
         },
         {
-          "name": "constant.numeric.float.aivi",
-          "match": "\\b\\d+\\.\\d+\\b"
-        },
-        {
-          "name": "constant.numeric.integer.aivi",
-          "match": "\\b\\d[\\d_]*\\b"
+          "comment": "built-in value constants — True False None Some Ok Err Valid Invalid",
+          "name": "support.constant.builtin.aivi",
+          "match": "\\b(Some|None|Ok|Err|True|False|Valid|Invalid)\\b"
         }
       ]
     },
-    "constructor-ref": {
-      "name": "support.class.aivi",
-      "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
-    },
-    "labeled-parameter": {
-      "name": "variable.parameter.aivi",
-      "match": "#[a-z][a-zA-Z0-9_]*"
-    },
-    "keyword": {
-      "name": "keyword.declaration.aivi",
-      "match": "\\b(type|val|fun|sig|class|instance|domain|provider|use|export)\\b"
-    },
-    "operator": {
+
+    "operators": {
       "patterns": [
         {
-          "name": "keyword.operator.arrow.aivi",
+          "name": "keyword.operator.arrow.fat.aivi",
           "match": "=>"
         },
         {
-          "name": "keyword.operator.type.aivi",
+          "name": "keyword.operator.arrow.thin.aivi",
           "match": "->"
         },
         {
-          "name": "keyword.operator.assign.aivi",
-          "match": "(?<![=!<>])=(?!=)"
+          "name": "keyword.operator.comparison.aivi",
+          "match": "==|!="
         },
         {
-          "name": "keyword.operator.type.aivi",
+          "name": "keyword.operator.comparison.aivi",
+          "match": "[<>]=?"
+        },
+        {
+          "comment": "assignment = not part of == => !=",
+          "name": "keyword.operator.assignment.aivi",
+          "match": "(?<![=!<>])=(?![>=])"
+        },
+        {
+          "name": "keyword.operator.type-annotation.aivi",
           "match": ":"
         },
         {
-          "name": "storage.type.aivi",
-          "match": "\\b(Int|Float|Decimal|BigInt|Bool|Text|Unit|Bytes|List|Map|Set|Option|Result|Validation|Signal|Task)\\b"
+          "name": "keyword.operator.projection.aivi",
+          "match": "\\."
+        },
+        {
+          "name": "keyword.operator.arithmetic.aivi",
+          "match": "[+\\-*\\/]"
         }
       ]
+    },
+
+    "number": {
+      "patterns": [
+        {
+          "comment": "suffix literal: 250ms 5s 1min",
+          "match": "\\b([0-9][0-9_]*)([a-z][a-zA-Z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "constant.numeric.integer.aivi" },
+            "2": { "name": "keyword.other.unit.aivi" }
+          }
+        },
+        {
+          "name": "constant.numeric.float.aivi",
+          "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*\\b"
+        },
+        {
+          "name": "constant.numeric.integer.aivi",
+          "match": "\\b[0-9][0-9_]*\\b"
+        }
+      ]
+    },
+
+    "labeled-param": {
+      "match": "(#)([a-z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "punctuation.definition.parameter.aivi" },
+        "2": { "name": "variable.parameter.labeled.aivi" }
+      }
+    },
+
+    "constructor": {
+      "comment": "Uppercase identifiers not matched by type-expression",
+      "name": "entity.name.tag.constructor.aivi",
+      "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+    },
+
+    "builtin-keyword": {
+      "match": "\\b(with|as|of|key|on|pattern|value|if|then|else|let|in|match|when)\\b",
+      "name": "keyword.other.aivi"
     }
   }
 }

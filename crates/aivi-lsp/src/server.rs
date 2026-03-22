@@ -160,7 +160,7 @@ impl LanguageServer for Backend {
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        Ok(crate::hover::hover(params).await)
+        Ok(crate::hover::hover(params, Arc::clone(&self.state)).await)
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -171,7 +171,7 @@ impl LanguageServer for Backend {
         &self,
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
-        Ok(crate::definition::definition(params).await)
+        Ok(crate::definition::definition(params, Arc::clone(&self.state)).await)
     }
 
     async fn symbol(

@@ -36,6 +36,7 @@ use crate::{
         ResolvedSourceContractType, ResolvedSourceTypeConstructor,
         SourceContractResolutionErrorKind, SourceContractTypeResolver,
     },
+    typecheck::{TypeConstraint, expression_matches, typecheck_module},
 };
 
 /// Validation strictness for HIR modules.
@@ -104,6 +105,7 @@ impl Validator<'_> {
         self.validate_items();
         self.validate_type_kinds();
         self.validate_source_contract_types();
+        self.validate_expression_types();
         self.validate_fanout_semantics();
         self.validate_gate_semantics();
         self.validate_truthy_falsy_semantics();
@@ -1255,6 +1257,14 @@ impl Validator<'_> {
         }
     }
 
+    fn validate_expression_types(&mut self) {
+        if self.mode != ValidationMode::RequireResolvedNames {
+            return;
+        }
+        self.diagnostics
+            .extend(typecheck_module(self.module).into_diagnostics());
+    }
+
     fn emit_source_option_value_mismatch(
         &mut self,
         field: &crate::hir::RecordExprField,
@@ -1372,6 +1382,12 @@ impl Validator<'_> {
         bindings: &mut SourceOptionTypeBindings,
         value_stack: &mut Vec<ItemId>,
     ) -> SourceOptionTypeCheck {
+        if let Some(expected_gate) = expected.to_gate_type(bindings) {
+            if expression_matches(self.module, expr_id, &GateExprEnv::default(), &expected_gate) {
+                return SourceOptionTypeCheck::Match;
+            }
+        }
+
         if let Some(check) = self.check_source_option_expr_by_inference(
             expr_id,
             expected,
@@ -5691,12 +5707,14 @@ pub(crate) struct GateExprInfo {
     pub(crate) ty: Option<GateType>,
     pub(crate) contains_signal: bool,
     pub(crate) issues: Vec<GateIssue>,
+    pub(crate) constraints: Vec<TypeConstraint>,
 }
 
 impl GateExprInfo {
     fn merge(&mut self, other: Self) {
         self.contains_signal |= other.contains_signal;
         self.issues.extend(other.issues);
+        self.constraints.extend(other.constraints);
     }
 }
 
@@ -6289,6 +6307,14 @@ impl<'a> GateTypeContext<'a> {
         self.lower_type(ty, &HashMap::new(), &mut Vec::new())
     }
 
+    pub(crate) fn lower_hir_type(
+        &mut self,
+        ty: TypeId,
+        substitutions: &HashMap<TypeParameterId, GateType>,
+    ) -> Option<GateType> {
+        self.lower_type(ty, substitutions, &mut Vec::new())
+    }
+
     fn recurrence_target_hint_for_annotation(
         &mut self,
         annotation: TypeId,
@@ -6307,19 +6333,25 @@ impl<'a> GateTypeContext<'a> {
         if let Some(cached) = self.item_types.get(&item_id) {
             return cached.clone();
         }
+        self.item_types.insert(item_id, None);
         let ty = match &self.module.items()[item_id] {
             Item::Value(item) => item
                 .annotation
-                .and_then(|annotation| self.lower_annotation(annotation)),
+                .and_then(|annotation| self.lower_annotation(annotation))
+                .or_else(|| self.infer_expr(item.body, &GateExprEnv::default(), None).ty),
             Item::Function(item) => {
-                let result = item
-                    .annotation
-                    .and_then(|annotation| self.lower_annotation(annotation))?;
+                let mut env = GateExprEnv::default();
                 let mut parameters = Vec::with_capacity(item.parameters.len());
                 for parameter in &item.parameters {
                     let annotation = parameter.annotation?;
-                    parameters.push(self.lower_annotation(annotation)?);
+                    let parameter_ty = self.lower_annotation(annotation)?;
+                    env.locals.insert(parameter.binding, parameter_ty.clone());
+                    parameters.push(parameter_ty);
                 }
+                let result = item
+                    .annotation
+                    .and_then(|annotation| self.lower_annotation(annotation))
+                    .or_else(|| self.infer_expr(item.body, &env, None).ty)?;
                 let mut ty = result;
                 for parameter in parameters.into_iter().rev() {
                     ty = GateType::Arrow {
@@ -6331,7 +6363,16 @@ impl<'a> GateTypeContext<'a> {
             }
             Item::Signal(item) => item
                 .annotation
-                .and_then(|annotation| self.lower_annotation(annotation)),
+                .and_then(|annotation| self.lower_annotation(annotation))
+                .or_else(|| {
+                    if item.source_metadata.is_some() {
+                        return None;
+                    }
+                    let body = item.body?;
+                    Some(GateType::Signal(Box::new(
+                        self.infer_expr(body, &GateExprEnv::default(), None).ty?,
+                    )))
+                }),
             Item::Type(_)
             | Item::Class(_)
             | Item::Domain(_)
@@ -6840,6 +6881,8 @@ impl<'a> GateTypeContext<'a> {
                     | (Some(left), Some(right), crate::hir::BinaryOperator::NotEquals)
                         if left.same_shape(right) =>
                     {
+                        info.constraints
+                            .push(TypeConstraint::eq(expr.span, left.clone()));
                         Some(GateType::Primitive(BuiltinType::Bool))
                     }
                     _ => None,
@@ -7631,6 +7674,52 @@ impl SourceOptionExpectedType {
             return None;
         };
         Some(named)
+    }
+
+    fn to_gate_type(&self, bindings: &SourceOptionTypeBindings) -> Option<GateType> {
+        match self {
+            Self::Primitive(builtin) => Some(GateType::Primitive(*builtin)),
+            Self::List(element) => Some(GateType::List(Box::new(element.to_gate_type(bindings)?))),
+            Self::Map { key, value } => Some(GateType::Map {
+                key: Box::new(key.to_gate_type(bindings)?),
+                value: Box::new(value.to_gate_type(bindings)?),
+            }),
+            Self::Set(element) => Some(GateType::Set(Box::new(element.to_gate_type(bindings)?))),
+            Self::Signal(element) => {
+                Some(GateType::Signal(Box::new(element.to_gate_type(bindings)?)))
+            }
+            Self::Option(element) => {
+                Some(GateType::Option(Box::new(element.to_gate_type(bindings)?)))
+            }
+            Self::Result { error, value } => Some(GateType::Result {
+                error: Box::new(error.to_gate_type(bindings)?),
+                value: Box::new(value.to_gate_type(bindings)?),
+            }),
+            Self::Validation { error, value } => Some(GateType::Validation {
+                error: Box::new(error.to_gate_type(bindings)?),
+                value: Box::new(value.to_gate_type(bindings)?),
+            }),
+            Self::Named(named) => {
+                let arguments = named
+                    .arguments
+                    .iter()
+                    .map(|argument| argument.to_gate_type(bindings))
+                    .collect::<Option<Vec<_>>>()?;
+                Some(match named.kind {
+                    SourceOptionNamedKind::Domain => GateType::Domain {
+                        item: named.item,
+                        name: named.name.clone(),
+                        arguments,
+                    },
+                    SourceOptionNamedKind::Type => GateType::OpaqueItem {
+                        item: named.item,
+                        name: named.name.clone(),
+                        arguments,
+                    },
+                })
+            }
+            Self::ContractParameter(parameter) => bindings.parameter_gate_type(*parameter),
+        }
     }
 }
 
@@ -9279,6 +9368,56 @@ val screenView =
         assert_eq!(
             bindings.parameter_gate_type(SourceTypeParameter::A),
             Some(GateType::Primitive(BuiltinType::Int)),
+        );
+    }
+
+    #[test]
+    fn source_option_concrete_expected_types_accept_function_applications_with_builtin_holes() {
+        let mut sources = SourceDatabase::new();
+        let file_id = sources.add_file(
+            "source-option-concrete-application.aivi",
+            "fun keep:Option Int #value:Option Int => value\n\
+             val chosen = keep None\n",
+        );
+        let parsed = parse_module(&sources[file_id]);
+        assert!(
+            !parsed.has_errors(),
+            "test input should parse before source option checking: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+        let lowered = crate::lower_module(&parsed.module);
+        assert!(
+            !lowered.has_errors(),
+            "test input should lower before source option checking: {:?}",
+            lowered.diagnostics()
+        );
+        let module = lowered.module();
+        let chosen_expr = module
+            .root_items()
+            .iter()
+            .find_map(|item_id| match &module.items()[*item_id] {
+                Item::Value(item) if item.name.text() == "chosen" => Some(item.body),
+                _ => None,
+            })
+            .expect("expected chosen value");
+        let validator = Validator {
+            module,
+            mode: ValidationMode::RequireResolvedNames,
+            diagnostics: Vec::new(),
+        };
+        let mut typing = GateTypeContext::new(module);
+        let mut bindings = SourceOptionTypeBindings::default();
+
+        assert_eq!(
+            validator.check_source_option_expr(
+                chosen_expr,
+                &SourceOptionExpectedType::Option(Box::new(SourceOptionExpectedType::Primitive(
+                    BuiltinType::Int,
+                ))),
+                &mut typing,
+                &mut bindings,
+            ),
+            SourceOptionTypeCheck::Match,
         );
     }
 

@@ -38,6 +38,22 @@
         "path": "./snippets/aivi.json"
       }
     ],
+    "themes": [
+      {
+        "label": "AIVI Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/aivi-dark-color-theme.json"
+      }
+    ],
+    "configurationDefaults": {
+      "[aivi]": {
+        "editor.fontLigatures": true,
+        "editor.fontFamily": "'Fira Code', 'Cascadia Code', 'JetBrains Mono', 'Maple Mono', monospace",
+        "editor.rulers": [100],
+        "editor.renderWhitespace": "boundary",
+        "editor.semanticHighlighting.enabled": true
+      }
+    },
     "commands": [
       {
         "command": "aivi.restartServer",

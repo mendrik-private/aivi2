@@ -1,0 +1,3 @@
+val left = Map { "id": 1 }
+val right = Map { "id": 1 }
+val same:Bool = left == right

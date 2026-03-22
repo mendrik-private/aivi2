@@ -17,6 +17,7 @@ mod sequence;
 mod source_contract_resolution;
 mod source_lifecycle_elaboration;
 pub mod symbols;
+mod typecheck;
 mod truthy_falsy_elaboration;
 mod validate;
 
@@ -96,4 +97,5 @@ pub use truthy_falsy_elaboration::{
     TruthyFalsyElaborationBlocker, TruthyFalsyElaborationReport, TruthyFalsyStageElaboration,
     TruthyFalsyStageOutcome, TruthyFalsyStagePlan, elaborate_truthy_falsy,
 };
+pub use typecheck::{ConstraintClass, TypeCheckReport, TypeConstraint, typecheck_module};
 pub use validate::{GateRecordField, GateType, ValidationMode, ValidationReport, validate_module};

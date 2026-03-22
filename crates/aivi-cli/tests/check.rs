@@ -112,6 +112,9 @@ fn check_rejects_invalid_hir_fixtures() {
         "milestone-2/invalid/source-option-imported-binding-mismatch/main.aivi",
         "milestone-2/invalid/source-option-constructor-mismatch/main.aivi",
         "milestone-2/invalid/source-option-list-element-mismatch/main.aivi",
+        "milestone-2/invalid/value-annotation-type-mismatch/main.aivi",
+        "milestone-2/invalid/equality-missing-eq-instance/main.aivi",
+        "milestone-2/invalid/trailing-declaration-body-token/main.aivi",
         "milestone-2/invalid/custom-source-provider-unknown-option/main.aivi",
         "milestone-2/invalid/custom-source-provider-option-type-mismatch/main.aivi",
         "milestone-2/invalid/custom-source-provider-argument-count-mismatch/main.aivi",
@@ -187,5 +190,77 @@ fn check_reports_non_exhaustive_case_from_hir() {
     assert!(
         stderr.contains("case split over `Status` is not exhaustive; missing `Pending`, `Failed`"),
         "expected explicit non-exhaustive case message, got stderr: {stderr}"
+    );
+}
+
+#[test]
+fn check_reports_type_mismatch_from_hir_typechecker() {
+    let path = fixture_path("milestone-2/invalid/value-annotation-type-mismatch/main.aivi");
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        !output.status.success(),
+        "expected type mismatch fixture to fail check"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("hir::type-mismatch"),
+        "expected type mismatch diagnostic code, got stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("expected `Text` but found `Int`"),
+        "expected explicit type mismatch message, got stderr: {stderr}"
+    );
+}
+
+#[test]
+fn check_reports_missing_eq_from_hir_typechecker() {
+    let path = fixture_path("milestone-2/invalid/equality-missing-eq-instance/main.aivi");
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        !output.status.success(),
+        "expected missing Eq fixture to fail check"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("hir::missing-eq-instance"),
+        "expected missing Eq diagnostic code, got stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("this expression requires `Eq` for `Map Text Int`"),
+        "expected explicit missing Eq message, got stderr: {stderr}"
+    );
+}
+
+#[test]
+fn check_reports_trailing_body_tokens_from_syntax() {
+    let path = fixture_path("milestone-2/invalid/trailing-declaration-body-token/main.aivi");
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        !output.status.success(),
+        "expected trailing body token fixture to fail check"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("syntax::trailing-declaration-body-token"),
+        "expected trailing body token diagnostic code, got stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("function declaration body must contain exactly one expression"),
+        "expected explicit trailing body token message, got stderr: {stderr}"
     );
 }

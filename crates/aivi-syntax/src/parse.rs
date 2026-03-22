@@ -28,6 +28,8 @@ const MISSING_USE_PATH: DiagnosticCode = DiagnosticCode::new("syntax", "missing-
 const MISSING_EXPORT_NAME: DiagnosticCode = DiagnosticCode::new("syntax", "missing-export-name");
 const MISSING_DECLARATION_BODY: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-declaration-body");
+const TRAILING_DECLARATION_BODY_TOKEN: DiagnosticCode =
+    DiagnosticCode::new("syntax", "trailing-declaration-body-token");
 const MISSING_CLASS_MEMBER_TYPE: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-class-member-type");
 const MISSING_DOMAIN_OVER: DiagnosticCode = DiagnosticCode::new("syntax", "missing-domain-over");
@@ -399,16 +401,14 @@ impl<'a> Parser<'a> {
             .consume_kind(&mut cursor, end, TokenKind::Equals)
             .is_some()
         {
-            self.parse_expr(&mut cursor, end, ExprStop::default())
-                .map(NamedItemBody::Expr)
-                .or_else(|| {
-                    self.missing_body_diagnostic(
-                        keyword_index,
-                        "value declaration is missing its body after `=`",
-                        "expected an expression after `=`",
-                    );
-                    None
-                })
+            self.parse_expression_body(
+                keyword_index,
+                &mut cursor,
+                end,
+                "value declaration",
+                "value declaration is missing its body after `=`",
+                "expected an expression after `=`",
+            )
         } else {
             self.missing_body_diagnostic(
                 keyword_index,
@@ -451,16 +451,14 @@ impl<'a> Parser<'a> {
             .consume_kind(&mut cursor, end, TokenKind::Arrow)
             .is_some()
         {
-            self.parse_expr(&mut cursor, end, ExprStop::default())
-                .map(NamedItemBody::Expr)
-                .or_else(|| {
-                    self.missing_body_diagnostic(
-                        keyword_index,
-                        "function declaration is missing its body after `=>`",
-                        "expected a function body after `=>`",
-                    );
-                    None
-                })
+            self.parse_expression_body(
+                keyword_index,
+                &mut cursor,
+                end,
+                "function declaration",
+                "function declaration is missing its body after `=>`",
+                "expected a function body after `=>`",
+            )
         } else {
             self.diagnostics.push(
                 Diagnostic::error("function declaration is missing `=>` before its body")
@@ -498,16 +496,14 @@ impl<'a> Parser<'a> {
             .consume_kind(&mut cursor, end, TokenKind::Equals)
             .is_some()
         {
-            self.parse_expr(&mut cursor, end, ExprStop::default())
-                .map(NamedItemBody::Expr)
-                .or_else(|| {
-                    self.missing_body_diagnostic(
-                        keyword_index,
-                        "signal declaration is missing its body after `=`",
-                        "expected an expression after `=`",
-                    );
-                    None
-                })
+            self.parse_expression_body(
+                keyword_index,
+                &mut cursor,
+                end,
+                "signal declaration",
+                "signal declaration is missing its body after `=`",
+                "expected an expression after `=`",
+            )
         } else {
             None
         };
@@ -2326,6 +2322,36 @@ impl<'a> Parser<'a> {
         );
     }
 
+    fn parse_expression_body(
+        &mut self,
+        keyword_index: usize,
+        cursor: &mut usize,
+        end: usize,
+        declaration_name: &str,
+        missing_message: &str,
+        missing_label: &str,
+    ) -> Option<NamedItemBody> {
+        let expr = self
+            .parse_expr(cursor, end, ExprStop::default())
+            .or_else(|| {
+                self.missing_body_diagnostic(keyword_index, missing_message, missing_label);
+                None
+            })?;
+        if let Some(trailing_index) = self.next_significant_in_range(*cursor, end) {
+            self.diagnostics.push(
+                Diagnostic::error(format!(
+                    "{declaration_name} body must contain exactly one expression"
+                ))
+                .with_code(TRAILING_DECLARATION_BODY_TOKEN)
+                .with_primary_label(
+                    self.source_span_of_token(trailing_index),
+                    "this token is outside the declaration body",
+                ),
+            );
+        }
+        Some(NamedItemBody::Expr(expr))
+    }
+
     fn text_literal_from_token(&mut self, index: usize) -> TextLiteral {
         let span = self.source_span_of_token(index);
         let raw = self.tokens[index].text(self.source);
@@ -3303,6 +3329,19 @@ export main
             Item::Value(item) => assert!(item.name.is_none()),
             other => panic!("expected a value item, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parser_reports_trailing_tokens_after_expression_body() {
+        let (_, parsed) = load(
+            "fun prependCells:List Int #head:Int #tail:List Int =>\n    head :: tail\n",
+        );
+
+        assert!(parsed.has_errors());
+        assert!(parsed
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code == Some(TRAILING_DECLARATION_BODY_TOKEN)));
     }
 
     #[test]
