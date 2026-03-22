@@ -8,9 +8,10 @@ use crate::{
         MarkupAttribute, MarkupAttributeValue, MarkupNode, Module, NamedItem, NamedItemBody,
         OperatorName, Pattern, PatternKind, PipeCaseArm, PipeExpr, PipeStage, PipeStageKind,
         ProjectionPath, QualifiedName, RecordExpr, RecordField, RecordPatternField, RegexLiteral,
-        SourceDecorator, SuffixedIntegerLiteral, TextFragment, TextInterpolation, TextLiteral,
-        TextSegment, TokenRange, TypeDeclBody, TypeExpr, TypeExprKind, TypeField, TypeVariant,
-        UnaryOperator, UseItem,
+        SourceDecorator, SourceProviderContractBody, SourceProviderContractItem,
+        SourceProviderContractMember, SuffixedIntegerLiteral, TextFragment, TextInterpolation,
+        TextLiteral, TextSegment, TokenRange, TypeDeclBody, TypeExpr, TypeExprKind, TypeField,
+        TypeVariant, UnaryOperator, UseItem,
     },
     lex::{LexedModule, Token, TokenKind, lex_fragment, lex_module},
 };
@@ -35,6 +36,10 @@ const MISSING_DOMAIN_MEMBER_NAME: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-domain-member-name");
 const MISSING_DOMAIN_MEMBER_TYPE: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-domain-member-type");
+const MISSING_PROVIDER_CONTRACT_NAME: DiagnosticCode =
+    DiagnosticCode::new("syntax", "missing-provider-contract-name");
+const MISSING_PROVIDER_CONTRACT_MEMBER_VALUE: DiagnosticCode =
+    DiagnosticCode::new("syntax", "missing-provider-contract-member-value");
 const MISSING_FUNCTION_ARROW: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-function-arrow");
 const MISMATCHED_MARKUP_CLOSE: DiagnosticCode =
@@ -184,6 +189,9 @@ impl<'a> Parser<'a> {
             }
             TokenKind::ClassKw => Item::Class(self.parse_class_item(base, keyword_index, end)),
             TokenKind::DomainKw => Item::Domain(self.parse_domain_item(base, keyword_index, end)),
+            TokenKind::ProviderKw => Item::SourceProviderContract(
+                self.parse_source_provider_contract_item(base, keyword_index, end),
+            ),
             TokenKind::UseKw => Item::Use(self.parse_use_item(base, keyword_index, end)),
             TokenKind::ExportKw => Item::Export(self.parse_export_item(base, keyword_index, end)),
             _ => unreachable!("finish_item only accepts top-level declaration keywords"),
@@ -341,6 +349,33 @@ impl<'a> Parser<'a> {
             name,
             type_parameters,
             carrier,
+            body,
+        }
+    }
+
+    fn parse_source_provider_contract_item(
+        &mut self,
+        base: ItemBase,
+        keyword_index: usize,
+        end: usize,
+    ) -> SourceProviderContractItem {
+        let mut cursor = keyword_index + 1;
+        let provider = self.parse_qualified_name(&mut cursor, end).or_else(|| {
+            self.diagnostics.push(
+                Diagnostic::error("provider contract declaration is missing its provider name")
+                    .with_code(MISSING_PROVIDER_CONTRACT_NAME)
+                    .with_primary_label(
+                        self.source_span_of_token(keyword_index),
+                        "expected a qualified provider name such as `custom.feed`",
+                    ),
+            );
+            None
+        });
+        let body = self.parse_source_provider_contract_body(&mut cursor, end);
+        SourceProviderContractItem {
+            base,
+            keyword_span: self.source_span_of_token(keyword_index),
+            provider,
             body,
         }
     }
@@ -531,6 +566,30 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_source_provider_contract_body(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+    ) -> Option<SourceProviderContractBody> {
+        let body_start = *cursor;
+        let mut members = Vec::new();
+
+        while let Some(index) = self.peek_nontrivia(*cursor, end) {
+            if !self.tokens[index].line_start() {
+                break;
+            }
+            let Some(member) = self.parse_source_provider_contract_member(cursor, end) else {
+                break;
+            };
+            members.push(member);
+        }
+
+        (!members.is_empty()).then_some(SourceProviderContractBody {
+            members,
+            span: self.source_span_for_range(body_start, *cursor),
+        })
+    }
+
     fn parse_class_member(&mut self, cursor: &mut usize, end: usize) -> Option<ClassMember> {
         let start = *cursor;
         let name = self.parse_signature_member_name(cursor, end)?;
@@ -610,6 +669,41 @@ impl<'a> Parser<'a> {
         Some(DomainMember {
             name,
             annotation,
+            span: self.source_span_for_range(start, *cursor),
+        })
+    }
+
+    fn parse_source_provider_contract_member(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+    ) -> Option<SourceProviderContractMember> {
+        let start = *cursor;
+        let name = self.parse_identifier(cursor, end)?;
+        let value = if self.consume_kind(cursor, end, TokenKind::Colon).is_some() {
+            self.parse_identifier(cursor, end).or_else(|| {
+                self.diagnostics.push(
+                    Diagnostic::error("provider contract member is missing its value after `:`")
+                        .with_code(MISSING_PROVIDER_CONTRACT_MEMBER_VALUE)
+                        .with_primary_label(
+                            name.span,
+                            "expected a provider-contract value such as `providerTrigger`",
+                        ),
+                );
+                None
+            })
+        } else {
+            self.diagnostics.push(
+                Diagnostic::error("provider contract member is missing `:` before its value")
+                    .with_code(MISSING_PROVIDER_CONTRACT_MEMBER_VALUE)
+                    .with_primary_label(name.span, "expected `:` followed by a contract value"),
+            );
+            None
+        };
+
+        Some(SourceProviderContractMember {
+            name: Some(name),
+            value,
             span: self.source_span_for_range(start, *cursor),
         })
     }
@@ -2871,6 +2965,45 @@ export main
                 ));
             }
             other => panic!("expected domain item, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parser_builds_provider_contract_members_from_fixture() {
+        let parsed = parse_fixture("valid/top-level/provider_contracts.aivi");
+
+        assert!(!parsed.has_errors());
+        assert_eq!(
+            parsed.module.items[0].kind(),
+            ItemKind::SourceProviderContract
+        );
+        match &parsed.module.items[0] {
+            Item::SourceProviderContract(item) => {
+                assert_eq!(
+                    item.provider
+                        .as_ref()
+                        .map(QualifiedName::as_dotted)
+                        .as_deref(),
+                    Some("custom.feed")
+                );
+                let body = item
+                    .body
+                    .as_ref()
+                    .expect("provider contract should have a body");
+                assert_eq!(body.members.len(), 1);
+                assert_eq!(
+                    body.members[0].name.as_ref().map(|name| name.text.as_str()),
+                    Some("wakeup")
+                );
+                assert_eq!(
+                    body.members[0]
+                        .value
+                        .as_ref()
+                        .map(|value| value.text.as_str()),
+                    Some("providerTrigger")
+                );
+            }
+            other => panic!("expected provider contract item, got {other:?}"),
         }
     }
 

@@ -44,6 +44,7 @@ pub enum TokenKind {
     SigKw,
     ClassKw,
     DomainKw,
+    ProviderKw,
     UseKw,
     ExportKw,
     Star,
@@ -75,6 +76,7 @@ impl TokenKind {
                 | TokenKind::SigKw
                 | TokenKind::ClassKw
                 | TokenKind::DomainKw
+                | TokenKind::ProviderKw
                 | TokenKind::UseKw
                 | TokenKind::ExportKw
         )
@@ -404,6 +406,7 @@ fn keyword_kind(text: &str) -> Option<TokenKind> {
         "sig" => Some(TokenKind::SigKw),
         "class" => Some(TokenKind::ClassKw),
         "domain" => Some(TokenKind::DomainKw),
+        "provider" => Some(TokenKind::ProviderKw),
         "use" => Some(TokenKind::UseKw),
         "export" => Some(TokenKind::ExportKw),
         _ => None,

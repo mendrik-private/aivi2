@@ -3,8 +3,9 @@ use crate::cst::{
     DomainItem, DomainMember, DomainMemberName, Expr, ExprKind, FunctionParam, Identifier, Item,
     MarkupAttribute, MarkupAttributeValue, MarkupNode, Module, NamedItem, Pattern, PatternKind,
     PipeExpr, PipeStage, PipeStageKind, ProjectionPath, QualifiedName, RecordExpr, RecordField,
-    RecordPatternField, SourceDecorator, SuffixedIntegerLiteral, TextLiteral, TextSegment,
-    TypeDeclBody, TypeExpr, TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseItem,
+    RecordPatternField, SourceDecorator, SourceProviderContractItem, SourceProviderContractMember,
+    SuffixedIntegerLiteral, TextLiteral, TextSegment, TypeDeclBody, TypeExpr, TypeExprKind,
+    TypeField, TypeVariant, UnaryOperator, UseItem,
 };
 
 const INDENT_WIDTH: usize = 4;
@@ -69,6 +70,9 @@ impl Formatter {
             Item::Signal(item) => lines.extend(self.format_value_item("sig", item, true)),
             Item::Class(item) => lines.extend(self.format_class_item(item)),
             Item::Domain(item) => lines.extend(self.format_domain_item(item)),
+            Item::SourceProviderContract(item) => {
+                lines.extend(self.format_source_provider_contract_item(item))
+            }
             Item::Use(item) => lines.extend(self.format_use_item(item)),
             Item::Export(item) => {
                 lines.push(format!("export {}", self.item_name(&item.name)));
@@ -266,6 +270,39 @@ impl Formatter {
             lines.extend(self.format_domain_member(member));
         }
         lines
+    }
+
+    fn format_source_provider_contract_item(
+        &self,
+        item: &SourceProviderContractItem,
+    ) -> Vec<String> {
+        let provider = item
+            .provider
+            .as_ref()
+            .map(|provider| self.format_qualified_name(provider))
+            .unwrap_or_else(|| "_".to_owned());
+        let header = format!("provider {provider}");
+        let Some(body) = &item.body else {
+            return vec![header];
+        };
+
+        let mut lines = vec![header];
+        for member in &body.members {
+            lines.push(self.format_source_provider_contract_member(member));
+        }
+        lines
+    }
+
+    fn format_source_provider_contract_member(
+        &self,
+        member: &SourceProviderContractMember,
+    ) -> String {
+        let mut line = format!("{}{}:", spaces(INDENT_WIDTH), self.item_name(&member.name));
+        if let Some(value) = &member.value {
+            line.push(' ');
+            line.push_str(&value.text);
+        }
+        line
     }
 
     fn format_class_member(&self, member: &ClassMember) -> Vec<String> {
@@ -1430,6 +1467,21 @@ mod tests {
                 "    literal root : Text -> Path\n",
                 "    (/) : Path -> Text -> Path\n",
                 "    value : Path -> Text\n",
+            )
+        );
+    }
+
+    #[test]
+    fn formatter_normalizes_provider_contract_layout_fixture() {
+        let formatted = format_fixture("valid/formatting/provider_contract_layout.aivi");
+        assert_eq!(
+            formatted,
+            concat!(
+                "provider custom.feed\n",
+                "    wakeup: providerTrigger\n",
+                "\n",
+                "provider custom.timer\n",
+                "    wakeup: timer\n",
             )
         );
     }

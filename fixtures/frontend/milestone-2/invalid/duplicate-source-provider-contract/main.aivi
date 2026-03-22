@@ -1,0 +1,5 @@
+provider custom.feed
+    wakeup: providerTrigger
+
+provider custom.feed
+    wakeup: timer

@@ -14,8 +14,11 @@ fn check_accepts_valid_hir_fixtures() {
     for relative in [
         "milestone-2/valid/local-top-level-refs/main.aivi",
         "milestone-2/valid/use-member-imports/main.aivi",
+        "milestone-2/valid/source-provider-contract-declarations/main.aivi",
         "milestone-2/valid/custom-source-recurrence-wakeup/main.aivi",
         "milestone-2/valid/source-decorator-signals/main.aivi",
+        "milestone-2/valid/source-option-contract-parameters/main.aivi",
+        "milestone-2/valid/source-option-imported-binding-match/main.aivi",
         "milestone-2/valid/applicative-clusters/main.aivi",
         "milestone-2/valid/markup-control-nodes/main.aivi",
         "milestone-2/valid/class-declarations/main.aivi",
@@ -57,6 +60,7 @@ fn check_accepts_valid_hir_fixtures() {
 fn check_rejects_invalid_hir_fixtures() {
     for relative in [
         "milestone-2/invalid/duplicate-top-level-names/main.aivi",
+        "milestone-2/invalid/duplicate-source-provider-contract/main.aivi",
         "milestone-2/invalid/unknown-imported-names/main.aivi",
         "milestone-2/invalid/unknown-decorator/main.aivi",
         "milestone-2/invalid/unresolved-names/main.aivi",
@@ -91,6 +95,8 @@ fn check_rejects_invalid_hir_fixtures() {
         "milestone-2/invalid/source-contract-missing-type/main.aivi",
         "milestone-2/invalid/source-contract-arity-mismatch/main.aivi",
         "milestone-2/invalid/source-option-type-mismatch/main.aivi",
+        "milestone-2/invalid/source-option-contract-parameter-signal-mismatch/main.aivi",
+        "milestone-2/invalid/source-option-imported-binding-mismatch/main.aivi",
         "milestone-2/invalid/source-option-constructor-mismatch/main.aivi",
         "milestone-2/invalid/source-option-list-element-mismatch/main.aivi",
     ] {

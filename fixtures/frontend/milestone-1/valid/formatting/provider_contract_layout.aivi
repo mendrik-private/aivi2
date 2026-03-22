@@ -1,0 +1,4 @@
+provider custom.feed
+ wakeup:providerTrigger
+provider custom.timer
+ wakeup:timer

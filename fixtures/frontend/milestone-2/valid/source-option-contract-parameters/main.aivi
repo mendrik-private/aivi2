@@ -1,0 +1,34 @@
+type HttpError =
+  | Timeout
+
+type Session = {
+    token: Text
+}
+
+type Credentials =
+  | Credentials Text Text
+
+type DecodeMode =
+  | Strict
+  | Permissive
+
+type FsError =
+  | Missing
+
+type FsWatchEvent =
+  | Changed
+
+sig fileEvents : Signal FsWatchEvent =
+    Changed
+
+@source http.post "/login" with {
+    body: Credentials "demo" "secret",
+    decode: Strict
+}
+sig login : Signal (Result HttpError Session)
+
+@source fs.read "/tmp/demo.txt" with {
+    decode: Strict,
+    reloadOn: fileEvents
+}
+sig fileText : Signal (Result FsError Text)

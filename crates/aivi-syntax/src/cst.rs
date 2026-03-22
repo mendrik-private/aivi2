@@ -550,6 +550,30 @@ pub struct DomainItem {
     pub body: Option<DomainBody>,
 }
 
+/// One `provider` contract member such as `wakeup: providerTrigger`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceProviderContractMember {
+    pub span: SourceSpan,
+    pub name: Option<Identifier>,
+    pub value: Option<Identifier>,
+}
+
+/// Body of a `provider` contract declaration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceProviderContractBody {
+    pub span: SourceSpan,
+    pub members: Vec<SourceProviderContractMember>,
+}
+
+/// `provider` declaration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceProviderContractItem {
+    pub base: ItemBase,
+    pub keyword_span: SourceSpan,
+    pub provider: Option<QualifiedName>,
+    pub body: Option<SourceProviderContractBody>,
+}
+
 /// Error recovery item that still preserves source coverage.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ErrorItem {
@@ -566,6 +590,7 @@ pub enum Item {
     Signal(NamedItem),
     Class(NamedItem),
     Domain(DomainItem),
+    SourceProviderContract(SourceProviderContractItem),
     Use(UseItem),
     Export(ExportItem),
     Error(ErrorItem),
@@ -580,6 +605,7 @@ pub enum ItemKind {
     Signal,
     Class,
     Domain,
+    SourceProviderContract,
     Use,
     Export,
     Error,
@@ -594,6 +620,7 @@ impl Item {
             Item::Signal(_) => ItemKind::Signal,
             Item::Class(_) => ItemKind::Class,
             Item::Domain(_) => ItemKind::Domain,
+            Item::SourceProviderContract(_) => ItemKind::SourceProviderContract,
             Item::Use(_) => ItemKind::Use,
             Item::Export(_) => ItemKind::Export,
             Item::Error(_) => ItemKind::Error,
@@ -608,6 +635,7 @@ impl Item {
             | Item::Signal(item)
             | Item::Class(item) => &item.base,
             Item::Domain(item) => &item.base,
+            Item::SourceProviderContract(item) => &item.base,
             Item::Use(item) => &item.base,
             Item::Export(item) => &item.base,
             Item::Error(item) => &item.base,

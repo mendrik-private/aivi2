@@ -1,0 +1,8 @@
+use aivi.network (
+    http
+)
+
+@source timer.every 120 with {
+    immediate: http
+}
+sig tick : Signal Unit

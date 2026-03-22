@@ -174,6 +174,7 @@ fn print_usage() {
             ItemKind::Signal,
             ItemKind::Class,
             ItemKind::Domain,
+            ItemKind::SourceProviderContract,
             ItemKind::Use,
             ItemKind::Export,
         ]

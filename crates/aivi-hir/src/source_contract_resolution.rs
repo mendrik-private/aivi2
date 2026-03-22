@@ -159,6 +159,7 @@ impl<'a> SourceContractTypeResolver<'a> {
                 | Item::Function(_)
                 | Item::Signal(_)
                 | Item::Class(_)
+                | Item::SourceProviderContract(_)
                 | Item::Instance(_)
                 | Item::Use(_)
                 | Item::Export(_) => None,

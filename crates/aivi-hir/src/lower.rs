@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 
 use aivi_base::{Diagnostic, DiagnosticCode, Severity, SourceSpan};
 use aivi_syntax as syn;
-use aivi_typing::BuiltinSourceProvider;
 
 use crate::{
     ApplicativeCluster, ApplicativeSpineHead, AtLeastTwo, BinaryOperator, Binding, BindingId,
@@ -10,15 +9,16 @@ use crate::{
     ClusterFinalizer, ClusterPresentation, ControlNode, ControlNodeId, Decorator, DecoratorCall,
     DecoratorId, DecoratorPayload, DomainItem, DomainMember, DomainMemberKind, EachControl,
     EmptyControl, ExportItem, Expr, ExprId, ExprKind, FragmentControl, FunctionItem,
-    FunctionParameter, ImportBinding, ImportId, IntegerLiteral, Item, ItemHeader, ItemId, ItemKind,
-    LiteralSuffixResolution, MarkupAttribute, MarkupAttributeValue, MarkupElement, MarkupNode,
-    MarkupNodeId, MarkupNodeKind, MatchControl, Module, Name, NamePath, Pattern, PatternId,
-    PatternKind, PipeExpr, PipeStage, PipeStageKind, ProjectionBase, RecordExpr, RecordExprField,
-    RecordFieldSurface, RecordPatternField, RecurrenceWakeupDecorator,
-    RecurrenceWakeupDecoratorKind, RegexLiteral, ResolutionState, ShowControl, SignalItem,
-    SourceDecorator, SourceMetadata, SuffixedIntegerLiteral, TermReference, TermResolution,
-    TextFragment, TextInterpolation, TextLiteral, TextSegment, TypeField, TypeId, TypeItem,
-    TypeItemBody, TypeKind, TypeNode, TypeParameter, TypeParameterId, TypeReference,
+    FunctionParameter, ImportBinding, ImportBindingMetadata, ImportBundleKind, ImportId,
+    ImportValueType, IntegerLiteral, Item, ItemHeader, ItemId, ItemKind, LiteralSuffixResolution,
+    MarkupAttribute, MarkupAttributeValue, MarkupElement, MarkupNode, MarkupNodeId, MarkupNodeKind,
+    MatchControl, Module, Name, NamePath, Pattern, PatternId, PatternKind, PipeExpr, PipeStage,
+    PipeStageKind, ProjectionBase, RecordExpr, RecordExprField, RecordFieldSurface,
+    RecordPatternField, RecurrenceWakeupDecorator, RecurrenceWakeupDecoratorKind, RegexLiteral,
+    ResolutionState, ShowControl, SignalItem, SourceDecorator, SourceMetadata,
+    SourceProviderContractItem, SourceProviderRef, SuffixedIntegerLiteral, TermReference,
+    TermResolution, TextFragment, TextInterpolation, TextLiteral, TextSegment, TypeField, TypeId,
+    TypeItem, TypeItemBody, TypeKind, TypeNode, TypeParameter, TypeParameterId, TypeReference,
     TypeResolution, TypeVariant, UnaryOperator, UseItem, ValueItem, WithControl,
 };
 
@@ -107,15 +107,10 @@ struct Namespaces {
     term_items: HashMap<String, Vec<NamedSite<ItemId>>>,
     type_items: HashMap<String, Vec<NamedSite<ItemId>>>,
     any_items: HashMap<String, Vec<NamedSite<ItemId>>>,
+    provider_contracts: HashMap<String, Vec<NamedSite<ItemId>>>,
     literal_suffixes: HashMap<String, Vec<NamedSite<LiteralSuffixResolution>>>,
     term_imports: HashMap<String, Vec<NamedSite<ImportId>>>,
     type_imports: HashMap<String, Vec<NamedSite<ImportId>>>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum KnownImportKind {
-    OrdinaryTerm,
-    Bundle,
 }
 
 #[derive(Clone, Copy)]
@@ -160,6 +155,9 @@ impl Lowerer {
             syn::Item::Signal(item) => Some(Item::Signal(self.lower_signal_item(item))),
             syn::Item::Class(item) => Some(Item::Class(self.lower_class_item(item))),
             syn::Item::Domain(item) => Some(Item::Domain(self.lower_domain_item(item))),
+            syn::Item::SourceProviderContract(item) => Some(Item::SourceProviderContract(
+                self.lower_source_provider_contract_item(item),
+            )),
             syn::Item::Use(item) => Some(Item::Use(self.lower_use_item(item))),
             syn::Item::Export(item) => Some(Item::Export(self.lower_export_item(item))),
             syn::Item::Error(item) => {
@@ -502,6 +500,120 @@ impl Lowerer {
         }
     }
 
+    fn lower_source_provider_contract_item(
+        &mut self,
+        item: &syn::SourceProviderContractItem,
+    ) -> SourceProviderContractItem {
+        let header = self.lower_item_header(
+            &item.base.decorators,
+            ItemKind::SourceProviderContract,
+            item.base.span,
+        );
+        let provider_path = item
+            .provider
+            .as_ref()
+            .map(|provider| self.lower_qualified_name(provider));
+        let provider = SourceProviderRef::from_path(provider_path.as_ref());
+        match &provider {
+            SourceProviderRef::Builtin(provider_ref) => {
+                self.emit_error(
+                    item.base.span,
+                    format!(
+                        "provider contract declarations cannot target built-in source provider `{}`",
+                        provider_ref.key()
+                    ),
+                    code("builtin-source-provider-contract"),
+                );
+            }
+            SourceProviderRef::InvalidShape(key) => {
+                self.emit_error(
+                    item.base.span,
+                    format!(
+                        "provider contract `{key}` must use a qualified provider key such as `custom.feed`"
+                    ),
+                    code("invalid-source-provider-contract-shape"),
+                );
+            }
+            SourceProviderRef::Missing | SourceProviderRef::Custom(_) => {}
+        }
+
+        SourceProviderContractItem {
+            header,
+            provider,
+            contract: self.lower_custom_source_contract(item.body.as_ref()),
+        }
+    }
+
+    fn lower_custom_source_contract(
+        &mut self,
+        body: Option<&syn::SourceProviderContractBody>,
+    ) -> crate::CustomSourceContractMetadata {
+        let mut contract = crate::CustomSourceContractMetadata::default();
+        let mut wakeup_span = None;
+        let Some(body) = body else {
+            return contract;
+        };
+
+        for member in &body.members {
+            let Some(name) = member.name.as_ref() else {
+                continue;
+            };
+            match name.text.as_str() {
+                "wakeup" => {
+                    if let Some(previous_span) = wakeup_span {
+                        self.diagnostics.push(
+                            Diagnostic::error("provider contract field `wakeup` is duplicated")
+                                .with_code(code("duplicate-source-provider-contract-field"))
+                                .with_primary_label(
+                                    member.span,
+                                    "this `wakeup` field repeats an earlier contract field",
+                                )
+                                .with_secondary_label(
+                                    previous_span,
+                                    "previous `wakeup` field declared here",
+                                ),
+                        );
+                        continue;
+                    }
+                    wakeup_span = Some(member.span);
+                    let Some(value) = member.value.as_ref() else {
+                        continue;
+                    };
+                    contract.recurrence_wakeup = self.lower_custom_source_contract_wakeup(value);
+                }
+                _ => {
+                    self.emit_error(
+                        name.span,
+                        format!("unknown provider contract field `{}`", name.text),
+                        code("unknown-source-provider-contract-field"),
+                    );
+                }
+            }
+        }
+
+        contract
+    }
+
+    fn lower_custom_source_contract_wakeup(
+        &mut self,
+        value: &syn::Identifier,
+    ) -> Option<crate::CustomSourceRecurrenceWakeup> {
+        match value.text.as_str() {
+            "timer" => Some(crate::CustomSourceRecurrenceWakeup::Timer),
+            "backoff" => Some(crate::CustomSourceRecurrenceWakeup::Backoff),
+            "sourceEvent" => Some(crate::CustomSourceRecurrenceWakeup::SourceEvent),
+            "providerTrigger" => Some(crate::CustomSourceRecurrenceWakeup::ProviderDefinedTrigger),
+            _ => {
+                self.emit_error(
+                    value.span,
+                    format!("unknown provider contract wakeup `{}`", value.text),
+                    code("unknown-source-provider-contract-wakeup"),
+                );
+                None
+            }
+        }
+    }
+
     fn lower_use_item(&mut self, item: &syn::UseItem) -> UseItem {
         let header = self.lower_item_header(&item.base.decorators, ItemKind::Use, item.base.span);
         let module = item
@@ -516,6 +628,7 @@ impl Lowerer {
                 );
                 self.make_path(&[self.make_name("invalid", item.base.span)])
             });
+        let module_name = path_text(&module);
         let mut imports = item
             .imports
             .iter()
@@ -525,10 +638,13 @@ impl Lowerer {
                     .last()
                     .map(|segment| self.make_name(&segment.text, segment.span))
                     .unwrap_or_else(|| self.make_name("invalid", item.base.span));
+                let metadata = known_import_metadata(&module_name, imported_name.text())
+                    .unwrap_or(ImportBindingMetadata::Unknown);
                 self.alloc_import(ImportBinding {
                     span: import.span,
                     imported_name: imported_name.clone(),
                     local_name: imported_name,
+                    metadata,
                 })
             })
             .collect::<Vec<_>>();
@@ -542,6 +658,7 @@ impl Lowerer {
                 span: item.base.span,
                 imported_name: self.make_name("invalid", item.base.span),
                 local_name: self.make_name("invalid", item.base.span),
+                metadata: ImportBindingMetadata::Unknown,
             }));
         }
         let imports =
@@ -775,16 +892,22 @@ impl Lowerer {
     }
 
     fn validate_source_decorator_shape(&mut self, span: SourceSpan, source: &SourceDecorator) {
-        let provider_key = match source.provider.as_ref() {
-            Some(provider) if provider.segments().len() >= 2 => Some(path_text(provider)),
-            Some(provider) => {
-                self.emit_error(
-                    provider.span(),
-                    "source decorators must name a provider variant such as `timer.every`",
-                    code("invalid-source-provider"),
-                );
-                None
-            }
+        let provider = match source.provider.as_ref() {
+            Some(provider) => match SourceProviderRef::from_path(Some(provider)) {
+                SourceProviderRef::Builtin(provider_ref) => Some(provider_ref),
+                SourceProviderRef::Custom(_) => None,
+                SourceProviderRef::InvalidShape(_) => {
+                    self.emit_error(
+                        provider.span(),
+                        "source decorators must name a provider variant such as `timer.every`",
+                        code("invalid-source-provider"),
+                    );
+                    None
+                }
+                SourceProviderRef::Missing => unreachable!(
+                    "classifying an explicit source provider should never yield Missing"
+                ),
+            },
             None => {
                 self.emit_error(
                     span,
@@ -793,11 +916,7 @@ impl Lowerer {
                 );
                 None
             }
-        }
-        .and_then(|provider_key| {
-            BuiltinSourceProvider::parse(&provider_key)
-                .map(|provider| (provider_key, provider.contract()))
-        });
+        };
 
         let Some(options) = source.options else {
             return;
@@ -821,12 +940,14 @@ impl Lowerer {
                         .with_secondary_label(previous_span, "previous source option here"),
                 );
             }
-            if let Some((provider_key, contract)) = provider_key.as_ref() {
+            if let Some(provider) = provider {
+                let contract = provider.contract();
                 if contract.option(field.label.text()).is_none() {
                     self.diagnostics.push(
                         Diagnostic::error(format!(
-                            "unknown source option `{}` for `{provider_key}`",
-                            field.label.text()
+                            "unknown source option `{}` for `{}`",
+                            field.label.text(),
+                            provider.key()
                         ))
                         .with_code(code("unknown-source-option"))
                         .with_primary_label(
@@ -2459,6 +2580,19 @@ impl Lowerer {
                         }
                     }
                 }
+                Item::SourceProviderContract(item) => {
+                    if let Some(key) = item.provider.custom_key() {
+                        insert_named(
+                            &mut namespaces.provider_contracts,
+                            key,
+                            item_id,
+                            item.header.span,
+                            &mut self.diagnostics,
+                            code("duplicate-source-provider-contract"),
+                            "provider contract",
+                        );
+                    }
+                }
                 Item::Use(item) => self.register_use_item(&item, &mut namespaces),
                 Item::Export(_) | Item::Instance(_) => {}
             }
@@ -2470,7 +2604,9 @@ impl Lowerer {
         let module_name = path_text(&item.module);
         for import_id in item.imports.iter() {
             let import = self.module.imports()[*import_id].clone();
-            let Some(kind) = known_import_kind(&module_name, import.imported_name.text()) else {
+            let metadata = import.metadata.clone();
+            let (ImportBindingMetadata::Value { .. } | ImportBindingMetadata::Bundle(_)) = metadata
+            else {
                 let message = if is_known_module(&module_name) {
                     format!(
                         "module `{module_name}` does not export `{}` in Milestone 2",
@@ -2495,14 +2631,15 @@ impl Lowerer {
                 );
                 continue;
             };
-            match kind {
-                KnownImportKind::OrdinaryTerm => insert_site(
+            match metadata {
+                ImportBindingMetadata::Value { .. } => insert_site(
                     &mut namespaces.term_imports,
                     import.local_name.text(),
                     *import_id,
                     import.span,
                 ),
-                KnownImportKind::Bundle => {}
+                ImportBindingMetadata::Bundle(_) => {}
+                ImportBindingMetadata::Unknown => unreachable!("handled above"),
             }
         }
     }
@@ -2915,6 +3052,7 @@ impl Lowerer {
                 }
                 Item::Domain(item)
             }
+            Item::SourceProviderContract(item) => Item::SourceProviderContract(item),
             Item::Use(item) => Item::Use(item),
             Item::Export(mut item) => {
                 item.resolution = self.resolve_export_target(&item.target, namespaces);
@@ -2984,13 +3122,10 @@ impl Lowerer {
         let source_metadata = source.map(|source| {
             let source_dependencies = source_dependencies.unwrap_or_default();
             SourceMetadata {
-                provider_key: source
-                    .provider
-                    .as_ref()
-                    .map(|path| path_text(path).into_boxed_str()),
+                provider: SourceProviderRef::from_path(source.provider.as_ref()),
                 is_reactive: !source_dependencies.is_empty(),
                 signal_dependencies: source_dependencies,
-                custom_recurrence_wakeup: None,
+                custom_contract: None,
             }
         });
         (signal_dependencies, source_metadata)
@@ -4249,12 +4384,16 @@ fn is_known_module(module: &str) -> bool {
     matches!(module, "aivi.network" | "aivi.defaults")
 }
 
-fn known_import_kind(module: &str, member: &str) -> Option<KnownImportKind> {
+fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMetadata> {
     match (module, member) {
         ("aivi.network", "http") | ("aivi.network", "socket") => {
-            Some(KnownImportKind::OrdinaryTerm)
+            Some(ImportBindingMetadata::Value {
+                ty: ImportValueType::Primitive(BuiltinType::Text),
+            })
         }
-        ("aivi.defaults", "Option") => Some(KnownImportKind::Bundle),
+        ("aivi.defaults", "Option") => Some(ImportBindingMetadata::Bundle(
+            ImportBundleKind::BuiltinOption,
+        )),
         _ => None,
     }
 }
@@ -4269,13 +4408,14 @@ mod tests {
 
     use aivi_base::SourceDatabase;
     use aivi_syntax::parse_module;
+    use aivi_typing::BuiltinSourceProvider;
 
     use super::{lower_module, path_text};
     use crate::{
         ApplicativeSpineHead, BuiltinType, ClusterFinalizer, ClusterPresentation, DecoratorPayload,
-        DomainMemberKind, ExprKind, Item, LiteralSuffixResolution, PipeStageKind,
-        RecurrenceWakeupDecoratorKind, ResolutionState, TermResolution, TextSegment, TypeKind,
-        TypeResolution, ValidationMode,
+        DomainMemberKind, ExprKind, ImportBindingMetadata, ImportBundleKind, ImportValueType, Item,
+        LiteralSuffixResolution, PipeStageKind, RecurrenceWakeupDecoratorKind, ResolutionState,
+        SourceProviderRef, TermResolution, TextSegment, TypeKind, TypeResolution, ValidationMode,
     };
 
     fn fixture_root() -> PathBuf {
@@ -4316,7 +4456,10 @@ mod tests {
                 Item::Signal(item) => item.name.text() == name,
                 Item::Class(item) => item.name.text() == name,
                 Item::Domain(item) => item.name.text() == name,
-                Item::Instance(_) | Item::Use(_) | Item::Export(_) => false,
+                Item::SourceProviderContract(_)
+                | Item::Instance(_)
+                | Item::Use(_)
+                | Item::Export(_) => false,
             })
             .unwrap_or_else(|| panic!("expected to find named item `{name}`"))
     }
@@ -4345,8 +4488,11 @@ mod tests {
         for path in [
             "milestone-2/valid/local-top-level-refs/main.aivi",
             "milestone-2/valid/use-member-imports/main.aivi",
+            "milestone-2/valid/source-provider-contract-declarations/main.aivi",
             "milestone-2/valid/custom-source-recurrence-wakeup/main.aivi",
             "milestone-2/valid/source-decorator-signals/main.aivi",
+            "milestone-2/valid/source-option-contract-parameters/main.aivi",
+            "milestone-2/valid/source-option-imported-binding-match/main.aivi",
             "milestone-2/valid/source-option-constructor-applications/main.aivi",
             "milestone-2/valid/applicative-clusters/main.aivi",
             "milestone-2/valid/markup-control-nodes/main.aivi",
@@ -4386,6 +4532,7 @@ mod tests {
     fn reports_invalid_fixture_corpus_but_keeps_structural_hir() {
         for path in [
             "milestone-2/invalid/duplicate-top-level-names/main.aivi",
+            "milestone-2/invalid/duplicate-source-provider-contract/main.aivi",
             "milestone-2/invalid/unknown-imported-names/main.aivi",
             "milestone-2/invalid/unknown-decorator/main.aivi",
             "milestone-2/invalid/unresolved-names/main.aivi",
@@ -4522,6 +4669,8 @@ mod tests {
     fn resolved_validation_rejects_source_option_type_invalid_fixtures() {
         for path in [
             "milestone-2/invalid/source-option-type-mismatch/main.aivi",
+            "milestone-2/invalid/source-option-contract-parameter-signal-mismatch/main.aivi",
+            "milestone-2/invalid/source-option-imported-binding-mismatch/main.aivi",
             "milestone-2/invalid/source-option-constructor-mismatch/main.aivi",
             "milestone-2/invalid/source-option-constructor-application-mismatch/main.aivi",
             "milestone-2/invalid/source-option-list-element-mismatch/main.aivi",
@@ -4666,14 +4815,17 @@ sig tick : Signal Unit
             .source_metadata
             .as_ref()
             .expect("custom source recurrence should still carry source metadata");
-        assert_eq!(metadata.provider_key.as_deref(), Some("custom.feed"));
+        assert_eq!(
+            metadata.provider,
+            SourceProviderRef::Custom("custom.feed".into())
+        );
         assert!(
             metadata.is_reactive,
             "reactive custom source arguments should mark the source metadata as reactive"
         );
         assert_eq!(
-            metadata.custom_recurrence_wakeup, None,
-            "surface lowering should not invent custom wakeup metadata"
+            metadata.custom_contract, None,
+            "surface lowering should not invent custom provider contract metadata"
         );
         assert_eq!(
             signal_dependency_names(lowered.module(), updates),
@@ -4683,7 +4835,88 @@ sig tick : Signal Unit
     }
 
     #[test]
-    fn manual_custom_source_wakeup_metadata_allows_nonreactive_recurrence() {
+    fn lowers_provider_contract_declarations_without_resolving_source_use_sites() {
+        let lowered =
+            lower_fixture("milestone-2/valid/source-provider-contract-declarations/main.aivi");
+        assert!(
+            !lowered.has_errors(),
+            "provider contract declaration fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let contract = lowered
+            .module()
+            .root_items()
+            .iter()
+            .find_map(|item_id| match &lowered.module().items()[*item_id] {
+                Item::SourceProviderContract(item) => Some(item),
+                _ => None,
+            })
+            .expect("expected to find provider contract item");
+        assert_eq!(
+            contract.provider,
+            SourceProviderRef::Custom("custom.feed".into())
+        );
+        assert_eq!(
+            contract.contract.recurrence_wakeup,
+            Some(crate::CustomSourceRecurrenceWakeup::ProviderDefinedTrigger)
+        );
+
+        let updates = find_signal(lowered.module(), "updates");
+        let metadata = updates
+            .source_metadata
+            .as_ref()
+            .expect("source-backed signal should keep source metadata");
+        assert_eq!(
+            metadata.provider,
+            SourceProviderRef::Custom("custom.feed".into())
+        );
+        assert_eq!(
+            metadata.custom_contract, None,
+            "declaration syntax should not resolve provider metadata onto use sites yet"
+        );
+    }
+
+    #[test]
+    fn provider_contract_declarations_report_builtin_keys_and_invalid_fields() {
+        let lowered = lower_text(
+            "provider_contract_errors.aivi",
+            r#"
+provider http.get
+    wakeup: surprise
+    mode: manual
+    wakeup: timer
+"#,
+        );
+        let codes = lowered
+            .diagnostics()
+            .iter()
+            .filter_map(|diagnostic| diagnostic.code)
+            .collect::<Vec<_>>();
+        assert!(
+            codes.contains(&super::code("builtin-source-provider-contract")),
+            "expected built-in provider contract diagnostic, got diagnostics: {:?}",
+            lowered.diagnostics()
+        );
+        assert!(
+            codes.contains(&super::code("unknown-source-provider-contract-wakeup")),
+            "expected unknown wakeup diagnostic, got diagnostics: {:?}",
+            lowered.diagnostics()
+        );
+        assert!(
+            codes.contains(&super::code("unknown-source-provider-contract-field")),
+            "expected unknown field diagnostic, got diagnostics: {:?}",
+            lowered.diagnostics()
+        );
+        assert!(
+            codes.contains(&super::code("duplicate-source-provider-contract-field")),
+            "expected duplicate wakeup diagnostic, got diagnostics: {:?}",
+            lowered.diagnostics()
+        );
+    }
+
+    #[test]
+    fn manual_custom_source_contract_metadata_allows_nonreactive_recurrence() {
         let lowered = lower_text(
             "custom_source_declared_wakeup.aivi",
             r#"
@@ -4737,13 +4970,103 @@ sig retried : Signal Int =
             !metadata.is_reactive,
             "non-reactive custom source should start without provider-independent wakeup proof"
         );
-        metadata.custom_recurrence_wakeup =
-            Some(crate::CustomSourceRecurrenceWakeup::ProviderDefinedTrigger);
+        metadata
+            .custom_contract
+            .get_or_insert_with(Default::default)
+            .recurrence_wakeup = Some(crate::CustomSourceRecurrenceWakeup::ProviderDefinedTrigger);
 
         let report = module.validate(ValidationMode::RequireResolvedNames);
         assert!(
             report.is_ok(),
             "explicit custom source wakeup metadata should unblock recurrence validation, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn manual_custom_source_contract_metadata_rejects_builtin_providers() {
+        let lowered = lower_fixture("milestone-1/valid/sources/source_declarations.aivi");
+        assert!(
+            !lowered.has_errors(),
+            "built-in source fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let mut module = lowered.module().clone();
+        let signal_id = module
+            .root_items()
+            .iter()
+            .copied()
+            .find(|item_id| {
+                matches!(
+                    &module.items()[*item_id],
+                    Item::Signal(item) if item.name.text() == "tick"
+                )
+            })
+            .expect("expected to find `tick` signal item");
+        let Some(Item::Signal(signal)) = module.arenas.items.get_mut(signal_id) else {
+            panic!("expected `tick` item to stay a signal");
+        };
+        signal
+            .source_metadata
+            .as_mut()
+            .expect("built-in source should carry source metadata")
+            .custom_contract = Some(crate::CustomSourceContractMetadata {
+            recurrence_wakeup: Some(crate::CustomSourceRecurrenceWakeup::ProviderDefinedTrigger),
+        });
+
+        let report = module.validate(ValidationMode::RequireResolvedNames);
+        assert!(
+            report
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code
+                    == Some(super::code("invalid-custom-source-wakeup"))),
+            "built-in sources should reject injected custom contract metadata, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn manual_custom_source_contract_metadata_rejects_invalid_provider_shapes() {
+        let lowered =
+            lower_fixture("milestone-2/invalid/source-provider-without-variant/main.aivi");
+        assert!(
+            lowered.has_errors(),
+            "invalid provider fixture should still report a lowering error"
+        );
+
+        let mut module = lowered.module().clone();
+        let signal_id = module
+            .root_items()
+            .iter()
+            .copied()
+            .find(|item_id| {
+                matches!(
+                    &module.items()[*item_id],
+                    Item::Signal(item) if item.name.text() == "users"
+                )
+            })
+            .expect("expected to find `users` signal item");
+        let Some(Item::Signal(signal)) = module.arenas.items.get_mut(signal_id) else {
+            panic!("expected `users` item to stay a signal");
+        };
+        signal
+            .source_metadata
+            .as_mut()
+            .expect("invalid provider shape should still preserve source metadata")
+            .custom_contract = Some(crate::CustomSourceContractMetadata {
+            recurrence_wakeup: Some(crate::CustomSourceRecurrenceWakeup::ProviderDefinedTrigger),
+        });
+
+        let report = module.validate(ValidationMode::Structural);
+        assert!(
+            report
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code
+                    == Some(super::code("invalid-custom-source-wakeup"))),
+            "malformed provider paths should reject injected custom contract metadata, got diagnostics: {:?}",
             report.diagnostics()
         );
     }
@@ -4891,13 +5214,13 @@ val duplicate : Task Int Int =
             .as_ref()
             .expect("source-backed signal should carry source metadata");
         assert_eq!(
-            metadata.provider_key.as_deref(),
-            Some("http.get"),
-            "source metadata should preserve the provider key"
+            metadata.provider,
+            SourceProviderRef::Builtin(BuiltinSourceProvider::HttpGet),
+            "source metadata should preserve built-in provider identity"
         );
         assert_eq!(
-            metadata.custom_recurrence_wakeup, None,
-            "lowering should leave custom-provider wakeup hooks empty until provider metadata exists"
+            metadata.custom_contract, None,
+            "lowering should leave custom-provider contract hooks empty until provider metadata exists"
         );
         assert!(
             metadata.is_reactive,
@@ -4933,9 +5256,12 @@ val duplicate : Task Int Int =
             .source_metadata
             .as_ref()
             .expect("timer source should still carry source metadata");
-        assert_eq!(metadata.provider_key.as_deref(), Some("timer.every"));
         assert_eq!(
-            metadata.custom_recurrence_wakeup, None,
+            metadata.provider,
+            SourceProviderRef::Builtin(BuiltinSourceProvider::TimerEvery)
+        );
+        assert_eq!(
+            metadata.custom_contract, None,
             "built-in source metadata should not use the custom-provider wakeup hook"
         );
         assert!(
@@ -5250,6 +5576,15 @@ val duplicate : Task Int Int =
             "source provider shape errors should keep structurally valid HIR: {:?}",
             report.diagnostics()
         );
+        let users = find_signal(lowered.module(), "users");
+        let metadata = users
+            .source_metadata
+            .as_ref()
+            .expect("invalid source provider fixture should still preserve source metadata");
+        assert_eq!(
+            metadata.provider,
+            SourceProviderRef::InvalidShape("http".into())
+        );
     }
 
     #[test]
@@ -5502,6 +5837,17 @@ val duplicate : Task Int Int =
                 .any(|(_, import)| import.imported_name.text() == "Option"),
             "fixture should preserve the explicit Option bundle import"
         );
+        assert!(
+            lowered
+                .module()
+                .imports()
+                .iter()
+                .any(|(_, import)| matches!(
+                    import.metadata,
+                    ImportBindingMetadata::Bundle(ImportBundleKind::BuiltinOption)
+                )),
+            "fixture should preserve builtin Option bundle metadata"
+        );
 
         let option_refs = lowered
             .module()
@@ -5526,6 +5872,40 @@ val duplicate : Task Int Int =
                 ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Option))
             )),
             "Option type references should resolve to the builtin even when a bundle import exists: {option_refs:?}"
+        );
+    }
+
+    #[test]
+    fn use_member_imports_preserve_compiler_known_value_types() {
+        let lowered = lower_fixture("milestone-2/valid/use-member-imports/main.aivi");
+        assert!(
+            !lowered.has_errors(),
+            "use-member-imports fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let text_imports = lowered
+            .module()
+            .imports()
+            .iter()
+            .filter_map(
+                |(_, import)| match (&*import.local_name.text(), &import.metadata) {
+                    ("http" | "socket", ImportBindingMetadata::Value { ty }) => Some(ty),
+                    _ => None,
+                },
+            )
+            .collect::<Vec<_>>();
+        assert_eq!(
+            text_imports.len(),
+            2,
+            "expected http/socket imports to carry compiler-known value metadata, got {:?}",
+            lowered.module().imports().iter().collect::<Vec<_>>()
+        );
+        assert!(
+            text_imports
+                .iter()
+                .all(|ty| matches!(ty, ImportValueType::Primitive(BuiltinType::Text))),
+            "expected http/socket imports to lower as Text-valued bindings, got {text_imports:?}"
         );
     }
 

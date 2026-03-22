@@ -1,0 +1,15 @@
+type DecodeMode =
+  | Strict
+  | Permissive
+
+type FsError =
+  | Missing
+
+type FsWatchEvent =
+  | Changed
+
+@source fs.read "/tmp/demo.txt" with {
+    decode: Strict,
+    reloadOn: Changed
+}
+sig fileText : Signal (Result FsError Text)

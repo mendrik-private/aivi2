@@ -1,6 +1,7 @@
 use std::{error::Error, fmt};
 
 use aivi_base::{FileId, SourceSpan};
+use aivi_typing::BuiltinSourceProvider;
 
 use crate::{
     arena::{Arena, ArenaOverflow},
@@ -188,6 +189,7 @@ pub struct ImportBinding {
     pub span: SourceSpan,
     pub imported_name: Name,
     pub local_name: Name,
+    pub metadata: ImportBindingMetadata,
 }
 
 /// Compiler-known builtin term references that live outside the current module graph.
@@ -220,6 +222,60 @@ pub enum BuiltinType {
     Validation,
     Signal,
     Task,
+}
+
+/// Compiler-known facts preserved for one imported binding.
+///
+/// Milestone 2 imports still resolve through a small closed catalog. This metadata keeps the
+/// proven value/type surface explicit so later validation can use import facts without re-parsing
+/// module/member strings or guessing missing type information.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ImportBindingMetadata {
+    Unknown,
+    Value { ty: ImportValueType },
+    Bundle(ImportBundleKind),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ImportBundleKind {
+    BuiltinOption,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportRecordField {
+    pub name: Box<str>,
+    pub ty: ImportValueType,
+}
+
+/// Closed imported value-type surface that HIR can use before real module-linked nominal typing
+/// exists.
+///
+/// This intentionally mirrors only the shapes the current validator can lower directly into
+/// `GateType` without cross-module item identities.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ImportValueType {
+    Primitive(BuiltinType),
+    Tuple(Vec<Self>),
+    Record(Vec<ImportRecordField>),
+    Arrow {
+        parameter: Box<Self>,
+        result: Box<Self>,
+    },
+    List(Box<Self>),
+    Option(Box<Self>),
+    Result {
+        error: Box<Self>,
+        value: Box<Self>,
+    },
+    Validation {
+        error: Box<Self>,
+        value: Box<Self>,
+    },
+    Signal(Box<Self>),
+    Task {
+        error: Box<Self>,
+        value: Box<Self>,
+    },
 }
 
 /// Resolved destination for a term-level reference.
@@ -317,6 +373,7 @@ pub enum ItemKind {
     Signal,
     Class,
     Domain,
+    SourceProviderContract,
     Instance,
     Use,
     Export,
@@ -331,6 +388,7 @@ pub enum Item {
     Signal(SignalItem),
     Class(ClassItem),
     Domain(DomainItem),
+    SourceProviderContract(SourceProviderContractItem),
     Instance(InstanceItem),
     Use(UseItem),
     Export(ExportItem),
@@ -345,6 +403,7 @@ impl Item {
             Self::Signal(_) => ItemKind::Signal,
             Self::Class(_) => ItemKind::Class,
             Self::Domain(_) => ItemKind::Domain,
+            Self::SourceProviderContract(_) => ItemKind::SourceProviderContract,
             Self::Instance(_) => ItemKind::Instance,
             Self::Use(_) => ItemKind::Use,
             Self::Export(_) => ItemKind::Export,
@@ -359,6 +418,7 @@ impl Item {
             Self::Signal(item) => item.header.span,
             Self::Class(item) => item.header.span,
             Self::Domain(item) => item.header.span,
+            Self::SourceProviderContract(item) => item.header.span,
             Self::Instance(item) => item.header.span,
             Self::Use(item) => item.header.span,
             Self::Export(item) => item.header.span,
@@ -373,6 +433,7 @@ impl Item {
             Self::Signal(item) => &item.header.decorators,
             Self::Class(item) => &item.header.decorators,
             Self::Domain(item) => &item.header.decorators,
+            Self::SourceProviderContract(item) => &item.header.decorators,
             Self::Instance(item) => &item.header.decorators,
             Self::Use(item) => &item.header.decorators,
             Self::Export(item) => &item.header.decorators,
@@ -441,10 +502,76 @@ pub struct SignalItem {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceMetadata {
-    pub provider_key: Option<Box<str>>,
+    pub provider: SourceProviderRef,
     pub signal_dependencies: Vec<ItemId>,
     pub is_reactive: bool,
-    pub custom_recurrence_wakeup: Option<CustomSourceRecurrenceWakeup>,
+    pub custom_contract: Option<CustomSourceContractMetadata>,
+}
+
+/// Typed `@source` provider identity preserved into HIR.
+///
+/// This keeps built-in vs custom vs malformed provider paths explicit so later validation and
+/// future contract resolution do not have to repeatedly re-parse raw strings.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum SourceProviderRef {
+    Missing,
+    Builtin(BuiltinSourceProvider),
+    Custom(Box<str>),
+    InvalidShape(Box<str>),
+}
+
+impl SourceProviderRef {
+    pub fn from_path(path: Option<&NamePath>) -> Self {
+        let Some(path) = path else {
+            return Self::Missing;
+        };
+        let key = path
+            .segments()
+            .iter()
+            .map(|segment| segment.text())
+            .collect::<Vec<_>>()
+            .join(".")
+            .into_boxed_str();
+        if path.segments().len() < 2 {
+            return Self::InvalidShape(key);
+        }
+        match BuiltinSourceProvider::parse(key.as_ref()) {
+            Some(provider) => Self::Builtin(provider),
+            None => Self::Custom(key),
+        }
+    }
+
+    pub fn key(&self) -> Option<&str> {
+        match self {
+            Self::Missing => None,
+            Self::Builtin(provider) => Some(provider.key()),
+            Self::Custom(key) | Self::InvalidShape(key) => Some(key.as_ref()),
+        }
+    }
+
+    pub fn builtin(&self) -> Option<BuiltinSourceProvider> {
+        match self {
+            Self::Builtin(provider) => Some(*provider),
+            Self::Missing | Self::Custom(_) | Self::InvalidShape(_) => None,
+        }
+    }
+
+    pub fn custom_key(&self) -> Option<&str> {
+        match self {
+            Self::Custom(key) => Some(key.as_ref()),
+            Self::Missing | Self::Builtin(_) | Self::InvalidShape(_) => None,
+        }
+    }
+}
+
+/// Resolved custom-provider facts carried at one `@source` use site.
+///
+/// Only recurrence-wakeup metadata is populated today. This explicit carrier keeps future
+/// declaration/resolution work local to HIR instead of extending source metadata with more
+/// ad-hoc optional fields.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct CustomSourceContractMetadata {
+    pub recurrence_wakeup: Option<CustomSourceRecurrenceWakeup>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -480,6 +607,14 @@ pub struct DomainItem {
     pub parameters: Vec<TypeParameterId>,
     pub carrier: TypeId,
     pub members: Vec<DomainMember>,
+}
+
+/// One `provider` contract declaration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceProviderContractItem {
+    pub header: ItemHeader,
+    pub provider: SourceProviderRef,
+    pub contract: CustomSourceContractMetadata,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

@@ -138,7 +138,12 @@ pub fn elaborate_fanouts(module: &Module) -> FanoutElaborationReport {
                     );
                 }
             }
-            Item::Type(_) | Item::Class(_) | Item::Domain(_) | Item::Use(_) | Item::Export(_) => {}
+            Item::Type(_)
+            | Item::Class(_)
+            | Item::Domain(_)
+            | Item::SourceProviderContract(_)
+            | Item::Use(_)
+            | Item::Export(_) => {}
         }
     }
 
@@ -425,7 +430,10 @@ mod tests {
             Item::Signal(item) => item.name.text(),
             Item::Class(item) => item.name.text(),
             Item::Domain(item) => item.name.text(),
-            Item::Instance(_) | Item::Use(_) | Item::Export(_) => "<anonymous>",
+            Item::SourceProviderContract(_)
+            | Item::Instance(_)
+            | Item::Use(_)
+            | Item::Export(_) => "<anonymous>",
         }
     }
 
