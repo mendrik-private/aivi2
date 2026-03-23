@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     collections::{BTreeMap, BTreeSet},
     env,
     ffi::OsString,
@@ -10,6 +10,7 @@ use std::{
     path::{Path, PathBuf},
     process::ExitCode,
     rc::Rc,
+    sync::Arc,
 };
 
 use aivi_backend::{
@@ -19,24 +20,29 @@ use aivi_backend::{
 use aivi_base::{Diagnostic, FileId, Severity, SourceDatabase, SourceSpan};
 use aivi_core::{
     RuntimeFragmentSpec, lower_module as lower_core_module, lower_runtime_fragment,
-    validate_module as validate_core_module,
+    lower_runtime_module, validate_module as validate_core_module,
 };
 use aivi_gtk::{
-    GtkBridgeGraph, GtkBridgeNodeKind, GtkCollectionKey, GtkConcreteHost, GtkExecutionPath,
-    GtkHostValue, GtkNodeInstance, GtkRuntimeExecutor, PlanNodeKind, RepeatedChildPolicy,
-    RuntimePropertyBinding, RuntimeShowMountPolicy, SetterSource, lower_markup_expr,
-    lower_widget_bridge,
+    GtkBridgeGraph, GtkBridgeNodeKind, GtkBridgeNodeRef, GtkChildGroup, GtkCollectionKey,
+    GtkConcreteEventPayload, GtkConcreteHost, GtkExecutionPath, GtkHostValue, GtkNodeInstance,
+    GtkRuntimeExecutor, RepeatedChildPolicy, RuntimePropertyBinding, RuntimeShowMountPolicy,
+    SetterSource, concrete_event_payload, concrete_supports_property, concrete_widget_is_window,
+    lower_markup_expr, lower_widget_bridge,
 };
 use aivi_hir::{
-    BuiltinTerm, ExprId as HirExprId, ExprKind, GeneralExprParameter, Item,
-    Module as HirModule, PatternId as HirPatternId, PatternKind, TermResolution,
-    ValidationMode, ValueItem,
-    collect_markup_runtime_expr_sites, elaborate_runtime_expr_with_env,
-    lower_module as lower_hir_module,
+    BuiltinTerm, BuiltinType, ExprId as HirExprId, ExprKind, GeneralExprParameter, Item,
+    Module as HirModule, PatternId as HirPatternId, PatternKind, TermResolution, TypeKind,
+    TypeResolution, ValidationMode, ValueItem, collect_markup_runtime_expr_sites,
+    elaborate_runtime_expr_with_env, lower_module as lower_hir_module,
 };
 use aivi_lambda::{lower_module as lower_lambda_module, validate_module as validate_lambda_module};
+use aivi_runtime::{
+    GlibLinkedRuntimeDriver, HirRuntimeAssembly, InputHandle as RuntimeInputHandle, Publication,
+    SourceProviderManager, assemble_hir_runtime, link_backend_runtime,
+};
 use aivi_syntax::{Formatter, ItemKind, TokenKind, lex_module, parse_module};
 use gtk::{glib, prelude::*};
+use tokio::sync::mpsc;
 
 fn main() -> ExitCode {
     match run() {
@@ -210,6 +216,10 @@ struct RunArtifact {
     module: HirModule,
     bridge: GtkBridgeGraph,
     fragments: BTreeMap<HirExprId, CompiledRunFragment>,
+    runtime_assembly: HirRuntimeAssembly,
+    core: aivi_core::Module,
+    backend: Arc<BackendProgram>,
+    event_handlers: BTreeMap<HirExprId, ResolvedRunEventHandler>,
 }
 
 #[derive(Clone, Debug)]
@@ -223,6 +233,27 @@ struct CompiledRunFragment {
     parameters: Vec<GeneralExprParameter>,
     program: BackendProgram,
     item: BackendItemId,
+    required_globals: Vec<BackendItemId>,
+}
+
+#[derive(Clone, Debug)]
+struct ResolvedRunEventHandler {
+    signal_item: aivi_hir::ItemId,
+    signal_name: Box<str>,
+    input: RuntimeInputHandle,
+}
+
+struct RunSession {
+    view_name: Box<str>,
+    module: HirModule,
+    bridge: GtkBridgeGraph,
+    fragments: BTreeMap<HirExprId, CompiledRunFragment>,
+    event_handlers: BTreeMap<HirExprId, ResolvedRunEventHandler>,
+    executor: GtkRuntimeExecutor<GtkConcreteHost<RunHostValue>, RunHostValue>,
+    driver: GlibLinkedRuntimeDriver,
+    main_loop: glib::MainLoop,
+    work_scheduled: bool,
+    runtime_error: Option<String>,
 }
 
 fn check_file(path: &Path) -> Result<ExitCode, String> {
@@ -298,8 +329,12 @@ fn prepare_run_artifact(
     requested_view: Option<&str>,
 ) -> Result<RunArtifact, String> {
     let view = select_run_view(module, requested_view)?;
-    let view_owner = find_run_view_owner(module, view)
-        .ok_or_else(|| format!("failed to recover owning item for run view `{}`", view.name.text()))?;
+    let view_owner = find_run_view_owner(module, view).ok_or_else(|| {
+        format!(
+            "failed to recover owning item for run view `{}`",
+            view.name.text()
+        )
+    })?;
     let ExprKind::Markup(_) = &module.exprs()[view.body].kind else {
         return Err(format!(
             "run view `{}` is not markup; `aivi run` currently requires a top-level markup-valued `val`",
@@ -312,19 +347,34 @@ fn prepare_run_artifact(
             view.name.text()
         )
     })?;
-    validate_run_plan(sources, &plan)?;
     let bridge = lower_widget_bridge(&plan).map_err(|error| {
         format!(
             "failed to lower run view `{}` into a GTK bridge graph: {error}",
             view.name.text()
         )
     })?;
+    validate_run_plan(sources, &bridge)?;
+    let lowered = lower_run_backend_stack(module)?;
+    let runtime_assembly = assemble_hir_runtime(module).map_err(|errors| {
+        let mut rendered = String::from("failed to assemble runtime plans for `aivi run`:\n");
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
     let fragments = compile_run_fragments(sources, module, view_owner, view.body, &bridge)?;
+    let event_handlers = resolve_run_event_handlers(module, &bridge, &runtime_assembly, sources)?;
     Ok(RunArtifact {
         view_name: view.name.text().into(),
         module: module.clone(),
         bridge,
         fragments,
+        runtime_assembly,
+        core: lowered.core,
+        backend: lowered.backend,
+        event_handlers,
     })
 }
 
@@ -396,36 +446,83 @@ fn markup_view_names(values: &[&ValueItem]) -> Vec<String> {
 }
 
 fn find_run_view_owner(module: &HirModule, view: &ValueItem) -> Option<aivi_hir::ItemId> {
-    module.items().iter().find_map(|(item_id, item)| match item {
-        Item::Value(candidate)
-            if candidate.body == view.body && candidate.name.text() == view.name.text() =>
-        {
-            Some(item_id)
-        }
-        _ => None,
-    })
+    module
+        .items()
+        .iter()
+        .find_map(|(item_id, item)| match item {
+            Item::Value(candidate)
+                if candidate.body == view.body && candidate.name.text() == view.name.text() =>
+            {
+                Some(item_id)
+            }
+            _ => None,
+        })
 }
 
-fn validate_run_plan(
-    sources: &SourceDatabase,
-    plan: &aivi_gtk::WidgetPlan,
-) -> Result<(), String> {
-    let mut blockers = Vec::new();
-    for node in plan.nodes() {
-        match &node.kind {
-            PlanNodeKind::Widget(widget) => {
-                for event in &widget.event_hooks {
-                    blockers.push(RunValidationBlocker {
-                        span: event.site.span,
-                        message: format!("event hook `{}` is not supported yet", event.name.text()),
-                    });
+fn validate_run_plan(sources: &SourceDatabase, bridge: &GtkBridgeGraph) -> Result<(), String> {
+    let mut blockers = Vec::<RunValidationBlocker>::new();
+
+    for node in bridge.nodes() {
+        let GtkBridgeNodeKind::Widget(widget) = &node.kind else {
+            continue;
+        };
+        for property in &widget.properties {
+            let (name, span) = match property {
+                RuntimePropertyBinding::Static(property) => {
+                    (property.name.text(), property.site.span)
                 }
+                RuntimePropertyBinding::Setter(binding) => (binding.name.text(), binding.site.span),
+            };
+            if !concrete_supports_property(&widget.widget, name) {
+                blockers.push(RunValidationBlocker {
+                    span,
+                    message: format!(
+                        "`aivi run` does not support property `{name}` on GTK widget `{}` yet",
+                        run_widget_name(&widget.widget)
+                    ),
+                });
             }
-            PlanNodeKind::Show(_)
-            | PlanNodeKind::Each(_)
-            | PlanNodeKind::Match(_)
-            | PlanNodeKind::With(_) => {}
-            PlanNodeKind::Empty(_) | PlanNodeKind::Case(_) | PlanNodeKind::Fragment(_) => {}
+        }
+        for event in &widget.event_hooks {
+            if concrete_event_payload(&widget.widget, event.name.text()).is_none() {
+                blockers.push(RunValidationBlocker {
+                    span: event.site.span,
+                    message: format!(
+                        "`aivi run` does not support event `{}` on GTK widget `{}` yet",
+                        event.name.text(),
+                        run_widget_name(&widget.widget)
+                    ),
+                });
+            }
+        }
+    }
+
+    let mut root_widgets = collect_run_root_widgets(bridge, bridge.root());
+    root_widgets.sort();
+    root_widgets.dedup();
+    if root_widgets.is_empty() {
+        blockers.push(RunValidationBlocker {
+            span: bridge.root_node().span,
+            message:
+                "`aivi run` requires the selected view to produce at least one reachable GTK root widget"
+                    .to_owned(),
+        });
+    }
+    for root in root_widgets {
+        let Some(node) = bridge.node(root.plan) else {
+            continue;
+        };
+        let GtkBridgeNodeKind::Widget(widget) = &node.kind else {
+            continue;
+        };
+        if !concrete_widget_is_window(&widget.widget) {
+            blockers.push(RunValidationBlocker {
+                span: node.span,
+                message: format!(
+                    "`aivi run` currently requires reachable root widgets to be `Window`; found `{}`",
+                    run_widget_name(&widget.widget)
+                ),
+            });
         }
     }
 
@@ -433,8 +530,9 @@ fn validate_run_plan(
         return Ok(());
     }
 
-    let mut rendered =
-        String::from("`aivi run` does not support every GTK/runtime feature yet. Unsupported features in the selected view:\n");
+    let mut rendered = String::from(
+        "`aivi run` does not support every GTK/runtime feature yet. Unsupported features in the selected view:\n",
+    );
     for blocker in blockers {
         rendered.push_str("- ");
         rendered.push_str(&source_location(sources, blocker.span));
@@ -443,6 +541,47 @@ fn validate_run_plan(
         rendered.push('\n');
     }
     Err(rendered)
+}
+
+fn collect_run_root_widgets(
+    bridge: &GtkBridgeGraph,
+    root: GtkBridgeNodeRef,
+) -> Vec<GtkBridgeNodeRef> {
+    let mut widgets = Vec::new();
+    let mut worklist = vec![root];
+    while let Some(node_ref) = worklist.pop() {
+        let Some(node) = bridge.node(node_ref.plan) else {
+            continue;
+        };
+        match &node.kind {
+            GtkBridgeNodeKind::Widget(_) => widgets.push(node_ref),
+            GtkBridgeNodeKind::Show(show) => extend_child_group_roots(&mut worklist, &show.body),
+            GtkBridgeNodeKind::Each(each) => {
+                extend_child_group_roots(&mut worklist, &each.item_template);
+                if let Some(empty) = &each.empty_branch {
+                    extend_child_group_roots(&mut worklist, &empty.body);
+                }
+            }
+            GtkBridgeNodeKind::Empty(empty) => extend_child_group_roots(&mut worklist, &empty.body),
+            GtkBridgeNodeKind::Match(match_node) => {
+                for case in &match_node.cases {
+                    extend_child_group_roots(&mut worklist, &case.body);
+                }
+            }
+            GtkBridgeNodeKind::Case(case) => extend_child_group_roots(&mut worklist, &case.body),
+            GtkBridgeNodeKind::Fragment(fragment) => {
+                extend_child_group_roots(&mut worklist, &fragment.body)
+            }
+            GtkBridgeNodeKind::With(with_node) => {
+                extend_child_group_roots(&mut worklist, &with_node.body)
+            }
+        }
+    }
+    widgets
+}
+
+fn extend_child_group_roots(worklist: &mut Vec<GtkBridgeNodeRef>, group: &GtkChildGroup) {
+    worklist.extend(group.roots.iter().rev().copied());
 }
 
 fn source_location(sources: &SourceDatabase, span: SourceSpan) -> String {
@@ -454,6 +593,256 @@ fn source_location(sources: &SourceDatabase, span: SourceSpan) -> String {
         location.line,
         location.column
     )
+}
+
+struct LoweredRunBackendStack {
+    core: aivi_core::Module,
+    backend: Arc<BackendProgram>,
+}
+
+fn lower_run_backend_stack(module: &HirModule) -> Result<LoweredRunBackendStack, String> {
+    let core = lower_runtime_module(module).map_err(|errors| {
+        let mut rendered = String::from("failed to lower `aivi run` module into typed core:\n");
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
+    validate_core_module(&core).map_err(|errors| {
+        let mut rendered = String::from("typed-core validation failed for `aivi run`:\n");
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
+    let lambda = lower_lambda_module(&core).map_err(|errors| {
+        let mut rendered = String::from("failed to lower `aivi run` module into typed lambda:\n");
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
+    validate_lambda_module(&lambda).map_err(|errors| {
+        let mut rendered = String::from("typed-lambda validation failed for `aivi run`:\n");
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
+    let backend = lower_backend_module(&lambda).map_err(|errors| {
+        let mut rendered = String::from("failed to lower `aivi run` module into backend IR:\n");
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
+    validate_program(&backend).map_err(|errors| {
+        let mut rendered = String::from("backend validation failed for `aivi run`:\n");
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
+    Ok(LoweredRunBackendStack {
+        core,
+        backend: Arc::new(backend),
+    })
+}
+
+fn resolve_run_event_handlers(
+    module: &HirModule,
+    bridge: &GtkBridgeGraph,
+    runtime_assembly: &HirRuntimeAssembly,
+    sources: &SourceDatabase,
+) -> Result<BTreeMap<HirExprId, ResolvedRunEventHandler>, String> {
+    let mut handlers = BTreeMap::new();
+    for node in bridge.nodes() {
+        let GtkBridgeNodeKind::Widget(widget) = &node.kind else {
+            continue;
+        };
+        for event in &widget.event_hooks {
+            let resolved = resolve_run_event_handler(
+                module,
+                runtime_assembly,
+                sources,
+                &widget.widget,
+                event.name.text(),
+                event.handler,
+            )?;
+            handlers.entry(event.handler).or_insert(resolved);
+        }
+    }
+    Ok(handlers)
+}
+
+fn resolve_run_event_handler(
+    module: &HirModule,
+    runtime_assembly: &HirRuntimeAssembly,
+    sources: &SourceDatabase,
+    widget: &aivi_hir::NamePath,
+    event_name: &str,
+    expr: HirExprId,
+) -> Result<ResolvedRunEventHandler, String> {
+    let location = source_location(sources, module.exprs()[expr].span);
+    let ExprKind::Name(reference) = &module.exprs()[expr].kind else {
+        return Err(format!(
+            "event handler at {location} must be a direct signal name, not {:?}",
+            module.exprs()[expr].kind
+        ));
+    };
+    let aivi_hir::ResolutionState::Resolved(TermResolution::Item(item_id)) =
+        reference.resolution.as_ref()
+    else {
+        return Err(format!(
+            "event handler `{}` at {location} must resolve directly to a same-module signal item",
+            name_path_text(&reference.path)
+        ));
+    };
+    let Item::Signal(signal) = &module.items()[*item_id] else {
+        return Err(format!(
+            "event handler `{}` at {location} resolves to a {}, but event hooks require an input-backed signal",
+            name_path_text(&reference.path),
+            hir_item_kind_label(&module.items()[*item_id])
+        ));
+    };
+    let binding = runtime_assembly.signal(*item_id).ok_or_else(|| {
+        format!(
+            "event handler `{}` at {location} points at signal `{}` without a runtime binding",
+            name_path_text(&reference.path),
+            signal.name.text()
+        )
+    })?;
+    let Some(input) = binding.input() else {
+        return Err(format!(
+            "event handler `{}` at {location} points at signal `{}`, but only direct input signals are publishable from GTK events",
+            name_path_text(&reference.path),
+            signal.name.text()
+        ));
+    };
+    let Some(payload) = concrete_event_payload(widget, event_name) else {
+        return Err(format!(
+            "event handler `{}` at {location} uses unsupported GTK event `{}` on widget `{}`",
+            name_path_text(&reference.path),
+            event_name,
+            run_widget_name(widget)
+        ));
+    };
+    if !signal_accepts_event_payload(module, signal, payload) {
+        return Err(format!(
+            "event handler `{}` at {location} points at signal `{}`, but `{}` on `{}` publishes `{}` and requires `{}`",
+            name_path_text(&reference.path),
+            signal.name.text(),
+            event_name,
+            run_widget_name(widget),
+            event_payload_label(payload),
+            required_signal_type_label(payload)
+        ));
+    }
+    Ok(ResolvedRunEventHandler {
+        signal_item: *item_id,
+        signal_name: signal.name.text().into(),
+        input,
+    })
+}
+
+fn signal_accepts_event_payload(
+    module: &HirModule,
+    signal: &aivi_hir::SignalItem,
+    payload: GtkConcreteEventPayload,
+) -> bool {
+    let Some(annotation) = signal.annotation else {
+        return false;
+    };
+    let TypeKind::Apply { callee, arguments } = &module.types()[annotation].kind else {
+        return false;
+    };
+    if arguments.len() != 1 {
+        return false;
+    }
+    let TypeKind::Name(reference) = &module.types()[*callee].kind else {
+        return false;
+    };
+    if !matches!(
+        &reference.resolution,
+        aivi_hir::ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Signal))
+    ) {
+        return false;
+    }
+    let Some(payload_ty) = arguments.iter().next().copied() else {
+        return false;
+    };
+    match payload {
+        GtkConcreteEventPayload::Unit => type_is_builtin(module, payload_ty, BuiltinType::Unit),
+    }
+}
+
+fn type_is_builtin(module: &HirModule, ty: aivi_hir::TypeId, builtin: BuiltinType) -> bool {
+    match &module.types()[ty].kind {
+        TypeKind::Name(reference) => matches!(
+            &reference.resolution,
+            aivi_hir::ResolutionState::Resolved(TypeResolution::Builtin(resolved))
+                if *resolved == builtin
+        ),
+        TypeKind::Tuple(_)
+        | TypeKind::Record(_)
+        | TypeKind::Arrow { .. }
+        | TypeKind::Apply { .. } => false,
+    }
+}
+
+fn event_payload_label(payload: GtkConcreteEventPayload) -> &'static str {
+    match payload {
+        GtkConcreteEventPayload::Unit => "Unit",
+    }
+}
+
+fn required_signal_type_label(payload: GtkConcreteEventPayload) -> &'static str {
+    match payload {
+        GtkConcreteEventPayload::Unit => "`Signal Unit`",
+    }
+}
+
+fn name_path_text(path: &aivi_hir::NamePath) -> String {
+    path.segments()
+        .iter()
+        .map(|segment| segment.text())
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+fn run_widget_name(path: &aivi_hir::NamePath) -> &str {
+    path.segments()
+        .iter()
+        .last()
+        .expect("NamePath is non-empty")
+        .text()
+}
+
+fn hir_item_kind_label(item: &Item) -> &'static str {
+    match item {
+        Item::Type(_) => "type",
+        Item::Value(_) => "value",
+        Item::Function(_) => "function",
+        Item::Signal(_) => "signal",
+        Item::Class(_) => "class",
+        Item::Domain(_) => "domain",
+        Item::SourceProviderContract(_) => "provider",
+        Item::Instance(_) => "instance",
+        Item::Use(_) => "use",
+        Item::Export(_) => "export",
+    }
 }
 
 fn collect_run_exprs_from_bridge(bridge: &GtkBridgeGraph) -> BTreeSet<HirExprId> {
@@ -469,7 +858,8 @@ fn collect_run_exprs_from_bridge(bridge: &GtkBridgeGraph) -> BTreeSet<HirExprId>
                             }
                             SetterSource::InterpolatedText(text) => {
                                 for segment in &text.segments {
-                                    if let aivi_hir::TextSegment::Interpolation(interpolation) = segment
+                                    if let aivi_hir::TextSegment::Interpolation(interpolation) =
+                                        segment
                                     {
                                         exprs.insert(interpolation.expr);
                                     }
@@ -583,12 +973,17 @@ fn compile_run_fragments(
                     source_location(sources, site.span)
                 )
             })?;
+        let required_globals = backend.items()[item]
+            .body
+            .map(|kernel| backend.kernels()[kernel].global_items.clone())
+            .unwrap_or_default();
         fragments.insert(
             expr,
             CompiledRunFragment {
                 parameters: site.parameters.clone(),
                 program: backend,
                 item,
+                required_globals,
             },
         );
     }
@@ -603,9 +998,33 @@ fn launch_run(path: &Path, artifact: RunArtifact) -> Result<ExitCode, String> {
         module,
         bridge,
         fragments,
+        runtime_assembly,
+        core,
+        backend,
+        event_handlers,
     } = artifact;
+    let linked = link_backend_runtime(runtime_assembly, &core, backend).map_err(|errors| {
+        let mut rendered = String::from("failed to link backend runtime for `aivi run`:\n");
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
 
-    let mut executor =
+    let context = glib::MainContext::default();
+    let (update_tx, mut update_rx) = mpsc::unbounded_channel::<()>();
+    let driver = GlibLinkedRuntimeDriver::new(
+        context.clone(),
+        linked,
+        SourceProviderManager::new(),
+        Some(Arc::new(move || {
+            let _ = update_tx.send(());
+        })),
+    );
+    let main_loop = glib::MainLoop::new(Some(&context), false);
+    let executor =
         GtkRuntimeExecutor::new(bridge.clone(), GtkConcreteHost::<RunHostValue>::default())
             .map_err(|error| {
                 format!(
@@ -614,43 +1033,63 @@ fn launch_run(path: &Path, artifact: RunArtifact) -> Result<ExitCode, String> {
                     path.display()
                 )
             })?;
-    hydrate_run_view(&module, &bridge, view_name.as_ref(), &fragments, &mut executor)
-        .map_err(|error| format!("failed to hydrate run view `{}`: {error}", view_name))?;
-    let root_handles = executor.root_widgets().map_err(|error| {
-        format!(
-            "failed to collect root widgets for run view `{}`: {error}",
-            view_name
-        )
-    })?;
-    if root_handles.is_empty() {
-        return Err(format!(
-            "run view `{}` did not produce any root GTK widgets",
-            view_name
-        ));
+    let session = Rc::new(RefCell::new(RunSession {
+        view_name,
+        module,
+        bridge,
+        fragments,
+        event_handlers,
+        executor,
+        driver,
+        main_loop: main_loop.clone(),
+        work_scheduled: false,
+        runtime_error: None,
+    }));
+    {
+        let weak_session = Rc::downgrade(&session);
+        session
+            .borrow_mut()
+            .executor
+            .host_mut()
+            .set_event_notifier(Some(Rc::new(move || {
+                if let Some(session) = weak_session.upgrade() {
+                    schedule_run_session(&session);
+                }
+            })));
+    }
+    {
+        let weak_session = Rc::downgrade(&session);
+        context.spawn_local(async move {
+            while update_rx.recv().await.is_some() {
+                let Some(session) = weak_session.upgrade() else {
+                    break;
+                };
+                schedule_run_session(&session);
+            }
+        });
     }
 
-    let root_windows = root_handles
-        .into_iter()
-        .map(|handle| {
-            let widget = executor.host().widget(&handle).ok_or_else(|| {
-                format!(
-                    "run view `{}` lost GTK root widget {:?} before presentation",
-                    view_name, handle
-                )
-            })?;
-            widget.clone().downcast::<gtk::Window>().map_err(|widget| {
-                format!(
-                    "`aivi run` currently requires top-level `Window` roots; view `{}` produced a root `{}`",
-                    view_name,
-                    widget.type_().name()
-                )
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    session.borrow().driver.tick_now();
+    {
+        let mut session = session.borrow_mut();
+        session.hydrate_current_state().map_err(|error| {
+            format!(
+                "failed to hydrate run view `{}`: {error}",
+                session.view_name
+            )
+        })?;
+        session.process_pending_work().map_err(|error| {
+            format!("failed to start run view `{}`: {error}", session.view_name)
+        })?;
+    }
+    let root_windows = session.borrow_mut().collect_root_windows()?;
 
-    println!("running GTK view `{}` from {}", view_name, path.display());
+    println!(
+        "running GTK view `{}` from {}",
+        session.borrow().view_name,
+        path.display()
+    );
 
-    let main_loop = glib::MainLoop::new(None, false);
     let remaining = Rc::new(Cell::new(root_windows.len()));
     for window in &root_windows {
         let main_loop = main_loop.clone();
@@ -664,24 +1103,170 @@ fn launch_run(path: &Path, artifact: RunArtifact) -> Result<ExitCode, String> {
             glib::Propagation::Proceed
         });
     }
-    executor.host().present_root_windows();
+    session.borrow().executor.host().present_root_windows();
     main_loop.run();
+    let mut session = session.borrow_mut();
+    if let Some(error) = session.runtime_error.take() {
+        return Err(error);
+    }
     Ok(ExitCode::SUCCESS)
 }
 
 type RuntimeBindingEnv = BTreeMap<aivi_hir::BindingId, RuntimeValue>;
+
+impl RunSession {
+    fn hydrate_current_state(&mut self) -> Result<(), String> {
+        let globals = self
+            .driver
+            .current_signal_globals()
+            .map_err(|error| format!("{error}"))?;
+        hydrate_run_view(
+            &self.module,
+            &self.bridge,
+            self.view_name.as_ref(),
+            &self.fragments,
+            &globals,
+            &mut self.executor,
+        )
+    }
+
+    fn process_pending_work(&mut self) -> Result<(), String> {
+        let queued_events = self.executor.host_mut().drain_events();
+        if !queued_events.is_empty() {
+            let mut sink = RunEventSink {
+                driver: &self.driver,
+                handlers: &self.event_handlers,
+            };
+            for event in queued_events {
+                self.executor
+                    .dispatch_event(event.route, event.value, &mut sink)
+                    .map_err(|error| {
+                        format!("failed to dispatch GTK event {}: {error}", event.route)
+                    })?;
+            }
+        }
+        let failures = self.driver.drain_failures();
+        if !failures.is_empty() {
+            let mut rendered = String::from("live runtime failed during `aivi run`:\n");
+            for failure in failures {
+                rendered.push_str("- ");
+                rendered.push_str(&failure.to_string());
+                rendered.push('\n');
+            }
+            return Err(rendered);
+        }
+        if !self.driver.drain_outcomes().is_empty() {
+            self.hydrate_current_state()?;
+        }
+        Ok(())
+    }
+
+    fn collect_root_windows(&mut self) -> Result<Vec<gtk::Window>, String> {
+        let root_handles = self.executor.root_widgets().map_err(|error| {
+            format!(
+                "failed to collect root widgets for run view `{}`: {error}",
+                self.view_name
+            )
+        })?;
+        if root_handles.is_empty() {
+            return Err(format!(
+                "run view `{}` did not produce any root GTK widgets",
+                self.view_name
+            ));
+        }
+        root_handles
+            .into_iter()
+            .map(|handle| {
+                let widget = self.executor.host().widget(&handle).ok_or_else(|| {
+                    format!(
+                        "run view `{}` lost GTK root widget {:?} before presentation",
+                        self.view_name, handle
+                    )
+                })?;
+                widget.clone().downcast::<gtk::Window>().map_err(|widget| {
+                    format!(
+                        "`aivi run` currently requires top-level `Window` roots; view `{}` produced a root `{}`",
+                        self.view_name,
+                        widget.type_().name()
+                    )
+                })
+            })
+            .collect()
+    }
+}
+
+fn schedule_run_session(session: &Rc<RefCell<RunSession>>) {
+    if session.borrow().work_scheduled {
+        return;
+    }
+    session.borrow_mut().work_scheduled = true;
+    let weak_session = Rc::downgrade(session);
+    glib::idle_add_local_once(move || {
+        let Some(session) = weak_session.upgrade() else {
+            return;
+        };
+        let mut session = session.borrow_mut();
+        session.work_scheduled = false;
+        if session.runtime_error.is_some() {
+            return;
+        }
+        if let Err(error) = session.process_pending_work() {
+            session.runtime_error = Some(error);
+            session.main_loop.quit();
+        }
+    });
+}
+
+struct RunEventSink<'a> {
+    driver: &'a GlibLinkedRuntimeDriver,
+    handlers: &'a BTreeMap<HirExprId, ResolvedRunEventHandler>,
+}
+
+impl aivi_gtk::GtkEventSink<RunHostValue> for RunEventSink<'_> {
+    type Error = String;
+
+    fn dispatch_event(
+        &mut self,
+        route: &aivi_gtk::GtkEventRoute,
+        value: RunHostValue,
+    ) -> Result<(), Self::Error> {
+        let handler = self.handlers.get(&route.binding.handler).ok_or_else(|| {
+            format!(
+                "missing resolved event handler for expression {} on route {}",
+                route.binding.handler.as_raw(),
+                route.id
+            )
+        })?;
+        let stamp = self
+            .driver
+            .current_stamp(handler.input)
+            .map_err(|error| format!("{error}"))?;
+        self.driver
+            .queue_publication_now(Publication::new(stamp, value.0))
+            .map_err(|error| {
+                format!(
+                    "failed to publish GTK event on route {} into signal `{}` (item {}): {error}",
+                    route.id,
+                    handler.signal_name,
+                    handler.signal_item.as_raw()
+                )
+            })
+    }
+}
 
 fn hydrate_run_view(
     module: &HirModule,
     bridge: &GtkBridgeGraph,
     view_name: &str,
     fragments: &BTreeMap<HirExprId, CompiledRunFragment>,
+    globals: &BTreeMap<BackendItemId, RuntimeValue>,
     executor: &mut GtkRuntimeExecutor<GtkConcreteHost<RunHostValue>, RunHostValue>,
 ) -> Result<(), String> {
     hydrate_node(
         module,
         bridge,
         fragments,
+        globals,
         view_name,
         executor,
         &GtkNodeInstance::root(bridge.root()),
@@ -693,25 +1278,29 @@ fn hydrate_node(
     module: &HirModule,
     bridge: &GtkBridgeGraph,
     fragments: &BTreeMap<HirExprId, CompiledRunFragment>,
+    globals: &BTreeMap<BackendItemId, RuntimeValue>,
     view_name: &str,
     executor: &mut GtkRuntimeExecutor<GtkConcreteHost<RunHostValue>, RunHostValue>,
     instance: &GtkNodeInstance,
     env: &RuntimeBindingEnv,
 ) -> Result<(), String> {
-    let node = bridge
-        .node(instance.node.plan)
-        .ok_or_else(|| format!("run view `{view_name}` is missing GTK node {}", instance.node))?;
+    let node = bridge.node(instance.node.plan).ok_or_else(|| {
+        format!(
+            "run view `{view_name}` is missing GTK node {}",
+            instance.node
+        )
+    })?;
     match &node.kind {
         GtkBridgeNodeKind::Widget(widget) => {
             for property in &widget.properties {
                 if let RuntimePropertyBinding::Setter(setter) = property {
                     let value = match &setter.source {
                         SetterSource::Expr(expr) => {
-                            evaluate_run_fragment(fragments, *expr, env)?
+                            evaluate_run_fragment(fragments, globals, *expr, env)?
                         }
-                        SetterSource::InterpolatedText(text) => {
-                            RuntimeValue::Text(evaluate_runtime_text(fragments, text, env)?)
-                        }
+                        SetterSource::InterpolatedText(text) => RuntimeValue::Text(
+                            evaluate_runtime_text(fragments, globals, text, env)?,
+                        ),
                     };
                     executor
                         .set_property_for_instance(instance, setter.input, RunHostValue(value))
@@ -728,6 +1317,7 @@ fn hydrate_node(
                 module,
                 bridge,
                 fragments,
+                globals,
                 view_name,
                 executor,
                 &widget.default_children.roots,
@@ -736,7 +1326,7 @@ fn hydrate_node(
             )
         }
         GtkBridgeNodeKind::Show(show) => {
-            let when = runtime_bool(evaluate_run_fragment(fragments, show.when.expr, env)?)
+            let when = runtime_bool(evaluate_run_fragment(fragments, globals, show.when.expr, env)?)
                 .ok_or_else(|| {
                     format!(
                         "run view `{view_name}` expected `<show when>` on {instance} to evaluate to Bool"
@@ -745,7 +1335,7 @@ fn hydrate_node(
             let keep_mounted = match &show.mount {
                 RuntimeShowMountPolicy::UnmountWhenHidden => false,
                 RuntimeShowMountPolicy::KeepMounted { decision } => runtime_bool(
-                    evaluate_run_fragment(fragments, decision.expr, env)?,
+                    evaluate_run_fragment(fragments, globals, decision.expr, env)?,
                 )
                 .ok_or_else(|| {
                     format!(
@@ -761,6 +1351,7 @@ fn hydrate_node(
                     module,
                     bridge,
                     fragments,
+                    globals,
                     view_name,
                     executor,
                     &show.body.roots,
@@ -773,6 +1364,7 @@ fn hydrate_node(
         GtkBridgeNodeKind::Each(each) => {
             let values = runtime_list_values(evaluate_run_fragment(
                 fragments,
+                globals,
                 each.collection.expr,
                 env,
             )?)
@@ -792,13 +1384,15 @@ fn hydrate_node(
                     for (index, value) in values.into_iter().enumerate() {
                         let mut child_env = env.clone();
                         child_env.insert(each.binding, value);
-                        let path = instance
-                            .path
-                            .pushed(instance.node, aivi_gtk::GtkRepeatedChildIdentity::Positional(index));
+                        let path = instance.path.pushed(
+                            instance.node,
+                            aivi_gtk::GtkRepeatedChildIdentity::Positional(index),
+                        );
                         hydrate_child_group(
                             module,
                             bridge,
                             fragments,
+                            globals,
                             view_name,
                             executor,
                             &each.item_template.roots,
@@ -813,7 +1407,8 @@ fn hydrate_node(
                     for value in values {
                         let mut child_env = env.clone();
                         child_env.insert(each.binding, value.clone());
-                        let key_value = evaluate_run_fragment(fragments, *key, &child_env)?;
+                        let key_value =
+                            evaluate_run_fragment(fragments, globals, *key, &child_env)?;
                         let collection_key = runtime_collection_key(key_value).ok_or_else(|| {
                             format!(
                                 "run view `{view_name}` expected `<each>` key on {instance} to be displayable"
@@ -836,6 +1431,7 @@ fn hydrate_node(
                             module,
                             bridge,
                             fragments,
+                            globals,
                             view_name,
                             executor,
                             &each.item_template.roots,
@@ -851,6 +1447,7 @@ fn hydrate_node(
                         module,
                         bridge,
                         fragments,
+                        globals,
                         view_name,
                         executor,
                         &GtkNodeInstance::with_path(empty.empty, instance.path.clone()),
@@ -861,7 +1458,7 @@ fn hydrate_node(
             Ok(())
         }
         GtkBridgeNodeKind::Match(match_node) => {
-            let value = evaluate_run_fragment(fragments, match_node.scrutinee.expr, env)?;
+            let value = evaluate_run_fragment(fragments, globals, match_node.scrutinee.expr, env)?;
             let mut matched = None;
             for (index, branch) in match_node.cases.iter().enumerate() {
                 let mut bindings = RuntimeBindingEnv::new();
@@ -884,6 +1481,7 @@ fn hydrate_node(
                 module,
                 bridge,
                 fragments,
+                globals,
                 view_name,
                 executor,
                 &GtkNodeInstance::with_path(branch.case, instance.path.clone()),
@@ -894,6 +1492,7 @@ fn hydrate_node(
             module,
             bridge,
             fragments,
+            globals,
             view_name,
             executor,
             &case.body.roots,
@@ -904,6 +1503,7 @@ fn hydrate_node(
             module,
             bridge,
             fragments,
+            globals,
             view_name,
             executor,
             &fragment.body.roots,
@@ -911,13 +1511,14 @@ fn hydrate_node(
             env,
         ),
         GtkBridgeNodeKind::With(with_node) => {
-            let value = evaluate_run_fragment(fragments, with_node.value.expr, env)?;
+            let value = evaluate_run_fragment(fragments, globals, with_node.value.expr, env)?;
             let mut child_env = env.clone();
             child_env.insert(with_node.binding, value);
             hydrate_child_group(
                 module,
                 bridge,
                 fragments,
+                globals,
                 view_name,
                 executor,
                 &with_node.body.roots,
@@ -929,6 +1530,7 @@ fn hydrate_node(
             module,
             bridge,
             fragments,
+            globals,
             view_name,
             executor,
             &empty.body.roots,
@@ -942,6 +1544,7 @@ fn hydrate_child_group(
     module: &HirModule,
     bridge: &GtkBridgeGraph,
     fragments: &BTreeMap<HirExprId, CompiledRunFragment>,
+    globals: &BTreeMap<BackendItemId, RuntimeValue>,
     view_name: &str,
     executor: &mut GtkRuntimeExecutor<GtkConcreteHost<RunHostValue>, RunHostValue>,
     roots: &[aivi_gtk::GtkBridgeNodeRef],
@@ -953,6 +1556,7 @@ fn hydrate_child_group(
             module,
             bridge,
             fragments,
+            globals,
             view_name,
             executor,
             &GtkNodeInstance::with_path(root, path.clone()),
@@ -964,12 +1568,16 @@ fn hydrate_child_group(
 
 fn evaluate_run_fragment(
     fragments: &BTreeMap<HirExprId, CompiledRunFragment>,
+    globals: &BTreeMap<BackendItemId, RuntimeValue>,
     expr: HirExprId,
     env: &RuntimeBindingEnv,
 ) -> Result<RuntimeValue, String> {
-    let fragment = fragments
-        .get(&expr)
-        .ok_or_else(|| format!("missing compiled runtime fragment for expression {}", expr.as_raw()))?;
+    let fragment = fragments.get(&expr).ok_or_else(|| {
+        format!(
+            "missing compiled runtime fragment for expression {}",
+            expr.as_raw()
+        )
+    })?;
     let args = fragment
         .parameters
         .iter()
@@ -985,22 +1593,43 @@ fn evaluate_run_fragment(
         .collect::<Result<Vec<_>, _>>()?;
     let item = &fragment.program.items()[fragment.item];
     let mut evaluator = KernelEvaluator::new(&fragment.program);
+    let required_globals = fragment
+        .required_globals
+        .iter()
+        .map(|item| {
+            globals
+                .get(item)
+                .cloned()
+                .map(|value| (*item, value))
+                .ok_or_else(|| {
+                    format!(
+                        "runtime expression {} requires current signal item {} but no committed snapshot exists",
+                        expr.as_raw(),
+                        item
+                    )
+                })
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
     if args.is_empty() {
         evaluator
-            .evaluate_item(fragment.item, &BTreeMap::new())
+            .evaluate_item(fragment.item, &required_globals)
             .map_err(|error| format!("{error}"))
     } else {
-        let kernel = item
-            .body
-            .ok_or_else(|| format!("compiled runtime fragment {} has no executable body", expr.as_raw()))?;
+        let kernel = item.body.ok_or_else(|| {
+            format!(
+                "compiled runtime fragment {} has no executable body",
+                expr.as_raw()
+            )
+        })?;
         evaluator
-            .evaluate_kernel(kernel, None, &args, &BTreeMap::new())
+            .evaluate_kernel(kernel, None, &args, &required_globals)
             .map_err(|error| format!("{error}"))
     }
 }
 
 fn evaluate_runtime_text(
     fragments: &BTreeMap<HirExprId, CompiledRunFragment>,
+    globals: &BTreeMap<BackendItemId, RuntimeValue>,
     text: &aivi_hir::TextLiteral,
     env: &RuntimeBindingEnv,
 ) -> Result<Box<str>, String> {
@@ -1011,6 +1640,7 @@ fn evaluate_runtime_text(
             aivi_hir::TextSegment::Interpolation(interpolation) => {
                 let value = strip_signal_runtime_value(evaluate_run_fragment(
                     fragments,
+                    globals,
                     interpolation.expr,
                     env,
                 )?);
@@ -1146,7 +1776,10 @@ fn match_builtin_pattern(
     }
 }
 
-fn truthy_falsy_payload(value: &RuntimeValue, constructor: BuiltinTerm) -> Option<Option<RuntimeValue>> {
+fn truthy_falsy_payload(
+    value: &RuntimeValue,
+    constructor: BuiltinTerm,
+) -> Option<Option<RuntimeValue>> {
     match (constructor, strip_signal_runtime_value(value.clone())) {
         (BuiltinTerm::True, RuntimeValue::Bool(true))
         | (BuiltinTerm::False, RuntimeValue::Bool(false))
@@ -1155,9 +1788,7 @@ fn truthy_falsy_payload(value: &RuntimeValue, constructor: BuiltinTerm) -> Optio
         | (BuiltinTerm::Ok, RuntimeValue::ResultOk(payload))
         | (BuiltinTerm::Err, RuntimeValue::ResultErr(payload))
         | (BuiltinTerm::Valid, RuntimeValue::ValidationValid(payload))
-        | (BuiltinTerm::Invalid, RuntimeValue::ValidationInvalid(payload)) => {
-            Some(Some(*payload))
-        }
+        | (BuiltinTerm::Invalid, RuntimeValue::ValidationInvalid(payload)) => Some(Some(*payload)),
         _ => None,
     }
 }
@@ -1512,7 +2143,7 @@ fn print_usage() {
         "usage:\n  aivi <path>\n  aivi check <path>\n  aivi compile <path> [-o <object>]\n  aivi run <path> [--view <name>]\n  aivi lex <path>\n  aivi fmt <path>\n  aivi fmt --stdin\n  aivi fmt --check [path...]\n  aivi lsp"
     );
     eprintln!(
-        "commands:\n  check    Lex, parse, lower, and validate a module through HIR\n  compile  Lower through typed core, typed lambda, backend, and Cranelift codegen\n  run      Launch the current static GTK markup MVP\n  lex      Dump the lossless token stream\n  fmt      Canonically format the supported surface subset\n  lsp      Start the language server"
+        "commands:\n  check    Lex, parse, lower, and validate a module through HIR\n  compile  Lower through typed core, typed lambda, backend, and Cranelift codegen\n  run      Launch the current live GTK runtime path\n  lex      Dump the lossless token stream\n  fmt      Canonically format the supported surface subset\n  lsp      Start the language server"
     );
     eprintln!(
         "milestone-2 surface items: {:?}",
@@ -1651,10 +2282,10 @@ val title = "AIVI"
 
 val view =
     <Window title={title} />
-"#,
+        "#,
             None,
         )
-        .expect("dynamic setters should compile for one-shot run hydration");
+        .expect("dynamic setters should compile for live run hydration");
         let root = artifact.bridge.root_node();
         let GtkBridgeNodeKind::Widget(widget) = &root.kind else {
             panic!("expected a root widget, found {:?}", root.kind.tag());
@@ -1679,31 +2310,87 @@ val view =
             <Label text="Visible" />
         </show>
     </Window>
-"#,
+        "#,
             None,
         )
-        .expect("control nodes should compile for one-shot run hydration");
-        assert!(artifact
-            .bridge
-            .nodes()
-            .iter()
-            .any(|node| matches!(node.kind, GtkBridgeNodeKind::Show(_))));
+        .expect("control nodes should compile for live run hydration");
+        assert!(
+            artifact
+                .bridge
+                .nodes()
+                .iter()
+                .any(|node| matches!(node.kind, GtkBridgeNodeKind::Show(_)))
+        );
     }
 
     #[test]
-    fn prepare_run_rejects_event_hooks() {
-        let error = prepare_run_from_text(
+    fn prepare_run_accepts_direct_signal_event_hooks() {
+        let artifact = prepare_run_from_text(
             "event-hook.aivi",
             r#"
-val click = True
+sig click : Signal Unit
 
 val view =
-    <Button label="Save" onClick={click} />
+    <Window title="Host">
+        <Button label="Save" onClick={click} />
+    </Window>
 "#,
             None,
         )
-        .expect_err("event hooks should stay rejected until real runtime routing lands");
-        assert!(error.contains("event hook `onClick` is not supported yet"));
+        .expect("event hooks should resolve when they target direct input signals");
+        let widget = artifact
+            .bridge
+            .nodes()
+            .iter()
+            .find_map(|node| match &node.kind {
+                GtkBridgeNodeKind::Widget(widget)
+                    if widget.widget.segments().last().text() == "Button" =>
+                {
+                    Some(widget)
+                }
+                _ => None,
+            })
+            .expect("bridge should keep the button widget");
+        let handler = widget
+            .event_hooks
+            .first()
+            .expect("button should keep one event hook")
+            .handler;
+        assert!(artifact.event_handlers.contains_key(&handler));
+    }
+
+    #[test]
+    fn prepare_run_rejects_non_window_root_widgets() {
+        let error = prepare_run_from_text(
+            "button-root.aivi",
+            r#"
+val view =
+    <Button label="Save" />
+"#,
+            None,
+        )
+        .expect_err("non-window roots should be rejected before launch");
+        assert!(error.contains("reachable root widgets"));
+        assert!(error.contains("Window"));
+    }
+
+    #[test]
+    fn prepare_run_rejects_event_payload_mismatch() {
+        let error = prepare_run_from_text(
+            "event-payload-mismatch.aivi",
+            r#"
+sig click : Signal Int
+
+val view =
+    <Window title="Host">
+        <Button label="Save" onClick={click} />
+    </Window>
+"#,
+            None,
+        )
+        .expect_err("button clicks should require Signal Unit handlers");
+        assert!(error.contains("Signal Unit"));
+        assert!(error.contains("onClick"));
     }
 
     #[test]

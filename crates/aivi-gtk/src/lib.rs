@@ -16,7 +16,11 @@ pub mod runtime_adapter;
 
 pub use bridge::*;
 pub use executor::*;
-pub use host::*;
+pub use host::{
+    GtkConcreteEventPayload, GtkConcreteHost, GtkConcreteHostError, GtkConcreteWidget,
+    GtkHostValue, GtkQueuedEvent, concrete_event_payload, concrete_supports_property,
+    concrete_widget_is_window,
+};
 pub use lower::{
     LoweringError, LoweringOptions, lower_markup_expr, lower_markup_expr_with_options,
     lower_markup_root, lower_markup_root_with_options,

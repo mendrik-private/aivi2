@@ -112,10 +112,16 @@ impl fmt::Display for MarkupRuntimeExprSiteError {
                 write!(f, "expression {expr} is not a markup root")
             }
             Self::MissingMarkupNode { expr, node } => {
-                write!(f, "markup root expression {expr} references missing markup node {node}")
+                write!(
+                    f,
+                    "markup root expression {expr} references missing markup node {node}"
+                )
             }
             Self::MissingControlNode { expr, node } => {
-                write!(f, "markup root expression {expr} references missing control node {node}")
+                write!(
+                    f,
+                    "markup root expression {expr} references missing control node {node}"
+                )
             }
             Self::UnknownExprType { expr, .. } => {
                 write!(f, "markup runtime expression {expr} has no resolved type")
@@ -417,8 +423,9 @@ impl<'a> GeneralExprElaborator<'a> {
                                     }
                                     crate::MarkupAttributeValue::Text(text) => {
                                         for segment in text.segments.into_iter().rev() {
-                                            if let crate::TextSegment::Interpolation(interpolation) =
-                                                segment
+                                            if let crate::TextSegment::Interpolation(
+                                                interpolation,
+                                            ) = segment
                                             {
                                                 self.record_markup_runtime_expr_site(
                                                     interpolation.expr,
@@ -498,11 +505,7 @@ impl<'a> GeneralExprElaborator<'a> {
                             }
                         }
                         crate::ControlNode::Match(node) => {
-                            self.record_markup_runtime_expr_site(
-                                node.scrutinee,
-                                &env,
-                                &mut sites,
-                            )?;
+                            self.record_markup_runtime_expr_site(node.scrutinee, &env, &mut sites)?;
                             let subject = self
                                 .typing
                                 .infer_expr(node.scrutinee, &env, None)
@@ -1465,11 +1468,10 @@ impl<'a> GeneralExprElaborator<'a> {
                 | BuiltinTerm::Valid
                 | BuiltinTerm::Invalid,
             )) => self.runtime_reference_for_name(span, reference).ok(),
-            ResolutionState::Resolved(TermResolution::Item(item_id)) => {
-                self.module
-                    .sum_constructor_handle(*item_id, reference.path.segments().last().text())
-                    .map(GateRuntimeReference::SumConstructor)
-            }
+            ResolutionState::Resolved(TermResolution::Item(item_id)) => self
+                .module
+                .sum_constructor_handle(*item_id, reference.path.segments().last().text())
+                .map(GateRuntimeReference::SumConstructor),
             _ => None,
         }
     }
@@ -1807,14 +1809,12 @@ impl<'a> GeneralExprElaborator<'a> {
         env: &GateExprEnv,
         sites: &mut BTreeMap<ExprId, MarkupRuntimeExprSite>,
     ) -> Result<(), MarkupRuntimeExprSiteError> {
-        let ty = self
-            .typing
-            .infer_expr(expr, env, None)
-            .ty
-            .ok_or(MarkupRuntimeExprSiteError::UnknownExprType {
+        let ty = self.typing.infer_expr(expr, env, None).ty.ok_or(
+            MarkupRuntimeExprSiteError::UnknownExprType {
                 expr,
                 span: self.module.exprs()[expr].span,
-            })?;
+            },
+        )?;
         let parameters = env_parameters(self.module, env);
         sites.entry(expr).or_insert(MarkupRuntimeExprSite {
             expr,

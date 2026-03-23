@@ -2409,7 +2409,11 @@ val view =
             ),
         );
         executor
-            .set_property_for_instance(&alpha_row, title_input, TestValue::Text("Alpha".to_string()))
+            .set_property_for_instance(
+                &alpha_row,
+                title_input,
+                TestValue::Text("Alpha".to_string()),
+            )
             .expect("scoped setter should update the alpha row");
         executor
             .set_property_for_instance(&beta_row, title_input, TestValue::Text("Beta".to_string()))

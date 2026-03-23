@@ -5,6 +5,7 @@ use aivi_hir::{
     MarkupNodeId, MarkupNodeKind, Module, NonEmpty, PatternId, TextLiteral, TextSegment,
 };
 
+use crate::host::concrete_event_payload;
 use crate::plan::{
     AttributeSite, CaseNode, ChildOp, ChildUpdateMode, EachNode, EmptyNode, EventHookPlan,
     EventHookStrategy, EventHookTeardown, FragmentNode, MatchNode, PlanNode, PlanNodeId,
@@ -15,9 +16,10 @@ use crate::plan::{
 
 /// Lowering options for the first GTK bridge slice.
 ///
-/// The RFC defines direct event hookups but does not yet freeze the exact surface naming convention
-/// for event attributes. This foundation therefore uses an `on*` expression-attribute convention by
-/// default, while keeping the choice explicit and easy to replace once widget schemas exist.
+/// The RFC defines direct event hookups but does not yet ship full widget/event metadata.
+/// This foundation therefore recognizes only the currently supported concrete GTK events inside the
+/// default `on*` namespace, while keeping the choice explicit and easy to replace once widget
+/// schemas exist.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoweringOptions {
     event_attribute_prefix: Box<str>,
@@ -42,12 +44,13 @@ impl LoweringOptions {
         self
     }
 
-    fn lowers_as_event(&self, attribute: &MarkupAttribute) -> bool {
+    fn lowers_as_event(&self, widget: &aivi_hir::NamePath, attribute: &MarkupAttribute) -> bool {
         matches!(attribute.value, MarkupAttributeValue::Expr(_))
             && attribute
                 .name
                 .text()
                 .starts_with(self.event_attribute_prefix())
+            && concrete_event_payload(widget, attribute.name.text()).is_some()
     }
 }
 
@@ -350,7 +353,8 @@ impl<'module> Lowering<'module> {
     ) -> Result<PlanNodeId, LoweringError> {
         let stable_id = StableNodeId::Markup(id);
         let children = self.child_ops_from_markup(stable_id, &element.children)?;
-        let (properties, event_hooks) = self.lower_attributes(stable_id, &element.attributes)?;
+        let (properties, event_hooks) =
+            self.lower_attributes(stable_id, &element.name, &element.attributes)?;
         Ok(self.push_node(PlanNode {
             stable_id,
             span,
@@ -459,6 +463,7 @@ impl<'module> Lowering<'module> {
     fn lower_attributes(
         &self,
         owner: StableNodeId,
+        widget: &aivi_hir::NamePath,
         attributes: &[MarkupAttribute],
     ) -> Result<(Vec<PropertyPlan>, Vec<EventHookPlan>), LoweringError> {
         let mut properties = Vec::new();
@@ -497,7 +502,7 @@ impl<'module> Lowering<'module> {
                 }
                 MarkupAttributeValue::Expr(expr) => {
                     self.require_expr(*expr)?;
-                    if self.options.lowers_as_event(attribute) {
+                    if self.options.lowers_as_event(widget, attribute) {
                         event_hooks.push(EventHookPlan {
                             site,
                             name: attribute.name.clone(),

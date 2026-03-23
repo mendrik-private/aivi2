@@ -332,19 +332,6 @@ impl Lowerer {
             .as_ref()
             .map(|annotation| self.lower_type_expr(annotation));
         let body = item.expr_body().map(|expr| self.lower_expr(expr));
-        if body.is_none()
-            && !item
-                .base
-                .decorators
-                .iter()
-                .any(|decorator| decorator.name.as_dotted() == "source")
-        {
-            self.emit_error(
-                item.base.span,
-                "signal declaration without `@source` must provide a body in Milestone 2",
-                code("missing-signal-body"),
-            );
-        }
 
         SignalItem {
             header,

@@ -43,6 +43,7 @@ dependencies = [
  "aivi-hir",
  "aivi-lambda",
  "aivi-lsp",
+ "aivi-runtime",
  "aivi-syntax",
  "gtk4",
  "tokio",

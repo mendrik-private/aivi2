@@ -409,8 +409,12 @@ sig tick : Signal Unit
         );
         let assembly =
             assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");
-        let mut linked = link_backend_runtime(assembly, &lowered.core, &lowered.backend)
-            .expect("startup link should succeed");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("startup link should succeed");
 
         let actions = linked
             .tick_with_source_lifecycle()
@@ -457,8 +461,12 @@ sig users : Signal Text
         );
         let assembly =
             assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");
-        let mut linked = link_backend_runtime(assembly, &lowered.core, &lowered.backend)
-            .expect("startup link should succeed");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("startup link should succeed");
         let actions = linked
             .tick_with_source_lifecycle()
             .expect("linked runtime tick should succeed");
@@ -488,8 +496,12 @@ sig tick : Signal Unit
         );
         let assembly =
             assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");
-        let mut linked = link_backend_runtime(assembly, &lowered.core, &lowered.backend)
-            .expect("startup link should succeed");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("startup link should succeed");
         let actions = linked
             .tick_with_source_lifecycle()
             .expect("linked runtime tick should succeed");
@@ -518,8 +530,12 @@ sig tick : Signal Unit
         );
         let assembly =
             assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");
-        let mut linked = link_backend_runtime(assembly, &lowered.core, &lowered.backend)
-            .expect("startup link should succeed");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("startup link should succeed");
         let actions = linked
             .tick_with_source_lifecycle()
             .expect("linked runtime tick should succeed");
@@ -550,8 +566,12 @@ sig tick : Signal Unit
         );
         let assembly =
             assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");
-        let mut linked = link_backend_runtime(assembly, &lowered.core, &lowered.backend)
-            .expect("startup link should succeed");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("startup link should succeed");
 
         let actions = linked
             .tick_with_source_lifecycle()

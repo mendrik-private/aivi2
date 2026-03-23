@@ -11,10 +11,11 @@ aivi-core = { path = "../aivi-core" }
 aivi-gtk = { path = "../aivi-gtk" }
 aivi-hir.workspace = true
 aivi-lambda = { path = "../aivi-lambda" }
+aivi-runtime = { path = "../aivi-runtime" }
 aivi-syntax.workspace = true
 aivi-lsp = { path = "../aivi-lsp" }
 gtk = { package = "gtk4", version = "0.9.5" }
-tokio = { version = "1", features = ["rt"] }
+tokio = { version = "1", features = ["rt", "sync"] }
 
 [[bin]]
 name = "aivi"

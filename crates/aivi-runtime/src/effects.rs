@@ -434,8 +434,19 @@ impl<V, D> TaskSourceRuntime<V, D> {
         self.scheduler.worker_sender()
     }
 
+    pub fn set_worker_publication_notifier(
+        &mut self,
+        notifier: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
+    ) {
+        self.scheduler.set_worker_publication_notifier(notifier);
+    }
+
     pub fn tick_count(&self) -> u64 {
         self.scheduler.tick_count()
+    }
+
+    pub fn queued_message_count(&self) -> usize {
+        self.scheduler.queued_message_count()
     }
 
     pub fn current_value(

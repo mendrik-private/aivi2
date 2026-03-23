@@ -467,7 +467,10 @@ pub fn describe_expr_kind(kind: &KernelExprKind) -> String {
         KernelExprKind::Environment(slot) => format!("env{slot}"),
         KernelExprKind::Item(item) => format!("item item{item}"),
         KernelExprKind::SumConstructor(handle) => {
-            format!("sum-constructor {}.{}", handle.type_name, handle.variant_name)
+            format!(
+                "sum-constructor {}.{}",
+                handle.type_name, handle.variant_name
+            )
         }
         KernelExprKind::DomainMember(handle) => {
             format!(

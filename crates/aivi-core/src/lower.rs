@@ -8,11 +8,10 @@ use aivi_hir::{
     GateRuntimePipeExpr, GateRuntimePipeStageKind, GateRuntimeProjectionBase, GateRuntimeReference,
     GateRuntimeTextLiteral, GateRuntimeTextSegment, GateRuntimeTruthyFalsyBranch, GateStageOutcome,
     GeneralExprOutcome, GeneralExprParameter, Item as HirItem, ItemId as HirItemId,
-    PatternId as HirPatternId,
-    RecurrenceNodeOutcome, SourceDecodeProgram, SourceDecodeProgramOutcome,
-    SourceLifecycleNodeOutcome, TruthyFalsyStageOutcome, elaborate_fanouts, elaborate_gates,
-    elaborate_general_expressions, elaborate_recurrences, elaborate_source_lifecycles,
-    elaborate_truthy_falsy, generate_source_decode_programs,
+    PatternId as HirPatternId, RecurrenceNodeOutcome, SourceDecodeProgram,
+    SourceDecodeProgramOutcome, SourceLifecycleNodeOutcome, TruthyFalsyStageOutcome,
+    elaborate_fanouts, elaborate_gates, elaborate_general_expressions, elaborate_recurrences,
+    elaborate_source_lifecycles, elaborate_truthy_falsy, generate_source_decode_programs,
 };
 
 use crate::{
@@ -248,6 +247,10 @@ pub fn lower_module(hir: &aivi_hir::Module) -> Result<Module, LoweringErrors> {
     ModuleLowerer::new(hir).build()
 }
 
+pub fn lower_runtime_module(hir: &aivi_hir::Module) -> Result<Module, LoweringErrors> {
+    ModuleLowerer::new_runtime(hir).build()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeFragmentSpec {
     pub name: Box<str>,
@@ -294,6 +297,7 @@ enum PendingStage {
 
 struct ModuleLowerer<'a> {
     hir: &'a aivi_hir::Module,
+    included_items: Option<HashSet<HirItemId>>,
     module: Module,
     item_map: HashMap<HirItemId, ItemId>,
     pipe_builders: BTreeMap<PipeKey, PipeBuilder>,
@@ -314,6 +318,7 @@ impl<'a> ModuleLowerer<'a> {
     fn new(hir: &'a aivi_hir::Module) -> Self {
         Self {
             hir,
+            included_items: None,
             module: Module::new(),
             item_map: HashMap::new(),
             pipe_builders: BTreeMap::new(),
@@ -321,6 +326,37 @@ impl<'a> ModuleLowerer<'a> {
             decode_by_owner: HashMap::new(),
             errors: Vec::new(),
         }
+    }
+
+    fn new_runtime(hir: &'a aivi_hir::Module) -> Self {
+        let included_items = hir
+            .items()
+            .iter()
+            .filter_map(|(item_id, item)| match item {
+                HirItem::Value(value)
+                    if matches!(hir.exprs()[value.body].kind, aivi_hir::ExprKind::Markup(_)) =>
+                {
+                    None
+                }
+                _ => Some(item_id),
+            })
+            .collect::<HashSet<_>>();
+        Self {
+            hir,
+            included_items: Some(included_items),
+            module: Module::new(),
+            item_map: HashMap::new(),
+            pipe_builders: BTreeMap::new(),
+            source_by_owner: HashMap::new(),
+            decode_by_owner: HashMap::new(),
+            errors: Vec::new(),
+        }
+    }
+
+    fn includes_item(&self, item: HirItemId) -> bool {
+        self.included_items
+            .as_ref()
+            .is_none_or(|included| included.contains(&item))
     }
 
     fn build(mut self) -> Result<Module, LoweringErrors> {
@@ -354,6 +390,9 @@ impl<'a> ModuleLowerer<'a> {
 
     fn seed_items(&mut self) -> Result<(), LoweringErrors> {
         for (hir_id, item) in self.hir.items().iter() {
+            if !self.includes_item(hir_id) {
+                continue;
+            }
             let (span, name, kind) = match item {
                 HirItem::Value(item) => {
                     (item.header.span, item.name.text().into(), ItemKind::Value)
@@ -400,6 +439,9 @@ impl<'a> ModuleLowerer<'a> {
 
     fn lower_general_exprs(&mut self) {
         for item in elaborate_general_expressions(self.hir).into_items() {
+            if !self.includes_item(item.owner) {
+                continue;
+            }
             let Some(owner) = self.item_map.get(&item.owner).copied() else {
                 self.errors
                     .push(LoweringError::UnknownOwner { owner: item.owner });
@@ -452,6 +494,9 @@ impl<'a> ModuleLowerer<'a> {
 
     fn seed_signal_dependencies(&mut self) {
         for (hir_id, item) in self.hir.items().iter() {
+            if !self.includes_item(hir_id) {
+                continue;
+            }
             let HirItem::Signal(signal) = item else {
                 continue;
             };
@@ -2176,7 +2221,9 @@ impl<'a> RuntimeFragmentLowerer<'a> {
             return;
         }
         let Some(report) = self.report_by_owner.get(&owner).cloned() else {
-            self.lowerer.errors.push(LoweringError::UnknownOwner { owner });
+            self.lowerer
+                .errors
+                .push(LoweringError::UnknownOwner { owner });
             return;
         };
         let Some(core_item) = self.seed_hir_item(owner) else {
@@ -2234,9 +2281,11 @@ impl<'a> RuntimeFragmentLowerer<'a> {
         let item = self.lowerer.hir.items().get(owner)?;
         let (span, name, kind) = match item {
             HirItem::Value(item) => (item.header.span, item.name.text().into(), ItemKind::Value),
-            HirItem::Function(item) => {
-                (item.header.span, item.name.text().into(), ItemKind::Function)
-            }
+            HirItem::Function(item) => (
+                item.header.span,
+                item.name.text().into(),
+                ItemKind::Function,
+            ),
             HirItem::Signal(item) => (
                 item.header.span,
                 item.name.text().into(),
@@ -2253,7 +2302,9 @@ impl<'a> RuntimeFragmentLowerer<'a> {
             | HirItem::SourceProviderContract(_)
             | HirItem::Use(_)
             | HirItem::Export(_) => {
-                self.lowerer.errors.push(LoweringError::UnknownOwner { owner });
+                self.lowerer
+                    .errors
+                    .push(LoweringError::UnknownOwner { owner });
                 return None;
             }
         };

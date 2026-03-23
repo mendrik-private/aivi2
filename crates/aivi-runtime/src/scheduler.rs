@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeSet, VecDeque},
     convert::Infallible,
-    sync::mpsc,
+    sync::{Arc, mpsc},
 };
 
 use crate::graph::{
@@ -102,13 +102,18 @@ impl<V> Publication<V> {
 #[derive(Clone)]
 pub struct WorkerPublicationSender<V> {
     sender: mpsc::Sender<Publication<V>>,
+    notifier: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
 }
 
 impl<V> WorkerPublicationSender<V> {
     pub fn publish(&self, publication: Publication<V>) -> Result<(), WorkerSendError<V>> {
         self.sender
             .send(publication)
-            .map_err(|err| WorkerSendError { publication: err.0 })
+            .map_err(|err| WorkerSendError { publication: err.0 })?;
+        if let Some(notifier) = &self.notifier {
+            notifier();
+        }
+        Ok(())
     }
 }
 
@@ -195,6 +200,7 @@ pub struct Scheduler<V> {
     publications_scratch: Vec<Option<Publication<V>>>,
     worker_publication_tx: mpsc::Sender<Publication<V>>,
     worker_publication_rx: mpsc::Receiver<Publication<V>>,
+    worker_publication_notifier: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
     initialized: bool,
     next_tick: u64,
 }
@@ -231,6 +237,7 @@ impl<V> Scheduler<V> {
             publications_scratch: Vec::new(),
             worker_publication_tx,
             worker_publication_rx,
+            worker_publication_notifier: None,
             initialized: false,
             next_tick: 0,
         }
@@ -251,7 +258,15 @@ impl<V> Scheduler<V> {
     pub fn worker_sender(&self) -> WorkerPublicationSender<V> {
         WorkerPublicationSender {
             sender: self.worker_publication_tx.clone(),
+            notifier: self.worker_publication_notifier.clone(),
         }
+    }
+
+    pub fn set_worker_publication_notifier(
+        &mut self,
+        notifier: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
+    ) {
+        self.worker_publication_notifier = notifier;
     }
 
     pub fn current_value(&self, signal: SignalHandle) -> Result<Option<&V>, SchedulerAccessError> {

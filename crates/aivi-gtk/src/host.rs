@@ -42,6 +42,11 @@ pub struct GtkQueuedEvent<V> {
     pub value: V,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GtkConcreteEventPayload {
+    Unit,
+}
+
 /// GTK signal closures run on the GTK main thread, so a small `Rc<RefCell<_>>` queue is the
 /// narrowest bridge that lets `'static` callbacks hand events back to the host without widening the
 /// threading surface to `Arc<Mutex<_>>`.
@@ -76,6 +81,7 @@ where
     widgets: BTreeMap<u64, MountedWidget>,
     events: BTreeMap<u64, MountedEvent>,
     queued_events: Rc<GtkEventQueue<V>>,
+    event_notifier: Option<Rc<dyn Fn()>>,
 }
 
 impl<V> Default for GtkConcreteHost<V>
@@ -89,6 +95,7 @@ where
             widgets: BTreeMap::new(),
             events: BTreeMap::new(),
             queued_events: Rc::new(GtkEventQueue::default()),
+            event_notifier: None,
         }
     }
 }
@@ -97,6 +104,10 @@ impl<V> GtkConcreteHost<V>
 where
     V: GtkHostValue,
 {
+    pub fn set_event_notifier(&mut self, notifier: Option<Rc<dyn Fn()>>) {
+        self.event_notifier = notifier;
+    }
+
     pub fn widget(&self, handle: &GtkConcreteWidget) -> Option<gtk::Widget> {
         self.widgets
             .get(&handle.0)
@@ -418,6 +429,7 @@ where
             .checked_add(1)
             .expect("concrete GTK event handle counter should not overflow");
         let queue = self.queued_events.clone();
+        let notifier = self.event_notifier.clone();
         let route_id = route.id;
         let signal = match (kind, route.binding.name.text()) {
             (SupportedWidget::Button, "onClick") => widget
@@ -429,6 +441,9 @@ where
                         route: route_id,
                         value: V::unit(),
                     });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
                 }),
             _ => {
                 return Err(GtkConcreteHostError::UnsupportedEvent {
@@ -803,6 +818,49 @@ impl fmt::Display for GtkConcreteHostError {
 }
 
 impl Error for GtkConcreteHostError {}
+
+pub fn concrete_widget_is_window(widget: &NamePath) -> bool {
+    matches!(supported_widget(widget), Some(SupportedWidget::Window))
+}
+
+pub fn concrete_supports_property(widget: &NamePath, property: &str) -> bool {
+    let Some(kind) = supported_widget(widget) else {
+        return false;
+    };
+    concrete_widget_supports_property(kind, property)
+}
+
+pub fn concrete_event_payload(widget: &NamePath, event: &str) -> Option<GtkConcreteEventPayload> {
+    match (supported_widget(widget), event) {
+        (Some(SupportedWidget::Button), "onClick") => Some(GtkConcreteEventPayload::Unit),
+        _ => None,
+    }
+}
+
+fn supported_widget(path: &NamePath) -> Option<SupportedWidget> {
+    match widget_name(path) {
+        "Window" => Some(SupportedWidget::Window),
+        "Box" => Some(SupportedWidget::Box),
+        "Label" => Some(SupportedWidget::Label),
+        "Button" => Some(SupportedWidget::Button),
+        _ => None,
+    }
+}
+
+fn concrete_widget_supports_property(kind: SupportedWidget, property: &str) -> bool {
+    if matches!(property, "visible" | "sensitive" | "hexpand" | "vexpand") {
+        return true;
+    }
+    matches!(
+        (kind, property),
+        (SupportedWidget::Window, "title")
+            | (SupportedWidget::Box, "orientation")
+            | (SupportedWidget::Box, "spacing")
+            | (SupportedWidget::Label, "text")
+            | (SupportedWidget::Label, "label")
+            | (SupportedWidget::Button, "label")
+    )
+}
 
 fn widget_name(path: &NamePath) -> &str {
     path.segments()

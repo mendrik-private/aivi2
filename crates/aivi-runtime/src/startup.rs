@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
+    sync::Arc,
 };
 
 use aivi_backend::{
@@ -19,11 +20,11 @@ use crate::{
     scheduler::DependencyValues,
 };
 
-pub fn link_backend_runtime<'a>(
+pub fn link_backend_runtime(
     assembly: HirRuntimeAssembly,
     core: &core::Module,
-    backend: &'a BackendProgram,
-) -> Result<BackendLinkedRuntime<'a>, BackendRuntimeLinkErrors> {
+    backend: Arc<BackendProgram>,
+) -> Result<BackendLinkedRuntime, BackendRuntimeLinkErrors> {
     let runtime = assembly
         .instantiate_runtime::<RuntimeValue>()
         .map_err(|error| {
@@ -31,7 +32,7 @@ pub fn link_backend_runtime<'a>(
                 error,
             }])
         })?;
-    let mut builder = LinkBuilder::new(&assembly, core, backend);
+    let mut builder = LinkBuilder::new(&assembly, core, &backend);
     let linked = builder.build()?;
     Ok(BackendLinkedRuntime {
         assembly,
@@ -44,23 +45,23 @@ pub fn link_backend_runtime<'a>(
     })
 }
 
-pub struct BackendLinkedRuntime<'a> {
+pub struct BackendLinkedRuntime {
     assembly: HirRuntimeAssembly,
     runtime: TaskSourceRuntime<RuntimeValue, hir::SourceDecodeProgram>,
-    backend: &'a BackendProgram,
+    backend: Arc<BackendProgram>,
     signal_items_by_handle: BTreeMap<SignalHandle, BackendItemId>,
     runtime_signal_by_item: BTreeMap<BackendItemId, SignalHandle>,
     derived_signals: BTreeMap<DerivedHandle, LinkedDerivedSignal>,
     source_bindings: BTreeMap<SourceInstanceId, LinkedSourceBinding>,
 }
 
-impl<'a> BackendLinkedRuntime<'a> {
+impl BackendLinkedRuntime {
     pub fn assembly(&self) -> &HirRuntimeAssembly {
         &self.assembly
     }
 
-    pub fn backend(&self) -> &'a BackendProgram {
-        self.backend
+    pub fn backend(&self) -> &BackendProgram {
+        self.backend.as_ref()
     }
 
     pub fn runtime(&self) -> &TaskSourceRuntime<RuntimeValue, hir::SourceDecodeProgram> {
@@ -87,10 +88,20 @@ impl<'a> BackendLinkedRuntime<'a> {
             .find(|binding| binding.owner == owner)
     }
 
+    pub fn queued_message_count(&self) -> usize {
+        self.runtime.queued_message_count()
+    }
+
+    pub fn current_signal_globals(
+        &self,
+    ) -> Result<BTreeMap<BackendItemId, RuntimeValue>, BackendRuntimeError> {
+        self.committed_signal_snapshots()
+    }
+
     pub fn tick(&mut self) -> Result<TickOutcome, BackendRuntimeError> {
         let committed = self.committed_signal_snapshots()?;
         let mut evaluator = LinkedDerivedEvaluator {
-            backend: self.backend,
+            backend: self.backend.as_ref(),
             derived_signals: &self.derived_signals,
             committed_signals: &committed,
         };
@@ -183,7 +194,7 @@ impl<'a> BackendLinkedRuntime<'a> {
             .get(&instance)
             .ok_or(BackendRuntimeError::UnknownSourceInstance { instance })?;
         let snapshots = self.committed_signal_snapshots()?;
-        let mut evaluator = KernelEvaluator::new(self.backend);
+        let mut evaluator = KernelEvaluator::new(self.backend.as_ref());
         let mut arguments = Vec::with_capacity(binding.arguments.len());
         for (index, argument) in binding.arguments.iter().enumerate() {
             let globals = self.required_signal_globals(
@@ -1186,8 +1197,12 @@ sig users : Signal Text
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
             .expect("runtime assembly should build");
-        let mut linked = link_backend_runtime(assembly, &lowered.core, &lowered.backend)
-            .expect("startup link should succeed");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("startup link should succeed");
 
         let outcome = linked
             .tick_with_source_lifecycle()
@@ -1240,8 +1255,12 @@ sig users : Signal Text
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
             .expect("runtime assembly should build");
-        let linked = link_backend_runtime(assembly, &lowered.core, &lowered.backend)
-            .expect("startup link should succeed");
+        let linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("startup link should succeed");
         let users = item_id(lowered.hir.module(), "users");
         let instance = linked
             .source_by_owner(users)
@@ -1270,8 +1289,12 @@ sig users : Signal Text
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
             .expect("runtime assembly should build");
-        let mut linked = link_backend_runtime(assembly, &lowered.core, &lowered.backend)
-            .expect("startup link should succeed");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("startup link should succeed");
         let users = item_id(lowered.hir.module(), "users");
         let binding = linked
             .source_by_owner(users)
@@ -1309,8 +1332,12 @@ sig label = choose maybeName
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
             .expect("runtime assembly should build");
-        let mut linked = link_backend_runtime(assembly, &lowered.core, &lowered.backend)
-            .expect("startup link should succeed");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("startup link should succeed");
         let outcome = linked
             .tick_with_source_lifecycle()
             .expect("linked runtime tick should succeed");
@@ -1347,7 +1374,11 @@ sig gated : Signal Int =
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
             .expect("runtime assembly should build");
-        let errors = match link_backend_runtime(assembly, &lowered.core, &lowered.backend) {
+        let errors = match link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        ) {
             Ok(_) => panic!("source-backed body signals should stay an explicit startup gap"),
             Err(errors) => errors,
         };

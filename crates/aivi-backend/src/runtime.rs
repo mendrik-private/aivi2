@@ -1596,7 +1596,9 @@ fn value_matches_layout(program: &Program, value: &RuntimeValue, layout: LayoutI
         (LayoutKind::Sum(variants), RuntimeValue::Sum(value)) => variants
             .iter()
             .find(|variant| variant.name.as_ref() == value.variant_name.as_ref())
-            .is_some_and(|variant| sum_fields_match_layout(program, &value.fields, variant.payload)),
+            .is_some_and(|variant| {
+                sum_fields_match_layout(program, &value.fields, variant.payload)
+            }),
         (LayoutKind::Option { element }, RuntimeValue::OptionNone) => {
             let _ = element;
             true
@@ -1622,12 +1624,18 @@ fn value_matches_layout(program: &Program, value: &RuntimeValue, layout: LayoutI
         (LayoutKind::Arrow { .. }, RuntimeValue::Callable(_)) => true,
         (LayoutKind::AnonymousDomain { .. }, RuntimeValue::SuffixedInteger { .. })
         | (LayoutKind::Domain { .. }, RuntimeValue::SuffixedInteger { .. }) => true,
-        (LayoutKind::Opaque { name, .. }, RuntimeValue::Sum(value)) => name.as_ref() == value.type_name.as_ref(),
+        (LayoutKind::Opaque { name, .. }, RuntimeValue::Sum(value)) => {
+            name.as_ref() == value.type_name.as_ref()
+        }
         _ => false,
     }
 }
 
-fn sum_fields_match_layout(program: &Program, fields: &[RuntimeValue], payload: Option<LayoutId>) -> bool {
+fn sum_fields_match_layout(
+    program: &Program,
+    fields: &[RuntimeValue],
+    payload: Option<LayoutId>,
+) -> bool {
     match (payload, fields) {
         (None, []) => true,
         (Some(layout), [field]) => value_matches_layout(program, field, layout),

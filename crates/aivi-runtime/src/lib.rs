@@ -17,7 +17,10 @@ pub use effects::{
     SourceRuntimeSpec, SourceStaleWorkPolicy, TaskCompletionPort, TaskInstanceId, TaskRuntimeSpec,
     TaskSourceRuntime, TaskSourceRuntimeError, TaskSourceTickOutcome,
 };
-pub use glib_adapter::{GlibSchedulerDriver, GlibSchedulerError, GlibWorkerPublicationSender};
+pub use glib_adapter::{
+    GlibLinkedRuntimeAccessError, GlibLinkedRuntimeDriver, GlibLinkedRuntimeFailure,
+    GlibSchedulerDriver, GlibSchedulerError, GlibWorkerPublicationSender,
+};
 pub use graph::{
     DerivedHandle, DerivedSpec, GraphBuildError, InputHandle, OwnerHandle, OwnerSpec, SignalGraph,
     SignalGraphBuilder, SignalHandle, SignalKind, SignalSpec, TopologyBatch,

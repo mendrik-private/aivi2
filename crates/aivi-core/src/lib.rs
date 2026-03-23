@@ -32,7 +32,7 @@ pub use expr::{
 pub use ids::{DecodeProgramId, DecodeStepId, ExprId, ItemId, PipeId, SourceId, StageId};
 pub use lower::{
     LoweredRuntimeFragment, LoweringError, LoweringErrors, RuntimeFragmentSpec, lower_module,
-    lower_runtime_fragment,
+    lower_runtime_fragment, lower_runtime_module,
 };
 pub use module::{
     DecodeField, DecodeProgram, DecodeStep, DecodeVariant, DomainDecodeSurface,

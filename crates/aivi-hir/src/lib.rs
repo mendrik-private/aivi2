@@ -51,10 +51,9 @@ pub use gate_elaboration::{
 };
 pub use general_expr_elaboration::{
     BlockedGeneralExpr, GeneralExprBlocker, GeneralExprElaborationReport,
-    GeneralExprItemElaboration, GeneralExprOutcome, GeneralExprParameter,
-    MarkupRuntimeExprSite, MarkupRuntimeExprSiteError, MarkupRuntimeExprSites,
-    collect_markup_runtime_expr_sites, elaborate_general_expressions,
-    elaborate_runtime_expr_with_env,
+    GeneralExprItemElaboration, GeneralExprOutcome, GeneralExprParameter, MarkupRuntimeExprSite,
+    MarkupRuntimeExprSiteError, MarkupRuntimeExprSites, collect_markup_runtime_expr_sites,
+    elaborate_general_expressions, elaborate_runtime_expr_with_env,
 };
 pub use hir::{
     ApplicativeCluster, ApplicativeSpine, ApplicativeSpineHead, BinaryOperator, Binding,
@@ -73,8 +72,8 @@ pub use hir::{
     RecordExpr, RecordExprField, RecordFieldSurface, RecordPatternField, RecurrenceWakeupDecorator,
     RecurrenceWakeupDecoratorKind, RegexLiteral, ResolutionState, RootItemError, ShowControl,
     SignalItem, SourceDecorator, SourceLifecycleDependencies, SourceMetadata,
-    SourceProviderContractItem, SourceProviderRef, SuffixedIntegerLiteral, TermReference,
-    TermResolution, SumConstructorHandle, TextFragment, TextInterpolation, TextLiteral, TextSegment,
+    SourceProviderContractItem, SourceProviderRef, SuffixedIntegerLiteral, SumConstructorHandle,
+    TermReference, TermResolution, TextFragment, TextInterpolation, TextLiteral, TextSegment,
     TupleConstructorArity, TypeField, TypeItem, TypeItemBody, TypeKind, TypeNode, TypeParameter,
     TypeReference, TypeResolution, TypeVariant, UnaryOperator, UseItem, ValueItem, WithControl,
 };

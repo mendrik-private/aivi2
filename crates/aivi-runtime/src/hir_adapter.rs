@@ -94,13 +94,6 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
             };
             let has_source = signal.source_metadata.is_some();
             let has_body = signal.body.is_some();
-            if !has_source && !has_body {
-                errors.push(HirRuntimeAdapterError::SignalHasNoRuntimeNode {
-                    item: item_id,
-                    span: signal.header.span,
-                });
-                continue;
-            }
 
             let owner = match graph_builder.add_owner(signal.name.text(), None) {
                 Ok(owner) => owner,
