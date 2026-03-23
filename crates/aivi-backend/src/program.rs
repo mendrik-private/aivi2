@@ -98,6 +98,19 @@ impl fmt::Display for Program {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (item_id, item) in self.items.iter() {
             writeln!(f, "{} {} (item{item_id}):", item.kind.label(), item.name)?;
+            if !item.parameters.is_empty() {
+                write!(f, "  params = [")?;
+                for (index, parameter) in item.parameters.iter().enumerate() {
+                    if index > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "layout{parameter}")?;
+                }
+                writeln!(f, "]")?;
+            }
+            if let Some(body) = item.body {
+                writeln!(f, "  body = kernel{body}")?;
+            }
             if let ItemKind::Signal(signal) = &item.kind {
                 if !signal.dependencies.is_empty() {
                     write!(f, "  dependencies = [")?;
@@ -340,6 +353,8 @@ pub struct Item {
     pub span: SourceSpan,
     pub name: Box<str>,
     pub kind: ItemKind,
+    pub parameters: Vec<LayoutId>,
+    pub body: Option<KernelId>,
     pub pipelines: Vec<PipelineId>,
 }
 
@@ -552,6 +567,10 @@ pub struct SourceInstanceId(u32);
 impl SourceInstanceId {
     pub const fn from_raw(raw: u32) -> Self {
         Self(raw)
+    }
+
+    pub const fn as_raw(self) -> u32 {
+        self.0
     }
 }
 

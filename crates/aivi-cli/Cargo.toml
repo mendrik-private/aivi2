@@ -8,10 +8,12 @@ rust-version.workspace = true
 aivi-base.workspace = true
 aivi-backend = { path = "../aivi-backend" }
 aivi-core = { path = "../aivi-core" }
+aivi-gtk = { path = "../aivi-gtk" }
 aivi-hir.workspace = true
 aivi-lambda = { path = "../aivi-lambda" }
 aivi-syntax.workspace = true
 aivi-lsp = { path = "../aivi-lsp" }
+gtk = { package = "gtk4", version = "0.9.5" }
 tokio = { version = "1", features = ["rt"] }
 
 [[bin]]

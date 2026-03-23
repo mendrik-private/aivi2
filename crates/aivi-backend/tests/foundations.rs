@@ -1,10 +1,11 @@
-use std::{fs, path::PathBuf};
+use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use aivi_backend::{
     CodegenError, DecodeStepKind, DomainDecodeSurfaceKind, GateStage as BackendGateStage,
-    ItemKind as BackendItemKind, KernelExprKind, LayoutKind, LoweringError, NonSourceWakeupCause,
-    RecurrenceTarget, SourceProvider, StageKind as BackendStageKind, ValidationError,
-    compile_program, lower_module as lower_backend_module, validate_program,
+    ItemKind as BackendItemKind, KernelEvaluator, KernelExprKind, LayoutKind, LoweringError,
+    NonSourceWakeupCause, RecurrenceTarget, RuntimeValue, SourceProvider,
+    StageKind as BackendStageKind, ValidationError, compile_program,
+    lower_module as lower_backend_module, validate_program,
 };
 use aivi_base::{SourceDatabase, SourceSpan};
 use aivi_core::{
@@ -286,6 +287,191 @@ sig users : Signal Int
             aivi_backend::KernelOriginKind::SourceOption { .. }
         ));
     }
+}
+
+#[test]
+fn lowers_item_body_kernels_into_backend_items() {
+    let backend = lower_text(
+        "backend-item-bodies.aivi",
+        r#"
+fun addOne:Int #value:Int =>
+    value + 1
+
+val answer =
+    addOne 41
+"#,
+    );
+
+    let add_one = find_item(&backend, "addOne");
+    let item = &backend.items()[add_one];
+    assert_eq!(item.parameters.len(), 1);
+    let body = item
+        .body
+        .expect("function item should lower a backend body kernel");
+    assert!(matches!(
+        backend.kernels()[body].origin.kind,
+        aivi_backend::KernelOriginKind::ItemBody
+    ));
+
+    let answer = find_item(&backend, "answer");
+    assert!(
+        backend.items()[answer].body.is_some(),
+        "value items should also retain body kernels"
+    );
+}
+
+#[test]
+fn runtime_evaluates_item_bodies_and_source_kernels() {
+    let backend = lower_text(
+        "backend-runtime-values.aivi",
+        r#"
+sig apiHost = "https://api.example.com"
+sig refresh = 0
+sig enabled = True
+sig pollInterval = 5
+
+fun addOne:Int #value:Int =>
+    value + 1
+
+val answer =
+    addOne 41
+
+@source http.get "{apiHost}/users" with {
+    refreshOn: refresh,
+    activeWhen: enabled,
+    refreshEvery: addOne pollInterval
+}
+sig users : Signal Int
+"#,
+    );
+
+    let mut evaluator = KernelEvaluator::new(&backend);
+    let globals = BTreeMap::from([
+        (
+            find_item(&backend, "apiHost"),
+            RuntimeValue::Signal(Box::new(RuntimeValue::Text(
+                "https://api.example.com".into(),
+            ))),
+        ),
+        (
+            find_item(&backend, "refresh"),
+            RuntimeValue::Signal(Box::new(RuntimeValue::Int(0))),
+        ),
+        (
+            find_item(&backend, "enabled"),
+            RuntimeValue::Signal(Box::new(RuntimeValue::Bool(true))),
+        ),
+        (
+            find_item(&backend, "pollInterval"),
+            RuntimeValue::Signal(Box::new(RuntimeValue::Int(5))),
+        ),
+    ]);
+
+    let answer = find_item(&backend, "answer");
+    assert_eq!(
+        evaluator
+            .evaluate_item(answer, &globals)
+            .expect("item body should evaluate"),
+        RuntimeValue::Int(42)
+    );
+
+    let users = find_item(&backend, "users");
+    let BackendItemKind::Signal(signal) = &backend.items()[users].kind else {
+        panic!("users should remain a signal item");
+    };
+    let source = &backend.sources()[signal.source.expect("source should exist")];
+
+    assert_eq!(
+        evaluator
+            .evaluate_kernel(source.arguments[0].kernel, None, &[], &globals)
+            .expect("source argument kernel should evaluate"),
+        RuntimeValue::Text("https://api.example.com/users".into())
+    );
+
+    let active_when = source
+        .options
+        .iter()
+        .find(|option| option.option_name.as_ref() == "activeWhen")
+        .expect("activeWhen option should exist");
+    assert_eq!(
+        evaluator
+            .evaluate_kernel(active_when.kernel, None, &[], &globals)
+            .expect("activeWhen option should evaluate"),
+        RuntimeValue::Signal(Box::new(RuntimeValue::Bool(true)))
+    );
+
+    let refresh_every = source
+        .options
+        .iter()
+        .find(|option| option.option_name.as_ref() == "refreshEvery")
+        .expect("refreshEvery option should exist");
+    assert_eq!(
+        evaluator
+            .evaluate_kernel(refresh_every.kernel, None, &[], &globals)
+            .expect("refreshEvery option should evaluate"),
+        RuntimeValue::Int(6)
+    );
+}
+
+#[test]
+fn evaluates_inline_case_pipe_with_pattern_binding_and_parameter_capture() {
+    let backend = lower_text(
+        "backend-inline-case-captures.aivi",
+        r#"
+val fallback = "guest"
+
+fun greet:Text #prefix:Text #maybeUser:(Option Text) =>
+    maybeUser
+     ||> Some name => "{prefix}:{name}"
+     ||> None => "{prefix}:{fallback}"
+
+val present =
+    greet "user" (Some "Ada")
+
+val missing =
+    greet "user" None
+"#,
+    );
+
+    let mut evaluator = KernelEvaluator::new(&backend);
+    let globals = BTreeMap::new();
+
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "present"), &globals)
+            .expect("inline case with captures should evaluate"),
+        RuntimeValue::Text("user:Ada".into())
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "missing"), &globals)
+            .expect("inline case fallback should evaluate"),
+        RuntimeValue::Text("user:guest".into())
+    );
+}
+
+#[test]
+fn evaluates_inline_truthy_falsy_item_bodies() {
+    let backend = lower_text(
+        "backend-inline-truthy-falsy.aivi",
+        r#"
+val ready = True
+val start = "start"
+val wait = "wait"
+
+val branch =
+    ready
+     T|> start
+     F|> wait
+"#,
+    );
+    let mut evaluator = KernelEvaluator::new(&backend);
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "branch"), &BTreeMap::new())
+            .expect("truthy/falsy item body should evaluate"),
+        RuntimeValue::Text("start".into())
+    );
 }
 
 #[test]

@@ -22,6 +22,7 @@ mod kernel;
 mod layout;
 mod lower;
 mod program;
+mod runtime;
 mod validate;
 
 pub use aivi_core::{Arena, ArenaId, ArenaOverflow};
@@ -32,10 +33,11 @@ pub use ids::{
 };
 pub use kernel::{
     AbiParameter, AbiResult, BinaryOperator, BuiltinTerm, CallingConvention, CallingConventionKind,
-    InlinePipeExpr, InlinePipeStage, InlinePipeStageKind, IntegerLiteral, Kernel, KernelExpr,
-    KernelExprKind, KernelOrigin, KernelOriginKind, MapEntry, ParameterRole, ProjectionBase,
-    RecordExprField, SubjectRef, SuffixedIntegerLiteral, TextLiteral, TextSegment, UnaryOperator,
-    describe_expr_kind,
+    InlinePipeCaseArm, InlinePipeExpr, InlinePipePattern, InlinePipePatternKind,
+    InlinePipeRecordPatternField, InlinePipeStage, InlinePipeStageKind,
+    InlinePipeTruthyFalsyBranch, IntegerLiteral, Kernel, KernelExpr, KernelExprKind, KernelOrigin,
+    KernelOriginKind, MapEntry, ParameterRole, ProjectionBase, RecordExprField, SubjectRef,
+    SuffixedIntegerLiteral, TextLiteral, TextSegment, UnaryOperator, describe_expr_kind,
 };
 pub use layout::{
     AbiPassMode, Layout, LayoutKind, PrimitiveType, RecordFieldLayout, VariantLayout,
@@ -50,5 +52,9 @@ pub use program::{
     SourceCancellationPolicy, SourceInstanceId, SourceOptionBinding, SourceOptionKernel,
     SourcePlan, SourceProvider, SourceReplacementPolicy, SourceStaleWorkPolicy,
     SourceTeardownPolicy, Stage, StageKind, TruthyFalsyBranch, TruthyFalsyStage,
+};
+pub use runtime::{
+    EvaluationError, KernelEvaluator, RuntimeCallable, RuntimeConstructor, RuntimeMapEntry,
+    RuntimeRecordField, RuntimeValue,
 };
 pub use validate::{ValidationError, ValidationErrors, validate_program};

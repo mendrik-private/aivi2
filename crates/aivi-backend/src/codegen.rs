@@ -1,4 +1,7 @@
-use std::{collections::HashSet, fmt};
+use std::{
+    collections::{BTreeMap, HashSet},
+    fmt,
+};
 
 use cranelift_codegen::{
     ir::{AbiParam, InstBuilder, MemFlags, Type, UserFuncName, Value, condcodes::IntCC, types},
@@ -21,6 +24,7 @@ use crate::{
 pub struct CompiledProgram {
     object: Vec<u8>,
     kernels: Vec<CompiledKernel>,
+    kernel_index: BTreeMap<KernelId, usize>,
 }
 
 impl CompiledProgram {
@@ -33,7 +37,9 @@ impl CompiledProgram {
     }
 
     pub fn kernel(&self, id: KernelId) -> Option<&CompiledKernel> {
-        self.kernels.iter().find(|compiled| compiled.kernel == id)
+        self.kernel_index
+            .get(&id)
+            .and_then(|index| self.kernels.get(*index))
     }
 }
 
@@ -278,6 +284,9 @@ impl<'a> CraneliftCompiler<'a> {
         let mut errors = Vec::new();
 
         for (kernel_id, kernel) in self.program.kernels().iter() {
+            if matches!(kernel.origin.kind, KernelOriginKind::ItemBody) {
+                continue;
+            }
             match kernel.convention.kind {
                 CallingConventionKind::RuntimeKernelV1 => {}
             }
@@ -546,6 +555,9 @@ impl<'a> CraneliftCompiler<'a> {
         let mut errors = Vec::new();
 
         for (kernel_id, kernel) in self.program.kernels().iter() {
+            if matches!(kernel.origin.kind, KernelOriginKind::ItemBody) {
+                continue;
+            }
             match self.compile_kernel(kernel_id, kernel) {
                 Ok(compiled) => compiled_kernels.push(compiled),
                 Err(error) => errors.push(error),
@@ -561,10 +573,16 @@ impl<'a> CraneliftCompiler<'a> {
                 message: error.to_string().into_boxed_str(),
             })
         })?;
+        let kernel_index = compiled_kernels
+            .iter()
+            .enumerate()
+            .map(|(index, kernel)| (kernel.kernel, index))
+            .collect();
 
         Ok(CompiledProgram {
             object,
             kernels: compiled_kernels,
+            kernel_index,
         })
     }
 
@@ -1439,6 +1457,7 @@ fn kernel_symbol(program: &Program, kernel_id: KernelId, kernel: &Kernel) -> Str
         sanitize_symbol_component(program.item_name(kernel.origin.item)),
         kernel_id.as_raw(),
         match kernel.origin.kind {
+            KernelOriginKind::ItemBody => "item_body".to_owned(),
             KernelOriginKind::GateTrue { stage_index, .. } => format!("gate_true_s{stage_index}"),
             KernelOriginKind::GateFalse { stage_index, .. } => format!("gate_false_s{stage_index}"),
             KernelOriginKind::SignalFilterPredicate { stage_index, .. } => {

@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeSet, VecDeque},
-    iter::repeat_with,
+    convert::Infallible,
     sync::mpsc,
 };
 
@@ -21,6 +21,31 @@ where
     }
 }
 
+pub trait TryDerivedNodeEvaluator<V> {
+    type Error;
+
+    fn try_evaluate(
+        &mut self,
+        signal: DerivedHandle,
+        inputs: DependencyValues<'_, V>,
+    ) -> Result<Option<V>, Self::Error>;
+}
+
+impl<V, E, F> TryDerivedNodeEvaluator<V> for F
+where
+    F: for<'a> FnMut(DerivedHandle, DependencyValues<'a, V>) -> Result<Option<V>, E>,
+{
+    type Error = E;
+
+    fn try_evaluate(
+        &mut self,
+        signal: DerivedHandle,
+        inputs: DependencyValues<'_, V>,
+    ) -> Result<Option<V>, Self::Error> {
+        self(signal, inputs)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Generation(u64);
 
@@ -30,7 +55,11 @@ impl Generation {
     }
 
     fn advance(self) -> Self {
-        Self(self.0.checked_add(1).expect("input generation overflow"))
+        Self(
+            self.0
+                .checked_add(1)
+                .unwrap_or_else(|| panic!("input generation overflow at {}", self.0)),
+        )
     }
 }
 
@@ -160,6 +189,10 @@ pub struct Scheduler<V> {
     inputs: Vec<Option<InputRuntimeState>>,
     signals: Vec<SignalRuntimeState<V>>,
     queue: VecDeque<SchedulerMessage<V>>,
+    queued_messages_scratch: Vec<SchedulerMessage<V>>,
+    pending_scratch: Vec<PendingValue<V>>,
+    dirty_scratch: Vec<bool>,
+    publications_scratch: Vec<Option<Publication<V>>>,
     worker_publication_tx: mpsc::Sender<Publication<V>>,
     worker_publication_rx: mpsc::Receiver<Publication<V>>,
     initialized: bool,
@@ -192,6 +225,10 @@ impl<V> Scheduler<V> {
             inputs,
             signals,
             queue: VecDeque::new(),
+            queued_messages_scratch: Vec::new(),
+            pending_scratch: Vec::new(),
+            dirty_scratch: Vec::new(),
+            publications_scratch: Vec::new(),
             worker_publication_tx,
             worker_publication_rx,
             initialized: false,
@@ -289,6 +326,21 @@ impl<V> Scheduler<V> {
     where
         E: DerivedNodeEvaluator<V>,
     {
+        self.tick_with::<_, Infallible>(|signal, inputs| Ok(evaluator.evaluate(signal, inputs)))
+            .unwrap_or_else(|never| match never {})
+    }
+
+    pub fn try_tick<E>(&mut self, evaluator: &mut E) -> Result<TickOutcome, E::Error>
+    where
+        E: TryDerivedNodeEvaluator<V>,
+    {
+        self.tick_with(|signal, inputs| evaluator.try_evaluate(signal, inputs))
+    }
+
+    fn tick_with<E, X>(&mut self, mut evaluate: E) -> Result<TickOutcome, X>
+    where
+        E: FnMut(DerivedHandle, DependencyValues<'_, V>) -> Result<Option<V>, X>,
+    {
         self.drain_worker_publications();
         let tick = self.next_tick;
         self.next_tick = self
@@ -296,19 +348,22 @@ impl<V> Scheduler<V> {
             .checked_add(1)
             .expect("tick counter overflow");
 
-        let mut pending = repeat_with(|| PendingValue::Unchanged)
-            .take(self.signals.len())
-            .collect::<Vec<_>>();
-        let messages = self.queue.drain(..).collect::<Vec<_>>();
+        let mut pending = std::mem::take(&mut self.pending_scratch);
+        pending.clear();
+        pending.resize_with(self.signals.len(), || PendingValue::Unchanged);
+
+        let mut messages = std::mem::take(&mut self.queued_messages_scratch);
+        messages.clear();
+        messages.extend(self.queue.drain(..));
         let disposed = self.collect_disposed_owners(&messages);
         self.apply_owner_disposals(&disposed, &mut pending);
 
         let mut dropped = Vec::new();
-        let mut publications = repeat_with(|| None::<Publication<V>>)
-            .take(self.signals.len())
-            .collect::<Vec<_>>();
+        let mut publications = std::mem::take(&mut self.publications_scratch);
+        publications.clear();
+        publications.resize_with(self.signals.len(), || None::<Publication<V>>);
 
-        for message in messages {
+        for message in messages.drain(..) {
             let SchedulerMessage::Publish(publication) = message else {
                 continue;
             };
@@ -340,13 +395,17 @@ impl<V> Scheduler<V> {
 
             publications[input.index()] = Some(publication);
         }
+        self.queued_messages_scratch = messages;
 
-        for publication in publications.into_iter().flatten() {
+        for publication in publications.drain(..).flatten() {
             let (stamp, value) = publication.into_parts();
             pending[stamp.input.index()] = PendingValue::NextSome(value);
         }
+        self.publications_scratch = publications;
 
-        let mut dirty = vec![false; self.signals.len()];
+        let mut dirty = std::mem::take(&mut self.dirty_scratch);
+        dirty.clear();
+        dirty.resize(self.signals.len(), false);
         if self.initialized {
             self.mark_dirty_dependents(&pending, &mut dirty);
         } else {
@@ -374,15 +433,16 @@ impl<V> Scheduler<V> {
                     pending: &pending,
                     committed: &self.signals,
                 };
-                pending[signal.index()] = match evaluator.evaluate(signal, inputs) {
+                pending[signal.index()] = match evaluate(signal, inputs)? {
                     Some(value) => PendingValue::NextSome(value),
                     None => PendingValue::NextNone,
                 };
             }
         }
+        self.dirty_scratch = dirty;
 
         let committed = pending
-            .into_iter()
+            .drain(..)
             .enumerate()
             .filter_map(|(index, pending)| {
                 let handle = SignalHandle::from_raw(index as u32);
@@ -400,13 +460,14 @@ impl<V> Scheduler<V> {
                 }
             })
             .collect::<Vec<_>>();
+        self.pending_scratch = pending;
 
         self.initialized = true;
-        TickOutcome {
+        Ok(TickOutcome {
             tick,
             committed: committed.into_boxed_slice(),
             dropped_publications: dropped.into_boxed_slice(),
-        }
+        })
     }
 
     fn collect_disposed_owners(&self, messages: &[SchedulerMessage<V>]) -> BTreeSet<OwnerHandle> {
@@ -783,6 +844,26 @@ mod tests {
     }
 
     #[test]
+    fn scheduler_try_tick_propagates_evaluator_errors() {
+        let mut builder = SignalGraphBuilder::new();
+        let input = builder.add_input("input", None).unwrap();
+        let mirror = builder.add_derived("mirror", None).unwrap();
+        builder.define_derived(mirror, [input.as_signal()]).unwrap();
+
+        let graph = builder.build().unwrap();
+        let mut scheduler = Scheduler::<i32>::new(graph);
+        let error = scheduler
+            .try_tick(&mut |signal,
+                            _: DependencyValues<'_, i32>|
+             -> Result<Option<i32>, &'static str> {
+                assert_eq!(signal, mirror);
+                Err("boom")
+            })
+            .expect_err("fallible scheduler tick should surface evaluator errors");
+        assert_eq!(error, "boom");
+    }
+
+    #[test]
     fn scheduler_drops_stale_publications_after_generation_advance() {
         let mut builder = SignalGraphBuilder::new();
         let input = builder.add_input("input", None).unwrap();
@@ -969,5 +1050,124 @@ mod tests {
             scheduler.current_value(join.as_signal()).unwrap().copied(),
             Some(13)
         );
+    }
+
+    #[derive(Clone, Copy)]
+    struct TestRng(u64);
+
+    impl TestRng {
+        fn next_u32(&mut self) -> u32 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (self.0 >> 32) as u32
+        }
+
+        fn next_usize(&mut self, upper_bound: usize) -> usize {
+            (self.next_u32() as usize) % upper_bound
+        }
+
+        fn next_i32(&mut self) -> i32 {
+            (self.next_u32() % 17) as i32 - 8
+        }
+    }
+
+    #[test]
+    fn randomized_dags_commit_the_same_snapshot_as_their_topological_model() {
+        for seed in 0..32_u64 {
+            let mut rng = TestRng(seed + 1);
+            let mut builder = SignalGraphBuilder::new();
+            let mut all_signals = Vec::new();
+            let mut inputs = Vec::new();
+            for index in 0..3 {
+                let input = builder.add_input(format!("input-{index}"), None).unwrap();
+                inputs.push(input);
+                all_signals.push(input.as_signal());
+            }
+
+            let mut derived_specs = Vec::new();
+            for index in 0..4 {
+                let derived = builder
+                    .add_derived(format!("derived-{index}"), None)
+                    .unwrap();
+                let available = all_signals.len();
+                let dep_count = 1 + rng.next_usize(available.min(3));
+                let mut selected = std::collections::BTreeSet::new();
+                while selected.len() < dep_count {
+                    selected.insert(rng.next_usize(available));
+                }
+                let dependencies = selected
+                    .into_iter()
+                    .map(|slot| all_signals[slot])
+                    .collect::<Vec<_>>();
+                builder
+                    .define_derived(derived, dependencies.iter().copied())
+                    .unwrap();
+                let bias = rng.next_i32();
+                derived_specs.push((derived, dependencies, bias));
+                all_signals.push(derived.as_signal());
+            }
+
+            let graph = builder.build().unwrap();
+            let mut scheduler = Scheduler::new(graph);
+            let mut expected = vec![None::<i32>; all_signals.len()];
+
+            for step in 0..20 {
+                let mut changed_inputs = std::collections::BTreeSet::new();
+                changed_inputs.insert(rng.next_usize(inputs.len()));
+                while changed_inputs.len() < inputs.len() && rng.next_u32() % 3 == 0 {
+                    changed_inputs.insert(rng.next_usize(inputs.len()));
+                }
+
+                for changed in changed_inputs {
+                    let input = inputs[changed];
+                    let next = rng.next_i32();
+                    let stamp = scheduler.current_stamp(input).unwrap();
+                    scheduler
+                        .queue_publication(Publication::new(stamp, next))
+                        .unwrap();
+                    expected[input.index()] = Some(next);
+                }
+
+                for (derived, dependencies, bias) in &derived_specs {
+                    let mut total = *bias;
+                    let mut ready = true;
+                    for dependency in dependencies {
+                        match expected[dependency.index()] {
+                            Some(value) => total += value,
+                            None => {
+                                ready = false;
+                                break;
+                            }
+                        }
+                    }
+                    expected[derived.as_signal().index()] = ready.then_some(total);
+                }
+
+                scheduler.tick(&mut |signal, inputs: DependencyValues<'_, i32>| {
+                    let (_, _, bias) = derived_specs
+                        .iter()
+                        .find(|(derived, _, _)| *derived == signal)
+                        .expect(
+                            "randomized evaluator should only receive declared derived signals",
+                        );
+                    let mut total = *bias;
+                    for index in 0..inputs.len() {
+                        total += inputs.value(index).copied()?;
+                    }
+                    Some(total)
+                });
+
+                for &signal in &all_signals {
+                    assert_eq!(
+                        scheduler.current_value(signal).unwrap().copied(),
+                        expected[signal.index()],
+                        "seed {seed} step {step} diverged for signal {:?}",
+                        signal
+                    );
+                }
+            }
+        }
     }
 }

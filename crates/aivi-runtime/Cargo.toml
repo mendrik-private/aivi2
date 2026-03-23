@@ -6,11 +6,14 @@ rust-version.workspace = true
 
 [dependencies]
 aivi-base.workspace = true
+aivi-backend = { path = "../aivi-backend" }
+aivi-core = { path = "../aivi-core" }
 aivi-hir.workspace = true
 aivi-typing.workspace = true
 glib = "0.20.12"
 
 [dev-dependencies]
+aivi-lambda = { path = "../aivi-lambda" }
 aivi-syntax.workspace = true
 
 [lints]

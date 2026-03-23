@@ -24,17 +24,18 @@ use crate::{
     DecodeExtraFieldPolicy, DecodeField, DecodeFieldRequirement, DecodeMode, DecodePlan,
     DecodePlanId, DecodeStep, DecodeStepId, DecodeStepKind, DecodeSumStrategy, DecodeVariant,
     DomainDecodeSurface, DomainDecodeSurfaceKind, EnvSlotId, FanoutCarrier, FanoutJoin,
-    FanoutStage, GateStage, InlinePipeExpr, InlinePipeStage, InlinePipeStageKind, InlineSubjectId,
-    IntegerLiteral, Item, ItemId, ItemKind, Kernel, KernelExpr, KernelExprId, KernelExprKind,
-    KernelId, KernelOrigin, KernelOriginKind, Layout, LayoutId, LayoutKind, LoweringError::*,
-    MapEntry, NonSourceWakeup, NonSourceWakeupCause, ParameterRole, Pipeline, PipelineId,
-    PipelineOrigin, PrimitiveType, Program, ProjectionBase, RecordExprField, RecordFieldLayout,
-    Recurrence, RecurrenceStage, RecurrenceTarget, RecurrenceWakeupKind, SignalInfo,
-    SourceArgumentKernel, SourceCancellationPolicy, SourceInstanceId, SourceOptionBinding,
-    SourceOptionKernel, SourcePlan, SourceProvider, SourceReplacementPolicy, SourceStaleWorkPolicy,
-    SourceTeardownPolicy, Stage, StageKind, SubjectRef, SuffixedIntegerLiteral, TextLiteral,
-    TextSegment, TruthyFalsyBranch, TruthyFalsyStage, UnaryOperator, ValidationError,
-    VariantLayout, validate_program,
+    FanoutStage, GateStage, InlinePipeCaseArm, InlinePipeExpr, InlinePipePattern,
+    InlinePipePatternKind, InlinePipeRecordPatternField, InlinePipeStage, InlinePipeStageKind,
+    InlinePipeTruthyFalsyBranch, InlineSubjectId, IntegerLiteral, Item, ItemId, ItemKind, Kernel,
+    KernelExpr, KernelExprId, KernelExprKind, KernelId, KernelOrigin, KernelOriginKind, Layout,
+    LayoutId, LayoutKind, LoweringError::*, MapEntry, NonSourceWakeup, NonSourceWakeupCause,
+    ParameterRole, Pipeline, PipelineId, PipelineOrigin, PrimitiveType, Program, ProjectionBase,
+    RecordExprField, RecordFieldLayout, Recurrence, RecurrenceStage, RecurrenceTarget,
+    RecurrenceWakeupKind, SignalInfo, SourceArgumentKernel, SourceCancellationPolicy,
+    SourceInstanceId, SourceOptionBinding, SourceOptionKernel, SourcePlan, SourceProvider,
+    SourceReplacementPolicy, SourceStaleWorkPolicy, SourceTeardownPolicy, Stage, StageKind,
+    SubjectRef, SuffixedIntegerLiteral, TextLiteral, TextSegment, TruthyFalsyBranch,
+    TruthyFalsyStage, UnaryOperator, ValidationError, VariantLayout, validate_program,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -88,6 +89,9 @@ pub enum LoweringError {
     UnsupportedInlinePipeStage {
         span: SourceSpan,
     },
+    UnsupportedInlinePipePattern {
+        span: SourceSpan,
+    },
     MissingInputSubjectContract {
         span: SourceSpan,
     },
@@ -126,6 +130,9 @@ impl fmt::Display for LoweringError {
             }
             Self::UnsupportedInlinePipeStage { .. } => f.write_str(
                 "backend lowering does not yet encode inline case/truthy-falsy pipe stages",
+            ),
+            Self::UnsupportedInlinePipePattern { .. } => f.write_str(
+                "backend lowering cannot encode this inline pipe pattern/runtime carrier yet",
             ),
             Self::MissingInputSubjectContract { .. } => f.write_str(
                 "backend kernel uses an input subject without an explicit backend contract",
@@ -189,6 +196,7 @@ impl<'a> ProgramLowerer<'a> {
     fn build(mut self) -> Result<Program, LoweringErrors> {
         self.seed_items().map_err(wrap_one)?;
         self.seed_signal_dependencies().map_err(wrap_one)?;
+        self.lower_item_bodies().map_err(wrap_one)?;
         self.lower_pipelines().map_err(wrap_one)?;
         self.lower_sources().map_err(wrap_one)?;
         if let Err(errors) = validate_program(&self.program) {
@@ -211,6 +219,11 @@ impl<'a> ProgramLowerer<'a> {
                 core::ItemKind::Signal(_) => ItemKind::Signal(SignalInfo::default()),
                 core::ItemKind::Instance => ItemKind::Instance,
             };
+            let parameters = item
+                .parameters
+                .iter()
+                .map(|parameter| self.intern_core_type(&parameter.ty))
+                .collect::<Result<Vec<_>, _>>()?;
             let item_id = self
                 .program
                 .items_mut()
@@ -219,10 +232,28 @@ impl<'a> ProgramLowerer<'a> {
                     span: item.span,
                     name: item.name.clone(),
                     kind,
+                    parameters,
+                    body: None,
                     pipelines: Vec::new(),
                 })
                 .map_err(|overflow| arena_overflow("items", overflow))?;
             self.item_map.insert(core_id, item_id);
+        }
+        Ok(())
+    }
+
+    fn lower_item_bodies(&mut self) -> Result<(), LoweringError> {
+        for (core_id, item) in self.lambda.items().iter() {
+            let Some(body) = item.body else {
+                continue;
+            };
+            let item_id = self.require_item(core_id, item.span)?;
+            let kernel = self.lower_item_body_kernel(item, item_id, body)?;
+            self.program
+                .items_mut()
+                .get_mut(item_id)
+                .expect("seeded backend item should exist")
+                .body = Some(kernel);
         }
         Ok(())
     }
@@ -901,13 +932,54 @@ impl<'a> ProgramLowerer<'a> {
             .transpose()?;
         let contract = self.collect_kernel_contract(&closure, input_hint)?;
         let lowered = self.lower_kernel_exprs(closure.root, input_hint, &contract.env_map)?;
-        let result_layout = self.intern_core_type(&self.lambda.exprs()[closure.root].ty)?;
+        let result_layout = self.runtime_expr_layout(closure.root)?;
         let input_subject = input_hint.filter(|_| contract.uses_input_subject);
         self.alloc_kernel(
             owner,
             closure.span,
             kind,
             input_subject,
+            contract,
+            lowered,
+            result_layout,
+        )
+    }
+
+    fn lower_item_body_kernel(
+        &mut self,
+        item: &lambda::Item,
+        owner: ItemId,
+        closure_id: lambda::ClosureId,
+    ) -> Result<KernelId, LoweringError> {
+        let closure = self.lambda.closures()[closure_id].clone();
+        debug_assert_eq!(closure.parameters.len(), item.parameters.len());
+
+        let mut environment =
+            Vec::with_capacity(item.parameters.len().saturating_add(closure.captures.len()));
+        let mut env_map =
+            HashMap::with_capacity(item.parameters.len().saturating_add(closure.captures.len()));
+
+        for parameter in &item.parameters {
+            let slot = EnvSlotId::from_raw(environment.len() as u32);
+            environment.push(self.intern_core_type(&parameter.ty)?);
+            env_map.insert(parameter.binding.as_raw(), slot);
+        }
+        for capture_id in &closure.captures {
+            let capture = &self.lambda.captures()[*capture_id];
+            let slot = EnvSlotId::from_raw(environment.len() as u32);
+            environment.push(self.intern_core_type(&capture.ty)?);
+            env_map.insert(capture.binding.as_raw(), slot);
+        }
+
+        let contract =
+            self.collect_root_kernel_contract(closure.root, None, environment, env_map)?;
+        let lowered = self.lower_kernel_exprs(closure.root, None, &contract.env_map)?;
+        let result_layout = self.runtime_item_body_layout(item, closure.root)?;
+        self.alloc_kernel(
+            owner,
+            closure.span,
+            KernelOriginKind::ItemBody,
+            None,
             contract,
             lowered,
             result_layout,
@@ -923,7 +995,7 @@ impl<'a> ProgramLowerer<'a> {
     ) -> Result<KernelId, LoweringError> {
         let contract = self.collect_root_kernel_contract(root, None, Vec::new(), HashMap::new())?;
         let lowered = self.lower_kernel_exprs(root, None, &contract.env_map)?;
-        let result_layout = self.intern_core_type(&self.lambda.exprs()[root].ty)?;
+        let result_layout = self.runtime_expr_layout(root)?;
         self.alloc_kernel(owner, span, kind, None, contract, lowered, result_layout)
     }
 
@@ -1068,9 +1140,14 @@ impl<'a> ProgramLowerer<'a> {
                             core::PipeStageKind::Gate { predicate, .. } => {
                                 work.push((*predicate, SubjectKind::Inline));
                             }
-                            core::PipeStageKind::Case { .. }
-                            | core::PipeStageKind::TruthyFalsy(_) => {
-                                return Err(UnsupportedInlinePipeStage { span: stage.span });
+                            core::PipeStageKind::Case { arms } => {
+                                for arm in arms.iter().rev() {
+                                    work.push((arm.body, SubjectKind::Inline));
+                                }
+                            }
+                            core::PipeStageKind::TruthyFalsy(pair) => {
+                                work.push((pair.falsy.body, SubjectKind::Inline));
+                                work.push((pair.truthy.body, SubjectKind::Inline));
                             }
                         }
                     }
@@ -1092,14 +1169,8 @@ impl<'a> ProgramLowerer<'a> {
         input_hint: Option<LayoutId>,
         env_map: &HashMap<u32, EnvSlotId>,
     ) -> Result<LoweredKernelExprs, LoweringError> {
-        #[derive(Clone, Copy)]
-        struct SubjectContext {
-            reference: SubjectRef,
-            layout: LayoutId,
-        }
-
         enum Task {
-            Visit(core::ExprId, Option<SubjectContext>),
+            Visit(core::ExprId, Option<SubjectContext>, LocalBindings),
             BuildOptionSome {
                 span: SourceSpan,
                 layout: LayoutId,
@@ -1172,7 +1243,7 @@ impl<'a> ProgramLowerer<'a> {
             Expr,
         }
 
-        #[derive(Clone, Copy)]
+        #[derive(Clone)]
         struct InlinePipeStageSpec {
             subject: InlineSubjectId,
             span: SourceSpan,
@@ -1181,11 +1252,38 @@ impl<'a> ProgramLowerer<'a> {
             kind: InlinePipeStageBuild,
         }
 
-        #[derive(Clone, Copy)]
+        #[derive(Clone)]
         enum InlinePipeStageBuild {
             Transform,
             Tap,
-            Gate { emits_negative_update: bool },
+            Gate {
+                emits_negative_update: bool,
+            },
+            Case {
+                arms: Vec<InlinePipeCaseArmSpec>,
+            },
+            TruthyFalsy {
+                truthy: InlinePipeTruthyFalsyBranchSpec,
+                falsy: InlinePipeTruthyFalsyBranchSpec,
+            },
+        }
+
+        impl InlinePipeStageSpec {
+            fn child_count(&self) -> usize {
+                match &self.kind {
+                    InlinePipeStageBuild::Transform
+                    | InlinePipeStageBuild::Tap
+                    | InlinePipeStageBuild::Gate { .. } => 1,
+                    InlinePipeStageBuild::Case { arms } => arms.len(),
+                    InlinePipeStageBuild::TruthyFalsy { .. } => 2,
+                }
+            }
+        }
+
+        struct PipeChildSpec {
+            expr: core::ExprId,
+            subject: Option<SubjectContext>,
+            locals: LocalBindings,
         }
 
         let mut tasks = vec![Task::Visit(
@@ -1194,6 +1292,7 @@ impl<'a> ProgramLowerer<'a> {
                 reference: SubjectRef::Input,
                 layout,
             }),
+            LocalBindings::default(),
         )];
         let mut values = Vec::new();
         let mut exprs = Arena::new();
@@ -1201,9 +1300,9 @@ impl<'a> ProgramLowerer<'a> {
 
         while let Some(task) = tasks.pop() {
             match task {
-                Task::Visit(expr_id, subject) => {
+                Task::Visit(expr_id, subject, locals) => {
                     let expr = &self.lambda.exprs()[expr_id];
-                    let layout = self.intern_core_type(&expr.ty)?;
+                    let layout = self.runtime_expr_layout(expr_id)?;
                     match &expr.kind {
                         core::ExprKind::AmbientSubject => {
                             let subject =
@@ -1229,7 +1328,7 @@ impl<'a> ProgramLowerer<'a> {
                                 span: expr.span,
                                 layout,
                             });
-                            tasks.push(Task::Visit(*payload, subject));
+                            tasks.push(Task::Visit(*payload, subject, locals));
                         }
                         core::ExprKind::OptionNone => {
                             values.push(alloc_kernel_expr(
@@ -1244,13 +1343,25 @@ impl<'a> ProgramLowerer<'a> {
                         core::ExprKind::Reference(reference) => {
                             let kind = match reference {
                                 core::Reference::Local(binding) => {
-                                    let Some(slot) = env_map.get(&binding.as_raw()).copied() else {
-                                        return Err(UnsupportedLocalReference {
-                                            span: expr.span,
-                                            binding: binding.as_raw(),
-                                        });
-                                    };
-                                    KernelExprKind::Environment(slot)
+                                    if let Some(local) = locals.get(binding.as_raw()) {
+                                        if local.layout != layout {
+                                            return Err(SubjectLayoutMismatch {
+                                                span: expr.span,
+                                                expected: local.layout,
+                                                found: layout,
+                                            });
+                                        }
+                                        KernelExprKind::Subject(local.reference)
+                                    } else {
+                                        let Some(slot) = env_map.get(&binding.as_raw()).copied()
+                                        else {
+                                            return Err(UnsupportedLocalReference {
+                                                span: expr.span,
+                                                binding: binding.as_raw(),
+                                            });
+                                        };
+                                        KernelExprKind::Environment(slot)
+                                    }
                                 }
                                 core::Reference::Item(item) => {
                                     KernelExprKind::Item(self.require_item(*item, expr.span)?)
@@ -1321,7 +1432,7 @@ impl<'a> ProgramLowerer<'a> {
                             });
                             for segment in text.segments.iter().rev() {
                                 if let core::TextSegment::Interpolation { expr, .. } = segment {
-                                    tasks.push(Task::Visit(*expr, subject));
+                                    tasks.push(Task::Visit(*expr, subject, locals.clone()));
                                 }
                             }
                         }
@@ -1332,7 +1443,7 @@ impl<'a> ProgramLowerer<'a> {
                                 len: elements.len(),
                             });
                             for child in elements.iter().rev() {
-                                tasks.push(Task::Visit(*child, subject));
+                                tasks.push(Task::Visit(*child, subject, locals.clone()));
                             }
                         }
                         core::ExprKind::List(elements) => {
@@ -1342,7 +1453,7 @@ impl<'a> ProgramLowerer<'a> {
                                 len: elements.len(),
                             });
                             for child in elements.iter().rev() {
-                                tasks.push(Task::Visit(*child, subject));
+                                tasks.push(Task::Visit(*child, subject, locals.clone()));
                             }
                         }
                         core::ExprKind::Map(entries) => {
@@ -1352,8 +1463,8 @@ impl<'a> ProgramLowerer<'a> {
                                 entries: entries.len(),
                             });
                             for entry in entries.iter().rev() {
-                                tasks.push(Task::Visit(entry.value, subject));
-                                tasks.push(Task::Visit(entry.key, subject));
+                                tasks.push(Task::Visit(entry.value, subject, locals.clone()));
+                                tasks.push(Task::Visit(entry.key, subject, locals.clone()));
                             }
                         }
                         core::ExprKind::Set(elements) => {
@@ -1363,7 +1474,7 @@ impl<'a> ProgramLowerer<'a> {
                                 len: elements.len(),
                             });
                             for child in elements.iter().rev() {
-                                tasks.push(Task::Visit(*child, subject));
+                                tasks.push(Task::Visit(*child, subject, locals.clone()));
                             }
                         }
                         core::ExprKind::Record(fields) => {
@@ -1373,7 +1484,7 @@ impl<'a> ProgramLowerer<'a> {
                                 labels: fields.iter().map(|field| field.label.clone()).collect(),
                             });
                             for field in fields.iter().rev() {
-                                tasks.push(Task::Visit(field.value, subject));
+                                tasks.push(Task::Visit(field.value, subject, locals.clone()));
                             }
                         }
                         core::ExprKind::Projection { base, path } => {
@@ -1394,7 +1505,7 @@ impl<'a> ProgramLowerer<'a> {
                                 path: path.clone(),
                             });
                             if let core::ProjectionBase::Expr(base_expr) = base {
-                                tasks.push(Task::Visit(*base_expr, subject));
+                                tasks.push(Task::Visit(*base_expr, subject, locals));
                             }
                         }
                         core::ExprKind::Apply { callee, arguments } => {
@@ -1404,9 +1515,9 @@ impl<'a> ProgramLowerer<'a> {
                                 arguments: arguments.len(),
                             });
                             for argument in arguments.iter().rev() {
-                                tasks.push(Task::Visit(*argument, subject));
+                                tasks.push(Task::Visit(*argument, subject, locals.clone()));
                             }
-                            tasks.push(Task::Visit(*callee, subject));
+                            tasks.push(Task::Visit(*callee, subject, locals));
                         }
                         core::ExprKind::Unary {
                             operator,
@@ -1417,7 +1528,7 @@ impl<'a> ProgramLowerer<'a> {
                                 layout,
                                 operator: map_unary_operator(*operator),
                             });
-                            tasks.push(Task::Visit(*inner, subject));
+                            tasks.push(Task::Visit(*inner, subject, locals));
                         }
                         core::ExprKind::Binary {
                             left,
@@ -1429,12 +1540,12 @@ impl<'a> ProgramLowerer<'a> {
                                 layout,
                                 operator: map_binary_operator(*operator),
                             });
-                            tasks.push(Task::Visit(*right, subject));
-                            tasks.push(Task::Visit(*left, subject));
+                            tasks.push(Task::Visit(*right, subject, locals.clone()));
+                            tasks.push(Task::Visit(*left, subject, locals));
                         }
                         core::ExprKind::Pipe(pipe) => {
                             let mut stage_specs = Vec::with_capacity(pipe.stages.len());
-                            let mut children = Vec::with_capacity(pipe.stages.len());
+                            let mut children = Vec::new();
                             for stage in &pipe.stages {
                                 let input_layout = self.intern_core_type(&stage.input_subject)?;
                                 let result_layout = self.intern_core_type(&stage.result_subject)?;
@@ -1446,27 +1557,86 @@ impl<'a> ProgramLowerer<'a> {
                                 });
                                 let kind = match &stage.kind {
                                     core::PipeStageKind::Transform { expr } => {
-                                        children.push((*expr, child_subject));
+                                        children.push(PipeChildSpec {
+                                            expr: *expr,
+                                            subject: child_subject,
+                                            locals: locals.clone(),
+                                        });
                                         InlinePipeStageBuild::Transform
                                     }
                                     core::PipeStageKind::Tap { expr } => {
-                                        children.push((*expr, child_subject));
+                                        children.push(PipeChildSpec {
+                                            expr: *expr,
+                                            subject: child_subject,
+                                            locals: locals.clone(),
+                                        });
                                         InlinePipeStageBuild::Tap
                                     }
                                     core::PipeStageKind::Gate {
                                         predicate,
                                         emits_negative_update,
                                     } => {
-                                        children.push((*predicate, child_subject));
+                                        children.push(PipeChildSpec {
+                                            expr: *predicate,
+                                            subject: child_subject,
+                                            locals: locals.clone(),
+                                        });
                                         InlinePipeStageBuild::Gate {
                                             emits_negative_update: *emits_negative_update,
                                         }
                                     }
-                                    core::PipeStageKind::Case { .. }
-                                    | core::PipeStageKind::TruthyFalsy(_) => {
-                                        return Err(UnsupportedInlinePipeStage {
-                                            span: stage.span,
+                                    core::PipeStageKind::Case { arms } => {
+                                        let mut lowered_arms = Vec::with_capacity(arms.len());
+                                        for arm in arms {
+                                            let mut arm_locals = locals.clone();
+                                            let pattern = self.lower_inline_pipe_pattern(
+                                                &arm.pattern,
+                                                input_layout,
+                                                &mut inline_subjects,
+                                                &mut arm_locals,
+                                            )?;
+                                            children.push(PipeChildSpec {
+                                                expr: arm.body,
+                                                subject: child_subject,
+                                                locals: arm_locals,
+                                            });
+                                            lowered_arms.push(InlinePipeCaseArmSpec {
+                                                span: arm.span,
+                                                pattern,
+                                            });
+                                        }
+                                        InlinePipeStageBuild::Case { arms: lowered_arms }
+                                    }
+                                    core::PipeStageKind::TruthyFalsy(stage_pair) => {
+                                        let truthy = self.lower_inline_truthy_falsy_branch_spec(
+                                            &stage_pair.truthy,
+                                            &mut inline_subjects,
+                                        )?;
+                                        let falsy = self.lower_inline_truthy_falsy_branch_spec(
+                                            &stage_pair.falsy,
+                                            &mut inline_subjects,
+                                        )?;
+                                        children.push(PipeChildSpec {
+                                            expr: stage_pair.truthy.body,
+                                            subject: truthy.payload_subject.map(|slot| {
+                                                SubjectContext {
+                                                    reference: SubjectRef::Inline(slot),
+                                                    layout: inline_subjects[slot.index()],
+                                                }
+                                            }),
+                                            locals: locals.clone(),
                                         });
+                                        children.push(PipeChildSpec {
+                                            expr: stage_pair.falsy.body,
+                                            subject: falsy.payload_subject.map(|slot| {
+                                                SubjectContext {
+                                                    reference: SubjectRef::Inline(slot),
+                                                    layout: inline_subjects[slot.index()],
+                                                }
+                                            }),
+                                            locals: locals.clone(),
+                                        });
+                                        InlinePipeStageBuild::TruthyFalsy { truthy, falsy }
                                     }
                                 };
                                 stage_specs.push(InlinePipeStageSpec {
@@ -1482,10 +1652,10 @@ impl<'a> ProgramLowerer<'a> {
                                 layout,
                                 stages: stage_specs,
                             });
-                            for (child, child_subject) in children.into_iter().rev() {
-                                tasks.push(Task::Visit(child, child_subject));
+                            for child in children.into_iter().rev() {
+                                tasks.push(Task::Visit(child.expr, child.subject, child.locals));
                             }
-                            tasks.push(Task::Visit(pipe.head, subject));
+                            tasks.push(Task::Visit(pipe.head, subject, locals));
                         }
                     }
                 }
@@ -1691,31 +1861,71 @@ impl<'a> ProgramLowerer<'a> {
                     layout,
                     stages,
                 } => {
-                    let lowered = drain_tail(&mut values, stages.len() + 1);
+                    let lowered = drain_tail(
+                        &mut values,
+                        1 + stages
+                            .iter()
+                            .map(InlinePipeStageSpec::child_count)
+                            .sum::<usize>(),
+                    );
                     let mut iter = lowered.into_iter();
                     let head = iter.next().expect("pipe head should exist");
                     let stages = stages
                         .into_iter()
-                        .map(|stage| {
-                            let expr = iter.next().expect("pipe stage child should exist");
-                            InlinePipeStage {
-                                subject: stage.subject,
-                                span: stage.span,
-                                input_layout: stage.input_layout,
-                                result_layout: stage.result_layout,
-                                kind: match stage.kind {
-                                    InlinePipeStageBuild::Transform => {
-                                        InlinePipeStageKind::Transform { expr }
-                                    }
-                                    InlinePipeStageBuild::Tap => InlinePipeStageKind::Tap { expr },
-                                    InlinePipeStageBuild::Gate {
-                                        emits_negative_update,
-                                    } => InlinePipeStageKind::Gate {
+                        .map(|stage| InlinePipeStage {
+                            subject: stage.subject,
+                            span: stage.span,
+                            input_layout: stage.input_layout,
+                            result_layout: stage.result_layout,
+                            kind: match stage.kind {
+                                InlinePipeStageBuild::Transform => {
+                                    let expr = iter.next().expect("pipe stage child should exist");
+                                    InlinePipeStageKind::Transform { expr }
+                                }
+                                InlinePipeStageBuild::Tap => {
+                                    let expr = iter.next().expect("pipe stage child should exist");
+                                    InlinePipeStageKind::Tap { expr }
+                                }
+                                InlinePipeStageBuild::Gate {
+                                    emits_negative_update,
+                                } => {
+                                    let expr = iter.next().expect("pipe stage child should exist");
+                                    InlinePipeStageKind::Gate {
                                         predicate: expr,
                                         emits_negative_update,
-                                    },
+                                    }
+                                }
+                                InlinePipeStageBuild::Case { arms } => InlinePipeStageKind::Case {
+                                    arms: arms
+                                        .into_iter()
+                                        .map(|arm| InlinePipeCaseArm {
+                                            span: arm.span,
+                                            pattern: arm.pattern,
+                                            body: iter.next().expect("case arm child should exist"),
+                                        })
+                                        .collect(),
                                 },
-                            }
+                                InlinePipeStageBuild::TruthyFalsy { truthy, falsy } => {
+                                    InlinePipeStageKind::TruthyFalsy {
+                                        truthy: InlinePipeTruthyFalsyBranch {
+                                            span: truthy.span,
+                                            constructor: truthy.constructor,
+                                            payload_subject: truthy.payload_subject,
+                                            body: iter
+                                                .next()
+                                                .expect("truthy branch child should exist"),
+                                        },
+                                        falsy: InlinePipeTruthyFalsyBranch {
+                                            span: falsy.span,
+                                            constructor: falsy.constructor,
+                                            payload_subject: falsy.payload_subject,
+                                            body: iter
+                                                .next()
+                                                .expect("falsy branch child should exist"),
+                                        },
+                                    }
+                                }
+                            },
                         })
                         .collect();
                     values.push(alloc_kernel_expr(
@@ -1736,6 +1946,157 @@ impl<'a> ProgramLowerer<'a> {
                 .expect("kernel lowering should yield one root expression"),
             inline_subjects,
             exprs,
+        })
+    }
+
+    fn lower_inline_truthy_falsy_branch_spec(
+        &mut self,
+        branch: &core::PipeTruthyFalsyBranch,
+        inline_subjects: &mut Vec<LayoutId>,
+    ) -> Result<InlinePipeTruthyFalsyBranchSpec, LoweringError> {
+        let payload_subject = branch
+            .payload_subject
+            .as_ref()
+            .map(|payload| {
+                let layout = self.intern_core_type(payload)?;
+                alloc_inline_subject(inline_subjects, layout)
+            })
+            .transpose()?;
+        Ok(InlinePipeTruthyFalsyBranchSpec {
+            span: branch.span,
+            constructor: map_builtin_term(branch.constructor),
+            payload_subject,
+        })
+    }
+
+    fn lower_inline_pipe_pattern(
+        &mut self,
+        pattern: &core::Pattern,
+        layout: LayoutId,
+        inline_subjects: &mut Vec<LayoutId>,
+        locals: &mut LocalBindings,
+    ) -> Result<InlinePipePattern, LoweringError> {
+        let kind = match &pattern.kind {
+            core::PatternKind::Wildcard => InlinePipePatternKind::Wildcard,
+            core::PatternKind::Binding(binding) => {
+                let subject = alloc_inline_subject(inline_subjects, layout)?;
+                locals.insert(
+                    binding.binding.as_raw(),
+                    SubjectContext {
+                        reference: SubjectRef::Inline(subject),
+                        layout,
+                    },
+                );
+                InlinePipePatternKind::Binding { subject }
+            }
+            core::PatternKind::Integer(integer) => {
+                let LayoutKind::Primitive(PrimitiveType::Int) =
+                    &self.program.layouts()[layout].kind
+                else {
+                    return Err(UnsupportedInlinePipePattern { span: pattern.span });
+                };
+                InlinePipePatternKind::Integer(IntegerLiteral {
+                    raw: integer.raw.clone(),
+                })
+            }
+            core::PatternKind::Text(raw) => {
+                let LayoutKind::Primitive(PrimitiveType::Text) =
+                    &self.program.layouts()[layout].kind
+                else {
+                    return Err(UnsupportedInlinePipePattern { span: pattern.span });
+                };
+                InlinePipePatternKind::Text(raw.clone())
+            }
+            core::PatternKind::Tuple(elements) => {
+                let layouts = match &self.program.layouts()[layout].kind {
+                    LayoutKind::Tuple(layouts) => layouts.clone(),
+                    _ => return Err(UnsupportedInlinePipePattern { span: pattern.span }),
+                };
+                if layouts.len() != elements.len() {
+                    return Err(UnsupportedInlinePipePattern { span: pattern.span });
+                }
+                InlinePipePatternKind::Tuple(
+                    elements
+                        .iter()
+                        .zip(layouts.into_iter())
+                        .map(|(element, layout)| {
+                            self.lower_inline_pipe_pattern(element, layout, inline_subjects, locals)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                )
+            }
+            core::PatternKind::Record(fields) => {
+                let layout_fields = match &self.program.layouts()[layout].kind {
+                    LayoutKind::Record(layout_fields) => layout_fields.clone(),
+                    _ => return Err(UnsupportedInlinePipePattern { span: pattern.span }),
+                };
+                InlinePipePatternKind::Record(
+                    fields
+                        .iter()
+                        .map(|field| {
+                            let Some(layout_field) = layout_fields
+                                .iter()
+                                .find(|candidate| candidate.name.as_ref() == field.label.as_ref())
+                            else {
+                                return Err(UnsupportedInlinePipePattern { span: pattern.span });
+                            };
+                            Ok(InlinePipeRecordPatternField {
+                                label: field.label.clone(),
+                                pattern: self.lower_inline_pipe_pattern(
+                                    &field.pattern,
+                                    layout_field.layout,
+                                    inline_subjects,
+                                    locals,
+                                )?,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                )
+            }
+            core::PatternKind::Constructor { callee, arguments } => {
+                let core::Reference::Builtin(term) = callee.reference else {
+                    return Err(UnsupportedInlinePipePattern { span: pattern.span });
+                };
+                let constructor = map_builtin_term(term);
+                let argument_layouts: Vec<LayoutId> =
+                    match (constructor, &self.program.layouts()[layout].kind) {
+                        (
+                            BuiltinTerm::True | BuiltinTerm::False,
+                            LayoutKind::Primitive(PrimitiveType::Bool),
+                        ) => Vec::new(),
+                        (BuiltinTerm::None, LayoutKind::Option { .. }) => Vec::new(),
+                        (BuiltinTerm::Some, LayoutKind::Option { element }) => vec![*element],
+                        (BuiltinTerm::Ok, LayoutKind::Result { value, .. }) => vec![*value],
+                        (BuiltinTerm::Err, LayoutKind::Result { error, .. }) => vec![*error],
+                        (BuiltinTerm::Valid, LayoutKind::Validation { value, .. }) => vec![*value],
+                        (BuiltinTerm::Invalid, LayoutKind::Validation { error, .. }) => {
+                            vec![*error]
+                        }
+                        _ => return Err(UnsupportedInlinePipePattern { span: pattern.span }),
+                    };
+                if arguments.len() != argument_layouts.len() {
+                    return Err(UnsupportedInlinePipePattern { span: pattern.span });
+                }
+                InlinePipePatternKind::Constructor {
+                    constructor,
+                    arguments: arguments
+                        .iter()
+                        .zip(argument_layouts.into_iter())
+                        .map(|(argument, layout)| {
+                            self.lower_inline_pipe_pattern(
+                                argument,
+                                layout,
+                                inline_subjects,
+                                locals,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                }
+            }
+        };
+        Ok(InlinePipePattern {
+            span: pattern.span,
+            kind,
         })
     }
 
@@ -1776,6 +2137,39 @@ impl<'a> ProgramLowerer<'a> {
             .get(&item)
             .copied()
             .ok_or(UnknownLambdaItem { item, span })
+    }
+
+    fn runtime_expr_layout(&mut self, expr_id: core::ExprId) -> Result<LayoutId, LoweringError> {
+        let ty = self.runtime_expr_type(expr_id);
+        self.intern_core_type(&ty)
+    }
+
+    fn runtime_item_body_layout(
+        &mut self,
+        item: &lambda::Item,
+        expr_id: core::ExprId,
+    ) -> Result<LayoutId, LoweringError> {
+        let ty = match (&item.kind, self.runtime_expr_type(expr_id)) {
+            (core::ItemKind::Signal(_), core::Type::Signal(payload)) => *payload,
+            (_, ty) => ty,
+        };
+        self.intern_core_type(&ty)
+    }
+
+    fn runtime_expr_type(&self, expr_id: core::ExprId) -> core::Type {
+        let expr = &self.lambda.exprs()[expr_id];
+        match &expr.kind {
+            core::ExprKind::Apply { callee, arguments } => {
+                applied_result_type(self.lambda.exprs()[*callee].ty.clone(), arguments.len())
+                    .unwrap_or_else(|| expr.ty.clone())
+            }
+            core::ExprKind::Pipe(pipe) => pipe
+                .stages
+                .last()
+                .map(|stage| stage.result_subject.clone())
+                .unwrap_or_else(|| expr.ty.clone()),
+            _ => expr.ty.clone(),
+        }
     }
 
     fn intern_layout(&mut self, layout: Layout) -> Result<LayoutId, LoweringError> {
@@ -2023,6 +2417,42 @@ struct KernelContract {
 }
 
 #[derive(Clone, Copy)]
+struct SubjectContext {
+    reference: SubjectRef,
+    layout: LayoutId,
+}
+
+#[derive(Clone, Default)]
+struct LocalBindings(Vec<(u32, SubjectContext)>);
+
+impl LocalBindings {
+    fn get(&self, binding: u32) -> Option<SubjectContext> {
+        self.0
+            .iter()
+            .rev()
+            .find(|(candidate, _)| *candidate == binding)
+            .map(|(_, subject)| *subject)
+    }
+
+    fn insert(&mut self, binding: u32, subject: SubjectContext) {
+        self.0.push((binding, subject));
+    }
+}
+
+#[derive(Clone)]
+struct InlinePipeCaseArmSpec {
+    span: SourceSpan,
+    pattern: InlinePipePattern,
+}
+
+#[derive(Clone)]
+struct InlinePipeTruthyFalsyBranchSpec {
+    span: SourceSpan,
+    constructor: BuiltinTerm,
+    payload_subject: Option<InlineSubjectId>,
+}
+
+#[derive(Clone, Copy)]
 enum SubjectKind {
     Input,
     Inline,
@@ -2033,6 +2463,17 @@ struct LoweredKernelExprs {
     inline_subjects: Vec<LayoutId>,
     exprs: Arena<KernelExprId, KernelExpr>,
 }
+
+fn applied_result_type(mut ty: core::Type, arguments: usize) -> Option<core::Type> {
+    for _ in 0..arguments {
+        match ty {
+            core::Type::Arrow { result, .. } => ty = *result,
+            _ => return None,
+        }
+    }
+    Some(ty)
+}
+
 fn alloc_kernel_expr(
     exprs: &mut Arena<KernelExprId, KernelExpr>,
     expr: KernelExpr,

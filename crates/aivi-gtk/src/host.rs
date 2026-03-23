@@ -42,6 +42,31 @@ pub struct GtkQueuedEvent<V> {
     pub value: V,
 }
 
+/// GTK signal closures run on the GTK main thread, so a small `Rc<RefCell<_>>` queue is the
+/// narrowest bridge that lets `'static` callbacks hand events back to the host without widening the
+/// threading surface to `Arc<Mutex<_>>`.
+struct GtkEventQueue<V> {
+    events: RefCell<VecDeque<GtkQueuedEvent<V>>>,
+}
+
+impl<V> Default for GtkEventQueue<V> {
+    fn default() -> Self {
+        Self {
+            events: RefCell::new(VecDeque::new()),
+        }
+    }
+}
+
+impl<V> GtkEventQueue<V> {
+    fn push(&self, event: GtkQueuedEvent<V>) {
+        self.events.borrow_mut().push_back(event);
+    }
+
+    fn drain(&self) -> Vec<GtkQueuedEvent<V>> {
+        self.events.borrow_mut().drain(..).collect()
+    }
+}
+
 pub struct GtkConcreteHost<V>
 where
     V: GtkHostValue,
@@ -50,7 +75,7 @@ where
     next_event: u64,
     widgets: BTreeMap<u64, MountedWidget>,
     events: BTreeMap<u64, MountedEvent>,
-    queued_events: Rc<RefCell<VecDeque<GtkQueuedEvent<V>>>>,
+    queued_events: Rc<GtkEventQueue<V>>,
 }
 
 impl<V> Default for GtkConcreteHost<V>
@@ -63,7 +88,7 @@ where
             next_event: 0,
             widgets: BTreeMap::new(),
             events: BTreeMap::new(),
-            queued_events: Rc::new(RefCell::new(VecDeque::new())),
+            queued_events: Rc::new(GtkEventQueue::default()),
         }
     }
 }
@@ -85,7 +110,7 @@ where
     }
 
     pub fn drain_events(&mut self) -> Vec<GtkQueuedEvent<V>> {
-        self.queued_events.borrow_mut().drain(..).collect()
+        self.queued_events.drain()
     }
 
     pub fn present_root_windows(&self) {
@@ -343,6 +368,12 @@ where
             StaticPropertyValue::ImplicitTrue => {
                 self.apply_bool_property(&widget, kind, property.name.text(), true)
             }
+            StaticPropertyValue::Text(text) if text.has_interpolation() => {
+                Err(GtkConcreteHostError::InterpolatedStaticText {
+                    widget: kind.label().into(),
+                    property: property.name.text().to_owned().into_boxed_str(),
+                })
+            }
             StaticPropertyValue::Text(text) => {
                 self.apply_text_property(&widget, kind, property.name.text(), &text_literal(text))
             }
@@ -394,7 +425,7 @@ where
                 .downcast::<gtk::Button>()
                 .expect("button widget should downcast")
                 .connect_clicked(move |_| {
-                    queue.borrow_mut().push_back(GtkQueuedEvent {
+                    queue.push(GtkQueuedEvent {
                         route: route_id,
                         value: V::unit(),
                     });
@@ -588,12 +619,13 @@ where
                 for (offset, child) in moved.iter().cloned().enumerate() {
                     next_children.insert(to + offset, child);
                 }
-                for index in 0..next_children.len() {
-                    let child_widget = self.widget_object(&next_children[index])?;
-                    let sibling = if index == 0 {
+                for (offset, child) in moved.iter().enumerate() {
+                    let target_index = to + offset;
+                    let child_widget = self.widget_object(child)?;
+                    let sibling = if target_index == 0 {
                         None
                     } else {
-                        Some(self.widget_object(&next_children[index - 1])?)
+                        Some(self.widget_object(&next_children[target_index - 1])?)
                     };
                     box_widget.reorder_child_after(&child_widget, sibling.as_ref());
                 }
@@ -707,6 +739,10 @@ pub enum GtkConcreteHostError {
     ChildMismatch {
         parent: GtkConcreteWidget,
     },
+    InterpolatedStaticText {
+        widget: Box<str>,
+        property: Box<str>,
+    },
 }
 
 impl fmt::Display for GtkConcreteHostError {
@@ -758,6 +794,10 @@ impl fmt::Display for GtkConcreteHostError {
                 "GTK host parent {:?} was asked to mutate a child range that does not match the mounted order",
                 parent
             ),
+            Self::InterpolatedStaticText { widget, property } => write!(
+                f,
+                "GTK host cannot mount interpolated static text for property `{property}` on widget `{widget}`"
+            ),
         }
     }
 }
@@ -775,31 +815,37 @@ fn widget_name(path: &NamePath) -> &str {
 fn text_literal(text: &TextLiteral) -> String {
     text.segments
         .iter()
-        .filter_map(|segment| match segment {
-            TextSegment::Text(fragment) => Some(fragment.raw.as_ref()),
-            TextSegment::Interpolation(_) => None,
+        .map(|segment| match segment {
+            TextSegment::Text(fragment) => fragment.raw.as_ref(),
+            TextSegment::Interpolation(_) => {
+                unreachable!("interpolated static text should be rejected before rendering")
+            }
         })
         .collect()
 }
 
 fn parse_orientation(value: &str) -> Option<Orientation> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "vertical" => Some(Orientation::Vertical),
-        "horizontal" => Some(Orientation::Horizontal),
+    match value.trim() {
+        "Vertical" | "vertical" => Some(Orientation::Vertical),
+        "Horizontal" | "horizontal" => Some(Orientation::Horizontal),
         _ => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use aivi_base::SourceDatabase;
-    use aivi_hir::{Item, lower_module};
+    use aivi_base::{FileId, SourceDatabase, SourceSpan, Span};
+    use aivi_hir::{
+        ExprId, Item, MarkupNodeId, Name, TextFragment, TextInterpolation, TextLiteral,
+        TextSegment, lower_module,
+    };
     use aivi_runtime::InputHandle;
     use aivi_syntax::parse_module;
     use gtk::prelude::*;
 
     use crate::{
-        GtkBridgeGraph, GtkBridgeNodeKind, GtkRuntimeExecutor, RuntimePropertyBinding,
+        AttributeSite, GtkBridgeGraph, GtkBridgeNodeKind, GtkRuntimeExecutor,
+        RuntimePropertyBinding, StableNodeId, StaticPropertyPlan, StaticPropertyValue,
         lower_markup_expr, lower_widget_bridge,
     };
 
@@ -892,6 +938,10 @@ mod tests {
                 _ => None,
             })
             .unwrap_or_else(|| panic!("expected {widget_name}.{property} input"))
+    }
+
+    fn span(start: usize, end: usize) -> SourceSpan {
+        SourceSpan::new(FileId::new(0), Span::from(start..end))
     }
 
     #[test]
@@ -993,6 +1043,127 @@ val view =
             assert_eq!(queued.len(), 1);
             assert_eq!(queued[0].route, routes[0].id);
             assert_eq!(queued[0].value, TestValue::Unit);
+        });
+    }
+
+    #[test]
+    fn concrete_host_rejects_interpolated_static_text() {
+        gtk::test_synced(|| {
+            let graph = lower_graph(
+                "gtk-host-static-property-guard.aivi",
+                r#"
+val view =
+    <Window title="Host" />
+"#,
+            );
+            let mut executor = GtkRuntimeExecutor::new_with_values(
+                graph,
+                GtkConcreteHost::<TestValue>::default(),
+                std::iter::empty::<(InputHandle, TestValue)>(),
+            )
+            .expect("concrete GTK host should mount a static window");
+            let widget = executor
+                .root_widgets()
+                .expect("root widget should exist")
+                .into_iter()
+                .next()
+                .expect("window root should exist");
+            let plan = StaticPropertyPlan {
+                site: AttributeSite {
+                    owner: StableNodeId::Markup(MarkupNodeId::from_raw(0)),
+                    index: 0,
+                    span: span(0, 18),
+                },
+                name: Name::new("title", span(0, 5)).unwrap(),
+                value: StaticPropertyValue::Text(TextLiteral {
+                    segments: vec![
+                        TextSegment::Text(TextFragment {
+                            raw: "Hello ".into(),
+                            span: span(6, 12),
+                        }),
+                        TextSegment::Interpolation(TextInterpolation {
+                            span: span(12, 18),
+                            expr: ExprId::from_raw(0),
+                        }),
+                    ],
+                }),
+            };
+            let error = executor
+                .host_mut()
+                .apply_static_property(&widget, &plan)
+                .expect_err("static GTK text interpolation should be rejected explicitly");
+            assert!(matches!(
+                error,
+                GtkConcreteHostError::InterpolatedStaticText { property, .. }
+                    if property.as_ref() == "title"
+            ));
+        });
+    }
+
+    #[test]
+    fn concrete_host_moves_only_the_requested_child_range() {
+        gtk::test_synced(|| {
+            let graph = lower_graph(
+                "gtk-host-move-children.aivi",
+                r#"
+val view =
+    <Window title="Host">
+        <Box>
+            <Label text="A" />
+            <Label text="B" />
+            <Label text="C" />
+        </Box>
+    </Window>
+"#,
+            );
+            let mut executor = GtkRuntimeExecutor::new_with_values(
+                graph,
+                GtkConcreteHost::<TestValue>::default(),
+                std::iter::empty::<(InputHandle, TestValue)>(),
+            )
+            .expect("concrete GTK host should mount the bridge graph");
+
+            let root = executor
+                .root_widgets()
+                .expect("root widget should exist")
+                .into_iter()
+                .next()
+                .expect("window root should exist");
+            let container_handle = executor
+                .host()
+                .child_handles(&root)
+                .expect("window child order should be tracked")
+                .into_iter()
+                .next()
+                .expect("window should contain the box child");
+            let before = executor
+                .host()
+                .child_handles(&container_handle)
+                .expect("box child order should be tracked");
+
+            executor
+                .host_mut()
+                .move_children(&container_handle, 0, 1, 2, &[before[0].clone()])
+                .expect("moving a single mounted child should succeed");
+
+            let after = executor
+                .host()
+                .child_handles(&container_handle)
+                .expect("box child order should be tracked after the move");
+            let labels = after
+                .iter()
+                .map(|handle| {
+                    executor
+                        .host()
+                        .widget(handle)
+                        .expect("label handle should resolve")
+                        .downcast::<gtk::Label>()
+                        .expect("moved children should stay labels")
+                        .text()
+                        .to_string()
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(labels, vec!["B", "C", "A"]);
         });
     }
 }

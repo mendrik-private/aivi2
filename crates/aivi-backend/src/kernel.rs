@@ -173,6 +173,7 @@ impl fmt::Display for CallingConvention {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KernelOriginKind {
+    ItemBody,
     GateTrue {
         pipeline: PipelineId,
         stage_index: usize,
@@ -209,6 +210,7 @@ pub enum KernelOriginKind {
 impl fmt::Display for KernelOriginKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ItemBody => f.write_str("item-body"),
             Self::GateTrue {
                 pipeline,
                 stage_index,
@@ -404,6 +406,56 @@ pub enum InlinePipeStageKind {
         predicate: KernelExprId,
         emits_negative_update: bool,
     },
+    Case {
+        arms: Vec<InlinePipeCaseArm>,
+    },
+    TruthyFalsy {
+        truthy: InlinePipeTruthyFalsyBranch,
+        falsy: InlinePipeTruthyFalsyBranch,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InlinePipeCaseArm {
+    pub span: SourceSpan,
+    pub pattern: InlinePipePattern,
+    pub body: KernelExprId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InlinePipeTruthyFalsyBranch {
+    pub span: SourceSpan,
+    pub constructor: BuiltinTerm,
+    pub payload_subject: Option<InlineSubjectId>,
+    pub body: KernelExprId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InlinePipePattern {
+    pub span: SourceSpan,
+    pub kind: InlinePipePatternKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InlinePipePatternKind {
+    Wildcard,
+    Binding {
+        subject: InlineSubjectId,
+    },
+    Integer(IntegerLiteral),
+    Text(Box<str>),
+    Tuple(Vec<InlinePipePattern>),
+    Record(Vec<InlinePipeRecordPatternField>),
+    Constructor {
+        constructor: BuiltinTerm,
+        arguments: Vec<InlinePipePattern>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InlinePipeRecordPatternField {
+    pub label: Box<str>,
+    pub pattern: InlinePipePattern,
 }
 
 pub fn describe_expr_kind(kind: &KernelExprKind) -> String {

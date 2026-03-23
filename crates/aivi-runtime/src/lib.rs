@@ -6,7 +6,9 @@ pub mod effects;
 pub mod glib_adapter;
 pub mod graph;
 pub mod hir_adapter;
+pub mod providers;
 pub mod scheduler;
+pub mod startup;
 
 pub use effects::{
     CancellationObserver, PublicationPortError, RuntimeSourceProvider, SourceActiveWhenEvaluator,
@@ -26,8 +28,16 @@ pub use hir_adapter::{
     HirRuntimeAssemblyBuilder, HirRuntimeGatePlan, HirRuntimeInstantiationError, HirSignalBinding,
     HirSignalBindingKind, HirSourceBinding, assemble_hir_runtime,
 };
+pub use providers::{SourceProviderExecutionError, SourceProviderManager};
 pub use scheduler::{
     DependencyValue, DependencyValues, DerivedNodeEvaluator, DroppedPublication, Generation,
     Publication, PublicationDropReason, PublicationStamp, Scheduler, SchedulerAccessError,
-    SchedulerMessage, TickOutcome, WorkerPublicationSender, WorkerSendError,
+    SchedulerMessage, TickOutcome, TryDerivedNodeEvaluator, WorkerPublicationSender,
+    WorkerSendError,
+};
+pub use startup::{
+    BackendLinkedRuntime, BackendRuntimeError, BackendRuntimeLinkError, BackendRuntimeLinkErrors,
+    EvaluatedSourceConfig, EvaluatedSourceOption, LinkedDerivedSignal, LinkedSourceArgument,
+    LinkedSourceBinding, LinkedSourceLifecycleAction, LinkedSourceOption, LinkedSourceTickOutcome,
+    link_backend_runtime,
 };

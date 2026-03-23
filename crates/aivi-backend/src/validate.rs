@@ -3,7 +3,10 @@ use std::fmt;
 use crate::{
     CallingConvention, DecodePlanId, DecodeStepId, EnvSlotId, InlineSubjectId, ItemId,
     KernelExprId, KernelId, LayoutId, PipelineId, Program, SourceId,
-    kernel::{InlinePipeStageKind, KernelExprKind, ParameterRole, ProjectionBase, SubjectRef},
+    kernel::{
+        InlinePipePattern, InlinePipePatternKind, InlinePipeRecordPatternField,
+        InlinePipeStageKind, KernelExprKind, ParameterRole, ProjectionBase, SubjectRef,
+    },
     layout::{LayoutKind, PrimitiveType},
     program::{DecodeStepKind, GateStage, ItemKind, StageKind},
 };
@@ -47,6 +50,39 @@ impl std::error::Error for ValidationErrors {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ValidationError {
+    ItemUnknownParameterLayout {
+        item: ItemId,
+        parameter_index: usize,
+        layout: LayoutId,
+    },
+    ItemUnknownBodyKernel {
+        item: ItemId,
+        kernel: KernelId,
+    },
+    ItemBodyOwnerMismatch {
+        item: ItemId,
+        kernel: KernelId,
+        expected_owner: ItemId,
+        found_owner: ItemId,
+    },
+    ItemBodyHasInput {
+        item: ItemId,
+        kernel: KernelId,
+        layout: LayoutId,
+    },
+    ItemBodyParameterCountMismatch {
+        item: ItemId,
+        kernel: KernelId,
+        expected: usize,
+        found: usize,
+    },
+    ItemBodyParameterLayoutMismatch {
+        item: ItemId,
+        kernel: KernelId,
+        parameter_index: usize,
+        expected: LayoutId,
+        found: LayoutId,
+    },
     ItemPipelineBackrefMissing {
         item: ItemId,
         pipeline: PipelineId,
@@ -206,6 +242,53 @@ pub enum ValidationError {
 impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ItemUnknownParameterLayout {
+                item,
+                parameter_index,
+                layout,
+            } => write!(
+                f,
+                "item {item} parameter {parameter_index} references unknown layout {layout}"
+            ),
+            Self::ItemUnknownBodyKernel { item, kernel } => {
+                write!(f, "item {item} references unknown body kernel {kernel}")
+            }
+            Self::ItemBodyOwnerMismatch {
+                item,
+                kernel,
+                expected_owner,
+                found_owner,
+            } => write!(
+                f,
+                "item {item} body kernel {kernel} belongs to item {found_owner}, expected {expected_owner}"
+            ),
+            Self::ItemBodyHasInput {
+                item,
+                kernel,
+                layout,
+            } => write!(
+                f,
+                "item {item} body kernel {kernel} unexpectedly requires input layout {layout}"
+            ),
+            Self::ItemBodyParameterCountMismatch {
+                item,
+                kernel,
+                expected,
+                found,
+            } => write!(
+                f,
+                "item {item} body kernel {kernel} expects {found} environment slot(s), but the item declares {expected} parameter(s)"
+            ),
+            Self::ItemBodyParameterLayoutMismatch {
+                item,
+                kernel,
+                parameter_index,
+                expected,
+                found,
+            } => write!(
+                f,
+                "item {item} body kernel {kernel} parameter {parameter_index} changed layout unexpectedly: expected {expected}, found {found}"
+            ),
             Self::ItemPipelineBackrefMissing { item, pipeline } => {
                 write!(
                     f,
@@ -422,6 +505,65 @@ pub fn validate_program(program: &Program) -> Result<(), ValidationErrors> {
     validate_layouts(program, &mut errors);
 
     for (item_id, item) in program.items().iter() {
+        for (parameter_index, layout) in item.parameters.iter().enumerate() {
+            if !program.layouts().contains(*layout) {
+                errors.push(ValidationError::ItemUnknownParameterLayout {
+                    item: item_id,
+                    parameter_index,
+                    layout: *layout,
+                });
+            }
+        }
+        if let Some(kernel_id) = item.body {
+            match program.kernels().get(kernel_id) {
+                Some(kernel) => {
+                    if kernel.origin.item != item_id {
+                        errors.push(ValidationError::ItemBodyOwnerMismatch {
+                            item: item_id,
+                            kernel: kernel_id,
+                            expected_owner: item_id,
+                            found_owner: kernel.origin.item,
+                        });
+                    }
+                    if let Some(layout) = kernel.input_subject {
+                        errors.push(ValidationError::ItemBodyHasInput {
+                            item: item_id,
+                            kernel: kernel_id,
+                            layout,
+                        });
+                    }
+                    if kernel.environment.len() != item.parameters.len() {
+                        errors.push(ValidationError::ItemBodyParameterCountMismatch {
+                            item: item_id,
+                            kernel: kernel_id,
+                            expected: item.parameters.len(),
+                            found: kernel.environment.len(),
+                        });
+                    } else {
+                        for (parameter_index, (expected, found)) in item
+                            .parameters
+                            .iter()
+                            .zip(kernel.environment.iter())
+                            .enumerate()
+                        {
+                            if expected != found {
+                                errors.push(ValidationError::ItemBodyParameterLayoutMismatch {
+                                    item: item_id,
+                                    kernel: kernel_id,
+                                    parameter_index,
+                                    expected: *expected,
+                                    found: *found,
+                                });
+                            }
+                        }
+                    }
+                }
+                None => errors.push(ValidationError::ItemUnknownBodyKernel {
+                    item: item_id,
+                    kernel: kernel_id,
+                }),
+            }
+        }
         for pipeline in &item.pipelines {
             if !program.pipelines().contains(*pipeline) {
                 errors.push(ValidationError::ItemPipelineBackrefMissing {
@@ -1093,6 +1235,36 @@ fn validate_kernel(
                         InlinePipeStageKind::Gate { predicate, .. } => {
                             push_expr(kernel_id, *predicate, kernel, &mut work, errors)
                         }
+                        InlinePipeStageKind::Case { arms } => {
+                            for arm in arms {
+                                push_expr(kernel_id, arm.body, kernel, &mut work, errors);
+                                validate_inline_pipe_pattern(
+                                    kernel_id,
+                                    expr_id,
+                                    kernel,
+                                    &arm.pattern,
+                                    errors,
+                                );
+                            }
+                        }
+                        InlinePipeStageKind::TruthyFalsy { truthy, falsy } => {
+                            push_expr(kernel_id, truthy.body, kernel, &mut work, errors);
+                            push_expr(kernel_id, falsy.body, kernel, &mut work, errors);
+                            for branch in [truthy, falsy] {
+                                if let Some(subject) = branch.payload_subject {
+                                    match kernel.inline_subjects.get(subject.index()) {
+                                        Some(_) => {}
+                                        None => errors.push(
+                                            ValidationError::KernelUnknownInlineSubject {
+                                                kernel: kernel_id,
+                                                expr: expr_id,
+                                                subject,
+                                            },
+                                        ),
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1168,6 +1340,47 @@ fn push_exprs(
 ) {
     for expr in exprs {
         push_expr(kernel_id, *expr, kernel, work, errors);
+    }
+}
+
+fn validate_inline_pipe_pattern(
+    kernel_id: KernelId,
+    expr_id: KernelExprId,
+    kernel: &crate::Kernel,
+    pattern: &InlinePipePattern,
+    errors: &mut Vec<ValidationError>,
+) {
+    let mut work = vec![pattern];
+    while let Some(pattern) = work.pop() {
+        match &pattern.kind {
+            InlinePipePatternKind::Wildcard
+            | InlinePipePatternKind::Integer(_)
+            | InlinePipePatternKind::Text(_) => {}
+            InlinePipePatternKind::Binding { subject } => {
+                if kernel.inline_subjects.get(subject.index()).is_none() {
+                    errors.push(ValidationError::KernelUnknownInlineSubject {
+                        kernel: kernel_id,
+                        expr: expr_id,
+                        subject: *subject,
+                    });
+                }
+            }
+            InlinePipePatternKind::Tuple(elements) => {
+                for element in elements.iter().rev() {
+                    work.push(element);
+                }
+            }
+            InlinePipePatternKind::Record(fields) => {
+                for InlinePipeRecordPatternField { pattern, .. } in fields.iter().rev() {
+                    work.push(pattern);
+                }
+            }
+            InlinePipePatternKind::Constructor { arguments, .. } => {
+                for argument in arguments.iter().rev() {
+                    work.push(argument);
+                }
+            }
+        }
     }
 }
 

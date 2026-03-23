@@ -14,7 +14,7 @@ use crate::{
     graph::{InputHandle, OwnerHandle, SignalGraph, SignalHandle},
     scheduler::{
         DerivedNodeEvaluator, Generation, Publication, PublicationStamp, Scheduler,
-        SchedulerAccessError, TickOutcome, WorkerPublicationSender,
+        SchedulerAccessError, TickOutcome, TryDerivedNodeEvaluator, WorkerPublicationSender,
     },
 };
 
@@ -683,6 +683,15 @@ impl<V, D> TaskSourceRuntime<V, D> {
         let outcome = self.scheduler.tick(evaluator);
         self.pending_owner_disposals.clear();
         outcome
+    }
+
+    pub fn try_tick<E>(&mut self, evaluator: &mut E) -> Result<TickOutcome, E::Error>
+    where
+        E: TryDerivedNodeEvaluator<V>,
+    {
+        let outcome = self.scheduler.try_tick(evaluator)?;
+        self.pending_owner_disposals.clear();
+        Ok(outcome)
     }
 
     /// Runs one transactional scheduler tick and derives deterministic source lifecycle actions

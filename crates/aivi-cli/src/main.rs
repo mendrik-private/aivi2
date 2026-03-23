@@ -1,20 +1,30 @@
 #![forbid(unsafe_code)]
 
 use std::{
+    cell::Cell,
     env,
     ffi::OsString,
     fs,
     io::{self, Read},
     path::{Path, PathBuf},
     process::ExitCode,
+    rc::Rc,
 };
 
 use aivi_backend::{compile_program, lower_module as lower_backend_module, validate_program};
-use aivi_base::{Diagnostic, FileId, Severity, SourceDatabase};
+use aivi_base::{Diagnostic, FileId, Severity, SourceDatabase, SourceSpan};
 use aivi_core::{lower_module as lower_core_module, validate_module as validate_core_module};
-use aivi_hir::{ValidationMode, lower_module as lower_hir_module};
+use aivi_gtk::{
+    GtkConcreteHost, GtkHostValue, GtkRuntimeExecutor, PlanNodeKind, PropertyPlan,
+    lower_markup_expr, lower_widget_bridge,
+};
+use aivi_hir::{
+    ExprKind, Item, Module as HirModule, ValidationMode, ValueItem,
+    lower_module as lower_hir_module,
+};
 use aivi_lambda::{lower_module as lower_lambda_module, validate_module as validate_lambda_module};
 use aivi_syntax::{Formatter, ItemKind, TokenKind, lex_module, parse_module};
+use gtk::{glib, prelude::*};
 
 fn main() -> ExitCode {
     match run() {
@@ -41,6 +51,10 @@ fn run() -> Result<ExitCode, String> {
 
     if first == OsString::from("compile") {
         return run_compile(args);
+    }
+
+    if first == OsString::from("run") {
+        return run_markup(args);
     }
 
     if first == OsString::from("lex") {
@@ -112,12 +126,63 @@ fn run_compile(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Str
     compile_file(&path, output.as_deref())
 }
 
+fn run_markup(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
+    let path = args
+        .next()
+        .map(PathBuf::from)
+        .ok_or_else(|| "expected a path argument after `run`".to_owned())?;
+    let mut requested_view = None;
+
+    while let Some(argument) = args.next() {
+        if argument == OsString::from("--view") {
+            let view = args
+                .next()
+                .ok_or_else(|| "expected a value name after `--view` for `run`".to_owned())?;
+            if requested_view
+                .replace(view.to_string_lossy().into_owned())
+                .is_some()
+            {
+                return Err("run view name was provided more than once".to_owned());
+            }
+            continue;
+        }
+
+        return Err(format!(
+            "unexpected run argument `{}`",
+            argument.to_string_lossy()
+        ));
+    }
+
+    run_markup_file(&path, requested_view.as_deref())
+}
+
 fn load_source(path: &Path) -> Result<(SourceDatabase, FileId), String> {
     let text = fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     let mut sources = SourceDatabase::new();
     let file_id = sources.add_file(path.to_path_buf(), text);
     Ok((sources, file_id))
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct RunHostValue;
+
+impl GtkHostValue for RunHostValue {
+    fn unit() -> Self {
+        Self
+    }
+}
+
+#[derive(Clone, Debug)]
+struct StaticRunArtifact {
+    view_name: Box<str>,
+    bridge: aivi_gtk::GtkBridgeGraph,
+}
+
+#[derive(Clone, Debug)]
+struct StaticRunBlocker {
+    span: SourceSpan,
+    message: String,
 }
 
 fn check_file(path: &Path) -> Result<ExitCode, String> {
@@ -152,6 +217,281 @@ fn check_file(path: &Path) -> Result<ExitCode, String> {
         );
         Ok(ExitCode::SUCCESS)
     }
+}
+
+fn run_markup_file(path: &Path, requested_view: Option<&str>) -> Result<ExitCode, String> {
+    let (sources, file_id) = load_source(path)?;
+    let file = &sources[file_id];
+    let parsed = parse_module(file);
+    let syntax_failed = print_diagnostics(&sources, parsed.all_diagnostics());
+    if syntax_failed {
+        return Ok(ExitCode::FAILURE);
+    }
+
+    let lowered = lower_hir_module(&parsed.module);
+    let hir_lowering_failed = print_diagnostics(&sources, lowered.diagnostics());
+    let validation_mode = if hir_lowering_failed {
+        ValidationMode::Structural
+    } else {
+        ValidationMode::RequireResolvedNames
+    };
+    let validation = lowered.module().validate(validation_mode);
+    let hir_validation_failed = print_diagnostics(&sources, validation.diagnostics());
+    if hir_lowering_failed || hir_validation_failed {
+        return Ok(ExitCode::FAILURE);
+    }
+
+    let artifact = match prepare_static_run_artifact(&sources, lowered.module(), requested_view) {
+        Ok(artifact) => artifact,
+        Err(message) => {
+            eprintln!("{message}");
+            return Ok(ExitCode::FAILURE);
+        }
+    };
+
+    launch_static_run(path, artifact)
+}
+
+fn prepare_static_run_artifact(
+    sources: &SourceDatabase,
+    module: &HirModule,
+    requested_view: Option<&str>,
+) -> Result<StaticRunArtifact, String> {
+    let view = select_run_view(module, requested_view)?;
+    let ExprKind::Markup(_) = &module.exprs()[view.body].kind else {
+        return Err(format!(
+            "run view `{}` is not markup; `aivi run` currently requires a top-level markup-valued `val`",
+            view.name.text()
+        ));
+    };
+    let plan = lower_markup_expr(module, view.body).map_err(|error| {
+        format!(
+            "failed to lower run view `{}` into GTK markup: {error}",
+            view.name.text()
+        )
+    })?;
+    validate_static_run_plan(sources, &plan)?;
+    let bridge = lower_widget_bridge(&plan).map_err(|error| {
+        format!(
+            "failed to lower static run view `{}` into a GTK bridge graph: {error}",
+            view.name.text()
+        )
+    })?;
+    Ok(StaticRunArtifact {
+        view_name: view.name.text().into(),
+        bridge,
+    })
+}
+
+fn select_run_view<'a>(
+    module: &'a HirModule,
+    requested_view: Option<&str>,
+) -> Result<&'a ValueItem, String> {
+    let mut markup_values = Vec::new();
+    let mut all_values = Vec::new();
+    for (_, item) in module.items().iter() {
+        let Item::Value(value) = item else {
+            continue;
+        };
+        all_values.push(value);
+        if matches!(module.exprs()[value.body].kind, ExprKind::Markup(_)) {
+            markup_values.push(value);
+        }
+    }
+
+    if let Some(requested_view) = requested_view {
+        let Some(value) = all_values
+            .into_iter()
+            .find(|value| value.name.text() == requested_view)
+        else {
+            let available = markup_view_names(&markup_values);
+            return Err(if available.is_empty() {
+                format!(
+                    "run view `{requested_view}` does not exist and this module exposes no markup-valued top-level `val`s"
+                )
+            } else {
+                format!(
+                    "run view `{requested_view}` does not exist; available markup views: {}",
+                    available.join(", ")
+                )
+            });
+        };
+        return if matches!(module.exprs()[value.body].kind, ExprKind::Markup(_)) {
+            Ok(value)
+        } else {
+            Err(format!(
+                "run view `{requested_view}` exists but is not markup; `aivi run` currently requires a markup-valued top-level `val`"
+            ))
+        };
+    }
+
+    if let Some(view) = markup_values
+        .iter()
+        .copied()
+        .find(|value| value.name.text() == "view")
+    {
+        return Ok(view);
+    }
+
+    match markup_values.as_slice() {
+        [single] => Ok(*single),
+        [] => Err("no markup view found; define `val view = <Window ...>` or pass `--view <name>` for another markup-valued top-level `val`".to_owned()),
+        many => Err(format!(
+            "multiple markup views are available ({}); rename one to `view` or pass `--view <name>`",
+            markup_view_names(many).join(", ")
+        )),
+    }
+}
+
+fn markup_view_names(values: &[&ValueItem]) -> Vec<String> {
+    values
+        .iter()
+        .map(|value| value.name.text().to_owned())
+        .collect()
+}
+
+fn validate_static_run_plan(
+    sources: &SourceDatabase,
+    plan: &aivi_gtk::WidgetPlan,
+) -> Result<(), String> {
+    let mut blockers = Vec::new();
+    for node in plan.nodes() {
+        match &node.kind {
+            PlanNodeKind::Widget(widget) => {
+                for property in &widget.properties {
+                    if let PropertyPlan::Setter(setter) = property {
+                        blockers.push(StaticRunBlocker {
+                            span: setter.site.span,
+                            message: format!(
+                                "dynamic property `{}` is not supported yet",
+                                setter.name.text()
+                            ),
+                        });
+                    }
+                }
+                for event in &widget.event_hooks {
+                    blockers.push(StaticRunBlocker {
+                        span: event.site.span,
+                        message: format!("event hook `{}` is not supported yet", event.name.text()),
+                    });
+                }
+            }
+            PlanNodeKind::Show(_) => blockers.push(StaticRunBlocker {
+                span: node.span,
+                message: "`<show>` control nodes are not supported yet".to_owned(),
+            }),
+            PlanNodeKind::Each(_) => blockers.push(StaticRunBlocker {
+                span: node.span,
+                message: "`<each>` control nodes are not supported yet".to_owned(),
+            }),
+            PlanNodeKind::Match(_) => blockers.push(StaticRunBlocker {
+                span: node.span,
+                message: "`<match>` control nodes are not supported yet".to_owned(),
+            }),
+            PlanNodeKind::With(_) => blockers.push(StaticRunBlocker {
+                span: node.span,
+                message: "`<with>` control nodes are not supported yet".to_owned(),
+            }),
+            PlanNodeKind::Empty(_) | PlanNodeKind::Case(_) | PlanNodeKind::Fragment(_) => {}
+        }
+    }
+
+    if blockers.is_empty() {
+        return Ok(());
+    }
+
+    let mut rendered = String::from(
+        "`aivi run` currently supports static GTK markup only. Unsupported features in the selected view:\n",
+    );
+    for blocker in blockers {
+        rendered.push_str("- ");
+        rendered.push_str(&source_location(sources, blocker.span));
+        rendered.push_str(": ");
+        rendered.push_str(&blocker.message);
+        rendered.push('\n');
+    }
+    Err(rendered)
+}
+
+fn source_location(sources: &SourceDatabase, span: SourceSpan) -> String {
+    let file = &sources[span.file()];
+    let location = file.line_column(span.span().start());
+    format!(
+        "{}:{}:{}",
+        file.path().display(),
+        location.line,
+        location.column
+    )
+}
+
+fn launch_static_run(path: &Path, artifact: StaticRunArtifact) -> Result<ExitCode, String> {
+    gtk::init()
+        .map_err(|error| format!("failed to initialize GTK for {}: {error}", path.display()))?;
+
+    let executor =
+        GtkRuntimeExecutor::new(artifact.bridge, GtkConcreteHost::<RunHostValue>::default())
+            .map_err(|error| {
+                format!(
+                    "failed to mount static GTK view `{}` from {}: {error}",
+                    artifact.view_name,
+                    path.display()
+                )
+            })?;
+    let root_handles = executor.root_widgets().map_err(|error| {
+        format!(
+            "failed to collect root widgets for static view `{}`: {error}",
+            artifact.view_name
+        )
+    })?;
+    if root_handles.is_empty() {
+        return Err(format!(
+            "run view `{}` did not produce any root GTK widgets",
+            artifact.view_name
+        ));
+    }
+
+    let root_windows = root_handles
+        .into_iter()
+        .map(|handle| {
+            let widget = executor.host().widget(&handle).ok_or_else(|| {
+                format!(
+                    "run view `{}` lost GTK root widget {:?} before presentation",
+                    artifact.view_name, handle
+                )
+            })?;
+            widget.clone().downcast::<gtk::Window>().map_err(|widget| {
+                format!(
+                    "`aivi run` currently requires top-level `Window` roots; view `{}` produced a root `{}`",
+                    artifact.view_name,
+                    widget.type_().name()
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    println!(
+        "running static GTK view `{}` from {}",
+        artifact.view_name,
+        path.display()
+    );
+
+    let main_loop = glib::MainLoop::new(None, false);
+    let remaining = Rc::new(Cell::new(root_windows.len()));
+    for window in &root_windows {
+        let main_loop = main_loop.clone();
+        let remaining = remaining.clone();
+        window.connect_close_request(move |_| {
+            let next = remaining.get().saturating_sub(1);
+            remaining.set(next);
+            if next == 0 {
+                main_loop.quit();
+            }
+            glib::Propagation::Proceed
+        });
+    }
+    executor.host().present_root_windows();
+    main_loop.run();
+    Ok(ExitCode::SUCCESS)
 }
 
 fn compile_file(path: &Path, output: Option<&Path>) -> Result<ExitCode, String> {
@@ -490,10 +830,10 @@ fn run_lsp(_args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
 
 fn print_usage() {
     eprintln!(
-        "usage:\n  aivi <path>\n  aivi check <path>\n  aivi compile <path> [-o <object>]\n  aivi lex <path>\n  aivi fmt <path>\n  aivi fmt --stdin\n  aivi fmt --check [path...]\n  aivi lsp"
+        "usage:\n  aivi <path>\n  aivi check <path>\n  aivi compile <path> [-o <object>]\n  aivi run <path> [--view <name>]\n  aivi lex <path>\n  aivi fmt <path>\n  aivi fmt --stdin\n  aivi fmt --check [path...]\n  aivi lsp"
     );
     eprintln!(
-        "commands:\n  check    Lex, parse, lower, and validate a module through HIR\n  compile  Lower through typed core, typed lambda, backend, and Cranelift codegen\n  lex      Dump the lossless token stream\n  fmt      Canonically format the supported surface subset\n  lsp      Start the language server"
+        "commands:\n  check    Lex, parse, lower, and validate a module through HIR\n  compile  Lower through typed core, typed lambda, backend, and Cranelift codegen\n  run      Launch the current static GTK markup MVP\n  lex      Dump the lossless token stream\n  fmt      Canonically format the supported surface subset\n  lsp      Start the language server"
     );
     eprintln!(
         "milestone-2 surface items: {:?}",
@@ -528,7 +868,11 @@ fn print_usage() {
 
 #[cfg(test)]
 mod tests {
-    use super::check_file;
+    use super::{check_file, prepare_static_run_artifact};
+    use aivi_base::SourceDatabase;
+    use aivi_gtk::GtkBridgeNodeKind;
+    use aivi_hir::{ValidationMode, lower_module as lower_hir_module};
+    use aivi_syntax::parse_module;
     use std::{path::PathBuf, process::ExitCode};
 
     fn fixture(path: &str) -> PathBuf {
@@ -536,6 +880,33 @@ mod tests {
             .join("../..")
             .join("fixtures/frontend")
             .join(path)
+    }
+
+    fn prepare_static_run_from_text(
+        path: &str,
+        source: &str,
+        requested_view: Option<&str>,
+    ) -> Result<super::StaticRunArtifact, String> {
+        let mut sources = SourceDatabase::new();
+        let file_id = sources.add_file(path, source);
+        let file = &sources[file_id];
+        let parsed = parse_module(file);
+        assert!(!parsed.has_errors(), "test input should parse cleanly");
+        let lowered = lower_hir_module(&parsed.module);
+        assert!(
+            !lowered.has_errors(),
+            "test input should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+        let validation = lowered
+            .module()
+            .validate(ValidationMode::RequireResolvedNames);
+        assert!(
+            validation.diagnostics().is_empty(),
+            "test input should validate cleanly: {:?}",
+            validation.diagnostics()
+        );
+        prepare_static_run_artifact(&sources, lowered.module(), requested_view)
     }
 
     #[test]
@@ -554,5 +925,92 @@ mod tests {
         let result = check_file(&fixture("milestone-2/invalid/unknown-decorator/main.aivi"))
             .expect("check should run");
         assert_eq!(result, ExitCode::FAILURE);
+    }
+
+    #[test]
+    fn prepare_static_run_accepts_a_single_static_window_view() {
+        let artifact = prepare_static_run_from_text(
+            "static-window.aivi",
+            r#"
+val screenView =
+    <Window title="AIVI" />
+"#,
+            None,
+        )
+        .expect("static window markup should be runnable");
+        assert_eq!(artifact.view_name.as_ref(), "screenView");
+        let root = artifact.bridge.root_node();
+        let GtkBridgeNodeKind::Widget(widget) = &root.kind else {
+            panic!("expected a root widget, found {:?}", root.kind.tag());
+        };
+        assert_eq!(widget.widget.segments().last().text(), "Window");
+    }
+
+    #[test]
+    fn prepare_static_run_prefers_named_view_when_present() {
+        let artifact = prepare_static_run_from_text(
+            "named-view.aivi",
+            r#"
+val view =
+    <Window title="Default" />
+
+val alternate =
+    <Window title="Alternate" />
+"#,
+            None,
+        )
+        .expect("default `view` should win when multiple markup values exist");
+        assert_eq!(artifact.view_name.as_ref(), "view");
+    }
+
+    #[test]
+    fn prepare_static_run_rejects_dynamic_properties() {
+        let error = prepare_static_run_from_text(
+            "dynamic-property.aivi",
+            r#"
+val title = "AIVI"
+
+val view =
+    <Window title={title} />
+"#,
+            None,
+        )
+        .expect_err("dynamic setters should stay rejected in the static MVP");
+        assert!(error.contains("dynamic property `title`"));
+    }
+
+    #[test]
+    fn prepare_static_run_rejects_control_nodes() {
+        let error = prepare_static_run_from_text(
+            "control-node.aivi",
+            r#"
+val view =
+    <Window title="AIVI">
+        <show when={True}>
+            <Label text="Visible" />
+        </show>
+    </Window>
+"#,
+            None,
+        )
+        .expect_err("control nodes should stay rejected in the static MVP");
+        assert!(error.contains("`<show>` control nodes are not supported yet"));
+    }
+
+    #[test]
+    fn prepare_static_run_requires_view_name_when_multiple_markup_values_exist() {
+        let error = prepare_static_run_from_text(
+            "multiple-views.aivi",
+            r#"
+val first =
+    <Window title="First" />
+
+val second =
+    <Window title="Second" />
+"#,
+            None,
+        )
+        .expect_err("multiple unnamed markup views should require `--view`");
+        assert!(error.contains("--view <name>"));
     }
 }

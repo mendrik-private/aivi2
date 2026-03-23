@@ -9,8 +9,8 @@ use crate::{
     GateRuntimePipeStageKind, GateRuntimeProjectionBase, GateRuntimeRecordField,
     GateRuntimeReference, GateRuntimeTextLiteral, GateRuntimeTextSegment,
     GateRuntimeTruthyFalsyBranch, GateRuntimeUnsupportedKind, GateRuntimeUnsupportedPipeStageKind,
-    Item, ItemId, Module, PipeExpr, PipeStageKind, ProjectionBase, ResolutionState, TermReference,
-    TermResolution, TypeItemBody, ValueItem,
+    Item, ItemId, Module, PipeExpr, PipeStageKind, ProjectionBase, ResolutionState, SignalItem,
+    TermReference, TermResolution, TypeItemBody, ValueItem,
     gate_elaboration::{GateElaborationBlocker, GateRuntimeMapEntry},
     typecheck::expression_matches,
     validate::{GateExprEnv, GateIssue, GateType, GateTypeContext, truthy_falsy_pair_stages},
@@ -251,8 +251,12 @@ impl<'a> GeneralExprElaborator<'a> {
             match item {
                 Item::Value(value) => items.push(self.elaborate_value(item_id, value)),
                 Item::Function(function) => items.push(self.elaborate_function(item_id, function)),
+                Item::Signal(signal) => {
+                    if let Some(item) = self.elaborate_signal(item_id, signal) {
+                        items.push(item);
+                    }
+                }
                 Item::Type(_)
-                | Item::Signal(_)
                 | Item::Class(_)
                 | Item::Domain(_)
                 | Item::SourceProviderContract(_)
@@ -310,6 +314,49 @@ impl<'a> GeneralExprElaborator<'a> {
             parameters,
             outcome,
         }
+    }
+
+    fn elaborate_signal(
+        &mut self,
+        owner: ItemId,
+        signal: &SignalItem,
+    ) -> Option<GeneralExprItemElaboration> {
+        let body = signal.body?;
+        if matches!(self.module.exprs()[body].kind, ExprKind::Pipe(_)) {
+            return None;
+        }
+        let expected = signal
+            .annotation
+            .and_then(|annotation| self.typing.lower_annotation(annotation));
+        let outcome = match expected.as_ref() {
+            Some(annotation @ GateType::Signal(_)) => {
+                match self.lower_expr(body, &GateExprEnv::default(), None, Some(annotation)) {
+                    Ok(body) => GeneralExprOutcome::Lowered(body),
+                    Err(blockers) => match annotation {
+                        GateType::Signal(payload) => match self.lower_expr(
+                            body,
+                            &GateExprEnv::default(),
+                            None,
+                            Some(payload.as_ref()),
+                        ) {
+                            Ok(body) => GeneralExprOutcome::Lowered(body),
+                            Err(_) => GeneralExprOutcome::Blocked(BlockedGeneralExpr { blockers }),
+                        },
+                        _ => unreachable!("signal elaboration only falls back from `Signal A`"),
+                    },
+                }
+            }
+            _ => match self.lower_expr(body, &GateExprEnv::default(), None, expected.as_ref()) {
+                Ok(body) => GeneralExprOutcome::Lowered(body),
+                Err(blockers) => GeneralExprOutcome::Blocked(BlockedGeneralExpr { blockers }),
+            },
+        };
+        Some(GeneralExprItemElaboration {
+            owner,
+            body_expr: body,
+            parameters: Vec::new(),
+            outcome,
+        })
     }
 
     fn lower_parameters(

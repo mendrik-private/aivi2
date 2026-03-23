@@ -1,4 +1,5 @@
 use std::{
+    cell::Cell,
     collections::VecDeque,
     error::Error,
     fmt,
@@ -114,6 +115,7 @@ where
     }
 
     fn with_state<R>(&self, f: impl FnOnce(&GlibSchedulerState<V, E>) -> R) -> R {
+        assert_non_reentrant_driver_access();
         let guard = self
             .shared
             .state
@@ -123,6 +125,7 @@ where
     }
 
     fn with_state_mut<R>(&self, f: impl FnOnce(&mut GlibSchedulerState<V, E>) -> R) -> R {
+        assert_non_reentrant_driver_access();
         let mut guard = self
             .shared
             .state
@@ -146,6 +149,39 @@ impl fmt::Display for GlibSchedulerError {
 }
 
 impl Error for GlibSchedulerError {}
+
+thread_local! {
+    static GLIB_DRIVER_TICK_ACTIVE: Cell<bool> = const { Cell::new(false) };
+}
+
+struct TickExecutionGuard;
+
+impl TickExecutionGuard {
+    fn enter() -> Self {
+        GLIB_DRIVER_TICK_ACTIVE.with(|active| {
+            assert!(
+                !active.replace(true),
+                "GLib scheduler ticks must not re-enter themselves"
+            );
+        });
+        Self
+    }
+}
+
+impl Drop for TickExecutionGuard {
+    fn drop(&mut self) {
+        GLIB_DRIVER_TICK_ACTIVE.with(|active| active.set(false));
+    }
+}
+
+fn assert_non_reentrant_driver_access() {
+    GLIB_DRIVER_TICK_ACTIVE.with(|active| {
+        assert!(
+            !active.get(),
+            "GLib scheduler driver access must not re-enter the driver while a tick is evaluating"
+        );
+    });
+}
 
 #[derive(Clone)]
 pub struct GlibWorkerPublicationSender<V, E>
@@ -208,6 +244,7 @@ where
     }
 
     fn drive_pending_ticks(&self) {
+        let _guard = TickExecutionGuard::enter();
         loop {
             self.tick_enqueued.store(false, Ordering::Release);
             let should_continue = {
@@ -246,7 +283,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::thread;
+    use std::{
+        panic::{AssertUnwindSafe, catch_unwind},
+        thread,
+    };
 
     use glib::MainContext;
 
@@ -255,7 +295,7 @@ mod tests {
         scheduler::{DependencyValues, Publication, Scheduler},
     };
 
-    use super::GlibSchedulerDriver;
+    use super::{GlibSchedulerDriver, TickExecutionGuard};
 
     fn pump_until(context: &MainContext, mut condition: impl FnMut() -> bool) {
         for _ in 0..32 {
@@ -336,6 +376,32 @@ mod tests {
                 );
                 assert_eq!(driver.current_value(mirror.as_signal()).unwrap(), Some(11));
                 assert_eq!(driver.tick_count(), 1);
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn glib_driver_panics_before_reentrant_access_can_deadlock() {
+        let context = MainContext::new();
+        context
+            .with_thread_default(|| {
+                let mut builder = SignalGraphBuilder::new();
+                let input = builder.add_input("input", None).unwrap();
+                let mirror = builder.add_derived("mirror", None).unwrap();
+                builder.define_derived(mirror, [input.as_signal()]).unwrap();
+
+                let driver = GlibSchedulerDriver::new(
+                    context.clone(),
+                    Scheduler::new(builder.build().unwrap()),
+                    move |_signal, inputs: DependencyValues<'_, i32>| inputs.value(0).copied(),
+                );
+
+                let _guard = TickExecutionGuard::enter();
+                let panic = catch_unwind(AssertUnwindSafe(|| driver.tick_count()));
+                assert!(
+                    panic.is_err(),
+                    "reentrant driver access should fail fast instead of blocking on the mutex"
+                );
             })
             .unwrap();
     }

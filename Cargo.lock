@@ -39,10 +39,12 @@ dependencies = [
  "aivi-backend",
  "aivi-base",
  "aivi-core",
+ "aivi-gtk",
  "aivi-hir",
  "aivi-lambda",
  "aivi-lsp",
  "aivi-syntax",
+ "gtk4",
  "tokio",
 ]
 
@@ -122,8 +124,11 @@ dependencies = [
 name = "aivi-runtime"
 version = "0.1.0"
 dependencies = [
+ "aivi-backend",
  "aivi-base",
+ "aivi-core",
  "aivi-hir",
+ "aivi-lambda",
  "aivi-syntax",
  "aivi-typing",
  "glib",
