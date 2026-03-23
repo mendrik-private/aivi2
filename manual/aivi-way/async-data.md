@@ -7,11 +7,11 @@ There is no `async`/`await`, no `.then()`, no `Promise`.
 ## The pattern
 
 ```
-@source http.get → Signal (Result Data) → ||> Ok/Err → markup
+@source http.get → Signal (Result HttpError Data) → ||> Ok/Err → markup
 ```
 
 1. Declare a signal with `@source http.get`.
-2. The signal holds `Result Data` — either `Ok` the parsed response or `Err` a message.
+2. The signal holds `Result HttpError Data` — either `Ok` the parsed response or `Err` an error.
 3. Use `\|\|>` or `T\|>`/`F\|>` to branch on the result.
 4. Bind the branched signals to markup.
 
@@ -19,106 +19,53 @@ There is no `async`/`await`, no `.then()`, no `Promise`.
 
 Fetching a user profile:
 
-```aivi
-type User = {
-    id:       Int,
-    name:     Text,
-    email:    Text,
-    bio:      Text
-}
-
-type LoadState A =
-  | Loading
-  | Loaded A
-  | Failed Text
-
-@source http.get "https://api.example.com/user/1"
-sig userResponse : Signal (Result User)
-
-sig userState : Signal (LoadState User) =
-    userResponse
-     ||> Ok user  => Loaded user
-     ||> Err msg  => Failed msg
-
-sig userName : Signal Text =
-    userState
-     ||> Loaded user => user.name
-     ||> Loading     => "Loading…"
-     ||> Failed _    => "Unknown"
-
-sig userBio : Signal Text =
-    userState
-     ||> Loaded user => user.bio
-     ||> Loading     => ""
-     ||> Failed msg  => "Error: {msg}"
-
-val main =
-    <Window title="User Profile">
-        <Box orientation={Vertical} spacing={12}>
-            <Label text={userName} />
-            <Label text={userBio} />
-        </Box>
-    </Window>
-
-export main
+```text
+-- declare a product type 'User' with integer id and text fields name, email, bio
+-- declare a parametric type 'LoadState A' with variants Loading, Loaded (carrying A), Failed (carrying error text)
+-- bind 'userResponse' to an HTTP GET request for user 1, producing Ok User or Err HttpError
+-- derive 'userState' by mapping Ok to Loaded and Err to Failed
+-- derive 'userName': show user's name when loaded, "Loading…" when loading, "Unknown" on failure
+-- derive 'userBio': show user's bio when loaded, empty string when loading, error message on failure
+-- render a Window titled "User Profile" with a vertical Box
+--   containing Labels bound to userName and userBio
+-- export main as the application entry point
 ```
 
 ## Handling the loading state
 
 The above example maps `Loading` to a placeholder string. For a proper loading spinner:
 
-```aivi
-sig isLoading : Signal Bool =
-    userState
-     ||> Loading => True
-     ||> _       => False
-
-val main =
-    <Window title="Profile">
-        <Box orientation={Vertical} spacing={12}>
-            <show when={isLoading}>
-                <Spinner active={True} />
-            </show>
-            <Label text={userName} />
-        </Box>
-    </Window>
+```text
+-- derive 'isLoading' as True when userState is Loading, False otherwise
+-- render a Window titled "Profile" with a vertical Box
+-- show an active Spinner only while isLoading is True
+-- show a Label with the user name below
 ```
 
 ## Retrying on error
 
-```aivi
-@source button.clicked "retry"
-sig retryClicked : Signal Unit
-
-@source http.get "https://api.example.com/data" with {
-    retry: retryClicked
-}
-sig data : Signal (Result Payload)
+```text
+-- bind 'retryClicked' to clicks on the "retry" button
+-- bind 'data' to an HTTP GET request that re-fetches whenever retryClicked fires
+-- the signal carries either a Payload or an HttpError
 ```
 
-Passing `retry: retryClicked` tells the source to re-fetch when `retryClicked` fires.
+Passing `refreshOn: retryClicked` tells the source to re-fetch when `retryClicked` fires.
 
 ## Chaining requests
 
-When a second request depends on the result of a first, use `?\|>` to gate the second source:
+When a second request depends on the result of a first, use `||>` to extract the `Ok` value.
+The signal only produces a value when the result is `Ok`:
 
-```aivi
-@source http.get "https://api.example.com/user/1"
-sig userResult : Signal (Result User)
-
-sig userId : Signal Int =
-    userResult
-     ?|> \r => r == Ok _
-     ||> Ok user => user.id
-
-@source http.get "https://api.example.com/posts" with {
-    params: userId
-}
-sig postsResult : Signal (Result (List Post))
+```text
+-- bind 'userResult' to an HTTP GET for user 1
+-- derive 'userId' as Some user's id when the user loaded successfully, or None on error
+-- bind 'postsResult' to an HTTP GET for posts, passing userId as a query parameter
+-- postsResult only fetches when userId has a value
 ```
 
-`userId` only has a value when the user loaded successfully.
-The posts request does not fire until `userId` is available.
+`userId` holds `Some id` when the user loaded successfully and `None` on error.
+The posts request can use `userId` as a reactive source argument.
 
 ## Why this is better than callbacks
 
@@ -137,18 +84,19 @@ fetchUser(id, (err, user) => {
 
 In AIVI, the dependency is declared, not nested:
 
-```aivi
-sig userId : Signal Int = userResult ||> Ok u => u.id
-sig posts  : Signal (Result (List Post)) = ... using userId
-sig view   : Signal Markup = posts ||> Ok ps => renderPosts ps
+```text
+-- derive userId from userResult: Some id on success, None on error
+-- derive posts using userId as a dependency
+-- derive view by rendering posts when they load successfully
+-- each step is a separate named signal with no nesting
 ```
 
 Each step is a separate named signal. No nesting, no error routing, no lifecycle cleanup.
 
 ## Summary
 
-- `@source http.get "url"` produces a `Signal (Result T)`.
-- Map the result through `\|\|>` arms for `Ok` and `Err`.
+- `@source http.get "url"` produces a `Signal (Result HttpError T)`.
+- Map the result through `||>` arms for `Ok` and `Err`.
 - Use `LoadState A` or similar to represent `Loading` / `Loaded` / `Failed`.
-- Gate dependent requests with `?\|>`.
-- Retry by passing a click signal to the source.
+- Extract `Ok` values with `||>` to chain dependent requests.
+- Retry by passing a click signal to `refreshOn` in the source options.

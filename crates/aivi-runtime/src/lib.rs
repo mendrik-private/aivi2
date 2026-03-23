@@ -8,9 +8,11 @@ pub mod hir_adapter;
 pub mod scheduler;
 
 pub use effects::{
-    CancellationObserver, PublicationPortError, RuntimeSourceProvider, SourceInstanceId,
-    SourcePublicationPort, SourceReplacementPolicy, SourceRuntimeSpec, SourceStaleWorkPolicy,
-    TaskCompletionPort, TaskInstanceId, TaskRuntimeSpec, TaskSourceRuntime, TaskSourceRuntimeError,
+    CancellationObserver, PublicationPortError, RuntimeSourceProvider, SourceActiveWhenEvaluator,
+    SourceInstanceId, SourceLifecycleAction, SourceLifecycleActionKind,
+    SourceProviderRuntimeContractViolation, SourcePublicationPort, SourceReplacementPolicy,
+    SourceRuntimeSpec, SourceStaleWorkPolicy, TaskCompletionPort, TaskInstanceId, TaskRuntimeSpec,
+    TaskSourceRuntime, TaskSourceRuntimeError, TaskSourceTickOutcome,
 };
 pub use graph::{
     DerivedHandle, DerivedSpec, GraphBuildError, InputHandle, OwnerHandle, OwnerSpec, SignalGraph,

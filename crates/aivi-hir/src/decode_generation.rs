@@ -8,9 +8,9 @@ use aivi_typing::{
 };
 
 use crate::{
+    decode_elaboration::{elaborate_source_decodes, DecodeTypeLowerer},
     DomainMemberKind, Item, ItemId, Module, SourceDecodeElaborationBlocker,
     SourceDecodeNodeOutcome, SourceDecodePlan, TypeKind, TypeParameterId as HirTypeParameterId,
-    decode_elaboration::{DecodeTypeLowerer, elaborate_source_decodes},
 };
 
 /// Concrete pre-runtime structural decoder programs derived from planned source-decode schemas.
@@ -544,10 +544,10 @@ mod tests {
     use aivi_syntax::parse_module;
 
     use super::{
-        DomainDecodeSurfaceKind, SourceDecodeProgramBlocker, SourceDecodeProgramOutcome,
-        generate_source_decode_programs,
+        generate_source_decode_programs, DomainDecodeSurfaceKind, SourceDecodeProgramBlocker,
+        SourceDecodeProgramOutcome,
     };
-    use crate::{Item, lower_module};
+    use crate::{lower_module, Item};
 
     fn lower_text(path: &str, text: &str) -> crate::LoweringResult {
         let mut sources = SourceDatabase::new();

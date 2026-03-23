@@ -17,22 +17,16 @@ pub fn lsp_range(r: LspRange) -> Range {
 
 /// Collect all diagnostics for a file and convert to LSP format.
 pub fn collect_lsp_diagnostics(
-    db: &mut aivi_query::RootDatabase,
+    db: &aivi_query::RootDatabase,
     file: aivi_query::SourceFile,
     _uri: &Url,
 ) -> Vec<lsp::Diagnostic> {
-    let diagnostics = aivi_query::all_diagnostics(db, file);
-    let path = file.path(db).to_path_buf();
+    let analysis = crate::analysis::FileAnalysis::load(db, file);
 
-    // We need a SourceDatabase to render positions; rebuild a minimal one.
-    let text = file.text(db).to_owned();
-    let mut source_db = aivi_base::SourceDatabase::new();
-    let file_id = source_db.add_file(path.clone(), text);
-    let source_file = &source_db[file_id];
-
-    diagnostics
-        .into_iter()
-        .map(|d| convert_diagnostic(&d, source_file))
+    analysis
+        .diagnostics
+        .iter()
+        .map(|diagnostic| convert_diagnostic(diagnostic, analysis.source.as_ref()))
         .collect()
 }
 
@@ -44,7 +38,6 @@ fn convert_diagnostic(d: &Diagnostic, source_file: &aivi_base::SourceFile) -> ls
         Severity::Help => DiagnosticSeverity::HINT,
     };
 
-    // Compute range from primary label, if any.
     let range = d
         .labels
         .iter()

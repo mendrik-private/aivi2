@@ -7,7 +7,7 @@ use aivi_hir::{
 };
 
 /// One node in the lowered widget plan arena.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PlanNodeId(u32);
 
 impl PlanNodeId {

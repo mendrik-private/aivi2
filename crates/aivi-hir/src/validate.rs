@@ -1,20 +1,20 @@
 use std::{
-    collections::{HashMap, HashSet, hash_map::Entry},
+    collections::{hash_map::Entry, HashMap, HashSet},
     fmt,
 };
 
 use aivi_base::{ByteIndex, Diagnostic, DiagnosticCode, DiagnosticLabel, SourceSpan, Span};
 use aivi_typing::{
-    BuiltinSourceProvider, BuiltinSourceWakeupCause, CustomSourceRecurrenceWakeupContext,
-    FanoutCarrier, FanoutPlan, FanoutPlanner, FanoutResultKind, FanoutStageKind, GateCarrier,
-    GatePlanner, GateResultKind, Kind, KindCheckError, KindCheckErrorKind, KindChecker, KindExprId,
+    builtin_source_option_wakeup_cause, BuiltinSourceProvider, BuiltinSourceWakeupCause,
+    CustomSourceRecurrenceWakeupContext, FanoutCarrier, FanoutPlan, FanoutPlanner,
+    FanoutResultKind, FanoutStageKind, GateCarrier, GatePlanner, GateResultKind, Kind,
+    KindCheckError, KindCheckErrorKind, KindChecker, KindExprId,
     KindParameterId as TypingKindParameterId, KindRecordField, KindStore, NonSourceWakeupCause,
     RecurrencePlanner, RecurrenceTargetEvidence, RecurrenceWakeupKind, RecurrenceWakeupPlanner,
     SourceContractType, SourceRecurrenceWakeupContext, SourceTypeParameter,
-    builtin_source_option_wakeup_cause,
 };
 use regex_syntax::{
-    Error as RegexSyntaxError, ParserBuilder as RegexParserBuilder, ast::Span as RegexSpan,
+    ast::Span as RegexSpan, Error as RegexSyntaxError, ParserBuilder as RegexParserBuilder,
 };
 
 use crate::{
@@ -37,7 +37,7 @@ use crate::{
         ResolvedSourceContractType, ResolvedSourceTypeConstructor,
         SourceContractResolutionErrorKind, SourceContractTypeResolver,
     },
-    typecheck::{TypeConstraint, typecheck_module},
+    typecheck::{typecheck_module, TypeConstraint},
 };
 
 /// Validation strictness for HIR modules.
@@ -4593,7 +4593,13 @@ impl Validator<'_> {
                     });
                     let wakeup =
                         self.recurrence_wakeup_hint_for_decorators(&item.header.decorators);
-                    self.validate_recurrence_expr_tree(item.body, target, wakeup);
+                    self.validate_recurrence_expr_tree(
+                        item.body,
+                        target,
+                        wakeup,
+                        &GateExprEnv::default(),
+                        &mut typing,
+                    );
                 }
                 Item::Function(item) => {
                     let target = item.annotation.and_then(|annotation| {
@@ -4601,7 +4607,14 @@ impl Validator<'_> {
                     });
                     let wakeup =
                         self.recurrence_wakeup_hint_for_decorators(&item.header.decorators);
-                    self.validate_recurrence_expr_tree(item.body, target, wakeup);
+                    let env = self.gate_env_for_function(&item, &mut typing);
+                    self.validate_recurrence_expr_tree(
+                        item.body,
+                        target,
+                        wakeup,
+                        &env,
+                        &mut typing,
+                    );
                 }
                 Item::Signal(item) => {
                     if let Some(body) = item.body {
@@ -4612,6 +4625,8 @@ impl Validator<'_> {
                                 RecurrenceTargetEvidence::SignalItemBody,
                             )),
                             wakeup,
+                            &GateExprEnv::default(),
+                            &mut typing,
                         );
                     }
                 }
@@ -4620,7 +4635,13 @@ impl Validator<'_> {
                         let target = member.annotation.and_then(|annotation| {
                             typing.recurrence_target_hint_for_annotation(annotation)
                         });
-                        self.validate_recurrence_expr_tree(member.body, target, None);
+                        self.validate_recurrence_expr_tree(
+                            member.body,
+                            target,
+                            None,
+                            &GateExprEnv::default(),
+                            &mut typing,
+                        );
                     }
                 }
                 Item::Type(_)
@@ -4637,21 +4658,51 @@ impl Validator<'_> {
                 DecoratorPayload::Bare => {}
                 DecoratorPayload::Call(call) => {
                     for argument in call.arguments {
-                        self.validate_recurrence_expr_tree(argument, None, None);
+                        self.validate_recurrence_expr_tree(
+                            argument,
+                            None,
+                            None,
+                            &GateExprEnv::default(),
+                            &mut typing,
+                        );
                     }
                     if let Some(options) = call.options {
-                        self.validate_recurrence_expr_tree(options, None, None);
+                        self.validate_recurrence_expr_tree(
+                            options,
+                            None,
+                            None,
+                            &GateExprEnv::default(),
+                            &mut typing,
+                        );
                     }
                 }
                 DecoratorPayload::RecurrenceWakeup(wakeup) => {
-                    self.validate_recurrence_expr_tree(wakeup.witness, None, None);
+                    self.validate_recurrence_expr_tree(
+                        wakeup.witness,
+                        None,
+                        None,
+                        &GateExprEnv::default(),
+                        &mut typing,
+                    );
                 }
                 DecoratorPayload::Source(source) => {
                     for argument in source.arguments {
-                        self.validate_recurrence_expr_tree(argument, None, None);
+                        self.validate_recurrence_expr_tree(
+                            argument,
+                            None,
+                            None,
+                            &GateExprEnv::default(),
+                            &mut typing,
+                        );
                     }
                     if let Some(options) = source.options {
-                        self.validate_recurrence_expr_tree(options, None, None);
+                        self.validate_recurrence_expr_tree(
+                            options,
+                            None,
+                            None,
+                            &GateExprEnv::default(),
+                            &mut typing,
+                        );
                     }
                 }
             }
@@ -4663,13 +4714,15 @@ impl Validator<'_> {
         root: ExprId,
         root_target: Option<RecurrenceTargetHint>,
         root_wakeup: Option<RecurrenceWakeupHint>,
+        env: &GateExprEnv,
+        typing: &mut GateTypeContext<'_>,
     ) {
         let module = self.module;
         walk_expr_tree(module, root, |_, expr, is_root| {
             if let ExprKind::Pipe(pipe) = &expr.kind {
                 let target = if is_root { root_target.as_ref() } else { None };
                 let wakeup = if is_root { root_wakeup.as_ref() } else { None };
-                self.validate_recurrence_pipe(pipe, target, wakeup, is_root);
+                self.validate_recurrence_pipe(pipe, target, wakeup, is_root, env, typing);
             }
         });
     }
@@ -4680,6 +4733,8 @@ impl Validator<'_> {
         target: Option<&RecurrenceTargetHint>,
         wakeup: Option<&RecurrenceWakeupHint>,
         is_root: bool,
+        env: &GateExprEnv,
+        typing: &mut GateTypeContext<'_>,
     ) {
         let suffix = match pipe.recurrence_suffix() {
             Ok(Some(suffix)) => suffix,
@@ -4724,6 +4779,214 @@ impl Validator<'_> {
                 self.emit_missing_recurrence_wakeup(start_span, wakeup);
             }
         }
+
+        let Some(input_subject) = self.infer_recurrence_input_subject_for_validation(
+            pipe,
+            suffix.prefix_stage_count(),
+            env,
+            typing,
+        ) else {
+            return;
+        };
+        let start_info = typing.infer_pipe_body(suffix.start_expr(), env, &input_subject);
+        if !start_info.issues.is_empty() {
+            return;
+        }
+        let Some(start_subject) = start_info.ty else {
+            return;
+        };
+        for stage in suffix.guard_stages() {
+            let PipeStageKind::Gate { expr } = stage.kind else {
+                unreachable!("validated recurrence guards must use `?|>`");
+            };
+            let _ = self.validate_gate_stage(stage.span, expr, env, &start_subject, typing);
+        }
+    }
+
+    fn validate_joined_fanout_segment(
+        &mut self,
+        segment: &crate::PipeFanoutSegment<'_>,
+        env: &GateExprEnv,
+        subject: &GateType,
+        typing: &mut GateTypeContext<'_>,
+    ) -> Option<GateType> {
+        let Some(carrier) = typing.fanout_carrier(subject) else {
+            self.diagnostics.push(
+                Diagnostic::error(format!(
+                    "fan-out `*|>` requires `List A` or `Signal (List A)`, found `{subject}`"
+                ))
+                .with_code(code("fanout-subject-not-list"))
+                .with_label(DiagnosticLabel::primary(
+                    segment.map_stage().span,
+                    "map over a list-valued subject or transform to `List` first",
+                )),
+            );
+            return None;
+        };
+        let Some(element_subject) = subject.fanout_element().cloned() else {
+            return None;
+        };
+        let body_info = typing.infer_pipe_body(segment.map_expr(), env, &element_subject);
+        let mut saw_error = false;
+        for issue in body_info.issues {
+            self.emit_fanout_issue(FanoutIssueContext::MapElement, issue);
+            saw_error = true;
+        }
+        if saw_error {
+            return None;
+        }
+        let mapped_element_type = body_info.ty?;
+        for stage in segment.filter_stages() {
+            let PipeStageKind::Gate { expr } = stage.kind else {
+                unreachable!("validated fan-out filters must use `?|>`");
+            };
+            if self
+                .validate_fanout_filter_stage(stage.span, expr, env, &mapped_element_type, typing)
+                .is_none()
+            {
+                return None;
+            }
+        }
+        let mapped_collection_type = typing.apply_fanout_plan(
+            FanoutPlanner::plan(FanoutStageKind::Map, carrier),
+            mapped_element_type,
+        );
+        match segment.join_expr() {
+            Some(join_expr) => self.validate_fanin_stage(
+                segment
+                    .join_stage()
+                    .expect("join expression implies join stage")
+                    .span,
+                join_expr,
+                env,
+                &mapped_collection_type,
+                typing,
+            ),
+            None => Some(mapped_collection_type),
+        }
+    }
+
+    fn validate_fanout_filter_stage(
+        &mut self,
+        _stage_span: SourceSpan,
+        predicate: ExprId,
+        env: &GateExprEnv,
+        subject: &GateType,
+        typing: &mut GateTypeContext<'_>,
+    ) -> Option<GateType> {
+        let predicate_info = typing.infer_pipe_body(predicate, env, subject);
+        let mut saw_error = false;
+        for issue in predicate_info.issues {
+            self.emit_gate_issue(issue);
+            saw_error = true;
+        }
+        if predicate_info.contains_signal
+            || predicate_info.ty.as_ref().is_some_and(GateType::is_signal)
+        {
+            self.diagnostics.push(
+                Diagnostic::error("gate predicate must be pure and cannot read a signal directly")
+                    .with_code(code("impure-gate-predicate"))
+                    .with_label(DiagnosticLabel::primary(
+                        self.module.exprs()[predicate].span,
+                        "compute a `Bool` from the current fan-out element instead of sampling a signal here",
+                    )),
+            );
+            saw_error = true;
+        }
+        if let Some(predicate_ty) = predicate_info.ty {
+            if !predicate_ty.is_bool() {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "gate predicate must produce `Bool`, found `{predicate_ty}`"
+                    ))
+                    .with_code(code("gate-predicate-not-bool"))
+                    .with_label(DiagnosticLabel::primary(
+                        self.module.exprs()[predicate].span,
+                        "this fan-out filter does not evaluate to `Bool` for the current element",
+                    )),
+                );
+                saw_error = true;
+            }
+        } else {
+            saw_error = true;
+        }
+        if saw_error {
+            return None;
+        }
+        Some(subject.clone())
+    }
+
+    fn infer_recurrence_input_subject_for_validation(
+        &mut self,
+        pipe: &crate::hir::PipeExpr,
+        prefix_stage_count: usize,
+        env: &GateExprEnv,
+        typing: &mut GateTypeContext<'_>,
+    ) -> Option<GateType> {
+        let stages = pipe
+            .stages
+            .iter()
+            .take(prefix_stage_count)
+            .collect::<Vec<_>>();
+        let mut current = typing.infer_expr(pipe.head, env, None).ty?;
+        let mut stage_index = 0usize;
+        while stage_index < stages.len() {
+            let stage = stages[stage_index];
+            match &stage.kind {
+                PipeStageKind::Transform { expr } => {
+                    current = typing.infer_transform_stage(*expr, env, &current)?;
+                    stage_index += 1;
+                }
+                PipeStageKind::Tap { expr } => {
+                    let _ = typing.infer_pipe_body(*expr, env, &current);
+                    stage_index += 1;
+                }
+                PipeStageKind::Gate { expr } => {
+                    current = typing.infer_gate_stage(*expr, env, &current)?;
+                    stage_index += 1;
+                }
+                PipeStageKind::Map { expr } => {
+                    let segment = pipe
+                        .fanout_segment(stage_index)
+                        .expect("map stages should expose a fan-out segment");
+                    if segment.join_stage().is_some() {
+                        let outcome = crate::fanout_elaboration::elaborate_fanout_segment(
+                            self.module,
+                            &segment,
+                            Some(&current),
+                            env,
+                            typing,
+                        );
+                        current = match outcome {
+                            crate::fanout_elaboration::FanoutSegmentOutcome::Planned(plan) => {
+                                plan.result_type
+                            }
+                            crate::fanout_elaboration::FanoutSegmentOutcome::Blocked(_) => {
+                                return None;
+                            }
+                        };
+                        stage_index = segment.next_stage_index();
+                    } else {
+                        current = typing.infer_fanout_map_stage(*expr, env, &current)?;
+                        stage_index += 1;
+                    }
+                }
+                PipeStageKind::FanIn { expr } => {
+                    current = typing.infer_fanin_stage(*expr, env, &current)?;
+                    stage_index += 1;
+                }
+                PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
+                    let pair = truthy_falsy_pair_stages(&stages, stage_index)?;
+                    current = typing.infer_truthy_falsy_pair(&pair, env, &current)?;
+                    stage_index = pair.next_index;
+                }
+                PipeStageKind::Case { .. }
+                | PipeStageKind::Apply { .. }
+                | PipeStageKind::RecurStart { .. }
+                | PipeStageKind::RecurStep { .. } => return None,
+            }
+        }
+        Some(current)
     }
 
     fn recurrence_wakeup_hint_for_decorators(
@@ -4983,10 +5246,24 @@ impl Validator<'_> {
                     current = typing.infer_gate_stage(*expr, env, &subject);
                     stage_index += 1;
                 }
-                PipeStageKind::Map { expr } => {
-                    current =
-                        self.validate_fanout_map_stage(stage.span, *expr, env, &subject, typing);
-                    stage_index += 1;
+                PipeStageKind::Map { .. } => {
+                    let segment = pipe
+                        .fanout_segment(stage_index)
+                        .expect("map stages should expose a fan-out segment");
+                    if segment.join_stage().is_some() {
+                        current =
+                            self.validate_joined_fanout_segment(&segment, env, &subject, typing);
+                        stage_index = segment.next_stage_index();
+                    } else {
+                        current = self.validate_fanout_map_stage(
+                            stage.span,
+                            segment.map_expr(),
+                            env,
+                            &subject,
+                            typing,
+                        );
+                        stage_index += 1;
+                    }
                 }
                 PipeStageKind::FanIn { expr } => {
                     current = self.validate_fanin_stage(stage.span, *expr, env, &subject, typing);
@@ -5033,9 +5310,17 @@ impl Validator<'_> {
         typing: &mut GateTypeContext<'_>,
     ) {
         let stages = pipe.stages.iter().collect::<Vec<_>>();
+        let recurrence_start_index = pipe
+            .recurrence_suffix()
+            .ok()
+            .flatten()
+            .map(|suffix| suffix.prefix_stage_count());
         let mut current = typing.infer_expr(pipe.head, env, None).ty;
         let mut stage_index = 0usize;
         while stage_index < stages.len() {
+            if recurrence_start_index.is_some_and(|start| stage_index >= start) {
+                break;
+            }
             let stage = stages[stage_index];
             let Some(subject) = current.clone() else {
                 break;
@@ -5055,8 +5340,28 @@ impl Validator<'_> {
                     stage_index += 1;
                 }
                 PipeStageKind::Map { expr } => {
-                    current = typing.infer_fanout_map_stage(*expr, env, &subject);
-                    stage_index += 1;
+                    let segment = pipe
+                        .fanout_segment(stage_index)
+                        .expect("map stages should expose a fan-out segment");
+                    if segment.join_stage().is_some() {
+                        let outcome = crate::fanout_elaboration::elaborate_fanout_segment(
+                            self.module,
+                            &segment,
+                            Some(&subject),
+                            env,
+                            typing,
+                        );
+                        current = match outcome {
+                            crate::fanout_elaboration::FanoutSegmentOutcome::Planned(plan) => {
+                                Some(plan.result_type)
+                            }
+                            crate::fanout_elaboration::FanoutSegmentOutcome::Blocked(_) => None,
+                        };
+                        stage_index = segment.next_stage_index();
+                    } else {
+                        current = typing.infer_fanout_map_stage(*expr, env, &subject);
+                        stage_index += 1;
+                    }
                 }
                 PipeStageKind::FanIn { expr } => {
                     current = typing.infer_fanin_stage(*expr, env, &subject);
@@ -9685,8 +9990,31 @@ impl<'a> GateTypeContext<'a> {
                     self.infer_gate_stage_info(*expr, env, &subject)
                 }
                 PipeStageKind::Map { expr } => {
-                    stage_index += 1;
-                    self.infer_fanout_map_stage_info(*expr, env, &subject)
+                    let segment = pipe
+                        .fanout_segment(stage_index)
+                        .expect("map stages should expose a fan-out segment");
+                    if segment.join_stage().is_some() {
+                        stage_index = segment.next_stage_index();
+                        match crate::fanout_elaboration::elaborate_fanout_segment(
+                            self.module,
+                            &segment,
+                            Some(&subject),
+                            env,
+                            self,
+                        ) {
+                            crate::fanout_elaboration::FanoutSegmentOutcome::Planned(plan) => {
+                                let mut info = GateExprInfo::default();
+                                info.ty = Some(plan.result_type);
+                                info
+                            }
+                            crate::fanout_elaboration::FanoutSegmentOutcome::Blocked(_) => {
+                                GateExprInfo::default()
+                            }
+                        }
+                    } else {
+                        stage_index += 1;
+                        self.infer_fanout_map_stage_info(*expr, env, &subject)
+                    }
                 }
                 PipeStageKind::FanIn { expr } => {
                     stage_index += 1;
@@ -11984,12 +12312,10 @@ val resultLabel =
 
         let report = validate_module(&module, ValidationMode::Structural);
         assert!(!report.is_ok());
-        assert!(
-            report
-                .diagnostics()
-                .iter()
-                .any(|diagnostic| diagnostic.message.contains("missing expression 99"))
-        );
+        assert!(report
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("missing expression 99")));
     }
 
     #[test]
@@ -12304,12 +12630,10 @@ val screenView =
             .expect("item allocation should fit");
 
         let report = validate_module(&module, ValidationMode::Structural);
-        assert!(
-            report
-                .diagnostics()
-                .iter()
-                .any(|diagnostic| diagnostic.message.contains("branch-only control node kind"))
-        );
+        assert!(report
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("branch-only control node kind")));
     }
 
     #[test]
@@ -12331,7 +12655,7 @@ val screenView =
                 span: shared_span,
                 kind: MarkupNodeKind::Element(crate::MarkupElement {
                     name: NamePath::from_vec(vec![
-                        Name::new("Label", span(0, 0, 5)).expect("valid name"),
+                        Name::new("Label", span(0, 0, 5)).expect("valid name")
                     ])
                     .expect("single segment path"),
                     attributes: Vec::new(),
@@ -13694,8 +14018,8 @@ sig login : Signal (Result HttpError Session)
     }
 
     #[test]
-    fn source_option_root_contract_parameters_preserve_generic_constructor_holes_for_unproven_arguments()
-     {
+    fn source_option_root_contract_parameters_preserve_generic_constructor_holes_for_unproven_arguments(
+    ) {
         let mut module = Module::new(FileId::new(0));
         let payload = type_parameter(&mut module, "A");
         let int_ref = builtin_type(&mut module, BuiltinType::Int);

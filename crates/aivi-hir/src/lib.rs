@@ -25,33 +25,34 @@ mod validate;
 
 pub use arena::{Arena, ArenaId, ArenaOverflow};
 pub use decode_elaboration::{
-    BlockedSourceDecodeNode, SourceDecodeDomainBinding, SourceDecodeElaborationBlocker,
-    SourceDecodeElaborationReport, SourceDecodeNodeElaboration, SourceDecodeNodeOutcome,
-    SourceDecodePlan, SourceDecodeUnsupportedTypeKind, elaborate_source_decodes,
+    elaborate_source_decodes, BlockedSourceDecodeNode, SourceDecodeDomainBinding,
+    SourceDecodeElaborationBlocker, SourceDecodeElaborationReport, SourceDecodeNodeElaboration,
+    SourceDecodeNodeOutcome, SourceDecodePlan, SourceDecodeUnsupportedTypeKind,
 };
 pub use decode_generation::{
-    BlockedSourceDecodeProgram, DecodeProgramField, DecodeProgramStep, DecodeProgramStepId,
-    DomainDecodeSurfaceCandidate, DomainDecodeSurfaceKind, DomainDecodeSurfacePlan,
-    SourceDecodeProgram, SourceDecodeProgramBlocker, SourceDecodeProgramNode,
-    SourceDecodeProgramOutcome, SourceDecodeProgramReport, generate_source_decode_programs,
+    generate_source_decode_programs, BlockedSourceDecodeProgram, DecodeProgramField,
+    DecodeProgramStep, DecodeProgramStepId, DomainDecodeSurfaceCandidate, DomainDecodeSurfaceKind,
+    DomainDecodeSurfacePlan, SourceDecodeProgram, SourceDecodeProgramBlocker,
+    SourceDecodeProgramNode, SourceDecodeProgramOutcome, SourceDecodeProgramReport,
 };
-pub use exports::{ExportedName, ExportedNameKind, ExportedNames, exports};
+pub use exports::{exports, ExportedName, ExportedNameKind, ExportedNames};
 pub use fanout_elaboration::{
-    BlockedFanoutSegment, FanoutElaborationBlocker, FanoutElaborationReport, FanoutJoinPlan,
-    FanoutSegmentElaboration, FanoutSegmentOutcome, FanoutSegmentPlan, elaborate_fanouts,
+    elaborate_fanouts, BlockedFanoutSegment, FanoutElaborationBlocker, FanoutElaborationReport,
+    FanoutFilterBlocker, FanoutFilterPlan, FanoutJoinPlan, FanoutSegmentElaboration,
+    FanoutSegmentOutcome, FanoutSegmentPlan,
 };
 pub use gate_elaboration::{
-    BlockedGateStage, GateCoreExpr, GateCoreExprKind, GateElaborationBlocker,
+    elaborate_gates, BlockedGateStage, GateCoreExpr, GateCoreExprKind, GateElaborationBlocker,
     GateElaborationReport, GateRuntimeCaseArm, GateRuntimeExpr, GateRuntimeExprKind,
     GateRuntimePipeExpr, GateRuntimePipeStage, GateRuntimePipeStageKind, GateRuntimeProjectionBase,
     GateRuntimeRecordField, GateRuntimeReference, GateRuntimeTextLiteral, GateRuntimeTextSegment,
     GateRuntimeTruthyFalsyBranch, GateRuntimeUnsupportedKind, GateRuntimeUnsupportedPipeStageKind,
-    GateStageElaboration, GateStageOutcome, OrdinaryGateStage, SignalGateFilter, elaborate_gates,
+    GateStageElaboration, GateStageOutcome, OrdinaryGateStage, SignalGateFilter,
 };
 pub use general_expr_elaboration::{
-    BlockedGeneralExpr, GeneralExprBlocker, GeneralExprElaborationReport,
-    GeneralExprItemElaboration, GeneralExprOutcome, GeneralExprParameter,
-    elaborate_general_expressions,
+    elaborate_general_expressions, BlockedGeneralExpr, GeneralExprBlocker,
+    GeneralExprElaborationReport, GeneralExprItemElaboration, GeneralExprOutcome,
+    GeneralExprParameter,
 };
 pub use hir::{
     ApplicativeCluster, ApplicativeSpine, ApplicativeSpineHead, BinaryOperator, Binding,
@@ -65,9 +66,9 @@ pub use hir::{
     InstanceItem, InstanceMember, IntegerLiteral, Item, ItemHeader, ItemKind,
     LiteralSuffixResolution, MapExpr, MapExprEntry, MarkupAttribute, MarkupAttributeValue,
     MarkupElement, MarkupNode, MarkupNodeKind, MatchControl, Module, ModuleArenas, Name, NameError,
-    NamePath, NamePathError, Pattern, PatternKind, PipeExpr, PipeRecurrenceShapeError,
-    PipeRecurrenceSuffix, PipeStage, PipeStageKind, ProjectionBase, RecordExpr, RecordExprField,
-    RecordFieldSurface, RecordPatternField, RecurrenceWakeupDecorator,
+    NamePath, NamePathError, Pattern, PatternKind, PipeExpr, PipeFanoutSegment,
+    PipeRecurrenceShapeError, PipeRecurrenceSuffix, PipeStage, PipeStageKind, ProjectionBase,
+    RecordExpr, RecordExprField, RecordFieldSurface, RecordPatternField, RecurrenceWakeupDecorator,
     RecurrenceWakeupDecoratorKind, RegexLiteral, ResolutionState, RootItemError, ShowControl,
     SignalItem, SourceDecorator, SourceLifecycleDependencies, SourceMetadata,
     SourceProviderContractItem, SourceProviderRef, SuffixedIntegerLiteral, TermReference,
@@ -80,12 +81,12 @@ pub use ids::{
     PatternId, TypeId, TypeParameterId,
 };
 pub use lower::lower_module_with_resolver;
-pub use lower::{LoweringResult, lower_module};
+pub use lower::{lower_module, LoweringResult};
 pub use recurrence_elaboration::{
-    BlockedRecurrenceNode, RecurrenceElaborationBlocker, RecurrenceElaborationReport,
-    RecurrenceNodeElaboration, RecurrenceNodeOutcome, RecurrenceNodePlan,
-    RecurrenceNonSourceWakeupBinding, RecurrenceRuntimeExpr, RecurrenceRuntimeStageBlocker,
-    RecurrenceStagePlan, elaborate_recurrences,
+    elaborate_recurrences, BlockedRecurrenceNode, RecurrenceElaborationBlocker,
+    RecurrenceElaborationReport, RecurrenceGuardPlan, RecurrenceNodeElaboration,
+    RecurrenceNodeOutcome, RecurrenceNodePlan, RecurrenceNonSourceWakeupBinding,
+    RecurrenceRuntimeExpr, RecurrenceRuntimeStageBlocker, RecurrenceStagePlan,
 };
 pub use resolver::{ImportResolver, NullImportResolver};
 pub use sequence::{AtLeastTwo, NonEmpty, SequenceError};
@@ -94,19 +95,20 @@ pub use source_contract_resolution::{
     SourceContractResolutionErrorKind, SourceContractTypeResolver,
 };
 pub use source_lifecycle_elaboration::{
-    BlockedSourceLifecycleNode, SourceInstanceId, SourceLifecycleElaborationBlocker,
-    SourceLifecycleElaborationReport, SourceLifecycleNodeElaboration, SourceLifecycleNodeOutcome,
-    SourceLifecyclePlan, SourceOptionSignalBinding, SourceReplacementPolicy, SourceStaleWorkPolicy,
-    SourceTeardownPolicy, elaborate_source_lifecycles,
+    elaborate_source_lifecycles, BlockedSourceLifecycleNode, SourceInstanceId,
+    SourceLifecycleElaborationBlocker, SourceLifecycleElaborationReport,
+    SourceLifecycleNodeElaboration, SourceLifecycleNodeOutcome, SourceLifecyclePlan,
+    SourceOptionSignalBinding, SourceReplacementPolicy, SourceStaleWorkPolicy,
+    SourceTeardownPolicy,
 };
-pub use symbols::{LspSymbol, LspSymbolKind, extract_symbols};
+pub use symbols::{extract_symbols, LspSymbol, LspSymbolKind};
 pub use truthy_falsy_elaboration::{
-    BlockedTruthyFalsyStage, TruthyFalsyBranchKind, TruthyFalsyBranchPlan,
+    elaborate_truthy_falsy, BlockedTruthyFalsyStage, TruthyFalsyBranchKind, TruthyFalsyBranchPlan,
     TruthyFalsyElaborationBlocker, TruthyFalsyElaborationReport, TruthyFalsyStageElaboration,
-    TruthyFalsyStageOutcome, TruthyFalsyStagePlan, elaborate_truthy_falsy,
+    TruthyFalsyStageOutcome, TruthyFalsyStagePlan,
 };
 pub use typecheck::{
-    ConstraintClass, TypeCheckReport, TypeConstraint, elaborate_default_record_fields,
-    typecheck_module,
+    elaborate_default_record_fields, typecheck_module, ConstraintClass, TypeCheckReport,
+    TypeConstraint,
 };
-pub use validate::{GateRecordField, GateType, ValidationMode, ValidationReport, validate_module};
+pub use validate::{validate_module, GateRecordField, GateType, ValidationMode, ValidationReport};

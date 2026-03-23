@@ -30,13 +30,13 @@ pub use expr::{
     ProjectionBase, RecordExprField, RecordPatternField, Reference, TextLiteral, TextSegment,
 };
 pub use ids::{DecodeProgramId, DecodeStepId, ExprId, ItemId, PipeId, SourceId, StageId};
-pub use lower::{LoweringError, LoweringErrors, lower_module};
+pub use lower::{lower_module, LoweringError, LoweringErrors};
 pub use module::{
     DecodeField, DecodeProgram, DecodeStep, DecodeVariant, DomainDecodeSurface,
-    DomainDecodeSurfaceKind, FanoutJoin, FanoutStage, GateStage, Item, ItemKind, ItemParameter,
-    Module, NonSourceWakeup, Pipe, PipeOrigin, PipeRecurrence, RecurrenceStage, SignalInfo,
-    SourceInstanceId, SourceNode, SourceOptionBinding, Stage, StageKind, TruthyFalsyBranch,
-    TruthyFalsyStage,
+    DomainDecodeSurfaceKind, FanoutFilter, FanoutJoin, FanoutStage, GateStage, Item, ItemKind,
+    ItemParameter, Module, NonSourceWakeup, Pipe, PipeOrigin, PipeRecurrence, RecurrenceGuard,
+    RecurrenceStage, SignalInfo, SourceInstanceId, SourceNode, SourceOptionBinding, Stage,
+    StageKind, TruthyFalsyBranch, TruthyFalsyStage,
 };
 pub use ty::{RecordField, Type};
-pub use validate::{ValidationError, ValidationErrors, validate_module};
+pub use validate::{validate_module, ValidationError, ValidationErrors};

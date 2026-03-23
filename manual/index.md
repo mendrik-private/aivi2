@@ -35,39 +35,15 @@ features:
 
 This complete program renders a counter with increment and decrement buttons.
 
-```aivi
-fun add:Int #x:Int #n:Int => n + x
-
-@source button.clicked "increment"
-sig added : Signal Int =
-    0
-    @|> add 1
-    <|@ add 1
-
-@source button.clicked "decrement"
-sig removed : Signal Int =
-    0
-    @|> add 1
-    <|@ add 1
-
-sig count : Signal Int = added - removed
-
-sig label : Signal Text =
-    count
-     |> .toString
-
-val main =
-    <Window title="Counter">
-        <Box orientation={Vertical} spacing={12}>
-            <Label text={label} />
-            <Button id="increment" label="+" />
-            <Button id="decrement" label="−" />
-        </Box>
-    </Window>
-
-export main
+```text
+-- declare a signal 'count' starting at 0
+-- when the "increment" button is clicked, increase count by 1
+-- when the "decrement" button is clicked, decrease count by 1
+-- derive 'label' as the text representation of count
+-- render a Window titled "Counter" containing a vertical Box
+--   with a Label bound to label, a "+" Button, and a "−" Button
+-- export main as the application entry point
 ```
 
-Each button owns its own recurrent signal. `@|>` starts the recurrence, `<|@` is the step.
-`count` is a pure derived signal — the difference of two independent accumulators.
+`count` starts at `0`. Each `increment` or `decrement` event folds through `update`.
 No event listeners. No mutable state. No async juggling.

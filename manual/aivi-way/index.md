@@ -33,15 +33,11 @@ button.on('click', () => {
 
 In AIVI, you declare the relationships once:
 
-```aivi
-sig count : Signal Int =
-    0
-    @|> \_ => \n => n + 1
-    <|@ \_ => \n => n + 1
-
-sig labelText : Signal Text =
-    count
-     |> \n => "Clicked {n} times"
+```text
+-- declare a helper function 'add' that adds x to n
+-- bind 'count' to the "increment" button click, starting at 0
+-- on each click, fold "add 1" into the accumulated count
+-- derive 'labelText' from count, formatted as "Clicked N times"
 ```
 
 `labelText` is always `"Clicked {count} times"`. You do not update it. You declared it.
@@ -51,14 +47,10 @@ sig labelText : Signal Text =
 The rule of thumb: if a value can change, it is a signal. If it is derived from a signal,
 it is also a signal. If it is constant, it is a `val`.
 
-```aivi
-val boardSize:BoardSize = { width: 12, height: 10 }   -- constant, val
-
-sig game : Signal Game = ...    -- changes on every timer tick, sig
-
-sig board : Signal GameBoard =  -- derived from game, also sig
-    game
-     |> toBoard boardSize
+```text
+-- declare 'boardSize' as a constant with width 12 and height 10
+-- 'game' is a signal that changes on every timer tick
+-- derive 'board' from game by applying toBoard with boardSize, also a signal
 ```
 
 ## Keep functions pure

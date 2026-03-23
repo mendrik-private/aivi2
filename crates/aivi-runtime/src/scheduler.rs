@@ -582,6 +582,12 @@ impl<V> Scheduler<V> {
     }
 }
 
+/// Read-only dependency view for one derived evaluation within a transactional scheduler tick.
+///
+/// Each lookup resolves against the latest value already produced for this tick (`pending`) before
+/// falling back to the previous committed snapshot. That guarantees topological, glitch-free reads:
+/// downstream evaluators observe the newest stable upstream values for the current tick, never a
+/// mixed intermediate state.
 pub struct DependencyValues<'a, V> {
     dependencies: &'a [SignalHandle],
     pending: &'a [PendingValue<V>],
@@ -913,5 +919,55 @@ mod tests {
             Some(depth)
         );
         assert_eq!(outcome.committed().len(), depth + 1);
+    }
+
+    #[test]
+    fn diamond_graph_batches_evaluate_once_without_glitches() {
+        let mut builder = SignalGraphBuilder::new();
+        let root = builder.add_input("root", None).unwrap();
+        let join = builder.add_derived("join", None).unwrap();
+        let left = builder.add_derived("left", None).unwrap();
+        let right = builder.add_derived("right", None).unwrap();
+        builder
+            .define_derived(join, [left.as_signal(), right.as_signal()])
+            .unwrap();
+        builder.define_derived(left, [root.as_signal()]).unwrap();
+        builder.define_derived(right, [root.as_signal()]).unwrap();
+
+        let graph = builder.build().unwrap();
+        let mut scheduler = Scheduler::new(graph);
+        let stamp = scheduler.current_stamp(root).unwrap();
+        scheduler
+            .queue_publication(Publication::new(stamp, 4_i32))
+            .unwrap();
+
+        let mut order = Vec::new();
+        let mut left_evals = 0;
+        let mut right_evals = 0;
+        let mut join_evals = 0;
+        scheduler.tick(&mut |signal, inputs: DependencyValues<'_, i32>| {
+            order.push(signal);
+            if signal == left {
+                left_evals += 1;
+                Some(inputs.value(0).copied()? + 1)
+            } else if signal == right {
+                right_evals += 1;
+                Some(inputs.value(0).copied()? * 2)
+            } else if signal == join {
+                join_evals += 1;
+                Some(inputs.value(0).copied()? + inputs.value(1).copied()?)
+            } else {
+                None
+            }
+        });
+
+        assert_eq!(order, vec![left, right, join]);
+        assert_eq!(left_evals, 1);
+        assert_eq!(right_evals, 1);
+        assert_eq!(join_evals, 1);
+        assert_eq!(
+            scheduler.current_value(join.as_signal()).unwrap().copied(),
+            Some(13)
+        );
     }
 }

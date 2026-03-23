@@ -1961,7 +1961,7 @@ fn alloc_builtin_default_expr(
     text: &str,
 ) -> ExprId {
     let path = NamePath::from_vec(vec![
-        Name::new(text, span).expect("builtin default term name must stay valid"),
+        Name::new(text, span).expect("builtin default term name must stay valid")
     ])
     .expect("builtin default term path must stay valid");
     module
@@ -1980,7 +1980,7 @@ mod tests {
     use aivi_base::{DiagnosticCode, SourceDatabase};
     use aivi_syntax::parse_module;
 
-    use crate::{Item, RecordFieldSurface, lower_module};
+    use crate::{lower_module, Item, RecordFieldSurface};
 
     use super::*;
 

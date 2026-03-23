@@ -1,10 +1,10 @@
 use std::{collections::BTreeSet, fmt};
 
 use crate::{
-    DecodeProgram, DecodeProgramId, DecodeStep, DecodeStepId, ExprId, Module, PipeId, SourceId,
-    StageId, StageKind,
     expr::{ExprKind, Pattern, PatternKind, PipeStageKind, ProjectionBase, Reference, TextSegment},
     module::{GateStage, ItemKind},
+    DecodeProgram, DecodeProgramId, DecodeStep, DecodeStepId, ExprId, Module, PipeId, SourceId,
+    StageId, StageKind,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -770,6 +770,15 @@ fn validate_stage(
             }
         }
         StageKind::Fanout(fanout) => {
+            for filter in &fanout.filters {
+                if !module.exprs().contains(filter.runtime_predicate) {
+                    errors.push(ValidationError::UnknownExpr {
+                        expr: filter.runtime_predicate,
+                    });
+                } else if !module.exprs()[filter.runtime_predicate].ty.is_bool() {
+                    errors.push(ValidationError::GatePredicateNotBool { stage: stage_id });
+                }
+            }
             let expected = fanout
                 .join
                 .as_ref()
@@ -819,6 +828,13 @@ fn validate_recurrence(
         errors.push(ValidationError::UnknownExpr {
             expr: recurrence.start.runtime_expr,
         });
+    }
+    for guard in &recurrence.guards {
+        if !module.exprs().contains(guard.runtime_predicate) {
+            errors.push(ValidationError::UnknownExpr {
+                expr: guard.runtime_predicate,
+            });
+        }
     }
     if let Some(witness) = &recurrence.non_source_wakeup {
         if !module.exprs().contains(witness.runtime_witness) {

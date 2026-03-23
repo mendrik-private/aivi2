@@ -123,6 +123,7 @@ impl<'a> WidgetRuntimeAssemblyBuilder<'a> {
 
         Ok(WidgetRuntimeAssembly {
             graph,
+            root: self.plan.root(),
             plan_to_owner: plan_to_owner.into_boxed_slice(),
             owner_to_plan: owner_to_plan.into_boxed_slice(),
             nodes: nodes
@@ -485,6 +486,7 @@ impl<'a> WidgetRuntimeAssemblyBuilder<'a> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WidgetRuntimeAssembly {
     graph: SignalGraph,
+    root: PlanNodeId,
     plan_to_owner: Box<[OwnerHandle]>,
     owner_to_plan: Box<[PlanNodeId]>,
     nodes: Box<[RuntimePlanNode]>,
@@ -493,6 +495,10 @@ pub struct WidgetRuntimeAssembly {
 impl WidgetRuntimeAssembly {
     pub fn graph(&self) -> &SignalGraph {
         &self.graph
+    }
+
+    pub const fn root(&self) -> PlanNodeId {
+        self.root
     }
 
     pub fn nodes(&self) -> &[RuntimePlanNode] {

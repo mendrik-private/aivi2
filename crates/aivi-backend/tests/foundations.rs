@@ -1,21 +1,22 @@
 use std::{fs, path::PathBuf};
 
 use aivi_backend::{
-    DecodeStepKind, DomainDecodeSurfaceKind, GateStage as BackendGateStage,
+    CodegenError, DecodeStepKind, DomainDecodeSurfaceKind, GateStage as BackendGateStage,
     ItemKind as BackendItemKind, KernelExprKind, LayoutKind, LoweringError, NonSourceWakeupCause,
     RecurrenceTarget, SourceProvider, StageKind as BackendStageKind, ValidationError,
-    lower_module as lower_backend_module, validate_program,
+    compile_program, lower_module as lower_backend_module, validate_program,
 };
 use aivi_base::{SourceDatabase, SourceSpan};
 use aivi_core::{
     Expr as CoreExpr, ExprKind as CoreExprKind, GateStage as CoreGateStage, Item as CoreItem,
     ItemKind as CoreItemKind, Module as CoreModule, Pipe as CorePipe, PipeOrigin as CorePipeOrigin,
+    ProjectionBase as CoreProjectionBase, RecordField as CoreRecordField,
     Reference as CoreReference, Stage as CoreStage, StageKind as CoreStageKind, Type as CoreType,
     lower_module as lower_core_module, validate_module as validate_core_module,
 };
 use aivi_hir::{
-    BindingId as HirBindingId, BuiltinType, ExprId as HirExprId, IntegerLiteral,
-    ItemId as HirItemId,
+    BinaryOperator as HirBinaryOperator, BindingId as HirBindingId, BuiltinTerm as HirBuiltinTerm,
+    BuiltinType, ExprId as HirExprId, IntegerLiteral, ItemId as HirItemId,
 };
 use aivi_lambda::{lower_module as lower_lambda_module, validate_module as validate_lambda_module};
 use aivi_syntax::parse_module;
@@ -73,7 +74,51 @@ fn first_pipeline(
     program.items()[item].pipelines[0]
 }
 
+fn clif_pointer_ty() -> &'static str {
+    if cfg!(target_pointer_width = "64") {
+        "i64"
+    } else {
+        "i32"
+    }
+}
+
 fn manual_core_gate(when_true: CoreExprKind) -> CoreModule {
+    manual_core_gate_stage(
+        CoreType::Primitive(BuiltinType::Int),
+        CoreType::Primitive(BuiltinType::Int),
+        move |module, span| {
+            module
+                .exprs_mut()
+                .alloc(CoreExpr {
+                    span,
+                    ty: CoreType::Primitive(BuiltinType::Int),
+                    kind: when_true,
+                })
+                .expect("expression allocation should fit")
+        },
+        |module, span| {
+            module
+                .exprs_mut()
+                .alloc(CoreExpr {
+                    span,
+                    ty: CoreType::Primitive(BuiltinType::Int),
+                    kind: CoreExprKind::Integer(IntegerLiteral { raw: "0".into() }),
+                })
+                .expect("expression allocation should fit")
+        },
+    )
+}
+
+fn manual_core_gate_stage<F, G>(
+    input_subject: CoreType,
+    result_subject: CoreType,
+    when_true: F,
+    when_false: G,
+) -> CoreModule
+where
+    F: FnOnce(&mut CoreModule, SourceSpan) -> aivi_core::ExprId,
+    G: FnOnce(&mut CoreModule, SourceSpan) -> aivi_core::ExprId,
+{
     let span = SourceSpan::default();
     let mut module = CoreModule::new();
     let item_id = module
@@ -88,22 +133,8 @@ fn manual_core_gate(when_true: CoreExprKind) -> CoreModule {
             pipes: Vec::new(),
         })
         .expect("item allocation should fit");
-    let when_true = module
-        .exprs_mut()
-        .alloc(CoreExpr {
-            span,
-            ty: CoreType::Primitive(BuiltinType::Int),
-            kind: when_true,
-        })
-        .expect("expression allocation should fit");
-    let when_false = module
-        .exprs_mut()
-        .alloc(CoreExpr {
-            span,
-            ty: CoreType::Primitive(BuiltinType::Int),
-            kind: CoreExprKind::Integer(IntegerLiteral { raw: "0".into() }),
-        })
-        .expect("expression allocation should fit");
+    let when_true = when_true(&mut module, span);
+    let when_false = when_false(&mut module, span);
     let pipe_id = module
         .pipes_mut()
         .alloc(CorePipe {
@@ -123,8 +154,8 @@ fn manual_core_gate(when_true: CoreExprKind) -> CoreModule {
             pipe: pipe_id,
             index: 0,
             span,
-            input_subject: CoreType::Primitive(BuiltinType::Int),
-            result_subject: CoreType::Primitive(BuiltinType::Int),
+            input_subject,
+            result_subject,
             kind: CoreStageKind::Gate(CoreGateStage::Ordinary {
                 when_true,
                 when_false,
@@ -208,7 +239,31 @@ sig timeout : Signal Duration
 
 #[test]
 fn lowers_recurrence_targets_and_witnesses() {
-    let backend = lower_fixture("milestone-2/valid/pipe-recurrence-nonsource-wakeup/main.aivi");
+    let backend = lower_text(
+        "backend-recurrence.aivi",
+        r#"
+domain Duration over Int
+    literal s : Int -> Duration
+
+domain Retry over Int
+    literal x : Int -> Retry
+
+fun step:Int #value:Int =>
+    value
+
+@recur.timer 5s
+sig polled : Signal Int =
+    0
+     @|> step
+     <|@ step
+
+@recur.backoff 3x
+val retried : Task Int Int =
+    0
+     @|> step
+     <|@ step
+"#,
+    );
 
     let polled = find_item(&backend, "polled");
     let polled_recurrence = backend.pipelines()[first_pipeline(&backend, polled)]
@@ -384,4 +439,334 @@ fn lowering_rejects_unresolved_hir_item_references() {
             .iter()
             .any(|error| matches!(error, LoweringError::UnresolvedItemReference { .. }))
     );
+}
+
+#[test]
+fn cranelift_codegen_compiles_scalar_gate_kernels() {
+    let core = manual_core_gate_stage(
+        CoreType::Primitive(BuiltinType::Int),
+        CoreType::Primitive(BuiltinType::Bool),
+        |module, span| {
+            let subject = module
+                .exprs_mut()
+                .alloc(CoreExpr {
+                    span,
+                    ty: CoreType::Primitive(BuiltinType::Int),
+                    kind: CoreExprKind::AmbientSubject,
+                })
+                .expect("subject allocation should fit");
+            let one = module
+                .exprs_mut()
+                .alloc(CoreExpr {
+                    span,
+                    ty: CoreType::Primitive(BuiltinType::Int),
+                    kind: CoreExprKind::Integer(IntegerLiteral { raw: "1".into() }),
+                })
+                .expect("integer allocation should fit");
+            module
+                .exprs_mut()
+                .alloc(CoreExpr {
+                    span,
+                    ty: CoreType::Primitive(BuiltinType::Bool),
+                    kind: CoreExprKind::Binary {
+                        left: subject,
+                        operator: HirBinaryOperator::GreaterThan,
+                        right: one,
+                    },
+                })
+                .expect("comparison allocation should fit")
+        },
+        |module, span| {
+            module
+                .exprs_mut()
+                .alloc(CoreExpr {
+                    span,
+                    ty: CoreType::Primitive(BuiltinType::Bool),
+                    kind: CoreExprKind::Reference(CoreReference::Builtin(HirBuiltinTerm::False)),
+                })
+                .expect("builtin allocation should fit")
+        },
+    );
+    validate_core_module(&core).expect("manual core module should validate");
+    let lambda = lower_lambda_module(&core).expect("typed lambda lowering should succeed");
+    validate_lambda_module(&lambda).expect("typed lambda should validate");
+    let backend = lower_backend_module(&lambda).expect("backend lowering should succeed");
+    validate_program(&backend).expect("backend program should validate");
+
+    let item = find_item(&backend, "captured");
+    let pipeline = &backend.pipelines()[first_pipeline(&backend, item)];
+    let BackendStageKind::Gate(BackendGateStage::Ordinary { when_true, .. }) =
+        &pipeline.stages[0].kind
+    else {
+        panic!("expected ordinary gate stage");
+    };
+
+    let compiled = compile_program(&backend).expect("Cranelift codegen should succeed");
+    let artifact = compiled
+        .kernel(*when_true)
+        .expect("compiled program should retain per-kernel metadata");
+    assert!(artifact.code_size > 0);
+    assert!(artifact.symbol.contains("gate_true"));
+    assert!(artifact.clif.contains("icmp sgt"));
+    assert!(artifact.clif.contains("(i64) -> i8"));
+    assert!(!compiled.object().is_empty());
+}
+
+#[test]
+fn cranelift_codegen_compiles_real_gate_carrier_kernels() {
+    let backend = lower_fixture("milestone-2/valid/pipe-gate-carriers/main.aivi");
+
+    let maybe_active = find_item(&backend, "maybeActive");
+    let (when_true, when_false) =
+        match &backend.pipelines()[first_pipeline(&backend, maybe_active)].stages[0].kind {
+            BackendStageKind::Gate(BackendGateStage::Ordinary {
+                when_true,
+                when_false,
+            }) => (*when_true, *when_false),
+            other => panic!("expected ordinary gate stage, found {other:?}"),
+        };
+    let active_users = find_item(&backend, "activeUsers");
+    let predicate =
+        match &backend.pipelines()[first_pipeline(&backend, active_users)].stages[0].kind {
+            BackendStageKind::Gate(BackendGateStage::SignalFilter { predicate, .. }) => *predicate,
+            other => panic!("expected signal-filter gate stage, found {other:?}"),
+        };
+
+    let compiled =
+        compile_program(&backend).expect("record projection and Option carriers should compile");
+    let ptr = clif_pointer_ty();
+
+    let gate_true = compiled
+        .kernel(when_true)
+        .expect("gate-true artifact should exist");
+    assert!(gate_true.code_size > 0);
+    assert!(gate_true.clif.contains(&format!("({ptr}) -> {ptr}")));
+
+    let gate_false = compiled
+        .kernel(when_false)
+        .expect("gate-false artifact should exist");
+    assert!(gate_false.code_size > 0);
+    assert!(gate_false.clif.contains(&format!("iconst.{ptr} 0")));
+
+    let predicate_artifact = compiled
+        .kernel(predicate)
+        .expect("predicate artifact should exist");
+    assert!(predicate_artifact.code_size > 0);
+    assert!(predicate_artifact.clif.contains(&format!("({ptr}) -> i8")));
+    assert!(predicate_artifact.clif.contains("load.i8"));
+    assert!(!compiled.object().is_empty());
+}
+
+#[test]
+fn cranelift_codegen_compiles_environment_slots() {
+    let core = manual_core_gate_stage(
+        CoreType::Primitive(BuiltinType::Int),
+        CoreType::Primitive(BuiltinType::Int),
+        |module, span| {
+            let captured = module
+                .exprs_mut()
+                .alloc(CoreExpr {
+                    span,
+                    ty: CoreType::Primitive(BuiltinType::Int),
+                    kind: CoreExprKind::Reference(CoreReference::Local(HirBindingId::from_raw(7))),
+                })
+                .expect("capture allocation should fit");
+            let one = module
+                .exprs_mut()
+                .alloc(CoreExpr {
+                    span,
+                    ty: CoreType::Primitive(BuiltinType::Int),
+                    kind: CoreExprKind::Integer(IntegerLiteral { raw: "1".into() }),
+                })
+                .expect("integer allocation should fit");
+            module
+                .exprs_mut()
+                .alloc(CoreExpr {
+                    span,
+                    ty: CoreType::Primitive(BuiltinType::Int),
+                    kind: CoreExprKind::Binary {
+                        left: captured,
+                        operator: HirBinaryOperator::Add,
+                        right: one,
+                    },
+                })
+                .expect("add allocation should fit")
+        },
+        |module, span| {
+            module
+                .exprs_mut()
+                .alloc(CoreExpr {
+                    span,
+                    ty: CoreType::Primitive(BuiltinType::Int),
+                    kind: CoreExprKind::Integer(IntegerLiteral { raw: "0".into() }),
+                })
+                .expect("integer allocation should fit")
+        },
+    );
+    validate_core_module(&core).expect("manual core module should validate");
+    let lambda = lower_lambda_module(&core).expect("typed lambda lowering should succeed");
+    validate_lambda_module(&lambda).expect("typed lambda should validate");
+    let backend = lower_backend_module(&lambda).expect("backend lowering should succeed");
+    validate_program(&backend).expect("backend program should validate");
+
+    let item = find_item(&backend, "captured");
+    let pipeline = &backend.pipelines()[first_pipeline(&backend, item)];
+    let BackendStageKind::Gate(BackendGateStage::Ordinary { when_true, .. }) =
+        &pipeline.stages[0].kind
+    else {
+        panic!("expected ordinary gate stage");
+    };
+
+    let compiled = compile_program(&backend).expect("Cranelift codegen should succeed");
+    let artifact = compiled
+        .kernel(*when_true)
+        .expect("compiled program should retain per-kernel metadata");
+    assert!(artifact.code_size > 0);
+    assert!(artifact.clif.contains("iadd"));
+    assert!(artifact.clif.contains("(i64) -> i64"));
+}
+
+#[test]
+fn cranelift_codegen_compiles_by_reference_environment_projection() {
+    let captured_user = CoreType::Record(vec![
+        CoreRecordField {
+            name: "active".into(),
+            ty: CoreType::Primitive(BuiltinType::Bool),
+        },
+        CoreRecordField {
+            name: "email".into(),
+            ty: CoreType::Primitive(BuiltinType::Text),
+        },
+    ]);
+    let core = manual_core_gate_stage(
+        CoreType::Primitive(BuiltinType::Int),
+        CoreType::Primitive(BuiltinType::Bool),
+        {
+            let captured_user = captured_user.clone();
+            move |module, span| {
+                let captured = module
+                    .exprs_mut()
+                    .alloc(CoreExpr {
+                        span,
+                        ty: captured_user.clone(),
+                        kind: CoreExprKind::Reference(CoreReference::Local(
+                            HirBindingId::from_raw(7),
+                        )),
+                    })
+                    .expect("capture allocation should fit");
+                module
+                    .exprs_mut()
+                    .alloc(CoreExpr {
+                        span,
+                        ty: CoreType::Primitive(BuiltinType::Bool),
+                        kind: CoreExprKind::Projection {
+                            base: CoreProjectionBase::Expr(captured),
+                            path: vec!["active".into()],
+                        },
+                    })
+                    .expect("projection allocation should fit")
+            }
+        },
+        |module, span| {
+            module
+                .exprs_mut()
+                .alloc(CoreExpr {
+                    span,
+                    ty: CoreType::Primitive(BuiltinType::Bool),
+                    kind: CoreExprKind::Reference(CoreReference::Builtin(HirBuiltinTerm::False)),
+                })
+                .expect("builtin allocation should fit")
+        },
+    );
+    validate_core_module(&core).expect("manual core module should validate");
+    let lambda = lower_lambda_module(&core).expect("typed lambda lowering should succeed");
+    validate_lambda_module(&lambda).expect("typed lambda should validate");
+    let backend = lower_backend_module(&lambda).expect("backend lowering should succeed");
+    validate_program(&backend).expect("backend program should validate");
+
+    let item = find_item(&backend, "captured");
+    let pipeline = &backend.pipelines()[first_pipeline(&backend, item)];
+    let BackendStageKind::Gate(BackendGateStage::Ordinary { when_true, .. }) =
+        &pipeline.stages[0].kind
+    else {
+        panic!("expected ordinary gate stage");
+    };
+    assert_eq!(backend.kernels()[*when_true].environment.len(), 1);
+    assert_eq!(backend.kernels()[*when_true].input_subject, None);
+
+    let compiled =
+        compile_program(&backend).expect("by-reference environment projection should compile");
+    let artifact = compiled
+        .kernel(*when_true)
+        .expect("compiled program should retain per-kernel metadata");
+    assert!(artifact.code_size > 0);
+    assert!(
+        artifact
+            .clif
+            .contains(&format!("({}) -> i8", clif_pointer_ty()))
+    );
+    assert!(artifact.clif.contains("load.i8"));
+}
+
+#[test]
+fn cranelift_codegen_prevalidates_invalid_projection_paths() {
+    let backend = lower_fixture("milestone-2/valid/pipe-gate-carriers/main.aivi");
+    let active_users = find_item(&backend, "activeUsers");
+    let predicate =
+        match &backend.pipelines()[first_pipeline(&backend, active_users)].stages[0].kind {
+            BackendStageKind::Gate(BackendGateStage::SignalFilter { predicate, .. }) => *predicate,
+            other => panic!("expected signal-filter gate stage, found {other:?}"),
+        };
+    let mut backend = backend;
+    let kernel = backend
+        .kernels_mut()
+        .get_mut(predicate)
+        .expect("predicate kernel should exist");
+    let root = kernel.root;
+    let expr = kernel
+        .exprs_mut()
+        .get_mut(root)
+        .expect("predicate root should exist");
+    let KernelExprKind::Projection { path, .. } = &mut expr.kind else {
+        panic!("expected predicate root to stay a projection");
+    };
+    path[0] = "missing".into();
+
+    let errors =
+        compile_program(&backend).expect_err("invalid projection path should fail prevalidation");
+    assert!(errors.errors().iter().any(|error| matches!(
+        error,
+        CodegenError::UnsupportedExpression { kernel, expr, detail }
+            if *kernel == predicate && *expr == root && detail.contains("no field `.missing`")
+    )));
+}
+
+#[test]
+fn cranelift_codegen_rejects_domain_apply_until_domain_lowering_exists() {
+    let backend = lower_text(
+        "backend-domain-operators-codegen.aivi",
+        r#"
+domain Duration over Int
+    literal ms : Int -> Duration
+    (+) : Duration -> Duration -> Duration
+    (>) : Duration -> Duration -> Bool
+
+type Window = {
+    delay: Duration
+}
+
+sig windows : Signal Window = { delay: 10ms }
+
+sig slowWindows : Signal Window =
+    windows
+     ?|> ((.delay + 5ms) > 12ms)
+"#,
+    );
+    let errors =
+        compile_program(&backend).expect_err("domain apply kernels should stay unsupported");
+    assert!(errors.errors().iter().any(|error| matches!(
+        error,
+        CodegenError::UnsupportedExpression { detail, .. }
+            if detail.contains("record projection, pointer-niche Option carriers")
+    )));
 }

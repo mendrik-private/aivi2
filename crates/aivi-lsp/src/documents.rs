@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use aivi_query::SourceFile;
 use tower_lsp::lsp_types::Url;
 
 use crate::state::ServerState;
@@ -8,23 +7,14 @@ use crate::state::ServerState;
 /// Open or update a document in the database.
 pub fn open_document(state: &ServerState, uri: &Url, text: String) {
     let path = uri_to_path(uri);
-    let mut db = state.db.write();
-    if let Some(file) = state.files.get(uri) {
-        file.set_text(&mut db, text);
-    } else {
-        drop(db);
-        let mut db = state.db.write();
-        let file = SourceFile::new(&mut db, path, text);
-        drop(db);
-        state.files.insert(uri.clone(), file);
-    }
+    let file = state.db.open_file(path, text);
+    state.files.insert(uri.clone(), file);
 }
 
 /// Update an existing document's text.
 pub fn change_document(state: &ServerState, uri: &Url, text: String) {
     if let Some(file) = state.files.get(uri) {
-        let mut db = state.db.write();
-        file.set_text(&mut db, text);
+        file.set_text(&state.db, text);
     } else {
         open_document(state, uri, text);
     }

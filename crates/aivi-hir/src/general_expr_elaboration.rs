@@ -1,9 +1,12 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt};
 
 use aivi_base::SourceSpan;
 use aivi_typing::GatePlanner;
 
 use crate::{
+    gate_elaboration::{GateElaborationBlocker, GateRuntimeMapEntry},
+    typecheck::expression_matches,
+    validate::{truthy_falsy_pair_stages, GateExprEnv, GateIssue, GateType, GateTypeContext},
     BindingId, BuiltinTerm, ExprId, ExprKind, FunctionItem, FunctionParameter, GateRuntimeCaseArm,
     GateRuntimeExpr, GateRuntimeExprKind, GateRuntimePipeExpr, GateRuntimePipeStage,
     GateRuntimePipeStageKind, GateRuntimeProjectionBase, GateRuntimeRecordField,
@@ -11,9 +14,6 @@ use crate::{
     GateRuntimeTruthyFalsyBranch, GateRuntimeUnsupportedKind, GateRuntimeUnsupportedPipeStageKind,
     Item, ItemId, Module, PipeExpr, PipeStageKind, ProjectionBase, ResolutionState, TermReference,
     TermResolution, TypeItemBody, ValueItem,
-    gate_elaboration::{GateElaborationBlocker, GateRuntimeMapEntry},
-    typecheck::expression_matches,
-    validate::{GateExprEnv, GateIssue, GateType, GateTypeContext, truthy_falsy_pair_stages},
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -66,6 +66,35 @@ pub struct BlockedGeneralExpr {
     pub blockers: Vec<GeneralExprBlocker>,
 }
 
+impl BlockedGeneralExpr {
+    pub fn primary_span(&self) -> Option<SourceSpan> {
+        self.blockers
+            .iter()
+            .map(GeneralExprBlocker::span)
+            .find(|span| *span != SourceSpan::default())
+            .or_else(|| self.blockers.first().map(GeneralExprBlocker::span))
+    }
+
+    pub fn requires_typed_core_error(&self) -> bool {
+        self.blockers
+            .iter()
+            .any(GeneralExprBlocker::requires_typed_core_error)
+    }
+}
+
+impl fmt::Display for BlockedGeneralExpr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Some((first, rest)) = self.blockers.split_first() else {
+            return f.write_str("blocked with no recorded general-expression diagnostics");
+        };
+        write!(f, "{first}")?;
+        for blocker in rest {
+            write!(f, "; {blocker}")?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GeneralExprBlocker {
     UnknownExprType {
@@ -106,6 +135,86 @@ pub enum GeneralExprBlocker {
         span: SourceSpan,
         subject: GateType,
     },
+}
+
+impl GeneralExprBlocker {
+    pub fn span(&self) -> SourceSpan {
+        match self {
+            Self::UnknownExprType { span }
+            | Self::UnsupportedRuntimeExpr { span, .. }
+            | Self::UnsupportedImportReference { span }
+            | Self::InvalidProjection { span, .. }
+            | Self::UnknownField { span, .. }
+            | Self::AmbiguousDomainMember { span, .. }
+            | Self::CaseBranchTypeMismatch { span, .. }
+            | Self::MissingParameterType { span, .. }
+            | Self::UnsupportedSignalCase { span, .. } => *span,
+        }
+    }
+
+    pub fn requires_typed_core_error(&self) -> bool {
+        !matches!(
+            self,
+            Self::UnsupportedRuntimeExpr {
+                kind: GateRuntimeUnsupportedKind::PipeStage(
+                    GateRuntimeUnsupportedPipeStageKind::Map
+                        | GateRuntimeUnsupportedPipeStageKind::FanIn
+                        | GateRuntimeUnsupportedPipeStageKind::RecurStart
+                        | GateRuntimeUnsupportedPipeStageKind::RecurStep
+                ),
+                ..
+            }
+        )
+    }
+}
+
+impl fmt::Display for GeneralExprBlocker {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownExprType { .. } => {
+                f.write_str("expression type could not be determined for typed-core general-expression lowering")
+            }
+            Self::UnsupportedRuntimeExpr { kind, .. } => {
+                write!(f, "{kind} is not supported in typed-core general expressions")
+            }
+            Self::UnsupportedImportReference { .. } => {
+                f.write_str("imported names are not supported in typed-core general expressions")
+            }
+            Self::InvalidProjection { path, subject, .. } => {
+                write!(f, "projection `{path}` is not valid for `{subject}`")
+            }
+            Self::UnknownField { path, subject, .. } => {
+                write!(f, "field `{path}` does not exist on `{subject}`")
+            }
+            Self::AmbiguousDomainMember {
+                name, candidates, ..
+            } => {
+                if candidates.is_empty() {
+                    write!(f, "domain member `{name}` is ambiguous in this context")
+                } else {
+                    write!(
+                        f,
+                        "domain member `{name}` is ambiguous in this context; candidates: {}",
+                        candidates.join(", ")
+                    )
+                }
+            }
+            Self::CaseBranchTypeMismatch {
+                expected, actual, ..
+            } => write!(
+                f,
+                "case split branches must agree on one result type, found `{expected}` and `{actual}`"
+            ),
+            Self::MissingParameterType { name, .. } => write!(
+                f,
+                "function parameter `{name}` requires an explicit type annotation for typed-core general-expression lowering"
+            ),
+            Self::UnsupportedSignalCase { subject, .. } => write!(
+                f,
+                "case pipe stages over `{subject}` are not supported in typed-core general expressions"
+            ),
+        }
+    }
 }
 
 pub fn elaborate_general_expressions(module: &Module) -> GeneralExprElaborationReport {
@@ -251,6 +360,27 @@ impl<'a> GeneralExprElaborator<'a> {
                 }
             }
         }
+        match &expr.kind {
+            ExprKind::Regex(_) => {
+                return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
+                    span: expr.span,
+                    kind: GateRuntimeUnsupportedKind::RegexLiteral,
+                }]);
+            }
+            ExprKind::Cluster(_) => {
+                return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
+                    span: expr.span,
+                    kind: GateRuntimeUnsupportedKind::ApplicativeCluster,
+                }]);
+            }
+            ExprKind::Markup(_) => {
+                return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
+                    span: expr.span,
+                    kind: GateRuntimeUnsupportedKind::Markup,
+                }]);
+            }
+            _ => {}
+        }
         let ty = self.expr_type(expr_id, env, ambient, expected)?;
         let kind = match expr.kind {
             ExprKind::Name(reference) => GateRuntimeExprKind::Reference(
@@ -260,12 +390,6 @@ impl<'a> GeneralExprElaborator<'a> {
             ExprKind::SuffixedInteger(literal) => GateRuntimeExprKind::SuffixedInteger(literal),
             ExprKind::Text(text) => {
                 GateRuntimeExprKind::Text(self.lower_text_literal(&text, env, ambient)?)
-            }
-            ExprKind::Regex(_) => {
-                return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
-                    span: expr.span,
-                    kind: GateRuntimeUnsupportedKind::RegexLiteral,
-                }]);
             }
             ExprKind::Tuple(elements) => {
                 let expected_elements = match expected {
@@ -421,17 +545,8 @@ impl<'a> GeneralExprElaborator<'a> {
             ExprKind::Pipe(pipe) => {
                 GateRuntimeExprKind::Pipe(self.lower_pipe_expr(&pipe, env, ambient, Some(&ty))?)
             }
-            ExprKind::Cluster(_) => {
-                return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
-                    span: expr.span,
-                    kind: GateRuntimeUnsupportedKind::ApplicativeCluster,
-                }]);
-            }
-            ExprKind::Markup(_) => {
-                return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
-                    span: expr.span,
-                    kind: GateRuntimeUnsupportedKind::Markup,
-                }]);
+            ExprKind::Regex(_) | ExprKind::Cluster(_) | ExprKind::Markup(_) => {
+                unreachable!("unsupported runtime forms should be returned before type inference")
             }
         };
         Ok(GateRuntimeExpr {
@@ -1382,8 +1497,8 @@ mod tests {
     use aivi_syntax::parse_module;
 
     use super::{
-        GateRuntimeExprKind, GateRuntimePipeStageKind, GeneralExprOutcome,
-        elaborate_general_expressions,
+        elaborate_general_expressions, GateRuntimeExprKind, GateRuntimePipeStageKind,
+        GeneralExprBlocker, GeneralExprOutcome,
     };
 
     fn item_name(module: &crate::Module, item: crate::ItemId) -> Option<&str> {
@@ -1528,6 +1643,82 @@ mod tests {
                 other => panic!("expected lowered runtime record, found {other:?}"),
             },
             other => panic!("expected lowered profile body, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blocks_regex_literals_in_general_expr_bodies() {
+        let lowered = lower_text("general-expr-blocked-regex.aivi", "val pattern = rx\"a+\"");
+        assert!(
+            !lowered.has_errors(),
+            "regex general-expression fixture should lower to HIR: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_general_expressions(lowered.module());
+        let pattern = report
+            .items()
+            .iter()
+            .find(|item| item_name(lowered.module(), item.owner) == Some("pattern"))
+            .expect("expected pattern elaboration");
+        match &pattern.outcome {
+            GeneralExprOutcome::Blocked(blocked) => {
+                assert!(matches!(
+                    blocked.blockers.as_slice(),
+                    [GeneralExprBlocker::UnsupportedRuntimeExpr {
+                        kind: crate::GateRuntimeUnsupportedKind::RegexLiteral,
+                        ..
+                    }]
+                ));
+                assert_eq!(
+                    blocked.to_string(),
+                    "regex literal is not supported in typed-core general expressions"
+                );
+            }
+            other => panic!("expected blocked pattern body, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blocks_map_pipe_stages_in_general_expr_bodies() {
+        let lowered = lower_text(
+            "general-expr-blocked-map-stage.aivi",
+            "fun identity:Int #value:Int =>\n\
+             value\n\
+             \n\
+             fun duplicate:List Int #values:List Int =>\n\
+             values\n\
+              *|> identity\n",
+        );
+        assert!(
+            !lowered.has_errors(),
+            "map-stage general-expression fixture should lower to HIR: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_general_expressions(lowered.module());
+        let duplicate = report
+            .items()
+            .iter()
+            .find(|item| item_name(lowered.module(), item.owner) == Some("duplicate"))
+            .expect("expected duplicate elaboration");
+        match &duplicate.outcome {
+            GeneralExprOutcome::Blocked(blocked) => {
+                assert!(matches!(
+                    blocked.blockers.as_slice(),
+                    [GeneralExprBlocker::UnsupportedRuntimeExpr {
+                        kind: crate::GateRuntimeUnsupportedKind::PipeStage(
+                            crate::GateRuntimeUnsupportedPipeStageKind::Map
+                        ),
+                        ..
+                    }]
+                ));
+                assert_eq!(
+                    blocked.to_string(),
+                    "map pipe stage is not supported in typed-core general expressions"
+                );
+            }
+            other => panic!("expected blocked duplicate body, found {other:?}"),
         }
     }
 }

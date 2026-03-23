@@ -7,12 +7,9 @@ Sources are attached to signals using the `@source` decorator.
 
 ## The @source decorator
 
-```aivi
-@source window.keyDown with {
-    repeat: False,
-    focusOnly: True
-}
-sig keyDown : Signal Key
+```text
+-- declare a signal 'keyDown' driven by keyboard key-down events from the window
+-- configured to ignore key-repeat events and only fire when the window has focus
 ```
 
 `@source` names the source (`window.keyDown`) and passes a configuration record.
@@ -35,12 +32,10 @@ You never unsubscribe manually. The runtime handles it.
 
 The `timer.every` source fires at a fixed interval:
 
-```aivi
-@source timer.every 160 with {
-    immediate: True,
-    coalesce: True
-}
-sig tick : Signal Unit
+```text
+-- declare a signal 'tick' driven by a timer firing every 160 milliseconds
+-- fires once immediately on activation
+-- drops queued ticks if the handler is busy (coalesce)
 ```
 
 - `timer.every 160` fires every 160 milliseconds.
@@ -49,15 +44,10 @@ sig tick : Signal Unit
 
 The snake game uses this to drive the game loop:
 
-```aivi
-@source timer.every 160 with {
-    immediate: True,
-    coalesce: True
-}
-sig game : Signal Game =
-    initialGame
-    @|> stepGame boardSize direction
-    <|@ stepGame boardSize direction
+```text
+-- bind 'game' to a timer firing every 160 ms, with an immediate first tick and coalescing
+-- game starts at the initial game state
+-- on each timer tick, apply stepGame with boardSize and direction to advance the game state
 ```
 
 Every 160 ms, `stepGame` runs and the `game` signal updates, which cascades to `board`,
@@ -65,9 +55,9 @@ Every 160 ms, `stepGame` runs and the `game` signal updates, which cascades to `
 
 ## HTTP source
 
-```aivi
-@source http.get "https://api.example.com/user/1"
-sig userData : Signal (Result User)
+```text
+-- declare a signal 'userData' driven by an HTTP GET request to the given URL
+-- the signal carries either a successfully parsed User or an HttpError
 ```
 
 The signal starts empty (`None` or a loading state depending on the source type).
@@ -75,18 +65,14 @@ When the HTTP response arrives, the signal fires with `Ok user` or `Err message`
 
 ## Button click source
 
-```aivi
-@source button.clicked "submit"
-sig submitClicked : Signal Unit
+```text
+-- declare a signal 'submitClicked' that fires when the button with id "submit" is clicked
 ```
 
 The source name `"submit"` corresponds to the `id` attribute on a `<Button>` in markup:
 
-```aivi
-val main =
-    <Window title="Form">
-        <Button id="submit" label="Submit" />
-    </Window>
+```text
+-- render a Window titled "Form" containing a Button labeled "Submit" with id "submit"
 ```
 
 ## Source configuration
@@ -99,8 +85,8 @@ Each source type documents its own options.
 | `timer.every N` | `immediate`, `coalesce` |
 | `window.keyDown` | `repeat`, `focusOnly` |
 | `button.clicked "id"` | — |
-| `http.get "url"` | `headers`, `retry` |
-| `http.post "url"` | `body`, `headers`, `retry` |
+| `http.get "url"` | `headers`, `refreshOn` |
+| `http.post "url"` | `body`, `headers`, `refreshOn` |
 
 ## How sources feed signals
 

@@ -46,10 +46,9 @@ A `sig` in AIVI is like a cell in a spreadsheet. When its inputs change, it reco
 automatically. You do not call a setter. You do not subscribe to an event. You declare a
 dependency, and the runtime ensures the value is always current.
 
-```aivi
-sig fullName : Signal Text =
-    firstName
-     |> \first => "{first} {lastName}"
+```text
+-- derive 'fullName' as a signal combining firstName and lastName into one text value
+-- whenever firstName or lastName changes, fullName recomputes automatically
 ```
 
 When either `firstName` or `lastName` changes, `fullName` recomputes. That is it.
@@ -63,7 +62,7 @@ This is the "Excel formula" mental model: **declare what a value is, not how to 
 | GTK/C | Manual signal connections | Mutable fields | Unchecked pointers |
 | React/JSX | `useEffect` hooks | `useState` + reconciler | Optional chaining |
 | Elm | `update` message dispatch | Single model record | No null (Maybe) |
-| **AIVI** | Declared source bindings | Signal dependency graph | No null (`Maybe A`) |
+| **AIVI** | Declared source bindings | Signal dependency graph | No null (`Option A`) |
 
 AIVI is closest to Elm in spirit — a pure, message-driven model — but with native GTK rendering
 and a pipe-oriented surface syntax rather than an ML-style record syntax.
@@ -74,7 +73,7 @@ and a pipe-oriented surface syntax rather than an ML-style record syntax.
   `sig` with `@source` decorators.
 - **Closed types.** Every `type` is a closed sum or product. The compiler knows all variants;
   pattern matches are exhaustive.
-- **No `null`.** The absence of a value is represented by `type Maybe A = Some A | None`,
+- **No `null`.** The absence of a value is represented by `type Option A = Some A | None`,
   which the compiler forces you to handle.
 - **No `if`/`else`, no loops.** Control flow is pattern matching (`\|\|>`) and recursion.
   This sounds restrictive; in practice it is liberating.
@@ -85,13 +84,9 @@ and a pipe-oriented surface syntax rather than an ML-style record syntax.
 
 ## Hello, world
 
-```aivi
-val main =
-    <Window title="Hello">
-        <Label text="Hello, world!" />
-    </Window>
-
-export main
+```text
+-- render a Window titled "Hello" containing a Label with the text "Hello, world!"
+-- export main as the application entry point
 ```
 
 That is a complete AIVI application. One `val`, one `export`, two GTK widgets.

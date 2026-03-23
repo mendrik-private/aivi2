@@ -15,35 +15,14 @@ pub async fn definition(
     let lsp_pos = params.text_document_position_params.position;
 
     let file = *state.files.get(uri)?;
-
-    let (symbols, text, path) = {
-        let mut db = state.db.write();
-        let symbols = aivi_query::symbol_index(&mut db, file);
-        let text = file.text(&db).to_owned();
-        let path = file.path(&db).to_path_buf();
-        (symbols, text, path)
-    };
-
-    let mut source_db = aivi_base::SourceDatabase::new();
-    let file_id = source_db.add_file(path, text);
-    let source_file = &source_db[file_id];
-
-    let cursor = source_file.lsp_position_to_offset(LspPosition {
+    let analysis = crate::analysis::FileAnalysis::load(&state.db, file);
+    let cursor = analysis.source.lsp_position_to_offset(LspPosition {
         line: lsp_pos.line,
         character: lsp_pos.character,
     });
+    let sym = analysis.tightest_symbol_at_offset(cursor)?;
 
-    // Find the symbol whose full span contains the cursor and whose name is
-    // at or nearest to the cursor — prefer the tightest (selection_span) match.
-    let sym = symbols
-        .iter()
-        .filter(|s| {
-            let sp = s.span.span();
-            sp.start() <= cursor && cursor <= sp.end()
-        })
-        .min_by_key(|s| s.span.span().len())?;
-
-    let lsp_range = source_file.span_to_lsp_range(sym.selection_span.span());
+    let lsp_range = analysis.source.span_to_lsp_range(sym.selection_span.span());
     let range = Range {
         start: Position {
             line: lsp_range.start.line,

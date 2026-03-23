@@ -2,10 +2,14 @@ use aivi_base::SourceSpan;
 use aivi_typing::{FanoutCarrier, FanoutPlanner, FanoutStageKind};
 
 use crate::{
-    ExprId, Item, ItemId, Module, PipeExpr, PipeStageKind,
-    validate::{
-        GateExprEnv, GateIssue, GateType, GateTypeContext, truthy_falsy_pair_stages, walk_expr_tree,
+    gate_elaboration::{
+        lower_gate_pipe_body_runtime_expr, GateElaborationBlocker, GateRuntimeExpr,
+        GateRuntimeUnsupportedKind,
     },
+    validate::{
+        truthy_falsy_pair_stages, walk_expr_tree, GateExprEnv, GateIssue, GateType, GateTypeContext,
+    },
+    ExprId, Item, ItemId, Module, PipeExpr, PipeStageKind,
 };
 
 /// Focused fan-out plans derived from resolved HIR.
@@ -61,8 +65,18 @@ pub struct FanoutSegmentPlan {
     pub element_subject: GateType,
     pub mapped_element_type: GateType,
     pub mapped_collection_type: GateType,
+    pub filters: Vec<FanoutFilterPlan>,
     pub join: Option<FanoutJoinPlan>,
     pub result_type: GateType,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FanoutFilterPlan {
+    pub stage_index: usize,
+    pub stage_span: SourceSpan,
+    pub predicate: ExprId,
+    pub input_subject: GateType,
+    pub runtime_predicate: GateRuntimeExpr,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,13 +98,55 @@ pub struct BlockedFanoutSegment {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FanoutElaborationBlocker {
     UnknownSubjectType,
-    SubjectNotCollection { found: GateType },
-    MapInvalidProjection { path: String, subject: String },
-    MapUnknownField { path: String, subject: String },
+    SubjectNotCollection {
+        found: GateType,
+    },
+    MapInvalidProjection {
+        path: String,
+        subject: String,
+    },
+    MapUnknownField {
+        path: String,
+        subject: String,
+    },
     UnknownMapBodyType,
-    JoinInvalidProjection { path: String, subject: String },
-    JoinUnknownField { path: String, subject: String },
+    FilterStage {
+        stage_index: usize,
+        stage_span: SourceSpan,
+        blocker: FanoutFilterBlocker,
+    },
+    JoinInvalidProjection {
+        path: String,
+        subject: String,
+    },
+    JoinUnknownField {
+        path: String,
+        subject: String,
+    },
     UnknownJoinBodyType,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FanoutFilterBlocker {
+    InvalidProjection {
+        path: String,
+        subject: String,
+    },
+    UnknownField {
+        path: String,
+        subject: String,
+    },
+    ImpureExpr,
+    UnknownExprType {
+        span: SourceSpan,
+    },
+    PredicateNotBool {
+        found: GateType,
+    },
+    UnsupportedExpr {
+        span: SourceSpan,
+        kind: GateRuntimeUnsupportedKind,
+    },
 }
 
 pub fn elaborate_fanouts(module: &Module) -> FanoutElaborationReport {
@@ -164,12 +220,13 @@ fn collect_fanout_segments(
 ) {
     walk_expr_tree(module, root, |pipe_expr, expr, _| {
         if let crate::ExprKind::Pipe(pipe) = &expr.kind {
-            collect_fanout_pipe(owner, pipe_expr, pipe, env, typing, segments);
+            collect_fanout_pipe(module, owner, pipe_expr, pipe, env, typing, segments);
         }
     });
 }
 
 fn collect_fanout_pipe(
+    module: &Module,
     owner: ItemId,
     pipe_expr: ExprId,
     pipe: &PipeExpr,
@@ -203,14 +260,11 @@ fn collect_fanout_pipe(
                 stage_index += 1;
             }
             PipeStageKind::Map { expr } => {
-                let join_stage = stages
-                    .get(stage_index + 1)
-                    .and_then(|candidate| match &candidate.kind {
-                        PipeStageKind::FanIn { expr } => Some((stage_index + 1, *candidate, *expr)),
-                        _ => None,
-                    });
+                let segment = pipe
+                    .fanout_segment(stage_index)
+                    .expect("map stages should expose a fan-out segment");
                 let outcome =
-                    elaborate_fanout_segment(*expr, current.as_ref(), join_stage, env, typing);
+                    elaborate_fanout_segment(module, &segment, current.as_ref(), env, typing);
                 segments.push(FanoutSegmentElaboration {
                     owner,
                     pipe_expr,
@@ -223,7 +277,7 @@ fn collect_fanout_pipe(
                     FanoutSegmentOutcome::Planned(plan) => Some(plan.result_type),
                     FanoutSegmentOutcome::Blocked(_) => None,
                 };
-                stage_index += if join_stage.is_some() { 2 } else { 1 };
+                stage_index = segment.next_stage_index();
             }
             PipeStageKind::FanIn { expr } => {
                 current = current
@@ -253,10 +307,10 @@ fn collect_fanout_pipe(
     }
 }
 
-fn elaborate_fanout_segment(
-    map_expr: ExprId,
+pub(crate) fn elaborate_fanout_segment(
+    module: &Module,
+    segment: &crate::PipeFanoutSegment<'_>,
     subject: Option<&GateType>,
-    join_stage: Option<(usize, &crate::PipeStage, ExprId)>,
     env: &GateExprEnv,
     typing: &mut GateTypeContext<'_>,
 ) -> FanoutSegmentOutcome {
@@ -283,7 +337,7 @@ fn elaborate_fanout_segment(
         });
     };
 
-    let map_info = typing.infer_pipe_body(map_expr, env, &element_subject);
+    let map_info = typing.infer_pipe_body(segment.map_expr(), env, &element_subject);
     let mut blockers = map_info
         .issues
         .into_iter()
@@ -305,6 +359,38 @@ fn elaborate_fanout_segment(
         });
     }
 
+    let mut filters = Vec::new();
+    for (offset, stage) in segment.filter_stages().enumerate() {
+        let PipeStageKind::Gate { expr } = stage.kind else {
+            unreachable!("validated fan-out filters must use `?|>`");
+        };
+        let stage_index = segment.map_stage_index() + 1 + offset;
+        match lower_fanout_filter_predicate(module, expr, env, &mapped_element_type, typing) {
+            Ok(runtime_predicate) => {
+                filters.push(FanoutFilterPlan {
+                    stage_index,
+                    stage_span: stage.span,
+                    predicate: expr,
+                    input_subject: mapped_element_type.clone(),
+                    runtime_predicate,
+                });
+            }
+            Err(blocker) => {
+                blockers.push(FanoutElaborationBlocker::FilterStage {
+                    stage_index,
+                    stage_span: stage.span,
+                    blocker,
+                });
+            }
+        }
+    }
+    if !blockers.is_empty() {
+        return FanoutSegmentOutcome::Blocked(BlockedFanoutSegment {
+            subject: Some(subject.clone()),
+            blockers,
+        });
+    }
+
     let mapped_collection_type = typing.apply_fanout_plan(
         FanoutPlanner::plan(FanoutStageKind::Map, carrier),
         mapped_element_type.clone(),
@@ -312,7 +398,10 @@ fn elaborate_fanout_segment(
     let mut result_type = mapped_collection_type.clone();
     let mut join = None;
 
-    if let Some((stage_index, stage, join_expr)) = join_stage {
+    if let Some((stage_index, stage)) = segment.join_stage_index().zip(segment.join_stage()) {
+        let join_expr = segment
+            .join_expr()
+            .expect("join stage index implies a join expression");
         let join_info = typing.infer_pipe_body(join_expr, env, &mapped_collection_type);
         let mut join_blockers = join_info
             .issues
@@ -355,9 +444,40 @@ fn elaborate_fanout_segment(
         element_subject,
         mapped_element_type,
         mapped_collection_type,
+        filters,
         join,
         result_type,
     })
+}
+
+fn lower_fanout_filter_predicate(
+    module: &Module,
+    predicate: ExprId,
+    env: &GateExprEnv,
+    subject: &GateType,
+    typing: &mut GateTypeContext<'_>,
+) -> Result<GateRuntimeExpr, FanoutFilterBlocker> {
+    let predicate_span = module.exprs()[predicate].span;
+    let predicate_info = typing.infer_pipe_body(predicate, env, subject);
+    if let Some(issue) = predicate_info.issues.into_iter().next() {
+        return Err(fanout_filter_issue_blocker(issue, predicate_span));
+    }
+    if predicate_info.contains_signal || predicate_info.ty.as_ref().is_some_and(GateType::is_signal)
+    {
+        return Err(FanoutFilterBlocker::ImpureExpr);
+    }
+    let Some(predicate_ty) = predicate_info.ty else {
+        return Err(FanoutFilterBlocker::UnknownExprType {
+            span: predicate_span,
+        });
+    };
+    if !predicate_ty.is_bool() {
+        return Err(FanoutFilterBlocker::PredicateNotBool {
+            found: predicate_ty,
+        });
+    }
+    lower_gate_pipe_body_runtime_expr(module, predicate, env, subject, typing)
+        .map_err(fanout_filter_blocker)
 }
 
 fn blocker_for_map_issue(issue: GateIssue) -> FanoutElaborationBlocker {
@@ -392,6 +512,47 @@ fn blocker_for_join_issue(issue: GateIssue) -> FanoutElaborationBlocker {
     }
 }
 
+fn fanout_filter_issue_blocker(issue: GateIssue, span: SourceSpan) -> FanoutFilterBlocker {
+    match issue {
+        GateIssue::InvalidProjection { path, subject, .. } => {
+            FanoutFilterBlocker::InvalidProjection { path, subject }
+        }
+        GateIssue::UnknownField { path, subject, .. } => {
+            FanoutFilterBlocker::UnknownField { path, subject }
+        }
+        GateIssue::AmbiguousDomainMember { .. }
+        | GateIssue::UnsupportedApplicativeClusterMember { .. }
+        | GateIssue::ApplicativeClusterMismatch { .. }
+        | GateIssue::InvalidClusterFinalizer { .. }
+        | GateIssue::CaseBranchTypeMismatch { .. } => FanoutFilterBlocker::UnknownExprType { span },
+    }
+}
+
+fn fanout_filter_blocker(blocker: GateElaborationBlocker) -> FanoutFilterBlocker {
+    match blocker {
+        GateElaborationBlocker::InvalidProjection { path, subject } => {
+            FanoutFilterBlocker::InvalidProjection { path, subject }
+        }
+        GateElaborationBlocker::UnknownField { path, subject } => {
+            FanoutFilterBlocker::UnknownField { path, subject }
+        }
+        GateElaborationBlocker::ImpurePredicate => FanoutFilterBlocker::ImpureExpr,
+        GateElaborationBlocker::PredicateNotBool { found } => {
+            FanoutFilterBlocker::PredicateNotBool { found }
+        }
+        GateElaborationBlocker::UnknownRuntimeExprType { span } => {
+            FanoutFilterBlocker::UnknownExprType { span }
+        }
+        GateElaborationBlocker::UnsupportedRuntimeExpr { span, kind } => {
+            FanoutFilterBlocker::UnsupportedExpr { span, kind }
+        }
+        GateElaborationBlocker::UnknownSubjectType
+        | GateElaborationBlocker::UnknownPredicateType => {
+            unreachable!("fan-out filter lowering always has an explicit subject")
+        }
+    }
+}
+
 fn fanout_env_for_function(
     item: &crate::FunctionItem,
     typing: &mut GateTypeContext<'_>,
@@ -416,8 +577,8 @@ mod tests {
     use aivi_syntax::parse_module;
     use aivi_typing::FanoutCarrier;
 
-    use super::{FanoutElaborationBlocker, FanoutSegmentOutcome, elaborate_fanouts};
-    use crate::{BuiltinType, GateType, Item, ValidationMode, lower_module};
+    use super::{elaborate_fanouts, FanoutElaborationBlocker, FanoutSegmentOutcome};
+    use crate::{lower_module, BuiltinType, GateType, Item, ValidationMode};
 
     fn fixture_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -484,6 +645,10 @@ mod tests {
         match &ordinary_map.outcome {
             FanoutSegmentOutcome::Planned(plan) => {
                 assert_eq!(plan.carrier, FanoutCarrier::Ordinary);
+                assert!(
+                    plan.filters.is_empty(),
+                    "plain `*|>` should not invent fan-out filters"
+                );
                 assert!(matches!(&plan.input_subject, GateType::List(_)));
                 assert_eq!(
                     plan.element_subject,
@@ -519,6 +684,10 @@ mod tests {
             .expect("expected joined fanout segment for joinedEmails");
         match &ordinary_join.outcome {
             FanoutSegmentOutcome::Planned(plan) => {
+                assert!(
+                    plan.filters.is_empty(),
+                    "simple joined fan-out should not invent filters"
+                );
                 let join = plan
                     .join
                     .as_ref()
@@ -541,6 +710,7 @@ mod tests {
         match &signal_map.outcome {
             FanoutSegmentOutcome::Planned(plan) => {
                 assert_eq!(plan.carrier, FanoutCarrier::Signal);
+                assert!(plan.filters.is_empty());
                 assert_eq!(
                     plan.mapped_collection_type,
                     GateType::Signal(Box::new(GateType::List(Box::new(GateType::Primitive(
@@ -559,6 +729,7 @@ mod tests {
             .expect("expected signal joined fanout segment");
         match &signal_join.outcome {
             FanoutSegmentOutcome::Planned(plan) => {
+                assert!(plan.filters.is_empty());
                 let join = plan.join.as_ref().expect("signal join should record `<|*`");
                 assert_eq!(
                     join.collection_subject,
@@ -577,6 +748,66 @@ mod tests {
                 assert_eq!(plan.result_type, join.result_type);
             }
             other => panic!("expected planned signal join segment, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn elaborates_joined_fanout_filters_before_join() {
+        let lowered = lower_text(
+            "fanout-filter-before-join.aivi",
+            r#"
+type User = {
+    email: Text
+}
+
+fun keepText:Bool #email:Text =>
+    True
+
+fun joinEmails:Text #items:List Text =>
+    "joined"
+
+val users:List User = [
+    { email: "ada@example.com" }
+]
+
+val joinedEmails:Text =
+    users
+     *|> .email
+     ?|> keepText
+     <|* joinEmails
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "fan-out filter example should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_fanouts(lowered.module());
+        let joined = report
+            .segments()
+            .iter()
+            .find(|segment| item_name(lowered.module(), segment.owner) == "joinedEmails")
+            .expect("expected joined fan-out segment with a filter");
+
+        match &joined.outcome {
+            FanoutSegmentOutcome::Planned(plan) => {
+                assert_eq!(plan.filters.len(), 1);
+                assert_eq!(
+                    plan.filters[0].input_subject,
+                    GateType::Primitive(BuiltinType::Text)
+                );
+                let join = plan
+                    .join
+                    .as_ref()
+                    .expect("joined fan-out should record `<|*`");
+                assert_eq!(
+                    join.collection_subject,
+                    GateType::List(Box::new(GateType::Primitive(BuiltinType::Text)))
+                );
+                assert_eq!(plan.result_type, GateType::Primitive(BuiltinType::Text));
+            }
+            other => panic!("expected planned joined fan-out segment, found {other:?}"),
         }
     }
 

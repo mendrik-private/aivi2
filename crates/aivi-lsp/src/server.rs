@@ -31,14 +31,10 @@ impl Backend {
     }
 
     async fn publish_diagnostics_for_uri(&self, uri: tower_lsp::lsp_types::Url) {
-        let maybe_file = self.state.files.get(&uri).map(|f| *f);
+        let maybe_file = self.state.files.get(&uri).map(|file| *file);
         let Some(file) = maybe_file else { return };
 
-        let lsp_diags = {
-            let mut db = self.state.db.write();
-            crate::diagnostics::collect_lsp_diagnostics(&mut db, file, &uri)
-        };
-
+        let lsp_diags = crate::diagnostics::collect_lsp_diagnostics(&self.state.db, file, &uri);
         self.client.publish_diagnostics(uri, lsp_diags, None).await;
     }
 }
@@ -112,7 +108,6 @@ impl LanguageServer for Backend {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
         crate::documents::close_document(&self.state, &uri);
-        // Clear diagnostics.
         self.client.publish_diagnostics(uri, Vec::new(), None).await;
     }
 
@@ -121,42 +116,25 @@ impl LanguageServer for Backend {
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
         let uri = &params.text_document.uri;
-        let maybe_file = self.state.files.get(uri).map(|f| *f);
+        let maybe_file = self.state.files.get(uri).map(|file| *file);
         let Some(file) = maybe_file else {
             return Ok(None);
         };
 
-        let (symbols, text, path) = {
-            let mut db = self.state.db.write();
-            let symbols = aivi_query::symbol_index(&mut db, file);
-            let text = file.text(&db).to_owned();
-            let path = file.path(&db).to_path_buf();
-            (symbols, text, path)
-        };
-
-        let mut source_db = aivi_base::SourceDatabase::new();
-        let file_id = source_db.add_file(path, text);
-        let source_file = &source_db[file_id];
-
-        let doc_symbols = crate::symbols::convert_symbols(symbols, source_file);
+        let analysis = crate::analysis::FileAnalysis::load(&self.state.db, file);
+        let doc_symbols =
+            crate::symbols::convert_symbols(analysis.symbols.as_ref(), analysis.source.as_ref());
         Ok(Some(DocumentSymbolResponse::Nested(doc_symbols)))
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = &params.text_document.uri;
-        let maybe_file = self.state.files.get(uri).map(|f| *f);
+        let maybe_file = self.state.files.get(uri).map(|file| *file);
         let Some(file) = maybe_file else {
             return Ok(None);
         };
 
-        let (text, path) = {
-            let db = self.state.db.read();
-            let text = file.text(&db).to_owned();
-            let path = file.path(&db).to_path_buf();
-            (text, path)
-        };
-
-        Ok(crate::formatting::format_document(&text, &path))
+        Ok(crate::formatting::format_document(&self.state.db, file))
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {

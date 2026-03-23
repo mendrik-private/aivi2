@@ -10,7 +10,7 @@ use crate::{
         PatternId, TypeId, TypeParameterId,
     },
     sequence::{AtLeastTwo, NonEmpty, SequenceError},
-    validate::{ValidationMode, ValidationReport, validate_module},
+    validate::{validate_module, ValidationMode, ValidationReport},
 };
 
 /// One source-stable surface name preserved into HIR for diagnostics.
@@ -914,11 +914,87 @@ pub enum PipeStageKind {
     RecurStep { expr: ExprId },
 }
 
+/// Presentation-free structural view of one fan-out segment inside a pipe.
+///
+/// The current supported joined segment shape is:
+/// - one `*|>` map stage,
+/// - followed by zero or more `?|>` filter stages,
+/// - optionally closed by one `<|*` join stage.
+///
+/// If no `<|*` follows the filter run, the segment remains a plain one-stage `*|>` map and the
+/// filter count is zero.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PipeFanoutSegment<'a> {
+    map_stage_index: usize,
+    map_stage: &'a PipeStage,
+    filter_stage_count: usize,
+    join_stage: Option<(usize, &'a PipeStage)>,
+    stages: &'a NonEmpty<PipeStage>,
+}
+
+impl<'a> PipeFanoutSegment<'a> {
+    pub fn map_stage_index(&self) -> usize {
+        self.map_stage_index
+    }
+
+    pub fn map_stage(&self) -> &'a PipeStage {
+        self.map_stage
+    }
+
+    pub fn map_expr(&self) -> ExprId {
+        match &self.map_stage.kind {
+            PipeStageKind::Map { expr } => *expr,
+            other => {
+                unreachable!("validated fan-out segments must start with `*|>`, found {other:?}")
+            }
+        }
+    }
+
+    pub fn filter_stage_count(&self) -> usize {
+        self.filter_stage_count
+    }
+
+    pub fn filter_stages(&self) -> impl Iterator<Item = &'a PipeStage> + 'a {
+        self.stages
+            .iter()
+            .skip(self.map_stage_index + 1)
+            .take(self.filter_stage_count)
+    }
+
+    pub fn filter_exprs(&self) -> impl Iterator<Item = ExprId> + 'a {
+        self.filter_stages().map(|stage| match &stage.kind {
+            PipeStageKind::Gate { expr } => *expr,
+            other => unreachable!("validated fan-out filters must use `?|>`, found {other:?}"),
+        })
+    }
+
+    pub fn join_stage_index(&self) -> Option<usize> {
+        self.join_stage.map(|(index, _)| index)
+    }
+
+    pub fn join_stage(&self) -> Option<&'a PipeStage> {
+        self.join_stage.map(|(_, stage)| stage)
+    }
+
+    pub fn join_expr(&self) -> Option<ExprId> {
+        self.join_stage().map(|stage| match &stage.kind {
+            PipeStageKind::FanIn { expr } => *expr,
+            other => unreachable!("validated fan-out joins must use `<|*`, found {other:?}"),
+        })
+    }
+
+    pub fn next_stage_index(&self) -> usize {
+        self.join_stage_index()
+            .map_or(self.map_stage_index + 1, |index| index + 1)
+    }
+}
+
 /// Presentation-free structural view of one trailing recurrence suffix inside a pipe.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PipeRecurrenceSuffix<'a> {
     prefix_stage_count: usize,
     start_stage: &'a PipeStage,
+    guard_stage_count: usize,
     stages: &'a NonEmpty<PipeStage>,
 }
 
@@ -944,12 +1020,32 @@ impl<'a> PipeRecurrenceSuffix<'a> {
         }
     }
 
+    pub fn guard_stage_count(&self) -> usize {
+        self.guard_stage_count
+    }
+
+    pub fn guard_stages(&self) -> impl Iterator<Item = &'a PipeStage> + 'a {
+        self.stages
+            .iter()
+            .skip(self.prefix_stage_count + 1)
+            .take(self.guard_stage_count)
+    }
+
+    pub fn guard_exprs(&self) -> impl Iterator<Item = ExprId> + 'a {
+        self.guard_stages().map(|stage| match &stage.kind {
+            PipeStageKind::Gate { expr } => *expr,
+            other => unreachable!("validated recurrence guards must use `?|>`, found {other:?}"),
+        })
+    }
+
     pub fn step_count(&self) -> usize {
-        self.stages.len() - self.prefix_stage_count - 1
+        self.stages.len() - self.prefix_stage_count - 1 - self.guard_stage_count
     }
 
     pub fn step_stages(&self) -> impl Iterator<Item = &'a PipeStage> + 'a {
-        self.stages.iter().skip(self.prefix_stage_count + 1)
+        self.stages
+            .iter()
+            .skip(self.prefix_stage_count + 1 + self.guard_stage_count)
     }
 
     pub fn step_exprs(&self) -> impl Iterator<Item = ExprId> + 'a {
@@ -997,10 +1093,40 @@ impl fmt::Display for PipeRecurrenceShapeError {
 impl Error for PipeRecurrenceShapeError {}
 
 impl PipeExpr {
+    pub fn fanout_segment(&self, map_stage_index: usize) -> Option<PipeFanoutSegment<'_>> {
+        let stages = self.stages.iter().collect::<Vec<_>>();
+        let map_stage = stages.get(map_stage_index).copied()?;
+        if !matches!(map_stage.kind, PipeStageKind::Map { .. }) {
+            return None;
+        }
+
+        let mut index = map_stage_index + 1;
+        while index < stages.len() && matches!(stages[index].kind, PipeStageKind::Gate { .. }) {
+            index += 1;
+        }
+        let join_stage = stages.get(index).and_then(|stage| match &stage.kind {
+            PipeStageKind::FanIn { .. } => Some((index, *stage)),
+            _ => None,
+        });
+
+        Some(PipeFanoutSegment {
+            map_stage_index,
+            map_stage,
+            filter_stage_count: if join_stage.is_some() {
+                index - (map_stage_index + 1)
+            } else {
+                0
+            },
+            join_stage,
+            stages: &self.stages,
+        })
+    }
+
     pub fn recurrence_suffix(
         &self,
     ) -> Result<Option<PipeRecurrenceSuffix<'_>>, PipeRecurrenceShapeError> {
         let mut suffix_start: Option<(usize, &PipeStage)> = None;
+        let mut guard_stage_count = 0usize;
         let mut saw_step = false;
 
         for (index, stage) in self.stages.iter().enumerate() {
@@ -1014,6 +1140,9 @@ impl PipeExpr {
                     });
                 }
                 (None, _) => {}
+                (Some(_), PipeStageKind::Gate { .. }) if !saw_step => {
+                    guard_stage_count += 1;
+                }
                 (Some(_), PipeStageKind::RecurStep { .. }) => {
                     saw_step = true;
                 }
@@ -1041,6 +1170,7 @@ impl PipeExpr {
             Some((prefix_stage_count, start_stage)) => Ok(Some(PipeRecurrenceSuffix {
                 prefix_stage_count,
                 start_stage,
+                guard_stage_count,
                 stages: &self.stages,
             })),
         }

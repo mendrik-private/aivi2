@@ -886,10 +886,10 @@ mod tests {
     };
 
     use super::{
-        SourceDecodeElaborationBlocker, SourceDecodeNodeOutcome, SourceDecodeUnsupportedTypeKind,
-        elaborate_source_decodes,
+        elaborate_source_decodes, SourceDecodeElaborationBlocker, SourceDecodeNodeOutcome,
+        SourceDecodeUnsupportedTypeKind,
     };
-    use crate::{Item, lower_module};
+    use crate::{lower_module, Item};
 
     fn lower_text(path: &str, text: &str) -> crate::LoweringResult {
         let mut sources = SourceDatabase::new();

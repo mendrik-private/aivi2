@@ -1,5 +1,3 @@
-use std::{fs, path::PathBuf};
-
 use aivi_base::{SourceDatabase, SourceSpan};
 use aivi_core::{
     Expr as CoreExpr, ExprKind as CoreExprKind, GateStage as CoreGateStage, Item as CoreItem,
@@ -16,14 +14,6 @@ use aivi_lambda::{
     validate_module,
 };
 use aivi_syntax::parse_module;
-
-fn fixture_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("fixtures")
-        .join("frontend")
-}
 
 fn lower_text(path: &str, text: &str) -> aivi_lambda::Module {
     let mut sources = SourceDatabase::new();
@@ -45,11 +35,6 @@ fn lower_text(path: &str, text: &str) -> aivi_lambda::Module {
     let lambda = lower_module(&core).expect("lambda lowering should succeed");
     validate_module(&lambda).expect("lambda module should validate");
     lambda
-}
-
-fn lower_fixture(path: &str) -> aivi_lambda::Module {
-    let text = fs::read_to_string(fixture_root().join(path)).expect("fixture should be readable");
-    lower_text(path, &text)
 }
 
 fn manual_core_gate(when_true: CoreExprKind) -> CoreModule {
@@ -127,7 +112,15 @@ fn manual_core_gate(when_true: CoreExprKind) -> CoreModule {
 
 #[test]
 fn lowers_value_and_function_bodies_into_item_closures() {
-    let lambda = lower_fixture("milestone-1/valid/top-level/declarations.aivi");
+    let lambda = lower_text(
+        "lambda-general-exprs.aivi",
+        r#"
+val answer = 42
+
+fun add:Int #x:Int #y:Int =>
+    x + y
+"#,
+    );
 
     let add = lambda
         .items()

@@ -10,32 +10,19 @@ It is created when the component mounts and destroyed when it unmounts.
 
 A counter is the canonical example of local state:
 
-```aivi
-@source button.clicked "increment"
-sig incrementClicked : Signal Unit
-
-@source button.clicked "decrement"
-sig decrementClicked : Signal Unit
-
-sig count : Signal Int =
-    0
-    @|> \_ => \n => n + 1
-    <|@ \_ => \n => n - 1
-
-sig label : Signal Text =
-    count
-     |> \n => "{n}"
-
-val counter =
-    <Box orientation={Horizontal} spacing={8}>
-        <Button id="decrement" label="−" />
-        <Label text={label} />
-        <Button id="increment" label="+" />
-    </Box>
+```text
+-- declare a local signal 'count' starting at 0
+-- bind 'increment' to the "increment" button click, updating count by adding 1
+-- bind 'decrement' to the "decrement" button click, updating count by subtracting 1
+-- derive 'label' as the text representation of count
+-- render a Window titled "Counter" with a vertical Box
+--   containing a Label bound to label, a "+" Button, and a "−" Button
+-- export main as the application entry point
 ```
 
-`count` starts at `0`. Each click on the increment button adds 1; each click on the decrement
-button subtracts 1. Nothing else in the application can see or modify `count`.
+`count` starts at `0`. `@|>` opens the recurrence on `increment`; `<|@` adds `decrement` as
+a second recurse point. Each event folds through `update`. Nothing else in the application
+can see or modify `count`.
 
 ## When to use local state
 
@@ -51,11 +38,11 @@ Examples: accordion open/closed, tooltip visibility, input focus, scroll positio
 
 When state needs to be accessible from multiple parts of the UI, it belongs in a `domain`:
 
-```aivi
-domain AppState
-    sig currentUser : Signal (Maybe User) = None
-    sig theme       : Signal Theme         = Light
-    sig notifications : Signal (List Notification) = []
+```text
+-- declare a domain 'AppState' holding application-wide signals
+-- 'currentUser' starts as None (no logged-in user)
+-- 'theme' starts as Light
+-- 'notifications' starts as an empty list
 ```
 
 A `domain` is a named collection of signals. Any component can read from a domain signal.
@@ -63,11 +50,10 @@ Only the domain itself (or providers) can write to it.
 
 ## Reading from a domain
 
-```aivi
-sig headerUser : Signal Text =
-    AppState.currentUser
-     ||> Some user => user.name
-     ||> None      => "Guest"
+```text
+-- derive 'headerUser' by reading AppState.currentUser
+-- if a user is logged in, use their name
+-- if no user, use the text "Guest"
 ```
 
 The dot notation `AppState.currentUser` reads a signal from the domain.
@@ -76,15 +62,11 @@ The dot notation `AppState.currentUser` reads a signal from the domain.
 
 Domain signals accept updates through `provider` declarations:
 
-```aivi
-provider LoginProvider for AppState
-    @source http.post "/api/login"
-    sig loginResult : Signal (Result User)
-
-    AppState.currentUser =
-        loginResult
-         ||> Ok user => Some user
-         ||> Err _   => None
+```text
+-- declare a provider 'LoginProvider' that writes to the AppState domain
+-- bind 'loginResult' to the result of an HTTP POST to "/api/login"
+-- when the login succeeds, set AppState.currentUser to Some user
+-- when the login fails, set AppState.currentUser to None
 ```
 
 Providers are the only mechanism for writing to domain state.

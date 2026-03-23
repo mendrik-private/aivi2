@@ -12,7 +12,6 @@ use aivi_typing::{
 };
 
 use crate::{
-    Arena,
     expr::{
         Expr, Pattern, PatternBinding, PatternConstructor, PatternKind, PipeCaseArm,
         PipeTruthyFalsyStage, Reference,
@@ -20,6 +19,7 @@ use crate::{
     ids::ExprId,
     ids::{DecodeProgramId, DecodeStepId, ItemId, PipeId, SourceId, StageId},
     ty::Type,
+    Arena,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -225,6 +225,14 @@ impl fmt::Display for Module {
                                 fanout.mapped_element_type,
                                 fanout.mapped_collection_type
                             )?;
+                            for filter in &fanout.filters {
+                                writeln!(
+                                    f,
+                                    "      filter[{}] = {}",
+                                    filter.stage_index,
+                                    ExprPrinter::new(self, filter.runtime_predicate)
+                                )?;
+                            }
                             if let Some(join) = &fanout.join {
                                 writeln!(
                                     f,
@@ -248,6 +256,14 @@ impl fmt::Display for Module {
                         recurrence.start.stage_index,
                         ExprPrinter::new(self, recurrence.start.runtime_expr)
                     )?;
+                    for guard in &recurrence.guards {
+                        writeln!(
+                            f,
+                            "      guard[{}] = {}",
+                            guard.stage_index,
+                            ExprPrinter::new(self, guard.runtime_predicate)
+                        )?;
+                    }
                     for step in &recurrence.steps {
                         writeln!(
                             f,
@@ -404,7 +420,17 @@ pub struct FanoutStage {
     pub element_subject: Type,
     pub mapped_element_type: Type,
     pub mapped_collection_type: Type,
+    pub filters: Vec<FanoutFilter>,
     pub join: Option<FanoutJoin>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FanoutFilter {
+    pub stage_index: usize,
+    pub stage_span: SourceSpan,
+    pub predicate_expr: HirExprId,
+    pub input_subject: Type,
+    pub runtime_predicate: ExprId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -422,6 +448,7 @@ pub struct PipeRecurrence {
     pub target: RecurrencePlan,
     pub wakeup: RecurrenceWakeupPlan,
     pub start: RecurrenceStage,
+    pub guards: Vec<RecurrenceGuard>,
     pub steps: Vec<RecurrenceStage>,
     pub non_source_wakeup: Option<NonSourceWakeup>,
 }
@@ -434,6 +461,15 @@ pub struct RecurrenceStage {
     pub input_subject: Type,
     pub result_subject: Type,
     pub runtime_expr: ExprId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecurrenceGuard {
+    pub stage_index: usize,
+    pub stage_span: SourceSpan,
+    pub predicate_expr: HirExprId,
+    pub input_subject: Type,
+    pub runtime_predicate: ExprId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

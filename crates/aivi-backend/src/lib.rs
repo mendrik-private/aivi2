@@ -8,12 +8,15 @@
 //! - explicit ABI/layout tables,
 //! - explicit kernel calling conventions and captured environments,
 //! - source/decode/runtime-facing plans with no remaining typed-lambda-only capture analysis,
-//! - and structural validation plus stable debug output.
+//! - structural validation plus stable debug output,
+//! - and a first Cranelift/object-code path for backend-owned scalar kernels.
 //!
-//! The current slice intentionally stops before real Cranelift emission. It consumes explicit
-//! lambda closures and turns them into closed backend kernels with explicit input subjects,
-//! environment slots, layout tables, and global dependencies.
+//! The current Cranelift slice is intentionally narrow. It consumes explicit lambda closures and
+//! turns them into closed backend kernels with explicit input subjects, environment slots, layout
+//! tables, and global dependencies, then lowers the subset of runtime-kernel ABI contracts that
+//! are already backend-owned into real Cranelift functions and object bytes.
 
+mod codegen;
 mod ids;
 mod kernel;
 mod layout;
@@ -22,6 +25,7 @@ mod program;
 mod validate;
 
 pub use aivi_core::{Arena, ArenaId, ArenaOverflow};
+pub use codegen::{CodegenError, CodegenErrors, CompiledKernel, CompiledProgram, compile_program};
 pub use ids::{
     DecodePlanId, DecodeStepId, EnvSlotId, InlineSubjectId, ItemId, KernelExprId, KernelId,
     LayoutId, PipelineId, SourceId,

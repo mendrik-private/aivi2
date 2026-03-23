@@ -1614,15 +1614,23 @@ impl Lowerer {
                     }
                 }
                 syn::PipeStageKind::FanIn { .. } => {
-                    if index == 0
-                        || !matches!(&stages[index - 1].kind, syn::PipeStageKind::Map { .. })
+                    let mut scan = index;
+                    while scan > 0
+                        && matches!(&stages[scan - 1].kind, syn::PipeStageKind::Gate { .. })
+                    {
+                        scan -= 1;
+                    }
+                    if scan == 0
+                        || !matches!(&stages[scan - 1].kind, syn::PipeStageKind::Map { .. })
                     {
                         self.diagnostics.push(
-                            Diagnostic::error("`<|*` must immediately follow a `*|>` stage")
+                            Diagnostic::error(
+                                "`<|*` must close a `*|>` fan-out body with only `?|>` filters in between",
+                            )
                                 .with_code(code("orphan-fan-in"))
                                 .with_primary_label(
                                     stages[index].span,
-                                    "place `<|*` directly after the fan-out stage it joins",
+                                    "place `<|*` after the `*|>` stage it joins, allowing only `?|>` filters between them",
                                 ),
                         );
                     }
@@ -1658,6 +1666,9 @@ impl Lowerer {
                     _ => index += 1,
                 },
                 RecurrenceState::AwaitingStep { start } => match &stages[index].kind {
+                    syn::PipeStageKind::Gate { .. } => {
+                        index += 1;
+                    }
                     syn::PipeStageKind::RecurStep { .. } => {
                         state = RecurrenceState::InSuffix { start };
                         index += 1;
@@ -1714,7 +1725,7 @@ impl Lowerer {
                     "add `@|>` before this recurrence step or remove `<|@`",
                 )
                 .with_note(
-                    "the current structural recurrence form is a trailing suffix shaped `@|> init <|@ step (<|@ step)*`",
+                    "the current structural recurrence form is a trailing suffix shaped `@|> init (?|> gate)* <|@ step (<|@ step)*`",
                 ),
         );
     }
@@ -1724,19 +1735,21 @@ impl Lowerer {
         start_span: SourceSpan,
         continuation_span: Option<SourceSpan>,
     ) {
-        let mut diagnostic = Diagnostic::error("`@|>` must be followed by one or more `<|@` stages")
+        let mut diagnostic = Diagnostic::error(
+            "`@|>` must be followed by zero or more `?|>` guards and one or more `<|@` stages",
+        )
             .with_code(code("unfinished-recurrence"))
             .with_primary_label(
                 start_span,
                 "this recurrent suffix never receives a recurrence step",
             )
             .with_note(
-                "the current structural recurrence form is a trailing suffix shaped `@|> init <|@ step (<|@ step)*`",
+                "the current structural recurrence form is a trailing suffix shaped `@|> init (?|> gate)* <|@ step (<|@ step)*`",
             );
         if let Some(span) = continuation_span {
             diagnostic = diagnostic.with_secondary_label(
                 span,
-                "a recurrent suffix cannot continue with this stage before a `<|@` step appears",
+                "a recurrent suffix may only use `?|>` guards before its first `<|@` step",
             );
         }
         self.diagnostics.push(diagnostic);
@@ -1750,7 +1763,7 @@ impl Lowerer {
     ) {
         self.diagnostics.push(
             Diagnostic::error(
-                "a recurrent pipe suffix may only continue with `<|@` stages and must reach pipe end",
+                "a recurrent pipe suffix may only use `?|>` guards before its first `<|@`, then only `<|@` stages, and must reach pipe end",
             )
             .with_code(code("illegal-recurrence-continuation"))
             .with_primary_label(span, label)
@@ -6677,6 +6690,65 @@ sig updates : Signal Int
             })
             .collect::<Vec<_>>();
         assert_eq!(step_names, vec!["step".to_owned(), "step".to_owned()]);
+    }
+
+    #[test]
+    fn allows_recurrence_guards_before_steps() {
+        let lowered = lower_text(
+            "recurrence-guard-view.aivi",
+            "domain Duration over Int\n\
+             \tliteral s : Int -> Duration\n\
+             type Cursor = { hasNext: Bool }\n\
+             fun keep:Cursor #cursor:Cursor => cursor\n\
+             val seed:Cursor = { hasNext: True }\n\
+             @recur.timer 1s\n\
+             sig cursor : Signal Cursor =\n\
+              seed\n\
+               @|> keep\n\
+               ?|> .hasNext\n\
+               <|@ keep\n",
+        );
+        assert!(
+            !lowered.has_errors(),
+            "recurrence guards should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let cursor = find_signal(lowered.module(), "cursor");
+        let body = cursor
+            .body
+            .expect("cursor should lower to a pipe expression");
+        let ExprKind::Pipe(pipe) = &lowered.module().exprs()[body].kind else {
+            panic!("expected cursor to lower as a pipe expression");
+        };
+        let recurrence = pipe
+            .recurrence_suffix()
+            .expect("lowered pipe should satisfy the structural recurrence invariant")
+            .expect("cursor should include a recurrence suffix");
+
+        assert_eq!(recurrence.guard_stage_count(), 1);
+        assert_eq!(recurrence.step_count(), 1);
+    }
+
+    #[test]
+    fn allows_fanout_filters_before_join() {
+        let lowered = lower_text(
+            "fanout-filter-before-join.aivi",
+            "type User = { email: Text }\n\
+             fun keepText:Bool #email:Text => True\n\
+             fun joinEmails:Text #items:List Text => \"joined\"\n\
+             val users:List User = [{ email: \"ada@example.com\" }]\n\
+             val joinedEmails:Text =\n\
+              users\n\
+               *|> .email\n\
+               ?|> keepText\n\
+               <|* joinEmails\n",
+        );
+        assert!(
+            !lowered.has_errors(),
+            "fan-out filters before `<|*` should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
     }
 
     #[test]

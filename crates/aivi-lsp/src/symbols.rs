@@ -35,12 +35,12 @@ fn convert_symbol_kind(kind: LspSymbolKind) -> SymbolKind {
 
 /// Convert aivi LspSymbol list to LSP DocumentSymbol list.
 pub fn convert_symbols(
-    symbols: Vec<LspSymbol>,
+    symbols: &[LspSymbol],
     source_file: &aivi_base::SourceFile,
 ) -> Vec<DocumentSymbol> {
     symbols
-        .into_iter()
-        .map(|s| convert_symbol(&s, source_file))
+        .iter()
+        .map(|symbol| convert_symbol(symbol, source_file))
         .collect()
 }
 
@@ -62,7 +62,7 @@ fn convert_symbol(sym: &LspSymbol, source_file: &aivi_base::SourceFile) -> Docum
     let children: Vec<DocumentSymbol> = sym
         .children
         .iter()
-        .map(|c| convert_symbol(c, source_file))
+        .map(|child| convert_symbol(child, source_file))
         .collect();
 
     #[allow(deprecated)]

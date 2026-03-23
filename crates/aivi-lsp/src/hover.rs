@@ -12,29 +12,12 @@ pub async fn hover(params: HoverParams, state: Arc<ServerState>) -> Option<Hover
     let lsp_pos = params.text_document_position_params.position;
 
     let file = *state.files.get(uri)?;
-
-    let (symbols, text, path) = {
-        let mut db = state.db.write();
-        let symbols = aivi_query::symbol_index(&mut db, file);
-        let text = file.text(&db).to_owned();
-        let path = file.path(&db).to_path_buf();
-        (symbols, text, path)
-    };
-
-    let mut source_db = aivi_base::SourceDatabase::new();
-    let file_id = source_db.add_file(path, text);
-    let source_file = &source_db[file_id];
-
-    let cursor = source_file.lsp_position_to_offset(LspPosition {
+    let analysis = crate::analysis::FileAnalysis::load(&state.db, file);
+    let cursor = analysis.source.lsp_position_to_offset(LspPosition {
         line: lsp_pos.line,
         character: lsp_pos.character,
     });
-
-    // Find the innermost symbol whose full span contains the cursor.
-    let sym = symbols.iter().find(|s| {
-        let sp = s.span.span();
-        sp.start() <= cursor && cursor <= sp.end()
-    })?;
+    let sym = analysis.tightest_symbol_at_offset(cursor)?;
 
     let kind_label = match sym.kind {
         aivi_hir::LspSymbolKind::Function => "fun",
@@ -52,8 +35,7 @@ pub async fn hover(params: HoverParams, state: Arc<ServerState>) -> Option<Hover
         format!("{} {}", kind_label, sym.name)
     };
 
-    // Compute range for the name span so VSCode highlights the hovered word.
-    let name_range = source_file.span_to_lsp_range(sym.selection_span.span());
+    let name_range = analysis.source.span_to_lsp_range(sym.selection_span.span());
     let range = Range {
         start: Position {
             line: name_range.start.line,

@@ -1,14 +1,16 @@
+use std::fmt;
+
 use aivi_base::SourceSpan;
 use aivi_typing::{GatePlanner, GateResultKind};
 
 use crate::{
+    domain_operator_elaboration::select_domain_binary_operator,
+    validate::{
+        truthy_falsy_pair_stages, walk_expr_tree, GateExprEnv, GateIssue, GateType, GateTypeContext,
+    },
     BinaryOperator, BindingId, BuiltinTerm, DomainMemberHandle, ExprId, ExprKind, IntegerLiteral,
     Item, ItemId, Module, Name, NamePath, PatternId, PipeExpr, PipeStageKind, ProjectionBase,
     SuffixedIntegerLiteral, TermResolution, TextFragment, TextSegment, UnaryOperator,
-    domain_operator_elaboration::select_domain_binary_operator,
-    validate::{
-        GateExprEnv, GateIssue, GateType, GateTypeContext, truthy_falsy_pair_stages, walk_expr_tree,
-    },
 };
 
 /// Focused gate-core plans derived from resolved HIR.
@@ -124,6 +126,32 @@ pub enum GateRuntimeUnsupportedPipeStageKind {
     Falsy,
     RecurStart,
     RecurStep,
+}
+
+impl fmt::Display for GateRuntimeUnsupportedKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::RegexLiteral => f.write_str("regex literal"),
+            Self::ApplicativeCluster => f.write_str("applicative cluster"),
+            Self::Markup => f.write_str("markup expression"),
+            Self::PipeStage(kind) => write!(f, "{kind}"),
+        }
+    }
+}
+
+impl fmt::Display for GateRuntimeUnsupportedPipeStageKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Case => f.write_str("case pipe stage"),
+            Self::Map => f.write_str("map pipe stage"),
+            Self::Apply => f.write_str("apply pipe stage"),
+            Self::FanIn => f.write_str("fan-in pipe stage"),
+            Self::Truthy => f.write_str("truthy pipe stage"),
+            Self::Falsy => f.write_str("falsy pipe stage"),
+            Self::RecurStart => f.write_str("recurrence-start pipe stage"),
+            Self::RecurStep => f.write_str("recurrence-step pipe stage"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -403,9 +431,17 @@ fn collect_gate_pipe(
     stages: &mut Vec<GateStageElaboration>,
 ) {
     let stages_in_pipe = pipe.stages.iter().collect::<Vec<_>>();
+    let recurrence_start_index = pipe
+        .recurrence_suffix()
+        .ok()
+        .flatten()
+        .map(|suffix| suffix.prefix_stage_count());
     let mut current = typing.infer_expr(pipe.head, env, None).ty;
     let mut stage_index = 0usize;
     while stage_index < stages_in_pipe.len() {
+        if recurrence_start_index.is_some_and(|start| stage_index >= start) {
+            break;
+        }
         let stage = stages_in_pipe[stage_index];
         match &stage.kind {
             PipeStageKind::Transform { expr } => {
@@ -439,10 +475,30 @@ fn collect_gate_pipe(
                 stage_index += 1;
             }
             PipeStageKind::Map { expr } => {
-                current = current
-                    .as_ref()
-                    .and_then(|subject| typing.infer_fanout_map_stage(*expr, env, subject));
-                stage_index += 1;
+                let segment = pipe
+                    .fanout_segment(stage_index)
+                    .expect("map stages should expose a fan-out segment");
+                if segment.join_stage().is_some() {
+                    let outcome = crate::fanout_elaboration::elaborate_fanout_segment(
+                        module,
+                        &segment,
+                        current.as_ref(),
+                        env,
+                        typing,
+                    );
+                    current = match outcome {
+                        crate::fanout_elaboration::FanoutSegmentOutcome::Planned(plan) => {
+                            Some(plan.result_type)
+                        }
+                        crate::fanout_elaboration::FanoutSegmentOutcome::Blocked(_) => None,
+                    };
+                    stage_index = segment.next_stage_index();
+                } else {
+                    current = current
+                        .as_ref()
+                        .and_then(|subject| typing.infer_fanout_map_stage(*expr, env, subject));
+                    stage_index += 1;
+                }
             }
             PipeStageKind::FanIn { expr } => {
                 current = current
@@ -1047,10 +1103,10 @@ mod tests {
     use aivi_syntax::parse_module;
 
     use super::{
-        GateCoreExprKind, GateElaborationBlocker, GateRuntimeExprKind, GateRuntimeProjectionBase,
-        GateRuntimeReference, GateStageOutcome, elaborate_gates,
+        elaborate_gates, GateCoreExprKind, GateElaborationBlocker, GateRuntimeExprKind,
+        GateRuntimeProjectionBase, GateRuntimeReference, GateStageOutcome,
     };
-    use crate::{BuiltinType, GateType, Item, lower_module};
+    use crate::{lower_module, BuiltinType, GateType, Item};
 
     fn fixture_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1462,6 +1518,91 @@ val maybeJoined:Option Text =
     }
 
     #[test]
+    fn skips_joined_fanout_filter_gates() {
+        let lowered = lower_text(
+            "gate-inside-fanout-join.aivi",
+            r#"
+type User = {
+    email: Text
+}
+
+fun keepText:Bool #email:Text =>
+    True
+
+fun joinEmails:Text #items:List Text =>
+    "joined"
+
+val users:List User = [
+    { email: "ada@example.com" }
+]
+
+val joinedEmails:Text =
+    users
+     *|> .email
+     ?|> keepText
+     <|* joinEmails
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "fan-out filter example should lower cleanly before gate elaboration: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_gates(lowered.module());
+        assert!(
+            report
+                .stages()
+                .iter()
+                .all(|stage| item_name(lowered.module(), stage.owner) != "joinedEmails"),
+            "joined fan-out filter gates should stay part of the fan-out segment, not become standalone gate stages: {:?}",
+            report.stages()
+        );
+    }
+
+    #[test]
+    fn skips_recurrence_guard_gates() {
+        let lowered = lower_text(
+            "gate-inside-recurrence.aivi",
+            r#"
+domain Duration over Int
+    literal s : Int -> Duration
+
+type Cursor = {
+    hasNext: Bool
+}
+
+fun keep:Cursor #cursor:Cursor =>
+    cursor
+
+val seed:Cursor = { hasNext: True }
+
+@recur.timer 5s
+sig cursor : Signal Cursor =
+    seed
+     @|> keep
+     ?|> .hasNext
+     <|@ keep
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "recurrence guard example should lower cleanly before gate elaboration: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_gates(lowered.module());
+        assert!(
+            report
+                .stages()
+                .iter()
+                .all(|stage| item_name(lowered.module(), stage.owner) != "cursor"),
+            "recurrence guards should stay attached to the recurrence, not become standalone gate stages: {:?}",
+            report.stages()
+        );
+    }
+
+    #[test]
     fn keeps_gate_subject_tracking_through_truthy_falsy_pairs() {
         let lowered = lower_fixture("milestone-2/valid/pipe-truthy-falsy-carriers/main.aivi");
         assert!(
@@ -1528,12 +1669,10 @@ val maybeJoined:Option Text =
 
         match &blocked.outcome {
             GateStageOutcome::Blocked(stage) => {
-                assert!(
-                    stage
-                        .blockers
-                        .iter()
-                        .any(|blocker| blocker == &GateElaborationBlocker::ImpurePredicate)
-                );
+                assert!(stage
+                    .blockers
+                    .iter()
+                    .any(|blocker| blocker == &GateElaborationBlocker::ImpurePredicate));
             }
             other => panic!("expected blocked gate stage, found {other:?}"),
         }

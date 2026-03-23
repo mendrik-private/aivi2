@@ -24,7 +24,7 @@ Before diving into the details, here is a small but complete AIVI program.
 The tour will dissect each piece.
 
 ```aivi
--- A simple todo-item counter
+// A simple todo-item counter
 
 type Filter = All | Active | Done
 
@@ -36,17 +36,14 @@ type TodoItem = {
 
 fun countActive:Int #items:List TodoItem =>
     items
-     *|> .done
-     *|> \done => done == False
-     |> List.length
+     *|> _
+     ?|> not .done 
+     <|* length
 
 @source window.keyDown with { repeat: False }
 sig lastKey : Signal Text
 
-sig todos : Signal (List TodoItem) =
-    []
-    @|> List.append (TodoItem 1 "Buy coffee" False)
-    <|@ List.append (TodoItem 1 "Buy coffee" False)
+sig todos : Signal (List TodoItem) = []
 
 sig activeCount : Signal Int =
     todos
@@ -54,7 +51,7 @@ sig activeCount : Signal Int =
 
 sig statusText : Signal Text =
     activeCount
-     |> \n => "{n} items remaining"
+     |> "{_} items remaining"
 
 val main =
     <Window title="Todos">

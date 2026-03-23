@@ -1300,7 +1300,7 @@ impl<'a> ProgramLowerer<'a> {
                             }
                         }
                         core::ExprKind::Projection { base, path } => {
-                            let base = match base {
+                            let build_base = match base {
                                 core::ProjectionBase::AmbientSubject => {
                                     ProjectionBaseBuild::Subject(
                                         subject
@@ -1308,17 +1308,17 @@ impl<'a> ProgramLowerer<'a> {
                                             .reference,
                                     )
                                 }
-                                core::ProjectionBase::Expr(base_expr) => {
-                                    tasks.push(Task::Visit(*base_expr, subject));
-                                    ProjectionBaseBuild::Expr
-                                }
+                                core::ProjectionBase::Expr(_) => ProjectionBaseBuild::Expr,
                             };
                             tasks.push(Task::BuildProjection {
                                 span: expr.span,
                                 layout,
-                                base,
+                                base: build_base,
                                 path: path.clone(),
                             });
+                            if let core::ProjectionBase::Expr(base_expr) = base {
+                                tasks.push(Task::Visit(*base_expr, subject));
+                            }
                         }
                         core::ExprKind::Apply { callee, arguments } => {
                             tasks.push(Task::BuildApply {

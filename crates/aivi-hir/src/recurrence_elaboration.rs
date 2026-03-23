@@ -1,19 +1,22 @@
 use aivi_base::SourceSpan;
 use aivi_typing::{
-    BuiltinSourceWakeupCause, CustomSourceRecurrenceWakeupContext, NonSourceWakeupCause,
-    RecurrencePlan, RecurrencePlanner, RecurrenceTargetEvidence, RecurrenceWakeupPlan,
-    RecurrenceWakeupPlanner, SourceRecurrenceWakeupContext, builtin_source_option_wakeup_cause,
+    builtin_source_option_wakeup_cause, BuiltinSourceWakeupCause,
+    CustomSourceRecurrenceWakeupContext, NonSourceWakeupCause, RecurrencePlan, RecurrencePlanner,
+    RecurrenceTargetEvidence, RecurrenceWakeupPlan, RecurrenceWakeupPlanner,
+    SourceRecurrenceWakeupContext,
 };
 
 use crate::{
+    gate_elaboration::{
+        lower_gate_pipe_body_runtime_expr, lower_gate_runtime_expr, GateElaborationBlocker,
+        GateRuntimeExpr, GateRuntimeUnsupportedKind,
+    },
+    validate::{
+        truthy_falsy_pair_stages, walk_expr_tree, GateExprEnv, GateIssue, GateType, GateTypeContext,
+    },
     CustomSourceRecurrenceWakeup, DecoratorId, DecoratorPayload, ExprId, ExprKind, Item, ItemId,
     Module, PipeExpr, PipeStageKind, SignalItem, SourceDecorator, SourceMetadata,
     SourceProviderRef,
-    gate_elaboration::{
-        GateElaborationBlocker, GateRuntimeExpr, GateRuntimeUnsupportedKind,
-        lower_gate_pipe_body_runtime_expr, lower_gate_runtime_expr,
-    },
-    validate::{GateExprEnv, GateType, GateTypeContext, truthy_falsy_pair_stages, walk_expr_tree},
 };
 
 /// Focused scheduler-node plans derived from validated recurrence suffixes.
@@ -80,6 +83,15 @@ pub struct RecurrenceStagePlan {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecurrenceGuardPlan {
+    pub stage_index: usize,
+    pub stage_span: SourceSpan,
+    pub predicate: ExprId,
+    pub input_subject: GateType,
+    pub runtime_predicate: RecurrenceRuntimeExpr,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecurrenceNonSourceWakeupBinding {
     pub cause: NonSourceWakeupCause,
     pub witness: ExprId,
@@ -91,6 +103,7 @@ pub struct RecurrenceNodePlan {
     pub target: RecurrencePlan,
     pub wakeup: RecurrenceWakeupPlan,
     pub start: RecurrenceStagePlan,
+    pub guards: Vec<RecurrenceGuardPlan>,
     pub steps: Vec<RecurrenceStagePlan>,
     pub non_source_wakeup: Option<RecurrenceNonSourceWakeupBinding>,
 }
@@ -112,6 +125,11 @@ pub enum RecurrenceElaborationBlocker {
     MissingWakeup,
     UnknownInputSubjectType,
     StartStage {
+        stage_span: SourceSpan,
+        blocker: RecurrenceRuntimeStageBlocker,
+    },
+    GuardStage {
+        stage_index: usize,
         stage_span: SourceSpan,
         blocker: RecurrenceRuntimeStageBlocker,
     },
@@ -360,6 +378,7 @@ fn elaborate_recurrence_pipe(
     }
 
     let mut start_plan = None;
+    let mut guard_plans = Vec::new();
     let mut step_plans = Vec::new();
     if let Some(input_subject) = input_subject.as_ref() {
         match lower_gate_pipe_body_runtime_expr(
@@ -370,63 +389,98 @@ fn elaborate_recurrence_pipe(
             typing,
         ) {
             Ok(runtime_expr) => {
-                let mut current_subject = runtime_expr.ty.clone();
+                let start_subject = runtime_expr.ty.clone();
                 start_plan = Some(RecurrenceStagePlan {
                     stage_index: prefix_stage_count,
                     stage_span: suffix.start_stage().span,
                     expr: suffix.start_expr(),
                     input_subject: input_subject.clone(),
-                    result_subject: current_subject.clone(),
+                    result_subject: start_subject.clone(),
                     runtime_expr,
                 });
 
-                for (offset, stage) in suffix.step_stages().enumerate() {
-                    let PipeStageKind::RecurStep { expr } = stage.kind else {
-                        unreachable!("validated recurrence suffix steps must use `<|@`");
+                for (offset, stage) in suffix.guard_stages().enumerate() {
+                    let PipeStageKind::Gate { expr } = stage.kind else {
+                        unreachable!("validated recurrence guards must use `?|>`");
                     };
                     let stage_index = prefix_stage_count + 1 + offset;
-                    match lower_gate_pipe_body_runtime_expr(
+                    match lower_recurrence_guard_predicate(
                         module,
                         expr,
                         env,
-                        &current_subject,
+                        &start_subject,
                         typing,
                     ) {
-                        Ok(runtime_expr) => {
-                            let result_subject = runtime_expr.ty.clone();
-                            step_plans.push(RecurrenceStagePlan {
+                        Ok(runtime_predicate) => {
+                            guard_plans.push(RecurrenceGuardPlan {
                                 stage_index,
                                 stage_span: stage.span,
-                                expr,
-                                input_subject: current_subject.clone(),
-                                result_subject: result_subject.clone(),
-                                runtime_expr,
+                                predicate: expr,
+                                input_subject: start_subject.clone(),
+                                runtime_predicate,
                             });
-                            current_subject = result_subject;
                         }
                         Err(blocker) => {
-                            blockers.push(RecurrenceElaborationBlocker::StepStage {
+                            blockers.push(RecurrenceElaborationBlocker::GuardStage {
                                 stage_index,
                                 stage_span: stage.span,
-                                blocker: recurrence_runtime_stage_blocker(blocker),
+                                blocker,
                             });
-                            break;
                         }
                     }
                 }
 
-                if blockers.is_empty()
-                    && !current_subject
-                        .same_shape(&start_plan.as_ref().expect("start exists").result_subject)
-                {
-                    blockers.push(RecurrenceElaborationBlocker::StepChainDoesNotClose {
-                        expected: start_plan
-                            .as_ref()
-                            .expect("start exists")
-                            .result_subject
-                            .clone(),
-                        found: current_subject,
-                    });
+                if blockers.is_empty() {
+                    let mut current_subject = start_subject.clone();
+                    for (offset, stage) in suffix.step_stages().enumerate() {
+                        let PipeStageKind::RecurStep { expr } = stage.kind else {
+                            unreachable!("validated recurrence suffix steps must use `<|@`");
+                        };
+                        let stage_index =
+                            prefix_stage_count + 1 + suffix.guard_stage_count() + offset;
+                        match lower_gate_pipe_body_runtime_expr(
+                            module,
+                            expr,
+                            env,
+                            &current_subject,
+                            typing,
+                        ) {
+                            Ok(runtime_expr) => {
+                                let result_subject = runtime_expr.ty.clone();
+                                step_plans.push(RecurrenceStagePlan {
+                                    stage_index,
+                                    stage_span: stage.span,
+                                    expr,
+                                    input_subject: current_subject.clone(),
+                                    result_subject: result_subject.clone(),
+                                    runtime_expr,
+                                });
+                                current_subject = result_subject;
+                            }
+                            Err(blocker) => {
+                                blockers.push(RecurrenceElaborationBlocker::StepStage {
+                                    stage_index,
+                                    stage_span: stage.span,
+                                    blocker: recurrence_runtime_stage_blocker(blocker),
+                                });
+                                break;
+                            }
+                        }
+                    }
+
+                    if blockers.is_empty()
+                        && !current_subject
+                            .same_shape(&start_plan.as_ref().expect("start exists").result_subject)
+                    {
+                        blockers.push(RecurrenceElaborationBlocker::StepChainDoesNotClose {
+                            expected: start_plan
+                                .as_ref()
+                                .expect("start exists")
+                                .result_subject
+                                .clone(),
+                            found: current_subject,
+                        });
+                    }
                 }
             }
             Err(blocker) => blockers.push(RecurrenceElaborationBlocker::StartStage {
@@ -462,6 +516,7 @@ fn elaborate_recurrence_pipe(
             target: target.expect("planned recurrence nodes should have a target"),
             wakeup: wakeup.expect("planned recurrence nodes should have a wakeup"),
             start: start_plan.expect("planned recurrence nodes should have a start stage"),
+            guards: guard_plans,
             steps: step_plans,
             non_source_wakeup,
         })
@@ -472,6 +527,57 @@ fn elaborate_recurrence_pipe(
             input_subject,
             blockers,
         })
+    }
+}
+
+fn lower_recurrence_guard_predicate(
+    module: &Module,
+    predicate: ExprId,
+    env: &GateExprEnv,
+    subject: &GateType,
+    typing: &mut GateTypeContext<'_>,
+) -> Result<RecurrenceRuntimeExpr, RecurrenceRuntimeStageBlocker> {
+    let predicate_span = module.exprs()[predicate].span;
+    let predicate_info = typing.infer_pipe_body(predicate, env, subject);
+    if let Some(issue) = predicate_info.issues.into_iter().next() {
+        return Err(recurrence_guard_issue_blocker(issue, predicate_span));
+    }
+    if predicate_info.contains_signal || predicate_info.ty.as_ref().is_some_and(GateType::is_signal)
+    {
+        return Err(RecurrenceRuntimeStageBlocker::ImpureExpr);
+    }
+    let Some(predicate_ty) = predicate_info.ty else {
+        return Err(RecurrenceRuntimeStageBlocker::UnknownExprType {
+            span: predicate_span,
+        });
+    };
+    if !predicate_ty.is_bool() {
+        return Err(RecurrenceRuntimeStageBlocker::PredicateNotBool {
+            found: predicate_ty,
+        });
+    }
+    lower_gate_pipe_body_runtime_expr(module, predicate, env, subject, typing)
+        .map_err(recurrence_runtime_stage_blocker)
+}
+
+fn recurrence_guard_issue_blocker(
+    issue: GateIssue,
+    span: SourceSpan,
+) -> RecurrenceRuntimeStageBlocker {
+    match issue {
+        GateIssue::InvalidProjection { path, subject, .. } => {
+            RecurrenceRuntimeStageBlocker::InvalidProjection { path, subject }
+        }
+        GateIssue::UnknownField { path, subject, .. } => {
+            RecurrenceRuntimeStageBlocker::UnknownField { path, subject }
+        }
+        GateIssue::AmbiguousDomainMember { .. }
+        | GateIssue::UnsupportedApplicativeClusterMember { .. }
+        | GateIssue::ApplicativeClusterMismatch { .. }
+        | GateIssue::InvalidClusterFinalizer { .. }
+        | GateIssue::CaseBranchTypeMismatch { .. } => {
+            RecurrenceRuntimeStageBlocker::UnknownExprType { span }
+        }
     }
 }
 
@@ -695,8 +801,8 @@ mod tests {
         BuiltinSourceWakeupCause, CustomSourceWakeupCause, RecurrenceTarget, RecurrenceWakeupKind,
     };
 
-    use super::{RecurrenceElaborationBlocker, RecurrenceNodeOutcome, elaborate_recurrences};
-    use crate::{GateRuntimeExprKind, GateType, Item, lower_module};
+    use super::{elaborate_recurrences, RecurrenceElaborationBlocker, RecurrenceNodeOutcome};
+    use crate::{lower_module, GateRuntimeExprKind, GateRuntimeProjectionBase, GateType, Item};
 
     fn fixture_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -765,6 +871,7 @@ mod tests {
                 assert_eq!(plan.target.target(), RecurrenceTarget::Signal);
                 assert_eq!(plan.wakeup.kind(), RecurrenceWakeupKind::Timer);
                 assert_eq!(plan.start.stage_index, 0);
+                assert!(plan.guards.is_empty());
                 assert_eq!(plan.steps.len(), 1);
                 assert_eq!(
                     plan.start.result_subject,
@@ -795,6 +902,7 @@ mod tests {
             RecurrenceNodeOutcome::Planned(plan) => {
                 assert_eq!(plan.target.target(), RecurrenceTarget::Task);
                 assert_eq!(plan.wakeup.kind(), RecurrenceWakeupKind::Backoff);
+                assert!(plan.guards.is_empty());
                 let witness = plan
                     .non_source_wakeup
                     .as_ref()
@@ -829,6 +937,7 @@ mod tests {
         match &built_in.outcome {
             RecurrenceNodeOutcome::Planned(plan) => {
                 assert_eq!(plan.wakeup.kind(), RecurrenceWakeupKind::Timer);
+                assert!(plan.guards.is_empty());
                 assert_eq!(
                     plan.wakeup.evidence().builtin_source_cause(),
                     Some(BuiltinSourceWakeupCause::ProviderTimer)
@@ -856,6 +965,7 @@ mod tests {
         match &custom.outcome {
             RecurrenceNodeOutcome::Planned(plan) => {
                 assert_eq!(plan.wakeup.kind(), RecurrenceWakeupKind::SourceEvent);
+                assert!(plan.guards.is_empty());
                 assert_eq!(
                     plan.wakeup.evidence().custom_source_cause(),
                     Some(CustomSourceWakeupCause::ReactiveInputs)
@@ -899,12 +1009,67 @@ sig gated : Signal Int =
         match &gated.outcome {
             RecurrenceNodeOutcome::Planned(plan) => {
                 assert_eq!(plan.wakeup.kind(), RecurrenceWakeupKind::SourceEvent);
+                assert!(plan.guards.is_empty());
                 assert_eq!(
                     plan.wakeup.evidence().builtin_source_cause(),
                     Some(BuiltinSourceWakeupCause::ReactiveInputs)
                 );
             }
             other => panic!("expected planned activeWhen recurrence node, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn elaborates_recurrence_guards_before_steps() {
+        let lowered = lower_text(
+            "recurrence-guard.aivi",
+            r#"
+domain Duration over Int
+    literal s : Int -> Duration
+
+type Cursor = {
+    hasNext: Bool
+}
+
+fun keep:Cursor #cursor:Cursor =>
+    cursor
+
+val seed:Cursor = { hasNext: True }
+
+@recur.timer 1s
+sig cursor : Signal Cursor =
+    seed
+     @|> keep
+     ?|> .hasNext
+     <|@ keep
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "recurrence guard example should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_recurrences(lowered.module());
+        let guarded = report
+            .nodes()
+            .iter()
+            .find(|node| item_name(lowered.module(), node.owner) == "cursor")
+            .expect("expected recurrence plan for cursor");
+
+        match &guarded.outcome {
+            RecurrenceNodeOutcome::Planned(plan) => {
+                assert_eq!(plan.guards.len(), 1);
+                assert_eq!(plan.guards[0].input_subject, plan.start.result_subject);
+                match &plan.guards[0].runtime_predicate.kind {
+                    GateRuntimeExprKind::Projection { base, path } => {
+                        assert_eq!(base, &GateRuntimeProjectionBase::AmbientSubject);
+                        assert_eq!(path.to_string(), "hasNext");
+                    }
+                    other => panic!("expected ambient projection guard predicate, found {other:?}"),
+                }
+            }
+            other => panic!("expected planned guarded recurrence node, found {other:?}"),
         }
     }
 

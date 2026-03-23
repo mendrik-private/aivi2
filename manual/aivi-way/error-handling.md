@@ -5,42 +5,38 @@ AIVI has no exceptions. Errors are values.
 This is not a limitation — it is a design. When errors are values, the type system enforces
 that you handle them. Nothing can go wrong silently.
 
-## Result A: the error type
+## Result E A: the error type
 
-```aivi
-type Result A = Ok A | Err Text
+```text
+-- declare the Result type: Ok carrying a success value of type A, or Err carrying an error of type E
 ```
 
-A `Result A` is either a successful value (`Ok A`) or an error message (`Err Text`).
+A `Result E A` is either a successful value (`Ok A`) or an error (`Err E`).
 Every operation that can fail returns `Result`.
 
 ## Matching on results
 
 Use `\|\|>` to branch on `Ok` vs `Err`:
 
-```aivi
-fun describeResult:Text #result:Result Int =>
-    result
-     ||> Ok n    => "Success: {n}"
-     ||> Err msg => "Failed: {msg}"
+```text
+-- declare a function 'describeResult' matching on a Result Text Int
+-- when Ok, format the number as "Success: N"
+-- when Err, format the message as "Failed: msg"
 ```
 
 The compiler ensures you handle both cases. You cannot accidentally ignore an error.
 
 ## Chaining operations that might fail
 
-A common pattern is a sequence of operations where each step can fail:
+A common pattern is a sequence of operations where each step can fail.
+Use `||>` to branch on `Ok` and `Err` at each step:
 
-```aivi
-fun parseAge:Result Int #input:Text =>
-    input
-     |> Text.toInt
-     ?|> \n => n > 0 and n < 150
-
-fun validateUser:Result User #raw:RawInput =>
-    parseAge raw.ageText
-     ||> Ok age  => Ok { name: raw.name, age }
-     ||> Err msg => Err "Invalid age: {msg}"
+```text
+-- declare a function 'validateAge' that returns Ok n if n is between 1 and 149, otherwise Err with a message
+-- declare a function 'validateUser' that parses raw input
+--   convert ageText to an integer, returning Err if it is not a number
+--   then validate the parsed integer with validateAge
+--   if both succeed, return Ok with a User record containing name and age
 ```
 
 ## Propagating errors in signals
@@ -48,60 +44,34 @@ fun validateUser:Result User #raw:RawInput =>
 When a signal holds a `Result`, downstream signals can propagate the `Ok` value or branch
 on the `Err`:
 
-```aivi
-@source http.get "/api/profile"
-sig profileResult : Signal (Result Profile)
-
-sig profileName : Signal Text =
-    profileResult
-     ||> Ok p    => p.name
-     ||> Err _   => "Unknown"
-
-sig profileError : Signal (Maybe Text) =
-    profileResult
-     ||> Ok _    => None
-     ||> Err msg => Some msg
+```text
+-- bind 'profileResult' to an HTTP GET for the user profile, producing Ok Profile or Err HttpError
+-- derive 'profileName': the user's name on success, "Unknown" on error
+-- derive 'profileError': None on success, Some with the error message on error
 ```
 
 ## Showing errors in markup
 
-```aivi
-sig hasError : Signal Bool =
-    profileError
-     ||> Some _ => True
-     ||> None   => False
-
-sig errorText : Signal Text =
-    profileError
-     ||> Some msg => msg
-     ||> None     => ""
-
-val profileView =
-    <Box orientation={Vertical} spacing={8}>
-        <show when={hasError}>
-            <Label text={errorText} cssClass="error-label" />
-        </show>
-        <Label text={profileName} />
-    </Box>
+```text
+-- derive 'hasError' as True when profileError holds a message, False otherwise
+-- derive 'errorText' as the error message when present, empty string otherwise
+-- render a vertical Box
+--   show an error Label with the error text only when hasError is True
+--   always show a Label with the profile name
 ```
 
-## The Maybe type for optional values
+## The Option type for optional values
 
-`Maybe A` handles absence (not failure):
+`Option A` handles absence (not failure):
 
-```aivi
-type Maybe A = Some A | None
-
-sig selectedItem : Signal (Maybe Item)
-
-sig selectionLabel : Signal Text =
-    selectedItem
-     ||> Some item => "Selected: {item.name}"
-     ||> None      => "Nothing selected"
+```text
+-- Option A is a sum type: Some (carrying A) or None
+-- declare a signal 'selectedItem' of type Option Item
+-- derive 'selectionLabel': show "Selected: name" when an item is selected, "Nothing selected" otherwise
 ```
 
 Use `Result` when an operation attempted and failed.
-Use `Maybe` when a value is simply optional.
+Use `Option` when a value is simply optional.
 
 ## Never throw
 
@@ -112,7 +82,7 @@ This means:
 - Reading a source file: returns `Result Text`.
 - Parsing a number: returns `Result Int`.
 - HTTP requests: return `Result Response`.
-- Looking up a key in a map: returns `Maybe Value`.
+- Looking up a key in a map: returns `Option Value`.
 
 The return type tells you whether the operation can fail before you even read the documentation.
 
@@ -120,42 +90,35 @@ The return type tells you whether the operation can fail before you even read th
 
 To fall back to a default value when a result is an error:
 
-```aivi
-fun withDefault:A #default:A #result:Result A =>
-    result
-     ||> Ok value => value
-     ||> Err _    => default
-
-val name = withDefault "Anonymous" profileResult
+```text
+-- declare a generic function 'withDefault' that returns the Ok value on success, or the default on error
+-- use withDefault to extract a name from profileResult, falling back to "Anonymous"
 ```
 
 Or inline in a pipe:
 
-```aivi
-sig displayName : Signal Text =
-    profileResult
-     ||> Ok profile => profile.name
-     ||> Err _      => "Anonymous"
+```text
+-- derive 'displayName' from profileResult: use the profile name on success, "Anonymous" on error
 ```
 
 ## Collecting errors from a list
 
-When validating a list of items, collect all errors rather than stopping at the first:
+When validating a list of items, validate each item independently and filter to keep only
+the valid ones. Use named predicate functions with `List.filter`:
 
-```aivi
-fun validateAll:Result (List B) #validate:(A -> Result B) #items:List A =>
-    items
-     *|> validate
-     |> List.partition
-     ||> { errors: [], oks } => Ok oks
-     ||> { errors }          => Err (errors |> List.head |> withDefault "Validation failed")
+```text
+-- declare a predicate 'isValidAge' returning True when an integer is between 1 and 149
+-- derive 'validAges' from ageInputs by filtering out values that do not pass isValidAge
 ```
+
+This keeps only the items that pass validation. For error reporting, match on each item
+individually with `||>` in the calling code.
 
 ## Summary
 
-- AIVI has no exceptions. Errors are `Result A = Ok A | Err Text`.
-- Use `\|\|>` to branch on `Ok` vs `Err`. The compiler enforces exhaustiveness.
-- `Maybe A = Some A | None` for optional values.
-- Chain results with `\|\|>` arms that produce new `Result` values.
+- AIVI has no exceptions. Errors are `Result E A = Ok A | Err E`.
+- Use `||>` to branch on `Ok` vs `Err`. The compiler enforces exhaustiveness.
+- `Option A = Some A | None` for optional values.
+- Chain results with `||>` arms that produce new `Result` values.
 - `withDefault` recovers a fallback when a result is an error.
 - Return type signatures communicate failure potential before reading docs.

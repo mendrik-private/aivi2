@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use aivi_base::SourceSpan;
 use aivi_hir::{
+    elaborate_fanouts, elaborate_gates, elaborate_general_expressions, elaborate_recurrences,
+    elaborate_source_lifecycles, elaborate_truthy_falsy, generate_source_decode_programs,
     BlockedFanoutSegment, BlockedGateStage, BlockedGeneralExpr as BlockedGeneralExprBody,
     BlockedRecurrenceNode, BlockedSourceDecodeProgram, BlockedSourceLifecycleNode,
     BlockedTruthyFalsyStage, ExprId as HirExprId, GateRuntimeExpr, GateRuntimeExprKind,
@@ -9,22 +11,20 @@ use aivi_hir::{
     GateRuntimeTextLiteral, GateRuntimeTextSegment, GateRuntimeTruthyFalsyBranch, GateStageOutcome,
     GeneralExprOutcome, Item as HirItem, ItemId as HirItemId, PatternId as HirPatternId,
     RecurrenceNodeOutcome, SourceDecodeProgram, SourceDecodeProgramOutcome,
-    SourceLifecycleNodeOutcome, TruthyFalsyStageOutcome, elaborate_fanouts, elaborate_gates,
-    elaborate_general_expressions, elaborate_recurrences, elaborate_source_lifecycles,
-    elaborate_truthy_falsy, generate_source_decode_programs,
+    SourceLifecycleNodeOutcome, TruthyFalsyStageOutcome,
 };
 
 use crate::{
-    Arena, ArenaOverflow, DecodeField, DecodeProgram, DecodeProgramId, DecodeStep, DecodeStepId,
-    DomainDecodeSurface, DomainDecodeSurfaceKind, Expr, ExprId, FanoutJoin, FanoutStage, GateStage,
-    Item, ItemId, ItemKind, ItemParameter, MapEntry, Module, NonSourceWakeup, Pattern,
-    PatternBinding, PatternConstructor, PatternKind, Pipe, PipeCaseArm, PipeExpr, PipeOrigin,
-    PipeRecurrence, PipeStage, PipeTruthyFalsyBranch, PipeTruthyFalsyStage, ProjectionBase,
-    RecordExprField, RecordPatternField, RecurrenceStage, Reference, SignalInfo, SourceId,
-    SourceInstanceId, SourceNode, SourceOptionBinding, Stage, StageKind, TextLiteral, TextSegment,
-    TruthyFalsyBranch, TruthyFalsyStage, Type,
     expr::ExprKind,
-    validate::{ValidationError, validate_module},
+    validate::{validate_module, ValidationError},
+    Arena, ArenaOverflow, DecodeField, DecodeProgram, DecodeProgramId, DecodeStep, DecodeStepId,
+    DomainDecodeSurface, DomainDecodeSurfaceKind, Expr, ExprId, FanoutFilter, FanoutJoin,
+    FanoutStage, GateStage, Item, ItemId, ItemKind, ItemParameter, MapEntry, Module,
+    NonSourceWakeup, Pattern, PatternBinding, PatternConstructor, PatternKind, Pipe, PipeCaseArm,
+    PipeExpr, PipeOrigin, PipeRecurrence, PipeStage, PipeTruthyFalsyBranch, PipeTruthyFalsyStage,
+    ProjectionBase, RecordExprField, RecordPatternField, RecurrenceGuard, RecurrenceStage,
+    Reference, SignalInfo, SourceId, SourceInstanceId, SourceNode, SourceOptionBinding, Stage,
+    StageKind, TextLiteral, TextSegment, TruthyFalsyBranch, TruthyFalsyStage, Type,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -196,7 +196,7 @@ impl std::fmt::Display for LoweringError {
             ),
             Self::BlockedGeneralExpr { owner, blocked, .. } => write!(
                 f,
-                "typed-core lowering blocked on general expression body for item {owner}: {blocked:?}"
+                "typed-core lowering blocked on general expression body for item {owner}: {blocked}"
             ),
             Self::DuplicatePipeStage {
                 owner,
@@ -401,7 +401,18 @@ impl<'a> ModuleLowerer<'a> {
                     core_item.body = Some(body);
                 }
                 GeneralExprOutcome::Blocked(blocked) => {
-                    let _ = blocked;
+                    if !blocked.requires_typed_core_error() {
+                        continue;
+                    }
+                    let span = blocked
+                        .primary_span()
+                        .unwrap_or(self.hir.exprs()[item.body_expr].span);
+                    self.errors.push(LoweringError::BlockedGeneralExpr {
+                        owner: item.owner,
+                        body_expr: item.body_expr,
+                        span,
+                        blocked,
+                    });
                 }
             }
         }
@@ -640,10 +651,6 @@ impl<'a> ModuleLowerer<'a> {
                 owner: segment.owner,
                 pipe_expr: segment.pipe_expr,
             };
-            let builder = match self.pipe_builder(key) {
-                Some(builder) => builder,
-                None => continue,
-            };
             let outcome = match segment.outcome {
                 aivi_hir::FanoutSegmentOutcome::Planned(plan) => {
                     let span = plan
@@ -651,6 +658,21 @@ impl<'a> ModuleLowerer<'a> {
                         .as_ref()
                         .map(|join| join_spans(segment.map_stage_span, join.stage_span))
                         .unwrap_or(segment.map_stage_span);
+                    let mut filters = Vec::with_capacity(plan.filters.len());
+                    let mut failed = false;
+                    for filter in &plan.filters {
+                        match self.lower_fanout_filter(segment.owner, filter) {
+                            Ok(filter) => filters.push(filter),
+                            Err(error) => {
+                                self.errors.push(error);
+                                failed = true;
+                                break;
+                            }
+                        }
+                    }
+                    if failed {
+                        continue;
+                    }
                     PendingStage::Lowered {
                         span,
                         input_subject: Type::lower(&plan.input_subject),
@@ -660,6 +682,7 @@ impl<'a> ModuleLowerer<'a> {
                             element_subject: Type::lower(&plan.element_subject),
                             mapped_element_type: Type::lower(&plan.mapped_element_type),
                             mapped_collection_type: Type::lower(&plan.mapped_collection_type),
+                            filters,
                             join: plan.join.map(|join| FanoutJoin {
                                 stage_index: join.stage_index,
                                 stage_span: join.stage_span,
@@ -681,6 +704,10 @@ impl<'a> ModuleLowerer<'a> {
                     });
                     continue;
                 }
+            };
+            let builder = match self.pipe_builder(key) {
+                Some(builder) => builder,
+                None => continue,
             };
             if builder
                 .stages
@@ -716,8 +743,23 @@ impl<'a> ModuleLowerer<'a> {
                             continue;
                         }
                     };
-                    let mut steps = Vec::with_capacity(plan.steps.len());
+                    let mut guards = Vec::with_capacity(plan.guards.len());
                     let mut failed = false;
+                    for guard in &plan.guards {
+                        match self.lower_recurrence_guard(node.owner, guard) {
+                            Ok(guard) => guards.push(guard),
+                            Err(error) => {
+                                self.errors.push(error);
+                                failed = true;
+                                break;
+                            }
+                        }
+                    }
+                    if failed {
+                        continue;
+                    }
+                    let mut steps = Vec::with_capacity(plan.steps.len());
+                    failed = false;
                     for step in &plan.steps {
                         match self.lower_recurrence_stage(node.owner, step) {
                             Ok(stage) => steps.push(stage),
@@ -751,6 +793,7 @@ impl<'a> ModuleLowerer<'a> {
                         target: plan.target,
                         wakeup: plan.wakeup,
                         start,
+                        guards,
                         steps,
                         non_source_wakeup,
                     }
@@ -1009,6 +1052,34 @@ impl<'a> ModuleLowerer<'a> {
             input_subject: Type::lower(&stage.input_subject),
             result_subject: Type::lower(&stage.result_subject),
             runtime_expr: self.lower_runtime_expr(owner, &stage.runtime_expr)?,
+        })
+    }
+
+    fn lower_recurrence_guard(
+        &mut self,
+        owner: HirItemId,
+        guard: &aivi_hir::RecurrenceGuardPlan,
+    ) -> Result<RecurrenceGuard, LoweringError> {
+        Ok(RecurrenceGuard {
+            stage_index: guard.stage_index,
+            stage_span: guard.stage_span,
+            predicate_expr: guard.predicate,
+            input_subject: Type::lower(&guard.input_subject),
+            runtime_predicate: self.lower_runtime_expr(owner, &guard.runtime_predicate)?,
+        })
+    }
+
+    fn lower_fanout_filter(
+        &mut self,
+        owner: HirItemId,
+        filter: &aivi_hir::FanoutFilterPlan,
+    ) -> Result<FanoutFilter, LoweringError> {
+        Ok(FanoutFilter {
+            stage_index: filter.stage_index,
+            stage_span: filter.stage_span,
+            predicate_expr: filter.predicate,
+            input_subject: Type::lower(&filter.input_subject),
+            runtime_predicate: self.lower_runtime_expr(owner, &filter.runtime_predicate)?,
         })
     }
 
@@ -1948,10 +2019,10 @@ mod tests {
     use aivi_base::SourceDatabase;
     use aivi_syntax::parse_module;
 
-    use super::{LoweringError, lower_module};
+    use super::{lower_module, LoweringError};
     use crate::{
+        validate::{validate_module, ValidationError},
         DecodeStep, GateStage, ItemKind, StageKind, Type,
-        validate::{ValidationError, validate_module},
     };
 
     fn fixture_root() -> PathBuf {
@@ -2059,10 +2130,18 @@ sig timeout : Signal Duration
 
     #[test]
     fn lowers_value_and_function_bodies_into_typed_core_exprs() {
-        let lowered = lower_fixture("milestone-1/valid/top-level/declarations.aivi");
+        let lowered = lower_text(
+            "typed-core-general-exprs.aivi",
+            r#"
+val answer = 42
+
+fun add:Int #x:Int #y:Int =>
+    x + y
+"#,
+        );
         assert!(
             !lowered.has_errors(),
-            "declarations fixture should lower cleanly before typed-core lowering: {:?}",
+            "general-expression fixture should lower cleanly before typed-core lowering: {:?}",
             lowered.diagnostics()
         );
 
@@ -2147,7 +2226,31 @@ sig timeout : Signal Duration
 
     #[test]
     fn lowers_recurrence_reports_into_pipe_nodes() {
-        let lowered = lower_fixture("milestone-2/valid/pipe-recurrence-nonsource-wakeup/main.aivi");
+        let lowered = lower_text(
+            "typed-core-recurrence.aivi",
+            r#"
+domain Duration over Int
+    literal s : Int -> Duration
+
+domain Retry over Int
+    literal x : Int -> Retry
+
+fun step:Int #value:Int =>
+    value
+
+@recur.timer 5s
+sig polled : Signal Int =
+    0
+     @|> step
+     <|@ step
+
+@recur.backoff 3x
+val retried : Task Int Int =
+    0
+     @|> step
+     <|@ step
+"#,
+        );
         assert!(
             !lowered.has_errors(),
             "recurrence fixture should lower cleanly before typed-core lowering: {:?}",
@@ -2166,19 +2269,95 @@ sig timeout : Signal Duration
             .recurrence
             .as_ref()
             .expect("expected recurrence attachment");
+        assert!(recurrence.guards.is_empty());
         assert_eq!(recurrence.steps.len(), 1);
         assert!(recurrence.non_source_wakeup.is_some());
+    }
+
+    #[test]
+    fn lowers_recurrence_guards_into_pipe_nodes() {
+        let lowered = lower_text(
+            "typed-core-recurrence-guard.aivi",
+            r#"
+domain Duration over Int
+    literal s : Int -> Duration
+
+type Cursor = {
+    hasNext: Bool
+}
+
+fun keep:Cursor #cursor:Cursor =>
+    cursor
+
+val seed:Cursor = { hasNext: True }
+
+@recur.timer 1s
+sig cursor : Signal Cursor =
+    seed
+     @|> keep
+     ?|> .hasNext
+     <|@ keep
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "guarded recurrence should lower cleanly before typed-core lowering: {:?}",
+            lowered.diagnostics()
+        );
+
+        let core = lower_module(lowered.module()).expect("typed-core lowering should succeed");
+        let cursor = core
+            .items()
+            .iter()
+            .find(|(_, item)| item.name.as_ref() == "cursor")
+            .map(|(id, _)| id)
+            .expect("expected cursor signal item");
+        let pipe = &core.pipes()[core.items()[cursor].pipes[0]];
+        let recurrence = pipe
+            .recurrence
+            .as_ref()
+            .expect("expected guarded recurrence attachment");
+        assert_eq!(recurrence.guards.len(), 1);
+        assert_eq!(recurrence.steps.len(), 1);
     }
 
     #[test]
     fn rejects_blocked_hir_handoffs_instead_of_guessing() {
         let lowered = lower_fixture("milestone-2/invalid/gate-predicate-not-bool/main.aivi");
         let errors = lower_module(lowered.module()).expect_err("blocked gate should stop lowering");
+        assert!(errors
+            .errors()
+            .iter()
+            .any(|error| matches!(error, LoweringError::BlockedGateStage { .. })));
+    }
+
+    #[test]
+    fn rejects_blocked_general_expr_handoffs_instead_of_guessing() {
+        let lowered = lower_fixture("milestone-2/valid/use-member-imports/main.aivi");
         assert!(
-            errors
-                .errors()
-                .iter()
-                .any(|error| matches!(error, LoweringError::BlockedGateStage { .. }))
+            !lowered.has_errors(),
+            "blocked general-expression fixture should lower cleanly before typed-core lowering: {:?}",
+            lowered.diagnostics()
+        );
+
+        let errors = lower_module(lowered.module())
+            .expect_err("blocked general expression should stop lowering");
+        let blocked = errors
+            .errors()
+            .iter()
+            .find_map(|error| match error {
+                LoweringError::BlockedGeneralExpr { blocked, .. } => Some(blocked),
+                _ => None,
+            })
+            .expect("expected blocked general-expression error");
+        assert!(matches!(
+            blocked.blockers.as_slice(),
+            [aivi_hir::GeneralExprBlocker::UnsupportedImportReference { .. }]
+        ));
+        let rendered = errors.to_string();
+        assert!(
+            rendered.contains("imported names are not supported in typed-core general expressions"),
+            "blocked general-expression error should explain the unsupported import handoff: {rendered}"
         );
     }
 
@@ -2204,17 +2383,39 @@ sig timeout : Signal Duration
 
         let errors =
             lower_module(lowered.module()).expect_err("ambiguous decode should block lowering");
-        assert!(
-            errors
-                .errors()
-                .iter()
-                .any(|error| matches!(error, LoweringError::BlockedDecodeProgram { .. }))
-        );
+        assert!(errors
+            .errors()
+            .iter()
+            .any(|error| matches!(error, LoweringError::BlockedDecodeProgram { .. })));
     }
 
     #[test]
     fn validator_catches_broken_recurrence_closure() {
-        let lowered = lower_fixture("milestone-2/valid/pipe-recurrence-nonsource-wakeup/main.aivi");
+        let lowered = lower_text(
+            "typed-core-recurrence.aivi",
+            r#"
+domain Duration over Int
+    literal s : Int -> Duration
+
+domain Retry over Int
+    literal x : Int -> Retry
+
+fun step:Int #value:Int =>
+    value
+
+@recur.timer 5s
+sig polled : Signal Int =
+    0
+     @|> step
+     <|@ step
+
+@recur.backoff 3x
+val retried : Task Int Int =
+    0
+     @|> step
+     <|@ step
+"#,
+        );
         let mut core = lower_module(lowered.module()).expect("typed-core lowering should succeed");
         let pipe_id = core
             .pipes()
@@ -2230,12 +2431,10 @@ sig timeout : Signal Duration
         recurrence.steps[0].result_subject = Type::Primitive(aivi_hir::BuiltinType::Text);
         let errors =
             validate_module(&core).expect_err("manually broken recurrence should fail validation");
-        assert!(
-            errors
-                .errors()
-                .iter()
-                .any(|error| matches!(error, ValidationError::RecurrenceDoesNotClose { .. }))
-        );
+        assert!(errors
+            .errors()
+            .iter()
+            .any(|error| matches!(error, ValidationError::RecurrenceDoesNotClose { .. })));
     }
 
     #[test]

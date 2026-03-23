@@ -5,9 +5,10 @@ on its explicit parameters and always returns the same result for the same input
 
 ## Basic syntax
 
-```aivi
-fun add:Int #x:Int #y:Int =>
-    x + y
+```text
+-- declare a pure function 'add' returning Int
+-- takes two integer parameters x and y
+-- returns their sum
 ```
 
 Breaking this down:
@@ -30,38 +31,23 @@ reading left to right, you see the name and return type before the parameters.
 All parameters in AIVI are labeled with `#`. This means you always know what an argument
 represents at the call site:
 
-```aivi
-fun greet:Text #name:Text #title:Text =>
-    "Hello, {title} {name}!"
-
-val msg = greet "Lovelace" "Ms"    -- ERROR: unlabeled
-val msg = greet #name="Lovelace" #title="Ms"   -- correct
+```text
+-- declare a function 'greet' returning Text, taking a name and a title
+-- returns a greeting string combining title and name
+-- call greet with "Lovelace" and "Ms", binding the result to 'msg'
 ```
 
-Wait — that does not look like the snake demo. Let me clarify: labeled parameters can be
-applied **positionally** or by name, as long as every parameter is supplied.
-In practice, most AIVI code passes arguments positionally because the parameter names are
-visible in the function declaration:
-
-```aivi
--- these two calls are equivalent:
-val result = greet "Lovelace" "Ms"
-val result = greet #name="Lovelace" #title="Ms"
-```
-
-The `#` sigil on the parameter declaration signals that this is a labeled parameter.
-This is visible in syntax highlighting — labeled params appear in a distinct colour.
+Function calls are positional juxtaposition. You pass arguments in the order the parameters
+are declared. The `#` sigil on the parameter declaration signals that this is a labeled
+parameter, which is visible in syntax highlighting — labeled params appear in a distinct colour.
 
 ## Multi-parameter functions
 
-```aivi
-fun clamp:Int #lo:Int #hi:Int #value:Int =>
-    value
-     ||> v => lo
-          when v < lo
-     ||> v => hi
-          when v > hi
-     ||> v => v
+```text
+-- declare a function 'clamp' returning Int, taking lo, hi, and value
+-- if value is less than lo, return lo
+-- otherwise if value is greater than hi, return hi
+-- otherwise return value unchanged
 ```
 
 Functions can have as many labeled parameters as needed.
@@ -70,16 +56,16 @@ Functions can have as many labeled parameters as needed.
 
 Pass arguments positionally after the function name:
 
-```aivi
-val clamped = clamp 0 100 42       -- result: 42
-val low     = clamp 0 100 (-5)     -- result: 0
+```text
+-- call clamp with bounds 0–100 and value 42, result is 42
+-- call clamp with bounds 0–100 and value -5, result is 0 (clamped to lower bound)
 ```
 
 When the argument is a complex expression, wrap it in parentheses:
 
-```aivi
-val moved = nextHead direction snake.head
-val eaten = willEat boardSize direction food snake
+```text
+-- call nextHead with direction and snake's head position, bind result to 'moved'
+-- call willEat with boardSize, direction, food, and snake, bind result to 'eaten'
 ```
 
 Note that in AIVI, function application is juxtaposition (no parentheses for the call itself,
@@ -90,28 +76,25 @@ arguments: `direction` and `snake.head`.
 
 Functions in AIVI are first-class. You can pass a function as an argument:
 
-```aivi
-fun applyTwice:Int #f:(Int -> Int) #x:Int =>
-    f (f x)
-
-val result = applyTwice (\n => n + 1) 5   -- result: 7
+```text
+-- declare a function 'applyTwice' that takes a function from Int to Int and an integer x
+-- applies the function to x twice, returning the final Int
+-- call applyTwice with "add 1" and 5, result is 7
 ```
 
 The `->` in `(Int -> Int)` is a function type: a function that takes `Int` and returns `Int`.
 
 ## Anonymous functions (lambdas)
 
-```aivi
-val double = \x => x * 2
-val add5   = \n => n + 5
+```text
+-- declare an anonymous function 'double' that multiplies its argument by 2
+-- declare an anonymous function 'add5' that adds 5 to its argument
 ```
 
 Lambdas use the `\` syntax. They appear frequently in pipe chains:
 
-```aivi
-sig labelText : Signal Text =
-    count
-     |> \n => "You clicked {n} times"
+```text
+-- derive 'labelText' from the signal 'count', formatting it as "You clicked N times"
 ```
 
 ## Pure by default
@@ -124,12 +107,11 @@ This means AIVI functions are easy to reason about and easy to test:
 - they have no hidden dependencies
 - they can be called in any order without affecting each other
 
-```aivi
-fun double:Int #x:Int => x * 2
-fun square:Int #x:Int => x * x
-
-val test1 = double 5    -- always 10
-val test2 = square 4    -- always 16
+```text
+-- declare a pure function 'double' that returns x multiplied by 2
+-- declare a pure function 'square' that returns x multiplied by itself
+-- call double with 5, always produces 10
+-- call square with 4, always produces 16
 ```
 
 ## Summary
