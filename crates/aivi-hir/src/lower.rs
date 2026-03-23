@@ -8,8 +8,9 @@ use crate::{
     ApplicativeCluster, ApplicativeSpineHead, AtLeastTwo, BinaryOperator, Binding, BindingId,
     BindingKind, BindingPattern, BuiltinTerm, BuiltinType, CaseControl, ClassItem, ClassMember,
     ClusterFinalizer, ClusterPresentation, ControlNode, ControlNodeId, Decorator, DecoratorCall,
-    DecoratorId, DecoratorPayload, DomainItem, DomainMember, DomainMemberKind, EachControl,
-    EmptyControl, ExportItem, Expr, ExprId, ExprKind, FragmentControl, FunctionItem,
+    DecoratorId, DecoratorPayload, DomainItem, DomainMember, DomainMemberKind,
+    DomainMemberResolution, EachControl, EmptyControl, ExportItem, Expr, ExprId, ExprKind,
+    FragmentControl, FunctionItem,
     FunctionParameter, ImportBinding, ImportBindingMetadata, ImportBundleKind, ImportId,
     ImportValueType, IntegerLiteral, Item, ItemHeader, ItemId, ItemKind, LiteralSuffixResolution,
     MapExpr, MapExprEntry, MarkupAttribute, MarkupAttributeValue, MarkupElement, MarkupNode,
@@ -114,6 +115,7 @@ struct NamedSite<T> {
 #[derive(Default)]
 struct Namespaces {
     term_items: HashMap<String, Vec<NamedSite<ItemId>>>,
+    domain_terms: HashMap<String, Vec<NamedSite<DomainMemberResolution>>>,
     type_items: HashMap<String, Vec<NamedSite<ItemId>>>,
     any_items: HashMap<String, Vec<NamedSite<ItemId>>>,
     provider_contracts: HashMap<String, Vec<NamedSite<ItemId>>>,
@@ -717,16 +719,22 @@ impl Lowerer {
             .iter()
             .map(|import| {
                 let imported_name = import
+                    .path
                     .segments
                     .last()
                     .map(|segment| self.make_name(&segment.text, segment.span))
                     .unwrap_or_else(|| self.make_name("invalid", item.base.span));
+                let local_name = import
+                    .alias
+                    .as_ref()
+                    .map(|alias| self.make_name(&alias.text, alias.span))
+                    .unwrap_or_else(|| imported_name.clone());
                 let metadata = known_import_metadata(&module_name, imported_name.text())
                     .unwrap_or(ImportBindingMetadata::Unknown);
                 self.alloc_import(ImportBinding {
-                    span: import.span,
+                    span: import.path.span,
                     imported_name: imported_name.clone(),
-                    local_name: imported_name,
+                    local_name,
                     metadata,
                 })
             })
@@ -2706,6 +2714,18 @@ impl Lowerer {
                                 },
                                 member.span,
                             );
+                            continue;
+                        }
+                        if member.kind == DomainMemberKind::Method {
+                            insert_site(
+                                &mut namespaces.domain_terms,
+                                member.name.text(),
+                                DomainMemberResolution {
+                                    domain: item_id,
+                                    member_index,
+                                },
+                                member.span,
+                            );
                         }
                     }
                 }
@@ -4101,12 +4121,23 @@ impl Lowerer {
             reference.resolution = ResolutionState::Resolved(TermResolution::Local(binding));
             return;
         }
-        match lookup_item(&namespaces.term_items, name) {
-            LookupResult::Unique(item) => {
-                reference.resolution = ResolutionState::Resolved(TermResolution::Item(item));
-                return;
-            }
-            LookupResult::Ambiguous => {
+        let term_lookup = lookup_item(&namespaces.term_items, name);
+        let domain_candidates = namespaces
+            .domain_terms
+            .get(name)
+            .map(|candidates| candidates.iter().map(|candidate| candidate.value).collect::<Vec<_>>())
+            .unwrap_or_default();
+        if matches!(term_lookup, LookupResult::Ambiguous) {
+            self.emit_error(
+                reference.span(),
+                format!("term `{name}` is ambiguous in this module"),
+                code("ambiguous-term-name"),
+            );
+            reference.resolution = ResolutionState::Unresolved;
+            return;
+        }
+        if let LookupResult::Unique(item) = term_lookup {
+            if !domain_candidates.is_empty() {
                 self.emit_error(
                     reference.span(),
                     format!("term `{name}` is ambiguous in this module"),
@@ -4115,9 +4146,32 @@ impl Lowerer {
                 reference.resolution = ResolutionState::Unresolved;
                 return;
             }
-            LookupResult::Missing => {}
+            reference.resolution = ResolutionState::Resolved(TermResolution::Item(item));
+            return;
         }
-        match lookup_item(&namespaces.term_imports, name) {
+        let import_lookup = lookup_item(&namespaces.term_imports, name);
+        if !domain_candidates.is_empty() {
+            if !matches!(import_lookup, LookupResult::Missing) {
+                self.emit_error(
+                    reference.span(),
+                    format!("term `{name}` is ambiguous in this module"),
+                    code("ambiguous-term-name"),
+                );
+                reference.resolution = ResolutionState::Unresolved;
+                return;
+            }
+            if domain_candidates.len() == 1 {
+                reference.resolution =
+                    ResolutionState::Resolved(TermResolution::DomainMember(domain_candidates[0]));
+                return;
+            }
+            if let Ok(candidates) = crate::NonEmpty::from_vec(domain_candidates) {
+                reference.resolution =
+                    ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(candidates));
+                return;
+            }
+        }
+        match import_lookup {
             LookupResult::Unique(import) => {
                 reference.resolution = ResolutionState::Resolved(TermResolution::Import(import));
                 return;
@@ -4931,6 +4985,7 @@ mod tests {
         for path in [
             "milestone-2/valid/local-top-level-refs/main.aivi",
             "milestone-2/valid/use-member-imports/main.aivi",
+            "milestone-2/valid/use-member-import-aliases/main.aivi",
             "milestone-2/valid/source-provider-contract-declarations/main.aivi",
             "milestone-2/valid/custom-source-provider-wakeup/main.aivi",
             "milestone-2/valid/custom-source-recurrence-wakeup/main.aivi",
@@ -4942,6 +4997,7 @@ mod tests {
             "milestone-2/valid/markup-control-nodes/main.aivi",
             "milestone-2/valid/class-declarations/main.aivi",
             "milestone-2/valid/domain-declarations/main.aivi",
+            "milestone-2/valid/domain-member-resolution/main.aivi",
             "milestone-2/valid/domain-literal-suffixes/main.aivi",
             "milestone-2/valid/type-kinds/main.aivi",
             "milestone-2/valid/pipe-branch-and-join/main.aivi",
@@ -6674,6 +6730,78 @@ sig updates : Signal Int
     }
 
     #[test]
+    fn use_member_import_aliases_preserve_local_names_and_metadata() {
+        let lowered = lower_fixture("milestone-2/valid/use-member-import-aliases/main.aivi");
+        assert!(
+            !lowered.has_errors(),
+            "use-member-import-aliases fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+        let report = lowered
+            .module()
+            .validate(ValidationMode::RequireResolvedNames);
+        assert!(
+            report.is_ok(),
+            "use-member-import-aliases fixture should validate as resolved HIR: {:?}",
+            report.diagnostics()
+        );
+
+        let primary_http = lowered.module().imports().iter().find(|(_, import)| {
+            import.imported_name.text() == "http" && import.local_name.text() == "primaryHttp"
+        });
+        assert!(
+            matches!(
+                primary_http.map(|(_, import)| &import.metadata),
+                Some(ImportBindingMetadata::Value {
+                    ty: ImportValueType::Primitive(BuiltinType::Text)
+                })
+            ),
+            "expected aliased http import to preserve Text metadata"
+        );
+
+        let aliased_request = lowered.module().imports().iter().find(|(_, import)| {
+            import.imported_name.text() == "Request" && import.local_name.text() == "HttpRequest"
+        });
+        assert!(
+            matches!(
+                aliased_request.map(|(_, import)| &import.metadata),
+                Some(ImportBindingMetadata::TypeConstructor { kind })
+                    if kind == &Kind::constructor(1)
+            ),
+            "expected aliased Request import to preserve constructor kind metadata"
+        );
+
+        let imported_type_refs = lowered
+            .module()
+            .types()
+            .iter()
+            .filter_map(|(_, ty)| match &ty.kind {
+                TypeKind::Name(reference)
+                    if matches!(
+                        reference.path.segments().first().text(),
+                        "HttpRequest" | "NetworkChannel"
+                    ) =>
+                {
+                    Some(reference)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            imported_type_refs.len(),
+            2,
+            "expected aliased imported type references in lowered HIR"
+        );
+        assert!(
+            imported_type_refs.iter().all(|reference| matches!(
+                reference.resolution,
+                ResolutionState::Resolved(TypeResolution::Import(_))
+            )),
+            "aliased imported type references should still resolve through import bindings: {imported_type_refs:?}"
+        );
+    }
+
+    #[test]
     fn lowers_domains_with_carriers_parameters_and_members() {
         let lowered = lower_fixture("milestone-2/valid/domain-declarations/main.aivi");
         assert!(
@@ -6715,6 +6843,44 @@ sig updates : Signal Int
             other => panic!("expected `NonEmpty` to lower as a domain item, found {other:?}"),
         };
         assert_eq!(non_empty.parameters.len(), 1);
+    }
+
+    #[test]
+    fn preserves_domain_member_ambiguity_for_contextual_resolution() {
+        let lowered = lower_fixture("milestone-2/valid/domain-member-resolution/main.aivi");
+        assert!(
+            !lowered.has_errors(),
+            "domain-member-resolution fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+        let report = lowered
+            .module()
+            .validate(ValidationMode::RequireResolvedNames);
+        assert!(
+            report.is_ok(),
+            "domain-member-resolution fixture should validate as resolved HIR: {:?}",
+            report.diagnostics()
+        );
+
+        let delay = match find_named_item(lowered.module(), "delay") {
+            Item::Value(item) => item,
+            other => panic!("expected `delay` to lower as a value item, found {other:?}"),
+        };
+        let ExprKind::Apply { callee, .. } = &lowered.module().exprs()[delay.body].kind else {
+            panic!("expected `delay` body to lower as an application");
+        };
+        let ExprKind::Name(reference) = &lowered.module().exprs()[*callee].kind else {
+            panic!("expected `delay` callee to stay a name");
+        };
+        assert!(
+            matches!(
+                reference.resolution,
+                ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(ref candidates))
+                    if candidates.len() == 2
+            ),
+            "expected `make` to preserve both domain candidates for later contextual resolution, found {:?}",
+            reference.resolution
+        );
     }
 
     #[test]

@@ -354,8 +354,8 @@
     },
 
     "record-key": {
-      "comment": "Identifier immediately followed by : in record/struct position",
-      "match": "\\b([a-z_][a-zA-Z0-9_]*)(?=\\s*:(?!:))",
+      "comment": "Identifier immediately followed by : with no space — record/struct field. Excludes 'name : Type' style annotations which use a space.",
+      "match": "\\b([a-z_][a-zA-Z0-9_]*)(?=:(?!:))",
       "captures": {
         "1": { "name": "variable.other.property.aivi" }
       }

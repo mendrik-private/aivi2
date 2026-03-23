@@ -1,0 +1,7 @@
+domain Duration over Int
+    make : Int -> Duration
+
+domain Count over Int
+    make : Int -> Count
+
+val bad = make 1

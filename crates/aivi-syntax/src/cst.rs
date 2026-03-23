@@ -541,11 +541,18 @@ impl NamedItem {
 
 /// `use` declaration with an optional module path and import list.
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UseImport {
+    pub path: QualifiedName,
+    pub alias: Option<Identifier>,
+}
+
+/// `use` declaration with an optional module path and import list.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UseItem {
     pub base: ItemBase,
     pub keyword_span: SourceSpan,
     pub path: Option<QualifiedName>,
-    pub imports: Vec<QualifiedName>,
+    pub imports: Vec<UseImport>,
 }
 
 /// `export` declaration.

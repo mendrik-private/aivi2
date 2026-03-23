@@ -276,6 +276,8 @@ fn resolve_decode_mode_name(
             }
         }
         ResolutionState::Resolved(TermResolution::Local(_))
+        | ResolutionState::Resolved(TermResolution::DomainMember(_))
+        | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_))
         | ResolutionState::Resolved(TermResolution::Import(_))
         | ResolutionState::Resolved(TermResolution::Builtin(_))
         | ResolutionState::Unresolved => None,

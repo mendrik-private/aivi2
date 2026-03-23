@@ -192,6 +192,13 @@ pub struct ImportBinding {
     pub metadata: ImportBindingMetadata,
 }
 
+/// Resolved destination for one domain-owned term member.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct DomainMemberResolution {
+    pub domain: ItemId,
+    pub member_index: usize,
+}
+
 /// Compiler-known builtin term references that live outside the current module graph.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BuiltinTerm {
@@ -287,11 +294,13 @@ pub enum ImportValueType {
 }
 
 /// Resolved destination for a term-level reference.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TermResolution {
     Local(BindingId),
     Item(ItemId),
     Import(ImportId),
+    DomainMember(DomainMemberResolution),
+    AmbiguousDomainMembers(NonEmpty<DomainMemberResolution>),
     Builtin(BuiltinTerm),
 }
 

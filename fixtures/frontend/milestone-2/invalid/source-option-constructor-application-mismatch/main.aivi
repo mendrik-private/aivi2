@@ -15,6 +15,7 @@ type Map K V =
 
 domain Duration over Int
     literal s : Int -> Duration
+    
 
 domain Retry over Int
     literal x : Int -> Retry

@@ -392,6 +392,9 @@ fn blocker_for_branch_issue(
                 subject,
             }
         }
+        GateIssue::AmbiguousDomainMember { .. } => {
+            TruthyFalsyElaborationBlocker::UnknownBranchType { branch }
+        }
     }
 }
 

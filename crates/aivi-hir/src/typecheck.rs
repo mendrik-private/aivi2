@@ -9,7 +9,9 @@ use crate::{
         TypeItemBody, ValueItem,
     },
     ids::{ExprId, ItemId, TypeParameterId},
-    validate::{GateExprEnv, GateIssue, GateRecordField, GateType, GateTypeContext},
+    validate::{
+        DomainMemberSelection, GateExprEnv, GateIssue, GateRecordField, GateType, GateTypeContext,
+    },
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -240,11 +242,21 @@ impl<'a> TypeChecker<'a> {
         match kind {
             ExprKind::Name(reference) => self
                 .check_builtin_constructor_name(&reference, expected)
+                .or_else(|| self.check_domain_member_name(&reference, expected))
                 .or_else(|| self.check_unannotated_value_name(&reference, env, expected, value_stack)),
             ExprKind::Apply { callee, arguments } => {
                 let callee_kind = self.module.exprs()[callee].kind.clone();
                 if let ExprKind::Name(reference) = callee_kind {
                     if let Some(result) = self.check_builtin_constructor_apply(
+                        &reference,
+                        &arguments,
+                        env,
+                        expected,
+                        value_stack,
+                    ) {
+                        return Some(result);
+                    }
+                    if let Some(result) = self.check_domain_member_apply(
                         &reference,
                         &arguments,
                         env,
@@ -360,6 +372,67 @@ impl<'a> TypeChecker<'a> {
                 Some(self.check_expr(argument, env, Some(error.as_ref()), value_stack))
             }
             _ => None,
+        }
+    }
+
+    fn check_domain_member_name(
+        &mut self,
+        reference: &TermReference,
+        expected: &GateType,
+    ) -> Option<bool> {
+        let labels = self.typing.domain_member_candidate_labels(reference)?;
+        match self.typing.select_domain_member_name(reference, expected)? {
+            DomainMemberSelection::Unique(_) => Some(true),
+            DomainMemberSelection::Ambiguous => {
+                self.emit_ambiguous_domain_member(reference.span(), reference, &labels);
+                Some(false)
+            }
+            DomainMemberSelection::NoMatch => (labels.len() > 1).then(|| {
+                self.emit_ambiguous_domain_member(reference.span(), reference, &labels);
+                false
+            }),
+        }
+    }
+
+    fn check_domain_member_apply(
+        &mut self,
+        reference: &TermReference,
+        arguments: &crate::NonEmpty<ExprId>,
+        env: &GateExprEnv,
+        expected: &GateType,
+        value_stack: &mut Vec<ItemId>,
+    ) -> Option<bool> {
+        let labels = self.typing.domain_member_candidate_labels(reference)?;
+        let mut argument_types = Vec::with_capacity(arguments.len());
+        for argument in arguments.iter() {
+            let info = self.typing.infer_expr(*argument, env, None);
+            self.emit_expr_issues(&info.issues);
+            self.solve_constraints(&info.constraints);
+            let Some(argument_ty) = info.ty else {
+                return None;
+            };
+            argument_types.push(argument_ty);
+        }
+        match self
+            .typing
+            .select_domain_member_call(reference, &argument_types, Some(expected))?
+        {
+            DomainMemberSelection::Unique(matched) => {
+                for (argument, parameter) in arguments.iter().zip(matched.parameters.iter()) {
+                    if !self.check_expr(*argument, env, Some(parameter), value_stack) {
+                        return Some(false);
+                    }
+                }
+                Some(true)
+            }
+            DomainMemberSelection::Ambiguous => {
+                self.emit_ambiguous_domain_member(reference.span(), reference, &labels);
+                Some(false)
+            }
+            DomainMemberSelection::NoMatch => (labels.len() > 1).then(|| {
+                self.emit_ambiguous_domain_member(reference.span(), reference, &labels);
+                false
+            }),
         }
     }
 
@@ -488,9 +561,45 @@ impl<'a> TypeChecker<'a> {
                 ))
                 .with_code(code("unknown-projection-field"))
                 .with_primary_label(*span, "this projection refers to a missing record field"),
+                GateIssue::AmbiguousDomainMember {
+                    span,
+                    name,
+                    candidates,
+                } => Diagnostic::error(format!(
+                    "domain member `{name}` is ambiguous in this context"
+                ))
+                .with_code(code("ambiguous-domain-member"))
+                .with_primary_label(
+                    *span,
+                    "add more type context or rename/import an alias for the desired member",
+                )
+                .with_note(format!("candidates: {}", candidates.join(", "))),
             };
             self.diagnostics.push(diagnostic);
         }
+    }
+
+    fn emit_ambiguous_domain_member(
+        &mut self,
+        span: SourceSpan,
+        reference: &TermReference,
+        candidates: &[String],
+    ) {
+        let name = reference
+            .path
+            .segments()
+            .last()
+            .text()
+            .to_owned();
+        self.diagnostics.push(
+            Diagnostic::error(format!("domain member `{name}` is ambiguous in this context"))
+                .with_code(code("ambiguous-domain-member"))
+                .with_primary_label(
+                    span,
+                    "add more type context or rename/import an alias for the desired member",
+                )
+                .with_note(format!("candidates: {}", candidates.join(", "))),
+        );
     }
 
     fn solve_constraints(&mut self, constraints: &[TypeConstraint]) {

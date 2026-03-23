@@ -1,0 +1,394 @@
+type Vec2 = Vec2 Int Int
+
+type Direction =
+  | Up
+  | Down
+  | Left
+  | Right
+
+type Key =
+  | ArrowUp
+  | ArrowDown
+  | ArrowLeft
+  | ArrowRight
+
+type Orientation =
+  | Vertical
+  | Horizontal
+
+type Status = Running | GameOver
+
+type FoodSpawn =
+  | SpawnA
+  | SpawnB
+  | SpawnC
+  | SpawnD
+  | SpawnE
+  | SpawnF
+
+type BoardSize = {
+    width: Int,
+    height: Int
+}
+
+type Snake = {
+    head: Vec2,
+    second: Vec2,
+    third: Vec2,
+    fourth: Vec2,
+    fifth: Vec2,
+    sixth: Vec2,
+    length: Int
+}
+
+type Game = {
+    snake: Snake,
+    food: FoodSpawn,
+    status: Status,
+    score: Int
+}
+
+type CellKind =
+  | SnakeHead
+  | SnakeBody
+  | Food
+  | Empty
+
+type BoardCell = {
+    id: Int,
+    kind: CellKind
+}
+
+type BoardRow = {
+    id: Int,
+    cells: List BoardCell
+}
+
+type GameBoard = {
+    width: Int,
+    height: Int,
+    rows: List BoardRow
+}
+
+val boardSize:BoardSize = {
+    width: 12,
+    height: 10
+}
+
+fun rightInnerX:Int #size:BoardSize =>
+    size.width - 2
+
+fun bottomInnerY:Int #size:BoardSize =>
+    size.height - 2
+
+fun initialSnakeFor:Snake #size:BoardSize =>
+    {
+        head: Vec2 6 5,
+        second: Vec2 5 5,
+        third: Vec2 4 5,
+        fourth: Vec2 4 5,
+        fifth: Vec2 4 5,
+        sixth: Vec2 4 5,
+        length: 3
+    }
+
+val initialGame:Game = {
+    snake: initialSnakeFor boardSize,
+    food: SpawnA,
+    status: Running,
+    score: 0
+}
+
+fun directionFromKey:Direction #key:Key =>
+    key
+     ||> ArrowUp => Up
+     ||> ArrowDown => Down
+     ||> ArrowLeft => Left
+     ||> ArrowRight => Right
+
+fun isOpposite:Bool #candidate:Direction #current:Direction =>
+    current
+     ||> Up => candidate == Down
+     ||> Down => candidate == Up
+     ||> Left => candidate == Right
+     ||> Right => candidate == Left
+
+fun applyDirection:Direction #current:Direction #candidate:Direction =>
+    isOpposite candidate current
+    T|> current
+    F|> candidate
+
+fun keepDirection:Direction #latest:Key #current:Direction =>
+    directionFromKey latest
+     |> applyDirection current
+
+fun moveUp:Vec2 #head:Vec2 =>
+    head
+     ||> Vec2 x y => Vec2 x (y - 1)
+
+fun moveDown:Vec2 #head:Vec2 =>
+    head
+     ||> Vec2 x y => Vec2 x (y + 1)
+
+fun moveLeft:Vec2 #head:Vec2 =>
+    head
+     ||> Vec2 x y => Vec2 (x - 1) y
+
+fun moveRight:Vec2 #head:Vec2 =>
+    head
+     ||> Vec2 x y => Vec2 (x + 1) y
+
+fun nextHead:Vec2 #direction:Direction #head:Vec2 =>
+    direction
+     ||> Up => moveUp head
+     ||> Down => moveDown head
+     ||> Left => moveLeft head
+     ||> Right => moveRight head
+
+fun growLength:Int #length:Int =>
+    length
+     ||> 1 => 2
+     ||> 2 => 3
+     ||> 3 => 4
+     ||> 4 => 5
+     ||> 5 => 6
+     ||> _ => 6
+
+fun nextLength:Int #grew:Bool #length:Int =>
+    grew
+    T|> growLength length
+    F|> length
+
+fun foodAt:Vec2 #size:BoardSize #food:FoodSpawn =>
+    food
+     ||> SpawnA => Vec2 (rightInnerX size) 1
+     ||> SpawnB => Vec2 (rightInnerX size) (bottomInnerY size)
+     ||> SpawnC => Vec2 1 (bottomInnerY size)
+     ||> SpawnD => Vec2 4 2
+     ||> SpawnE => Vec2 2 1
+     ||> SpawnF => Vec2 5 1
+
+fun nextFood:FoodSpawn #food:FoodSpawn =>
+    food
+     ||> SpawnA => SpawnB
+     ||> SpawnB => SpawnC
+     ||> SpawnC => SpawnD
+     ||> SpawnD => SpawnE
+     ||> SpawnE => SpawnF
+     ||> SpawnF => SpawnA
+
+fun willEat:Bool #size:BoardSize #direction:Direction #food:FoodSpawn #snake:Snake =>
+    nextHead direction snake.head == foodAt size food
+
+fun advanceSnake:Snake #direction:Direction #grew:Bool #snake:Snake =>
+    {
+        head: nextHead direction snake.head,
+        second: snake.head,
+        third: snake.second,
+        fourth: snake.third,
+        fifth: snake.fourth,
+        sixth: snake.fifth,
+        length: nextLength grew snake.length
+    }
+
+fun nextSnake:Snake #size:BoardSize #direction:Direction #food:FoodSpawn #snake:Snake =>
+    advanceSnake direction (willEat size direction food snake) snake
+
+fun hitsWall:Bool #size:BoardSize #head:Vec2 =>
+    head
+     ||> Vec2 x y => x < 0 or x > (size.width - 1) or y < 0 or y > (size.height - 1)
+
+fun isBodyAt:Bool #snake:Snake #position:Vec2 =>
+    snake.length
+     ||> 1 => False
+     ||> 2 => snake.second == position
+     ||> 3 => snake.second == position or snake.third == position
+     ||> 4 => snake.second == position or snake.third == position or snake.fourth == position
+     ||> 5 => snake.second == position or snake.third == position or snake.fourth == position or snake.fifth == position
+     ||> _ => snake.second == position or snake.third == position or snake.fourth == position or snake.fifth == position or snake.sixth == position
+
+fun hitsSelf:Bool #snake:Snake =>
+    snake.length
+     ||> 1 => False
+     ||> 2 => snake.head == snake.second
+     ||> 3 => snake.head == snake.second or snake.head == snake.third
+     ||> 4 => snake.head == snake.second or snake.head == snake.third or snake.head == snake.fourth
+     ||> 5 => snake.head == snake.second or snake.head == snake.third or snake.head == snake.fourth or snake.head == snake.fifth
+     ||> _ => snake.head == snake.second or snake.head == snake.third or snake.head == snake.fourth or snake.head == snake.fifth or snake.head == snake.sixth
+
+fun nextStatus:Status #size:BoardSize #snake:Snake =>
+    hitsWall size snake.head or hitsSelf snake
+    T|> GameOver
+    F|> Running
+
+fun nextFoodState:FoodSpawn #ateFood:Bool #food:FoodSpawn =>
+    ateFood
+     T|> nextFood food
+     F|> food
+
+fun nextScore:Int #ateFood:Bool #score:Int =>
+    ateFood
+    T|> score + 1
+    F|> score
+
+fun movedGame:Game #size:BoardSize #direction:Direction #snake:Snake #food:FoodSpawn #score:Int =>
+    {
+        snake: nextSnake size direction food snake,
+        food: nextFoodState (willEat size direction food snake) food,
+        status: nextStatus size (nextSnake size direction food snake),
+        score: nextScore (willEat size direction food snake) score
+    }
+
+fun runningStep:Game #size:BoardSize #direction:Direction #current:Game =>
+    current
+     ||> { snake, food, score } => movedGame size direction snake food score
+
+fun stepGame:Game #size:BoardSize #direction:Direction #current:Game =>
+    current.status
+     ||> GameOver => current
+     ||> Running => runningStep size direction current
+
+fun foodOrEmpty:CellKind #size:BoardSize #game:Game #position:Vec2 =>
+    position == foodAt size game.food
+     ||> True => Food
+     ||> False => Empty
+
+fun bodyOrFood:CellKind #size:BoardSize #game:Game #position:Vec2 =>
+    isBodyAt game.snake position
+     ||> True => SnakeBody
+     ||> False => foodOrEmpty size game position
+
+fun cellKindAt:CellKind #size:BoardSize #game:Game #position:Vec2 =>
+    position == game.snake.head
+     ||> True => SnakeHead
+     ||> False => bodyOrFood size game position
+
+fun makeBoardCell:BoardCell #size:BoardSize #game:Game #row:Int #column:Int =>
+    {
+        id: column,
+        kind: cellKindAt size game (Vec2 column row)
+    }
+
+fun makeBoardCells:List BoardCell #size:BoardSize #game:Game #row:Int #column:Int =>
+    column == (size.width - 1)
+     T|> [ makeBoardCell size game row column ]
+     F|> [ makeBoardCell size game row column, makeBoardCells size game row (column + 1) ]
+
+fun makeBoardRow:BoardRow #size:BoardSize #game:Game #row:Int =>
+    {
+        id: row,
+        cells: makeBoardCells size game row 0
+    }
+
+fun makeBoardRows:List BoardRow #size:BoardSize #game:Game #row:Int =>
+    row == (size.height - 1)
+     T|> [ makeBoardRow size game row ]
+     F|> [ makeBoardRow size game row, makeBoardRows size game (row + 1) ]
+
+fun toBoard:GameBoard #size:BoardSize #game:Game =>
+    {
+        width: size.width,
+        height: size.height,
+        rows: makeBoardRows size game 0
+    }
+
+fun cellGlyph:Text #kind:CellKind =>
+    kind
+     ||> SnakeHead => "@"
+     ||> SnakeBody => "o"
+     ||> Food => "*"
+     ||> Empty => "."
+
+fun statusText:Text #status:Status =>
+    status
+     ||> Running => "running"
+     ||> GameOver => "game over"
+
+fun directionText:Text #direction:Direction =>
+    direction
+     ||> Up => "up"
+     ||> Down => "down"
+     ||> Left => "left"
+     ||> Right => "right"
+
+fun boardLineFor:Text #board:GameBoard =>
+    "Board: {board.width} x {board.height}"
+
+fun scoreLineFor:Text #game:Game =>
+    "Score: {game.score}"
+
+fun statusLineFor:Text #game:Game =>
+    "Status: {statusText game.status}"
+
+fun directionLineFor:Text #direction:Direction =>
+    "Direction: {directionText direction}"
+
+@source window.keyDown with {
+    repeat: False,
+    focusOnly: True
+}
+sig keyDown : Signal Key
+
+@source window.keyDown with {
+    repeat: False,
+    focusOnly: True
+}
+sig direction : Signal Direction =
+    Right
+    @|> keepDirection keyDown
+    <|@ keepDirection keyDown
+
+@source timer.every 160 with {
+    immediate: True,
+    coalesce: True
+}
+sig game : Signal Game =
+    initialGame
+    @|> stepGame boardSize direction
+    <|@ stepGame boardSize direction
+
+sig board : Signal GameBoard =
+    game
+     |> toBoard boardSize
+
+sig boardLine:Signal Text =
+    board
+     |> boardLineFor
+
+sig boardRows:Signal (List BoardRow) =
+    board
+     |> .rows
+
+sig scoreLine:Signal Text =
+    game
+     |> scoreLineFor
+
+sig statusLine:Signal Text =
+    game
+     |> statusLineFor
+
+sig directionLine:Signal Text =
+    direction
+     |> directionLineFor
+
+val main =
+    <Window title="AIVI Snake">
+        <Box orientation={Vertical} spacing={8}>
+            <Label text="Board is rendered from a real matrix." />
+            <Label text={boardLine} />
+            <Label text={directionLine} />
+            <Label text={scoreLine} />
+            <Label text={statusLine} />
+            <Box orientation={Vertical} spacing={2}>
+                <each of={boardRows} as={row} key={row.id}>
+                    <Box orientation={Horizontal} spacing={2}>
+                        <each of={row.cells} as={cell} key={cell.id}>
+                            <Label text={cellGlyph cell.kind} />
+                        </each>
+                    </Box>
+                </each>
+            </Box>
+        </Box>
+    </Window>
+
+export main

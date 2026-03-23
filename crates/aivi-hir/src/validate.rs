@@ -21,7 +21,8 @@ use crate::{
     arena::{Arena, ArenaId},
     hir::{
         ApplicativeSpineHead, BuiltinTerm, BuiltinType, ControlNode, ControlNodeKind,
-        CustomSourceRecurrenceWakeup, DecoratorPayload, DomainMemberKind, ExprKind,
+        CustomSourceRecurrenceWakeup, DecoratorPayload, DomainMemberKind,
+        DomainMemberResolution, ExprKind,
         ImportBindingMetadata, ImportValueType, Item, LiteralSuffixResolution,
         MarkupAttributeValue, MarkupNodeKind, Module, Name, NamePath, PatternKind, PipeStageKind,
         RecurrenceWakeupDecoratorKind, ResolutionState, SignalItem, SourceDecorator,
@@ -2076,6 +2077,8 @@ impl Validator<'_> {
             ResolutionState::Resolved(TermResolution::Import(import_id)) => typing
                 .import_value_type(*import_id)
                 .map(|actual| SourceOptionActualType::from_gate_type(&actual)),
+            ResolutionState::Resolved(TermResolution::DomainMember(_))
+            | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_)) => None,
             ResolutionState::Resolved(TermResolution::Builtin(builtin)) => self
                 .infer_source_option_builtin_actual_type(
                     *builtin,
@@ -4500,6 +4503,23 @@ impl Validator<'_> {
                     )),
                 );
             }
+            GateIssue::AmbiguousDomainMember {
+                span,
+                name,
+                candidates,
+            } => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "gate predicate cannot resolve domain member `{name}` unambiguously"
+                    ))
+                    .with_code(code("ambiguous-domain-member"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "add more type context or use a distinct local/import alias for the member you want",
+                    ))
+                    .with_note(format!("candidates: {}", candidates.join(", "))),
+                );
+            }
         }
     }
 
@@ -4575,6 +4595,23 @@ impl Validator<'_> {
                         span,
                         "use a field that exists on the matched branch payload",
                     )),
+                );
+            }
+            GateIssue::AmbiguousDomainMember {
+                span,
+                name,
+                candidates,
+            } => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "{branch_name} branch cannot resolve domain member `{name}` unambiguously"
+                    ))
+                    .with_code(code("ambiguous-domain-member"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "add more type context or use a distinct local/import alias for the member you want",
+                    ))
+                    .with_note(format!("candidates: {}", candidates.join(", "))),
                 );
             }
         }
@@ -4681,6 +4718,46 @@ impl Validator<'_> {
                         span,
                         "use a field that exists on the mapped collection subject",
                     )),
+                );
+            }
+            (
+                FanoutIssueContext::MapElement,
+                GateIssue::AmbiguousDomainMember {
+                    span,
+                    name,
+                    candidates,
+                },
+            ) => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "fan-out body cannot resolve domain member `{name}` unambiguously"
+                    ))
+                    .with_code(code("ambiguous-domain-member"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "add more type context or use a distinct local/import alias for the member you want",
+                    ))
+                    .with_note(format!("candidates: {}", candidates.join(", "))),
+                );
+            }
+            (
+                FanoutIssueContext::JoinCollection,
+                GateIssue::AmbiguousDomainMember {
+                    span,
+                    name,
+                    candidates,
+                },
+            ) => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "fan-in body cannot resolve domain member `{name}` unambiguously"
+                    ))
+                    .with_code(code("ambiguous-domain-member"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "add more type context or use a distinct local/import alias for the member you want",
+                    ))
+                    .with_note(format!("candidates: {}", candidates.join(", "))),
                 );
             }
         }
@@ -5025,6 +5102,14 @@ impl Validator<'_> {
                 TermResolution::Import(import) => {
                     this.require_import(reference.span(), "term reference", "import", *import);
                 }
+                TermResolution::DomainMember(resolution) => {
+                    this.require_domain_member_resolution(reference.span(), *resolution);
+                }
+                TermResolution::AmbiguousDomainMembers(candidates) => {
+                    for resolution in candidates.iter().copied() {
+                        this.require_domain_member_resolution(reference.span(), resolution);
+                    }
+                }
                 TermResolution::Builtin(_) => {}
             },
         );
@@ -5337,6 +5422,56 @@ impl Validator<'_> {
         id: ItemId,
     ) {
         self.require_node(self.module.items(), span, owner, field, id, "item");
+    }
+
+    fn require_domain_member_resolution(
+        &mut self,
+        span: SourceSpan,
+        resolution: DomainMemberResolution,
+    ) {
+        let Some(item) = self.module.items().get(resolution.domain) else {
+            self.diagnostics.push(
+                Diagnostic::error("domain member resolution points at a missing domain item")
+                    .with_code(code("invalid-domain-member-resolution"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "update this resolution to target an existing domain item",
+                    )),
+            );
+            return;
+        };
+        let Item::Domain(domain) = item else {
+            self.diagnostics.push(
+                Diagnostic::error("domain member resolution does not target a domain item")
+                    .with_code(code("invalid-domain-member-resolution"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "domain member resolutions must point at a domain declaration",
+                    )),
+            );
+            return;
+        };
+        let Some(member) = domain.members.get(resolution.member_index) else {
+            self.diagnostics.push(
+                Diagnostic::error("domain member resolution points at a missing domain member")
+                    .with_code(code("invalid-domain-member-resolution"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "update this resolution to target an existing domain member",
+                    )),
+            );
+            return;
+        };
+        if member.kind != DomainMemberKind::Method {
+            self.diagnostics.push(
+                Diagnostic::error("domain member resolution does not target a callable domain member")
+                    .with_code(code("invalid-domain-member-resolution"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "only callable identifier members participate in unqualified term resolution",
+                    )),
+            );
+        }
     }
 
     fn require_literal_suffix_resolution(
@@ -5730,6 +5865,24 @@ pub(crate) enum GateIssue {
         path: String,
         subject: String,
     },
+    AmbiguousDomainMember {
+        span: SourceSpan,
+        name: String,
+        candidates: Vec<String>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum DomainMemberSelection<T> {
+    Unique(T),
+    Ambiguous,
+    NoMatch,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DomainMemberCallMatch {
+    pub(crate) parameters: Vec<GateType>,
+    pub(crate) result: GateType,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -6448,6 +6601,352 @@ impl<'a> GateTypeContext<'a> {
         }
     }
 
+    fn domain_member_candidates(
+        &self,
+        reference: &TermReference,
+    ) -> Option<Vec<DomainMemberResolution>> {
+        match reference.resolution.as_ref() {
+            ResolutionState::Resolved(TermResolution::DomainMember(resolution)) => {
+                Some(vec![*resolution])
+            }
+            ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(candidates)) => {
+                Some(candidates.iter().copied().collect())
+            }
+            ResolutionState::Unresolved
+            | ResolutionState::Resolved(TermResolution::Local(_))
+            | ResolutionState::Resolved(TermResolution::Item(_))
+            | ResolutionState::Resolved(TermResolution::Import(_))
+            | ResolutionState::Resolved(TermResolution::Builtin(_)) => None,
+        }
+    }
+
+    pub(crate) fn domain_member_candidate_labels(
+        &self,
+        reference: &TermReference,
+    ) -> Option<Vec<String>> {
+        self.domain_member_candidates(reference).map(|candidates| {
+            candidates
+                .into_iter()
+                .filter_map(|candidate| self.domain_member_label(candidate))
+                .collect()
+        })
+    }
+
+    pub(crate) fn infer_domain_member_name_type(
+        &mut self,
+        reference: &TermReference,
+    ) -> Option<GateType> {
+        let candidates = self.domain_member_candidates(reference)?;
+        if candidates.len() != 1 {
+            return None;
+        }
+        self.lower_domain_member_annotation(candidates[0], &HashMap::new())
+    }
+
+    pub(crate) fn select_domain_member_name(
+        &mut self,
+        reference: &TermReference,
+        expected: &GateType,
+    ) -> Option<DomainMemberSelection<GateType>> {
+        let candidates = self.domain_member_candidates(reference)?;
+        Some(self.select_domain_member_candidate(candidates, |this, resolution| {
+            this.match_domain_member_name_candidate(resolution, expected)
+        }))
+    }
+
+    pub(crate) fn select_domain_member_call(
+        &mut self,
+        reference: &TermReference,
+        argument_types: &[GateType],
+        expected_result: Option<&GateType>,
+    ) -> Option<DomainMemberSelection<DomainMemberCallMatch>> {
+        let candidates = self.domain_member_candidates(reference)?;
+        Some(self.select_domain_member_candidate(candidates, |this, resolution| {
+            this.match_domain_member_call_candidate(resolution, argument_types, expected_result)
+        }))
+    }
+
+    fn select_domain_member_candidate<T>(
+        &mut self,
+        candidates: Vec<DomainMemberResolution>,
+        mut matcher: impl FnMut(&mut Self, DomainMemberResolution) -> Option<T>,
+    ) -> DomainMemberSelection<T> {
+        let mut matches = Vec::new();
+        for candidate in candidates {
+            if let Some(matched) = matcher(self, candidate) {
+                matches.push(matched);
+            }
+        }
+        match matches.len() {
+            0 => DomainMemberSelection::NoMatch,
+            1 => DomainMemberSelection::Unique(
+                matches
+                    .pop()
+                    .expect("exactly one domain member match should be available"),
+            ),
+            _ => DomainMemberSelection::Ambiguous,
+        }
+    }
+
+    fn match_domain_member_name_candidate(
+        &mut self,
+        resolution: DomainMemberResolution,
+        expected: &GateType,
+    ) -> Option<GateType> {
+        let annotation = self.domain_member_annotation(resolution)?;
+        let mut substitutions = HashMap::new();
+        let mut item_stack = Vec::new();
+        if !self.match_hir_type(annotation, expected, &mut substitutions, &mut item_stack) {
+            return None;
+        }
+        let lowered = self.lower_domain_member_annotation(resolution, &substitutions)?;
+        lowered.same_shape(expected).then_some(lowered)
+    }
+
+    fn match_domain_member_call_candidate(
+        &mut self,
+        resolution: DomainMemberResolution,
+        argument_types: &[GateType],
+        expected_result: Option<&GateType>,
+    ) -> Option<DomainMemberCallMatch> {
+        let annotation = self.domain_member_annotation(resolution)?;
+        let mut substitutions = HashMap::new();
+        let mut current = annotation;
+        let mut parameter_type_ids = Vec::with_capacity(argument_types.len());
+        for argument in argument_types {
+            let TypeKind::Arrow { parameter, result } = self.module.types()[current].kind.clone()
+            else {
+                return None;
+            };
+            let mut item_stack = Vec::new();
+            if !self.match_hir_type(parameter, argument, &mut substitutions, &mut item_stack) {
+                return None;
+            }
+            parameter_type_ids.push(parameter);
+            current = result;
+        }
+        if let Some(expected) = expected_result {
+            let mut item_stack = Vec::new();
+            if !self.match_hir_type(current, expected, &mut substitutions, &mut item_stack) {
+                return None;
+            }
+        }
+
+        let mut parameters = Vec::with_capacity(parameter_type_ids.len());
+        for parameter in parameter_type_ids {
+            let mut item_stack = Vec::new();
+            parameters.push(self.lower_type(parameter, &substitutions, &mut item_stack)?);
+        }
+        let mut item_stack = Vec::new();
+        let result = self.lower_type(current, &substitutions, &mut item_stack)?;
+        if let Some(expected) = expected_result {
+            if !result.same_shape(expected) {
+                return None;
+            }
+        }
+        Some(DomainMemberCallMatch { parameters, result })
+    }
+
+    fn match_hir_type(
+        &mut self,
+        type_id: TypeId,
+        actual: &GateType,
+        substitutions: &mut HashMap<TypeParameterId, GateType>,
+        item_stack: &mut Vec<ItemId>,
+    ) -> bool {
+        if let Some(lowered) = self.lower_type(type_id, substitutions, item_stack) {
+            return lowered.same_shape(actual);
+        }
+        let ty = self.module.types()[type_id].clone();
+        match ty.kind {
+            TypeKind::Name(reference) => match reference.resolution.as_ref() {
+                ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
+                    match substitutions.entry(*parameter) {
+                        Entry::Occupied(entry) => entry.get().same_shape(actual),
+                        Entry::Vacant(entry) => {
+                            entry.insert(actual.clone());
+                            true
+                        }
+                    }
+                }
+                _ => false,
+            },
+            TypeKind::Tuple(elements) => {
+                let GateType::Tuple(actual_elements) = actual else {
+                    return false;
+                };
+                elements.len() == actual_elements.len()
+                    && elements.iter().zip(actual_elements.iter()).all(|(element, actual)| {
+                        self.match_hir_type(*element, actual, substitutions, item_stack)
+                    })
+            }
+            TypeKind::Record(fields) => {
+                let GateType::Record(actual_fields) = actual else {
+                    return false;
+                };
+                fields.len() == actual_fields.len()
+                    && fields.iter().all(|field| {
+                        let Some(actual_field) =
+                            actual_fields.iter().find(|candidate| candidate.name == field.label.text())
+                        else {
+                            return false;
+                        };
+                        self.match_hir_type(field.ty, &actual_field.ty, substitutions, item_stack)
+                    })
+            }
+            TypeKind::Arrow { parameter, result } => {
+                let GateType::Arrow {
+                    parameter: actual_parameter,
+                    result: actual_result,
+                } = actual
+                else {
+                    return false;
+                };
+                self.match_hir_type(parameter, actual_parameter, substitutions, item_stack)
+                    && self.match_hir_type(result, actual_result, substitutions, item_stack)
+            }
+            TypeKind::Apply { callee, arguments } => self.match_hir_type_application(
+                callee,
+                &arguments,
+                actual,
+                substitutions,
+                item_stack,
+            ),
+        }
+    }
+
+    fn match_hir_type_application(
+        &mut self,
+        callee: TypeId,
+        arguments: &crate::NonEmpty<TypeId>,
+        actual: &GateType,
+        substitutions: &mut HashMap<TypeParameterId, GateType>,
+        item_stack: &mut Vec<ItemId>,
+    ) -> bool {
+        let TypeKind::Name(reference) = &self.module.types()[callee].kind else {
+            return false;
+        };
+        let arguments = arguments.iter().copied().collect::<Vec<_>>();
+        match reference.resolution.as_ref() {
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::List)) => {
+                let GateType::List(element) = actual else {
+                    return false;
+                };
+                arguments.len() == 1
+                    && self.match_hir_type(arguments[0], element, substitutions, item_stack)
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Map)) => {
+                let GateType::Map { key, value } = actual else {
+                    return false;
+                };
+                arguments.len() == 2
+                    && self.match_hir_type(arguments[0], key, substitutions, item_stack)
+                    && self.match_hir_type(arguments[1], value, substitutions, item_stack)
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Set)) => {
+                let GateType::Set(element) = actual else {
+                    return false;
+                };
+                arguments.len() == 1
+                    && self.match_hir_type(arguments[0], element, substitutions, item_stack)
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Option)) => {
+                let GateType::Option(element) = actual else {
+                    return false;
+                };
+                arguments.len() == 1
+                    && self.match_hir_type(arguments[0], element, substitutions, item_stack)
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Result)) => {
+                let GateType::Result { error, value } = actual else {
+                    return false;
+                };
+                arguments.len() == 2
+                    && self.match_hir_type(arguments[0], error, substitutions, item_stack)
+                    && self.match_hir_type(arguments[1], value, substitutions, item_stack)
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Validation)) => {
+                let GateType::Validation { error, value } = actual else {
+                    return false;
+                };
+                arguments.len() == 2
+                    && self.match_hir_type(arguments[0], error, substitutions, item_stack)
+                    && self.match_hir_type(arguments[1], value, substitutions, item_stack)
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Signal)) => {
+                let GateType::Signal(element) = actual else {
+                    return false;
+                };
+                arguments.len() == 1
+                    && self.match_hir_type(arguments[0], element, substitutions, item_stack)
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Task)) => {
+                let GateType::Task { error, value } = actual else {
+                    return false;
+                };
+                arguments.len() == 2
+                    && self.match_hir_type(arguments[0], error, substitutions, item_stack)
+                    && self.match_hir_type(arguments[1], value, substitutions, item_stack)
+            }
+            ResolutionState::Resolved(TypeResolution::Item(item_id)) => match actual {
+                GateType::Domain {
+                    item,
+                    arguments: actual_arguments,
+                    ..
+                } if *item == *item_id && arguments.len() == actual_arguments.len() => arguments
+                    .iter()
+                    .zip(actual_arguments.iter())
+                    .all(|(argument, actual)| {
+                        self.match_hir_type(*argument, actual, substitutions, item_stack)
+                    }),
+                GateType::OpaqueItem {
+                    item,
+                    arguments: actual_arguments,
+                    ..
+                } if *item == *item_id && arguments.len() == actual_arguments.len() => arguments
+                    .iter()
+                    .zip(actual_arguments.iter())
+                    .all(|(argument, actual)| {
+                        self.match_hir_type(*argument, actual, substitutions, item_stack)
+                    }),
+                _ => false,
+            },
+            ResolutionState::Unresolved
+            | ResolutionState::Resolved(TypeResolution::TypeParameter(_))
+            | ResolutionState::Resolved(TypeResolution::Import(_))
+            | ResolutionState::Resolved(TypeResolution::Builtin(_)) => false,
+        }
+    }
+
+    fn lower_domain_member_annotation(
+        &mut self,
+        resolution: DomainMemberResolution,
+        substitutions: &HashMap<TypeParameterId, GateType>,
+    ) -> Option<GateType> {
+        let annotation = self.domain_member_annotation(resolution)?;
+        let mut item_stack = Vec::new();
+        self.lower_type(annotation, substitutions, &mut item_stack)
+    }
+
+    fn domain_member_annotation(&self, resolution: DomainMemberResolution) -> Option<TypeId> {
+        let Item::Domain(domain) = &self.module.items()[resolution.domain] else {
+            return None;
+        };
+        domain
+            .members
+            .get(resolution.member_index)
+            .filter(|member| member.kind == DomainMemberKind::Method)
+            .map(|member| member.annotation)
+    }
+
+    fn domain_member_label(&self, resolution: DomainMemberResolution) -> Option<String> {
+        let Item::Domain(domain) = &self.module.items()[resolution.domain] else {
+            return None;
+        };
+        let member = domain.members.get(resolution.member_index)?;
+        Some(format!("{}.{}", domain.name.text(), member.name.text()))
+    }
+
     fn lower_type(
         &mut self,
         type_id: TypeId,
@@ -6822,6 +7321,13 @@ impl<'a> GateTypeContext<'a> {
                 info
             }
             ExprKind::Apply { callee, arguments } => {
+                if let ExprKind::Name(reference) = &self.module.exprs()[callee].kind {
+                    if let Some(info) =
+                        self.infer_domain_member_apply(reference, &arguments, env, ambient)
+                    {
+                        return info;
+                    }
+                }
                 let mut info = self.infer_expr(callee, env, ambient);
                 let mut current = info.ty.clone();
                 for argument in arguments.iter() {
@@ -6924,6 +7430,25 @@ impl<'a> GateTypeContext<'a> {
                     ..GateExprInfo::default()
                 }
             }
+            ResolutionState::Resolved(TermResolution::DomainMember(_)) => GateExprInfo {
+                ty: self.infer_domain_member_name_type(reference),
+                ..GateExprInfo::default()
+            },
+            ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_)) => GateExprInfo {
+                issues: vec![GateIssue::AmbiguousDomainMember {
+                    span: reference.span(),
+                    name: reference
+                        .path
+                        .segments()
+                        .last()
+                        .text()
+                        .to_owned(),
+                    candidates: self
+                        .domain_member_candidate_labels(reference)
+                        .unwrap_or_default(),
+                }],
+                ..GateExprInfo::default()
+            },
             ResolutionState::Resolved(TermResolution::Builtin(builtin)) => {
                 let ty = match builtin {
                     crate::hir::BuiltinTerm::True | crate::hir::BuiltinTerm::False => {
@@ -6942,6 +7467,47 @@ impl<'a> GateTypeContext<'a> {
                 }
             }
         }
+    }
+
+    fn infer_domain_member_apply(
+        &mut self,
+        reference: &TermReference,
+        arguments: &crate::NonEmpty<ExprId>,
+        env: &GateExprEnv,
+        ambient: Option<&GateType>,
+    ) -> Option<GateExprInfo> {
+        self.domain_member_candidates(reference)?;
+        let mut info = GateExprInfo::default();
+        let mut argument_types = Vec::with_capacity(arguments.len());
+        for argument in arguments.iter() {
+            let argument_info = self.infer_expr(*argument, env, ambient);
+            argument_types.push(argument_info.ty.clone());
+            info.merge(argument_info);
+        }
+        let Some(argument_types) = argument_types.into_iter().collect::<Option<Vec<_>>>() else {
+            return Some(info);
+        };
+        match self.select_domain_member_call(reference, &argument_types, None)? {
+            DomainMemberSelection::Unique(matched) => {
+                info.ty = Some(matched.result);
+            }
+            DomainMemberSelection::Ambiguous => {
+                info.issues.push(GateIssue::AmbiguousDomainMember {
+                    span: reference.span(),
+                    name: reference
+                        .path
+                        .segments()
+                        .last()
+                        .text()
+                        .to_owned(),
+                    candidates: self
+                        .domain_member_candidate_labels(reference)
+                        .unwrap_or_default(),
+                });
+            }
+            DomainMemberSelection::NoMatch => {}
+        }
+        Some(info)
     }
 
     pub(crate) fn infer_pipe_body(
@@ -7249,7 +7815,9 @@ fn case_constructor_key(reference: &TermReference) -> Option<CaseConstructorKey>
         }
         ResolutionState::Unresolved
         | ResolutionState::Resolved(TermResolution::Local(_))
-        | ResolutionState::Resolved(TermResolution::Import(_)) => None,
+        | ResolutionState::Resolved(TermResolution::Import(_))
+        | ResolutionState::Resolved(TermResolution::DomainMember(_))
+        | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_)) => None,
     }
 }
 

@@ -910,7 +910,9 @@ fn runtime_reference_for_name(
         crate::ResolutionState::Resolved(TermResolution::Builtin(builtin)) => {
             Ok(GateRuntimeReference::Builtin(*builtin))
         }
-        crate::ResolutionState::Resolved(TermResolution::Import(_))
+        crate::ResolutionState::Resolved(TermResolution::DomainMember(_))
+        | crate::ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_))
+        | crate::ResolutionState::Resolved(TermResolution::Import(_))
         | crate::ResolutionState::Unresolved => {
             Err(GateElaborationBlocker::UnknownRuntimeExprType { span })
         }
@@ -934,6 +936,9 @@ fn blocker_for_issue(issue: GateIssue) -> GateElaborationBlocker {
         }
         GateIssue::UnknownField { path, subject, .. } => {
             GateElaborationBlocker::UnknownField { path, subject }
+        }
+        GateIssue::AmbiguousDomainMember { span, .. } => {
+            GateElaborationBlocker::UnknownRuntimeExprType { span }
         }
     }
 }

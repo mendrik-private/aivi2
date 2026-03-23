@@ -14,6 +14,7 @@ fn check_accepts_valid_hir_fixtures() {
     for relative in [
         "milestone-2/valid/local-top-level-refs/main.aivi",
         "milestone-2/valid/use-member-imports/main.aivi",
+        "milestone-2/valid/use-member-import-aliases/main.aivi",
         "milestone-2/valid/source-provider-contract-declarations/main.aivi",
         "milestone-2/valid/custom-source-provider-wakeup/main.aivi",
         "milestone-2/valid/custom-source-recurrence-wakeup/main.aivi",
@@ -27,6 +28,7 @@ fn check_accepts_valid_hir_fixtures() {
         "milestone-2/valid/markup-control-nodes/main.aivi",
         "milestone-2/valid/class-declarations/main.aivi",
         "milestone-2/valid/domain-declarations/main.aivi",
+        "milestone-2/valid/domain-member-resolution/main.aivi",
         "milestone-2/valid/domain-literal-suffixes/main.aivi",
         "milestone-2/valid/type-kinds/main.aivi",
         "milestone-2/valid/pipe-branch-and-join/main.aivi",
@@ -114,6 +116,7 @@ fn check_rejects_invalid_hir_fixtures() {
         "milestone-2/invalid/source-option-list-element-mismatch/main.aivi",
         "milestone-2/invalid/value-annotation-type-mismatch/main.aivi",
         "milestone-2/invalid/equality-missing-eq-instance/main.aivi",
+        "milestone-2/invalid/ambiguous-domain-member/main.aivi",
         "milestone-2/invalid/trailing-declaration-body-token/main.aivi",
         "milestone-2/invalid/custom-source-provider-unknown-option/main.aivi",
         "milestone-2/invalid/custom-source-provider-option-type-mismatch/main.aivi",
@@ -262,5 +265,29 @@ fn check_reports_trailing_body_tokens_from_syntax() {
     assert!(
         stderr.contains("function declaration body must contain exactly one expression"),
         "expected explicit trailing body token message, got stderr: {stderr}"
+    );
+}
+
+#[test]
+fn check_reports_ambiguous_domain_members_from_hir_typechecker() {
+    let path = fixture_path("milestone-2/invalid/ambiguous-domain-member/main.aivi");
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        !output.status.success(),
+        "expected ambiguous domain member fixture to fail check"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("hir::ambiguous-domain-member"),
+        "expected ambiguous domain member diagnostic code, got stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("domain member `make` is ambiguous in this context"),
+        "expected explicit ambiguous domain member message, got stderr: {stderr}"
     );
 }

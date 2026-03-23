@@ -1,9 +1,7 @@
-use tower_lsp::lsp_types::{SemanticTokens, SemanticTokensParams, SemanticTokensResult};
+use tower_lsp::lsp_types::{SemanticTokensParams, SemanticTokensResult};
 
-/// Handle a semantic tokens request (stub).
+/// Semantic tokens not yet implemented — returning None lets VSCode fall back
+/// to the TextMate grammar for all coloring.
 pub async fn semantic_tokens_full(_params: SemanticTokensParams) -> Option<SemanticTokensResult> {
-    Some(SemanticTokensResult::Tokens(SemanticTokens {
-        result_id: None,
-        data: Vec::new(),
-    }))
+    None
 }

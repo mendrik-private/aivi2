@@ -17,7 +17,8 @@ pub use cst::{
     RegexLiteral, SourceDecorator, SourceProviderContractBody, SourceProviderContractFieldValue,
     SourceProviderContractItem, SourceProviderContractMember, SourceProviderContractSchemaMember,
     SuffixedIntegerLiteral, TextFragment, TextInterpolation, TextLiteral, TextSegment, TokenRange,
-    TypeDeclBody, TypeExpr, TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseItem,
+    TypeDeclBody, TypeExpr, TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseImport,
+    UseItem,
 };
 pub use format::Formatter;
 pub use lex::{LexedModule, Token, TokenKind, lex_module};

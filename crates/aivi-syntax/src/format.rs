@@ -235,7 +235,7 @@ impl Formatter {
         if item.imports.len() == 1 {
             return vec![format!(
                 "use {path} ({})",
-                self.format_qualified_name(&item.imports[0])
+                self.format_use_import(&item.imports[0])
             )];
         }
 
@@ -244,11 +244,20 @@ impl Formatter {
             lines.push(format!(
                 "{}{}",
                 spaces(INDENT_WIDTH),
-                self.format_qualified_name(import)
+                self.format_use_import(import)
             ));
         }
         lines.push(")".to_owned());
         lines
+    }
+
+    fn format_use_import(&self, import: &crate::UseImport) -> String {
+        let mut text = self.format_qualified_name(&import.path);
+        if let Some(alias) = &import.alias {
+            text.push_str(" as ");
+            text.push_str(&alias.text);
+        }
+        text
     }
 
     fn format_domain_item(&self, item: &DomainItem) -> Vec<String> {
@@ -1711,6 +1720,20 @@ mod tests {
                 "    name,\n",
                 "    nickname\n",
                 "}\n",
+            )
+        );
+    }
+
+    #[test]
+    fn formatter_normalizes_use_import_aliases() {
+        let formatted = format_text("use aivi.network(http as primary,Request as HttpRequest)\n");
+        assert_eq!(
+            formatted,
+            concat!(
+                "use aivi.network (\n",
+                "    http as primary\n",
+                "    Request as HttpRequest\n",
+                ")\n",
             )
         );
     }

@@ -366,6 +366,7 @@ fn blocker_for_map_issue(issue: GateIssue) -> FanoutElaborationBlocker {
         GateIssue::UnknownField { path, subject, .. } => {
             FanoutElaborationBlocker::MapUnknownField { path, subject }
         }
+        GateIssue::AmbiguousDomainMember { .. } => FanoutElaborationBlocker::UnknownMapBodyType,
     }
 }
 
@@ -377,6 +378,7 @@ fn blocker_for_join_issue(issue: GateIssue) -> FanoutElaborationBlocker {
         GateIssue::UnknownField { path, subject, .. } => {
             FanoutElaborationBlocker::JoinUnknownField { path, subject }
         }
+        GateIssue::AmbiguousDomainMember { .. } => FanoutElaborationBlocker::UnknownJoinBodyType,
     }
 }
 

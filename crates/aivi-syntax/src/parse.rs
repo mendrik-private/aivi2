@@ -12,7 +12,7 @@ use crate::{
         SourceProviderContractFieldValue, SourceProviderContractItem, SourceProviderContractMember,
         SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextFragment,
         TextInterpolation, TextLiteral, TextSegment, TokenRange, TypeDeclBody, TypeExpr,
-        TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseItem,
+        TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseImport, UseItem,
     },
     lex::{LexedModule, Token, TokenKind, lex_fragment, lex_module},
 };
@@ -25,6 +25,7 @@ const DANGLING_DECORATOR_BLOCK: DiagnosticCode =
     DiagnosticCode::new("syntax", "dangling-decorator-block");
 const MISSING_ITEM_NAME: DiagnosticCode = DiagnosticCode::new("syntax", "missing-item-name");
 const MISSING_USE_PATH: DiagnosticCode = DiagnosticCode::new("syntax", "missing-use-path");
+const MISSING_USE_ALIAS: DiagnosticCode = DiagnosticCode::new("syntax", "missing-use-alias");
 const MISSING_EXPORT_NAME: DiagnosticCode = DiagnosticCode::new("syntax", "missing-export-name");
 const MISSING_DECLARATION_BODY: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-declaration-body");
@@ -844,7 +845,7 @@ impl<'a> Parser<'a> {
                 {
                     break;
                 }
-                let Some(import) = self.parse_qualified_name(&mut cursor, end) else {
+                let Some(import) = self.parse_use_import(&mut cursor, end) else {
                     break;
                 };
                 imports.push(import);
@@ -858,6 +859,34 @@ impl<'a> Parser<'a> {
             path,
             imports,
         }
+    }
+
+    fn parse_use_import(&mut self, cursor: &mut usize, end: usize) -> Option<UseImport> {
+        let path = self.parse_qualified_name(cursor, end)?;
+        let alias = match self.peek_nontrivia(*cursor, end) {
+            Some(index)
+                if self.tokens[index].kind() == TokenKind::Identifier
+                    && self.is_identifier_text(index, "as") =>
+            {
+                *cursor = index + 1;
+                match self.parse_identifier(cursor, end) {
+                    Some(alias) => Some(alias),
+                    None => {
+                        self.diagnostics.push(
+                            Diagnostic::error("`use` import alias is missing its local name")
+                                .with_code(MISSING_USE_ALIAS)
+                                .with_primary_label(
+                                    self.source_span_of_token(index),
+                                    "expected a local alias such as `request` after `as`",
+                                ),
+                        );
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
+        Some(UseImport { path, alias })
     }
 
     fn parse_export_item(
@@ -3020,6 +3049,52 @@ export main
             }
             other => panic!("expected function item, got {other:?}"),
         }
+
+        match &parsed.module.items[4] {
+            Item::Use(item) => {
+                assert_eq!(
+                    item.path.as_ref().map(QualifiedName::as_dotted).as_deref(),
+                    Some("aivi.network")
+                );
+                assert_eq!(item.imports.len(), 1);
+                assert_eq!(item.imports[0].path.as_dotted(), "http");
+                assert!(item.imports[0].alias.is_none());
+            }
+            other => panic!("expected use item, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parser_builds_use_import_aliases() {
+        let (_, parsed) = load(
+            r#"use aivi.network (
+    http as primaryHttp
+    Request as HttpRequest
+)
+"#,
+        );
+
+        assert!(!parsed.has_errors());
+        let Item::Use(item) = &parsed.module.items[0] else {
+            panic!("expected use item");
+        };
+        assert_eq!(item.imports.len(), 2);
+        assert_eq!(item.imports[0].path.as_dotted(), "http");
+        assert_eq!(
+            item.imports[0]
+                .alias
+                .as_ref()
+                .map(|alias| alias.text.as_str()),
+            Some("primaryHttp")
+        );
+        assert_eq!(item.imports[1].path.as_dotted(), "Request");
+        assert_eq!(
+            item.imports[1]
+                .alias
+                .as_ref()
+                .map(|alias| alias.text.as_str()),
+            Some("HttpRequest")
+        );
     }
 
     #[test]
