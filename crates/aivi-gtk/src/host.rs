@@ -1,9 +1,9 @@
 use std::{
-    cell::RefCell,
     collections::{BTreeMap, VecDeque},
     error::Error,
     fmt,
     rc::Rc,
+    sync::Mutex,
 };
 
 use aivi_hir::{NamePath, TextLiteral, TextSegment};
@@ -47,28 +47,40 @@ pub enum GtkConcreteEventPayload {
     Unit,
 }
 
-/// GTK signal closures run on the GTK main thread, so a small `Rc<RefCell<_>>` queue is the
-/// narrowest bridge that lets `'static` callbacks hand events back to the host without widening the
-/// threading surface to `Arc<Mutex<_>>`.
+/// Event queue shared between GTK signal closures and the host evaluation loop.
+///
+/// The host itself is `Rc<GtkConcreteHost<V>>` (single-threaded by design), so
+/// `Mutex` does not introduce any cross-thread overhead.  Compared with
+/// `RefCell`, `Mutex` eliminates the reentrant-borrow panic surface: if a GTK
+/// callback fires while the host is draining the queue the `Mutex` will block
+/// rather than panic.  Both operations are short, so the brief mutual exclusion
+/// is acceptable and safe.
 struct GtkEventQueue<V> {
-    events: RefCell<VecDeque<GtkQueuedEvent<V>>>,
+    events: Mutex<VecDeque<GtkQueuedEvent<V>>>,
 }
 
 impl<V> Default for GtkEventQueue<V> {
     fn default() -> Self {
         Self {
-            events: RefCell::new(VecDeque::new()),
+            events: Mutex::new(VecDeque::new()),
         }
     }
 }
 
 impl<V> GtkEventQueue<V> {
     fn push(&self, event: GtkQueuedEvent<V>) {
-        self.events.borrow_mut().push_back(event);
+        self.events
+            .lock()
+            .expect("GtkEventQueue mutex should not be poisoned")
+            .push_back(event);
     }
 
     fn drain(&self) -> Vec<GtkQueuedEvent<V>> {
-        self.events.borrow_mut().drain(..).collect()
+        self.events
+            .lock()
+            .expect("GtkEventQueue mutex should not be poisoned")
+            .drain(..)
+            .collect()
     }
 }
 
@@ -629,11 +641,14 @@ where
                     .clone()
                     .downcast::<gtk::Box>()
                     .expect("box widget should downcast");
+                // Build the desired child order in a single linear pass:
+                // drain the moved slice then splice it at the target position.
+                // `Vec::splice` is O(n) in the children count; iterating over
+                // `moved` for GTK reorder calls is O(count).  The previous
+                // per-element `Vec::insert` loop was O(count × n) (M3).
                 let mut next_children = current_children.clone();
-                let moved = next_children.drain(from..from + count).collect::<Vec<_>>();
-                for (offset, child) in moved.iter().cloned().enumerate() {
-                    next_children.insert(to + offset, child);
-                }
+                let moved: Vec<_> = next_children.drain(from..from + count).collect();
+                next_children.splice(to..to, moved.iter().cloned());
                 for (offset, child) in moved.iter().enumerate() {
                     let target_index = to + offset;
                     let child_widget = self.widget_object(child)?;
@@ -862,11 +877,17 @@ fn concrete_widget_supports_property(kind: SupportedWidget, property: &str) -> b
     )
 }
 
+/// Return the leaf segment of a widget name path.
+///
+/// **Invariant**: `NamePath` is constructed by the HIR parser which guarantees
+/// at least one segment per path node.  An empty path is a parser bug, not a
+/// user error, so the `expect` here is a programmer assertion rather than a
+/// recoverable condition (I4).
 fn widget_name(path: &NamePath) -> &str {
     path.segments()
         .iter()
         .last()
-        .expect("NamePath is non-empty")
+        .expect("NamePath must contain at least one segment — this is a parser invariant")
         .text()
 }
 

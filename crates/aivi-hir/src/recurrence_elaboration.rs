@@ -14,7 +14,8 @@ use crate::{
         lower_gate_pipe_body_runtime_expr, lower_gate_runtime_expr,
     },
     validate::{
-        GateExprEnv, GateIssue, GateType, GateTypeContext, truthy_falsy_pair_stages, walk_expr_tree,
+        GateExprEnv, GateIssue, GateType, GateTypeContext, PipeSubjectStepOutcome,
+        PipeSubjectWalker, gate_env_for_function, truthy_falsy_pair_stages, walk_expr_tree,
     },
 };
 
@@ -217,7 +218,7 @@ pub fn elaborate_recurrences(module: &Module) -> RecurrenceElaborationReport {
                     recurrence_target_hint_for_annotation(&mut typing, annotation)
                 });
                 let wakeup = recurrence_wakeup_hint_for_decorators(module, &item.header.decorators);
-                let env = recurrence_env_for_function(&item, &mut typing);
+                let env = gate_env_for_function(&item, &mut typing);
                 collect_recurrence_nodes(
                     module,
                     owner,
@@ -586,48 +587,52 @@ fn infer_recurrence_input_subject(
     env: &GateExprEnv,
     typing: &mut GateTypeContext<'_>,
 ) -> Option<GateType> {
-    let stages = pipe
-        .stages
-        .iter()
-        .take(prefix_stage_count)
-        .collect::<Vec<_>>();
-    let mut current = typing.infer_expr(pipe.head, env, None).ty?;
-    let mut stage_index = 0usize;
-    while stage_index < stages.len() {
-        let stage = stages[stage_index];
-        match &stage.kind {
-            PipeStageKind::Transform { expr } => {
-                current = typing.infer_transform_stage(*expr, env, &current)?;
-                stage_index += 1;
-            }
-            PipeStageKind::Tap { expr } => {
-                let _ = typing.infer_pipe_body(*expr, env, &current);
-                stage_index += 1;
-            }
-            PipeStageKind::Gate { expr } => {
-                current = typing.infer_gate_stage(*expr, env, &current)?;
-                stage_index += 1;
-            }
-            PipeStageKind::Map { expr } => {
-                current = typing.infer_fanout_map_stage(*expr, env, &current)?;
-                stage_index += 1;
-            }
-            PipeStageKind::FanIn { expr } => {
-                current = typing.infer_fanin_stage(*expr, env, &current)?;
-                stage_index += 1;
-            }
+    // Collect the limited stage slice once so the truthy/falsy pair helper can
+    // index into it by position.  The walker is constructed with the same limit
+    // so it only iterates over these prefix stages (PA-M1).
+    let all_stages = pipe.stages.iter().take(prefix_stage_count).collect::<Vec<_>>();
+    PipeSubjectWalker::new_with_limit(pipe, env, typing, prefix_stage_count).walk(
+        typing,
+        |stage_index, stage, current, typing| match &stage.kind {
+            PipeStageKind::Gate { expr } => PipeSubjectStepOutcome::Continue {
+                new_subject: current.and_then(|s| typing.infer_gate_stage(*expr, env, s)),
+                advance_by: 1,
+            },
+            PipeStageKind::Map { expr } => PipeSubjectStepOutcome::Continue {
+                new_subject: current
+                    .and_then(|s| typing.infer_fanout_map_stage(*expr, env, s)),
+                advance_by: 1,
+            },
+            PipeStageKind::FanIn { expr } => PipeSubjectStepOutcome::Continue {
+                new_subject: current.and_then(|s| typing.infer_fanin_stage(*expr, env, s)),
+                advance_by: 1,
+            },
             PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
-                let pair = truthy_falsy_pair_stages(&stages, stage_index)?;
-                current = typing.infer_truthy_falsy_pair(&pair, env, &current)?;
-                stage_index = pair.next_index;
+                let Some(pair) = truthy_falsy_pair_stages(&all_stages, stage_index) else {
+                    return PipeSubjectStepOutcome::Continue {
+                        new_subject: None,
+                        advance_by: 1,
+                    };
+                };
+                let new_subject = current
+                    .and_then(|s| typing.infer_truthy_falsy_pair(&pair, env, s));
+                let advance = pair.next_index.saturating_sub(stage_index).max(1);
+                PipeSubjectStepOutcome::Continue { new_subject, advance_by: advance }
             }
+            // Recurrence boundary stages and unhandled case/apply stages should
+            // never appear within the prefix (the caller computes prefix_stage_count
+            // to exclude them), but stop cleanly if one is encountered.
             PipeStageKind::Case { .. }
             | PipeStageKind::Apply { .. }
             | PipeStageKind::RecurStart { .. }
-            | PipeStageKind::RecurStep { .. } => return None,
-        }
-    }
-    Some(current)
+            | PipeStageKind::RecurStep { .. } => PipeSubjectStepOutcome::Stop,
+            // Transform and Tap are handled by PipeSubjectWalker before the
+            // callback is invoked; they can never reach this arm.
+            PipeStageKind::Transform { .. } | PipeStageKind::Tap { .. } => {
+                unreachable!("Transform/Tap are consumed by PipeSubjectWalker before the callback")
+            }
+        },
+    )
 }
 
 fn recurrence_target_hint_for_annotation(
@@ -734,21 +739,7 @@ fn signal_source_decorator<'a>(
     })
 }
 
-fn recurrence_env_for_function(
-    item: &crate::FunctionItem,
-    typing: &mut GateTypeContext<'_>,
-) -> GateExprEnv {
-    let mut env = GateExprEnv::default();
-    for parameter in &item.parameters {
-        let Some(annotation) = parameter.annotation else {
-            continue;
-        };
-        if let Some(ty) = typing.lower_annotation(annotation) {
-            env.locals.insert(parameter.binding, ty);
-        }
-    }
-    env
-}
+// recurrence_env_for_function is now the shared crate::validate::gate_env_for_function (PA-I2).
 
 fn recurrence_runtime_stage_blocker(
     blocker: GateElaborationBlocker,
@@ -772,7 +763,22 @@ fn recurrence_runtime_stage_blocker(
         }
         GateElaborationBlocker::UnknownSubjectType
         | GateElaborationBlocker::UnknownPredicateType => {
-            unreachable!("runtime expression lowering should not emit subject-only gate blockers")
+            // These variants are emitted by `elaborate_gate_stage` when the
+            // subject type is not yet known — a subject-level concern, not a
+            // runtime-expression concern.  `lower_gate_pipe_body_runtime_expr`
+            // is only called after the subject type is confirmed (it takes
+            // `subject: &GateType`, not `Option<&GateType>`), so these arms
+            // are unreachable today.
+            //
+            // If `GateElaborationBlocker` is ever split into
+            // `GateSubjectBlocker` + `GateRuntimeBlocker` (PA-I1), this match
+            // arm should be removed and `recurrence_runtime_stage_blocker`
+            // should accept only `GateRuntimeBlocker`, making the invariant
+            // compiler-enforced rather than a runtime assertion.
+            unreachable!(
+                "lower_gate_pipe_body_runtime_expr takes a concrete subject and cannot emit \
+                 subject-only gate blockers; this arm is evidence the type should be split (PA-I1)"
+            )
         }
     }
 }

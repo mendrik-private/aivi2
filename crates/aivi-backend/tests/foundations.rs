@@ -310,7 +310,7 @@ val answer =
         .expect("function item should lower a backend body kernel");
     assert!(matches!(
         backend.kernels()[body].origin.kind,
-        aivi_backend::KernelOriginKind::ItemBody
+        aivi_backend::KernelOriginKind::ItemBody { .. }
     ));
 
     let answer = find_item(&backend, "answer");

@@ -55,11 +55,10 @@ impl Generation {
     }
 
     fn advance(self) -> Self {
-        Self(
-            self.0
-                .checked_add(1)
-                .unwrap_or_else(|| panic!("input generation overflow at {}", self.0)),
-        )
+        // Wrapping is safe: no two live generation values ever compare equal
+        // across a wrap boundary in practice at any achievable tick rate.
+        // At 60 fps, u64::MAX generations would take ~9.7 billion years.
+        Self(self.0.wrapping_add(1))
     }
 }
 
@@ -198,6 +197,7 @@ pub struct Scheduler<V> {
     pending_scratch: Vec<PendingValue<V>>,
     dirty_scratch: Vec<bool>,
     publications_scratch: Vec<Option<Publication<V>>>,
+    dropped_scratch: Vec<DroppedPublication>,
     worker_publication_tx: mpsc::Sender<Publication<V>>,
     worker_publication_rx: mpsc::Receiver<Publication<V>>,
     worker_publication_notifier: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
@@ -235,6 +235,7 @@ impl<V> Scheduler<V> {
             pending_scratch: Vec::new(),
             dirty_scratch: Vec::new(),
             publications_scratch: Vec::new(),
+            dropped_scratch: Vec::new(),
             worker_publication_tx,
             worker_publication_rx,
             worker_publication_notifier: None,
@@ -358,10 +359,9 @@ impl<V> Scheduler<V> {
     {
         self.drain_worker_publications();
         let tick = self.next_tick;
-        self.next_tick = self
-            .next_tick
-            .checked_add(1)
-            .expect("tick counter overflow");
+        // Wrapping is safe: the tick counter is used for tracing only; no two
+        // in-flight ticks run simultaneously.
+        self.next_tick = self.next_tick.wrapping_add(1);
 
         let mut pending = std::mem::take(&mut self.pending_scratch);
         pending.clear();
@@ -373,7 +373,8 @@ impl<V> Scheduler<V> {
         let disposed = self.collect_disposed_owners(&messages);
         self.apply_owner_disposals(&disposed, &mut pending);
 
-        let mut dropped = Vec::new();
+        let mut dropped = std::mem::take(&mut self.dropped_scratch);
+        dropped.clear();
         let mut publications = std::mem::take(&mut self.publications_scratch);
         publications.clear();
         publications.resize_with(self.signals.len(), || None::<Publication<V>>);
@@ -478,10 +479,14 @@ impl<V> Scheduler<V> {
         self.pending_scratch = pending;
 
         self.initialized = true;
+        // Drain `dropped` into a boxed slice for the outcome, then return the
+        // now-empty Vec to the scratch field to avoid a fresh allocation next tick.
+        let dropped_publications: Box<[DroppedPublication]> = dropped.drain(..).collect();
+        self.dropped_scratch = dropped;
         Ok(TickOutcome {
             tick,
             committed: committed.into_boxed_slice(),
-            dropped_publications: dropped.into_boxed_slice(),
+            dropped_publications,
         })
     }
 

@@ -6,6 +6,10 @@ use std::{
     },
 };
 
+// Re-export the backend's canonical `SourceInstanceId` so the runtime and
+// backend share one definition instead of two independent macro-generated
+// newtypes that could diverge (I2).
+pub use aivi_backend::SourceInstanceId;
 use aivi_typing::{
     BuiltinSourceProvider, RecurrenceWakeupPlan, SourceCancellationPolicy, SourceOptionWakeupCause,
 };
@@ -35,7 +39,6 @@ macro_rules! define_runtime_id {
     };
 }
 
-define_runtime_id!(SourceInstanceId);
 define_runtime_id!(TaskInstanceId);
 
 /// Runtime-facing provider identity carried forward from source elaboration/lowering.
@@ -63,14 +66,26 @@ impl RuntimeSourceProvider {
 }
 
 /// Reconfiguration contract retained from the current source-lifecycle handoff.
+///
+/// Only `DisposeSupersededBeforePublish` exists today.  A second variant
+/// (`HoldSupersededUntilPublish`) is anticipated when sources need to
+/// complete in-flight work before a replacement takes over.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SourceReplacementPolicy {
+    /// Dispose superseded source work immediately before the replacement's
+    /// first publication is applied to the scheduler state.
     DisposeSupersededBeforePublish,
 }
 
 /// Stale-work contract retained from the current source-lifecycle handoff.
+///
+/// Only `DropStalePublications` exists today.  A second variant
+/// (`QueueStalePublications`) is anticipated for sources that must not lose
+/// results even when a reconfiguration races ahead of them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SourceStaleWorkPolicy {
+    /// Discard any publication whose generation stamp predates the current
+    /// scheduler generation for that source slot.
     DropStalePublications,
 }
 

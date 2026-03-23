@@ -173,7 +173,12 @@ impl fmt::Display for CallingConvention {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KernelOriginKind {
-    ItemBody,
+    /// The kernel was produced from the item body of the item identified by
+    /// `item`.  All other `KernelOriginKind` variants identify their producer
+    /// through their own fields; this variant makes that identity explicit so
+    /// diagnostic messages can name the item without having to look up the
+    /// parent `KernelOrigin`.
+    ItemBody { item: ItemId },
     GateTrue {
         pipeline: PipelineId,
         stage_index: usize,
@@ -210,7 +215,7 @@ pub enum KernelOriginKind {
 impl fmt::Display for KernelOriginKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ItemBody => f.write_str("item-body"),
+            Self::ItemBody { item } => write!(f, "item-body item{item}"),
             Self::GateTrue {
                 pipeline,
                 stage_index,

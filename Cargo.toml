@@ -29,6 +29,7 @@ aivi-typing = { path = "crates/aivi-typing" }
 aivi-query = { path = "crates/aivi-query" }
 aivi-lsp = { path = "crates/aivi-lsp" }
 regex-syntax = "0.8.10"
+rustc-hash = "2"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -3,8 +3,9 @@ use aivi_base::SourceSpan;
 use crate::{
     BuiltinTerm, ExprId, ExprKind, Item, ItemId, Module, PipeExpr, PipeStageKind,
     validate::{
-        GateExprEnv, GateIssue, GateType, GateTypeContext, TruthyFalsyPairStages,
-        truthy_falsy_pair_stages, walk_expr_tree,
+        GateExprEnv, GateIssue, GateType, GateTypeContext, PipeSubjectStepOutcome,
+        PipeSubjectWalker, TruthyFalsyPairStages, gate_env_for_function, truthy_falsy_pair_stages,
+        walk_expr_tree,
     },
 };
 
@@ -136,7 +137,7 @@ pub fn elaborate_truthy_falsy(module: &Module) -> TruthyFalsyElaborationReport {
                 &mut stages,
             ),
             Item::Function(item) => {
-                let env = truthy_falsy_env_for_function(&item, &mut typing);
+                let env = gate_env_for_function(&item, &mut typing);
                 collect_truthy_falsy_stages(
                     module,
                     owner,
@@ -203,53 +204,34 @@ fn collect_truthy_falsy_pipe(
     pipe: &PipeExpr,
     env: &GateExprEnv,
     typing: &mut GateTypeContext<'_>,
-    stages: &mut Vec<TruthyFalsyStageElaboration>,
+    truthy_falsy_stages: &mut Vec<TruthyFalsyStageElaboration>,
 ) {
-    let stage_refs = pipe.stages.iter().collect::<Vec<_>>();
-    let mut current = typing.infer_expr(pipe.head, env, None).ty;
-    let mut stage_index = 0usize;
-    while stage_index < stage_refs.len() {
-        let stage = stage_refs[stage_index];
+    let all_stages = pipe.stages.iter().collect::<Vec<_>>();
+    PipeSubjectWalker::new(pipe, env, typing).walk(typing, |stage_index, stage, current, typing| {
         match &stage.kind {
-            PipeStageKind::Transform { expr } => {
-                current = current
-                    .as_ref()
-                    .and_then(|subject| typing.infer_transform_stage(*expr, env, subject));
-                stage_index += 1;
-            }
-            PipeStageKind::Tap { expr } => {
-                if let Some(subject) = current.clone() {
-                    let _ = typing.infer_pipe_body(*expr, env, &subject);
-                    current = Some(subject);
-                }
-                stage_index += 1;
-            }
-            PipeStageKind::Gate { expr } => {
-                current = current
-                    .as_ref()
-                    .and_then(|subject| typing.infer_gate_stage(*expr, env, subject));
-                stage_index += 1;
-            }
-            PipeStageKind::Map { expr } => {
-                current = current
-                    .as_ref()
-                    .and_then(|subject| typing.infer_fanout_map_stage(*expr, env, subject));
-                stage_index += 1;
-            }
-            PipeStageKind::FanIn { expr } => {
-                current = current
-                    .as_ref()
-                    .and_then(|subject| typing.infer_fanin_stage(*expr, env, subject));
-                stage_index += 1;
-            }
+            PipeStageKind::Gate { expr } => PipeSubjectStepOutcome::Continue {
+                new_subject: current.and_then(|s| typing.infer_gate_stage(*expr, env, s)),
+                advance_by: 1,
+            },
+            PipeStageKind::Map { expr } => PipeSubjectStepOutcome::Continue {
+                new_subject: current
+                    .and_then(|s| typing.infer_fanout_map_stage(*expr, env, s)),
+                advance_by: 1,
+            },
+            PipeStageKind::FanIn { expr } => PipeSubjectStepOutcome::Continue {
+                new_subject: current.and_then(|s| typing.infer_fanin_stage(*expr, env, s)),
+                advance_by: 1,
+            },
             PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
-                let Some(pair) = truthy_falsy_pair_stages(&stage_refs, stage_index) else {
-                    current = None;
-                    stage_index += 1;
-                    continue;
+                let Some(pair) = truthy_falsy_pair_stages(&all_stages, stage_index) else {
+                    return PipeSubjectStepOutcome::Continue {
+                        new_subject: None,
+                        advance_by: 1,
+                    };
                 };
-                let outcome = elaborate_truthy_falsy_pair(&pair, current.as_ref(), env, typing);
-                stages.push(TruthyFalsyStageElaboration {
+                let outcome =
+                    elaborate_truthy_falsy_pair(&pair, current, env, typing);
+                truthy_falsy_stages.push(TruthyFalsyStageElaboration {
                     owner,
                     pipe_expr,
                     truthy_stage_index: pair.truthy_index,
@@ -260,21 +242,27 @@ fn collect_truthy_falsy_pipe(
                     falsy_expr: pair.falsy_expr,
                     outcome: outcome.clone(),
                 });
-                current = match outcome {
-                    TruthyFalsyStageOutcome::Planned(plan) => Some(plan.result_type),
-                    TruthyFalsyStageOutcome::Blocked(_) => None,
-                };
-                stage_index = pair.next_index;
+                let advance = pair.next_index.saturating_sub(stage_index).max(1);
+                PipeSubjectStepOutcome::Continue {
+                    new_subject: match outcome {
+                        TruthyFalsyStageOutcome::Planned(plan) => Some(plan.result_type),
+                        TruthyFalsyStageOutcome::Blocked(_) => None,
+                    },
+                    advance_by: advance,
+                }
             }
             PipeStageKind::Case { .. }
             | PipeStageKind::Apply { .. }
             | PipeStageKind::RecurStart { .. }
-            | PipeStageKind::RecurStep { .. } => {
-                current = None;
-                stage_index += 1;
+            | PipeStageKind::RecurStep { .. } => PipeSubjectStepOutcome::Continue {
+                new_subject: None,
+                advance_by: 1,
+            },
+            PipeStageKind::Transform { .. } | PipeStageKind::Tap { .. } => {
+                unreachable!("PipeSubjectWalker handles Transform and Tap internally")
             }
         }
-    }
+    });
 }
 
 fn elaborate_truthy_falsy_pair(
@@ -319,19 +307,19 @@ fn elaborate_truthy_falsy_pair(
             .map(|issue| blocker_for_branch_issue(TruthyFalsyBranchKind::Falsy, issue)),
     );
 
-    let Some(truthy_result_type) = truthy_ty else {
+    // Collect UnknownBranchType for both branches before early-returning so
+    // that a user who breaks both branches sees both errors at once (PA-M2).
+    if truthy_ty.is_none() {
         blockers.push(TruthyFalsyElaborationBlocker::UnknownBranchType {
             branch: TruthyFalsyBranchKind::Truthy,
         });
-        return TruthyFalsyStageOutcome::Blocked(BlockedTruthyFalsyStage {
-            subject: Some(subject.clone()),
-            blockers,
-        });
-    };
-    let Some(falsy_result_type) = falsy_ty else {
+    }
+    if falsy_ty.is_none() {
         blockers.push(TruthyFalsyElaborationBlocker::UnknownBranchType {
             branch: TruthyFalsyBranchKind::Falsy,
         });
+    }
+    let (Some(truthy_result_type), Some(falsy_result_type)) = (truthy_ty, falsy_ty) else {
         return TruthyFalsyStageOutcome::Blocked(BlockedTruthyFalsyStage {
             subject: Some(subject.clone()),
             blockers,
@@ -407,21 +395,7 @@ fn blocker_for_branch_issue(
     }
 }
 
-fn truthy_falsy_env_for_function(
-    item: &crate::FunctionItem,
-    typing: &mut GateTypeContext<'_>,
-) -> GateExprEnv {
-    let mut env = GateExprEnv::default();
-    for parameter in &item.parameters {
-        let Some(annotation) = parameter.annotation else {
-            continue;
-        };
-        if let Some(ty) = typing.lower_annotation(annotation) {
-            env.locals.insert(parameter.binding, ty);
-        }
-    }
-    env
-}
+// truthy_falsy_env_for_function is now the shared crate::validate::gate_env_for_function (PA-I2).
 
 #[cfg(test)]
 mod tests {

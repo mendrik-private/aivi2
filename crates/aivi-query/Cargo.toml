@@ -10,6 +10,7 @@ aivi-syntax = { workspace = true }
 aivi-hir = { workspace = true }
 aivi-typing = { workspace = true }
 parking_lot = "0.12"
+rustc-hash = { workspace = true }
 
 [lints]
 workspace = true

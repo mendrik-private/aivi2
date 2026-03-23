@@ -8,7 +8,8 @@ use crate::{
         lower_gate_pipe_body_runtime_expr,
     },
     validate::{
-        GateExprEnv, GateIssue, GateType, GateTypeContext, truthy_falsy_pair_stages, walk_expr_tree,
+        GateExprEnv, GateIssue, GateType, GateTypeContext, PipeSubjectStepOutcome,
+        PipeSubjectWalker, truthy_falsy_pair_stages, walk_expr_tree,
     },
 };
 
@@ -234,37 +235,20 @@ fn collect_fanout_pipe(
     typing: &mut GateTypeContext<'_>,
     segments: &mut Vec<FanoutSegmentElaboration>,
 ) {
-    let stages = pipe.stages.iter().collect::<Vec<_>>();
-    let mut current = typing.infer_expr(pipe.head, env, None).ty;
-    let mut stage_index = 0usize;
-    while stage_index < stages.len() {
-        let stage = stages[stage_index];
+    // Collect the stages snapshot once for truthy_falsy_pair_stages lookups.
+    let all_stages = pipe.stages.iter().collect::<Vec<_>>();
+    PipeSubjectWalker::new(pipe, env, typing).walk(typing, |stage_index, stage, current, typing| {
         match &stage.kind {
-            PipeStageKind::Transform { expr } => {
-                current = current
-                    .as_ref()
-                    .and_then(|subject| typing.infer_transform_stage(*expr, env, subject));
-                stage_index += 1;
-            }
-            PipeStageKind::Tap { expr } => {
-                if let Some(subject) = current.clone() {
-                    let _ = typing.infer_pipe_body(*expr, env, &subject);
-                    current = Some(subject);
-                }
-                stage_index += 1;
-            }
-            PipeStageKind::Gate { expr } => {
-                current = current
-                    .as_ref()
-                    .and_then(|subject| typing.infer_gate_stage(*expr, env, subject));
-                stage_index += 1;
-            }
+            PipeStageKind::Gate { expr } => PipeSubjectStepOutcome::Continue {
+                new_subject: current.and_then(|s| typing.infer_gate_stage(*expr, env, s)),
+                advance_by: 1,
+            },
             PipeStageKind::Map { expr } => {
                 let segment = pipe
                     .fanout_segment(stage_index)
                     .expect("map stages should expose a fan-out segment");
                 let outcome =
-                    elaborate_fanout_segment(module, &segment, current.as_ref(), env, typing);
+                    elaborate_fanout_segment(module, &segment, current, env, typing);
                 segments.push(FanoutSegmentElaboration {
                     owner,
                     pipe_expr,
@@ -273,38 +257,46 @@ fn collect_fanout_pipe(
                     map_expr: *expr,
                     outcome: outcome.clone(),
                 });
-                current = match outcome {
-                    FanoutSegmentOutcome::Planned(plan) => Some(plan.result_type),
-                    FanoutSegmentOutcome::Blocked(_) => None,
-                };
-                stage_index = segment.next_stage_index();
+                let advance = segment.next_stage_index().saturating_sub(stage_index);
+                PipeSubjectStepOutcome::Continue {
+                    new_subject: match outcome {
+                        FanoutSegmentOutcome::Planned(plan) => Some(plan.result_type),
+                        FanoutSegmentOutcome::Blocked(_) => None,
+                    },
+                    advance_by: advance.max(1),
+                }
             }
-            PipeStageKind::FanIn { expr } => {
-                current = current
-                    .as_ref()
-                    .and_then(|subject| typing.infer_fanin_stage(*expr, env, subject));
-                stage_index += 1;
-            }
+            PipeStageKind::FanIn { expr } => PipeSubjectStepOutcome::Continue {
+                new_subject: current.and_then(|s| typing.infer_fanin_stage(*expr, env, s)),
+                advance_by: 1,
+            },
             PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
-                let Some(pair) = truthy_falsy_pair_stages(&stages, stage_index) else {
-                    current = None;
-                    stage_index += 1;
-                    continue;
+                let Some(pair) = truthy_falsy_pair_stages(&all_stages, stage_index) else {
+                    return PipeSubjectStepOutcome::Continue {
+                        new_subject: None,
+                        advance_by: 1,
+                    };
                 };
-                current = current
-                    .as_ref()
-                    .and_then(|subject| typing.infer_truthy_falsy_pair(&pair, env, subject));
-                stage_index = pair.next_index;
+                let advance = pair.next_index.saturating_sub(stage_index);
+                PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_truthy_falsy_pair(&pair, env, s)),
+                    advance_by: advance.max(1),
+                }
             }
             PipeStageKind::Case { .. }
             | PipeStageKind::Apply { .. }
             | PipeStageKind::RecurStart { .. }
-            | PipeStageKind::RecurStep { .. } => {
-                current = None;
-                stage_index += 1;
+            | PipeStageKind::RecurStep { .. } => PipeSubjectStepOutcome::Continue {
+                new_subject: None,
+                advance_by: 1,
+            },
+            // Transform and Tap are handled by the walker itself.
+            PipeStageKind::Transform { .. } | PipeStageKind::Tap { .. } => {
+                unreachable!("PipeSubjectWalker handles Transform and Tap internally")
             }
         }
-    }
+    });
 }
 
 pub(crate) fn elaborate_fanout_segment(

@@ -45,6 +45,12 @@ pub fn link_backend_runtime(
     })
 }
 
+/// A fully linked runtime pairing a compiled backend program with the
+/// scheduler/assembly required to tick signals.
+///
+/// Owns an `Arc<BackendProgram>` so the runtime is `'static` and can be
+/// stored in `Arc`, sent across threads, or used at async `await` points
+/// without a lifetime coupling to the stack that produced the program (M5).
 pub struct BackendLinkedRuntime {
     assembly: HirRuntimeAssembly,
     runtime: TaskSourceRuntime<RuntimeValue, hir::SourceDecodeProgram>,

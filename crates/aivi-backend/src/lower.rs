@@ -978,7 +978,7 @@ impl<'a> ProgramLowerer<'a> {
         self.alloc_kernel(
             owner,
             closure.span,
-            KernelOriginKind::ItemBody,
+            KernelOriginKind::ItemBody { item: owner },
             None,
             contract,
             lowered,

@@ -134,7 +134,9 @@ where
             .state
             .lock()
             .expect("GLib scheduler state mutex should not be poisoned");
-        f(&guard)
+        f(guard
+            .as_ref()
+            .expect("GLib scheduler state should be present when not inside a tick"))
     }
 
     fn with_state_mut<R>(&self, f: impl FnOnce(&mut GlibSchedulerState<V, E>) -> R) -> R {
@@ -144,7 +146,9 @@ where
             .state
             .lock()
             .expect("GLib scheduler state mutex should not be poisoned");
-        f(&mut guard)
+        f(guard
+            .as_mut()
+            .expect("GLib scheduler state should be present when not inside a tick"))
     }
 }
 
@@ -224,7 +228,12 @@ where
     E: DerivedNodeEvaluator<V> + Send + 'static,
 {
     context: MainContext,
-    state: Mutex<GlibSchedulerState<V, E>>,
+    /// State is held inside `Option` so the tick loop can take it out of the
+    /// Mutex for the duration of `scheduler.tick(evaluator)`, releasing the
+    /// lock while the tick runs.  The `TickExecutionGuard` / re-entrancy check
+    /// ensures no caller can observe the `None` state: any concurrent access
+    /// will panic before reaching the Mutex.
+    state: Mutex<Option<GlibSchedulerState<V, E>>>,
     tick_enqueued: AtomicBool,
 }
 
@@ -236,11 +245,11 @@ where
     fn new(scheduler: Scheduler<V>, evaluator: E, context: MainContext) -> Self {
         Self {
             context,
-            state: Mutex::new(GlibSchedulerState {
+            state: Mutex::new(Some(GlibSchedulerState {
                 scheduler,
                 evaluator,
                 outcomes: VecDeque::new(),
-            }),
+            })),
             tick_enqueued: AtomicBool::new(false),
         }
     }
@@ -260,21 +269,33 @@ where
         let _guard = TickExecutionGuard::enter();
         loop {
             self.tick_enqueued.store(false, Ordering::Release);
+
+            // Phase 1: take the full state out of the Mutex so the lock is
+            // released before the tick runs.
+            let mut state = self
+                .state
+                .lock()
+                .expect("GLib scheduler state mutex should not be poisoned")
+                .take()
+                .expect("GLib scheduler state should be present before a tick");
+
+            // Phase 2: run the tick with no lock held.  GTK redraws and other
+            // GLib event sources are free to run between the two lock scopes.
+            let outcome = state.scheduler.tick(&mut state.evaluator);
+
+            // Phase 3: re-acquire the lock to store the outcome and put the
+            // state back.
             let should_continue = {
-                let mut state = self
+                let mut guard = self
                     .state
                     .lock()
                     .expect("GLib scheduler state mutex should not be poisoned");
-                let GlibSchedulerState {
-                    scheduler,
-                    evaluator,
-                    outcomes,
-                } = &mut *state;
-                let outcome = scheduler.tick(evaluator);
+                let queued_count = state.scheduler.queued_message_count();
                 if !outcome.is_empty() {
-                    outcomes.push_back(outcome);
+                    state.outcomes.push_back(outcome);
                 }
-                self.tick_enqueued.load(Ordering::Acquire) || scheduler.queued_message_count() > 0
+                *guard = Some(state);
+                self.tick_enqueued.load(Ordering::Acquire) || queued_count > 0
             };
 
             if !should_continue {

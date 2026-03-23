@@ -561,7 +561,7 @@ pub struct NonSourceWakeup {
     pub kernel: KernelId,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceInstanceId(u32);
 
 impl SourceInstanceId {

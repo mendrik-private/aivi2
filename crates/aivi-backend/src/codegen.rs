@@ -284,7 +284,7 @@ impl<'a> CraneliftCompiler<'a> {
         let mut errors = Vec::new();
 
         for (kernel_id, kernel) in self.program.kernels().iter() {
-            if matches!(kernel.origin.kind, KernelOriginKind::ItemBody) {
+            if matches!(kernel.origin.kind, KernelOriginKind::ItemBody { .. }) {
                 continue;
             }
             match kernel.convention.kind {
@@ -556,7 +556,7 @@ impl<'a> CraneliftCompiler<'a> {
         let mut errors = Vec::new();
 
         for (kernel_id, kernel) in self.program.kernels().iter() {
-            if matches!(kernel.origin.kind, KernelOriginKind::ItemBody) {
+            if matches!(kernel.origin.kind, KernelOriginKind::ItemBody { .. }) {
                 continue;
             }
             match self.compile_kernel(kernel_id, kernel) {
@@ -1458,7 +1458,7 @@ fn kernel_symbol(program: &Program, kernel_id: KernelId, kernel: &Kernel) -> Str
         sanitize_symbol_component(program.item_name(kernel.origin.item)),
         kernel_id.as_raw(),
         match kernel.origin.kind {
-            KernelOriginKind::ItemBody => "item_body".to_owned(),
+            KernelOriginKind::ItemBody { .. } => "item_body".to_owned(),
             KernelOriginKind::GateTrue { stage_index, .. } => format!("gate_true_s{stage_index}"),
             KernelOriginKind::GateFalse { stage_index, .. } => format!("gate_false_s{stage_index}"),
             KernelOriginKind::SignalFilterPredicate { stage_index, .. } => {

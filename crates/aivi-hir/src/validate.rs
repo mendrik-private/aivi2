@@ -24,7 +24,8 @@ use crate::{
         ApplicativeSpineHead, BuiltinTerm, BuiltinType, ControlNode, ControlNodeKind,
         CustomSourceRecurrenceWakeup, DecoratorPayload, DomainMemberKind, DomainMemberResolution,
         ExprKind, ImportBindingMetadata, ImportValueType, Item, LiteralSuffixResolution,
-        MarkupAttributeValue, MarkupNodeKind, Module, Name, NamePath, PatternKind, PipeStageKind,
+        MarkupAttributeValue, MarkupNodeKind, Module, Name, NamePath, PatternKind, PipeStage,
+        PipeStageKind,
         RecurrenceWakeupDecoratorKind, ResolutionState, SignalItem, SourceDecorator,
         SourceMetadata, SourceProviderRef, TermReference, TermResolution, TextLiteral, TextSegment,
         TypeItemBody, TypeKind, TypeReference, TypeResolution,
@@ -108,11 +109,7 @@ impl Validator<'_> {
         self.validate_instance_items();
         self.validate_source_contract_types();
         self.validate_expression_types();
-        self.validate_fanout_semantics();
-        self.validate_gate_semantics();
-        self.validate_truthy_falsy_semantics();
-        self.validate_case_exhaustiveness();
-        self.validate_recurrence_targets();
+        self.validate_pipe_semantics();
     }
 
     fn validate_roots(&mut self) {
@@ -3705,151 +3702,24 @@ impl Validator<'_> {
         }
     }
 
-    fn validate_fanout_semantics(&mut self) {
-        if self.mode != ValidationMode::RequireResolvedNames {
-            return;
-        }
-
-        let items = self
-            .module
-            .items()
-            .iter()
-            .map(|(_, item)| item.clone())
-            .collect::<Vec<_>>();
-        let mut typing = GateTypeContext::new(self.module);
-
-        for item in items {
-            match item {
-                Item::Value(item) => {
-                    self.validate_fanout_expr_tree(item.body, &GateExprEnv::default(), &mut typing);
-                }
-                Item::Function(item) => {
-                    let env = self.gate_env_for_function(&item, &mut typing);
-                    self.validate_fanout_expr_tree(item.body, &env, &mut typing);
-                }
-                Item::Signal(item) => {
-                    if let Some(body) = item.body {
-                        self.validate_fanout_expr_tree(body, &GateExprEnv::default(), &mut typing);
-                    }
-                }
-                Item::Instance(item) => {
-                    for member in item.members {
-                        self.validate_fanout_expr_tree(
-                            member.body,
-                            &GateExprEnv::default(),
-                            &mut typing,
-                        );
-                    }
-                }
-                Item::Type(_)
-                | Item::Class(_)
-                | Item::Domain(_)
-                | Item::SourceProviderContract(_)
-                | Item::Use(_)
-                | Item::Export(_) => {}
-            }
-        }
-    }
-
-    fn validate_gate_semantics(&mut self) {
-        if self.mode != ValidationMode::RequireResolvedNames {
-            return;
-        }
-
-        let items = self
-            .module
-            .items()
-            .iter()
-            .map(|(_, item)| item.clone())
-            .collect::<Vec<_>>();
-        let mut typing = GateTypeContext::new(self.module);
-
-        for item in items {
-            match item {
-                Item::Value(item) => {
-                    self.validate_gate_expr_tree(item.body, &GateExprEnv::default(), &mut typing);
-                }
-                Item::Function(item) => {
-                    let env = self.gate_env_for_function(&item, &mut typing);
-                    self.validate_gate_expr_tree(item.body, &env, &mut typing);
-                }
-                Item::Signal(item) => {
-                    if let Some(body) = item.body {
-                        self.validate_gate_expr_tree(body, &GateExprEnv::default(), &mut typing);
-                    }
-                }
-                Item::Instance(item) => {
-                    for member in item.members {
-                        self.validate_gate_expr_tree(
-                            member.body,
-                            &GateExprEnv::default(),
-                            &mut typing,
-                        );
-                    }
-                }
-                Item::Type(_)
-                | Item::Class(_)
-                | Item::Domain(_)
-                | Item::SourceProviderContract(_)
-                | Item::Use(_)
-                | Item::Export(_) => {}
-            }
-        }
-    }
-
-    fn validate_truthy_falsy_semantics(&mut self) {
-        if self.mode != ValidationMode::RequireResolvedNames {
-            return;
-        }
-
-        let items = self
-            .module
-            .items()
-            .iter()
-            .map(|(_, item)| item.clone())
-            .collect::<Vec<_>>();
-        let mut typing = GateTypeContext::new(self.module);
-
-        for item in items {
-            match item {
-                Item::Value(item) => self.validate_truthy_falsy_expr_tree(
-                    item.body,
-                    &GateExprEnv::default(),
-                    &mut typing,
-                ),
-                Item::Function(item) => {
-                    let env = self.gate_env_for_function(&item, &mut typing);
-                    self.validate_truthy_falsy_expr_tree(item.body, &env, &mut typing);
-                }
-                Item::Signal(item) => {
-                    if let Some(body) = item.body {
-                        self.validate_truthy_falsy_expr_tree(
-                            body,
-                            &GateExprEnv::default(),
-                            &mut typing,
-                        );
-                    }
-                }
-                Item::Instance(item) => {
-                    for member in item.members {
-                        self.validate_truthy_falsy_expr_tree(
-                            member.body,
-                            &GateExprEnv::default(),
-                            &mut typing,
-                        );
-                    }
-                }
-                Item::Type(_)
-                | Item::Class(_)
-                | Item::Domain(_)
-                | Item::SourceProviderContract(_)
-                | Item::Use(_)
-                | Item::Export(_) => {}
-            }
-        }
-    }
-
-    fn validate_case_exhaustiveness(&mut self) {
+    /// Merged pipe-semantics validation pass.
+    ///
+    /// Replaces the five formerly separate passes (`validate_fanout_semantics`,
+    /// `validate_gate_semantics`, `validate_truthy_falsy_semantics`,
+    /// `validate_case_exhaustiveness`, `validate_recurrence_targets`).
+    ///
+    /// The five passes shared identical item-cloning and `GateTypeContext`
+    /// construction steps, causing every item body to be traversed five times
+    /// with five freshly-built typing contexts on every validation run.  This
+    /// single pass:
+    ///  - Clones items once.
+    ///  - Builds one `GateTypeContext` (interning tables are preserved across
+    ///    all five per-operator dispatch calls at each pipe expression site).
+    ///  - Walks each item body once, dispatching to each operator's private
+    ///    validation method inside the same `walk_expr_tree` callback.
+    ///
+    /// The public interface of `Validator::run` is unchanged.
+    fn validate_pipe_semantics(&mut self) {
         if self.mode != ValidationMode::RequireResolvedNames {
             return;
         }
@@ -3870,29 +3740,66 @@ impl Validator<'_> {
 
         for item in items {
             match item {
-                Item::Value(item) => self.validate_case_exhaustiveness_expr_tree(
-                    item.body,
-                    &GateExprEnv::default(),
-                    &mut typing,
-                ),
+                Item::Value(item) => {
+                    let env = GateExprEnv::default();
+                    let target = item.annotation.and_then(|annotation| {
+                        typing.recurrence_target_hint_for_annotation(annotation)
+                    });
+                    let wakeup =
+                        self.recurrence_wakeup_hint_for_decorators(&item.header.decorators);
+                    self.validate_fanout_expr_tree(item.body, &env, &mut typing);
+                    self.validate_gate_expr_tree(item.body, &env, &mut typing);
+                    self.validate_truthy_falsy_expr_tree(item.body, &env, &mut typing);
+                    self.validate_case_exhaustiveness_expr_tree(item.body, &env, &mut typing);
+                    self.validate_recurrence_expr_tree(item.body, target, wakeup, &env, &mut typing);
+                }
                 Item::Function(item) => {
                     let env = self.gate_env_for_function(&item, &mut typing);
+                    let target = item.annotation.and_then(|annotation| {
+                        typing.recurrence_target_hint_for_annotation(annotation)
+                    });
+                    let wakeup =
+                        self.recurrence_wakeup_hint_for_decorators(&item.header.decorators);
+                    self.validate_fanout_expr_tree(item.body, &env, &mut typing);
+                    self.validate_gate_expr_tree(item.body, &env, &mut typing);
+                    self.validate_truthy_falsy_expr_tree(item.body, &env, &mut typing);
                     self.validate_case_exhaustiveness_expr_tree(item.body, &env, &mut typing);
+                    self.validate_recurrence_expr_tree(item.body, target, wakeup, &env, &mut typing);
                 }
                 Item::Signal(item) => {
                     if let Some(body) = item.body {
-                        self.validate_case_exhaustiveness_expr_tree(
+                        let env = GateExprEnv::default();
+                        let wakeup = self.recurrence_wakeup_hint_for_signal(&item);
+                        self.validate_fanout_expr_tree(body, &env, &mut typing);
+                        self.validate_gate_expr_tree(body, &env, &mut typing);
+                        self.validate_truthy_falsy_expr_tree(body, &env, &mut typing);
+                        self.validate_case_exhaustiveness_expr_tree(body, &env, &mut typing);
+                        self.validate_recurrence_expr_tree(
                             body,
-                            &GateExprEnv::default(),
+                            Some(RecurrenceTargetHint::Evidence(
+                                RecurrenceTargetEvidence::SignalItemBody,
+                            )),
+                            wakeup,
+                            &env,
                             &mut typing,
                         );
                     }
                 }
                 Item::Instance(item) => {
                     for member in item.members {
-                        self.validate_case_exhaustiveness_expr_tree(
+                        let env = GateExprEnv::default();
+                        let target = member.annotation.and_then(|annotation| {
+                            typing.recurrence_target_hint_for_annotation(annotation)
+                        });
+                        self.validate_fanout_expr_tree(member.body, &env, &mut typing);
+                        self.validate_gate_expr_tree(member.body, &env, &mut typing);
+                        self.validate_truthy_falsy_expr_tree(member.body, &env, &mut typing);
+                        self.validate_case_exhaustiveness_expr_tree(member.body, &env, &mut typing);
+                        self.validate_recurrence_expr_tree(
                             member.body,
-                            &GateExprEnv::default(),
+                            target,
+                            None,
+                            &env,
                             &mut typing,
                         );
                     }
@@ -3906,43 +3813,63 @@ impl Validator<'_> {
             }
         }
 
+        // Decorator expressions: only case-exhaustiveness and recurrence need them.
         for decorator in decorators {
             match decorator.payload {
                 DecoratorPayload::Bare => {}
                 DecoratorPayload::Call(call) => {
-                    for argument in call.arguments {
-                        self.validate_case_exhaustiveness_expr_tree(
-                            argument,
-                            &GateExprEnv::default(),
+                    let env = GateExprEnv::default();
+                    for argument in &call.arguments {
+                        self.validate_case_exhaustiveness_expr_tree(*argument, &env, &mut typing);
+                        self.validate_recurrence_expr_tree(
+                            *argument,
+                            None,
+                            None,
+                            &env,
                             &mut typing,
                         );
                     }
                     if let Some(options) = call.options {
-                        self.validate_case_exhaustiveness_expr_tree(
+                        self.validate_case_exhaustiveness_expr_tree(options, &env, &mut typing);
+                        self.validate_recurrence_expr_tree(
                             options,
-                            &GateExprEnv::default(),
+                            None,
+                            None,
+                            &env,
                             &mut typing,
                         );
                     }
                 }
-                DecoratorPayload::RecurrenceWakeup(wakeup) => self
-                    .validate_case_exhaustiveness_expr_tree(
+                DecoratorPayload::RecurrenceWakeup(wakeup) => {
+                    let env = GateExprEnv::default();
+                    self.validate_case_exhaustiveness_expr_tree(wakeup.witness, &env, &mut typing);
+                    self.validate_recurrence_expr_tree(
                         wakeup.witness,
-                        &GateExprEnv::default(),
+                        None,
+                        None,
+                        &env,
                         &mut typing,
-                    ),
+                    );
+                }
                 DecoratorPayload::Source(source) => {
-                    for argument in source.arguments {
-                        self.validate_case_exhaustiveness_expr_tree(
-                            argument,
-                            &GateExprEnv::default(),
+                    let env = GateExprEnv::default();
+                    for argument in &source.arguments {
+                        self.validate_case_exhaustiveness_expr_tree(*argument, &env, &mut typing);
+                        self.validate_recurrence_expr_tree(
+                            *argument,
+                            None,
+                            None,
+                            &env,
                             &mut typing,
                         );
                     }
                     if let Some(options) = source.options {
-                        self.validate_case_exhaustiveness_expr_tree(
+                        self.validate_case_exhaustiveness_expr_tree(options, &env, &mut typing);
+                        self.validate_recurrence_expr_tree(
                             options,
-                            &GateExprEnv::default(),
+                            None,
+                            None,
+                            &env,
                             &mut typing,
                         );
                     }
@@ -4566,149 +4493,6 @@ impl Validator<'_> {
         child_env
     }
 
-    fn validate_recurrence_targets(&mut self) {
-        if self.mode != ValidationMode::RequireResolvedNames {
-            return;
-        }
-
-        let items = self
-            .module
-            .items()
-            .iter()
-            .map(|(_, item)| item.clone())
-            .collect::<Vec<_>>();
-        let decorators = self
-            .module
-            .decorators()
-            .iter()
-            .map(|(_, decorator)| decorator.clone())
-            .collect::<Vec<_>>();
-        let mut typing = GateTypeContext::new(self.module);
-
-        for item in items {
-            match item {
-                Item::Value(item) => {
-                    let target = item.annotation.and_then(|annotation| {
-                        typing.recurrence_target_hint_for_annotation(annotation)
-                    });
-                    let wakeup =
-                        self.recurrence_wakeup_hint_for_decorators(&item.header.decorators);
-                    self.validate_recurrence_expr_tree(
-                        item.body,
-                        target,
-                        wakeup,
-                        &GateExprEnv::default(),
-                        &mut typing,
-                    );
-                }
-                Item::Function(item) => {
-                    let target = item.annotation.and_then(|annotation| {
-                        typing.recurrence_target_hint_for_annotation(annotation)
-                    });
-                    let wakeup =
-                        self.recurrence_wakeup_hint_for_decorators(&item.header.decorators);
-                    let env = self.gate_env_for_function(&item, &mut typing);
-                    self.validate_recurrence_expr_tree(
-                        item.body,
-                        target,
-                        wakeup,
-                        &env,
-                        &mut typing,
-                    );
-                }
-                Item::Signal(item) => {
-                    if let Some(body) = item.body {
-                        let wakeup = self.recurrence_wakeup_hint_for_signal(&item);
-                        self.validate_recurrence_expr_tree(
-                            body,
-                            Some(RecurrenceTargetHint::Evidence(
-                                RecurrenceTargetEvidence::SignalItemBody,
-                            )),
-                            wakeup,
-                            &GateExprEnv::default(),
-                            &mut typing,
-                        );
-                    }
-                }
-                Item::Instance(item) => {
-                    for member in item.members {
-                        let target = member.annotation.and_then(|annotation| {
-                            typing.recurrence_target_hint_for_annotation(annotation)
-                        });
-                        self.validate_recurrence_expr_tree(
-                            member.body,
-                            target,
-                            None,
-                            &GateExprEnv::default(),
-                            &mut typing,
-                        );
-                    }
-                }
-                Item::Type(_)
-                | Item::Class(_)
-                | Item::Domain(_)
-                | Item::SourceProviderContract(_)
-                | Item::Use(_)
-                | Item::Export(_) => {}
-            }
-        }
-
-        for decorator in decorators {
-            match decorator.payload {
-                DecoratorPayload::Bare => {}
-                DecoratorPayload::Call(call) => {
-                    for argument in call.arguments {
-                        self.validate_recurrence_expr_tree(
-                            argument,
-                            None,
-                            None,
-                            &GateExprEnv::default(),
-                            &mut typing,
-                        );
-                    }
-                    if let Some(options) = call.options {
-                        self.validate_recurrence_expr_tree(
-                            options,
-                            None,
-                            None,
-                            &GateExprEnv::default(),
-                            &mut typing,
-                        );
-                    }
-                }
-                DecoratorPayload::RecurrenceWakeup(wakeup) => {
-                    self.validate_recurrence_expr_tree(
-                        wakeup.witness,
-                        None,
-                        None,
-                        &GateExprEnv::default(),
-                        &mut typing,
-                    );
-                }
-                DecoratorPayload::Source(source) => {
-                    for argument in source.arguments {
-                        self.validate_recurrence_expr_tree(
-                            argument,
-                            None,
-                            None,
-                            &GateExprEnv::default(),
-                            &mut typing,
-                        );
-                    }
-                    if let Some(options) = source.options {
-                        self.validate_recurrence_expr_tree(
-                            options,
-                            None,
-                            None,
-                            &GateExprEnv::default(),
-                            &mut typing,
-                        );
-                    }
-                }
-            }
-        }
-    }
-
     fn validate_recurrence_expr_tree(
         &mut self,
         root: ExprId,
@@ -5224,69 +5008,75 @@ impl Validator<'_> {
         env: &GateExprEnv,
         typing: &mut GateTypeContext<'_>,
     ) {
-        let stages = pipe.stages.iter().collect::<Vec<_>>();
-        let mut current = typing.infer_expr(pipe.head, env, None).ty;
-        let mut stage_index = 0usize;
-        while stage_index < stages.len() {
-            let stage = stages[stage_index];
-            let Some(subject) = current.clone() else {
-                break;
-            };
-            match &stage.kind {
-                PipeStageKind::Transform { expr } => {
-                    current = typing.infer_transform_stage(*expr, env, &subject);
-                    stage_index += 1;
-                }
-                PipeStageKind::Tap { expr } => {
-                    let _ = typing.infer_pipe_body(*expr, env, &subject);
-                    current = Some(subject);
-                    stage_index += 1;
-                }
-                PipeStageKind::Gate { expr } => {
-                    current = typing.infer_gate_stage(*expr, env, &subject);
-                    stage_index += 1;
-                }
+        let all_stages = pipe.stages.iter().collect::<Vec<_>>();
+        PipeSubjectWalker::new(pipe, env, typing).walk(
+            typing,
+            |stage_index, stage, current, typing| match &stage.kind {
+                PipeStageKind::Gate { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_gate_stage(*expr, env, s)),
+                    advance_by: 1,
+                },
                 PipeStageKind::Map { .. } => {
                     let segment = pipe
                         .fanout_segment(stage_index)
                         .expect("map stages should expose a fan-out segment");
                     if segment.join_stage().is_some() {
-                        current =
-                            self.validate_joined_fanout_segment(&segment, env, &subject, typing);
-                        stage_index = segment.next_stage_index();
+                        let next = segment.next_stage_index();
+                        let new_subject = current.and_then(|s| {
+                            self.validate_joined_fanout_segment(&segment, env, s, typing)
+                        });
+                        PipeSubjectStepOutcome::Continue {
+                            new_subject,
+                            advance_by: next.saturating_sub(stage_index).max(1),
+                        }
                     } else {
-                        current = self.validate_fanout_map_stage(
-                            stage.span,
-                            segment.map_expr(),
-                            env,
-                            &subject,
-                            typing,
-                        );
-                        stage_index += 1;
+                        let new_subject = current.and_then(|s| {
+                            self.validate_fanout_map_stage(
+                                stage.span,
+                                segment.map_expr(),
+                                env,
+                                s,
+                                typing,
+                            )
+                        });
+                        PipeSubjectStepOutcome::Continue { new_subject, advance_by: 1 }
                     }
                 }
-                PipeStageKind::FanIn { expr } => {
-                    current = self.validate_fanin_stage(stage.span, *expr, env, &subject, typing);
-                    stage_index += 1;
-                }
+                PipeStageKind::FanIn { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current.and_then(|s| {
+                        self.validate_fanin_stage(stage.span, *expr, env, s, typing)
+                    }),
+                    advance_by: 1,
+                },
                 PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
-                    let Some(pair) = truthy_falsy_pair_stages(&stages, stage_index) else {
-                        current = None;
-                        stage_index += 1;
-                        continue;
+                    let Some(pair) = truthy_falsy_pair_stages(&all_stages, stage_index) else {
+                        return PipeSubjectStepOutcome::Continue {
+                            new_subject: None,
+                            advance_by: 1,
+                        };
                     };
-                    current = typing.infer_truthy_falsy_pair(&pair, env, &subject);
-                    stage_index = pair.next_index;
+                    let new_subject = current
+                        .and_then(|s| typing.infer_truthy_falsy_pair(&pair, env, s));
+                    let advance = pair.next_index.saturating_sub(stage_index).max(1);
+                    PipeSubjectStepOutcome::Continue { new_subject, advance_by: advance }
                 }
                 PipeStageKind::Case { .. }
                 | PipeStageKind::Apply { .. }
                 | PipeStageKind::RecurStart { .. }
-                | PipeStageKind::RecurStep { .. } => {
-                    current = None;
-                    stage_index += 1;
+                | PipeStageKind::RecurStep { .. } => PipeSubjectStepOutcome::Continue {
+                    new_subject: None,
+                    advance_by: 1,
+                },
+                // Transform and Tap are handled by PipeSubjectWalker before the
+                // callback is invoked; they can never reach this arm.
+                PipeStageKind::Transform { .. } | PipeStageKind::Tap { .. } => {
+                    unreachable!(
+                        "Transform/Tap are consumed by PipeSubjectWalker before the callback"
+                    )
                 }
-            }
-        }
+            },
+        );
     }
 
     fn validate_gate_expr_tree(
@@ -5309,82 +5099,82 @@ impl Validator<'_> {
         env: &GateExprEnv,
         typing: &mut GateTypeContext<'_>,
     ) {
-        let stages = pipe.stages.iter().collect::<Vec<_>>();
-        let recurrence_start_index = pipe
+        // Limit the walk to the prefix before any recurrence suffix so
+        // RecurStart/RecurStep are never seen by this pass (PA-M1).
+        let limit = pipe
             .recurrence_suffix()
             .ok()
             .flatten()
-            .map(|suffix| suffix.prefix_stage_count());
-        let mut current = typing.infer_expr(pipe.head, env, None).ty;
-        let mut stage_index = 0usize;
-        while stage_index < stages.len() {
-            if recurrence_start_index.is_some_and(|start| stage_index >= start) {
-                break;
-            }
-            let stage = stages[stage_index];
-            let Some(subject) = current.clone() else {
-                break;
-            };
-            match &stage.kind {
-                PipeStageKind::Transform { expr } => {
-                    current = typing.infer_transform_stage(*expr, env, &subject);
-                    stage_index += 1;
-                }
-                PipeStageKind::Tap { expr } => {
-                    let _ = typing.infer_pipe_body(*expr, env, &subject);
-                    current = Some(subject);
-                    stage_index += 1;
-                }
-                PipeStageKind::Gate { expr } => {
-                    current = self.validate_gate_stage(stage.span, *expr, env, &subject, typing);
-                    stage_index += 1;
-                }
+            .map(|suffix| suffix.prefix_stage_count())
+            .unwrap_or(pipe.stages.len());
+        let all_stages = pipe.stages.iter().take(limit).collect::<Vec<_>>();
+        PipeSubjectWalker::new_with_limit(pipe, env, typing, limit).walk(
+            typing,
+            |stage_index, stage, current, typing| match &stage.kind {
+                PipeStageKind::Gate { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current.and_then(|s| {
+                        self.validate_gate_stage(stage.span, *expr, env, s, typing)
+                    }),
+                    advance_by: 1,
+                },
                 PipeStageKind::Map { expr } => {
                     let segment = pipe
                         .fanout_segment(stage_index)
                         .expect("map stages should expose a fan-out segment");
                     if segment.join_stage().is_some() {
-                        let outcome = crate::fanout_elaboration::elaborate_fanout_segment(
-                            self.module,
-                            &segment,
-                            Some(&subject),
-                            env,
-                            typing,
-                        );
-                        current = match outcome {
-                            crate::fanout_elaboration::FanoutSegmentOutcome::Planned(plan) => {
-                                Some(plan.result_type)
-                            }
-                            crate::fanout_elaboration::FanoutSegmentOutcome::Blocked(_) => None,
-                        };
-                        stage_index = segment.next_stage_index();
+                        // Use infer_fanout_segment_result_type instead of the
+                        // full elaborate_fanout_segment to avoid re-running
+                        // filter/join plan building that validate_fanout_semantics
+                        // already performed (PA-H2).
+                        let next = segment.next_stage_index();
+                        let new_subject = current.and_then(|s| {
+                            typing.infer_fanout_segment_result_type(&segment, env, s)
+                        });
+                        PipeSubjectStepOutcome::Continue {
+                            new_subject,
+                            advance_by: next.saturating_sub(stage_index).max(1),
+                        }
                     } else {
-                        current = typing.infer_fanout_map_stage(*expr, env, &subject);
-                        stage_index += 1;
+                        PipeSubjectStepOutcome::Continue {
+                            new_subject: current
+                                .and_then(|s| typing.infer_fanout_map_stage(*expr, env, s)),
+                            advance_by: 1,
+                        }
                     }
                 }
-                PipeStageKind::FanIn { expr } => {
-                    current = typing.infer_fanin_stage(*expr, env, &subject);
-                    stage_index += 1;
-                }
+                PipeStageKind::FanIn { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_fanin_stage(*expr, env, s)),
+                    advance_by: 1,
+                },
                 PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
-                    let Some(pair) = truthy_falsy_pair_stages(&stages, stage_index) else {
-                        current = None;
-                        stage_index += 1;
-                        continue;
+                    let Some(pair) = truthy_falsy_pair_stages(&all_stages, stage_index) else {
+                        return PipeSubjectStepOutcome::Continue {
+                            new_subject: None,
+                            advance_by: 1,
+                        };
                     };
-                    current = typing.infer_truthy_falsy_pair(&pair, env, &subject);
-                    stage_index = pair.next_index;
+                    let new_subject = current
+                        .and_then(|s| typing.infer_truthy_falsy_pair(&pair, env, s));
+                    let advance = pair.next_index.saturating_sub(stage_index).max(1);
+                    PipeSubjectStepOutcome::Continue { new_subject, advance_by: advance }
                 }
                 PipeStageKind::Case { .. }
                 | PipeStageKind::Apply { .. }
                 | PipeStageKind::RecurStart { .. }
-                | PipeStageKind::RecurStep { .. } => {
-                    current = None;
-                    stage_index += 1;
+                | PipeStageKind::RecurStep { .. } => PipeSubjectStepOutcome::Continue {
+                    new_subject: None,
+                    advance_by: 1,
+                },
+                // Transform and Tap are handled by PipeSubjectWalker before the
+                // callback is invoked; they can never reach this arm.
+                PipeStageKind::Transform { .. } | PipeStageKind::Tap { .. } => {
+                    unreachable!(
+                        "Transform/Tap are consumed by PipeSubjectWalker before the callback"
+                    )
                 }
-            }
-        }
+            },
+        );
     }
 
     fn validate_truthy_falsy_expr_tree(
@@ -5407,54 +5197,54 @@ impl Validator<'_> {
         env: &GateExprEnv,
         typing: &mut GateTypeContext<'_>,
     ) {
-        let stages = pipe.stages.iter().collect::<Vec<_>>();
-        let mut current = typing.infer_expr(pipe.head, env, None).ty;
-        let mut stage_index = 0usize;
-        while stage_index < stages.len() {
-            let stage = stages[stage_index];
-            let Some(subject) = current.clone() else {
-                break;
-            };
-            match &stage.kind {
-                PipeStageKind::Transform { expr } => {
-                    current = typing.infer_transform_stage(*expr, env, &subject);
-                    stage_index += 1;
-                }
-                PipeStageKind::Tap { expr } => {
-                    let _ = typing.infer_pipe_body(*expr, env, &subject);
-                    current = Some(subject);
-                    stage_index += 1;
-                }
-                PipeStageKind::Gate { expr } => {
-                    current = typing.infer_gate_stage(*expr, env, &subject);
-                    stage_index += 1;
-                }
-                PipeStageKind::Map { expr } => {
-                    current = typing.infer_fanout_map_stage(*expr, env, &subject);
-                    stage_index += 1;
-                }
-                PipeStageKind::FanIn { expr } => {
-                    current = typing.infer_fanin_stage(*expr, env, &subject);
-                    stage_index += 1;
-                }
+        let all_stages = pipe.stages.iter().collect::<Vec<_>>();
+        PipeSubjectWalker::new(pipe, env, typing).walk(
+            typing,
+            |stage_index, stage, current, typing| match &stage.kind {
+                PipeStageKind::Gate { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_gate_stage(*expr, env, s)),
+                    advance_by: 1,
+                },
+                PipeStageKind::Map { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_fanout_map_stage(*expr, env, s)),
+                    advance_by: 1,
+                },
+                PipeStageKind::FanIn { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_fanin_stage(*expr, env, s)),
+                    advance_by: 1,
+                },
                 PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
-                    let Some(pair) = truthy_falsy_pair_stages(&stages, stage_index) else {
-                        current = None;
-                        stage_index += 1;
-                        continue;
+                    let Some(pair) = truthy_falsy_pair_stages(&all_stages, stage_index) else {
+                        return PipeSubjectStepOutcome::Continue {
+                            new_subject: None,
+                            advance_by: 1,
+                        };
                     };
-                    current = self.validate_truthy_falsy_pair(&pair, env, &subject, typing);
-                    stage_index = pair.next_index;
+                    let new_subject = current.and_then(|s| {
+                        self.validate_truthy_falsy_pair(&pair, env, s, typing)
+                    });
+                    let advance = pair.next_index.saturating_sub(stage_index).max(1);
+                    PipeSubjectStepOutcome::Continue { new_subject, advance_by: advance }
                 }
                 PipeStageKind::Case { .. }
                 | PipeStageKind::Apply { .. }
                 | PipeStageKind::RecurStart { .. }
-                | PipeStageKind::RecurStep { .. } => {
-                    current = None;
-                    stage_index += 1;
+                | PipeStageKind::RecurStep { .. } => PipeSubjectStepOutcome::Continue {
+                    new_subject: None,
+                    advance_by: 1,
+                },
+                // Transform and Tap are handled by PipeSubjectWalker before the
+                // callback is invoked; they can never reach this arm.
+                PipeStageKind::Transform { .. } | PipeStageKind::Tap { .. } => {
+                    unreachable!(
+                        "Transform/Tap are consumed by PipeSubjectWalker before the callback"
+                    )
                 }
-            }
-        }
+            },
+        );
     }
 
     fn validate_truthy_falsy_pair(
@@ -5633,16 +5423,7 @@ impl Validator<'_> {
         item: &crate::hir::FunctionItem,
         typing: &mut GateTypeContext<'_>,
     ) -> GateExprEnv {
-        let mut env = GateExprEnv::default();
-        for parameter in &item.parameters {
-            let Some(annotation) = parameter.annotation else {
-                continue;
-            };
-            if let Some(ty) = typing.lower_annotation(annotation) {
-                env.locals.insert(parameter.binding, ty);
-            }
-        }
-        env
+        gate_env_for_function(item, typing)
     }
 
     fn emit_gate_issue(&mut self, issue: GateIssue) {
@@ -7358,6 +7139,140 @@ enum CaseExhaustivenessWork {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct GateExprEnv {
     pub(crate) locals: HashMap<BindingId, GateType>,
+}
+
+/// Outcome of one step in a `PipeSubjectWalker` iteration.
+///
+/// Returned by per-stage callbacks to tell the walker how to advance and what
+/// the new subject type is after the stage (PA-M1).
+pub(crate) enum PipeSubjectStepOutcome {
+    /// The stage was handled; `new_subject` is the subject type after the
+    /// stage and `advance_by` is how many stage slots to skip (usually 1, but
+    /// fanout segments span multiple slots).
+    Continue {
+        new_subject: Option<GateType>,
+        advance_by: usize,
+    },
+    /// Stop walking at this stage index (e.g. when hitting a recurrence
+    /// boundary or a stage kind the caller cannot handle).
+    Stop,
+}
+
+/// Iterator-style helper that walks a pipe expression's stages left-to-right,
+/// maintaining the subject type across `|>` transform and `|` tap stages.
+///
+/// Callers supply a callback that handles operator-specific stages (gate,
+/// fanout, truthy/falsy, recurrence, …).  The walker handles the common
+/// `Transform` and `Tap` stages so every pass doesn't duplicate that logic
+/// (PA-M1).
+///
+/// # Usage
+/// ```ignore
+/// PipeSubjectWalker::new(pipe, env, typing).walk(|stage_index, stage, current, typing| {
+///     match &stage.kind {
+///         PipeStageKind::Gate { expr } => PipeSubjectStepOutcome::Continue { … },
+///         _ => PipeSubjectStepOutcome::Stop,
+///     }
+/// });
+/// ```
+pub(crate) struct PipeSubjectWalker<'pipe, 'env> {
+    stages: Vec<&'pipe PipeStage>,
+    current: Option<GateType>,
+    env: &'env GateExprEnv,
+}
+
+impl<'pipe, 'env> PipeSubjectWalker<'pipe, 'env> {
+    pub(crate) fn new(
+        pipe: &'pipe crate::hir::PipeExpr,
+        env: &'env GateExprEnv,
+        typing: &mut GateTypeContext<'_>,
+    ) -> Self {
+        let stages = pipe.stages.iter().collect::<Vec<_>>();
+        let current = typing.infer_expr(pipe.head, env, None).ty;
+        Self { stages, current, env }
+    }
+
+    /// Like `new`, but only considers the first `limit` stages of the pipe.
+    ///
+    /// Used by passes (e.g. recurrence elaboration) that must stop before the
+    /// recurrence boundary stages (`RecurStart`/`RecurStep`) which appear at a
+    /// known prefix position (PA-M1).
+    pub(crate) fn new_with_limit(
+        pipe: &'pipe crate::hir::PipeExpr,
+        env: &'env GateExprEnv,
+        typing: &mut GateTypeContext<'_>,
+        limit: usize,
+    ) -> Self {
+        let stages = pipe.stages.iter().take(limit).collect::<Vec<_>>();
+        let current = typing.infer_expr(pipe.head, env, None).ty;
+        Self { stages, current, env }
+    }
+
+    /// Walk all stages, calling `on_stage` for each stage that is not a plain
+    /// `Transform` or `Tap`.  Iteration stops when `on_stage` returns
+    /// `PipeSubjectStepOutcome::Stop` or when all stages are exhausted.
+    ///
+    /// Returns the subject type at the point where walking stopped.
+    pub(crate) fn walk<F>(mut self, typing: &mut GateTypeContext<'_>, mut on_stage: F) -> Option<GateType>
+    where
+        F: FnMut(
+            usize,                    // stage_index
+            &'pipe PipeStage,         // stage
+            Option<&GateType>,        // current subject (before this stage)
+            &mut GateTypeContext<'_>,
+        ) -> PipeSubjectStepOutcome,
+    {
+        let mut stage_index = 0usize;
+        while stage_index < self.stages.len() {
+            let stage = self.stages[stage_index];
+            match &stage.kind {
+                PipeStageKind::Transform { expr } => {
+                    self.current = self
+                        .current
+                        .as_ref()
+                        .and_then(|subject| typing.infer_transform_stage(*expr, self.env, subject));
+                    stage_index += 1;
+                }
+                PipeStageKind::Tap { expr } => {
+                    if let Some(subject) = self.current.clone() {
+                        let _ = typing.infer_pipe_body(*expr, self.env, &subject);
+                        self.current = Some(subject);
+                    }
+                    stage_index += 1;
+                }
+                _ => {
+                    match on_stage(stage_index, stage, self.current.as_ref(), typing) {
+                        PipeSubjectStepOutcome::Continue { new_subject, advance_by } => {
+                            self.current = new_subject;
+                            stage_index += advance_by;
+                        }
+                        PipeSubjectStepOutcome::Stop => break,
+                    }
+                }
+            }
+        }
+        self.current
+    }
+}
+
+/// Build a `GateExprEnv` from a function item's annotated parameters.
+///
+/// Shared by all gate/truthy-falsy/recurrence elaboration passes so the
+/// parameter-to-type wiring is defined exactly once (PA-I2).
+pub(crate) fn gate_env_for_function(
+    item: &crate::hir::FunctionItem,
+    typing: &mut GateTypeContext<'_>,
+) -> GateExprEnv {
+    let mut env = GateExprEnv::default();
+    for parameter in &item.parameters {
+        let Some(annotation) = parameter.annotation else {
+            continue;
+        };
+        if let Some(ty) = typing.lower_annotation(annotation) {
+            env.locals.insert(parameter.binding, ty);
+        }
+    }
+    env
 }
 
 #[derive(Clone, Debug, Default)]
@@ -9718,6 +9633,36 @@ impl<'a> GateTypeContext<'a> {
         subject: &GateType,
     ) -> Option<GateType> {
         self.infer_fanout_map_stage_info(expr_id, env, subject).ty
+    }
+
+    /// Infer only the result type for a joined fanout segment, without building
+    /// filter plans or join plans.  Used by `validate_gate_pipe` to advance the
+    /// subject type past a `*|> … <|*` segment without re-running the full
+    /// `elaborate_fanout_segment` pass that `validate_fanout_semantics` already
+    /// performed (PA-H2).
+    pub(crate) fn infer_fanout_segment_result_type(
+        &mut self,
+        segment: &crate::PipeFanoutSegment<'_>,
+        env: &GateExprEnv,
+        subject: &GateType,
+    ) -> Option<GateType> {
+        let carrier = self.fanout_carrier(subject)?;
+        let element_subject = subject.fanout_element().cloned()?;
+        let mapped_element_type = self.infer_pipe_body(segment.map_expr(), env, &element_subject).ty?;
+        let mapped_collection_type = self.apply_fanout_plan(
+            FanoutPlanner::plan(FanoutStageKind::Map, carrier),
+            mapped_element_type,
+        );
+        if let Some(join_expr) = segment.join_expr() {
+            let join_value_type =
+                self.infer_pipe_body(join_expr, env, &mapped_collection_type).ty?;
+            Some(self.apply_fanout_plan(
+                FanoutPlanner::plan(FanoutStageKind::Join, carrier),
+                join_value_type,
+            ))
+        } else {
+            Some(mapped_collection_type)
+        }
     }
 
     pub(crate) fn infer_fanin_stage(

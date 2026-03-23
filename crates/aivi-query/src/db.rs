@@ -1,8 +1,9 @@
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
     sync::Arc,
 };
+
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use parking_lot::RwLock;
 
@@ -36,13 +37,78 @@ struct Cached<T> {
     value: Arc<T>,
 }
 
+/// Dependency graph kept alongside the query cache.
+///
+/// `deps[A]` is the set of files that file `A` *imports from* (direct
+/// dependencies).  `rdeps[B]` is the set of files that *import* `B`.
+///
+/// When file `B` changes its text, every entry in `rdeps[B]` (and their own
+/// rdeps, recursively) must have their HIR caches invalidated, because those
+/// files transitively depend on `B`'s exported names (M6).
+#[derive(Default)]
+struct FileDeps {
+    /// file_id → set of file_ids it directly depends on
+    deps: FxHashMap<u32, FxHashSet<u32>>,
+    /// file_id → set of file_ids that directly depend on it
+    rdeps: FxHashMap<u32, FxHashSet<u32>>,
+}
+
+impl FileDeps {
+    /// Record that `importer` now depends on exactly the files in `new_deps`,
+    /// updating the reverse-dependency index accordingly.
+    fn set_deps(&mut self, importer: u32, new_deps: FxHashSet<u32>) {
+        // Remove old reverse edges.
+        if let Some(old) = self.deps.remove(&importer) {
+            for dep in old {
+                if let Some(set) = self.rdeps.get_mut(&dep) {
+                    set.remove(&importer);
+                }
+            }
+        }
+        // Insert new reverse edges.
+        for &dep in &new_deps {
+            self.rdeps.entry(dep).or_default().insert(importer);
+        }
+        if !new_deps.is_empty() {
+            self.deps.insert(importer, new_deps);
+        }
+    }
+
+    /// Remove all dependency/reverse-dependency edges for a file that is
+    /// being dropped.
+    #[allow(dead_code)]
+    fn remove_file(&mut self, id: u32) {
+        self.set_deps(id, FxHashSet::default());
+        self.rdeps.remove(&id);
+    }
+
+    /// Collect the transitive closure of all files that (directly or
+    /// indirectly) import `changed`.  These files must have their HIR caches
+    /// invalidated when `changed` is modified.
+    fn transitive_rdeps(&self, changed: u32) -> FxHashSet<u32> {
+        let mut visited = FxHashSet::default();
+        let mut queue = vec![changed];
+        while let Some(current) = queue.pop() {
+            if let Some(set) = self.rdeps.get(&current) {
+                for &rdep in set {
+                    if visited.insert(rdep) {
+                        queue.push(rdep);
+                    }
+                }
+            }
+        }
+        visited
+    }
+}
+
 #[derive(Default)]
 struct DbState {
     next_id: u32,
-    files: HashMap<u32, SourceInput>,
-    paths: HashMap<PathBuf, SourceFile>,
-    parsed: HashMap<u32, Cached<ParsedFileResult>>,
-    hir: HashMap<u32, Cached<HirModuleResult>>,
+    files: FxHashMap<u32, SourceInput>,
+    paths: FxHashMap<PathBuf, SourceFile>,
+    parsed: FxHashMap<u32, Cached<ParsedFileResult>>,
+    hir: FxHashMap<u32, Cached<HirModuleResult>>,
+    file_deps: FileDeps,
 }
 
 /// Shared query database for tooling features.
@@ -86,6 +152,12 @@ impl RootDatabase {
             if changed {
                 state.parsed.remove(&file.id);
                 state.hir.remove(&file.id);
+                // Transitively invalidate all files that (directly or
+                // indirectly) import this file (M6).
+                let rdeps = state.file_deps.transitive_rdeps(file.id);
+                for rdep in rdeps {
+                    state.hir.remove(&rdep);
+                }
             }
             return file;
         }
@@ -139,6 +211,11 @@ impl RootDatabase {
         if changed {
             state.parsed.remove(&file.id);
             state.hir.remove(&file.id);
+            // Transitively invalidate all files that import this file (M6).
+            let rdeps = state.file_deps.transitive_rdeps(file.id);
+            for rdep in rdeps {
+                state.hir.remove(&rdep);
+            }
         }
         changed
     }
@@ -228,5 +305,22 @@ impl RootDatabase {
             },
         );
         Some(computed)
+    }
+
+    /// Register the set of files that `importer` directly depends on.
+    ///
+    /// Call this after a successful HIR compilation for `importer`, passing
+    /// the `SourceFile` handles of every file whose exported names the
+    /// compiled module references.  Future changes to any of those files will
+    /// cause `importer`'s HIR cache entry to be evicted transitively (M6).
+    ///
+    /// Calling this with an empty `deps` slice removes all previously recorded
+    /// dependencies for `importer`.
+    pub fn register_file_deps(&self, importer: SourceFile, deps: &[SourceFile]) {
+        let dep_ids: FxHashSet<u32> = deps.iter().map(|f| f.id).collect();
+        self.state
+            .write()
+            .file_deps
+            .set_deps(importer.id, dep_ids);
     }
 }
