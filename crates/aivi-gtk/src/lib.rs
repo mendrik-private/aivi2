@@ -9,12 +9,14 @@
 
 pub mod bridge;
 pub mod executor;
+pub mod host;
 pub mod lower;
 pub mod plan;
 pub mod runtime_adapter;
 
 pub use bridge::*;
 pub use executor::*;
+pub use host::*;
 pub use lower::{
     LoweringError, LoweringOptions, lower_markup_expr, lower_markup_expr_with_options,
     lower_markup_root, lower_markup_root_with_options,

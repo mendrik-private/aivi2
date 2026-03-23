@@ -118,6 +118,15 @@ pub enum ValidationError {
         source: SourceId,
         dependency: crate::ItemId,
     },
+    UnknownSourceArgumentExpr {
+        source: SourceId,
+        expr: ExprId,
+    },
+    UnknownSourceOptionExpr {
+        source: SourceId,
+        option_name: Box<str>,
+        expr: ExprId,
+    },
     UnknownDecodeOwner {
         decode: DecodeProgramId,
         owner: crate::ItemId,
@@ -289,6 +298,20 @@ impl fmt::Display for ValidationError {
             Self::SourceDependencyNotSignal { source, dependency } => {
                 write!(f, "source {source} depends on non-signal item {dependency}")
             }
+            Self::UnknownSourceArgumentExpr { source, expr } => {
+                write!(
+                    f,
+                    "source {source} references unknown argument expression {expr}"
+                )
+            }
+            Self::UnknownSourceOptionExpr {
+                source,
+                option_name,
+                expr,
+            } => write!(
+                f,
+                "source {source} option `{option_name}` references unknown expression {expr}"
+            ),
             Self::UnknownDecodeOwner { decode, owner } => {
                 write!(
                     f,
@@ -527,6 +550,23 @@ pub fn validate_module(module: &Module) -> Result<(), ValidationErrors> {
                     source: source_id,
                     dependency: *dependency,
                 }),
+            }
+        }
+        for argument in &source.arguments {
+            if !module.exprs().contains(argument.runtime_expr) {
+                errors.push(ValidationError::UnknownSourceArgumentExpr {
+                    source: source_id,
+                    expr: argument.runtime_expr,
+                });
+            }
+        }
+        for option in &source.options {
+            if !module.exprs().contains(option.runtime_expr) {
+                errors.push(ValidationError::UnknownSourceOptionExpr {
+                    source: source_id,
+                    option_name: option.option_name.clone(),
+                    expr: option.runtime_expr,
+                });
             }
         }
     }

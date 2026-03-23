@@ -115,6 +115,27 @@ pub enum ValidationError {
         source: SourceId,
         dependency: ItemId,
     },
+    SourceUnknownArgumentKernel {
+        source: SourceId,
+        index: usize,
+        kernel: KernelId,
+    },
+    SourceUnknownOptionKernel {
+        source: SourceId,
+        option_name: Box<str>,
+        kernel: KernelId,
+    },
+    SourceKernelHasInput {
+        source: SourceId,
+        kernel: KernelId,
+        layout: LayoutId,
+    },
+    SourceKernelOwnerMismatch {
+        source: SourceId,
+        kernel: KernelId,
+        expected_owner: ItemId,
+        found_owner: ItemId,
+    },
     SourceUnknownDecode {
         source: SourceId,
         decode: DecodePlanId,
@@ -281,6 +302,39 @@ impl fmt::Display for ValidationError {
             Self::SourceDependencyNotSignal { source, dependency } => {
                 write!(f, "source {source} depends on non-signal item {dependency}")
             }
+            Self::SourceUnknownArgumentKernel {
+                source,
+                index,
+                kernel,
+            } => write!(
+                f,
+                "source {source} argument {index} references unknown kernel {kernel}"
+            ),
+            Self::SourceUnknownOptionKernel {
+                source,
+                option_name,
+                kernel,
+            } => write!(
+                f,
+                "source {source} option `{option_name}` references unknown kernel {kernel}"
+            ),
+            Self::SourceKernelHasInput {
+                source,
+                kernel,
+                layout,
+            } => write!(
+                f,
+                "source {source} kernel {kernel} unexpectedly requires input layout{layout}"
+            ),
+            Self::SourceKernelOwnerMismatch {
+                source,
+                kernel,
+                expected_owner,
+                found_owner,
+            } => write!(
+                f,
+                "source {source} kernel {kernel} belongs to item{found_owner}, expected item{expected_owner}"
+            ),
             Self::SourceUnknownDecode { source, decode } => {
                 write!(f, "source {source} references unknown decode plan {decode}")
             }
@@ -428,6 +482,32 @@ pub fn validate_program(program: &Program) -> Result<(), ValidationErrors> {
                     dependency: *dependency,
                 }),
             }
+        }
+        for (index, argument) in source.arguments.iter().enumerate() {
+            validate_source_kernel(
+                program,
+                source_id,
+                source.owner,
+                argument.kernel,
+                &mut errors,
+            )
+            .unwrap_or_else(|kernel| {
+                errors.push(ValidationError::SourceUnknownArgumentKernel {
+                    source: source_id,
+                    index,
+                    kernel,
+                });
+            });
+        }
+        for option in &source.options {
+            validate_source_kernel(program, source_id, source.owner, option.kernel, &mut errors)
+                .unwrap_or_else(|kernel| {
+                    errors.push(ValidationError::SourceUnknownOptionKernel {
+                        source: source_id,
+                        option_name: option.option_name.clone(),
+                        kernel,
+                    });
+                });
         }
         if let Some(decode) = source.decode {
             if !program.decode_plans().contains(decode) {
@@ -752,6 +832,34 @@ fn validate_kernel_contract(
             found: kernel.result_layout,
         });
     }
+}
+
+fn validate_source_kernel(
+    program: &Program,
+    source: SourceId,
+    expected_owner: ItemId,
+    kernel_id: KernelId,
+    errors: &mut Vec<ValidationError>,
+) -> Result<(), KernelId> {
+    let Some(kernel) = program.kernels().get(kernel_id) else {
+        return Err(kernel_id);
+    };
+    if let Some(layout) = kernel.input_subject {
+        errors.push(ValidationError::SourceKernelHasInput {
+            source,
+            kernel: kernel_id,
+            layout,
+        });
+    }
+    if kernel.origin.item != expected_owner {
+        errors.push(ValidationError::SourceKernelOwnerMismatch {
+            source,
+            kernel: kernel_id,
+            expected_owner,
+            found_owner: kernel.origin.item,
+        });
+    }
+    Ok(())
 }
 
 fn validate_kernel(

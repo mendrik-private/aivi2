@@ -1451,6 +1451,10 @@ fn kernel_symbol(program: &Program, kernel_id: KernelId, kernel: &Kernel) -> Str
                 format!("recurrence_step_s{stage_index}")
             }
             KernelOriginKind::RecurrenceWakeupWitness { .. } => "recurrence_witness".to_owned(),
+            KernelOriginKind::SourceArgument { index, .. } => {
+                format!("source_argument_{index}")
+            }
+            KernelOriginKind::SourceOption { index, .. } => format!("source_option_{index}"),
         }
     )
 }

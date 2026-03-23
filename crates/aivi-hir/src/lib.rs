@@ -95,10 +95,11 @@ pub use source_contract_resolution::{
     SourceContractResolutionErrorKind, SourceContractTypeResolver,
 };
 pub use source_lifecycle_elaboration::{
-    BlockedSourceLifecycleNode, SourceInstanceId, SourceLifecycleElaborationBlocker,
-    SourceLifecycleElaborationReport, SourceLifecycleNodeElaboration, SourceLifecycleNodeOutcome,
-    SourceLifecyclePlan, SourceOptionSignalBinding, SourceReplacementPolicy, SourceStaleWorkPolicy,
-    SourceTeardownPolicy, elaborate_source_lifecycles,
+    BlockedSourceLifecycleNode, SourceArgumentValueBinding, SourceInstanceId,
+    SourceLifecycleElaborationBlocker, SourceLifecycleElaborationReport,
+    SourceLifecycleNodeElaboration, SourceLifecycleNodeOutcome, SourceLifecyclePlan,
+    SourceOptionSignalBinding, SourceOptionValueBinding, SourceReplacementPolicy,
+    SourceStaleWorkPolicy, SourceTeardownPolicy, elaborate_source_lifecycles,
 };
 pub use symbols::{LspSymbol, LspSymbolKind, extract_symbols};
 pub use truthy_falsy_elaboration::{

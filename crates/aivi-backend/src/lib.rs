@@ -46,9 +46,9 @@ pub use program::{
     DecodeStep, DecodeStepKind, DecodeSumStrategy, DecodeVariant, DomainDecodeSurface,
     DomainDecodeSurfaceKind, FanoutCarrier, FanoutJoin, FanoutStage, GateStage, Item, ItemKind,
     NonSourceWakeup, NonSourceWakeupCause, Pipeline, PipelineOrigin, Program, Recurrence,
-    RecurrenceStage, RecurrenceTarget, RecurrenceWakeupKind, SignalInfo, SourceCancellationPolicy,
-    SourceInstanceId, SourceOptionBinding, SourcePlan, SourceProvider, SourceReplacementPolicy,
-    SourceStaleWorkPolicy, SourceTeardownPolicy, Stage, StageKind, TruthyFalsyBranch,
-    TruthyFalsyStage,
+    RecurrenceStage, RecurrenceTarget, RecurrenceWakeupKind, SignalInfo, SourceArgumentKernel,
+    SourceCancellationPolicy, SourceInstanceId, SourceOptionBinding, SourceOptionKernel,
+    SourcePlan, SourceProvider, SourceReplacementPolicy, SourceStaleWorkPolicy,
+    SourceTeardownPolicy, Stage, StageKind, TruthyFalsyBranch, TruthyFalsyStage,
 };
 pub use validate::{ValidationError, ValidationErrors, validate_program};

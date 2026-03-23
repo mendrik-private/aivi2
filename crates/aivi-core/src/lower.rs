@@ -21,8 +21,9 @@ use crate::{
     NonSourceWakeup, Pattern, PatternBinding, PatternConstructor, PatternKind, Pipe, PipeCaseArm,
     PipeExpr, PipeOrigin, PipeRecurrence, PipeStage, PipeTruthyFalsyBranch, PipeTruthyFalsyStage,
     ProjectionBase, RecordExprField, RecordPatternField, RecurrenceGuard, RecurrenceStage,
-    Reference, SignalInfo, SourceId, SourceInstanceId, SourceNode, SourceOptionBinding, Stage,
-    StageKind, TextLiteral, TextSegment, TruthyFalsyBranch, TruthyFalsyStage, Type,
+    Reference, SignalInfo, SourceArgumentValue, SourceId, SourceInstanceId, SourceNode,
+    SourceOptionBinding, SourceOptionValue, Stage, StageKind, TextLiteral, TextSegment,
+    TruthyFalsyBranch, TruthyFalsyStage, Type,
     expr::ExprKind,
     validate::{ValidationError, validate_module},
 };
@@ -902,6 +903,43 @@ impl<'a> ModuleLowerer<'a> {
                 .iter()
                 .filter_map(|dependency| self.map_dependency(node.owner, *dependency))
                 .collect::<Vec<_>>();
+            let mut arguments = Vec::with_capacity(plan.arguments.len());
+            let mut failed = false;
+            for argument in plan.arguments {
+                match self.lower_runtime_expr(node.owner, &argument.runtime_expr) {
+                    Ok(runtime_expr) => arguments.push(SourceArgumentValue {
+                        origin_expr: argument.expr,
+                        runtime_expr,
+                    }),
+                    Err(error) => {
+                        self.errors.push(error);
+                        failed = true;
+                        break;
+                    }
+                }
+            }
+            if failed {
+                continue;
+            }
+            let mut options = Vec::with_capacity(plan.options.len());
+            for option in plan.options {
+                match self.lower_runtime_expr(node.owner, &option.runtime_expr) {
+                    Ok(runtime_expr) => options.push(SourceOptionValue {
+                        option_span: option.option_span,
+                        option_name: option.option_name.text().into(),
+                        origin_expr: option.expr,
+                        runtime_expr,
+                    }),
+                    Err(error) => {
+                        self.errors.push(error);
+                        failed = true;
+                        break;
+                    }
+                }
+            }
+            if failed {
+                continue;
+            }
             let source_id = self
                 .module
                 .sources_mut()
@@ -912,6 +950,8 @@ impl<'a> ModuleLowerer<'a> {
                     provider: plan.provider,
                     teardown: plan.teardown,
                     replacement: plan.replacement,
+                    arguments,
+                    options,
                     reconfiguration_dependencies,
                     explicit_triggers: plan
                         .explicit_triggers
@@ -2126,6 +2166,54 @@ sig timeout : Signal Duration
             }
             other => panic!("expected domain decode root, found {other:?}"),
         }
+    }
+
+    #[test]
+    fn lowers_source_payload_values_into_typed_core_ir() {
+        let lowered = lower_text(
+            "typed-core-source-config.aivi",
+            r#"
+sig apiHost = "https://api.example.com"
+sig refresh = 0
+sig enabled = True
+sig pollInterval = 5
+
+@source http.get "{apiHost}/users" with {
+    refreshOn: refresh,
+    activeWhen: enabled,
+    refreshEvery: pollInterval
+}
+sig users : Signal Int
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "source config fixture should lower cleanly before typed-core lowering: {:?}",
+            lowered.diagnostics()
+        );
+
+        let core = lower_module(lowered.module()).expect("typed-core lowering should succeed");
+        let users = core
+            .items()
+            .iter()
+            .find(|(_, item)| item.name.as_ref() == "users")
+            .map(|(id, _)| id)
+            .expect("expected users signal item");
+        let ItemKind::Signal(info) = &core.items()[users].kind else {
+            panic!("users should remain a signal item");
+        };
+        let source = &core.sources()[info
+            .source
+            .expect("users should carry a lowered source node")];
+        assert_eq!(source.arguments.len(), 1);
+        assert_eq!(source.options.len(), 3);
+        assert!(matches!(
+            core.exprs()[source.arguments[0].runtime_expr].kind,
+            crate::ExprKind::Text(_)
+        ));
+        assert_eq!(source.options[0].option_name.as_ref(), "refreshOn");
+        assert_eq!(source.options[1].option_name.as_ref(), "activeWhen");
+        assert_eq!(source.options[2].option_name.as_ref(), "refreshEvery");
     }
 
     #[test]

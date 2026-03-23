@@ -30,10 +30,11 @@ use crate::{
     MapEntry, NonSourceWakeup, NonSourceWakeupCause, ParameterRole, Pipeline, PipelineId,
     PipelineOrigin, PrimitiveType, Program, ProjectionBase, RecordExprField, RecordFieldLayout,
     Recurrence, RecurrenceStage, RecurrenceTarget, RecurrenceWakeupKind, SignalInfo,
-    SourceCancellationPolicy, SourceInstanceId, SourceOptionBinding, SourcePlan, SourceProvider,
-    SourceReplacementPolicy, SourceStaleWorkPolicy, SourceTeardownPolicy, Stage, StageKind,
-    SubjectRef, SuffixedIntegerLiteral, TextLiteral, TextSegment, TruthyFalsyBranch,
-    TruthyFalsyStage, UnaryOperator, ValidationError, VariantLayout, validate_program,
+    SourceArgumentKernel, SourceCancellationPolicy, SourceInstanceId, SourceOptionBinding,
+    SourceOptionKernel, SourcePlan, SourceProvider, SourceReplacementPolicy, SourceStaleWorkPolicy,
+    SourceTeardownPolicy, Stage, StageKind, SubjectRef, SuffixedIntegerLiteral, TextLiteral,
+    TextSegment, TruthyFalsyBranch, TruthyFalsyStage, UnaryOperator, ValidationError,
+    VariantLayout, validate_program,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -491,6 +492,8 @@ impl<'a> ProgramLowerer<'a> {
                     provider: map_source_provider(&source.provider),
                     teardown: map_teardown_policy(source.teardown),
                     replacement: map_replacement_policy(source.replacement),
+                    arguments: Vec::new(),
+                    options: Vec::new(),
                     reconfiguration_dependencies,
                     explicit_triggers,
                     active_when,
@@ -508,6 +511,42 @@ impl<'a> ProgramLowerer<'a> {
                 unreachable!("typed-lambda validation should prevent non-signal sources");
             };
             info.source = Some(source_id);
+            let mut arguments = Vec::with_capacity(source.arguments.len());
+            for (index, argument) in source.arguments.iter().enumerate() {
+                arguments.push(SourceArgumentKernel {
+                    kernel: self.lower_root_expr_kernel(
+                        owner,
+                        source.span,
+                        KernelOriginKind::SourceArgument {
+                            source: source_id,
+                            index,
+                        },
+                        argument.runtime_expr,
+                    )?,
+                });
+            }
+            let mut options = Vec::with_capacity(source.options.len());
+            for (index, option) in source.options.iter().enumerate() {
+                options.push(SourceOptionKernel {
+                    option_name: option.option_name.clone(),
+                    kernel: self.lower_root_expr_kernel(
+                        owner,
+                        option.option_span,
+                        KernelOriginKind::SourceOption {
+                            source: source_id,
+                            index,
+                        },
+                        option.runtime_expr,
+                    )?,
+                });
+            }
+            let lowered_source = self
+                .program
+                .sources_mut()
+                .get_mut(source_id)
+                .expect("allocated source should exist");
+            lowered_source.arguments = arguments;
+            lowered_source.options = options;
             if let Some(decode) = source.decode {
                 let decode_id =
                     self.lower_decode_plan(owner, &self.lambda.decode_programs()[decode])?;
@@ -864,6 +903,40 @@ impl<'a> ProgramLowerer<'a> {
         let lowered = self.lower_kernel_exprs(closure.root, input_hint, &contract.env_map)?;
         let result_layout = self.intern_core_type(&self.lambda.exprs()[closure.root].ty)?;
         let input_subject = input_hint.filter(|_| contract.uses_input_subject);
+        self.alloc_kernel(
+            owner,
+            closure.span,
+            kind,
+            input_subject,
+            contract,
+            lowered,
+            result_layout,
+        )
+    }
+
+    fn lower_root_expr_kernel(
+        &mut self,
+        owner: ItemId,
+        span: SourceSpan,
+        kind: KernelOriginKind,
+        root: core::ExprId,
+    ) -> Result<KernelId, LoweringError> {
+        let contract = self.collect_root_kernel_contract(root, None, Vec::new(), HashMap::new())?;
+        let lowered = self.lower_kernel_exprs(root, None, &contract.env_map)?;
+        let result_layout = self.intern_core_type(&self.lambda.exprs()[root].ty)?;
+        self.alloc_kernel(owner, span, kind, None, contract, lowered, result_layout)
+    }
+
+    fn alloc_kernel(
+        &mut self,
+        owner: ItemId,
+        span: SourceSpan,
+        kind: KernelOriginKind,
+        input_subject: Option<LayoutId>,
+        contract: KernelContract,
+        lowered: LoweredKernelExprs,
+        result_layout: LayoutId,
+    ) -> Result<KernelId, LoweringError> {
         let convention =
             self.build_calling_convention(input_subject, &contract.environment, result_layout);
         self.program
@@ -871,7 +944,7 @@ impl<'a> ProgramLowerer<'a> {
             .alloc(Kernel::new(
                 KernelOrigin {
                     item: owner,
-                    span: closure.span,
+                    span,
                     kind,
                 },
                 input_subject,
@@ -891,13 +964,6 @@ impl<'a> ProgramLowerer<'a> {
         closure: &lambda::Closure,
         input_hint: Option<LayoutId>,
     ) -> Result<KernelContract, LoweringError> {
-        #[derive(Clone, Copy)]
-        enum SubjectKind {
-            Input,
-            Inline,
-        }
-
-        let mut work = vec![(closure.root, SubjectKind::Input)];
         let mut environment = Vec::with_capacity(closure.captures.len());
         let mut env_map = HashMap::with_capacity(closure.captures.len());
         for (index, capture_id) in closure.captures.iter().enumerate() {
@@ -905,8 +971,19 @@ impl<'a> ProgramLowerer<'a> {
             environment.push(self.intern_core_type(&capture.ty)?);
             env_map.insert(capture.binding.as_raw(), EnvSlotId::from_raw(index as u32));
         }
+        self.collect_root_kernel_contract(closure.root, input_hint, environment, env_map)
+    }
+
+    fn collect_root_kernel_contract(
+        &mut self,
+        root: core::ExprId,
+        input_hint: Option<LayoutId>,
+        environment: Vec<LayoutId>,
+        env_map: HashMap<u32, EnvSlotId>,
+    ) -> Result<KernelContract, LoweringError> {
         let mut globals = BTreeSet::new();
         let mut uses_input_subject = false;
+        let mut work = vec![(root, SubjectKind::Input)];
 
         while let Some((expr_id, subject)) = work.pop() {
             let expr = &self.lambda.exprs()[expr_id];
@@ -1943,6 +2020,12 @@ struct KernelContract {
     environment: Vec<LayoutId>,
     env_map: HashMap<u32, EnvSlotId>,
     global_items: Vec<ItemId>,
+}
+
+#[derive(Clone, Copy)]
+enum SubjectKind {
+    Input,
+    Inline,
 }
 
 struct LoweredKernelExprs {

@@ -238,6 +238,57 @@ sig timeout : Signal Duration
 }
 
 #[test]
+fn lowers_source_config_values_into_backend_kernels() {
+    let backend = lower_text(
+        "backend-source-config.aivi",
+        r#"
+sig apiHost = "https://api.example.com"
+sig refresh = 0
+sig enabled = True
+sig pollInterval = 5
+
+@source http.get "{apiHost}/users" with {
+    refreshOn: refresh,
+    activeWhen: enabled,
+    refreshEvery: pollInterval
+}
+sig users : Signal Int
+"#,
+    );
+
+    let users = find_item(&backend, "users");
+    let BackendItemKind::Signal(signal) = &backend.items()[users].kind else {
+        panic!("users should remain a signal item");
+    };
+    let source = &backend.sources()[signal.source.expect("users should carry a source")];
+    assert_eq!(source.arguments.len(), 1);
+    assert_eq!(source.options.len(), 3);
+
+    let argument_kernel = &backend.kernels()[source.arguments[0].kernel];
+    assert!(argument_kernel.input_subject.is_none());
+    assert!(matches!(
+        argument_kernel.origin.kind,
+        aivi_backend::KernelOriginKind::SourceArgument { .. }
+    ));
+    assert!(matches!(
+        argument_kernel.exprs()[argument_kernel.root].kind,
+        KernelExprKind::Text(_)
+    ));
+
+    assert_eq!(source.options[0].option_name.as_ref(), "refreshOn");
+    assert_eq!(source.options[1].option_name.as_ref(), "activeWhen");
+    assert_eq!(source.options[2].option_name.as_ref(), "refreshEvery");
+    for option in &source.options {
+        let kernel = &backend.kernels()[option.kernel];
+        assert!(kernel.input_subject.is_none());
+        assert!(matches!(
+            kernel.origin.kind,
+            aivi_backend::KernelOriginKind::SourceOption { .. }
+        ));
+    }
+}
+
+#[test]
 fn lowers_recurrence_targets_and_witnesses() {
     let backend = lower_text(
         "backend-recurrence.aivi",

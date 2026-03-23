@@ -5,7 +5,8 @@ use aivi_core::Arena;
 use aivi_hir::DomainMemberHandle;
 
 use crate::{
-    EnvSlotId, InlineSubjectId, ItemId, KernelExprId, LayoutId, PipelineId, layout::AbiPassMode,
+    EnvSlotId, InlineSubjectId, ItemId, KernelExprId, LayoutId, PipelineId, SourceId,
+    layout::AbiPassMode,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -195,6 +196,14 @@ pub enum KernelOriginKind {
     RecurrenceWakeupWitness {
         pipeline: PipelineId,
     },
+    SourceArgument {
+        source: SourceId,
+        index: usize,
+    },
+    SourceOption {
+        source: SourceId,
+        index: usize,
+    },
 }
 
 impl fmt::Display for KernelOriginKind {
@@ -222,6 +231,12 @@ impl fmt::Display for KernelOriginKind {
             } => write!(f, "recurrence-step pipeline{pipeline}[{stage_index}]"),
             Self::RecurrenceWakeupWitness { pipeline } => {
                 write!(f, "recurrence-witness pipeline{pipeline}")
+            }
+            Self::SourceArgument { source, index } => {
+                write!(f, "source-argument source{source}[{index}]")
+            }
+            Self::SourceOption { source, index } => {
+                write!(f, "source-option source{source}[{index}]")
             }
         }
     }

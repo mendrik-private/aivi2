@@ -2,8 +2,9 @@ use aivi_base::SourceSpan;
 use aivi_typing::{SourceCancellationPolicy, SourceOptionWakeupCause};
 
 use crate::{
-    DecoratorId, DecoratorPayload, ExprId, ExprKind, Item, ItemId, Module, Name, SignalItem,
-    SourceDecorator, SourceMetadata, SourceProviderRef,
+    BlockedGeneralExpr, DecoratorId, DecoratorPayload, ExprId, ExprKind, GateRuntimeExpr, Item,
+    ItemId, Module, Name, SignalItem, SourceDecorator, SourceMetadata, SourceProviderRef,
+    general_expr_elaboration::elaborate_runtime_expr,
 };
 
 /// Focused source-lifecycle plans derived from resolved `@source` signals.
@@ -75,6 +76,20 @@ pub struct SourceOptionSignalBinding {
     pub expr: ExprId,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceArgumentValueBinding {
+    pub expr: ExprId,
+    pub runtime_expr: GateRuntimeExpr,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceOptionValueBinding {
+    pub option_span: SourceSpan,
+    pub option_name: Name,
+    pub expr: ExprId,
+    pub runtime_expr: GateRuntimeExpr,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SourceTeardownPolicy {
     DisposeOnOwnerTeardown,
@@ -96,6 +111,8 @@ pub struct SourceLifecyclePlan {
     pub provider: SourceProviderRef,
     pub teardown: SourceTeardownPolicy,
     pub replacement: SourceReplacementPolicy,
+    pub arguments: Vec<SourceArgumentValueBinding>,
+    pub options: Vec<SourceOptionValueBinding>,
     pub reconfiguration_dependencies: Vec<ItemId>,
     pub explicit_triggers: Vec<SourceOptionSignalBinding>,
     pub active_when: Option<SourceOptionSignalBinding>,
@@ -116,7 +133,17 @@ pub struct BlockedSourceLifecycleNode {
 pub enum SourceLifecycleElaborationBlocker {
     MissingSourceMetadata,
     MissingProvider,
-    InvalidProviderShape { key: Box<str> },
+    InvalidProviderShape {
+        key: Box<str>,
+    },
+    UnsupportedArgumentRuntimeExpr {
+        index: usize,
+        blocked: BlockedGeneralExpr,
+    },
+    UnsupportedOptionRuntimeExpr {
+        option_name: Name,
+        blocked: BlockedGeneralExpr,
+    },
 }
 
 pub fn elaborate_source_lifecycles(module: &Module) -> SourceLifecycleElaborationReport {
@@ -158,6 +185,8 @@ fn elaborate_source_lifecycle_signal(
     let explicit_triggers = explicit_trigger_bindings(module, source, &provider);
     let active_when = active_when_binding(module, source, &provider);
     let mut blockers = Vec::new();
+    let arguments = source_argument_value_bindings(module, source, &mut blockers);
+    let options = source_option_value_bindings(module, source, &mut blockers);
     let mut reconfiguration_dependencies = Vec::new();
 
     match &provider {
@@ -189,6 +218,8 @@ fn elaborate_source_lifecycle_signal(
             provider,
             teardown: SourceTeardownPolicy::DisposeOnOwnerTeardown,
             replacement: SourceReplacementPolicy::DisposeSupersededBeforePublish,
+            arguments,
+            options,
             reconfiguration_dependencies,
             explicit_triggers,
             active_when,
@@ -211,6 +242,59 @@ fn lifecycle_cancellation_policy(provider: &SourceProviderRef) -> SourceCancella
         .builtin()
         .map(|provider| provider.contract().lifecycle().cancellation())
         .unwrap_or(SourceCancellationPolicy::ProviderManaged)
+}
+
+fn source_argument_value_bindings(
+    module: &Module,
+    source: &SourceDecorator,
+    blockers: &mut Vec<SourceLifecycleElaborationBlocker>,
+) -> Vec<SourceArgumentValueBinding> {
+    let mut bindings = Vec::with_capacity(source.arguments.len());
+    for (index, expr) in source.arguments.iter().copied().enumerate() {
+        match elaborate_runtime_expr(module, expr, None) {
+            Ok(runtime_expr) => bindings.push(SourceArgumentValueBinding { expr, runtime_expr }),
+            Err(blocked) => {
+                blockers.push(
+                    SourceLifecycleElaborationBlocker::UnsupportedArgumentRuntimeExpr {
+                        index,
+                        blocked,
+                    },
+                );
+            }
+        }
+    }
+    bindings
+}
+
+fn source_option_value_bindings(
+    module: &Module,
+    source: &SourceDecorator,
+    blockers: &mut Vec<SourceLifecycleElaborationBlocker>,
+) -> Vec<SourceOptionValueBinding> {
+    let Some(options) = source.options else {
+        return Vec::new();
+    };
+    let ExprKind::Record(record) = &module.exprs()[options].kind else {
+        return Vec::new();
+    };
+    let mut bindings = Vec::with_capacity(record.fields.len());
+    for field in &record.fields {
+        match elaborate_runtime_expr(module, field.value, None) {
+            Ok(runtime_expr) => bindings.push(SourceOptionValueBinding {
+                option_span: field.span,
+                option_name: field.label.clone(),
+                expr: field.value,
+                runtime_expr,
+            }),
+            Err(blocked) => blockers.push(
+                SourceLifecycleElaborationBlocker::UnsupportedOptionRuntimeExpr {
+                    option_name: field.label.clone(),
+                    blocked,
+                },
+            ),
+        }
+    }
+    bindings
 }
 
 fn explicit_trigger_bindings(
@@ -404,6 +488,15 @@ sig users : Signal Int
                     dependency_names(lowered.module(), &plan.reconfiguration_dependencies),
                     vec!["apiHost".to_owned(), "pollInterval".to_owned()]
                 );
+                assert_eq!(plan.arguments.len(), 1);
+                assert_eq!(plan.options.len(), 3);
+                assert!(matches!(
+                    plan.arguments[0].runtime_expr.kind,
+                    crate::GateRuntimeExprKind::Text(_)
+                ));
+                assert_eq!(plan.options[0].option_name.text(), "refreshOn");
+                assert_eq!(plan.options[1].option_name.text(), "activeWhen");
+                assert_eq!(plan.options[2].option_name.text(), "refreshEvery");
                 assert_eq!(plan.explicit_triggers.len(), 1);
                 assert_eq!(plan.explicit_triggers[0].option_name.text(), "refreshOn");
                 let active_when = plan
@@ -462,6 +555,9 @@ sig updates : Signal Int
                     dependency_names(lowered.module(), &plan.reconfiguration_dependencies),
                     vec!["path".to_owned(), "enabled".to_owned()]
                 );
+                assert_eq!(plan.arguments.len(), 1);
+                assert_eq!(plan.options.len(), 1);
+                assert_eq!(plan.options[0].option_name.text(), "activeWhen");
                 assert!(
                     plan.explicit_triggers.is_empty(),
                     "custom lifecycle elaboration must not invent built-in trigger bindings"

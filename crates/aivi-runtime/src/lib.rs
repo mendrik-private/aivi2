@@ -3,6 +3,7 @@
 //! Runtime and scheduler foundations for the AIVI execution engine.
 
 pub mod effects;
+pub mod glib_adapter;
 pub mod graph;
 pub mod hir_adapter;
 pub mod scheduler;
@@ -14,6 +15,7 @@ pub use effects::{
     SourceRuntimeSpec, SourceStaleWorkPolicy, TaskCompletionPort, TaskInstanceId, TaskRuntimeSpec,
     TaskSourceRuntime, TaskSourceRuntimeError, TaskSourceTickOutcome,
 };
+pub use glib_adapter::{GlibSchedulerDriver, GlibSchedulerError, GlibWorkerPublicationSender};
 pub use graph::{
     DerivedHandle, DerivedSpec, GraphBuildError, InputHandle, OwnerHandle, OwnerSpec, SignalGraph,
     SignalGraphBuilder, SignalHandle, SignalKind, SignalSpec, TopologyBatch,

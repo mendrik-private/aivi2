@@ -222,6 +222,16 @@ pub fn elaborate_general_expressions(module: &Module) -> GeneralExprElaborationR
     GeneralExprElaborator::new(&module).build()
 }
 
+pub(crate) fn elaborate_runtime_expr(
+    module: &Module,
+    expr_id: ExprId,
+    expected: Option<&GateType>,
+) -> Result<GateRuntimeExpr, BlockedGeneralExpr> {
+    GeneralExprElaborator::new(module)
+        .lower_expr(expr_id, &GateExprEnv::default(), None, expected)
+        .map_err(|blockers| BlockedGeneralExpr { blockers })
+}
+
 struct GeneralExprElaborator<'a> {
     module: &'a Module,
     typing: GateTypeContext<'a>,

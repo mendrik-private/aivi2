@@ -144,6 +144,16 @@ impl fmt::Display for Module {
                         source.provider.key().unwrap_or("<missing>"),
                         source.cancellation
                     )?;
+                    for (index, argument) in source.arguments.iter().enumerate() {
+                        writeln!(f, "    arg[{index}] @expr {}", argument.origin_expr)?;
+                    }
+                    for option in &source.options {
+                        writeln!(
+                            f,
+                            "    option {} @expr {}",
+                            option.option_name, option.origin_expr
+                        )?;
+                    }
                     if !source.reconfiguration_dependencies.is_empty() {
                         write!(f, "    reconfigure = [")?;
                         for (index, dependency) in
@@ -502,6 +512,20 @@ pub struct SourceOptionBinding {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceArgumentValue {
+    pub origin_expr: HirExprId,
+    pub runtime_expr: ExprId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceOptionValue {
+    pub option_span: SourceSpan,
+    pub option_name: Box<str>,
+    pub origin_expr: HirExprId,
+    pub runtime_expr: ExprId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceNode {
     pub owner: ItemId,
     pub span: SourceSpan,
@@ -509,6 +533,8 @@ pub struct SourceNode {
     pub provider: SourceProviderRef,
     pub teardown: SourceTeardownPolicy,
     pub replacement: SourceReplacementPolicy,
+    pub arguments: Vec<SourceArgumentValue>,
+    pub options: Vec<SourceOptionValue>,
     pub reconfiguration_dependencies: Vec<ItemId>,
     pub explicit_triggers: Vec<SourceOptionBinding>,
     pub active_when: Option<SourceOptionBinding>,

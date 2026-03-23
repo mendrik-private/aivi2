@@ -116,6 +116,16 @@ impl fmt::Display for Program {
                         "  source {} provider={} cancellation={}",
                         source.instance, source.provider, source.cancellation
                     )?;
+                    for (index, argument) in source.arguments.iter().enumerate() {
+                        writeln!(f, "    arg[{index}] = kernel{}", argument.kernel)?;
+                    }
+                    for option in &source.options {
+                        writeln!(
+                            f,
+                            "    option {} = kernel{}",
+                            option.option_name, option.kernel
+                        )?;
+                    }
                     if !source.reconfiguration_dependencies.is_empty() {
                         write!(f, "    reconfigure = [")?;
                         for (index, dependency) in
@@ -605,6 +615,17 @@ pub struct SourceOptionBinding {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceArgumentKernel {
+    pub kernel: KernelId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceOptionKernel {
+    pub option_name: Box<str>,
+    pub kernel: KernelId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourcePlan {
     pub owner: ItemId,
     pub span: SourceSpan,
@@ -612,6 +633,8 @@ pub struct SourcePlan {
     pub provider: SourceProvider,
     pub teardown: SourceTeardownPolicy,
     pub replacement: SourceReplacementPolicy,
+    pub arguments: Vec<SourceArgumentKernel>,
+    pub options: Vec<SourceOptionKernel>,
     pub reconfiguration_dependencies: Vec<ItemId>,
     pub explicit_triggers: Vec<SourceOptionBinding>,
     pub active_when: Option<SourceOptionBinding>,
