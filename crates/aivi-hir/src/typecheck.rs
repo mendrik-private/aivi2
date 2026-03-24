@@ -1101,7 +1101,7 @@ impl<'a> TypeChecker<'a> {
             let info = self.typing.infer_expr(*argument, env, None);
             self.emit_expr_issues(&info.issues);
             self.solve_constraints(&info.constraints);
-            let Some(argument_ty) = info.ty else {
+            let Some(argument_ty) = info.ty.clone().or_else(|| info.actual_gate_type()) else {
                 return None;
             };
             argument_types.push(argument_ty);
@@ -1189,7 +1189,7 @@ impl<'a> TypeChecker<'a> {
             let info = self.typing.infer_expr(*argument, env, None);
             self.emit_expr_issues(&info.issues);
             self.solve_constraints(&info.constraints);
-            let Some(argument_ty) = info.ty else {
+            let Some(argument_ty) = info.ty.clone().or_else(|| info.actual_gate_type()) else {
                 return None;
             };
             argument_types.push(argument_ty);
@@ -1318,8 +1318,12 @@ impl<'a> TypeChecker<'a> {
         if self.diagnostics.len() != checkpoint {
             return Some(false);
         }
+        let callee_ty = callee_info
+            .ty
+            .clone()
+            .or_else(|| callee_info.actual_gate_type());
 
-        let parameter_types = match callee_info.ty {
+        let parameter_types = match callee_ty {
             Some(callee_ty) => {
                 let (parameter_types, result_ty) =
                     self.expected_function_signature(&callee_ty, arguments.len())?;
@@ -1546,7 +1550,10 @@ impl<'a> TypeChecker<'a> {
         self.emit_expr_issues(&callee_info.issues);
         self.solve_constraints(&callee_info.constraints);
 
-        let mut current = callee_info.ty?;
+        let mut current = callee_info
+            .ty
+            .clone()
+            .or_else(|| callee_info.actual_gate_type())?;
         for _ in arguments.iter() {
             let GateType::Arrow { result, .. } = current else {
                 return None;

@@ -7554,6 +7554,7 @@ impl GateExprInfo {
 pub(crate) struct PipeFunctionSignatureMatch {
     pub(crate) callee_expr: ExprId,
     pub(crate) explicit_arguments: Vec<ExprId>,
+    pub(crate) signal_payload_arguments: Vec<bool>,
     pub(crate) parameter_types: Vec<GateType>,
     pub(crate) result_type: GateType,
 }
@@ -7905,7 +7906,179 @@ impl GateType {
     }
 
     pub(crate) fn same_shape(&self, other: &Self) -> bool {
-        self == other
+        let mut left_to_right = HashMap::new();
+        let mut right_to_left = HashMap::new();
+        Self::same_shape_inner(self, other, &mut left_to_right, &mut right_to_left)
+    }
+
+    fn same_shape_inner(
+        left: &Self,
+        right: &Self,
+        left_to_right: &mut HashMap<TypeParameterId, TypeParameterId>,
+        right_to_left: &mut HashMap<TypeParameterId, TypeParameterId>,
+    ) -> bool {
+        match (left, right) {
+            (Self::Primitive(left), Self::Primitive(right)) => left == right,
+            (
+                Self::TypeParameter {
+                    parameter: left_parameter,
+                    ..
+                },
+                Self::TypeParameter {
+                    parameter: right_parameter,
+                    ..
+                },
+            ) => match (
+                left_to_right.get(left_parameter),
+                right_to_left.get(right_parameter),
+            ) {
+                (Some(mapped_right), Some(mapped_left)) => {
+                    mapped_right == right_parameter && mapped_left == left_parameter
+                }
+                (None, None) => {
+                    left_to_right.insert(*left_parameter, *right_parameter);
+                    right_to_left.insert(*right_parameter, *left_parameter);
+                    true
+                }
+                _ => false,
+            },
+            (Self::Tuple(left), Self::Tuple(right)) => {
+                left.len() == right.len()
+                    && left.iter().zip(right.iter()).all(|(left, right)| {
+                        Self::same_shape_inner(left, right, left_to_right, right_to_left)
+                    })
+            }
+            (Self::Record(left), Self::Record(right)) => {
+                left.len() == right.len()
+                    && left.iter().zip(right.iter()).all(|(left, right)| {
+                        left.name == right.name
+                            && Self::same_shape_inner(
+                                &left.ty,
+                                &right.ty,
+                                left_to_right,
+                                right_to_left,
+                            )
+                    })
+            }
+            (
+                Self::Arrow {
+                    parameter: left_parameter,
+                    result: left_result,
+                },
+                Self::Arrow {
+                    parameter: right_parameter,
+                    result: right_result,
+                },
+            ) => {
+                Self::same_shape_inner(
+                    left_parameter,
+                    right_parameter,
+                    left_to_right,
+                    right_to_left,
+                ) && Self::same_shape_inner(
+                    left_result,
+                    right_result,
+                    left_to_right,
+                    right_to_left,
+                )
+            }
+            (Self::List(left), Self::List(right))
+            | (Self::Set(left), Self::Set(right))
+            | (Self::Option(left), Self::Option(right))
+            | (Self::Signal(left), Self::Signal(right)) => {
+                Self::same_shape_inner(left, right, left_to_right, right_to_left)
+            }
+            (
+                Self::Map {
+                    key: left_key,
+                    value: left_value,
+                },
+                Self::Map {
+                    key: right_key,
+                    value: right_value,
+                },
+            ) => {
+                Self::same_shape_inner(left_key, right_key, left_to_right, right_to_left)
+                    && Self::same_shape_inner(
+                        left_value,
+                        right_value,
+                        left_to_right,
+                        right_to_left,
+                    )
+            }
+            (
+                Self::Result {
+                    error: left_error,
+                    value: left_value,
+                },
+                Self::Result {
+                    error: right_error,
+                    value: right_value,
+                },
+            )
+            | (
+                Self::Validation {
+                    error: left_error,
+                    value: left_value,
+                },
+                Self::Validation {
+                    error: right_error,
+                    value: right_value,
+                },
+            )
+            | (
+                Self::Task {
+                    error: left_error,
+                    value: left_value,
+                },
+                Self::Task {
+                    error: right_error,
+                    value: right_value,
+                },
+            ) => {
+                Self::same_shape_inner(left_error, right_error, left_to_right, right_to_left)
+                    && Self::same_shape_inner(
+                        left_value,
+                        right_value,
+                        left_to_right,
+                        right_to_left,
+                    )
+            }
+            (
+                Self::Domain {
+                    item: left_item,
+                    arguments: left_arguments,
+                    ..
+                },
+                Self::Domain {
+                    item: right_item,
+                    arguments: right_arguments,
+                    ..
+                },
+            )
+            | (
+                Self::OpaqueItem {
+                    item: left_item,
+                    arguments: left_arguments,
+                    ..
+                },
+                Self::OpaqueItem {
+                    item: right_item,
+                    arguments: right_arguments,
+                    ..
+                },
+            ) => {
+                left_item == right_item
+                    && left_arguments.len() == right_arguments.len()
+                    && left_arguments
+                        .iter()
+                        .zip(right_arguments.iter())
+                        .all(|(left, right)| {
+                            Self::same_shape_inner(left, right, left_to_right, right_to_left)
+                        })
+            }
+            _ => false,
+        }
     }
 
     pub(crate) fn constructor_view(&self) -> Option<(TypeConstructorHead, Vec<GateType>)> {
@@ -8555,6 +8728,134 @@ impl<'a> GateTypeContext<'a> {
         self.lower_poly_type(ty, bindings, &mut Vec::new())
     }
 
+    pub(crate) fn instantiate_poly_hir_type_partially(
+        &mut self,
+        ty: TypeId,
+        bindings: &PolyTypeBindings,
+    ) -> Option<GateType> {
+        self.lower_poly_type_partially(ty, bindings, &mut Vec::new())
+    }
+
+    fn lower_poly_type_partially(
+        &mut self,
+        type_id: TypeId,
+        bindings: &PolyTypeBindings,
+        item_stack: &mut Vec<ItemId>,
+    ) -> Option<GateType> {
+        if let Some(lowered) = self.lower_poly_type(type_id, bindings, item_stack) {
+            return Some(lowered);
+        }
+        match &self.module.types()[type_id].kind {
+            TypeKind::Name(reference) => match reference.resolution.as_ref() {
+                ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
+                    match bindings.get(parameter) {
+                        Some(TypeBinding::Type(ty)) => Some(ty.clone()),
+                        Some(TypeBinding::Constructor(binding)) => {
+                            let arity = type_constructor_arity(binding.head, self.module);
+                            (binding.arguments.len() == arity)
+                                .then(|| {
+                                    self.apply_type_constructor(
+                                        binding.head,
+                                        &binding.arguments,
+                                        item_stack,
+                                    )
+                                })
+                                .flatten()
+                        }
+                        None => Some(GateType::TypeParameter {
+                            parameter: *parameter,
+                            name: self.module.type_parameters()[*parameter].name.text().to_owned(),
+                        }),
+                    }
+                }
+                ResolutionState::Resolved(TypeResolution::Builtin(
+                    builtin @ (BuiltinType::Int
+                    | BuiltinType::Float
+                    | BuiltinType::Decimal
+                    | BuiltinType::BigInt
+                    | BuiltinType::Bool
+                    | BuiltinType::Text
+                    | BuiltinType::Unit
+                    | BuiltinType::Bytes),
+                )) => Some(GateType::Primitive(*builtin)),
+                ResolutionState::Resolved(TypeResolution::Item(item_id)) => {
+                    self.lower_type_item(*item_id, &[], item_stack, true)
+                }
+                ResolutionState::Resolved(TypeResolution::Builtin(_))
+                | ResolutionState::Resolved(TypeResolution::Import(_))
+                | ResolutionState::Unresolved => None,
+            },
+            TypeKind::Tuple(elements) => {
+                let mut lowered = Vec::with_capacity(elements.len());
+                for element in elements.iter() {
+                    lowered.push(self.lower_poly_type_partially(*element, bindings, item_stack)?);
+                }
+                Some(GateType::Tuple(lowered))
+            }
+            TypeKind::Record(fields) => {
+                let mut lowered = Vec::with_capacity(fields.len());
+                for field in fields {
+                    lowered.push(GateRecordField {
+                        name: field.label.text().to_owned(),
+                        ty: self.lower_poly_type_partially(field.ty, bindings, item_stack)?,
+                    });
+                }
+                Some(GateType::Record(lowered))
+            }
+            TypeKind::Arrow { parameter, result } => Some(GateType::Arrow {
+                parameter: Box::new(self.lower_poly_type_partially(
+                    *parameter,
+                    bindings,
+                    item_stack,
+                )?),
+                result: Box::new(self.lower_poly_type_partially(*result, bindings, item_stack)?),
+            }),
+            TypeKind::Apply { callee, arguments } => {
+                let TypeKind::Name(reference) = &self.module.types()[*callee].kind else {
+                    return None;
+                };
+                match reference.resolution.as_ref() {
+                    ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
+                        let TypeBinding::Constructor(binding) = bindings.get(parameter)? else {
+                            return None;
+                        };
+                        let mut all_arguments =
+                            Vec::with_capacity(binding.arguments.len() + arguments.len());
+                        all_arguments.extend(binding.arguments.iter().cloned());
+                        for argument in arguments.iter() {
+                            all_arguments.push(self.lower_poly_type_partially(
+                                *argument,
+                                bindings,
+                                item_stack,
+                            )?);
+                        }
+                        let arity = type_constructor_arity(binding.head, self.module);
+                        (all_arguments.len() == arity)
+                            .then(|| {
+                                self.apply_type_constructor(binding.head, &all_arguments, item_stack)
+                            })
+                            .flatten()
+                    }
+                    _ => {
+                        let (head, arity) = self.type_constructor_head_and_arity(*callee)?;
+                        if arguments.len() != arity {
+                            return None;
+                        }
+                        let mut lowered_arguments = Vec::with_capacity(arguments.len());
+                        for argument in arguments.iter() {
+                            lowered_arguments.push(self.lower_poly_type_partially(
+                                *argument,
+                                bindings,
+                                item_stack,
+                            )?);
+                        }
+                        self.apply_type_constructor(head, &lowered_arguments, item_stack)
+                    }
+                }
+            }
+        }
+    }
+
     pub(crate) fn match_poly_hir_type(
         &mut self,
         ty: TypeId,
@@ -8690,7 +8991,7 @@ impl<'a> GateTypeContext<'a> {
                 }
                 let result = item
                     .annotation
-                    .and_then(|annotation| self.lower_annotation(annotation))
+                    .and_then(|annotation| self.lower_open_annotation(annotation))
                     .or_else(|| self.infer_expr(item.body, &env, None).ty)?;
                 let mut ty = result;
                 for parameter in parameters.into_iter().rev() {
@@ -10161,9 +10462,25 @@ impl<'a> GateTypeContext<'a> {
             ExprKind::List(elements) => {
                 let mut info = GateExprInfo::default();
                 let mut element_type = None::<SourceOptionActualType>;
+                let mut element_gate_type = None::<GateType>;
                 let mut consistent = true;
                 for element in &elements {
                     let child = self.infer_expr(*element, env, ambient);
+                    if consistent {
+                        if let Some(child_ty) = child.actual_gate_type().or(child.ty.clone()) {
+                            element_gate_type = match element_gate_type.take() {
+                                None => Some(child_ty),
+                                Some(current) => {
+                                    if current.same_shape(&child_ty) {
+                                        Some(current)
+                                    } else {
+                                        consistent = false;
+                                        None
+                                    }
+                                }
+                            };
+                        }
+                    }
                     if consistent {
                         if let Some(child_ty) = child.actual() {
                             element_type = match element_type.take() {
@@ -10185,6 +10502,13 @@ impl<'a> GateTypeContext<'a> {
                 if consistent {
                     if let Some(element_type) = element_type {
                         info.set_actual(SourceOptionActualType::List(Box::new(element_type)));
+                        if info.ty.is_none() {
+                            if let Some(element_gate_type) = element_gate_type {
+                                info.ty = Some(GateType::List(Box::new(element_gate_type)));
+                            }
+                        }
+                    } else if let Some(element_gate_type) = element_gate_type {
+                        info.ty = Some(GateType::List(Box::new(element_gate_type)));
                     }
                 }
                 info
@@ -10815,6 +11139,25 @@ impl<'a> GateTypeContext<'a> {
         }
     }
 
+    fn match_pipe_argument_parameter_annotation(
+        &mut self,
+        annotation: TypeId,
+        actual: &GateType,
+        bindings: &mut PolyTypeBindings,
+    ) -> Option<bool> {
+        if self
+            .match_function_parameter_annotation(annotation, actual, bindings)
+            .is_some()
+        {
+            return Some(false);
+        }
+        let GateType::Signal(payload) = actual else {
+            return None;
+        };
+        self.match_function_parameter_annotation(annotation, payload, bindings)
+            .map(|_| true)
+    }
+
     fn instantiate_function_parameter_annotation(
         &mut self,
         annotation: TypeId,
@@ -10822,6 +11165,7 @@ impl<'a> GateTypeContext<'a> {
     ) -> Option<GateType> {
         self.lower_annotation(annotation)
             .or_else(|| self.instantiate_poly_hir_type(annotation, bindings))
+            .or_else(|| self.instantiate_poly_hir_type_partially(annotation, bindings))
     }
 
     pub(crate) fn match_pipe_function_signature(
@@ -10848,13 +11192,22 @@ impl<'a> GateTypeContext<'a> {
             }
 
             let mut bindings = PolyTypeBindings::new();
+            let mut signal_payload_arguments = Vec::with_capacity(explicit_arguments.len());
             for (argument, parameter) in explicit_arguments.iter().zip(function.parameters.iter()) {
                 let annotation = parameter.annotation?;
                 let argument_info = self.infer_expr(*argument, env, Some(ambient));
                 let Some(argument_ty) = argument_info.actual_gate_type().or(argument_info.ty) else {
+                    signal_payload_arguments.push(false);
                     continue;
                 };
-                self.match_function_parameter_annotation(annotation, &argument_ty, &mut bindings)?;
+                let Some(reads_signal_payload) = self.match_pipe_argument_parameter_annotation(
+                    annotation,
+                    &argument_ty,
+                    &mut bindings,
+                ) else {
+                    return None;
+                };
+                signal_payload_arguments.push(reads_signal_payload);
             }
 
             let ambient_parameter = function
@@ -10881,6 +11234,7 @@ impl<'a> GateTypeContext<'a> {
             return Some(PipeFunctionSignatureMatch {
                 callee_expr,
                 explicit_arguments,
+                signal_payload_arguments,
                 parameter_types,
                 result_type,
             });
@@ -10893,6 +11247,24 @@ impl<'a> GateTypeContext<'a> {
                 argument_info.actual_gate_type().or(argument_info.ty)
             })
             .collect::<Vec<_>>();
+        if let Some(mut full_argument_types) = explicit_argument_types
+            .iter()
+            .cloned()
+            .collect::<Option<Vec<_>>>()
+        {
+            full_argument_types.push(ambient.clone());
+            if let DomainMemberSelection::Unique(matched) =
+                self.select_class_member_call(reference, &full_argument_types, expected_result)?
+            {
+                return Some(PipeFunctionSignatureMatch {
+                    callee_expr,
+                    explicit_arguments,
+                    signal_payload_arguments: vec![false; matched.parameters.len().saturating_sub(1)],
+                    parameter_types: matched.parameters,
+                    result_type: matched.result,
+                });
+            }
+        }
         let candidates = self.class_member_candidates(reference)?;
         let mut matches = Vec::new();
         for candidate in candidates {
@@ -10900,24 +11272,43 @@ impl<'a> GateTypeContext<'a> {
             let mut bindings = PolyTypeBindings::new();
             let mut current = member_annotation;
             let mut parameter_type_ids = Vec::with_capacity(explicit_arguments.len() + 1);
-            for argument_ty in explicit_argument_types
-                .iter()
-                .cloned()
-                .chain(std::iter::once(Some(ambient.clone())))
-            {
+            let mut signal_payload_arguments = Vec::with_capacity(explicit_arguments.len());
+            for argument_ty in explicit_argument_types.iter().cloned() {
                 let TypeKind::Arrow { parameter, result } = self.module.types()[current].kind.clone()
                 else {
                     continue;
                 };
-                if let Some(argument_ty) = argument_ty.as_ref()
-                    && !self.match_poly_hir_type(parameter, argument_ty, &mut bindings)
-                {
-                    parameter_type_ids.clear();
-                    break;
+                if let Some(argument_ty) = argument_ty.as_ref() {
+                    if self.match_poly_hir_type(parameter, argument_ty, &mut bindings) {
+                        signal_payload_arguments.push(false);
+                    } else if let GateType::Signal(payload) = argument_ty {
+                        if self.match_poly_hir_type(parameter, payload, &mut bindings) {
+                            signal_payload_arguments.push(true);
+                        } else {
+                            parameter_type_ids.clear();
+                            signal_payload_arguments.clear();
+                            break;
+                        }
+                    } else {
+                        parameter_type_ids.clear();
+                        signal_payload_arguments.clear();
+                        break;
+                    }
+                } else {
+                    signal_payload_arguments.push(false);
                 }
                 parameter_type_ids.push(parameter);
                 current = result;
             }
+            let TypeKind::Arrow { parameter, result } = self.module.types()[current].kind.clone()
+            else {
+                continue;
+            };
+            if !self.match_poly_hir_type(parameter, ambient, &mut bindings) {
+                continue;
+            }
+            parameter_type_ids.push(parameter);
+            current = result;
             if parameter_type_ids.len() != explicit_arguments.len() + 1 {
                 continue;
             }
@@ -10928,12 +11319,13 @@ impl<'a> GateTypeContext<'a> {
             }
             let Some(parameter_types) = parameter_type_ids
                 .into_iter()
-                .map(|parameter| self.instantiate_poly_hir_type(parameter, &bindings))
+                .map(|parameter| self.instantiate_poly_hir_type_partially(parameter, &bindings))
                 .collect::<Option<Vec<_>>>()
             else {
                 continue;
             };
-            let Some(result_type) = self.instantiate_poly_hir_type(current, &bindings) else {
+            let Some(result_type) = self.instantiate_poly_hir_type_partially(current, &bindings)
+            else {
                 continue;
             };
             if let Some(expected) = expected_result
@@ -10941,9 +11333,34 @@ impl<'a> GateTypeContext<'a> {
             {
                 continue;
             }
+            let explicit_arguments_match = explicit_arguments
+                .iter()
+                .zip(parameter_types.iter().take(explicit_arguments.len()))
+                .zip(signal_payload_arguments.iter())
+                .all(|((argument, expected_parameter), reads_signal_payload)| {
+                    let argument_info = self.infer_expr(*argument, env, Some(ambient));
+                    argument_info
+                        .actual_gate_type()
+                        .or(argument_info.ty.clone())
+                        .as_ref()
+                        .is_some_and(|actual| {
+                            actual.same_shape(expected_parameter)
+                                || (*reads_signal_payload
+                                    && matches!(
+                                        actual,
+                                        GateType::Signal(payload)
+                                            if payload.same_shape(expected_parameter)
+                                    ))
+                        })
+                        || expression_matches(self.module, *argument, env, expected_parameter)
+                });
+            if !explicit_arguments_match {
+                continue;
+            }
             matches.push(PipeFunctionSignatureMatch {
                 callee_expr,
                 explicit_arguments: explicit_arguments.clone(),
+                signal_payload_arguments,
                 parameter_types,
                 result_type,
             });
@@ -11058,12 +11475,8 @@ impl<'a> GateTypeContext<'a> {
     ) -> GateExprInfo {
         let ambient = subject.gate_payload().clone();
         let mut info = self.infer_expr(expr_id, env, Some(&ambient));
-        if info.ty.is_none() {
-            if let Some(function_body) =
-                self.infer_function_pipe_body(expr_id, env, &ambient, None)
-            {
-                info = function_body;
-            }
+        if let Some(function_body) = self.infer_function_pipe_body(expr_id, env, &ambient, None) {
+            info = function_body;
         }
         if let Some(GateType::Arrow { parameter, result }) = info.ty.clone() {
             if parameter.same_shape(&ambient) {
@@ -11176,17 +11589,25 @@ impl<'a> GateTypeContext<'a> {
     ) -> Option<GateExprInfo> {
         let plan = self.match_pipe_function_signature(expr_id, env, ambient, expected_result)?;
         let mut info = GateExprInfo::default();
-        for (argument, expected) in plan
+        for ((argument, expected), reads_signal_payload) in plan
             .explicit_arguments
             .iter()
-            .zip(plan.parameter_types.iter())
+            .zip(plan.parameter_types.iter().take(plan.explicit_arguments.len()))
+            .zip(plan.signal_payload_arguments.iter())
         {
             let argument_info = self.infer_expr(*argument, env, Some(ambient));
             let argument_ty = argument_info.actual_gate_type().or(argument_info.ty.clone());
             info.merge(argument_info);
             let matches_expected = argument_ty
                 .as_ref()
-                .is_some_and(|actual| actual.same_shape(expected))
+                .is_some_and(|actual| {
+                    actual.same_shape(expected)
+                        || (*reads_signal_payload
+                            && matches!(
+                                actual,
+                                GateType::Signal(payload) if payload.same_shape(expected)
+                            ))
+                })
                 || expression_matches(self.module, *argument, env, expected);
             if !matches_expected {
                 return Some(info);

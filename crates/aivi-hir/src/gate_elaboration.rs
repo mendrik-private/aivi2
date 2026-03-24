@@ -9,6 +9,7 @@ use crate::{
     NamePath, PatternId, PipeExpr, PipeStageKind, ProjectionBase, SuffixedIntegerLiteral,
     TermResolution, TextFragment, TextSegment, UnaryOperator,
     domain_operator_elaboration::select_domain_binary_operator,
+    typecheck::resolve_class_member_dispatch,
     validate::{
         GateExprEnv, GateIssue, GateType, GateTypeContext, PipeSubjectStepOutcome,
         PipeSubjectWalker, gate_env_for_function, truthy_falsy_pair_stages, walk_expr_tree,
@@ -108,6 +109,12 @@ pub enum GateElaborationBlocker {
         span: SourceSpan,
         kind: GateRuntimeUnsupportedKind,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GateRuntimePurity {
+    PureOnly,
+    AllowSignalReads,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -622,13 +629,53 @@ pub(crate) fn lower_gate_pipe_body_runtime_expr(
     subject: &GateType,
     typing: &mut GateTypeContext<'_>,
 ) -> Result<GateRuntimeExpr, GateElaborationBlocker> {
+    lower_gate_pipe_body_runtime_expr_with_purity(
+        module,
+        expr_id,
+        env,
+        subject,
+        typing,
+        GateRuntimePurity::PureOnly,
+    )
+}
+
+pub(crate) fn lower_gate_pipe_body_runtime_expr_allow_signal_reads(
+    module: &Module,
+    expr_id: ExprId,
+    env: &GateExprEnv,
+    subject: &GateType,
+    typing: &mut GateTypeContext<'_>,
+) -> Result<GateRuntimeExpr, GateElaborationBlocker> {
+    lower_gate_pipe_body_runtime_expr_with_purity(
+        module,
+        expr_id,
+        env,
+        subject,
+        typing,
+        GateRuntimePurity::AllowSignalReads,
+    )
+}
+
+fn lower_gate_pipe_body_runtime_expr_with_purity(
+    module: &Module,
+    expr_id: ExprId,
+    env: &GateExprEnv,
+    subject: &GateType,
+    typing: &mut GateTypeContext<'_>,
+    purity: GateRuntimePurity,
+) -> Result<GateRuntimeExpr, GateElaborationBlocker> {
     let ambient = subject.gate_payload().clone();
-    let mut lowered = match lower_gate_runtime_expr(module, expr_id, env, Some(&ambient), typing) {
+    let mut lowered = match lower_gate_runtime_expr_with_purity(
+        module,
+        expr_id,
+        env,
+        Some(&ambient),
+        typing,
+        purity,
+    ) {
         Ok(lowered) => lowered,
         Err(GateElaborationBlocker::UnknownRuntimeExprType { .. }) => {
-            lower_single_parameter_function_pipe_body_runtime_expr(
-                module, expr_id, &ambient, typing,
-            )?
+            lower_function_pipe_body_runtime_expr(module, expr_id, env, &ambient, typing, purity)?
         }
         Err(other) => return Err(other),
     };
@@ -650,6 +697,126 @@ pub(crate) fn lower_gate_pipe_body_runtime_expr(
     Ok(lowered)
 }
 
+fn lower_function_pipe_body_runtime_expr(
+    module: &Module,
+    expr_id: ExprId,
+    env: &GateExprEnv,
+    ambient: &GateType,
+    typing: &mut GateTypeContext<'_>,
+    purity: GateRuntimePurity,
+) -> Result<GateRuntimeExpr, GateElaborationBlocker> {
+    let expr = module.exprs()[expr_id].clone();
+    let plan = typing
+        .match_pipe_function_signature(expr_id, env, ambient, None)
+        .ok_or(GateElaborationBlocker::UnknownRuntimeExprType { span: expr.span })?;
+    let callee_ty = arrow_type(&plan.parameter_types, plan.result_type.clone());
+    let callee = if let ExprKind::Name(reference) = &module.exprs()[plan.callee_expr].kind {
+        if matches!(
+            reference.resolution.as_ref(),
+            crate::ResolutionState::Resolved(TermResolution::ClassMember(_))
+                | crate::ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_))
+        ) {
+            let dispatch = resolve_class_member_dispatch(
+                module,
+                reference,
+                &plan.parameter_types,
+                Some(&plan.result_type),
+            )
+            .ok_or(GateElaborationBlocker::UnknownRuntimeExprType { span: expr.span })?;
+            GateRuntimeExpr {
+                span: module.exprs()[plan.callee_expr].span,
+                ty: callee_ty.clone(),
+                kind: GateRuntimeExprKind::Reference(GateRuntimeReference::ClassMember(dispatch)),
+            }
+        } else {
+            lower_gate_runtime_expr_with_purity(
+                module,
+                plan.callee_expr,
+                env,
+                Some(ambient),
+                typing,
+                purity,
+            )?
+        }
+    } else {
+        lower_gate_runtime_expr_with_purity(
+            module,
+            plan.callee_expr,
+            env,
+            Some(ambient),
+            typing,
+            purity,
+        )?
+    };
+    let mut arguments = Vec::with_capacity(plan.explicit_arguments.len() + 1);
+    for ((argument, expected_parameter), reads_signal_payload) in plan
+        .explicit_arguments
+        .iter()
+        .zip(plan.parameter_types.iter().take(plan.explicit_arguments.len()))
+        .zip(plan.signal_payload_arguments.iter())
+    {
+        arguments.push(lower_pipe_argument_runtime_expr(
+            module,
+            *argument,
+            env,
+            Some(ambient),
+            expected_parameter,
+            *reads_signal_payload,
+            typing,
+            purity,
+        )?);
+    }
+    arguments.push(GateRuntimeExpr::ambient_subject(expr.span, ambient.clone()));
+    Ok(GateRuntimeExpr::apply(
+        expr.span,
+        plan.result_type,
+        callee,
+        arguments,
+    ))
+}
+
+fn lower_pipe_argument_runtime_expr(
+    module: &Module,
+    expr_id: ExprId,
+    env: &GateExprEnv,
+    ambient: Option<&GateType>,
+    expected: &GateType,
+    reads_signal_payload: bool,
+    typing: &mut GateTypeContext<'_>,
+    purity: GateRuntimePurity,
+) -> Result<GateRuntimeExpr, GateElaborationBlocker> {
+    if reads_signal_payload
+        && let ExprKind::Name(reference) = &module.exprs()[expr_id].kind
+    {
+        let info = typing.infer_expr(expr_id, env, ambient);
+        if let Some(GateType::Signal(payload)) = info.ty
+            && payload.same_shape(expected)
+        {
+            return Ok(GateRuntimeExpr {
+                span: module.exprs()[expr_id].span,
+                ty: expected.clone(),
+                kind: GateRuntimeExprKind::Reference(runtime_reference_for_name(
+                    module,
+                    module.exprs()[expr_id].span,
+                    reference,
+                )?),
+            });
+        }
+    }
+    lower_gate_runtime_expr_with_purity(module, expr_id, env, ambient, typing, purity)
+}
+
+fn arrow_type(parameters: &[GateType], result: GateType) -> GateType {
+    parameters
+        .iter()
+        .rev()
+        .cloned()
+        .fold(result, |result, parameter| GateType::Arrow {
+            parameter: Box::new(parameter),
+            result: Box::new(result),
+        })
+}
+
 /// Inline a single-parameter function reference as a gate predicate by
 /// substituting the function's sole parameter with the ambient subject.
 ///
@@ -661,62 +828,6 @@ pub(crate) fn lower_gate_pipe_body_runtime_expr(
 /// are allowed inside gate predicates.  If the type system is ever relaxed to
 /// permit impure functions in predicate position, this substitution must be
 /// guarded by an explicit purity check before calling this function (PA-I3).
-fn lower_single_parameter_function_pipe_body_runtime_expr(
-    module: &Module,
-    expr_id: ExprId,
-    ambient: &GateType,
-    typing: &mut GateTypeContext<'_>,
-) -> Result<GateRuntimeExpr, GateElaborationBlocker> {
-    let expr = module.exprs()[expr_id].clone();
-    let ExprKind::Name(reference) = expr.kind else {
-        return Err(GateElaborationBlocker::UnknownRuntimeExprType { span: expr.span });
-    };
-    let crate::ResolutionState::Resolved(TermResolution::Item(item_id)) =
-        reference.resolution.as_ref()
-    else {
-        return Err(GateElaborationBlocker::UnknownRuntimeExprType { span: expr.span });
-    };
-    let Item::Function(function) = &module.items()[*item_id] else {
-        return Err(GateElaborationBlocker::UnknownRuntimeExprType { span: expr.span });
-    };
-    if function.parameters.len() != 1 {
-        return Err(GateElaborationBlocker::UnknownRuntimeExprType { span: expr.span });
-    }
-    let parameter = function
-        .parameters
-        .first()
-        .expect("checked single-parameter function above");
-    if let Some(annotation) = parameter.annotation {
-        let parameter_ty = typing
-            .lower_annotation(annotation)
-            .ok_or(GateElaborationBlocker::UnknownRuntimeExprType { span: expr.span })?;
-        if !parameter_ty.same_shape(ambient) {
-            return Err(GateElaborationBlocker::UnknownRuntimeExprType { span: expr.span });
-        }
-    }
-
-    let mut function_env = GateExprEnv::default();
-    function_env
-        .locals
-        .insert(parameter.binding, ambient.clone());
-    let body =
-        lower_gate_runtime_expr(module, function.body, &function_env, Some(ambient), typing)?;
-    let callee = GateRuntimeExpr {
-        span: expr.span,
-        ty: GateType::Arrow {
-            parameter: Box::new(ambient.clone()),
-            result: Box::new(body.ty.clone()),
-        },
-        kind: GateRuntimeExprKind::Reference(GateRuntimeReference::Item(*item_id)),
-    };
-    Ok(GateRuntimeExpr::apply(
-        expr.span,
-        body.ty.clone(),
-        callee,
-        vec![GateRuntimeExpr::ambient_subject(expr.span, ambient.clone())],
-    ))
-}
-
 /// Continuation tasks used by the iterative post-order traversal inside
 /// [`lower_gate_runtime_expr`].  Each variant corresponds to a step in the
 /// tree-building process after all child expressions have been lowered and
@@ -809,6 +920,24 @@ pub(crate) fn lower_gate_runtime_expr(
     ambient: Option<&GateType>,
     typing: &mut GateTypeContext<'_>,
 ) -> Result<GateRuntimeExpr, GateElaborationBlocker> {
+    lower_gate_runtime_expr_with_purity(
+        module,
+        expr_id,
+        env,
+        ambient,
+        typing,
+        GateRuntimePurity::PureOnly,
+    )
+}
+
+fn lower_gate_runtime_expr_with_purity(
+    module: &Module,
+    expr_id: ExprId,
+    env: &GateExprEnv,
+    ambient: Option<&GateType>,
+    typing: &mut GateTypeContext<'_>,
+    purity: GateRuntimePurity,
+) -> Result<GateRuntimeExpr, GateElaborationBlocker> {
     let mut work: Vec<LowerTask> = vec![LowerTask::Eval(expr_id)];
     let mut results: Vec<GateRuntimeExpr> = Vec::new();
 
@@ -824,7 +953,8 @@ pub(crate) fn lower_gate_runtime_expr(
                     continue;
                 }
 
-                let (expr, ty) = inferred_runtime_expr(module, expr_id, env, ambient, typing)?;
+                let (expr, ty) =
+                    inferred_runtime_expr(module, expr_id, env, ambient, typing, purity)?;
 
                 match expr.kind {
                     // --- Leaf nodes: push result directly ---
@@ -875,8 +1005,9 @@ pub(crate) fn lower_gate_runtime_expr(
                     }
                     // --- Text: bounded interpolation segments (not a source of deep nesting) ---
                     ExprKind::Text(text) => {
-                        let lowered =
-                            lower_runtime_text_literal(module, &text, env, ambient, typing)?;
+                        let lowered = lower_runtime_text_literal(
+                            module, &text, env, ambient, typing, purity,
+                        )?;
                         results.push(GateRuntimeExpr {
                             span: expr.span,
                             ty,
@@ -903,7 +1034,8 @@ pub(crate) fn lower_gate_runtime_expr(
                     }
                     // --- Pipe: bounded number of stages (not deep in practice) ---
                     ExprKind::Pipe(pipe) => {
-                        let lowered = lower_runtime_pipe_expr(module, &pipe, env, ambient, typing)?;
+                        let lowered =
+                            lower_runtime_pipe_expr(module, &pipe, env, ambient, typing, purity)?;
                         results.push(GateRuntimeExpr {
                             span: expr.span,
                             ty,
@@ -1237,19 +1369,23 @@ fn lower_runtime_text_literal(
     env: &GateExprEnv,
     ambient: Option<&GateType>,
     typing: &mut GateTypeContext<'_>,
+    purity: GateRuntimePurity,
 ) -> Result<GateRuntimeTextLiteral, GateElaborationBlocker> {
     let mut segments = Vec::with_capacity(text.segments.len());
     for segment in &text.segments {
         let lowered = match segment {
             TextSegment::Text(fragment) => GateRuntimeTextSegment::Fragment(fragment.clone()),
             TextSegment::Interpolation(interpolation) => {
-                GateRuntimeTextSegment::Interpolation(Box::new(lower_gate_runtime_expr(
-                    module,
-                    interpolation.expr,
-                    env,
-                    ambient,
-                    typing,
-                )?))
+                GateRuntimeTextSegment::Interpolation(Box::new(
+                    lower_gate_runtime_expr_with_purity(
+                        module,
+                        interpolation.expr,
+                        env,
+                        ambient,
+                        typing,
+                        purity,
+                    )?,
+                ))
             }
         };
         segments.push(lowered);
@@ -1263,15 +1399,18 @@ fn lower_runtime_pipe_expr(
     env: &GateExprEnv,
     ambient: Option<&GateType>,
     typing: &mut GateTypeContext<'_>,
+    purity: GateRuntimePurity,
 ) -> Result<GateRuntimePipeExpr, GateElaborationBlocker> {
-    let head = lower_gate_runtime_expr(module, pipe.head, env, ambient, typing)?;
+    let head = lower_gate_runtime_expr_with_purity(module, pipe.head, env, ambient, typing, purity)?;
     let mut current = head.ty.clone();
     let mut stages = Vec::with_capacity(pipe.stages.len());
     for stage in pipe.stages.iter() {
         let input_subject = current.clone();
         let (kind, result_subject) = match &stage.kind {
             PipeStageKind::Transform { expr } => {
-                let body = lower_gate_pipe_body_runtime_expr(module, *expr, env, &current, typing)?;
+                let body = lower_gate_pipe_body_runtime_expr_with_purity(
+                    module, *expr, env, &current, typing, purity,
+                )?;
                 let result_subject = typing
                     .infer_transform_stage(*expr, env, &current)
                     .ok_or(GateElaborationBlocker::UnknownRuntimeExprType { span: stage.span })?;
@@ -1282,7 +1421,9 @@ fn lower_runtime_pipe_expr(
             }
             PipeStageKind::Tap { expr } => (
                 GateRuntimePipeStageKind::Tap {
-                    expr: lower_gate_pipe_body_runtime_expr(module, *expr, env, &current, typing)?,
+                    expr: lower_gate_pipe_body_runtime_expr_with_purity(
+                        module, *expr, env, &current, typing, purity,
+                    )?,
                 },
                 current.clone(),
             ),
@@ -1373,10 +1514,13 @@ fn inferred_runtime_expr(
     env: &GateExprEnv,
     ambient: Option<&GateType>,
     typing: &mut GateTypeContext<'_>,
+    purity: GateRuntimePurity,
 ) -> Result<(crate::Expr, GateType), GateElaborationBlocker> {
     let expr = module.exprs()[expr_id].clone();
     let info = typing.infer_expr(expr_id, env, ambient);
-    if info.contains_signal || info.ty.as_ref().is_some_and(GateType::is_signal) {
+    if matches!(purity, GateRuntimePurity::PureOnly)
+        && (info.contains_signal || info.ty.as_ref().is_some_and(GateType::is_signal))
+    {
         return Err(GateElaborationBlocker::ImpurePredicate);
     }
     if let Some(issue) = info.issues.into_iter().next() {

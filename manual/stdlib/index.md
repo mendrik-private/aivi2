@@ -16,43 +16,14 @@ Built-in (no import needed): `Option` `Some` `None` `Result` `Ok` `Err` `True` `
 
 ## Importing modules
 
-```aivi
-use aivi.list (
-    length
-    head
-    tail
-    any
-    isEmpty
-    nonEmpty
-)
-
-use aivi.text (join)
+```text
+// TODO: add a verified AIVI example here
 ```
 
 `use` brings specific names into scope.
 
-```aivi
-use aivi.list (
-    length
-    isEmpty
-    nonEmpty
-)
-
-val nums:List Int = [
-    1,
-    2,
-    3,
-    4,
-    5
-]
-
-val total:Int =
-    nums
-     |> length
-
-val empty:Bool =
-    nums
-     |> isEmpty
+```text
+// TODO: add a verified AIVI example here
 ```
 
 ## Current status

@@ -5,9 +5,8 @@ on its explicit parameters and always returns the same result for the same input
 
 ## Basic syntax
 
-```aivi
-fun add:Int #x:Int #y:Int =>
-    x + y
+```text
+// TODO: add a verified AIVI example here
 ```
 
 Breaking this down:
@@ -30,11 +29,8 @@ reading left to right, you see the name and return type before the parameters.
 All parameters in AIVI are labeled with `#`. This means you always know what an argument
 represents at the call site:
 
-```aivi
-fun greet:Text #name:Text #title:Text =>
-    "{title} {name}"
-
-val msg:Text = greet "Lovelace" "Ms"
+```text
+// TODO: add a verified AIVI example here
 ```
 
 Function calls are positional juxtaposition. You pass arguments in the order the parameters
@@ -43,16 +39,8 @@ parameter, which is visible in syntax highlighting — labeled params appear in 
 
 ## Multi-parameter functions
 
-```aivi
-fun clampLow:Int #lo:Int #value:Int =>
-    value < lo
-     T|> lo
-     F|> value
-
-fun clamp:Int #lo:Int #hi:Int #value:Int =>
-    value > hi
-     T|> hi
-     F|> clampLow lo value
+```text
+// TODO: add a verified AIVI example here
 ```
 
 Functions can have as many labeled parameters as needed.
@@ -61,42 +49,14 @@ Functions can have as many labeled parameters as needed.
 
 Pass arguments positionally after the function name:
 
-```aivi
-fun clampLow:Int #lo:Int #value:Int =>
-    value < lo
-     T|> lo
-     F|> value
-
-fun clamp:Int #lo:Int #hi:Int #value:Int =>
-    value > hi
-     T|> hi
-     F|> clampLow lo value
-
-val r1:Int = clamp 0 100 42
-val r2:Int = clamp 0 100 150
+```text
+// TODO: add a verified AIVI example here
 ```
 
 When the argument is a complex expression, wrap it in parentheses:
 
-```aivi
-type Direction =
-  | Up
-  | Down
-  | Left
-  | Right
-
-type Pixel = { x: Int, y: Int }
-
-type Snake = {
-    head: Pixel,
-    body: List Pixel
-}
-
-fun nextHead:Pixel #direction:Direction #head:Pixel =>
-    head
-
-fun movedHead:Pixel #direction:Direction #snake:Snake =>
-    nextHead direction snake.head
+```text
+// TODO: add a verified AIVI example here
 ```
 
 Note that in AIVI, function application is juxtaposition (no parentheses for the call itself,
@@ -107,14 +67,8 @@ arguments: `direction` and `snake.head`.
 
 Functions in AIVI are first-class. You can pass a function as an argument:
 
-```aivi
-fun addOne:Int #n:Int =>
-    n + 1
-
-fun applyTwice:Int #f:(Int -> Int) #x:Int =>
-    f (f x)
-
-val result:Int = applyTwice addOne 5
+```text
+// TODO: add a verified AIVI example here
 ```
 
 The `->` in `(Int -> Int)` is a function type: a function that takes `Int` and returns `Int`.
@@ -131,19 +85,14 @@ val add5 = \x => x + 5
 
 The equivalent in current AIVI uses named functions:
 
-```aivi
-fun double:Int #x:Int =>
-    x * 2
-
-fun add5:Int #x:Int =>
-    x + 5
+```text
+// TODO: add a verified AIVI example here
 ```
 
 Named functions appear frequently in pipe chains and as first-class arguments:
 
-```aivi
-sig count : Signal Int = 0
-sig labelText : Signal Text = "You clicked {count} times"
+```text
+// TODO: add a verified AIVI example here
 ```
 
 ## Pure by default
@@ -156,12 +105,8 @@ This means AIVI functions are easy to reason about and easy to test:
 - they have no hidden dependencies
 - they can be called in any order without affecting each other
 
-```aivi
-fun double:Int #x:Int =>
-    x * 2
-
-fun square:Int #x:Int =>
-    x * x
+```text
+// TODO: add a verified AIVI example here
 ```
 
 ## Summary

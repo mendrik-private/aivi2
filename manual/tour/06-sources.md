@@ -7,14 +7,8 @@ Sources are attached to signals using the `@source` decorator.
 
 ## The @source decorator
 
-```aivi
-type Key = Key Text
-
-@source window.keyDown with {
-    repeat: False,
-    focusOnly: True
-}
-sig keyDown : Signal Key
+```text
+// TODO: add a verified AIVI example here
 ```
 
 `@source` names the source (`window.keyDown`) and passes a configuration record.
@@ -37,12 +31,8 @@ You never unsubscribe manually. The runtime handles it.
 
 The `timer.every` source fires at a fixed interval:
 
-```aivi
-@source timer.every 160 with {
-    immediate: True,
-    coalesce: True
-}
-sig tick : Signal Unit
+```text
+// TODO: add a verified AIVI example here
 ```
 
 - `timer.every 160` fires every 160 milliseconds.
@@ -51,60 +41,8 @@ sig tick : Signal Unit
 
 The snake game uses this to drive the game loop:
 
-```aivi
-type Status = Running | GameOver
-
-type Pixel = Pixel Int Int
-
-type Direction =
-  | Up
-  | Down
-  | Left
-  | Right
-
-type BoardSize = {
-    width: Int,
-    height: Int
-}
-
-type Game = {
-    snake: List Pixel,
-    food: Pixel,
-    score: Int,
-    status: Status,
-    seed: Int
-}
-
-val boardSize:BoardSize = {
-    width: 12,
-    height: 10
-}
-
-val initialGame:Game = {
-    snake: [
-        Pixel 6 5,
-        Pixel 5 5,
-        Pixel 4 5
-    ],
-    food: Pixel 10 1,
-    score: 0,
-    status: Running,
-    seed: 2463534242
-}
-
-val direction:Direction = Right
-
-fun stepGame:Game #size:BoardSize #direction:Direction #game:Game =>
-    game
-
-@source timer.every 160 with {
-    immediate: True,
-    coalesce: True
-}
-sig game : Signal Game =
-    initialGame
-     @|> stepGame boardSize direction
-     <|@ stepGame boardSize direction
+```text
+// TODO: add a verified AIVI example here
 ```
 
 Every 160 ms, `stepGame` runs and the `game` signal updates, which cascades to `board`,
@@ -112,18 +50,8 @@ Every 160 ms, `stepGame` runs and the `game` signal updates, which cascades to `
 
 ## HTTP source
 
-```aivi
-type HttpError =
-  | Timeout
-  | DecodeFailure Text
-
-type User = {
-    id: Int,
-    name: Text
-}
-
-@source http.get "/api/user/1"
-sig userData : Signal (Result HttpError User)
+```text
+// TODO: add a verified AIVI example here
 ```
 
 The signal starts empty (`None` or a loading state depending on the source type).
@@ -131,8 +59,8 @@ When the HTTP response arrives, the signal fires with `Ok user` or `Err message`
 
 ## Button click source
 
-```aivi
-sig submitClicked : Signal Unit
+```text
+// TODO: add a verified AIVI example here
 ```
 
 This is an input signal — it has no body and is driven externally. In markup, connect it via
@@ -142,15 +70,8 @@ This is a direct widget binding. Unlike the provider-based `@source button.click
 used for recurrent signals, `onClick={submitClicked}` does not need a separate `id` or `@source`
 declaration:
 
-```aivi
-sig submitClicked : Signal Unit
-
-val main =
-    <Window title="Form">
-        <Button label="Submit" onClick={submitClicked} />
-    </Window>
-
-export main
+```text
+// TODO: add a verified AIVI example here
 ```
 
 ## Source configuration

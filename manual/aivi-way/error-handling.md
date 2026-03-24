@@ -7,8 +7,8 @@ that you handle them. Nothing can go wrong silently.
 
 ## Result E A: the error type
 
-```aivi
-type Result E A = Ok A | Err E
+```text
+// TODO: add a verified AIVI example here
 ```
 
 A `Result E A` is either a successful value (`Ok A`) or an error (`Err E`).
@@ -18,11 +18,8 @@ Every operation that can fail returns `Result`.
 
 Use `\|\|>` to branch on `Ok` vs `Err`:
 
-```aivi
-fun describeResult:Text #result:(Result Text Int) =>
-    result
-     ||> Ok n    => "Success: {n}"
-     ||> Err msg => "Failed: {msg}"
+```text
+// TODO: add a verified AIVI example here
 ```
 
 The compiler ensures you handle both cases. You cannot accidentally ignore an error.
@@ -32,29 +29,8 @@ The compiler ensures you handle both cases. You cannot accidentally ignore an er
 A common pattern is a sequence of operations where each step can fail.
 Use `||>` to branch on `Ok` and `Err` at each step:
 
-```aivi
-type User = {
-    name: Text,
-    age: Int
-}
-
-fun parseIntResult:(Result Text Int) #text:Text =>
-    Ok 0
-
-fun validateAge:(Result Text Int) #n:Int =>
-    n > 0
-     T|> Ok n
-     F|> Err "Age must be positive"
-
-fun checkedAge:(Result Text Int) #ageText:Text =>
-    parseIntResult ageText
-     ||> Ok age  => validateAge age
-     ||> Err msg => Err msg
-
-fun validateUser:(Result Text User) #name:Text #ageText:Text =>
-    checkedAge ageText
-     ||> Ok age  => Ok { name: name, age: age }
-     ||> Err msg => Err msg
+```text
+// TODO: add a verified AIVI example here
 ```
 
 ## Propagating errors in signals
@@ -62,130 +38,22 @@ fun validateUser:(Result Text User) #name:Text #ageText:Text =>
 When a signal holds a `Result`, downstream signals can propagate the `Ok` value or branch
 on the `Err`:
 
-```aivi
-type HttpError = {
-    message: Text,
-    code: Int
-}
-
-type Profile = {
-    name: Text,
-    bio: Text
-}
-
-fun nameFromResult:Text #result:(Result HttpError Profile) =>
-    result
-     ||> Ok profile => profile.name
-     ||> Err _      => "Unknown"
-
-fun errorFromResult:(Option Text) #result:(Result HttpError Profile) =>
-    result
-     ||> Ok _    => None
-     ||> Err err => Some err.message
-
-@source http.get "/api/profile"
-sig profileResult : Signal (Result HttpError Profile)
-
-sig profileName : Signal Text =
-    profileResult
-     |> nameFromResult
-
-sig profileError : Signal (Option Text) =
-    profileResult
-     |> errorFromResult
+```text
+// TODO: add a verified AIVI example here
 ```
 
 ## Showing errors in markup
 
-```aivi
-type HttpError = {
-    message: Text,
-    code: Int
-}
-
-type Profile = {
-    name: Text,
-    bio: Text
-}
-
-type Orientation =
-  | Vertical
-  | Horizontal
-
-fun nameFromResult:Text #result:(Result HttpError Profile) =>
-    result
-     ||> Ok profile => profile.name
-     ||> Err _      => "Unknown"
-
-fun errorFromResult:(Option Text) #result:(Result HttpError Profile) =>
-    result
-     ||> Ok _    => None
-     ||> Err err => Some err.message
-
-fun hasErrorMsg:Bool #err:(Option Text) =>
-    err
-     T|> True
-     F|> False
-
-fun errorText:Text #err:(Option Text) =>
-    err
-     ||> Some msg => msg
-     ||> None     => ""
-
-@source http.get "/api/profile"
-sig profileResult : Signal (Result HttpError Profile)
-
-sig profileName : Signal Text =
-    profileResult
-     |> nameFromResult
-
-sig profileError : Signal (Option Text) =
-    profileResult
-     |> errorFromResult
-
-sig hasError : Signal Bool =
-    profileError
-     |> hasErrorMsg
-
-sig errText : Signal Text =
-    profileError
-     |> errorText
-
-val main =
-    <Window title="Profile">
-        <Box orientation={Vertical} spacing={8}>
-            <show when={hasError}>
-                <Label text={errText} />
-            </show>
-            <Label text={profileName} />
-        </Box>
-    </Window>
-
-export main
+```text
+// TODO: add a verified AIVI example here
 ```
 
 ## The Option type for optional values
 
 `Option A` handles absence (not failure):
 
-```aivi
-type Option A = Some A | None
-
-type Item = {
-    id: Int,
-    name: Text
-}
-
-sig selectedItem : Signal (Option Item) = None
-
-fun selectionLabel:Text #selected:(Option Item) =>
-    selected
-     ||> Some item => "Selected: {item.name}"
-     ||> None      => "Nothing selected"
-
-sig selectionText : Signal Text =
-    selectedItem
-     |> selectionLabel
+```text
+// TODO: add a verified AIVI example here
 ```
 
 Use `Result` when an operation attempted and failed.
@@ -208,68 +76,22 @@ The return type tells you whether the operation can fail before you even read th
 
 To fall back to a default value when a result is an error:
 
-```aivi
-type HttpError = {
-    message: Text,
-    code: Int
-}
-
-type Profile = { name: Text }
-
-fun withDefault:A #fallback:A #result:(Result HttpError A) =>
-    result
-     ||> Ok value => value
-     ||> Err _    => fallback
-
-fun profileNameOrAnon:Text #result:(Result HttpError Profile) =>
-    withDefault { name: "Anonymous" } result
-     |> .name
+```text
+// TODO: add a verified AIVI example here
 ```
 
 Or inline in a pipe:
 
-```aivi
-type HttpError = {
-    message: Text,
-    code: Int
-}
-
-type Profile = { name: Text }
-
-fun nameOrFallback:Text #result:(Result HttpError Profile) =>
-    result
-     ||> Ok profile => profile.name
-     ||> Err _      => "Anonymous"
-
-@source http.get "/api/profile"
-sig profileResult : Signal (Result HttpError Profile)
-
-sig displayName : Signal Text =
-    profileResult
-     |> nameOrFallback
+```text
+// TODO: add a verified AIVI example here
 ```
 
 ## Counting valid items in a list
 
 When validating a list of items, derive a count of the valid values with a named predicate:
 
-```aivi
-use aivi.list (count)
-
-fun isValidAge:Bool #n:Int =>
-    n > 0 and n < 150
-
-val ageInputs:List Int = [
-    25,
-    0,
-    30,
-    200,
-    42
-]
-
-val validCount:Int =
-    ageInputs
-     |> count isValidAge
+```text
+// TODO: add a verified AIVI example here
 ```
 
 This gives you a stable summary signal or value you can render directly. For detailed error

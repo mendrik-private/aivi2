@@ -1527,6 +1527,9 @@ impl<'a> GeneralExprElaborator<'a> {
         let Some(ambient) = ambient else {
             return Ok(lowered);
         };
+        if let Ok(function_body) = self.lower_function_pipe_body(expr_id, env, ambient, expected) {
+            lowered = function_body;
+        }
         let GateType::Arrow { parameter, result } = lowered.ty.clone() else {
             return Ok(lowered);
         };
@@ -2159,8 +2162,13 @@ mod tests {
     use aivi_syntax::parse_module;
 
     use super::{
+        ExprKind, Item,
         GateRuntimeExprKind, GateRuntimePipeStageKind, GeneralExprBlocker, GeneralExprOutcome,
         elaborate_general_expressions,
+    };
+    use crate::{
+        typecheck::resolve_class_member_dispatch,
+        validate::{GateExprEnv, GateTypeContext},
     };
 
     fn item_name(module: &crate::Module, item: crate::ItemId) -> Option<&str> {
@@ -2458,6 +2466,452 @@ instance Semigroup Blob
                 ));
             }
             other => panic!("expected lowered instance member body, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn elaborates_generic_append_calls_in_function_bodies() {
+        let lowered = lower_text(
+            "general-expr-generic-append.aivi",
+            r#"
+fun appendOne:(List A) #items:(List A) #item:A =>
+    append items [item]
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "generic append example should lower to HIR: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_general_expressions(lowered.module());
+        let append_one = report
+            .items()
+            .iter()
+            .find(|item| item_name(lowered.module(), item.owner) == Some("appendOne"))
+            .expect("expected appendOne elaboration");
+        if !matches!(append_one.outcome, GeneralExprOutcome::Lowered(_)) {
+            let module = lowered.module();
+            let Item::Function(function) = &module.items()[append_one.owner] else {
+                panic!("appendOne should be a function");
+            };
+            let mut typing = GateTypeContext::new(module);
+            let mut env = GateExprEnv::default();
+            for parameter in &function.parameters {
+                let annotation = parameter.annotation.expect("test parameters are annotated");
+                env.locals.insert(
+                    parameter.binding,
+                    typing
+                        .lower_open_annotation(annotation)
+                        .expect("test parameter types should lower"),
+                );
+            }
+            let ExprKind::Apply { callee, arguments } = module.exprs()[function.body].kind.clone()
+            else {
+                panic!("appendOne body should be an apply expression");
+            };
+            let ExprKind::Name(reference) = &module.exprs()[callee].kind else {
+                panic!("appendOne callee should be a name");
+            };
+            let argument_infos = arguments
+                .iter()
+                .map(|argument| (*argument, typing.infer_expr(*argument, &env, None)))
+                .collect::<Vec<_>>();
+            let argument_types = argument_infos
+                .iter()
+                .map(|(_, info)| info.actual_gate_type().or(info.ty.clone()))
+                .collect::<Option<Vec<_>>>()
+                .unwrap_or_else(|| {
+                    panic!("appendOne arguments should infer: {argument_infos:?}");
+                });
+            let expected = typing
+                .lower_open_annotation(function.annotation.expect("appendOne is annotated"))
+                .expect("appendOne result type should lower");
+            let dispatch = resolve_class_member_dispatch(
+                module,
+                reference,
+                &argument_types,
+                Some(&expected),
+            );
+            panic!(
+                "expected generic append body to lower, found {:?}; argument_types={argument_types:?}; expected={expected:?}; dispatch={dispatch:?}",
+                append_one.outcome
+            );
+        }
+    }
+
+    #[test]
+    fn elaborates_reduce_pipe_bodies_with_generic_step_functions() {
+        let lowered = lower_text(
+            "general-expr-generic-reduce.aivi",
+            r#"
+fun lengthStep:Int #total:Int #item:A =>
+    total + 1
+
+fun length:Int #items:(List A) =>
+    items
+     |> reduce lengthStep 0
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "generic reduce example should lower to HIR: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_general_expressions(lowered.module());
+        let length = report
+            .items()
+            .iter()
+            .find(|item| item_name(lowered.module(), item.owner) == Some("length"))
+            .expect("expected length elaboration");
+        if !matches!(length.outcome, GeneralExprOutcome::Lowered(_)) {
+            let module = lowered.module();
+            let Item::Function(function) = &module.items()[length.owner] else {
+                panic!("length should be a function");
+            };
+            let mut typing = GateTypeContext::new(module);
+            let mut env = GateExprEnv::default();
+            for parameter in &function.parameters {
+                let annotation = parameter.annotation.expect("test parameters are annotated");
+                env.locals.insert(
+                    parameter.binding,
+                    typing
+                        .lower_open_annotation(annotation)
+                        .expect("test parameter types should lower"),
+                );
+            }
+            let ExprKind::Pipe(pipe) = &module.exprs()[function.body].kind else {
+                panic!("length body should be a pipe expression");
+            };
+            let stage_expr = match &pipe.stages.first().kind {
+                crate::PipeStageKind::Transform { expr } => *expr,
+                other => panic!("expected transform stage, found {other:?}"),
+            };
+            let ExprKind::Apply { callee, arguments } = module.exprs()[stage_expr].kind.clone()
+            else {
+                panic!("reduce stage should be an apply expression");
+            };
+            let ExprKind::Name(reference) = &module.exprs()[callee].kind else {
+                panic!("reduce callee should be a name");
+            };
+            let argument_infos = arguments
+                .iter()
+                .map(|argument| (*argument, typing.infer_expr(*argument, &env, None)))
+                .collect::<Vec<_>>();
+            let argument_types = argument_infos
+                .iter()
+                .map(|(_, info)| info.actual_gate_type().or(info.ty.clone()))
+                .collect::<Vec<_>>();
+            let ambient = env
+                .locals
+                .values()
+                .next()
+                .expect("length should have one parameter")
+                .clone();
+            let plan = typing.match_pipe_function_signature(stage_expr, &env, ambient.gate_payload(), None);
+            let full_argument_types = argument_types
+                .iter()
+                .flatten()
+                .cloned()
+                .chain(std::iter::once(ambient.gate_payload().clone()))
+                .collect::<Vec<_>>();
+            let selection = typing.select_class_member_call(reference, &full_argument_types, None);
+            panic!(
+                "expected generic reduce body to lower, found {:?}; argument_infos={argument_infos:?}; argument_types={argument_types:?}; ambient={ambient:?}; full_argument_types={full_argument_types:?}; selection={selection:?}; plan={plan:?}; dispatch={:?}",
+                length.outcome,
+                resolve_class_member_dispatch(module, reference, &argument_types.iter().flatten().cloned().collect::<Vec<_>>(), None)
+            );
+        }
+    }
+
+    #[test]
+    fn elaborates_reduce_pipe_bodies_with_generic_record_accumulators() {
+        let lowered = lower_text(
+            "general-expr-generic-reduce-record-acc.aivi",
+            r#"
+type TakeAcc A = {
+    n: Int,
+    items: List A
+}
+
+fun takeStep:(TakeAcc A) #acc:(TakeAcc A) #item:A =>
+    acc.n > 0
+     T|> { n: acc.n - 1, items: append acc.items [item] }
+     F|> acc
+
+fun take:(List A) #n:Int #xs:(List A) =>
+    xs
+     |> reduce takeStep { n, items: [] }
+     |> .items
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "generic reduce record example should lower to HIR: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_general_expressions(lowered.module());
+        let take = report
+            .items()
+            .iter()
+            .find(|item| item_name(lowered.module(), item.owner) == Some("take"))
+            .expect("expected take elaboration");
+        if !matches!(take.outcome, GeneralExprOutcome::Lowered(_)) {
+            let module = lowered.module();
+            let Item::Function(function) = &module.items()[take.owner] else {
+                panic!("take should be a function");
+            };
+            let mut typing = GateTypeContext::new(module);
+            let mut env = GateExprEnv::default();
+            for parameter in &function.parameters {
+                let annotation = parameter.annotation.expect("test parameters are annotated");
+                env.locals.insert(
+                    parameter.binding,
+                    typing
+                        .lower_open_annotation(annotation)
+                        .expect("test parameter types should lower"),
+                );
+            }
+            let ExprKind::Pipe(pipe) = &module.exprs()[function.body].kind else {
+                panic!("take body should be a pipe expression");
+            };
+            let reduce_expr = match &pipe.stages.first().kind {
+                crate::PipeStageKind::Transform { expr } => *expr,
+                other => panic!("expected transform stage, found {other:?}"),
+            };
+            let ExprKind::Apply { callee, arguments } = module.exprs()[reduce_expr].kind.clone() else {
+                panic!("take reduce stage should be an apply expression");
+            };
+            let ExprKind::Name(reference) = &module.exprs()[callee].kind else {
+                panic!("take reduce callee should be a name");
+            };
+            let argument_infos = arguments
+                .iter()
+                .map(|argument| (*argument, typing.infer_expr(*argument, &env, None)))
+                .collect::<Vec<_>>();
+            let argument_types = argument_infos
+                .iter()
+                .map(|(_, info)| info.actual_gate_type().or(info.ty.clone()))
+                .collect::<Vec<_>>();
+            let ambient = env
+                .locals
+                .get(
+                    &function
+                        .parameters
+                        .last()
+                        .expect("take has xs parameter")
+                        .binding,
+                )
+                .expect("take xs parameter should be in env")
+                .clone();
+            let plan =
+                typing.match_pipe_function_signature(reduce_expr, &env, ambient.gate_payload(), None);
+            let full_argument_types = argument_types
+                .iter()
+                .flatten()
+                .cloned()
+                .chain(std::iter::once(ambient.gate_payload().clone()))
+                .collect::<Vec<_>>();
+            let selection = typing.select_class_member_call(reference, &full_argument_types, None);
+            panic!(
+                "expected generic reduce record body to lower, found {:?}; argument_infos={argument_infos:?}; argument_types={argument_types:?}; ambient={ambient:?}; full_argument_types={full_argument_types:?}; selection={selection:?}; plan={plan:?}",
+                take.outcome
+            );
+        }
+    }
+
+    #[test]
+    fn elaborates_reduce_pipe_bodies_with_generic_option_initializers() {
+        let lowered = lower_text(
+            "general-expr-generic-reduce-option-init.aivi",
+            r#"
+fun keepFirst:(Option A) #found:(Option A) #item:A =>
+    found
+     T|> found
+     F|> Some item
+
+fun head:(Option A) #items:(List A) =>
+    items
+     |> reduce keepFirst None
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "generic reduce option-init example should lower to HIR: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_general_expressions(lowered.module());
+        let head = report
+            .items()
+            .iter()
+            .find(|item| item_name(lowered.module(), item.owner) == Some("head"))
+            .expect("expected head elaboration");
+        if !matches!(head.outcome, GeneralExprOutcome::Lowered(_)) {
+            let module = lowered.module();
+            let Item::Function(function) = &module.items()[head.owner] else {
+                panic!("head should be a function");
+            };
+            let mut typing = GateTypeContext::new(module);
+            let mut env = GateExprEnv::default();
+            for parameter in &function.parameters {
+                let annotation = parameter.annotation.expect("test parameters are annotated");
+                env.locals.insert(
+                    parameter.binding,
+                    typing
+                        .lower_open_annotation(annotation)
+                        .expect("test parameter types should lower"),
+                );
+            }
+            let ExprKind::Pipe(pipe) = &module.exprs()[function.body].kind else {
+                panic!("head body should be a pipe expression");
+            };
+            let reduce_expr = match &pipe.stages.first().kind {
+                crate::PipeStageKind::Transform { expr } => *expr,
+                other => panic!("expected transform stage, found {other:?}"),
+            };
+            let ExprKind::Apply { callee, arguments } = module.exprs()[reduce_expr].kind.clone() else {
+                panic!("head reduce stage should be an apply expression");
+            };
+            let ExprKind::Name(reference) = &module.exprs()[callee].kind else {
+                panic!("head reduce callee should be a name");
+            };
+            let argument_infos = arguments
+                .iter()
+                .map(|argument| (*argument, typing.infer_expr(*argument, &env, None)))
+                .collect::<Vec<_>>();
+            let argument_types = argument_infos
+                .iter()
+                .map(|(_, info)| info.actual_gate_type().or(info.ty.clone()))
+                .collect::<Vec<_>>();
+            let ambient = env
+                .locals
+                .values()
+                .next()
+                .expect("head should have one parameter")
+                .clone();
+            let expected = typing
+                .lower_open_annotation(function.annotation.expect("head is annotated"))
+                .expect("head result type should lower");
+            let plan = typing.match_pipe_function_signature(
+                reduce_expr,
+                &env,
+                ambient.gate_payload(),
+                Some(&expected),
+            );
+            let full_argument_types = argument_types
+                .iter()
+                .flatten()
+                .cloned()
+                .chain(std::iter::once(ambient.gate_payload().clone()))
+                .collect::<Vec<_>>();
+            let selection =
+                typing.select_class_member_call(reference, &full_argument_types, Some(&expected));
+            panic!(
+                "expected generic reduce option-init body to lower, found {:?}; argument_infos={argument_infos:?}; argument_types={argument_types:?}; ambient={ambient:?}; expected={expected:?}; full_argument_types={full_argument_types:?}; selection={selection:?}; plan={plan:?}",
+                head.outcome
+            );
+        }
+    }
+
+    #[test]
+    fn elaborates_reduce_pipe_bodies_with_partial_generic_step_functions() {
+        let lowered = lower_text(
+            "general-expr-generic-reduce-partial-step.aivi",
+            r#"
+fun anyStep:Bool #predicate:(A -> Bool) #found:Bool #item:A =>
+    found
+     T|> True
+     F|> predicate item
+
+fun any:Bool #predicate:(A -> Bool) #items:(List A) =>
+    items
+     |> reduce (anyStep predicate) False
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "generic reduce partial-step example should lower to HIR: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_general_expressions(lowered.module());
+        let any = report
+            .items()
+            .iter()
+            .find(|item| item_name(lowered.module(), item.owner) == Some("any"))
+            .expect("expected any elaboration");
+        if !matches!(any.outcome, GeneralExprOutcome::Lowered(_)) {
+            let module = lowered.module();
+            let Item::Function(function) = &module.items()[any.owner] else {
+                panic!("any should be a function");
+            };
+            let mut typing = GateTypeContext::new(module);
+            let mut env = GateExprEnv::default();
+            for parameter in &function.parameters {
+                let annotation = parameter.annotation.expect("test parameters are annotated");
+                env.locals.insert(
+                    parameter.binding,
+                    typing
+                        .lower_open_annotation(annotation)
+                        .expect("test parameter types should lower"),
+                );
+            }
+            let ExprKind::Pipe(pipe) = &module.exprs()[function.body].kind else {
+                panic!("any body should be a pipe expression");
+            };
+            let reduce_expr = match &pipe.stages.first().kind {
+                crate::PipeStageKind::Transform { expr } => *expr,
+                other => panic!("expected transform stage, found {other:?}"),
+            };
+            let ExprKind::Apply { callee, arguments } = module.exprs()[reduce_expr].kind.clone() else {
+                panic!("any reduce stage should be an apply expression");
+            };
+            let ExprKind::Name(reference) = &module.exprs()[callee].kind else {
+                panic!("any reduce callee should be a name");
+            };
+            let argument_infos = arguments
+                .iter()
+                .map(|argument| (*argument, typing.infer_expr(*argument, &env, None)))
+                .collect::<Vec<_>>();
+            let argument_types = argument_infos
+                .iter()
+                .map(|(_, info)| info.actual_gate_type().or(info.ty.clone()))
+                .collect::<Vec<_>>();
+            let expected = typing
+                .lower_open_annotation(function.annotation.expect("any is annotated"))
+                .expect("any result type should lower");
+            let ambient = env
+                .locals
+                .get(
+                    &function
+                        .parameters
+                        .last()
+                        .expect("any has items parameter")
+                        .binding,
+                )
+                .expect("any items parameter should be in env")
+                .clone();
+            let plan = typing.match_pipe_function_signature(
+                reduce_expr,
+                &env,
+                ambient.gate_payload(),
+                Some(&expected),
+            );
+            let full_argument_types = argument_types
+                .iter()
+                .flatten()
+                .cloned()
+                .chain(std::iter::once(ambient.gate_payload().clone()))
+                .collect::<Vec<_>>();
+            let selection =
+                typing.select_class_member_call(reference, &full_argument_types, Some(&expected));
+            panic!(
+                "expected generic reduce partial-step body to lower, found {:?}; argument_infos={argument_infos:?}; argument_types={argument_types:?}; ambient={ambient:?}; expected={expected:?}; full_argument_types={full_argument_types:?}; selection={selection:?}; plan={plan:?}",
+                any.outcome
+            );
         }
     }
 }

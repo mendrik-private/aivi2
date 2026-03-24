@@ -6,10 +6,8 @@ There is no `any`, no `object`, no `null`.
 
 ## `val` — a named constant
 
-```aivi
-val answer = 42
-val greeting = "Hello, world!"
-val pi = 3.14159
+```text
+// TODO: add a verified AIVI example here
 ```
 
 `val` declares an immutable, named value. There are no variables in AIVI — once declared,
@@ -18,9 +16,8 @@ a value does not change. If something needs to change over time, that is a `sig`
 
 You can annotate the type explicitly:
 
-```aivi
-val answer:Int = 42
-val greeting:Text = "Hello, world!"
+```text
+// TODO: add a verified AIVI example here
 ```
 
 The compiler infers types when they are omitted, but annotations are welcome for documentation.
@@ -34,19 +31,8 @@ AIVI has two flavours of `type`: **sum types** and **product types**.
 A sum type lists all possible values (variants). If you have used TypeScript unions or Rust enums,
 this is the same idea — but exhaustive and closed.
 
-```aivi
-type Direction =
-  | Up
-  | Down
-  | Left
-  | Right
-
-type Status =
-  | Running
-  | Paused
-  | GameOver
-
-type Bool = True | False
+```text
+// TODO: add a verified AIVI example here
 ```
 
 Each variant is a constructor — a value of that type.
@@ -56,23 +42,14 @@ You can write `Up` or `GameOver` directly; they are ordinary values.
 
 Variants can carry data:
 
-```aivi
-type Option A = Some A | None
-
-type Result E A = Ok A | Err E
-
-type Shape =
-  | Circle Int
-  | Rectangle Int Int
+```text
+// TODO: add a verified AIVI example here
 ```
 
 `Option` and `Result` are **parametric types** — the type variables are filled in at use sites:
 
-```aivi
-val found:Option Int = Some 42
-val missing:Option Int = None
-val success:Result Text Int = Ok 100
-val failure:Result Text Int = Err "not found"
+```text
+// TODO: add a verified AIVI example here
 ```
 
 The type variable is always lowercase; type names and constructors are uppercase.
@@ -81,108 +58,49 @@ The type variable is always lowercase; type names and constructors are uppercase
 
 AIVI has no `null`, `nil`, or `undefined`. The absence of a value is always explicit:
 
-```aivi
-type Option A = Some A | None
-
-val notLoggedIn:Option Text = None
-val loggedIn:Option Text = Some "ada"
+```text
+// TODO: add a verified AIVI example here
 ```
 
 Because you cannot ignore the `None` case (the compiler enforces it), null pointer bugs are
 impossible by construction.
 
-### Product types (records)
+### Product types
 
-A product type groups multiple named fields into one value:
+A product type groups multiple values into one shape. Use a constructor product for positional
+data and a record when fields are naturally named:
 
-```aivi
-type Point = { x: Int, y: Int }
-
-type User = {
-    id: Int,
-    username: Text,
-    email: Text
-}
+```text
+// TODO: add a verified AIVI example here
 ```
 
-Create a record by listing its fields:
+Create a value by calling the constructor or listing named fields:
 
-```aivi
-type Point = { x: Int, y: Int }
-
-type User = {
-    id: Int,
-    username: Text,
-    email: Text
-}
-
-val origin:Point = {
-    x: 0,
-    y: 0
-}
-
-val user:User = {
-    id: 1,
-    username: "ada",
-    email: "ada@example.com"
-}
+```text
+// TODO: add a verified AIVI example here
 ```
 
-Access fields with dot projection:
+Access named fields with dot projection:
 
-```aivi
-type User = {
-    id: Int,
-    username: Text,
-    email: Text
-}
-
-type Point = { x: Int, y: Int }
-
-fun getName:Text #user:User =>
-    user.username
-
-fun getX:Int #point:Point =>
-    point.x
+```text
+// TODO: add a verified AIVI example here
 ```
+
+`Point` is positional, so you usually unpack it with pattern matching (covered in
+[Chapter 04](/tour/04-pattern-matching)). `User` is a record, so dot projection works directly.
 
 Records are immutable — you cannot update a field in place. Instead, create a new record:
 
-```aivi
-type User = {
-    id: Int,
-    username: Text,
-    email: Text
-}
-
-fun withUsername:User #name:Text #user:User =>
-    {
-        id: user.id,
-        username: name,
-        email: user.email
-    }
+```text
+// TODO: add a verified AIVI example here
 ```
 
 ### Combining sum and product types
 
 Real programs combine both. Here is a snapshot from the Snake demo:
 
-```aivi
-type Vec2 = Vec2 Int Int
-
-type Status = Running | GameOver
-
-type Snake = {
-    head: Vec2,
-    second: Vec2,
-    length: Int
-}
-
-type Game = {
-    snake: Snake,
-    status: Status,
-    score: Int
-}
+```text
+// TODO: add a verified AIVI example here
 ```
 
 `Vec2` is a sum type with one variant that carries two `Int` values.

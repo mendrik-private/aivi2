@@ -9,19 +9,8 @@ structure, not just equality.
 `\|\|>` is the case pipe. It takes a value on the left and a pattern `=>` body arm on the right.
 Multiple arms are written as successive `\|\|>` lines:
 
-```aivi
-type Direction =
-  | Up
-  | Down
-  | Left
-  | Right
-
-fun directionText:Text #direction:Direction =>
-    direction
-     ||> Up    => "up"
-     ||> Down  => "down"
-     ||> Left  => "left"
-     ||> Right => "right"
+```text
+// TODO: add a verified AIVI example here
 ```
 
 Each arm is: `\|\|> pattern => expression`.
@@ -32,17 +21,8 @@ The body of the first matching arm is evaluated and returned.
 
 The most common use is matching on sum type variants:
 
-```aivi
-type Status =
-  | Running
-  | Paused
-  | GameOver
-
-fun statusLabel:Text #status:Status =>
-    status
-     ||> Running  => "In progress"
-     ||> Paused   => "Paused"
-     ||> GameOver => "Game over"
+```text
+// TODO: add a verified AIVI example here
 ```
 
 The same constructor syntax works for your own same-module sum types and for builtin carriers like
@@ -70,15 +50,8 @@ fun colorName:Text #color:Color =>
 
 When you want a catch-all, use `_`:
 
-```aivi
-fun growLength:Int #n:Int =>
-    n
-     ||> 1 => 2
-     ||> 2 => 3
-     ||> 3 => 4
-     ||> 4 => 5
-     ||> 5 => 6
-     ||> _ => 6
+```text
+// TODO: add a verified AIVI example here
 ```
 
 `_` matches anything and does not bind the value.
@@ -87,51 +60,22 @@ fun growLength:Int #n:Int =>
 
 You can match on integer and text literals directly:
 
-```aivi
-fun divisible:Bool #d:Int #n:Int =>
-    n % d == 0
-
-fun buzzOrN:Text #n:Int =>
-    divisible 5 n
-     T|> "Buzz"
-     F|> "{n}"
-
-fun fizzOrBuzzOrN:Text #n:Int =>
-    divisible 3 n
-     T|> "Fizz"
-     F|> buzzOrN n
-
-fun fizzBuzz:Text #n:Int =>
-    divisible 15 n
-     T|> "FizzBuzz"
-     F|> fizzOrBuzzOrN n
+```text
+// TODO: add a verified AIVI example here
 ```
 
 ## Destructuring product types (records)
 
 You can destructure a record in a pattern arm, binding its fields to names:
 
-```aivi
-type Vec2 = Vec2 Int Int
-
-fun describePoint:Text #pos:Vec2 =>
-    pos
-     ||> Vec2 x y => "({x}, {y})"
+```text
+// TODO: add a verified AIVI example here
 ```
 
 Record patterns work similarly:
 
-```aivi
-type Status = Running | GameOver
-
-type Game = {
-    status: Status,
-    score: Int
-}
-
-fun scoreOf:Int #game:Game =>
-    game
-     ||> { score } => score
+```text
+// TODO: add a verified AIVI example here
 ```
 
 Here `{ score }` matches any `Game` record and binds the `score` field.
@@ -140,11 +84,8 @@ Here `{ score }` matches any `Game` record and binds the `score` field.
 
 When a variant carries data, the pattern binds the inner values:
 
-```aivi
-fun unwrapOr:A #default:A #option:(Option A) =>
-    option
-     ||> Some value => value
-     ||> None       => default
+```text
+// TODO: add a verified AIVI example here
 ```
 
 `Some value` binds the wrapped `A` to the name `value` in the body.
@@ -154,27 +95,8 @@ fun unwrapOr:A #default:A #option:(Option A) =>
 Patterns can be nested. In the snake game, the step logic matches on a record extracted
 from a record:
 
-```aivi
-type Status = Running | GameOver
-
-type Pixel = { x: Int, y: Int }
-
-type Direction =
-  | Up
-  | Down
-  | Left
-  | Right
-
-type Game = {
-    snake: List Pixel,
-    food: Pixel,
-    score: Int,
-    status: Status
-}
-
-fun runningStep:Game #size:Pixel #direction:Direction #current:Game =>
-    current
-     ||> { snake, food, score } => { snake: snake, food: food, score: score, status: Running }
+```text
+// TODO: add a verified AIVI example here
 ```
 
 The record pattern `{ snake, food, score }` binds three fields of `Game` simultaneously,
@@ -185,25 +107,12 @@ without needing intermediate `let` bindings.
 Use `\|\|>` when matching on a general sum type or literal. Use `T\|>` / `F\|>` when the
 value is already a `Bool` and you want a two-branch conditional:
 
-```aivi
-val condition:Bool = True
-val valueIfTrue:Text = "yes"
-val valueIfFalse:Text = "no"
-
-val result:Text =
-    condition
-     T|> valueIfTrue
-     F|> valueIfFalse
+```text
+// TODO: add a verified AIVI example here
 ```
 
-```aivi
-val fallback:Text = "nothing"
-val maybeValue:Option Int = Some 42
-
-val display:Text =
-    maybeValue
-     ||> Some x => "got {x}"
-     ||> None   => fallback
+```text
+// TODO: add a verified AIVI example here
 ```
 
 ## Summary

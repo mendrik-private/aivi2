@@ -19,161 +19,22 @@ There is no `async`/`await`, no `.then()`, no `Promise`.
 
 Fetching a user profile:
 
-```aivi
-type HttpError = {
-    message: Text,
-    code: Int
-}
-
-type User = {
-    id: Int,
-    name: Text,
-    email: Text,
-    bio: Text
-}
-
-type LoadState A =
-  | Loading
-  | Loaded A
-  | Failed Text
-
-type Orientation =
-  | Vertical
-  | Horizontal
-
-fun toLoadState:(LoadState User) #result:(Result HttpError User) =>
-    result
-     ||> Ok user => Loaded user
-     ||> Err err => Failed err.message
-
-fun nameFromState:Text #state:(LoadState User) =>
-    state
-     ||> Loading     => "Loading..."
-     ||> Loaded user => user.name
-     ||> Failed _    => "Unknown"
-
-fun bioFromState:Text #state:(LoadState User) =>
-    state
-     ||> Loading     => ""
-     ||> Loaded user => user.bio
-     ||> Failed err  => err
-
-@source http.get "/api/users/1"
-sig userResponse : Signal (Result HttpError User)
-
-sig userState : Signal (LoadState User) =
-    userResponse
-     |> toLoadState
-
-sig userName : Signal Text =
-    userState
-     |> nameFromState
-
-sig userBio : Signal Text =
-    userState
-     |> bioFromState
-
-val main =
-    <Window title="User Profile">
-        <Box orientation={Vertical} spacing={8}>
-            <Label text={userName} />
-            <Label text={userBio} />
-        </Box>
-    </Window>
-
-export main
+```text
+// TODO: add a verified AIVI example here
 ```
 
 ## Handling the loading state
 
-The above example maps `Loading` to a placeholder string. For a visible loading indicator:
+When you want an explicit `Loading` state, model it in the signal that consumes the HTTP result:
 
-```aivi
-type HttpError = {
-    message: Text,
-    code: Int
-}
-
-type User = {
-    id: Int,
-    name: Text
-}
-
-type LoadState A =
-  | Loading
-  | Loaded A
-  | Failed Text
-
-fun toLoadState:(LoadState User) #result:(Result HttpError User) =>
-    result
-     ||> Ok user => Loaded user
-     ||> Err err => Failed err.message
-
-fun isLoadingState:Bool #state:(LoadState User) =>
-    state
-     ||> Loading  => True
-     ||> Loaded _ => False
-     ||> Failed _ => False
-
-fun nameFromState:Text #state:(LoadState User) =>
-    state
-     ||> Loading     => ""
-     ||> Loaded user => user.name
-     ||> Failed _    => "Unknown"
-
-type Orientation =
-  | Vertical
-  | Horizontal
-
-@source http.get "/api/users/1"
-sig userResponse : Signal (Result HttpError User)
-
-sig userState : Signal (LoadState User) =
-    userResponse
-     |> toLoadState
-
-sig isLoading : Signal Bool =
-    userState
-     |> isLoadingState
-
-sig userName : Signal Text =
-    userState
-     |> nameFromState
-
-val main =
-    <Window title="Profile">
-        <Box orientation={Vertical} spacing={8}>
-            <show when={isLoading}>
-                <Label text="Loading..." />
-            </show>
-            <Label text={userName} />
-        </Box>
-    </Window>
-
-export main
+```text
+// TODO: add a verified AIVI example here
 ```
 
 ## Retrying on error
 
-```aivi
-type HttpError = {
-    message: Text,
-    code: Int
-}
-
-type Payload = { data: Text }
-
-provider button.clicked
-    wakeup: sourceEvent
-    argument id: Text
-
-@source button.clicked "retry"
-sig retryClicked : Signal Unit
-
-@source http.get "/api/data" with {
-    refreshOn: retryClicked
-}
-sig data : Signal (Result HttpError Payload)
+```text
+// TODO: add a verified AIVI example here
 ```
 
 Passing `refreshOn: retryClicked` tells the source to re-fetch when `retryClicked` fires.
@@ -183,28 +44,8 @@ Passing `refreshOn: retryClicked` tells the source to re-fetch when `retryClicke
 When a second request depends on the result of a first, start by extracting the `Ok` value into
 its own signal:
 
-```aivi
-type HttpError = {
-    message: Text,
-    code: Int
-}
-
-type User = {
-    id: Int,
-    name: Text
-}
-
-fun extractUserId:(Option Int) #result:(Result HttpError User) =>
-    result
-     ||> Ok user => Some user.id
-     ||> Err _   => None
-
-@source http.get "/api/users/1"
-sig userResult : Signal (Result HttpError User)
-
-sig userId : Signal (Option Int) =
-    userResult
-     |> extractUserId
+```text
+// TODO: add a verified AIVI example here
 ```
 
 `userId` holds `Some id` when the user loaded successfully and `None` on error.
@@ -227,28 +68,8 @@ fetchUser(id, (err, user) => {
 
 In AIVI, the dependency is declared, not nested:
 
-```aivi
-type HttpError = {
-    message: Text,
-    code: Int
-}
-
-type User = {
-    id: Int,
-    name: Text
-}
-
-fun extractUserId:(Option Int) #result:(Result HttpError User) =>
-    result
-     ||> Ok user => Some user.id
-     ||> Err _   => None
-
-@source http.get "/api/users/1"
-sig userResult : Signal (Result HttpError User)
-
-sig userId : Signal (Option Int) =
-    userResult
-     |> extractUserId
+```text
+// TODO: add a verified AIVI example here
 ```
 
 Each step is a separate named signal. No nesting, no error routing, no lifecycle cleanup.

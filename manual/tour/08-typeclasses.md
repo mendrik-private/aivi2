@@ -6,10 +6,8 @@ type class instances come with **laws** — invariants the implementation must u
 
 ## Declaring a class
 
-```aivi
-class Eq A
-    (==) : A -> A -> Bool
-    (!=) : A -> A -> Bool
+```text
+// TODO: add a verified AIVI example here
 ```
 
 This declares a class `Eq` parameterized over a type `A`.
@@ -17,33 +15,8 @@ Any type that implements `Eq` must provide `==` and `!=`.
 
 ## Writing an instance
 
-```aivi
-class Eq A
-    (==) : A -> A -> Bool
-    (!=) : A -> A -> Bool
-
-type Color = Red | Green | Blue
-
-fun colorEq:Bool #left:Color #right:Color =>
-    (left, right)
-     ||> (Red, Red)     => True
-     ||> (Red, Green)   => False
-     ||> (Red, Blue)    => False
-     ||> (Green, Red)   => False
-     ||> (Green, Green) => True
-     ||> (Green, Blue)  => False
-     ||> (Blue, Red)    => False
-     ||> (Blue, Green)  => False
-     ||> (Blue, Blue)   => True
-
-fun colorNeq:Bool #left:Color #right:Color =>
-    colorEq left right
-     T|> False
-     F|> True
-
-instance Eq Color
-    (==) left right = colorEq left right
-    (!=) left right = colorNeq left right
+```text
+// TODO: add a verified AIVI example here
 ```
 
 The compiler derives structural equality for closed product and sum types whose fields all
@@ -57,10 +30,8 @@ AIVI ships three fundamental classes:
 
 ### Eq — equality
 
-```aivi
-class Eq A
-    (==) : A -> A -> Bool
-    (!=) : A -> A -> Bool
+```text
+// TODO: add a verified AIVI example here
 ```
 
 Most built-in types (`Int`, `Bool`, `Text`, `List A`) are instances of `Eq`.
@@ -68,45 +39,24 @@ Your product and sum types get `Eq` for free if all their fields have `Eq` insta
 
 ### Show — text representation
 
-```aivi
-class Show A
-    show : A -> Text
+```text
+// TODO: add a verified AIVI example here
 ```
 
 `show` converts a value to a human-readable `Text`.
 The snake game uses this pattern with hand-written text functions rather than the class,
 but `Show` is the standard interface:
 
-```aivi
-type Direction =
-  | Up
-  | Down
-  | Left
-  | Right
-
-class Show A
-    show : A -> Text
-
-fun directionText:Text #d:Direction =>
-    d
-     ||> Up    => "Up"
-     ||> Down  => "Down"
-     ||> Left  => "Left"
-     ||> Right => "Right"
-
-instance Show Direction
-    show d = directionText d
+```text
+// TODO: add a verified AIVI example here
 ```
 
 The instance body is filled in by the compiler based on the constructor names.
 
 ### Ord — ordering
 
-```aivi
-type Ordering = LT | EQ | GT
-
-class Ord A
-    compare : A -> A -> Ordering
+```text
+// TODO: add a verified AIVI example here
 ```
 
 `Ord` requires `Eq` as a superclass constraint. Any type with a meaningful ordering can
@@ -116,18 +66,8 @@ implement `Ord`, enabling use with sorting and comparison functions.
 
 When a function is generic but requires a class capability, you express this with a constraint:
 
-```aivi
-class Eq A
-    (==) : A -> A -> Bool
-
-fun sameScore:Bool #a:Int #b:Int =>
-    a == b
-
-use aivi.list (any)
-
-fun containsScore:Bool #target:Int #scores:(List Int) =>
-    scores
-     |> any (sameScore target)
+```text
+// TODO: add a verified AIVI example here
 ```
 
 The `with Eq A` syntax says: "this function works for any type `A`, but only if `A` has

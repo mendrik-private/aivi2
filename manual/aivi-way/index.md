@@ -33,21 +33,8 @@ button.on('click', () => {
 
 In AIVI, you declare the relationships once:
 
-```aivi
-fun addOne:Int #n:Int =>
-    n + 1
-
-provider button.clicked
-    wakeup: sourceEvent
-    argument id: Text
-
-@source button.clicked "increment"
-sig count : Signal Int =
-    0
-     @|> addOne
-     <|@ addOne
-
-sig labelText : Signal Text = "Clicked {count} times"
+```text
+// TODO: add a verified AIVI example here
 ```
 
 `labelText` is always `"Clicked {count} times"`. You do not update it. You declared it.
@@ -57,51 +44,8 @@ sig labelText : Signal Text = "Clicked {count} times"
 The rule of thumb: if a value can change, it is a signal. If it is derived from a signal,
 it is also a signal. If it is constant, it is a `val`.
 
-```aivi
-type Status = Running | GameOver
-
-type Pixel = Pixel Int Int
-
-type BoardSize = {
-    width: Int,
-    height: Int
-}
-
-type Game = {
-    snake: List Pixel,
-    food: Pixel,
-    score: Int,
-    status: Status,
-    seed: Int
-}
-
-fun toBoard:Game #size:BoardSize #game:Game =>
-    game
-
-val boardSize:BoardSize = {
-    width: 12,
-    height: 10
-}
-
-@source timer.every 160 with {
-    immediate: True,
-    coalesce: True
-}
-sig game : Signal Game = {
-    snake: [
-        Pixel 6 5,
-        Pixel 5 5,
-        Pixel 4 5
-    ],
-    food: Pixel 10 1,
-    score: 0,
-    status: Running,
-    seed: 2463534242
-}
-
-sig board : Signal Game =
-    game
-     |> toBoard boardSize
+```text
+// TODO: add a verified AIVI example here
 ```
 
 ## Keep functions pure

@@ -9,23 +9,16 @@ Think of it like a spreadsheet cell: when a cell it depends on changes, it updat
 
 ## Declaring a signal
 
-```aivi
-sig count : Signal Int = 0
+```text
+// TODO: add a verified AIVI example here
 ```
 
 This declares a signal named `count` that holds an `Int`. Its initial value is `0`.
 
 A signal that derives from another signal uses `\|>`:
 
-```aivi
-fun timesTwo:Int #n:Int =>
-    n * 2
-
-sig count : Signal Int = 0
-
-sig doubled : Signal Int =
-    count
-     |> timesTwo
+```text
+// TODO: add a verified AIVI example here
 ```
 
 `doubled` is always `count * 2`. You do not manually update it; the runtime maintains the
@@ -35,26 +28,8 @@ dependency.
 
 Any pipe chain that starts with a signal produces a new signal:
 
-```aivi
-type Status = Running | GameOver
-
-type Game = {
-    score: Int,
-    status: Status
-}
-
-sig game : Signal Game = {
-    score: 0,
-    status: Running
-}
-
-fun formatScore:Text #n:Int =>
-    "Score: {n}"
-
-sig scoreLine : Signal Text =
-    game
-     |> .score
-     |> formatScore
+```text
+// TODO: add a verified AIVI example here
 ```
 
 `scoreLine` recomputes whenever `game` changes. The `\|>` pipes you already know work
@@ -65,154 +40,47 @@ identically on signals.
 The recurrence pattern is how signals accumulate state over time.
 `@\|>` starts the recurrent flow; `<\|@` is the recurrence step.
 
-```aivi
-fun addOne:Int #n:Int =>
-    n + 1
-
-provider button.clicked
-    wakeup: sourceEvent
-    argument id: Text
-
-@source button.clicked "inc"
-sig count : Signal Int =
-    0
-     @|> addOne
-     <|@ addOne
+```text
+// TODO: add a verified AIVI example here
 ```
 
 Reading this:
 
 - `0` — the initial value (the seed of the accumulator).
-- `@\|>` — recurrent flow start: when the source fires, begin the accumulation.
-- `<\|@` — recurrence step: apply the step function to the current accumulated value.
-- `add 1` is partially applied — the step function receives the current `count` as its last
-  argument each time the source fires.
+- `@\|>` — recurrent flow start: enter the recurrent region with an explicit start stage.
+- `<\|@` — recurrence step: apply the per-wakeup state transition.
+- In this simple counter, `keep` preserves the current state at the start stage and
+  `<\|@ addOne` performs the actual increment.
 
 ## Example: direction signal in Snake
 
-```aivi
-type Key = Key Text
-
-type Direction =
-  | Up
-  | Down
-  | Left
-  | Right
-
-fun updateDirection:Direction #key:Key #current:Direction =>
-    current
-
-@source window.keyDown with {
-    repeat: False,
-    focusOnly: True
-}
-sig keyDown : Signal Key
-
-@source window.keyDown with {
-    repeat: False,
-    focusOnly: True
-}
-sig direction : Signal Direction =
-    Right
-     @|> updateDirection keyDown
-     <|@ updateDirection keyDown
+```text
+// TODO: add a verified AIVI example here
 ```
 
-On each `keyDown` event, `@\|>` starts the recurrence and `<\|@` applies `keepDirection keyDown`
-to the current direction, storing the result as the new direction.
+On each `keyDown` event, the recurrent region starts from the current direction and
+`<|@ updateDirection keyDown` computes the next one.
 
 ## Example: game state signal
 
-```aivi
-type Status = Running | GameOver
-
-type Pixel = Pixel Int Int
-
-type Direction =
-  | Up
-  | Down
-  | Left
-  | Right
-
-type BoardSize = {
-    width: Int,
-    height: Int
-}
-
-type Game = {
-    snake: List Pixel,
-    food: Pixel,
-    score: Int,
-    status: Status,
-    seed: Int
-}
-
-val boardSize:BoardSize = {
-    width: 12,
-    height: 10
-}
-
-val initialGame:Game = {
-    snake: [
-        Pixel 6 5,
-        Pixel 5 5,
-        Pixel 4 5
-    ],
-    food: Pixel 10 1,
-    score: 0,
-    status: Running,
-    seed: 2463534242
-}
-
-fun stepGame:Game #size:BoardSize #direction:Direction #game:Game =>
-    game
-
-sig direction : Signal Direction = Right
-
-@source timer.every 160 with {
-    immediate: True,
-    coalesce: True
-}
-sig game : Signal Game =
-    initialGame
-     @|> stepGame boardSize direction
-     <|@ stepGame boardSize direction
+```text
+// TODO: add a verified AIVI example here
 ```
 
 Every 160 ms the timer fires. `stepGame` runs with the current `direction`, producing the next
 `game` state. The entire game loop is two lines.
 
-## Multiple step sources
+## Recurrence guards
 
-`<|@` can introduce a different source from `@|>`. A counter with two buttons:
+Guards sit between the start stage and the first recurrence step. They let the scheduler skip
+an iteration unless the current recurrent state passes a predicate:
 
-```aivi
-type Msg = Increment | Decrement
-
-fun update:Int #msg:Msg #n:Int =>
-    msg
-     ||> Increment => n + 1
-     ||> Decrement => n - 1
-
-provider button.clicked
-    wakeup: sourceEvent
-    argument id: Text
-
-@source button.clicked "increment"
-sig increment : Signal Unit
-
-@source button.clicked "decrement"
-sig decrement : Signal Unit
-
-@source button.clicked "increment"
-sig count : Signal Int =
-    0
-     @|> update Increment
-     <|@ update Decrement
+```text
+// TODO: add a verified AIVI example here
 ```
 
-`@|>` opens the recurrence triggered by `increment`; `<|@` adds `decrement` as a second
-recurse point. Each event folds through `update` into the current count.
+Here `?|> .hasNext` suppresses further iterations once the recurrent state no longer satisfies
+the guard.
 
 ## Signals are values, not variables
 

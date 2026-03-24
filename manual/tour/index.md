@@ -23,54 +23,8 @@ Each chapter builds on the previous one. Read them in order on your first pass.
 Before diving into the details, here is a small but complete AIVI program.
 The tour will dissect each piece.
 
-```aivi
-use aivi.list (length)
-
-type Filter =
-  | All
-  | Active
-  | Done
-
-type TodoItem = {
-    id: Int,
-    text: Text,
-    done: Bool
-}
-
-type Orientation =
-  | Vertical
-  | Horizontal
-
-fun countActive:Int #items:(List TodoItem) =>
-    items
-     |> length
-
-fun formatStatus:Text #n:Int =>
-    "{n} items remaining"
-
-@source window.keyDown with {
-    repeat: False
-}
-sig lastKey : Signal Text
-
-sig todos : Signal (List TodoItem) = []
-
-sig activeCount : Signal Int =
-    todos
-     |> countActive
-
-sig statusText : Signal Text =
-    activeCount
-     |> formatStatus
-
-val main =
-    <Window title="Todos">
-        <Box orientation={Vertical} spacing={8}>
-            <Label text={statusText} />
-        </Box>
-    </Window>
-
-export main
+```text
+// TODO: add a verified AIVI example here
 ```
 
 Do not worry if parts are unfamiliar — the tour explains everything step by step.

@@ -11,7 +11,8 @@ use crate::{
     SourceProviderRef,
     gate_elaboration::{
         GateElaborationBlocker, GateRuntimeExpr, GateRuntimeUnsupportedKind,
-        lower_gate_pipe_body_runtime_expr, lower_gate_runtime_expr,
+        lower_gate_pipe_body_runtime_expr, lower_gate_pipe_body_runtime_expr_allow_signal_reads,
+        lower_gate_runtime_expr,
     },
     validate::{
         GateExprEnv, GateIssue, GateType, GateTypeContext, PipeSubjectStepOutcome,
@@ -381,7 +382,7 @@ fn elaborate_recurrence_pipe(
     let mut guard_plans = Vec::new();
     let mut step_plans = Vec::new();
     if let Some(input_subject) = input_subject.as_ref() {
-        match lower_gate_pipe_body_runtime_expr(
+        match lower_gate_pipe_body_runtime_expr_allow_signal_reads(
             module,
             suffix.start_expr(),
             env,
@@ -438,7 +439,7 @@ fn elaborate_recurrence_pipe(
                         };
                         let stage_index =
                             prefix_stage_count + 1 + suffix.guard_stage_count() + offset;
-                        match lower_gate_pipe_body_runtime_expr(
+                        match lower_gate_pipe_body_runtime_expr_allow_signal_reads(
                             module,
                             expr,
                             env,
@@ -1152,6 +1153,56 @@ sig broken : Signal Int =
                 )));
             }
             other => panic!("expected blocked recurrence node, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn elaborates_recurrence_start_and_steps_that_read_signals() {
+        let lowered = lower_text(
+            "recurrence-signal-reads-in-update-stages.aivi",
+            r#"
+domain Duration over Int
+    literal s : Int -> Duration
+
+fun advance:Int #pressed:Bool #value:Int =>
+    pressed
+     T|> value + 1
+     F|> value
+
+fun belowLimit:Bool #value:Int =>
+    value < 10
+
+sig ready : Signal Bool = True
+
+@recur.timer 5s
+sig counter : Signal Int =
+    0
+     @|> advance ready
+     ?|> belowLimit
+     <|@ advance ready
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "signal-reading recurrence update example should lower cleanly before elaboration: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_recurrences(lowered.module());
+        let counter = report
+            .nodes()
+            .iter()
+            .find(|node| item_name(lowered.module(), node.owner) == "counter")
+            .expect("expected recurrence plan for counter");
+
+        match &counter.outcome {
+            RecurrenceNodeOutcome::Planned(plan) => {
+                assert_eq!(plan.start.result_subject, GateType::Primitive(crate::BuiltinType::Int));
+                assert_eq!(plan.guards.len(), 1);
+                assert_eq!(plan.steps.len(), 1);
+                assert_eq!(plan.steps[0].result_subject, GateType::Primitive(crate::BuiltinType::Int));
+            }
+            other => panic!("expected planned recurrence node, found {other:?}"),
         }
     }
 }

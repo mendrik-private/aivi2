@@ -10,54 +10,13 @@ It is created when the component mounts and destroyed when it unmounts.
 
 A counter is the canonical example of local state:
 
-```aivi
-type Orientation =
-  | Vertical
-  | Horizontal
-
-fun applyIncrement:Int #id:Text #n:Int =>
-    id == "increment"
-     T|> n + 1
-     F|> n
-
-fun applyDecrement:Int #id:Text #n:Int =>
-    id == "decrement"
-     T|> n - 1
-     F|> n
-
-fun updateFromButton:Int #id:Text #n:Int =>
-    n
-     |> applyIncrement id
-     |> applyDecrement id
-
-provider button.clicked
-    wakeup: sourceEvent
-    argument id: Text
-
-@source button.clicked "increment"
-@source button.clicked "decrement"
-sig count : Signal Int =
-    0
-     @|> updateFromButton
-     <|@ updateFromButton
-
-sig label : Signal Text = "{count}"
-
-val main =
-    <Window title="Counter">
-        <Box orientation={Vertical} spacing={8}>
-            <Label text={label} />
-            <Button id="increment" label="+" />
-            <Button id="decrement" label="-" />
-        </Box>
-    </Window>
-
-export main
+```text
+// TODO: add a verified AIVI example here
 ```
 
-`count` starts at `0`. The two button ids drive the recurrence, and `updateFromButton` inspects
-the incoming id to decide whether to increment or decrement. Nothing else in the application can
-see or modify `count` unless you explicitly derive another signal from it.
+`count` starts at `0`. The increment button drives the recurrence, and `<|@ addOne` produces the
+next local state. Nothing else in the application can see or modify `count` unless you explicitly
+derive another signal from it.
 
 ## When to use local state
 
@@ -74,22 +33,8 @@ Examples: accordion open/closed, tooltip visibility, input focus, scroll positio
 When state needs to be accessible from multiple parts of the UI, model it as named top-level
 signals rather than inventing a separate mutable container:
 
-```aivi
-type Theme = Light | Dark
-
-type User = {
-    id: Int,
-    name: Text
-}
-
-type Notification = {
-    id: Int,
-    message: Text
-}
-
-sig currentUser : Signal (Option User) = None
-sig theme : Signal Theme = Light
-sig notifications : Signal (List Notification) = []
+```text
+// TODO: add a verified AIVI example here
 ```
 
 These are shared because any other signal or markup binding can derive from them.
@@ -98,22 +43,8 @@ the right tool here.
 
 ## Reading shared state
 
-```aivi
-type User = {
-    id: Int,
-    name: Text
-}
-
-sig currentUser : Signal (Option User) = None
-
-fun headerUserName:Text #user:(Option User) =>
-    user
-     ||> Some u => u.name
-     ||> None   => "Guest"
-
-sig headerUser : Signal Text =
-    currentUser
-     |> headerUserName
+```text
+// TODO: add a verified AIVI example here
 ```
 
 A header label, profile panel, and status bar can all derive their own views from the same shared
@@ -124,40 +55,8 @@ signal without mutating it directly.
 Shared state is still source-driven. Instead of "writing into a domain", derive the next shared
 value from the result of a source:
 
-```aivi
-type HttpError = {
-    message: Text,
-    code: Int
-}
-
-type User = {
-    id: Int,
-    name: Text
-}
-
-type Credentials = {
-    username: Text,
-    password: Text
-}
-
-sig credentials : Signal Credentials = {
-    username: "",
-    password: ""
-}
-
-@source http.post "/api/login" with {
-    body: credentials
-}
-sig loginResult : Signal (Result HttpError User)
-
-fun userFromLogin:(Option User) #result:(Result HttpError User) =>
-    result
-     ||> Ok user => Some user
-     ||> Err _   => None
-
-sig currentUser : Signal (Option User) =
-    loginResult
-     |> userFromLogin
+```text
+// TODO: add a verified AIVI example here
 ```
 
 The source produces a `Result`, and the shared signal is just another pure transformation of that

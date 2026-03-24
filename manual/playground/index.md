@@ -35,13 +35,8 @@ While the playground is being built, you can try AIVI locally:
 3. Install the binary: `cp target/release/aivi ~/.local/bin/`
 4. Create a file `hello.aivi`:
 
-```aivi
-val main =
-    <Window title="Hello">
-        <Label text="Hello from AIVI!" />
-    </Window>
-
-export main
+```text
+// TODO: add a verified AIVI example here
 ```
 
 5. Run it: `aivi run hello.aivi`
