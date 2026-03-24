@@ -9,10 +9,10 @@
 Define a small, typed, GNOME-first standard library that matches the current
 language model in `AGENTS.md` and `AIVI_RFC.md`.
 
-The anchor application is a native GNOME email client. It requires GNOME Online
-Accounts, OAuth2 with PKCE, persistent local storage via SQL, and reactive inbox
-state. The stdlib must be sufficient to build this application without reaching
-outside its boundaries.
+The anchor application is a native GNOME email client built as three cooperating
+processes: a background sync daemon, a GTK main UI, and a GNOME Shell tray
+extension. They communicate via D-Bus. The stdlib must be sufficient to build
+all three without reaching outside its boundaries.
 
 The stdlib centers five ideas:
 
@@ -582,6 +582,123 @@ smtp.send : SmtpConfig -> SmtpMessage -> Task SmtpError Unit
 For GOA-backed accounts the `SmtpConfig` can be derived from the GOA account
 metadata; no manual host/port configuration is required in that case.
 
+### 4.8 D-Bus IPC
+
+Implement a minimal user-facing D-Bus surface under `aivi.dbus`. This is the
+primary IPC mechanism between the sync daemon, the main UI, and the GNOME Shell
+tray extension.
+
+The surface covers four capabilities: name ownership, outbound method calls,
+outbound signal emission, and inbound signal subscription. Inbound method
+dispatch (exposing methods that other processes call) follows a source model
+with fire-and-forget semantics for v1.
+
+#### Name ownership
+
+```aivi
+@source dbus.ownName "org.gnome.AiviMail.Daemon" with {
+    flags: [AllowReplacement]
+}
+sig busNameState : Signal (Result DbusError BusNameState)
+
+type BusNameState = Owned | Queued | Lost
+```
+
+The daemon registers its well-known name on startup. If another instance is
+already running, `busNameState` becomes `Queued` or `Lost` and the daemon can
+exit cleanly. `AllowReplacement` lets a newer instance take ownership when
+explicitly requested.
+
+#### Outbound method calls
+
+```aivi
+dbus.call : DbusCall -> Task DbusError DbusValue
+
+type DbusCall = {
+    destination : Text,
+    path        : Text,
+    interface   : Text,
+    member      : Text,
+    body        : List DbusValue
+}
+```
+
+Used by the UI and extension to call methods on the daemon. `DbusValue` is a
+closed typed union covering the D-Bus type system (strings, integers, booleans,
+arrays, structs, variants). Typed wrappers over `dbus.call` live in the
+application layer, not the stdlib.
+
+#### Outbound signal emission
+
+```aivi
+dbus.emit : DbusSignal -> Task DbusError Unit
+
+type DbusSignal = {
+    path      : Text,
+    interface : Text,
+    member    : Text,
+    body      : List DbusValue
+}
+```
+
+The daemon emits signals to notify connected clients of state changes (new mail
+arrived, sync state changed, unread count updated).
+
+#### Inbound signal subscription
+
+```aivi
+@source dbus.signal with {
+    sender    : "org.gnome.AiviMail.Daemon",
+    path      : "/org/gnome/AiviMail/Daemon",
+    interface : "org.gnome.AiviMail.IDaemon",
+    member    : "SyncStateChanged"
+}
+sig syncStateChanged : Signal (Result DbusError (List DbusValue))
+```
+
+The UI subscribes to daemon signals reactively. Subscription activates when the
+source is first observed and stays live until `activeWhen` gates it off or the
+app exits.
+
+#### Inbound method dispatch
+
+For v1, the daemon exposes callable D-Bus methods through an inbound source that
+emits when a method is invoked by a remote caller. All exposed methods are
+fire-and-forget (return Unit immediately on the D-Bus wire); the reply is sent
+before the AIVI signal is published.
+
+```aivi
+@source dbus.method with {
+    path      : "/org/gnome/AiviMail/Daemon",
+    interface : "org.gnome.AiviMail.IDaemon",
+    member    : "Quit"
+}
+sig quitRequested : Signal (Result DbusError Unit)
+
+@source dbus.method with {
+    path      : "/org/gnome/AiviMail/Daemon",
+    interface : "org.gnome.AiviMail.IDaemon",
+    member    : "ShowWindow"
+}
+sig showWindowRequested : Signal (Result DbusError Unit)
+```
+
+Methods that must return non-Unit data to the caller (queries, typed responses)
+are deferred to a later phase. For the email client, the daemon surface required
+in v1 is entirely fire-and-forget: `Quit`, `ShowWindow`, `TriggerSync`.
+
+#### Error types
+
+```aivi
+type DbusError
+    = NameNotOwned Text
+    | ServiceUnknown Text
+    | NoReply
+    | AccessDenied Text
+    | InvalidArgs Text
+    | ProtocolError Text
+```
+
 ---
 
 ## 5. GNOME-first integration surfaces
@@ -708,6 +825,128 @@ Queries that live outside the UI (background sync, scheduled polling) do not
 need `trackVisible` at all. `activeWhen` accepts any `Signal Bool` regardless of
 how it is produced.
 
+### 5.3 Multi-process application architecture
+
+The GNOME email client is built as three cooperating processes. This section
+documents how the stdlib surfaces combine to make that architecture work.
+
+#### Process map
+
+```
+┌─────────────────────────────────────────────┐
+│  GNOME Shell Extension  (GJS — not AIVI)    │
+│  tray indicator · unread badge · quick menu │
+└───────────────┬─────────────────────────────┘
+                │  D-Bus: org.gnome.AiviMail
+       ┌────────┴────────┐
+       │                 │
+┌──────▼──────┐   ┌──────▼──────┐
+│ Sync Daemon │   │  Main UI    │
+│  (AIVI)     │   │  (AIVI)     │
+│             │   │             │
+│ imap.sync   │   │ db.query    │
+│ db writes   │   │ dbus signals│
+│ dbus.ownName│   │ GTK/adwaita │
+└──────┬──────┘   └──────┬──────┘
+       └────── SQLite ───┘
+              (WAL mode,
+               shared file)
+```
+
+#### Sync daemon
+
+The daemon is a headless AIVI process. It owns the D-Bus well-known name
+`org.gnome.AiviMail.Daemon`, runs `imap.sync` sources for all configured
+accounts, writes fetched messages to the shared SQLite database, and emits
+D-Bus signals when new mail arrives or sync state changes. It exposes three
+inbound methods: `Quit`, `ShowWindow`, and `TriggerSync`.
+
+The daemon starts at login via an XDG autostart `.desktop` file installed to
+`~/.config/autostart/`. It stays running until the user explicitly selects
+**Quit** from the tray menu, which calls the `Quit` D-Bus method. Simply closing
+the main UI does not stop the daemon.
+
+#### Main UI
+
+The main UI is a GTK/libadwaita AIVI process. It reads mail data exclusively
+from the local SQLite database via `@source db.query` and does not hold its own
+IMAP connections. It subscribes to daemon D-Bus signals to trigger `refreshOn`
+when new mail arrives.
+
+Closing the main window hides the application rather than quitting it. This is
+controlled by a `hideOnClose` window property in the GTK markup:
+
+```aivi
+<ApplicationWindow hideOnClose=True title="Mail">
+    ...
+</ApplicationWindow>
+```
+
+When `hideOnClose` is `True` the GTK host intercepts `delete-event` and calls
+`window.hide()` instead of destroying the widget. The process stays alive. The
+tray extension's **Open** action calls the `ShowWindow` D-Bus method, which the
+UI listens to via a `@source dbus.method` source and responds to by calling
+`window.present()`.
+
+If the main UI is launched while already running (e.g. from the app launcher),
+D-Bus activation delivers the launch to the existing instance rather than
+starting a second process. The existing instance calls `window.present()` in
+response.
+
+#### GNOME Shell extension
+
+The tray extension is a GJS GNOME Shell extension. It is not AIVI code. It ships
+as a companion component of the project and is installed to
+`~/.local/share/gnome-shell/extensions/` as part of app installation.
+
+The extension communicates with the daemon exclusively via D-Bus using GJS's
+native `Gio.DBusProxy`. It subscribes to the daemon's D-Bus signals to update
+the unread badge and exposes a quick menu with **Open**, **Compose**, and
+**Quit** actions that call the corresponding daemon methods.
+
+The extension has no direct SQLite access and no AIVI runtime dependency. The
+D-Bus interface is the contract boundary; both sides must agree on the interface
+definition.
+
+#### Shared SQLite database
+
+The daemon is the sole writer. The UI is a reader. SQLite WAL mode allows
+concurrent reads from the UI while the daemon writes without contention. The
+database file lives at a conventional XDG data path, e.g.
+`$XDG_DATA_HOME/aivi-mail/mail.db`.
+
+The daemon applies migrations on startup via `aivi db apply`. The UI does a
+schema version check on startup and fails with `DbError.SchemaMismatch` if the
+daemon has not applied the latest migrations first. The daemon must therefore
+start and apply migrations before the UI attempts to open the database.
+
+#### Desktop notifications
+
+When new mail arrives and the UI is hidden, the daemon sends a desktop
+notification via `aivi.gnome.notifications`. Clicking the notification calls
+`ShowWindow` on the daemon's D-Bus interface, which the UI responds to.
+
+Required surface:
+
+```aivi
+type Notification = {
+    summary : Text,
+    body    : Option Text,
+    icon    : Option Text,
+    actions : List { label: Text, id: Text }
+}
+
+type NotificationError = Failed Text
+
+gnome.notify         : Notification -> Task NotificationError Text
+gnome.withdrawNotify : Text -> Task NotificationError Unit
+```
+
+`gnome.notify` returns an ID that can be passed to `gnome.withdrawNotify` to
+dismiss the notification programmatically (e.g. when the user opens the mail
+from the app). This uses `libnotify` / the GNOME notification D-Bus interface
+internally.
+
 ---
 
 ## 6. What is not in the first stdlib wave
@@ -785,12 +1024,13 @@ Later work should reuse the same rules:
 - minimal `aivi.log`
 - typed decode support and source option types
 
-### Phase 3: GNOME-native account support and auth
+### Phase 3: D-Bus IPC, GOA, and auth
 
-- `aivi.gnome.onlineAccounts`
-- internal D-Bus plumbing needed for that surface
-- `aivi.auth` PKCE task surface (required alongside GOA for providers that
-  need a manual OAuth2 flow)
+- `aivi.dbus` with `dbus.ownName`, `dbus.call`, `dbus.emit`, `dbus.signal`,
+  and `dbus.method` sources and tasks
+- `aivi.gnome.onlineAccounts` (builds on D-Bus infrastructure)
+- `aivi.auth` PKCE task surface
+- `aivi.gnome.notifications` (`gnome.notify` / `gnome.withdrawNotify`)
 
 ### Phase 4: database
 
@@ -801,12 +1041,16 @@ Later work should reuse the same rules:
 - `aivi db migrate` and `aivi db apply` CLI commands
 - startup schema version check
 
-### Phase 5: mail protocols
+### Phase 5: mail protocols and multi-process assembly
 
 - `imap.sync` source provider with IDLE connection management
 - `smtp.send` task
 - credential handoff from GOA and PKCE token surfaces
 - typed `ImapError` and `SmtpError`
+- `hideOnClose` window property in GTK markup (`ApplicationWindow`)
+- XDG autostart `.desktop` file generation for the daemon (`aivi install`)
+- D-Bus activation service registration for the main UI
+- GJS GNOME Shell extension companion template
 
 ### Phase 6: later expansions
 
@@ -843,7 +1087,12 @@ This plan is complete only when the implementation follows these constraints:
    `aivi db apply` is idempotent and rolls back atomically on failure.
 10. The `imap.sync` source closes IDLE connections cleanly when `activeWhen`
     becomes `False` or the app shuts down.
-11. Tests cover:
+11. `dbus.ownName` correctly handles name already owned (queued/lost states);
+    `dbus.method` sources dispatch inbound calls and send the Unit reply before
+    publishing the signal.
+12. `hideOnClose` intercepts `delete-event` and hides rather than destroys;
+    the process stays alive and `window.present()` restores it.
+13. Tests cover:
     - domain invariants
     - strict decode behavior
     - source reconfiguration and stale-result suppression
@@ -854,6 +1103,9 @@ This plan is complete only when the implementation follows these constraints:
     - migration apply idempotency and rollback
     - IMAP IDLE reconnect after transient connection failure
     - SMTP credential error surfaced as typed `SmtpError`
+    - `dbus.ownName` name-lost and name-queued transitions
+    - `dbus.method` inbound dispatch reply-before-publish ordering
+    - `hideOnClose` delete-event interception and window re-presentation
 
 ---
 
@@ -871,5 +1123,9 @@ Implement the smallest stdlib that makes the GNOME email client real:
   mutation tasks
 - `aivi db migrate` / `aivi db apply` for schema management
 - IMAP sync source and SMTP send task for mail protocol access
+- D-Bus IPC for daemon/UI/extension communication
+- `hideOnClose` window behavior and D-Bus activation for single-instance UI
+- XDG autostart for the sync daemon
+- GJS companion extension for the GNOME Shell tray
 
 Everything else should wait until it is justified by the current architecture.
