@@ -704,7 +704,8 @@ impl<'a> GeneralExprElaborator<'a> {
         let Some(class_item_id) = self.instance_class_item_id(instance) else {
             return Vec::new();
         };
-        let Some(argument_bindings) = self.instance_argument_bindings(class_item_id, instance) else {
+        let Some(argument_bindings) = self.instance_argument_bindings(class_item_id, instance)
+        else {
             return Vec::new();
         };
         let Item::Class(class_item) = &self.module.items()[class_item_id] else {
@@ -813,7 +814,9 @@ impl<'a> GeneralExprElaborator<'a> {
                 result,
             } = current
             else {
-                return Err(vec![GeneralExprBlocker::UnknownExprType { span: member.span }]);
+                return Err(vec![GeneralExprBlocker::UnknownExprType {
+                    span: member.span,
+                }]);
             };
             let binding = &self.module.bindings()[parameter.binding];
             let parameter_ty = parameter_ty.as_ref().clone();
@@ -830,7 +833,8 @@ impl<'a> GeneralExprElaborator<'a> {
     }
 
     fn instance_class_item_id(&self, item: &InstanceItem) -> Option<ItemId> {
-        let ResolutionState::Resolved(TypeResolution::Item(item_id)) = item.class.resolution.as_ref()
+        let ResolutionState::Resolved(TypeResolution::Item(item_id)) =
+            item.class.resolution.as_ref()
         else {
             return None;
         };

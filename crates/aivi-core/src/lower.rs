@@ -9,11 +9,10 @@ use aivi_hir::{
     GateRuntimeTextLiteral, GateRuntimeTextSegment, GateRuntimeTruthyFalsyBranch, GateStageOutcome,
     GeneralExprInstanceMemberElaboration, GeneralExprOutcome, GeneralExprParameter,
     Item as HirItem, ItemId as HirItemId, PatternId as HirPatternId, RecurrenceNodeOutcome,
-    ResolvedClassMemberDispatch,
-    SourceDecodeProgram, SourceDecodeProgramOutcome, SourceLifecycleNodeOutcome,
-    TruthyFalsyStageOutcome, TypeBinding, TypeConstructorHead, elaborate_fanouts, elaborate_gates,
-    elaborate_general_expressions, elaborate_recurrences, elaborate_source_lifecycles,
-    elaborate_truthy_falsy, generate_source_decode_programs,
+    ResolvedClassMemberDispatch, SourceDecodeProgram, SourceDecodeProgramOutcome,
+    SourceLifecycleNodeOutcome, TruthyFalsyStageOutcome, TypeBinding, TypeConstructorHead,
+    elaborate_fanouts, elaborate_gates, elaborate_general_expressions, elaborate_recurrences,
+    elaborate_source_lifecycles, elaborate_truthy_falsy, generate_source_decode_programs,
 };
 
 use crate::{
@@ -476,7 +475,10 @@ impl<'a> ModuleLowerer<'a> {
                 continue;
             };
             for member_index in 0..instance.members.len() {
-                if self.seed_instance_member_item(hir_id, member_index).is_none() {
+                if self
+                    .seed_instance_member_item(hir_id, member_index)
+                    .is_none()
+                {
                     break;
                 }
             }
@@ -1629,11 +1631,13 @@ impl<'a> ModuleLowerer<'a> {
             return Some(item);
         }
         let HirItem::Instance(item) = self.hir.items().get(instance)? else {
-            self.errors.push(LoweringError::UnknownOwner { owner: instance });
+            self.errors
+                .push(LoweringError::UnknownOwner { owner: instance });
             return None;
         };
         let Some(member) = item.members.get(member_index) else {
-            self.errors.push(LoweringError::UnknownOwner { owner: instance });
+            self.errors
+                .push(LoweringError::UnknownOwner { owner: instance });
             return None;
         };
         let kind = if member.parameters.is_empty() {
@@ -2498,23 +2502,39 @@ impl TruthyFalsyArmSpec {
 
 impl<'a> RuntimeFragmentLowerer<'a> {
     fn new(hir: &'a aivi_hir::Module, fragment: &'a RuntimeFragmentSpec) -> Self {
-        let report_by_owner = elaborate_general_expressions(hir)
-            .into_items()
+        let (items, instance_members) = elaborate_general_expressions(hir).into_parts();
+        let report_by_owner = items.into_iter().map(|item| (item.owner, item)).collect();
+        let instance_member_reports = instance_members
             .into_iter()
-            .map(|item| (item.owner, item))
+            .map(|item| {
+                (
+                    InstanceMemberKey {
+                        instance: item.instance_owner,
+                        member_index: item.member_index,
+                    },
+                    item,
+                )
+            })
             .collect();
         Self {
             lowerer: ModuleLowerer::new(hir),
             fragment,
             report_by_owner,
+            instance_member_reports,
             lowering: HashSet::new(),
             lowered: HashSet::new(),
+            lowering_instance_members: HashSet::new(),
+            lowered_instance_members: HashSet::new(),
         }
     }
 
     fn build(mut self) -> Result<LoweredRuntimeFragment, LoweringErrors> {
-        for dependency in referenced_hir_items(&self.fragment.body) {
+        let dependencies = referenced_hir_dependencies(&self.fragment.body);
+        for dependency in dependencies.items {
             self.ensure_hir_item_lowered(dependency);
+        }
+        for dependency in dependencies.instance_members {
+            self.ensure_instance_member_lowered(dependency);
         }
 
         let fragment_item = self
@@ -2608,8 +2628,12 @@ impl<'a> RuntimeFragmentLowerer<'a> {
         };
 
         self.lowering.insert(owner);
-        for dependency in referenced_hir_items(&body) {
+        let dependencies = referenced_hir_dependencies(&body);
+        for dependency in dependencies.items {
             self.ensure_hir_item_lowered(dependency);
+        }
+        for dependency in dependencies.instance_members {
+            self.ensure_instance_member_lowered(dependency);
         }
         if self.lowerer.errors.is_empty() {
             match self.lowerer.lower_runtime_expr(owner, &body) {
@@ -2637,6 +2661,73 @@ impl<'a> RuntimeFragmentLowerer<'a> {
         }
         self.lowering.remove(&owner);
         self.lowered.insert(owner);
+    }
+
+    fn ensure_instance_member_lowered(&mut self, key: InstanceMemberKey) {
+        if self.lowered_instance_members.contains(&key)
+            || self.lowering_instance_members.contains(&key)
+        {
+            return;
+        }
+        let Some(report) = self.instance_member_reports.get(&key).cloned() else {
+            self.lowerer.errors.push(LoweringError::UnknownOwner {
+                owner: key.instance,
+            });
+            return;
+        };
+        let Some(core_item) = self
+            .lowerer
+            .seed_instance_member_item(key.instance, key.member_index)
+        else {
+            return;
+        };
+        let body = match report.outcome {
+            GeneralExprOutcome::Lowered(body) => body,
+            GeneralExprOutcome::Blocked(blocked) => {
+                self.lowerer.errors.push(LoweringError::BlockedGeneralExpr {
+                    owner: key.instance,
+                    body_expr: report.body_expr,
+                    span: blocked.primary_span().unwrap_or_default(),
+                    blocked,
+                });
+                return;
+            }
+        };
+
+        self.lowering_instance_members.insert(key);
+        let dependencies = referenced_hir_dependencies(&body);
+        for dependency in dependencies.items {
+            self.ensure_hir_item_lowered(dependency);
+        }
+        for dependency in dependencies.instance_members {
+            self.ensure_instance_member_lowered(dependency);
+        }
+        if self.lowerer.errors.is_empty() {
+            match self.lowerer.lower_runtime_expr(key.instance, &body) {
+                Ok(lowered_body) => {
+                    let item = self
+                        .lowerer
+                        .module
+                        .items_mut()
+                        .get_mut(core_item)
+                        .expect("seeded runtime dependency item should exist");
+                    item.parameters = report
+                        .parameters
+                        .iter()
+                        .map(|parameter| ItemParameter {
+                            binding: parameter.binding,
+                            span: parameter.span,
+                            name: parameter.name.clone(),
+                            ty: Type::lower(&parameter.ty),
+                        })
+                        .collect();
+                    item.body = Some(lowered_body);
+                }
+                Err(error) => self.lowerer.errors.push(error),
+            }
+        }
+        self.lowering_instance_members.remove(&key);
+        self.lowered_instance_members.insert(key);
     }
 
     fn seed_hir_item(&mut self, owner: HirItemId) -> Option<ItemId> {
@@ -2693,8 +2784,15 @@ impl<'a> RuntimeFragmentLowerer<'a> {
     }
 }
 
-fn referenced_hir_items(root: &GateRuntimeExpr) -> Vec<HirItemId> {
-    let mut seen = HashSet::new();
+#[derive(Default)]
+struct HirDependencies {
+    items: Vec<HirItemId>,
+    instance_members: Vec<InstanceMemberKey>,
+}
+
+fn referenced_hir_dependencies(root: &GateRuntimeExpr) -> HirDependencies {
+    let mut seen_items = HashSet::new();
+    let mut seen_instance_members = HashSet::new();
     let mut work = vec![root];
     while let Some(expr) = work.pop() {
         match &expr.kind {
@@ -2703,11 +2801,22 @@ fn referenced_hir_items(root: &GateRuntimeExpr) -> Vec<HirItemId> {
             | GateRuntimeExprKind::SuffixedInteger(_)
             | GateRuntimeExprKind::Reference(GateRuntimeReference::Local(_))
             | GateRuntimeExprKind::Reference(GateRuntimeReference::Builtin(_))
-            | GateRuntimeExprKind::Reference(GateRuntimeReference::ClassMember(_))
             | GateRuntimeExprKind::Reference(GateRuntimeReference::DomainMember(_))
             | GateRuntimeExprKind::Reference(GateRuntimeReference::SumConstructor(_)) => {}
             GateRuntimeExprKind::Reference(GateRuntimeReference::Item(item)) => {
-                seen.insert(*item);
+                seen_items.insert(*item);
+            }
+            GateRuntimeExprKind::Reference(GateRuntimeReference::ClassMember(dispatch)) => {
+                if let aivi_hir::ClassMemberImplementation::SameModuleInstance {
+                    instance,
+                    member_index,
+                } = dispatch.implementation
+                {
+                    seen_instance_members.insert(InstanceMemberKey {
+                        instance,
+                        member_index,
+                    });
+                }
             }
             GateRuntimeExprKind::Text(text) => {
                 for segment in text.segments.iter().rev() {
@@ -2773,9 +2882,14 @@ fn referenced_hir_items(root: &GateRuntimeExpr) -> Vec<HirItemId> {
             }
         }
     }
-    let mut items = seen.into_iter().collect::<Vec<_>>();
+    let mut items = seen_items.into_iter().collect::<Vec<_>>();
     items.sort_by_key(|item| item.as_raw());
-    items
+    let mut instance_members = seen_instance_members.into_iter().collect::<Vec<_>>();
+    instance_members.sort();
+    HirDependencies {
+        items,
+        instance_members,
+    }
 }
 
 #[cfg(test)]
@@ -2785,7 +2899,7 @@ mod tests {
     use aivi_base::SourceDatabase;
     use aivi_syntax::parse_module;
 
-    use super::{LoweringError, lower_module};
+    use super::{LoweringError, RuntimeFragmentSpec, lower_module, lower_runtime_fragment};
     use crate::{
         DecodeStep, GateStage, ItemKind, StageKind, Type,
         validate::{ValidationError, validate_module},
@@ -3174,6 +3288,114 @@ sig cursor : Signal Cursor =
         assert!(
             rendered.contains("imported names are not supported in typed-core general expressions"),
             "blocked general-expression error should explain the unsupported import handoff: {rendered}"
+        );
+    }
+
+    #[test]
+    fn lowers_same_module_instance_member_calls_into_hidden_items() {
+        let lowered = lower_text(
+            "typed-core-same-module-instance-member.aivi",
+            r#"
+class Semigroup A
+    append : A -> A -> A
+
+type Blob = Blob Int
+
+instance Semigroup Blob
+    append left right =
+        left
+
+val combined:Blob =
+    append (Blob 1) (Blob 2)
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "same-module instance example should lower to HIR: {:?}",
+            lowered.diagnostics()
+        );
+
+        let core = lower_module(lowered.module()).expect("typed-core lowering should succeed");
+        let combined = core
+            .items()
+            .iter()
+            .find(|(_, item)| item.name.as_ref() == "combined")
+            .map(|(id, _)| id)
+            .expect("expected combined value item");
+        let combined_body = core.items()[combined]
+            .body
+            .expect("combined should carry a lowered body");
+        let crate::ExprKind::Apply { callee, .. } = &core.exprs()[combined_body].kind else {
+            panic!("combined should lower to an apply expression");
+        };
+        let crate::ExprKind::Reference(crate::Reference::Item(hidden_item)) =
+            &core.exprs()[*callee].kind
+        else {
+            panic!("same-module class member should lower to a hidden typed-core item");
+        };
+        let hidden = &core.items()[*hidden_item];
+        assert!(
+            hidden.name.starts_with("instance#"),
+            "expected hidden instance-member item name, found {}",
+            hidden.name
+        );
+        assert!(
+            hidden.body.is_some(),
+            "hidden instance-member item should carry a lowered body"
+        );
+    }
+
+    #[test]
+    fn runtime_fragments_pull_same_module_instance_member_dependencies() {
+        let lowered = lower_text(
+            "typed-core-runtime-fragment-instance-member.aivi",
+            r#"
+class Semigroup A
+    append : A -> A -> A
+
+type Blob = Blob Int
+
+instance Semigroup Blob
+    append left right =
+        left
+
+val combined:Blob =
+    append (Blob 1) (Blob 2)
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "runtime-fragment instance example should lower to HIR: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = aivi_hir::elaborate_general_expressions(lowered.module());
+        let combined = report
+            .items()
+            .iter()
+            .find(|item| matches!(&lowered.module().items()[item.owner], aivi_hir::Item::Value(value) if value.name.text() == "combined"))
+            .expect("expected combined elaboration");
+        let aivi_hir::GeneralExprOutcome::Lowered(body) = &combined.outcome else {
+            panic!("combined runtime fragment should elaborate");
+        };
+        let lowered_fragment = lower_runtime_fragment(
+            lowered.module(),
+            &RuntimeFragmentSpec {
+                name: "combinedFragment".into(),
+                owner: combined.owner,
+                body_expr: combined.body_expr,
+                parameters: combined.parameters.clone(),
+                body: body.clone(),
+            },
+        )
+        .expect("runtime fragment should lower with same-module instance dependency");
+        assert!(
+            lowered_fragment
+                .module
+                .items()
+                .iter()
+                .any(|(_, item)| item.name.starts_with("instance#") && item.body.is_some()),
+            "runtime fragment should carry a lowered hidden instance-member dependency"
         );
     }
 

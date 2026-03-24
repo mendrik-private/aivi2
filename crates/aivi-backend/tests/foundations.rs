@@ -596,10 +596,9 @@ val lifted:Envelope (Option Int) =
 }
 
 #[test]
-fn typed_core_lowering_reports_same_module_class_member_boundary() {
-    let mut sources = SourceDatabase::new();
-    let file_id = sources.add_file(
-        "core-same-module-class-member.aivi",
+fn same_module_class_member_calls_lower_through_backend_runtime() {
+    let backend = lower_text(
+        "backend-same-module-class-member.aivi",
         r#"
 class Semigroup A
     append : A -> A -> A
@@ -612,30 +611,25 @@ instance Semigroup Blob
 
 fun combine:Blob #left:Blob #right:Blob =>
     append left right
+
+val combined:Blob =
+    combine (Blob 1) (Blob 2)
 "#,
     );
-    let parsed = parse_module(&sources[file_id]);
-    assert!(
-        !parsed.has_errors(),
-        "same-module class-member input should parse: {:?}",
-        parsed.all_diagnostics().collect::<Vec<_>>()
-    );
-    let hir = aivi_hir::lower_module(&parsed.module);
-    assert!(
-        !hir.has_errors(),
-        "same-module class-member input should lower to HIR: {:?}",
-        hir.diagnostics()
-    );
 
-    let errors = lower_core_module(hir.module()).expect_err(
-        "same-module overloaded class members should currently stop at typed-core lowering",
-    );
-    assert!(errors.errors().iter().any(|error| matches!(
-        error,
-        aivi_core::LoweringError::UnsupportedClassMemberDispatch { reason, .. }
-            if *reason
-                == "same-module instance member bodies are not yet materialized as typed-core items"
-    )));
+    let mut evaluator = KernelEvaluator::new(&backend);
+    let globals = BTreeMap::new();
+    match evaluator
+        .evaluate_item(find_item(&backend, "combined"), &globals)
+        .expect("same-module class member should evaluate")
+    {
+        RuntimeValue::Sum(value) => {
+            assert_eq!(value.type_name.as_ref(), "Blob");
+            assert_eq!(value.variant_name.as_ref(), "Blob");
+            assert_eq!(value.fields, vec![RuntimeValue::Int(1)]);
+        }
+        other => panic!("expected Blob sum result, found {other:?}"),
+    }
 }
 
 #[test]
