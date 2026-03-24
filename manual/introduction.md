@@ -46,9 +46,10 @@ A `sig` in AIVI is like a cell in a spreadsheet. When its inputs change, it reco
 automatically. You do not call a setter. You do not subscribe to an event. You declare a
 dependency, and the runtime ensures the value is always current.
 
-```text
-// derive 'fullName' as a signal combining firstName and lastName into one text value
-// whenever firstName or lastName changes, fullName recomputes automatically
+```aivi
+sig firstName : Signal Text = "Ada"
+sig lastName : Signal Text = "Lovelace"
+sig fullName : Signal Text = "{firstName} {lastName}"
 ```
 
 When either `firstName` or `lastName` changes, `fullName` recomputes. That is it.
@@ -84,9 +85,13 @@ and a pipe-oriented surface syntax rather than an ML-style record syntax.
 
 ## Hello, world
 
-```text
-// render a Window titled "Hello" containing a Label with the text "Hello, world!"
-// export main as the application entry point
+```aivi
+val main =
+    <Window title="Hello">
+        <Label text="Hello, world!" />
+    </Window>
+
+export main
 ```
 
 That is a complete AIVI application. One `val`, one `export`, two GTK widgets.

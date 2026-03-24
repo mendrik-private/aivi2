@@ -6,10 +6,10 @@ There is no `any`, no `object`, no `null`.
 
 ## `val` — a named constant
 
-```text
-// declare a constant 'answer' with value 42
-// declare a constant 'greeting' with text "Hello, world!"
-// declare a constant 'pi' with value 3.14159
+```aivi
+val answer = 42
+val greeting = "Hello, world!"
+val pi = 3.14159
 ```
 
 `val` declares an immutable, named value. There are no variables in AIVI — once declared,
@@ -18,9 +18,9 @@ a value does not change. If something needs to change over time, that is a `sig`
 
 You can annotate the type explicitly:
 
-```text
-// declare a constant 'answer' of type Int with value 42
-// declare a constant 'greeting' of type Text with value "Hello, world!"
+```aivi
+val answer:Int = 42
+val greeting:Text = "Hello, world!"
 ```
 
 The compiler infers types when they are omitted, but annotations are welcome for documentation.
@@ -34,10 +34,19 @@ AIVI has two flavours of `type`: **sum types** and **product types**.
 A sum type lists all possible values (variants). If you have used TypeScript unions or Rust enums,
 this is the same idea — but exhaustive and closed.
 
-```text
-// declare a sum type 'Direction' with variants: Up, Down, Left, Right
-// declare a sum type 'Status' with variants: Running, Paused, GameOver
-// declare a sum type 'Bool' with variants: True, False
+```aivi
+type Direction =
+  | Up
+  | Down
+  | Left
+  | Right
+
+type Status =
+  | Running
+  | Paused
+  | GameOver
+
+type Bool = True | False
 ```
 
 Each variant is a constructor — a value of that type.
@@ -47,20 +56,23 @@ You can write `Up` or `GameOver` directly; they are ordinary values.
 
 Variants can carry data:
 
-```text
-// declare a parametric type 'Option A' with variants: Some (holding a value of type A) and None
-// declare a parametric type 'Result E A' with variants: Ok (holding A) and Err (holding E)
-// declare a sum type 'Shape' with variant Circle carrying a radius integer,
-//   and variant Rectangle carrying width and height integers
+```aivi
+type Option A = Some A | None
+
+type Result E A = Ok A | Err E
+
+type Shape =
+  | Circle Int
+  | Rectangle Int Int
 ```
 
 `Option` and `Result` are **parametric types** — the type variables are filled in at use sites:
 
-```text
-// declare 'found' as an Option Int holding the value 42
-// declare 'missing' as an Option Int with no value
-// declare 'success' as a Result Text Int holding the successful value 100
-// declare 'failure' as a Result Text Int holding the error text "not found"
+```aivi
+val found:Option Int = Some 42
+val missing:Option Int = None
+val success:Result Text Int = Ok 100
+val failure:Result Text Int = Err "not found"
 ```
 
 The type variable is always lowercase; type names and constructors are uppercase.
@@ -69,10 +81,11 @@ The type variable is always lowercase; type names and constructors are uppercase
 
 AIVI has no `null`, `nil`, or `undefined`. The absence of a value is always explicit:
 
-```text
-// Option A is a sum type: Some (holding A) or None
-// declare 'username' as Option Text with no value (not logged in)
-// declare 'username' as Option Text holding "ada" (logged in)
+```aivi
+type Option A = Some A | None
+
+val notLoggedIn:Option Text = None
+val loggedIn:Option Text = Some "ada"
 ```
 
 Because you cannot ignore the `None` case (the compiler enforces it), null pointer bugs are
@@ -82,40 +95,94 @@ impossible by construction.
 
 A product type groups multiple named fields into one value:
 
-```text
-// declare a product type 'Point' with integer fields x and y
-// declare a product type 'User' with integer field id, and text fields username and email
+```aivi
+type Point = { x: Int, y: Int }
+
+type User = {
+    id: Int,
+    username: Text,
+    email: Text
+}
 ```
 
 Create a record by listing its fields:
 
-```text
-// declare 'origin' as a Point with x and y both set to 0
-// declare 'user' as a User with id 1, username "ada", and email "ada@example.com"
+```aivi
+type Point = { x: Int, y: Int }
+
+type User = {
+    id: Int,
+    username: Text,
+    email: Text
+}
+
+val origin:Point = {
+    x: 0,
+    y: 0
+}
+
+val user:User = {
+    id: 1,
+    username: "ada",
+    email: "ada@example.com"
+}
 ```
 
 Access fields with dot projection:
 
-```text
-// project 'username' field from user, binding result to 'name'
-// project 'x' field from origin, binding result to 'x'
+```aivi
+type User = {
+    id: Int,
+    username: Text,
+    email: Text
+}
+
+type Point = { x: Int, y: Int }
+
+fun getName:Text #user:User =>
+    user.username
+
+fun getX:Int #point:Point =>
+    point.x
 ```
 
 Records are immutable — you cannot update a field in place. Instead, create a new record:
 
-```text
-// create a new User 'movedUser' copying id and email from user, but with username "lovelace"
+```aivi
+type User = {
+    id: Int,
+    username: Text,
+    email: Text
+}
+
+fun withUsername:User #name:Text #user:User =>
+    {
+        id: user.id,
+        username: name,
+        email: user.email
+    }
 ```
 
 ### Combining sum and product types
 
 Real programs combine both. Here is a snapshot from the Snake demo:
 
-```text
-// declare a type 'Vec2' as a single-variant type carrying two integers (x and y)
-// declare a sum type 'Status' with variants Running and GameOver
-// declare a product type 'Snake' with a Vec2 head, a Vec2 second segment, and an integer length
-// declare a product type 'Game' with a Snake, a Status, and an integer score
+```aivi
+type Vec2 = Vec2 Int Int
+
+type Status = Running | GameOver
+
+type Snake = {
+    head: Vec2,
+    second: Vec2,
+    length: Int
+}
+
+type Game = {
+    snake: Snake,
+    status: Status,
+    score: Int
+}
 ```
 
 `Vec2` is a sum type with one variant that carries two `Int` values.

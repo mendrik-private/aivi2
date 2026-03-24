@@ -1,0 +1,11 @@
+class Eq A
+    (==) : A -> A -> Bool
+
+fun sameScore:Bool #a:Int #b:Int =>
+    a == b
+
+use aivi.list (any)
+
+fun containsScore:Bool #target:Int #scores:(List Int) =>
+    scores
+     |> any (sameScore target)

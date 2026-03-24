@@ -667,7 +667,7 @@ impl<'a> GeneralExprElaborator<'a> {
         };
         let expected = function
             .annotation
-            .and_then(|annotation| self.typing.lower_annotation(annotation));
+            .and_then(|annotation| self.typing.lower_open_annotation(annotation));
         let outcome = match self.lower_expr(function.body, &env, None, expected.as_ref()) {
             Ok(body) => GeneralExprOutcome::Lowered(body),
             Err(blockers) => GeneralExprOutcome::Blocked(BlockedGeneralExpr { blockers }),
@@ -822,7 +822,7 @@ impl<'a> GeneralExprElaborator<'a> {
                 });
                 continue;
             };
-            let Some(ty) = self.typing.lower_annotation(annotation) else {
+            let Some(ty) = self.typing.lower_open_annotation(annotation) else {
                 blockers.push(GeneralExprBlocker::UnknownExprType {
                     span: parameter.span,
                 });
@@ -1447,14 +1447,6 @@ impl<'a> GeneralExprElaborator<'a> {
         subject: &GateType,
         expected: Option<&GateType>,
     ) -> Result<GateRuntimePipeStage, Vec<GeneralExprBlocker>> {
-        let result_subject = self
-            .typing
-            .infer_truthy_falsy_pair(pair, env, subject)
-            .ok_or_else(|| {
-                vec![GeneralExprBlocker::UnknownExprType {
-                    span: join_spans(pair.truthy_stage.span, pair.falsy_stage.span),
-                }]
-            })?;
         let branch_expected = self.inline_pipe_stage_result_body_type(subject, expected);
         let plan = self
             .typing
@@ -1482,6 +1474,14 @@ impl<'a> GeneralExprElaborator<'a> {
             )?,
             None => self.lower_expr(pair.falsy_expr, env, None, branch_expected.as_ref())?,
         };
+        if !truthy_body.ty.same_shape(&falsy_body.ty) {
+            return Err(vec![GeneralExprBlocker::UnknownExprType {
+                span: join_spans(pair.truthy_stage.span, pair.falsy_stage.span),
+            }]);
+        }
+        let result_subject =
+            self.typing
+                .apply_truthy_falsy_result_type(subject, truthy_body.ty.clone());
         Ok(GateRuntimePipeStage {
             span: join_spans(pair.truthy_stage.span, pair.falsy_stage.span),
             input_subject: subject.gate_payload().clone(),
@@ -1653,7 +1653,9 @@ impl<'a> GeneralExprElaborator<'a> {
         expected: Option<&GateType>,
     ) -> Result<GateType, Vec<GeneralExprBlocker>> {
         if let Some(expected) = expected {
-            if expression_matches(self.module, expr_id, env, expected) {
+            if matches!(self.module.exprs()[expr_id].kind, ExprKind::Pipe(_))
+                || expression_matches(self.module, expr_id, env, expected)
+            {
                 return Ok(expected.clone());
             }
         }
@@ -2282,6 +2284,33 @@ mod tests {
             },
             other => panic!("expected lowered function body, found {other:?}"),
         }
+    }
+
+    #[test]
+    fn elaborates_truthy_falsy_branches_from_expected_result_types() {
+        let lowered = lower_text(
+            "expected-truthy-falsy-branches.aivi",
+            "fun choose:(List Int) #flag:Bool =>\n\
+                flag\n\
+                 T|> []\n\
+                 F|> [1]\n",
+        );
+        assert!(
+            !lowered.has_errors(),
+            "expected truthy/falsy fixture should lower to HIR: {:?}",
+            lowered.diagnostics()
+        );
+        let report = elaborate_general_expressions(lowered.module());
+        let choose = report
+            .items()
+            .iter()
+            .find(|item| item_name(lowered.module(), item.owner) == Some("choose"))
+            .expect("expected choose elaboration");
+        assert!(
+            matches!(choose.outcome, GeneralExprOutcome::Lowered(_)),
+            "expected choose body to lower using the annotated result type, got {:?}",
+            choose.outcome
+        );
     }
 
     #[test]

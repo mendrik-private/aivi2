@@ -279,14 +279,14 @@ impl<'a> TypeChecker<'a> {
             let Some(annotation) = parameter.annotation else {
                 continue;
             };
-            let Some(parameter_ty) = self.typing.lower_annotation(annotation) else {
+            let Some(parameter_ty) = self.typing.lower_open_annotation(annotation) else {
                 continue;
             };
             env.locals.insert(parameter.binding, parameter_ty);
         }
         let expected = item
             .annotation
-            .and_then(|annotation| self.typing.lower_annotation(annotation));
+            .and_then(|annotation| self.typing.lower_open_annotation(annotation));
         self.check_expr(item.body, &env, expected.as_ref(), &mut Vec::new());
     }
 
@@ -1990,6 +1990,9 @@ impl<'a> TypeChecker<'a> {
                 Err("`Bytes` does not have a compiler-derived `Eq` instance in v1".to_owned())
             }
             GateType::Primitive(_) => Ok(()),
+            GateType::TypeParameter { name, .. } => Err(format!(
+                "open type parameter `{name}` does not have a compiler-derived `Eq` instance in v1"
+            )),
             GateType::Tuple(elements) => {
                 for element in elements {
                     self.require_eq(element, item_stack)?;
@@ -3259,6 +3262,61 @@ val resultLabel:Result Text Text =
         assert!(
             report.is_ok(),
             "expected partial builtin case runs to typecheck, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_accepts_applied_calls_in_case_branches() {
+        let report = typecheck_text(
+            "applied-call-case-branches.aivi",
+            r#"fun addOne:Int #n:Int => n + 1
+val value:Int =
+    0
+     ||> 0 => addOne 0
+     ||> _ => 1
+"#,
+        );
+        assert!(
+            report.is_ok(),
+            "expected applied calls in case branches to typecheck, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_accepts_applied_calls_in_truthy_falsy_branches() {
+        let report = typecheck_text(
+            "applied-call-truthy-falsy-branches.aivi",
+            r#"fun addOne:Int #n:Int => n + 1
+val value:Int =
+    True
+     T|> addOne 0
+     F|> 1
+"#,
+        );
+        assert!(
+            report.is_ok(),
+            "expected applied calls in truthy/falsy branches to typecheck, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_accepts_generic_record_projection_in_function_body() {
+        let report = typecheck_text(
+            "generic-record-projection-in-function-body.aivi",
+            r#"type TakeAcc A = {
+    n: Int,
+    items: List A
+}
+fun remaining:Int #acc:(TakeAcc A) => acc.n
+fun items:(List A) #acc:(TakeAcc A) => acc.items
+"#,
+        );
+        assert!(
+            report.is_ok(),
+            "expected generic record projection in function bodies to typecheck, got diagnostics: {:?}",
             report.diagnostics()
         );
     }

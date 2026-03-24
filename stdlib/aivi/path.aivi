@@ -1,9 +1,9 @@
 type PathError = Text
 
 domain Path over Text
-    parse : Text -> Result PathError Path
-    (/) : Path -> Text -> Path
-    value : Path -> Text
+    parse: Text -> Result PathError Path
+    (/): Path -> Text -> Path
+    value: Path -> Text
 
 export PathError
 export Path

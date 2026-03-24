@@ -1,0 +1,18 @@
+type Direction =
+  | Up
+  | Down
+  | Left
+  | Right
+
+class Show A
+    show : A -> Text
+
+fun directionText:Text #d:Direction =>
+    d
+     ||> Up    => "Up"
+     ||> Down  => "Down"
+     ||> Left  => "Left"
+     ||> Right => "Right"
+
+instance Show Direction
+    show d = directionText d

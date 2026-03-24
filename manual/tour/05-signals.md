@@ -9,16 +9,23 @@ Think of it like a spreadsheet cell: when a cell it depends on changes, it updat
 
 ## Declaring a signal
 
-```text
-// declare a signal 'count' of type Int starting at 0
+```aivi
+sig count : Signal Int = 0
 ```
 
 This declares a signal named `count` that holds an `Int`. Its initial value is `0`.
 
 A signal that derives from another signal uses `\|>`:
 
-```text
-// derive a signal 'doubled' from count, always equal to count multiplied by 2
+```aivi
+fun timesTwo:Int #n:Int =>
+    n * 2
+
+sig count : Signal Int = 0
+
+sig doubled : Signal Int =
+    count
+     |> timesTwo
 ```
 
 `doubled` is always `count * 2`. You do not manually update it; the runtime maintains the
@@ -28,11 +35,26 @@ dependency.
 
 Any pipe chain that starts with a signal produces a new signal:
 
-```text
-// derive 'scoreLine' from the game signal
-// extract the score field
-// format it as the text "Score: N"
-// recomputes whenever game changes
+```aivi
+type Status = Running | GameOver
+
+type Game = {
+    score: Int,
+    status: Status
+}
+
+sig game : Signal Game = {
+    score: 0,
+    status: Running
+}
+
+fun formatScore:Text #n:Int =>
+    "Score: {n}"
+
+sig scoreLine : Signal Text =
+    game
+     |> .score
+     |> formatScore
 ```
 
 `scoreLine` recomputes whenever `game` changes. The `\|>` pipes you already know work
@@ -43,11 +65,19 @@ identically on signals.
 The recurrence pattern is how signals accumulate state over time.
 `@\|>` starts the recurrent flow; `<\|@` is the recurrence step.
 
-```text
-// declare a helper function 'add' that adds x to n
-// bind the signal 'count' to the "inc" button click event
-// count starts at 0
-// each time the button fires, fold "add 1" into the accumulated count
+```aivi
+fun addOne:Int #n:Int =>
+    n + 1
+
+provider button.clicked
+    wakeup: sourceEvent
+    argument id: Text
+
+@source button.clicked "inc"
+sig count : Signal Int =
+    0
+     @|> addOne
+     <|@ addOne
 ```
 
 Reading this:
@@ -60,10 +90,32 @@ Reading this:
 
 ## Example: direction signal in Snake
 
-```text
-// bind 'direction' to keyboard key-down events, ignoring key repeats, only when focused
-// direction starts as Right
-// on each key-down event, apply keepDirection with the key press to compute the new direction
+```aivi
+type Key = Key Text
+
+type Direction =
+  | Up
+  | Down
+  | Left
+  | Right
+
+fun updateDirection:Direction #key:Key #current:Direction =>
+    current
+
+@source window.keyDown with {
+    repeat: False,
+    focusOnly: True
+}
+sig keyDown : Signal Key
+
+@source window.keyDown with {
+    repeat: False,
+    focusOnly: True
+}
+sig direction : Signal Direction =
+    Right
+     @|> updateDirection keyDown
+     <|@ updateDirection keyDown
 ```
 
 On each `keyDown` event, `@\|>` starts the recurrence and `<\|@` applies `keepDirection keyDown`
@@ -71,10 +123,54 @@ to the current direction, storing the result as the new direction.
 
 ## Example: game state signal
 
-```text
-// bind 'game' to a timer that fires every 160 milliseconds, firing once immediately and coalescing rapid ticks
-// game starts at the initial game state
-// on each timer tick, apply stepGame with boardSize and current direction to advance the game
+```aivi
+type Status = Running | GameOver
+
+type Pixel = { x: Int, y: Int }
+
+type Direction =
+  | Up
+  | Down
+  | Left
+  | Right
+
+type BoardSize = {
+    width: Int,
+    height: Int
+}
+
+type Game = {
+    snake: List Pixel,
+    food: Pixel,
+    score: Int,
+    status: Status
+}
+
+val boardSize:BoardSize = {
+    width: 12,
+    height: 10
+}
+
+val initialGame:Game = {
+    snake: [],
+    food: { x: 10, y: 1 },
+    score: 0,
+    status: Running
+}
+
+fun stepGame:Game #size:BoardSize #direction:Direction #game:Game =>
+    game
+
+sig direction : Signal Direction = Right
+
+@source timer.every 160 with {
+    immediate: True,
+    coalesce: True
+}
+sig game : Signal Game =
+    initialGame
+     @|> stepGame boardSize direction
+     <|@ stepGame boardSize direction
 ```
 
 Every 160 ms the timer fires. `stepGame` runs with the current `direction`, producing the next
@@ -84,14 +180,29 @@ Every 160 ms the timer fires. `stepGame` runs with the current `direction`, prod
 
 `<|@` can introduce a different source from `@|>`. A counter with two buttons:
 
-```text
-// declare a message type 'Msg' with variants Increment and Decrement
-// declare a function 'update' that increments or decrements count based on a message
-// bind 'increment' signal to the "increment" button, emitting the Increment message
-// bind 'decrement' signal to the "decrement" button, emitting the Decrement message
-// count starts at 0
-// on each increment event, fold update with Increment into the accumulated count
-// on each decrement event, fold update with Decrement into the accumulated count
+```aivi
+type Msg = Increment | Decrement
+
+fun update:Int #msg:Msg #n:Int =>
+    msg
+     ||> Increment => n + 1
+     ||> Decrement => n - 1
+
+provider button.clicked
+    wakeup: sourceEvent
+    argument id: Text
+
+@source button.clicked "increment"
+sig increment : Signal Unit
+
+@source button.clicked "decrement"
+sig decrement : Signal Unit
+
+@source button.clicked "increment"
+sig count : Signal Int =
+    0
+     @|> update Increment
+     <|@ update Decrement
 ```
 
 `@|>` opens the recurrence triggered by `increment`; `<|@` adds `decrement` as a second

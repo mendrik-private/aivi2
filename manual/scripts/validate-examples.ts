@@ -91,7 +91,7 @@ for (const mdFile of markdownFiles) {
   const snippets = extractSnippets(mdFile)
   for (const snippet of snippets) {
     const tmpFile = path.join(tmpDir, `snippet-${snippetIndex}.aivi`)
-    fs.writeFileSync(tmpFile, snippet.content, 'utf8')
+    fs.writeFileSync(tmpFile, snippet.content + '\n', 'utf8')
 
     const rel = path.relative(manualRoot, snippet.sourcePath)
 

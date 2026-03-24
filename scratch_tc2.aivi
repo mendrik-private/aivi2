@@ -1,0 +1,26 @@
+class Eq A
+    (==) : A -> A -> Bool
+    (!=) : A -> A -> Bool
+
+type Color = Red | Green | Blue
+
+fun colorEq:Bool #left:Color #right:Color =>
+    (left, right)
+     ||> (Red, Red)     => True
+     ||> (Red, Green)   => False
+     ||> (Red, Blue)    => False
+     ||> (Green, Red)   => False
+     ||> (Green, Green) => True
+     ||> (Green, Blue)  => False
+     ||> (Blue, Red)    => False
+     ||> (Blue, Green)  => False
+     ||> (Blue, Blue)   => True
+
+fun colorNeq:Bool #left:Color #right:Color =>
+    colorEq left right
+     T|> False
+     F|> True
+
+instance Eq Color
+    (==) left right = colorEq left right
+    (!=) left right = colorNeq left right

@@ -23,7 +23,7 @@ type Orientation =
 
 type Status = Running | GameOver
 
-type Pixel = { x: Int, y: Int }
+type Pixel = Pixel Int Int
 
 type BoardSize = {
     width: Int,
@@ -34,7 +34,8 @@ type Game = {
     snake: List Pixel,
     food: Pixel,
     score: Int,
-    status: Status
+    status: Status,
+    seed: Int
 }
 
 type CellKind =
@@ -68,13 +69,14 @@ val maxLength:Int = 6
 
 val initialGame:Game = {
     snake: [
-        { x: 6, y: 5 },
-        { x: 5, y: 5 },
-        { x: 4, y: 5 }
+        Pixel 6 5,
+        Pixel 5 5,
+        Pixel 4 5
     ],
-    food: { x: 10, y: 1 },
+    food: Pixel 10 1,
     score: 0,
-    status: Running
+    status: Running,
+    seed: 2463534242
 }
 
 type TakeAcc A = {
@@ -117,36 +119,52 @@ fun guardDirection:Direction #candidate:Direction #current:Direction =>
      T|> current
      F|> candidate
 
-fun updateDirection:Direction #key:Key #current:Direction =>
-    arrowKey key
+fun filterDirection:Direction #current:Direction #opt:(Option Direction) =>
+    opt
      ||> Some dir => guardDirection dir current
      ||> None     => current
 
+fun updateDirection:Direction #key:Key #current:Direction =>
+    arrowKey key
+     |> filterDirection current
+
 fun moveHead:Pixel #dx:Int #dy:Int #p:Pixel =>
-    { x: p.x + dx, y: p.y + dy }
+    p
+     ||> Pixel px py => Pixel (px + dx) (py + dy)
+
+fun moveUp:Pixel #p:Pixel =>
+    p
+     |> moveHead 0 (0 - 1)
+
+fun moveDown:Pixel #p:Pixel =>
+    p
+     |> moveHead 0 1
+
+fun moveLeft:Pixel #p:Pixel =>
+    p
+     |> moveHead (0 - 1) 0
+
+fun moveRight:Pixel #p:Pixel =>
+    p
+     |> moveHead 1 0
 
 fun nextHead:Pixel #direction:Direction #head:Pixel =>
     direction
-     ||> Up    => moveHead 0 - 1 head
-     ||> Down  => moveHead 0 1 head
-     ||> Left  => moveHead - 1 0 head
-     ||> Right => moveHead 1 0 head
+     ||> Up    => moveUp head
+     ||> Down  => moveDown head
+     ||> Left  => moveLeft head
+     ||> Right => moveRight head
 
-fun spawnAt:Pixel #size:BoardSize #score:Int =>
-    score % 8
-     ||> 0 => { x: size.width - 2, y: 1 }
-     ||> 1 => { x: size.width - 2, y: size.height - 2 }
-     ||> 2 => { x: 1, y: size.height - 2 }
-     ||> 3 => { x: 4, y: 2 }
-     ||> 4 => { x: 2, y: 7 }
-     ||> 5 => { x: 9, y: 3 }
-     ||> 6 => { x: 3, y: 8 }
-     ||> _ => { x: 7, y: 4 }
+fun nextSeed:Int #seed:Int =>
+    (seed * 1103515245 + 12345) % 2147483648
+
+fun spawnAt:Pixel #size:BoardSize #seed:Int =>
+    Pixel (seed % (size.width - 2) + 1) (nextSeed seed % (size.height - 2) + 1)
 
 fun snakeHead:Pixel #snake:(List Pixel) =>
     snake
      |> head
-     |> getOrElse { x: 0, y: 0 }
+     |> getOrElse (Pixel 0 0)
 
 fun movedHead:Pixel #direction:Direction #snake:(List Pixel) =>
     nextHead direction (snakeHead snake)
@@ -163,13 +181,22 @@ fun occupiesBody:Bool #snake:(List Pixel) #p:Pixel =>
 fun willEat:Bool #direction:Direction #food:Pixel #snake:(List Pixel) =>
     movedHead direction snake == food
 
+fun growSnake:(List Pixel) #direction:Direction #snake:(List Pixel) =>
+    append [movedHead direction snake] snake
+     |> take maxLength
+
+fun moveSnake:(List Pixel) #direction:Direction #snake:(List Pixel) =>
+    append [movedHead direction snake] snake
+     |> take (length snake)
+
 fun advanceSnake:(List Pixel) #direction:Direction #ate:Bool #snake:(List Pixel) =>
     ate
-     T|> take maxLength (append [movedHead direction snake] snake)
-     F|> take (length snake) (append [movedHead direction snake] snake)
+     T|> growSnake direction snake
+     F|> moveSnake direction snake
 
 fun hitsWall:Bool #size:BoardSize #p:Pixel =>
-    p.x < 0 or p.x > size.width - 1 or p.y < 0 or p.y > size.height - 1
+    p
+     ||> Pixel px py => px < 0 or px > size.width - 1 or py < 0 or py > size.height - 1
 
 fun hasCollision:Bool #size:BoardSize #direction:Direction #game:Game =>
     hitsWall size (movedHead direction game.snake) or occupiesBody game.snake (movedHead direction game.snake)
@@ -184,23 +211,28 @@ fun nextScore:Int #ate:Bool #score:Int =>
      T|> score + 1
      F|> score
 
-fun nextFood:Pixel #ate:Bool #food:Pixel #size:BoardSize #score:Int =>
+fun nextFood:Pixel #ate:Bool #food:Pixel #size:BoardSize #seed:Int =>
     ate
-     T|> spawnAt size score
+     T|> spawnAt size seed
      F|> food
 
 fun applyStep:Game #size:BoardSize #direction:Direction #game:Game #ate:Bool =>
     {
         snake: advanceSnake direction ate game.snake,
-        food: nextFood ate game.food size (nextScore ate game.score),
+        food: nextFood ate game.food size (nextSeed game.seed),
         score: nextScore ate game.score,
-        status: nextStatusFor size direction game
+        status: nextStatusFor size direction game,
+        seed: nextSeed game.seed
     }
+
+fun stepRunning:Game #size:BoardSize #direction:Direction #game:Game =>
+    willEat direction game.food game.snake
+     |> applyStep size direction game
 
 fun stepGame:Game #size:BoardSize #direction:Direction #game:Game =>
     game.status
      ||> GameOver => game
-     ||> Running  => applyStep size direction game (willEat direction game.food game.snake)
+     ||> Running  => stepRunning size direction game
 
 fun cellFoodOrEmpty:CellKind #game:Game #pos:Pixel =>
     pos == game.food
@@ -220,7 +252,7 @@ fun cellAt:CellKind #game:Game #pos:Pixel =>
 fun makeCell:BoardCell #game:Game #row:Int #col:Int =>
     {
         id: col,
-        kind: cellAt game { x: col, y: row }
+        kind: cellAt game (Pixel col row)
     }
 
 fun rowCells:(List BoardCell) #size:BoardSize #game:Game #row:Int =>
@@ -233,7 +265,7 @@ fun makeRow:BoardRow #size:BoardSize #game:Game #row:Int =>
         cells: rowCells size game row
     }
 
-fun boardRows:(List BoardRow) #size:BoardSize #game:Game =>
+fun buildBoardRows:(List BoardRow) #size:BoardSize #game:Game =>
     range 0 size.height
      *|> makeRow size game
 
@@ -241,7 +273,7 @@ fun toBoard:GameBoard #size:BoardSize #game:Game =>
     {
         width: size.width,
         height: size.height,
-        rows: boardRows size game
+        rows: buildBoardRows size game
     }
 
 fun cellGlyph:Text #kind:CellKind =>
@@ -279,6 +311,7 @@ sig keyDown : Signal Key
 sig direction : Signal Direction =
     Right
      @|> updateDirection keyDown
+     <|@ updateDirection keyDown
 
 @source timer.every 160 with {
     immediate: True,
@@ -287,6 +320,7 @@ sig direction : Signal Direction =
 sig game : Signal Game =
     initialGame
      @|> stepGame boardSize direction
+     <|@ stepGame boardSize direction
 
 sig board : Signal GameBoard =
     game

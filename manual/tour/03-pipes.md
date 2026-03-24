@@ -7,10 +7,17 @@ The idea is borrowed from Unix: data flows from left to right through a sequence
 
 `\|>` takes the value on its left and passes it as the first argument to the function on its right.
 
-```text
-// start with the value 42
-// pass it through 'double'
-// then pass the result through 'toString', binding the final value to 'result'
+```aivi
+fun double:Int #n:Int =>
+    n * 2
+
+fun asText:Text #n:Int =>
+    "{n}"
+
+val result:Text =
+    42
+     |> double
+     |> asText
 ```
 
 This is equivalent to `toString (double 42)`. Pipes let you read computation top-to-bottom
@@ -18,64 +25,157 @@ instead of inside-out.
 
 Compare these two forms of the same computation:
 
-```text
-// nested style: clamp rawScore to 0–100, add bonus of 10, then format the score (reads inside-out)
-// pipe style: start with rawScore, clamp to 0–100, add a bonus of 10, then format the score (reads top-to-bottom)
+```aivi
+fun clampLow:Int #lo:Int #value:Int =>
+    value < lo
+     T|> lo
+     F|> value
+
+fun clamp:Int #lo:Int #hi:Int #value:Int =>
+    value > hi
+     T|> hi
+     F|> clampLow lo value
+
+fun addBonus:Int #bonus:Int #score:Int =>
+    score + bonus
+
+fun formatScore:Text #score:Int =>
+    "Score: {score}"
+
+val rawScore:Int = 95
+
+val formatted:Text =
+    rawScore
+     |> clamp 0 100
+     |> addBonus 10
+     |> formatScore
 ```
 
-When you pass partial arguments before the piped value, `\|>` inserts the left-hand value
+When you pass partial arguments before the piped value, `|>` inserts the left-hand value
 as the **last** argument:
 
-```text
-// clamp is a function taking lower bound, upper bound, and value
-// pipe rawScore into clamp with bounds 0 and 100
-// the piped value is inserted as the final argument to clamp
+```aivi
+fun clampLow:Int #lo:Int #value:Int =>
+    value < lo
+     T|> lo
+     F|> value
+
+fun clamp:Int #lo:Int #hi:Int #value:Int =>
+    value > hi
+     T|> hi
+     F|> clampLow lo value
+
+val rawScore:Int = 95
+
+val clamped:Int =
+    rawScore
+     |> clamp 0 100
 ```
 
 ## Projection shorthand
 
 A common pattern is projecting a field from a record:
 
-```text
-// project the 'username' field from user, binding the result to 'name'
+```aivi
+type User = {
+    id: Int,
+    username: Text,
+    email: Text
+}
+
+val user:User = {
+    id: 1,
+    username: "ada",
+    email: "ada@example.com"
+}
+
+fun getName:Text #user:User =>
+    user
+     |> .username
 ```
 
 The `.field` syntax is a shorthand for `\r => r.field`.
 It composes naturally in pipes:
 
-```text
-// derive 'boardTitle' from the board signal
-// extract its width field
-// format it as the text "Board width: W"
+```aivi
+type Board = {
+    width: Int,
+    height: Int
+}
+
+fun formatWidth:Text #n:Int =>
+    "Board width: {n}"
+
+sig board : Signal Board = {
+    width: 10,
+    height: 10
+}
+
+sig boardTitle : Signal Text =
+    board
+     |> .width
+     |> formatWidth
 ```
 
 ## Chaining pipes
 
 Pipes chain arbitrarily. Each `\|>` is one step in the computation:
 
-```text
-// derive 'scoreLabel' from the game signal
-// extract the score field
-// multiply the score by 10
-// format it as "Score: N pts"
+```aivi
+type Game = { score: Int }
+
+fun timesten:Int #n:Int =>
+    n * 10
+
+fun asScoreText:Text #n:Int =>
+    "Score: {n} pts"
+
+sig game : Signal Game = {
+    score: 0
+}
+
+sig scoreLabel : Signal Text =
+    game
+     |> .score
+     |> timesten
+     |> asScoreText
 ```
 
 ## Why pipes instead of nested calls?
 
-Consider a computation with five steps. With nested calls:
+Consider a computation with five steps. With nested calls, you must read inside-out:
 
 ```text
-// apply five transformation steps to input in sequence, reading from innermost to outermost
+step5 (step4 (step3 (step2 (step1 input))))
 ```
-
-You must read from the inside out, matching parentheses as you go.
 
 With pipes:
 
-```text
-// start with input
-// pass through step1, then step2, then step3, then step4, then step5 in sequence
-// bind the final value to 'result'
+```aivi
+fun step1:Int #n:Int =>
+    n + 1
+
+fun step2:Int #n:Int =>
+    n * 2
+
+fun step3:Int #n:Int =>
+    n - 3
+
+fun step4:Int #n:Int =>
+    n * n
+
+fun step5:Text #n:Int =>
+    "result: {n}"
+
+val input:Int = 5
+
+val result:Text =
+    input
+     |> step1
+     |> step2
+     |> step3
+     |> step4
+     |> step5
 ```
 
 The computation reads in execution order, top to bottom.
@@ -86,20 +186,41 @@ Each step is on its own line. Inserting, removing, or reordering steps is straig
 `?\|>` passes the value only if a condition is true.
 If the condition is false, the value is **suppressed** — nothing flows downstream.
 
-```text
-// declare a predicate 'isNonEmpty' that returns True when text is not empty
-// derive 'validInput' from rawInput, suppressing the value when rawInput is empty
-// validInput only carries a value when rawInput passes the isNonEmpty gate
+```aivi
+fun isNonEmpty:Bool #text:Text =>
+    text != ""
+
+sig rawInput : Signal Text = ""
+
+sig validInput : Signal Text =
+    rawInput
+     ?|> isNonEmpty
 ```
 
 `validInput` only has a value when `rawInput` is non-empty.
 This is useful for validation: downstream signals only fire when the gate is open.
 
-```text
-// declare a predicate 'hasName' that checks the form has a non-empty name field
-// declare a predicate 'hasEmail' that checks the form has a non-empty email field
-// derive 'submittable' from formData, gating on both hasName and hasEmail
-// submittable only has a value when both name and email are non-empty
+```aivi
+type FormData = {
+    name: Text,
+    email: Text
+}
+
+fun hasName:Bool #form:FormData =>
+    form.name != ""
+
+fun hasEmail:Bool #form:FormData =>
+    form.email != ""
+
+sig formData : Signal FormData = {
+    name: "",
+    email: ""
+}
+
+sig submittable : Signal FormData =
+    formData
+     ?|> hasName
+     ?|> hasEmail
 ```
 
 ## The truthy and falsy pipes T\|> and F\|>
@@ -107,18 +228,33 @@ This is useful for validation: downstream signals only fire when the gate is ope
 `T\|>` and `F\|>` are conditional path selectors. Given a `Bool` on the left, they pass
 a value (not the condition) depending on whether it is `True` or `False`:
 
-```text
-// declare a function 'absolute' taking an integer n
-// if n is less than 0, return n negated
-// otherwise return n unchanged
+```aivi
+fun absolute:Int #n:Int =>
+    n < 0
+     T|> 0 - n
+     F|> n
 ```
 
 `T\|>` and `F\|>` are usually used in pairs. They are the AIVI alternative to `if`/`else`:
 
-```text
-// declare a function 'applyDirection' taking a current and a candidate direction
-// if the candidate is opposite to the current direction, keep the current direction
-// otherwise use the candidate direction
+```aivi
+type Direction =
+  | Up
+  | Down
+  | Left
+  | Right
+
+fun oppositeOf:Direction #d:Direction =>
+    d
+     ||> Up    => Down
+     ||> Down  => Up
+     ||> Left  => Right
+     ||> Right => Left
+
+fun applyDirection:Direction #candidate:Direction #current:Direction =>
+    oppositeOf candidate == current
+     T|> current
+     F|> candidate
 ```
 
 If `isOpposite candidate current` is `True`, the result is `current`.

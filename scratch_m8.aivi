@@ -1,0 +1,9 @@
+type Orientation =
+  | Vertical
+  | Horizontal
+
+val layout =
+    <Box orientation={Vertical} spacing={12}>
+        <Label text="First" />
+        <Label text="Second" />
+    </Box>

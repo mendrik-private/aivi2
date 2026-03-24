@@ -1,0 +1,4 @@
+type Ordering = LT | EQ | GT
+
+class Eq A => Ord A
+    compare : A -> A -> Ordering

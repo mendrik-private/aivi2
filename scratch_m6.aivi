@@ -1,0 +1,21 @@
+type Status = Running | GameOver
+
+type Orientation =
+  | Vertical
+  | Horizontal
+
+sig status : Signal Status = Running
+
+val main =
+    <Window title="Status">
+        <match on={status}>
+            <case pattern={Running}>
+                <Label text="Game is running" />
+            </case>
+            <case pattern={GameOver}>
+                <Label text="Game over!" />
+            </case>
+        </match>
+    </Window>
+
+export main

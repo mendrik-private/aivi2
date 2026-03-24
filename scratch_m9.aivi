@@ -1,0 +1,14 @@
+type Orientation =
+  | Vertical
+  | Horizontal
+
+val cellSize:Int = 32
+
+type Game = { width: Int }
+
+val game:Game = { width: 12 }
+
+val view =
+    <Box orientation={Horizontal} spacing={cellSize}>
+        <Label text="{game.width}" />
+    </Box>

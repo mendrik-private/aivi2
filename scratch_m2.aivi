@@ -1,0 +1,13 @@
+val score:Int = 42
+val msg:Text = "Current score: {score}"
+
+type Orientation =
+  | Vertical
+  | Horizontal
+
+val main =
+    <Window title="Score: {score}">
+        <Label text={msg} />
+    </Window>
+
+export main

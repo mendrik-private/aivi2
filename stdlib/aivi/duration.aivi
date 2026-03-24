@@ -1,14 +1,14 @@
 type DurationError = Text
 
 domain Duration over Int
-    literal ms : Int -> Duration
-    literal sec : Int -> Duration
-    literal min : Int -> Duration
-    millis : Int -> Duration
-    trySeconds : Int -> Result DurationError Duration
-    value : Duration -> Int
-    (+) : Duration -> Duration -> Duration
-    (-) : Duration -> Duration -> Duration
+    literal ms: Int -> Duration
+    literal sec: Int -> Duration
+    literal min: Int -> Duration
+    millis: Int -> Duration
+    trySeconds: Int -> Result DurationError Duration
+    value: Duration -> Int
+    (+): Duration -> Duration -> Duration
+    (-): Duration -> Duration -> Duration
 
 export DurationError
 export Duration

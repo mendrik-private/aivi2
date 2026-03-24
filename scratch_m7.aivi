@@ -1,0 +1,14 @@
+type Orientation =
+  | Vertical
+  | Horizontal
+
+sig isLoggedIn : Signal Bool = False
+
+val main =
+    <Window title="App">
+        <show when={isLoggedIn}>
+            <Button label="Log out" />
+        </show>
+    </Window>
+
+export main

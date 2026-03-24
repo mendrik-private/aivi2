@@ -1,0 +1,12 @@
+type Orientation =
+  | Vertical
+  | Horizontal
+
+val main =
+    <Window title="Hello AIVI">
+        <Box orientation={Vertical} spacing={8}>
+            <Button label="Click me" />
+        </Box>
+    </Window>
+
+export main

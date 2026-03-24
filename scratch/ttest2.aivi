@@ -1,0 +1,7 @@
+fun double:Int #n:Int => n * 2
+
+fun testFn:Result Text Int #x:Int =>
+    Ok x
+     |> ._ 
+     ||> Err msg => Err msg
+     ||> Ok n    => Ok (double n)

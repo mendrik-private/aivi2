@@ -7,9 +7,14 @@ Sources are attached to signals using the `@source` decorator.
 
 ## The @source decorator
 
-```text
-// declare a signal 'keyDown' driven by keyboard key-down events from the window
-// configured to ignore key-repeat events and only fire when the window has focus
+```aivi
+type Key = Key Text
+
+@source window.keyDown with {
+    repeat: False,
+    focusOnly: True
+}
+sig keyDown : Signal Key
 ```
 
 `@source` names the source (`window.keyDown`) and passes a configuration record.
@@ -32,10 +37,12 @@ You never unsubscribe manually. The runtime handles it.
 
 The `timer.every` source fires at a fixed interval:
 
-```text
-// declare a signal 'tick' driven by a timer firing every 160 milliseconds
-// fires once immediately on activation
-// drops queued ticks if the handler is busy (coalesce)
+```aivi
+@source timer.every 160 with {
+    immediate: True,
+    coalesce: True
+}
+sig tick : Signal Unit
 ```
 
 - `timer.every 160` fires every 160 milliseconds.
@@ -44,10 +51,54 @@ The `timer.every` source fires at a fixed interval:
 
 The snake game uses this to drive the game loop:
 
-```text
-// bind 'game' to a timer firing every 160 ms, with an immediate first tick and coalescing
-// game starts at the initial game state
-// on each timer tick, apply stepGame with boardSize and direction to advance the game state
+```aivi
+type Status = Running | GameOver
+
+type Pixel = { x: Int, y: Int }
+
+type Direction =
+  | Up
+  | Down
+  | Left
+  | Right
+
+type BoardSize = {
+    width: Int,
+    height: Int
+}
+
+type Game = {
+    snake: List Pixel,
+    food: Pixel,
+    score: Int,
+    status: Status
+}
+
+val boardSize:BoardSize = {
+    width: 12,
+    height: 10
+}
+
+val initialGame:Game = {
+    snake: [],
+    food: { x: 10, y: 1 },
+    score: 0,
+    status: Running
+}
+
+val direction:Direction = Right
+
+fun stepGame:Game #size:BoardSize #direction:Direction #game:Game =>
+    game
+
+@source timer.every 160 with {
+    immediate: True,
+    coalesce: True
+}
+sig game : Signal Game =
+    initialGame
+     @|> stepGame boardSize direction
+     <|@ stepGame boardSize direction
 ```
 
 Every 160 ms, `stepGame` runs and the `game` signal updates, which cascades to `board`,
@@ -55,9 +106,18 @@ Every 160 ms, `stepGame` runs and the `game` signal updates, which cascades to `
 
 ## HTTP source
 
-```text
-// declare a signal 'userData' driven by an HTTP GET request to the given URL
-// the signal carries either a successfully parsed User or an HttpError
+```aivi
+type HttpError =
+  | Timeout
+  | DecodeFailure Text
+
+type User = {
+    id: Int,
+    name: Text
+}
+
+@source http.get "/api/user/1"
+sig userData : Signal (Result HttpError User)
 ```
 
 The signal starts empty (`None` or a loading state depending on the source type).
@@ -65,14 +125,24 @@ When the HTTP response arrives, the signal fires with `Ok user` or `Err message`
 
 ## Button click source
 
-```text
-// declare a signal 'submitClicked' that fires when the button with id "submit" is clicked
+```aivi
+sig submitClicked : Signal Unit
 ```
+
+This is an input signal — it has no body and is driven externally. In markup, connect it via
+`onClick={submitClicked}` on a `<Button>` element.
 
 The source name `"submit"` corresponds to the `id` attribute on a `<Button>` in markup:
 
-```text
-// render a Window titled "Form" containing a Button labeled "Submit" with id "submit"
+```aivi
+sig submitClicked : Signal Unit
+
+val main =
+    <Window title="Form">
+        <Button label="Submit" onClick={submitClicked} />
+    </Window>
+
+export main
 ```
 
 ## Source configuration

@@ -1,0 +1,43 @@
+type CellKind =
+  | SnakeHead
+  | SnakeBody
+  | Food
+  | Empty
+
+type BoardCell = {
+    id: Int,
+    kind: CellKind
+}
+
+type BoardRow = {
+    id: Int,
+    cells: List BoardCell
+}
+
+type Orientation =
+  | Vertical
+  | Horizontal
+
+fun cellGlyph:Text #kind:CellKind =>
+    kind
+     ||> SnakeHead => "@"
+     ||> SnakeBody => "o"
+     ||> Food      => "*"
+     ||> Empty     => "."
+
+sig boardRows : Signal (List BoardRow) = []
+
+val main =
+    <Window title="Board">
+        <Box orientation={Vertical} spacing={2}>
+            <each of={boardRows} as={row} key={row.id}>
+                <Box orientation={Horizontal} spacing={2}>
+                    <each of={row.cells} as={cell} key={cell.id}>
+                        <Label text={cellGlyph cell.kind} />
+                    </each>
+                </Box>
+            </each>
+        </Box>
+    </Window>
+
+export main

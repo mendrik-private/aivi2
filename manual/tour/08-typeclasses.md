@@ -6,10 +6,10 @@ type class instances come with **laws** — invariants the implementation must u
 
 ## Declaring a class
 
-```text
-// declare a type class 'Eq' for any type A
-// requires an equality operator returning Bool
-// requires an inequality operator returning Bool
+```aivi
+class Eq A
+    (==) : A -> A -> Bool
+    (!=) : A -> A -> Bool
 ```
 
 This declares a class `Eq` parameterized over a type `A`.
@@ -17,9 +17,33 @@ Any type that implements `Eq` must provide `==` and `!=`.
 
 ## Writing an instance
 
-```text
-// declare a sum type 'Color' with variants Red, Green, Blue
-// declare that Color implements the Eq class (compiler derives equality from the type structure)
+```aivi
+class Eq A
+    (==) : A -> A -> Bool
+    (!=) : A -> A -> Bool
+
+type Color = Red | Green | Blue
+
+fun colorEq:Bool #left:Color #right:Color =>
+    (left, right)
+     ||> (Red, Red)     => True
+     ||> (Red, Green)   => False
+     ||> (Red, Blue)    => False
+     ||> (Green, Red)   => False
+     ||> (Green, Green) => True
+     ||> (Green, Blue)  => False
+     ||> (Blue, Red)    => False
+     ||> (Blue, Green)  => False
+     ||> (Blue, Blue)   => True
+
+fun colorNeq:Bool #left:Color #right:Color =>
+    colorEq left right
+     T|> False
+     F|> True
+
+instance Eq Color
+    (==) left right = colorEq left right
+    (!=) left right = colorNeq left right
 ```
 
 The compiler derives structural equality for closed product and sum types whose fields all
@@ -33,8 +57,10 @@ AIVI ships three fundamental classes:
 
 ### Eq — equality
 
-```text
-// define the Eq class: requires equality and inequality operators for type A
+```aivi
+class Eq A
+    (==) : A -> A -> Bool
+    (!=) : A -> A -> Bool
 ```
 
 Most built-in types (`Int`, `Bool`, `Text`, `List A`) are instances of `Eq`.
@@ -42,27 +68,45 @@ Your product and sum types get `Eq` for free if all their fields have `Eq` insta
 
 ### Show — text representation
 
-```text
-// declare a type class 'Show' for any type A
-// requires a 'show' function that converts A to a human-readable Text
+```aivi
+class Show A
+    show : A -> Text
 ```
 
 `show` converts a value to a human-readable `Text`.
 The snake game uses this pattern with hand-written text functions rather than the class,
 but `Show` is the standard interface:
 
-```text
-// declare that Direction implements the Show class (compiler derives text representation from constructor names)
+```aivi
+type Direction =
+  | Up
+  | Down
+  | Left
+  | Right
+
+class Show A
+    show : A -> Text
+
+fun directionText:Text #d:Direction =>
+    d
+     ||> Up    => "Up"
+     ||> Down  => "Down"
+     ||> Left  => "Left"
+     ||> Right => "Right"
+
+instance Show Direction
+    show d = directionText d
 ```
 
 The instance body is filled in by the compiler based on the constructor names.
 
 ### Ord — ordering
 
-```text
-// declare a type class 'Ord' for any type A (requires Eq as a superclass)
-// requires a 'compare' function returning an Ordering value
-// Ordering is a sum type with variants LT (less than), EQ (equal), GT (greater than)
+```aivi
+type Ordering = LT | EQ | GT
+
+class Ord A
+    compare : A -> A -> Ordering
 ```
 
 `Ord` requires `Eq` as a superclass constraint. Any type with a meaningful ordering can
@@ -72,10 +116,18 @@ implement `Ord`, enabling use with sorting and comparison functions.
 
 When a function is generic but requires a class capability, you express this with a constraint:
 
-```text
-// declare a generic function 'matches' comparing two values of type A, requiring Eq for A
-// declare a generic function 'contains' checking whether a list includes a given item, requiring Eq for A
-// filter the list to items matching the target, count them, and return True if the count is greater than zero
+```aivi
+class Eq A
+    (==) : A -> A -> Bool
+
+fun sameScore:Bool #a:Int #b:Int =>
+    a == b
+
+use aivi.list (any)
+
+fun containsScore:Bool #target:Int #scores:(List Int) =>
+    scores
+     |> any (sameScore target)
 ```
 
 The `with Eq A` syntax says: "this function works for any type `A`, but only if `A` has

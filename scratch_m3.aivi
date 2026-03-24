@@ -1,0 +1,25 @@
+type Orientation =
+  | Vertical
+  | Horizontal
+
+provider button.clicked
+    wakeup: sourceEvent
+    argument id: Text
+
+fun addOne:Int #n:Int =>
+    n + 1
+
+@source button.clicked "inc"
+sig count : Signal Int =
+    0
+     @|> addOne
+     <|@ addOne
+
+sig labelText : Signal Text = "Clicked {count} times"
+
+val main =
+    <Window title="Counter">
+        <Label text={labelText} />
+    </Window>
+
+export main

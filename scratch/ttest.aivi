@@ -1,0 +1,7 @@
+fun double:Int #n:Int => n * 2
+fun parseNum:Result Text Int #t:Text => Ok 0
+
+fun testFn:Result Text Int #x:Int =>
+    parseNum "hello"
+     ||> Err msg => Err msg
+     ||> Ok n    => Ok (double n)

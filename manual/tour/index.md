@@ -24,23 +24,33 @@ Before diving into the details, here is a small but complete AIVI program.
 The tour will dissect each piece.
 
 ```aivi
-// A simple todo-item counter
+use aivi.list (length)
 
-type Filter = All | Active | Done
+type Filter =
+  | All
+  | Active
+  | Done
 
 type TodoItem = {
-    id:   Int,
+    id: Int,
     text: Text,
     done: Bool
 }
 
-fun countActive:Int #items:List TodoItem =>
-    items
-     *|> _
-     ?|> not .done 
-     <|* length
+type Orientation =
+  | Vertical
+  | Horizontal
 
-@source window.keyDown with { repeat: False }
+fun countActive:Int #items:(List TodoItem) =>
+    items
+     |> length
+
+fun formatStatus:Text #n:Int =>
+    "{n} items remaining"
+
+@source window.keyDown with {
+    repeat: False
+}
 sig lastKey : Signal Text
 
 sig todos : Signal (List TodoItem) = []
@@ -51,7 +61,7 @@ sig activeCount : Signal Int =
 
 sig statusText : Signal Text =
     activeCount
-     |> "{_} items remaining"
+     |> formatStatus
 
 val main =
     <Window title="Todos">

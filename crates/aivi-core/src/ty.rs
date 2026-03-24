@@ -1,6 +1,9 @@
 use std::fmt;
 
-use aivi_hir::{BuiltinType, GateType as HirGateType, ItemId as HirItemId};
+use aivi_hir::{
+    BuiltinType, GateType as HirGateType, ItemId as HirItemId,
+    TypeParameterId as HirTypeParameterId,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RecordField {
@@ -11,6 +14,10 @@ pub struct RecordField {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type {
     Primitive(BuiltinType),
+    TypeParameter {
+        parameter: HirTypeParameterId,
+        name: Box<str>,
+    },
     Tuple(Vec<Type>),
     Record(Vec<RecordField>),
     Arrow {
@@ -83,6 +90,12 @@ impl Type {
             match task {
                 Task::Visit(ty) => match ty {
                     HirGateType::Primitive(builtin) => values.push(Self::Primitive(*builtin)),
+                    HirGateType::TypeParameter { parameter, name } => {
+                        values.push(Self::TypeParameter {
+                            parameter: *parameter,
+                            name: name.clone().into_boxed_str(),
+                        });
+                    }
                     HirGateType::Tuple(elements) => {
                         tasks.push(Task::BuildTuple(elements.len()));
                         for element in elements.iter().rev() {
@@ -301,6 +314,7 @@ impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Type::Primitive(builtin) => write!(f, "{}", builtin_type_name(*builtin)),
+            Type::TypeParameter { name, .. } => write!(f, "{name}"),
             Type::Tuple(elements) => {
                 write!(f, "(")?;
                 for (index, element) in elements.iter().enumerate() {

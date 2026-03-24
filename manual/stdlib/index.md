@@ -3,46 +3,62 @@
 The AIVI standard library catalog is being built out alongside the language implementation.
 This page will be the full reference once modules stabilize.
 
-## Planned top-level modules
+## Available modules
 
-| Module | Description |
+| Module | Exported names |
 |---|---|
-| `aivi.core` | Fundamental types: `Maybe`, `Result`, `Ordering`, `Unit` |
-| `aivi.text` | Text operations: `length`, `contains`, `split`, `trim`, `toUpper`, `toLower`, `toInt`, `fromInt` |
-| `aivi.list` | List operations: `map`, `filter`, `fold`, `any`, `all`, `head`, `tail`, `length`, `append`, `zip`, `partition` |
-| `aivi.math` | Arithmetic helpers: `abs`, `max`, `min`, `clamp`, `round`, `floor`, `ceil` |
-| `aivi.network` | HTTP sources: `http.get`, `http.post`, `http.put`, `http.delete`, `socket` |
-| `aivi.fs` | File system sources: `file.read`, `file.watch`, `dir.list` |
-| `aivi.timer` | Timer sources: `timer.every`, `timer.after`, `timer.debounce` |
-| `aivi.window` | Window events: `window.keyDown`, `window.keyUp`, `window.resize`, `window.focus` |
-| `aivi.clipboard` | Clipboard: `clipboard.read`, `clipboard.write` |
-| `aivi.dialog` | GTK dialogs: `dialog.open`, `dialog.save`, `dialog.alert`, `dialog.confirm` |
-| `aivi.gtk` | Low-level GTK widget bindings for advanced use cases |
+| `aivi.list` | `length` `head` `tail` `last` `zip` `any` `all` `count` `find` `findMap` `partition` `isEmpty` `nonEmpty` `Partition` |
+| `aivi.option` | `isSome` `isNone` `getOrElse` `orElse` `flatMap` `flatten` `toList` `toResult` |
+| `aivi.text` | `join` `concat` `surround` `isEmpty` `nonEmpty` |
+| `aivi.defaults` | `Option` (enables record-field defaults for `Option` fields) |
+
+Built-in (no import needed): `Option` `Some` `None` `Result` `Ok` `Err` `True` `False` `reduce` `append` `head` `tail`
 
 ## Importing modules
 
 ```aivi
-use aivi.network (
-    http
+use aivi.list (
+    length
+    head
+    tail
+    any
+    isEmpty
+    nonEmpty
 )
 
-use aivi.list (
-    filter
-    map
-    fold
-)
+use aivi.text (join)
 ```
 
-`use` brings specific names into scope. You can also use the module path directly:
+`use` brings specific names into scope.
 
 ```aivi
-val filtered = List.filter (\x => x > 0) myList
-val joined   = Text.join ", " labels
+use aivi.list (
+    length
+    isEmpty
+    nonEmpty
+)
+
+val nums:List Int = [
+    1,
+    2,
+    3,
+    4,
+    5
+]
+
+val total:Int =
+    nums
+     |> length
+
+val empty:Bool =
+    nums
+     |> isEmpty
 ```
 
 ## Current status
 
-The core language and basic types (`Maybe`, `Result`, `List`, `Bool`, `Int`, `Text`) are
-implemented. Network, filesystem, and GTK-specific modules are under active development.
+The core language and all basic types (`Option`, `Result`, `List`, `Bool`, `Int`, `Text`) are
+implemented. The `aivi.list`, `aivi.option`, and `aivi.text` modules are available now.
+Network, filesystem, and additional GTK-specific modules are under active development.
 
 Check the [GitHub repository](https://github.com/mendrik/aivi2) for the latest status.

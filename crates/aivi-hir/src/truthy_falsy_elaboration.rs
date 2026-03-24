@@ -133,6 +133,7 @@ pub fn elaborate_truthy_falsy(module: &Module) -> TruthyFalsyElaborationReport {
                 owner,
                 item.body,
                 &GateExprEnv::default(),
+                item.annotation.and_then(|annotation| typing.lower_annotation(annotation)),
                 &mut typing,
                 &mut stages,
             ),
@@ -143,6 +144,8 @@ pub fn elaborate_truthy_falsy(module: &Module) -> TruthyFalsyElaborationReport {
                     owner,
                     item.body,
                     &env,
+                    item.annotation
+                        .and_then(|annotation| typing.lower_open_annotation(annotation)),
                     &mut typing,
                     &mut stages,
                 );
@@ -154,6 +157,7 @@ pub fn elaborate_truthy_falsy(module: &Module) -> TruthyFalsyElaborationReport {
                         owner,
                         body,
                         &GateExprEnv::default(),
+                        item.annotation.and_then(|annotation| typing.lower_annotation(annotation)),
                         &mut typing,
                         &mut stages,
                     );
@@ -166,6 +170,7 @@ pub fn elaborate_truthy_falsy(module: &Module) -> TruthyFalsyElaborationReport {
                         owner,
                         member.body,
                         &GateExprEnv::default(),
+                        None,
                         &mut typing,
                         &mut stages,
                     );
@@ -188,21 +193,33 @@ fn collect_truthy_falsy_stages(
     owner: ItemId,
     root: ExprId,
     env: &GateExprEnv,
+    root_expected: Option<GateType>,
     typing: &mut GateTypeContext<'_>,
     stages: &mut Vec<TruthyFalsyStageElaboration>,
 ) {
     walk_expr_tree(module, root, |pipe_expr, expr, _| {
         if let ExprKind::Pipe(pipe) = &expr.kind {
-            collect_truthy_falsy_pipe(owner, pipe_expr, pipe, env, typing, stages);
+            collect_truthy_falsy_pipe(
+                owner,
+                root,
+                pipe_expr,
+                pipe,
+                env,
+                root_expected.as_ref(),
+                typing,
+                stages,
+            );
         }
     });
 }
 
 fn collect_truthy_falsy_pipe(
     owner: ItemId,
+    root_expr: ExprId,
     pipe_expr: ExprId,
     pipe: &PipeExpr,
     env: &GateExprEnv,
+    root_expected: Option<&GateType>,
     typing: &mut GateTypeContext<'_>,
     truthy_falsy_stages: &mut Vec<TruthyFalsyStageElaboration>,
 ) {
@@ -229,7 +246,17 @@ fn collect_truthy_falsy_pipe(
                         advance_by: 1,
                     };
                 };
-                let outcome = elaborate_truthy_falsy_pair(&pair, current, env, typing);
+                let outcome = elaborate_truthy_falsy_pair(
+                    &pair,
+                    current,
+                    env,
+                    if pipe_expr == root_expr {
+                        root_expected
+                    } else {
+                        None
+                    },
+                    typing,
+                );
                 truthy_falsy_stages.push(TruthyFalsyStageElaboration {
                     owner,
                     pipe_expr,
@@ -268,6 +295,7 @@ fn elaborate_truthy_falsy_pair(
     pair: &TruthyFalsyPairStages<'_>,
     subject: Option<&GateType>,
     env: &GateExprEnv,
+    expected_result: Option<&GateType>,
     typing: &mut GateTypeContext<'_>,
 ) -> TruthyFalsyStageOutcome {
     let Some(subject) = subject else {
@@ -292,8 +320,9 @@ fn elaborate_truthy_falsy_pair(
     );
     let falsy_info =
         typing.infer_truthy_falsy_branch(pair.falsy_expr, env, subject_plan.falsy_payload.as_ref());
-    let truthy_ty = truthy_info.ty.clone();
-    let falsy_ty = falsy_info.ty.clone();
+    let branch_expected = truthy_falsy_branch_expected(subject, expected_result);
+    let truthy_ty = truthy_info.ty.clone().or_else(|| branch_expected.clone());
+    let falsy_ty = falsy_info.ty.clone().or_else(|| branch_expected.clone());
     let mut blockers = truthy_info
         .issues
         .into_iter()
@@ -363,6 +392,17 @@ fn elaborate_truthy_falsy_pair(
         },
         result_type: stage_result_type,
     })
+}
+
+fn truthy_falsy_branch_expected(
+    input_subject: &GateType,
+    expected: Option<&GateType>,
+) -> Option<GateType> {
+    let expected = expected?;
+    match (input_subject, expected) {
+        (GateType::Signal(_), GateType::Signal(payload)) => Some(payload.as_ref().clone()),
+        _ => Some(expected.clone()),
+    }
 }
 
 fn blocker_for_branch_issue(

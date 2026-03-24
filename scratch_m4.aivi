@@ -1,0 +1,21 @@
+type User = {
+    id: Int,
+    name: Text
+}
+
+type Orientation =
+  | Vertical
+  | Horizontal
+
+sig users : Signal (List User) = []
+
+val main =
+    <Window title="Users">
+        <Box orientation={Vertical} spacing={4}>
+            <each of={users} as={user} key={user.id}>
+                <Label text={user.name} />
+            </each>
+        </Box>
+    </Window>
+
+export main

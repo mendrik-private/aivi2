@@ -112,6 +112,9 @@ pub enum LoweringError {
         span: SourceSpan,
         binding: u32,
     },
+    OpenTypeParameter {
+        name: Box<str>,
+    },
     ArenaOverflow {
         family: &'static str,
         attempted_len: usize,
@@ -154,6 +157,10 @@ impl fmt::Display for LoweringError {
             Self::UnsupportedLocalReference { binding, .. } => write!(
                 f,
                 "backend lowering does not yet encode closure-local binding {binding} inside runtime kernels"
+            ),
+            Self::OpenTypeParameter { name } => write!(
+                f,
+                "backend lowering requires closed specialized types, but encountered open type parameter `{name}`"
             ),
             Self::ArenaOverflow {
                 family,
@@ -2327,6 +2334,9 @@ impl<'a> ProgramLowerer<'a> {
                             ty.clone(),
                             TypeBuildTask::Primitive(PrimitiveType::from_builtin(*builtin)),
                         )),
+                        core::Type::TypeParameter { name, .. } => {
+                            return Err(OpenTypeParameter { name: name.clone() });
+                        }
                         core::Type::Tuple(elements) => {
                             tasks.push(Task::Build(
                                 ty.clone(),

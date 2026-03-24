@@ -67,7 +67,7 @@ impl Formatter {
 
         match item {
             Item::Type(item) => lines.extend(self.format_type_item(item)),
-            Item::Value(item) => lines.extend(self.format_value_item("val", item, false)),
+            Item::Value(item) => lines.extend(self.format_value_item("val", item, true)),
             Item::Function(item) => lines.extend(self.format_function_item(item)),
             Item::Signal(item) => lines.extend(self.format_value_item("sig", item, true)),
             Item::Class(item) => lines.extend(self.format_class_item(item)),
@@ -148,7 +148,7 @@ impl Formatter {
     ) -> Vec<String> {
         let mut header = format!("{keyword} {}", self.item_name(&item.name));
         if let Some(annotation) = &item.annotation {
-            header.push_str(if spaced_annotation { " : " } else { ":" });
+            header.push_str(if spaced_annotation { ": " } else { ":" });
             header.push_str(&self.format_type_inline(annotation, 0));
         }
 
@@ -390,7 +390,7 @@ impl Formatter {
 
     fn format_class_member(&self, member: &ClassMember) -> Vec<String> {
         let prefix = format!(
-            "{}{} : ",
+            "{}{}: ",
             spaces(INDENT_WIDTH),
             self.format_class_member_name(&member.name)
         );
@@ -411,7 +411,7 @@ impl Formatter {
 
     fn format_domain_member(&self, member: &DomainMember) -> Vec<String> {
         let prefix = format!(
-            "{}{} : ",
+            "{}{}: ",
             spaces(INDENT_WIDTH),
             self.format_domain_member_name(&member.name)
         );
@@ -1675,7 +1675,7 @@ mod tests {
             formatted,
             concat!(
                 "class Eq A\n",
-                "    (==) : A -> A -> Bool\n",
+                "    (==): A -> A -> Bool\n",
                 "\n",
                 "fun equivalent:Bool #left:Int #right:Int =>\n",
                 "    left + 1 == right - 1 and left != right\n",
@@ -1690,14 +1690,14 @@ mod tests {
             formatted,
             concat!(
                 "domain Duration over Int\n",
-                "    literal ms : Int -> Duration\n",
-                "    (*) : Duration -> Int -> Duration\n",
-                "    value : Duration -> Int\n",
+                "    literal ms: Int -> Duration\n",
+                "    (*): Duration -> Int -> Duration\n",
+                "    value: Duration -> Int\n",
                 "\n",
                 "domain Path over Text\n",
-                "    literal root : Text -> Path\n",
-                "    (/) : Path -> Text -> Path\n",
-                "    value : Path -> Text\n",
+                "    literal root: Text -> Path\n",
+                "    (/): Path -> Text -> Path\n",
+                "    value: Path -> Text\n",
             )
         );
     }
@@ -1711,7 +1711,7 @@ mod tests {
             formatted,
             concat!(
                 "class Eq A\n",
-                "    (==) : A -> A -> Bool\n",
+                "    (==): A -> A -> Bool\n",
                 "\n",
                 "instance Eq Blob\n",
                 "    (==) left right = same left right\n",
@@ -1753,7 +1753,7 @@ mod tests {
             formatted,
             concat!(
                 "domain Bucket over Int\n",
-                "    (%) : Bucket -> Int -> Bucket\n",
+                "    (%): Bucket -> Int -> Bucket\n",
             )
         );
     }
@@ -1767,9 +1767,9 @@ mod tests {
             formatted,
             concat!(
                 "domain Duration over Int\n",
-                "    literal ms : Int -> Duration\n",
+                "    literal ms: Int -> Duration\n",
                 "\n",
-                "val delay:Duration = 250ms\n",
+                "val delay: Duration = 250ms\n",
                 "val applied = wrap 250ms\n",
             )
         );
@@ -1783,10 +1783,10 @@ mod tests {
         assert_eq!(
             formatted,
             concat!(
-                "val pi:Float = 3.14\n",
-                "val amount:Decimal = 19.25d\n",
-                "val whole:Decimal = 19d\n",
-                "val count:BigInt = 123n\n",
+                "val pi: Float = 3.14\n",
+                "val amount: Decimal = 19.25d\n",
+                "val whole: Decimal = 19d\n",
+                "val count: BigInt = 123n\n",
             )
         );
     }
@@ -1849,7 +1849,7 @@ mod tests {
                 "    socket\n",
                 ")\n",
                 "\n",
-                "val profile:Profile = {\n",
+                "val profile: Profile = {\n",
                 "    name,\n",
                 "    nickname\n",
                 "}\n",

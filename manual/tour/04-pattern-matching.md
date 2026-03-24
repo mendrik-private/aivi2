@@ -9,12 +9,19 @@ structure, not just equality.
 `\|\|>` is the case pipe. It takes a value on the left and a pattern `=>` body arm on the right.
 Multiple arms are written as successive `\|\|>` lines:
 
-```text
-// declare a function 'directionText' mapping a Direction to a Text label
-// Up maps to "up"
-// Down maps to "down"
-// Left maps to "left"
-// Right maps to "right"
+```aivi
+type Direction =
+  | Up
+  | Down
+  | Left
+  | Right
+
+fun directionText:Text #direction:Direction =>
+    direction
+     ||> Up    => "up"
+     ||> Down  => "down"
+     ||> Left  => "left"
+     ||> Right => "right"
 ```
 
 Each arm is: `\|\|> pattern => expression`.
@@ -25,12 +32,17 @@ The body of the first matching arm is evaluated and returned.
 
 The most common use is matching on sum type variants:
 
-```text
-// declare a sum type 'Status' with variants Running, Paused, GameOver
-// declare a function 'statusLabel' mapping a Status to a Text label
-// Running maps to "In progress"
-// Paused maps to "Paused"
-// GameOver maps to "Game over"
+```aivi
+type Status =
+  | Running
+  | Paused
+  | GameOver
+
+fun statusLabel:Text #status:Status =>
+    status
+     ||> Running  => "In progress"
+     ||> Paused   => "Paused"
+     ||> GameOver => "Game over"
 ```
 
 The same constructor syntax works for your own same-module sum types and for builtin carriers like
@@ -45,21 +57,28 @@ a compile error until you handle the new case.
 This is the key advantage over `switch` statements: you cannot accidentally forget a case.
 
 ```text
-// declare a sum type 'Color' with variants Red, Green, Blue
-// declare a function 'colorName' matching on Color
-// Red maps to "red"
-// Green maps to "green"
-// the Blue case is missing — this would be a compile error
+type Color = Red | Green | Blue
+
+// Compile error: Blue is not covered
+fun colorName:Text #color:Color =>
+    color
+     ||> Red   => "red"
+     ||> Green => "green"
 ```
 
 ## Wildcard patterns
 
 When you want a catch-all, use `_`:
 
-```text
-// declare a function 'growLength' matching on specific integer values
-// 1 maps to 2, 2 maps to 3, 3 maps to 4, 4 maps to 5, 5 maps to 6
-// any other value maps to 6 via the wildcard catch-all
+```aivi
+fun growLength:Int #n:Int =>
+    n
+     ||> 1 => 2
+     ||> 2 => 3
+     ||> 3 => 4
+     ||> 4 => 5
+     ||> 5 => 6
+     ||> _ => 6
 ```
 
 `_` matches anything and does not bind the value.
@@ -68,29 +87,51 @@ When you want a catch-all, use `_`:
 
 You can match on integer and text literals directly:
 
-```text
-// declare a function 'fizzBuzz' taking an integer n
-// if n is divisible by 15, return "FizzBuzz"
-// else if n is divisible by 3, return "Fizz"
-// else if n is divisible by 5, return "Buzz"
-// otherwise return n converted to text
+```aivi
+fun divisible:Bool #d:Int #n:Int =>
+    n % d == 0
+
+fun buzzOrN:Text #n:Int =>
+    divisible 5 n
+     T|> "Buzz"
+     F|> "{n}"
+
+fun fizzOrBuzzOrN:Text #n:Int =>
+    divisible 3 n
+     T|> "Fizz"
+     F|> buzzOrN n
+
+fun fizzBuzz:Text #n:Int =>
+    divisible 15 n
+     T|> "FizzBuzz"
+     F|> fizzOrBuzzOrN n
 ```
 
 ## Destructuring product types (records)
 
 You can destructure a record in a pattern arm, binding its fields to names:
 
-```text
-// declare a function 'describePoint' matching on a Vec2 value
-// destructure the Vec2 into its x and y components
-// format them as "(x, y)"
+```aivi
+type Vec2 = Vec2 Int Int
+
+fun describePoint:Text #pos:Vec2 =>
+    pos
+     ||> Vec2 x y => "({x}, {y})"
 ```
 
 Record patterns work similarly:
 
-```text
-// declare a function 'scoreOf' matching on a Game record
-// destructure the record to extract the 'score' field and return it
+```aivi
+type Status = Running | GameOver
+
+type Game = {
+    status: Status,
+    score: Int
+}
+
+fun scoreOf:Int #game:Game =>
+    game
+     ||> { score } => score
 ```
 
 Here `{ score }` matches any `Game` record and binds the `score` field.
@@ -99,11 +140,11 @@ Here `{ score }` matches any `Game` record and binds the `score` field.
 
 When a variant carries data, the pattern binds the inner values:
 
-```text
-// Option A is a sum type: Some (carrying A) or None
-// declare a generic function 'unwrapOr' taking a default value and an Option A
-// if the option is Some, return the wrapped value
-// if the option is None, return the default
+```aivi
+fun unwrapOr:A #default:A #option:(Option A) =>
+    option
+     ||> Some value => value
+     ||> None       => default
 ```
 
 `Some value` binds the wrapped `A` to the name `value` in the body.
@@ -113,10 +154,27 @@ When a variant carries data, the pattern binds the inner values:
 Patterns can be nested. In the snake game, the step logic matches on a record extracted
 from a record:
 
-```text
-// declare a function 'runningStep' taking boardSize, direction, and current game state
-// destructure the current game to extract snake, food, and score fields simultaneously
-// pass them to movedGame along with size and direction to produce the next game state
+```aivi
+type Status = Running | GameOver
+
+type Pixel = { x: Int, y: Int }
+
+type Direction =
+  | Up
+  | Down
+  | Left
+  | Right
+
+type Game = {
+    snake: List Pixel,
+    food: Pixel,
+    score: Int,
+    status: Status
+}
+
+fun runningStep:Game #size:Pixel #direction:Direction #current:Game =>
+    current
+     ||> { snake, food, score } => { snake: snake, food: food, score: score, status: Running }
 ```
 
 The record pattern `{ snake, food, score }` binds three fields of `Game` simultaneously,
@@ -127,9 +185,25 @@ without needing intermediate `let` bindings.
 Use `\|\|>` when matching on a general sum type or literal. Use `T\|>` / `F\|>` when the
 value is already a `Bool` and you want a two-branch conditional:
 
-```text
-// when branching on a Bool: use the truthy/falsy pipe — if true use valueIfTrue, else valueIfFalse
-// when matching a sum type with two or more variants: match Some carrying x to call useIt on it, and None to use a fallback
+```aivi
+val condition:Bool = True
+val valueIfTrue:Text = "yes"
+val valueIfFalse:Text = "no"
+
+val result:Text =
+    condition
+     T|> valueIfTrue
+     F|> valueIfFalse
+```
+
+```aivi
+val fallback:Text = "nothing"
+val maybeValue:Option Int = Some 42
+
+val display:Text =
+    maybeValue
+     ||> Some x => "got {x}"
+     ||> None   => fallback
 ```
 
 ## Summary

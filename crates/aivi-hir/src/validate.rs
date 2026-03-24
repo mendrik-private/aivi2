@@ -7509,7 +7509,7 @@ pub(crate) fn gate_env_for_function(
         let Some(annotation) = parameter.annotation else {
             continue;
         };
-        if let Some(ty) = typing.lower_annotation(annotation) {
+        if let Some(ty) = typing.lower_open_annotation(annotation) {
             env.locals.insert(parameter.binding, ty);
         }
     }
@@ -7801,6 +7801,10 @@ pub fn case_pattern_field_types(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GateType {
     Primitive(BuiltinType),
+    TypeParameter {
+        parameter: TypeParameterId,
+        name: String,
+    },
     Tuple(Vec<GateType>),
     Record(Vec<GateRecordField>),
     Arrow {
@@ -7935,7 +7939,11 @@ impl GateType {
             | Self::OpaqueItem {
                 item, arguments, ..
             } => Some((TypeConstructorHead::Item(*item), arguments.clone())),
-            Self::Primitive(_) | Self::Tuple(_) | Self::Record(_) | Self::Arrow { .. } => None,
+            Self::Primitive(_)
+            | Self::TypeParameter { .. }
+            | Self::Tuple(_)
+            | Self::Record(_)
+            | Self::Arrow { .. } => None,
         }
     }
 }
@@ -7944,6 +7952,7 @@ impl fmt::Display for GateType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             GateType::Primitive(builtin) => write!(f, "{}", builtin_type_name(*builtin)),
+            GateType::TypeParameter { name, .. } => write!(f, "{name}"),
             GateType::Tuple(elements) => {
                 write!(f, "(")?;
                 for (index, element) in elements.iter().enumerate() {
@@ -8205,6 +8214,7 @@ impl<'a> GateTypeContext<'a> {
                 falsy_payload: Some(error.as_ref().clone()),
             }),
             GateType::Primitive(_)
+            | GateType::TypeParameter { .. }
             | GateType::Tuple(_)
             | GateType::Record(_)
             | GateType::Arrow { .. }
@@ -8310,6 +8320,7 @@ impl<'a> GateTypeContext<'a> {
                 item, arguments, ..
             } => self.same_module_case_subject_shape(*item, arguments),
             GateType::Primitive(_)
+            | GateType::TypeParameter { .. }
             | GateType::Tuple(_)
             | GateType::Record(_)
             | GateType::Arrow { .. }
@@ -8364,7 +8375,7 @@ impl<'a> GateTypeContext<'a> {
     ) -> Option<Vec<GateType>> {
         let mut lowered = Vec::with_capacity(fields.len());
         for field in fields {
-            lowered.push(self.lower_type(*field, substitutions, &mut Vec::new())?);
+            lowered.push(self.lower_type(*field, substitutions, &mut Vec::new(), false)?);
         }
         Some(lowered)
     }
@@ -8503,7 +8514,11 @@ impl<'a> GateTypeContext<'a> {
     }
 
     pub(crate) fn lower_annotation(&mut self, ty: TypeId) -> Option<GateType> {
-        self.lower_type(ty, &HashMap::new(), &mut Vec::new())
+        self.lower_type(ty, &HashMap::new(), &mut Vec::new(), false)
+    }
+
+    pub(crate) fn lower_open_annotation(&mut self, ty: TypeId) -> Option<GateType> {
+        self.lower_type(ty, &HashMap::new(), &mut Vec::new(), true)
     }
 
     pub(crate) fn lower_hir_type(
@@ -8511,7 +8526,7 @@ impl<'a> GateTypeContext<'a> {
         ty: TypeId,
         substitutions: &HashMap<TypeParameterId, GateType>,
     ) -> Option<GateType> {
-        self.lower_type(ty, substitutions, &mut Vec::new())
+        self.lower_type(ty, substitutions, &mut Vec::new(), false)
     }
 
     pub(crate) fn poly_type_binding(&mut self, ty: TypeId) -> Option<TypeBinding> {
@@ -8660,7 +8675,7 @@ impl<'a> GateTypeContext<'a> {
                 let mut parameters = Vec::with_capacity(item.parameters.len());
                 for parameter in &item.parameters {
                     let annotation = parameter.annotation?;
-                    let parameter_ty = self.lower_annotation(annotation)?;
+                    let parameter_ty = self.lower_open_annotation(annotation)?;
                     env.locals.insert(parameter.binding, parameter_ty.clone());
                     parameters.push(parameter_ty);
                 }
@@ -8745,8 +8760,13 @@ impl<'a> GateTypeContext<'a> {
     }
 
     fn finalize_expr_info(&self, mut info: GateExprInfo) -> GateExprInfo {
-        if info.actual.is_none() {
-            if let Some(ty) = info.ty.as_ref() {
+        if let Some(ty) = info.ty.as_ref() {
+            let actual_matches_ty = info
+                .actual
+                .as_ref()
+                .and_then(SourceOptionActualType::to_gate_type)
+                .is_some_and(|actual| actual.same_shape(ty));
+            if !actual_matches_ty {
                 info.actual = Some(SourceOptionActualType::from_gate_type(ty));
             }
         }
@@ -9139,10 +9159,15 @@ impl<'a> GateTypeContext<'a> {
         let mut parameters = Vec::with_capacity(parameter_type_ids.len());
         for parameter in parameter_type_ids {
             let mut item_stack = Vec::new();
-            parameters.push(self.lower_type(parameter, &substitutions, &mut item_stack)?);
+            parameters.push(self.lower_type(
+                parameter,
+                &substitutions,
+                &mut item_stack,
+                false,
+            )?);
         }
         let mut item_stack = Vec::new();
-        let result = self.lower_type(current, &substitutions, &mut item_stack)?;
+        let result = self.lower_type(current, &substitutions, &mut item_stack, false)?;
         if let Some(expected) = expected_result {
             if !result.same_shape(expected) {
                 return None;
@@ -9158,7 +9183,7 @@ impl<'a> GateTypeContext<'a> {
         substitutions: &mut HashMap<TypeParameterId, GateType>,
         item_stack: &mut Vec<ItemId>,
     ) -> bool {
-        if let Some(lowered) = self.lower_type(type_id, substitutions, item_stack) {
+        if let Some(lowered) = self.lower_type(type_id, substitutions, item_stack, false) {
             return lowered.same_shape(actual);
         }
         let ty = self.module.types()[type_id].clone();
@@ -9333,7 +9358,7 @@ impl<'a> GateTypeContext<'a> {
     ) -> Option<GateType> {
         let annotation = self.domain_member_annotation(resolution)?;
         let mut item_stack = Vec::new();
-        self.lower_type(annotation, substitutions, &mut item_stack)
+        self.lower_type(annotation, substitutions, &mut item_stack, false)
     }
 
     fn domain_member_annotation(&self, resolution: DomainMemberResolution) -> Option<TypeId> {
@@ -9360,15 +9385,26 @@ impl<'a> GateTypeContext<'a> {
         type_id: TypeId,
         substitutions: &HashMap<TypeParameterId, GateType>,
         item_stack: &mut Vec<ItemId>,
+        allow_open_type_parameters: bool,
     ) -> Option<GateType> {
         match &self.module.types()[type_id].kind {
             TypeKind::Name(reference) => {
-                self.lower_type_reference(reference, substitutions, item_stack)
+                self.lower_type_reference(
+                    reference,
+                    substitutions,
+                    item_stack,
+                    allow_open_type_parameters,
+                )
             }
             TypeKind::Tuple(elements) => {
                 let mut lowered = Vec::with_capacity(elements.len());
                 for element in elements.iter() {
-                    lowered.push(self.lower_type(*element, substitutions, item_stack)?);
+                    lowered.push(self.lower_type(
+                        *element,
+                        substitutions,
+                        item_stack,
+                        allow_open_type_parameters,
+                    )?);
                 }
                 Some(GateType::Tuple(lowered))
             }
@@ -9377,14 +9413,29 @@ impl<'a> GateTypeContext<'a> {
                 for field in fields {
                     lowered.push(GateRecordField {
                         name: field.label.text().to_owned(),
-                        ty: self.lower_type(field.ty, substitutions, item_stack)?,
+                        ty: self.lower_type(
+                            field.ty,
+                            substitutions,
+                            item_stack,
+                            allow_open_type_parameters,
+                        )?,
                     });
                 }
                 Some(GateType::Record(lowered))
             }
             TypeKind::Arrow { parameter, result } => Some(GateType::Arrow {
-                parameter: Box::new(self.lower_type(*parameter, substitutions, item_stack)?),
-                result: Box::new(self.lower_type(*result, substitutions, item_stack)?),
+                parameter: Box::new(self.lower_type(
+                    *parameter,
+                    substitutions,
+                    item_stack,
+                    allow_open_type_parameters,
+                )?),
+                result: Box::new(self.lower_type(
+                    *result,
+                    substitutions,
+                    item_stack,
+                    allow_open_type_parameters,
+                )?),
             }),
             TypeKind::Apply { callee, arguments } => {
                 let mut lowered_arguments = Vec::with_capacity(arguments.len());
@@ -9393,9 +9444,16 @@ impl<'a> GateTypeContext<'a> {
                         *argument,
                         substitutions,
                         item_stack,
+                        allow_open_type_parameters,
                     )?);
                 }
-                self.lower_type_application(*callee, &lowered_arguments, substitutions, item_stack)
+                self.lower_type_application(
+                    *callee,
+                    &lowered_arguments,
+                    substitutions,
+                    item_stack,
+                    allow_open_type_parameters,
+                )
             }
         }
     }
@@ -9405,6 +9463,7 @@ impl<'a> GateTypeContext<'a> {
         reference: &TypeReference,
         substitutions: &HashMap<TypeParameterId, GateType>,
         item_stack: &mut Vec<ItemId>,
+        allow_open_type_parameters: bool,
     ) -> Option<GateType> {
         match reference.resolution.as_ref() {
             ResolutionState::Unresolved => None,
@@ -9420,10 +9479,15 @@ impl<'a> GateTypeContext<'a> {
             )) => Some(GateType::Primitive(*builtin)),
             ResolutionState::Resolved(TypeResolution::Builtin(_)) => None,
             ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
-                substitutions.get(parameter).cloned()
+                substitutions.get(parameter).cloned().or_else(|| {
+                    allow_open_type_parameters.then(|| GateType::TypeParameter {
+                        parameter: *parameter,
+                        name: self.module.type_parameters()[*parameter].name.text().to_owned(),
+                    })
+                })
             }
             ResolutionState::Resolved(TypeResolution::Item(item_id)) => {
-                self.lower_type_item(*item_id, &[], item_stack)
+                self.lower_type_item(*item_id, &[], item_stack, allow_open_type_parameters)
             }
             ResolutionState::Resolved(TypeResolution::Import(_)) => None,
         }
@@ -9435,6 +9499,7 @@ impl<'a> GateTypeContext<'a> {
         arguments: &[GateType],
         substitutions: &HashMap<TypeParameterId, GateType>,
         item_stack: &mut Vec<ItemId>,
+        allow_open_type_parameters: bool,
     ) -> Option<GateType> {
         let TypeKind::Name(reference) = &self.module.types()[callee].kind else {
             return None;
@@ -9477,7 +9542,12 @@ impl<'a> GateTypeContext<'a> {
                 })
             }
             ResolutionState::Resolved(TypeResolution::Item(item_id)) => {
-                self.lower_type_item(*item_id, arguments, item_stack)
+                self.lower_type_item(
+                    *item_id,
+                    arguments,
+                    item_stack,
+                    allow_open_type_parameters,
+                )
             }
             ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
                 substitutions.get(parameter).cloned()
@@ -9502,6 +9572,7 @@ impl<'a> GateTypeContext<'a> {
         item_id: ItemId,
         arguments: &[GateType],
         item_stack: &mut Vec<ItemId>,
+        allow_open_type_parameters: bool,
     ) -> Option<GateType> {
         let item = &self.module.items()[item_id];
         let name = item_type_name(item);
@@ -9526,7 +9597,12 @@ impl<'a> GateTypeContext<'a> {
                                 .copied()
                                 .zip(arguments.iter().cloned())
                                 .collect::<HashMap<_, _>>();
-                            self.lower_type(*alias, &substitutions, item_stack)
+                            self.lower_type(
+                                *alias,
+                                &substitutions,
+                                item_stack,
+                                allow_open_type_parameters,
+                            )
                         }
                         crate::hir::TypeItemBody::Sum(_) => Some(GateType::OpaqueItem {
                             item: item_id,
@@ -9648,7 +9724,7 @@ impl<'a> GateTypeContext<'a> {
                 | BuiltinType::Bytes),
             )) => Some(GateType::Primitive(*builtin)),
             ResolutionState::Resolved(TypeResolution::Item(item_id)) => {
-                self.lower_type_item(*item_id, &[], item_stack)
+                self.lower_type_item(*item_id, &[], item_stack, false)
             }
             ResolutionState::Resolved(TypeResolution::Import(_))
             | ResolutionState::Resolved(TypeResolution::Builtin(_))
@@ -9911,6 +9987,7 @@ impl<'a> GateTypeContext<'a> {
                         *argument,
                         &HashMap::new(),
                         item_stack,
+                        false,
                     )?);
                 }
                 Some(TypeConstructorBinding {
@@ -9959,7 +10036,7 @@ impl<'a> GateTypeContext<'a> {
                 self.apply_builtin_type_constructor(builtin, arguments)
             }
             TypeConstructorHead::Item(item_id) => {
-                self.lower_type_item(item_id, arguments, item_stack)
+                self.lower_type_item(item_id, arguments, item_stack, false)
             }
         }
     }
@@ -11858,6 +11935,7 @@ impl SourceOptionExpectedType {
     ) -> Option<Self> {
         match ty {
             GateType::Primitive(builtin) => Some(Self::Primitive(*builtin)),
+            GateType::TypeParameter { .. } => None,
             GateType::Tuple(elements) => Some(Self::Tuple(
                 elements
                     .iter()
@@ -11955,6 +12033,7 @@ impl SourceOptionActualType {
     fn from_gate_type(ty: &GateType) -> Self {
         match ty {
             GateType::Primitive(builtin) => Self::Primitive(*builtin),
+            GateType::TypeParameter { .. } => Self::Hole,
             GateType::Tuple(elements) => {
                 Self::Tuple(elements.iter().map(Self::from_gate_type).collect())
             }

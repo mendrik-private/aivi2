@@ -5,10 +5,20 @@ native GTK4/libadwaita widgets — no web rendering, no virtual DOM, no Electron
 
 ## Basic tags
 
-```text
-// render a Window titled "Hello AIVI"
-// containing a vertical Box with 8px spacing
-// with a Label showing "Welcome!" and a Button labeled "Click me"
+```aivi
+type Orientation =
+  | Vertical
+  | Horizontal
+
+val main =
+    <Window title="Hello AIVI">
+        <Box orientation={Vertical} spacing={8}>
+            <Label text="Welcome!" />
+            <Button label="Click me" />
+        </Box>
+    </Window>
+
+export main
 ```
 
 Tags are PascalCase GTK widget names. Attributes set widget properties.
@@ -23,11 +33,20 @@ with a `<Window>` at the top.
 
 Use `{expression}` inside a double-quoted string to embed a value:
 
-```text
-// declare 'score' as 42
-// declare 'msg' interpolating score into a text message
-// render a Window with a title that includes the score value
-// containing a Label whose text interpolates the score value
+```aivi
+val score:Int = 42
+val msg:Text = "Current score: {score}"
+
+type Orientation =
+  | Vertical
+  | Horizontal
+
+val main =
+    <Window title="Score: {score}">
+        <Label text={msg} />
+    </Window>
+
+export main
 ```
 
 The interpolation works in both `val` strings and markup attribute strings.
@@ -37,11 +56,32 @@ The interpolation works in both `val` strings and markup attribute strings.
 When an attribute value is wrapped in `{...}` with a signal, the widget re-renders automatically
 when the signal changes:
 
-```text
-// declare a signal 'count' starting at 0
-// derive 'labelText' from count, formatted as "Clicked N times"
-// render a Window titled "Counter" with a Label whose text is bound to labelText
-// the Label updates automatically whenever count changes
+```aivi
+type Orientation =
+  | Vertical
+  | Horizontal
+
+provider button.clicked
+    wakeup: sourceEvent
+    argument id: Text
+
+fun addOne:Int #n:Int =>
+    n + 1
+
+@source button.clicked "inc"
+sig count : Signal Int =
+    0
+     @|> addOne
+     <|@ addOne
+
+sig labelText : Signal Text = "Clicked {count} times"
+
+val main =
+    <Window title="Counter">
+        <Label text={labelText} />
+    </Window>
+
+export main
 ```
 
 The `<Label>` text updates every time `labelText` changes — which happens whenever `count`
@@ -52,12 +92,28 @@ changes. There is no explicit update call.
 `<each>` renders a list of items. It requires a `key` attribute to help the runtime identify
 stable items across updates:
 
-```text
-// declare a product type 'User' with integer id and text name
-// declare a signal 'users' holding a list of Users
-// render a Window titled "Users" with a vertical Box
-// iterate over the users list, keying each item by user id
-// render a Label showing each user's name
+```aivi
+type User = {
+    id: Int,
+    name: Text
+}
+
+type Orientation =
+  | Vertical
+  | Horizontal
+
+sig users : Signal (List User) = []
+
+val main =
+    <Window title="Users">
+        <Box orientation={Vertical} spacing={4}>
+            <each of={users} as={user} key={user.id}>
+                <Label text={user.name} />
+            </each>
+        </Box>
+    </Window>
+
+export main
 ```
 
 - `of={users}` — the list signal to iterate.
@@ -69,13 +125,50 @@ rather than rebuilding the whole list.
 
 ## Nested each
 
-```text
-// declare a signal 'boardRows' holding a list of rows
-// render a vertical Box for the board
-// iterate over each row, keyed by row id
-// for each row render a horizontal Box
-// iterate over each cell in the row, keyed by cell id
-// render a Label showing the cell's glyph
+```aivi
+type CellKind =
+  | SnakeHead
+  | SnakeBody
+  | Food
+  | Empty
+
+type BoardCell = {
+    id: Int,
+    kind: CellKind
+}
+
+type BoardRow = {
+    id: Int,
+    cells: List BoardCell
+}
+
+type Orientation =
+  | Vertical
+  | Horizontal
+
+fun cellGlyph:Text #kind:CellKind =>
+    kind
+     ||> SnakeHead => "@"
+     ||> SnakeBody => "o"
+     ||> Food      => "*"
+     ||> Empty     => "."
+
+sig boardRows : Signal (List BoardRow) = []
+
+val main =
+    <Window title="Board">
+        <Box orientation={Vertical} spacing={2}>
+            <each of={boardRows} as={row} key={row.id}>
+                <Box orientation={Horizontal} spacing={2}>
+                    <each of={row.cells} as={cell} key={cell.id}>
+                        <Label text={cellGlyph cell.kind} />
+                    </each>
+                </Box>
+            </each>
+        </Box>
+    </Window>
+
+export main
 ```
 
 Each row is a horizontal `<Box>`, and each cell inside it is a `<Label>`.
@@ -86,11 +179,28 @@ This is the exact structure in the Snake demo.
 `<match>` and `<case>` are markup-level pattern matching. They render different widget trees
 based on a value:
 
-```text
-// declare a signal 'status' of type Status
-// render different widget trees based on the value of status
-// when Running, show a Label "Game is running"
-// when GameOver, show a Label "Game over!"
+```aivi
+type Status = Running | GameOver
+
+type Orientation =
+  | Vertical
+  | Horizontal
+
+sig status : Signal Status = Running
+
+val main =
+    <Window title="Status">
+        <match on={status}>
+            <case pattern={Running}>
+                <Label text="Game is running" />
+            </case>
+            <case pattern={GameOver}>
+                <Label text="Game over!" />
+            </case>
+        </match>
+    </Window>
+
+export main
 ```
 
 Like `\|\|>`, `<match>` is exhaustive — all variants must be covered.
@@ -99,10 +209,21 @@ Like `\|\|>`, `<match>` is exhaustive — all variants must be covered.
 
 `<show>` renders its children only when a condition is true:
 
-```text
-// declare a signal 'isLoggedIn' of type Bool
-// render a "Log out" Button only when isLoggedIn is True
-// when isLoggedIn is False, the button is absent from the widget tree
+```aivi
+type Orientation =
+  | Vertical
+  | Horizontal
+
+sig isLoggedIn : Signal Bool = False
+
+val main =
+    <Window title="App">
+        <show when={isLoggedIn}>
+            <Button label="Log out" />
+        </show>
+    </Window>
+
+export main
 ```
 
 When `isLoggedIn` is `False`, the `<Button>` is removed from the widget tree.
@@ -112,19 +233,37 @@ When `isLoggedIn` is `False`, the `<Button>` is removed from the widget tree.
 GTK `Box` is the main layout widget. `orientation` takes `Vertical` or `Horizontal`
 (both are AIVI values of type `Orientation`). `spacing` is an `Int` in pixels.
 
-```text
-// render a vertical Box with 12px spacing
-// containing a Label "First" and a Label "Second"
+```aivi
+type Orientation =
+  | Vertical
+  | Horizontal
+
+val layout =
+    <Box orientation={Vertical} spacing={12}>
+        <Label text="First" />
+        <Label text="Second" />
+    </Box>
 ```
 
 ## Attribute expressions
 
 Attribute values can be any AIVI expression:
 
-```text
-// declare cellSize as 32
-// render a horizontal Box with spacing equal to cellSize
-// containing a Label showing the board width
+```aivi
+type Orientation =
+  | Vertical
+  | Horizontal
+
+val cellSize:Int = 32
+
+type Game = { width: Int }
+
+val game:Game = { width: 12 }
+
+val view =
+    <Box orientation={Horizontal} spacing={cellSize}>
+        <Label text="{game.width}" />
+    </Box>
 ```
 
 ## Summary
