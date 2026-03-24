@@ -11,6 +11,7 @@ aivi-core = { path = "../aivi-core" }
 aivi-gtk = { path = "../aivi-gtk" }
 aivi-hir.workspace = true
 aivi-lambda = { path = "../aivi-lambda" }
+aivi-query.workspace = true
 aivi-runtime = { path = "../aivi-runtime" }
 aivi-syntax.workspace = true
 aivi-lsp = { path = "../aivi-lsp" }

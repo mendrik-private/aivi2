@@ -1,5 +1,5 @@
 val brokenAnd: Bool     = 1 and True
-val brokenCompare: Bool = "a" < "b"
+val brokenCompare: Bool = [1] < [2]
 val brokenNot: Bool     = not None
 val brokenAdd: Int      = 1 + True
 val brokenEq: Bool      = 1 != "1"

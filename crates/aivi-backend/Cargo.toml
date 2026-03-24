@@ -17,6 +17,7 @@ cranelift-native = "0.126.2"
 cranelift-object = "0.126.2"
 
 [dev-dependencies]
+aivi-query.workspace = true
 aivi-syntax.workspace = true
 
 [lints]

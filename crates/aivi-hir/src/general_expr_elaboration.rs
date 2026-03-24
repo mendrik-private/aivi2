@@ -12,25 +12,49 @@ use crate::{
     GateRuntimePipeStageKind, GateRuntimeProjectionBase, GateRuntimeRecordField,
     GateRuntimeReference, GateRuntimeTextLiteral, GateRuntimeTextSegment,
     GateRuntimeTruthyFalsyBranch, GateRuntimeUnsupportedKind, GateRuntimeUnsupportedPipeStageKind,
-    Item, ItemId, Module, PipeExpr, PipeStageKind, ProjectionBase, ResolutionState, SignalItem,
-    TermReference, TermResolution, TypeItemBody, ValueItem,
+    InstanceItem, InstanceMember, Item, ItemId, Module, PipeExpr, PipeStageKind, ProjectionBase,
+    ResolutionState, SignalItem, TermReference, TermResolution, TypeItemBody, TypeResolution,
+    ValueItem,
     gate_elaboration::{GateElaborationBlocker, GateRuntimeMapEntry},
-    typecheck::expression_matches,
-    validate::{GateExprEnv, GateIssue, GateType, GateTypeContext, truthy_falsy_pair_stages},
+    typecheck::{expression_matches, resolve_class_member_dispatch},
+    validate::{
+        GateExprEnv, GateIssue, GateType, GateTypeContext, PolyTypeBindings,
+        truthy_falsy_pair_stages,
+    },
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GeneralExprElaborationReport {
     items: Vec<GeneralExprItemElaboration>,
+    instance_members: Vec<GeneralExprInstanceMemberElaboration>,
 }
 
 impl GeneralExprElaborationReport {
-    pub fn new(items: Vec<GeneralExprItemElaboration>) -> Self {
-        Self { items }
+    pub fn new(
+        items: Vec<GeneralExprItemElaboration>,
+        instance_members: Vec<GeneralExprInstanceMemberElaboration>,
+    ) -> Self {
+        Self {
+            items,
+            instance_members,
+        }
     }
 
     pub fn items(&self) -> &[GeneralExprItemElaboration] {
         &self.items
+    }
+
+    pub fn instance_members(&self) -> &[GeneralExprInstanceMemberElaboration] {
+        &self.instance_members
+    }
+
+    pub fn into_parts(
+        self,
+    ) -> (
+        Vec<GeneralExprItemElaboration>,
+        Vec<GeneralExprInstanceMemberElaboration>,
+    ) {
+        (self.items, self.instance_members)
     }
 
     pub fn into_items(self) -> Vec<GeneralExprItemElaboration> {
@@ -38,13 +62,22 @@ impl GeneralExprElaborationReport {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
+        self.items.is_empty() && self.instance_members.is_empty()
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GeneralExprItemElaboration {
     pub owner: ItemId,
+    pub body_expr: ExprId,
+    pub parameters: Vec<GeneralExprParameter>,
+    pub outcome: GeneralExprOutcome,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GeneralExprInstanceMemberElaboration {
+    pub instance_owner: ItemId,
+    pub member_index: usize,
     pub body_expr: ExprId,
     pub parameters: Vec<GeneralExprParameter>,
     pub outcome: GeneralExprOutcome,
@@ -345,6 +378,7 @@ impl<'a> GeneralExprElaborator<'a> {
 
     fn build(mut self) -> GeneralExprElaborationReport {
         let mut items = Vec::new();
+        let mut instance_members = Vec::new();
         for (item_id, item) in self.module.items().iter() {
             match item {
                 Item::Value(value) => items.push(self.elaborate_value(item_id, value)),
@@ -354,16 +388,18 @@ impl<'a> GeneralExprElaborator<'a> {
                         items.push(item);
                     }
                 }
+                Item::Instance(instance) => {
+                    instance_members.extend(self.elaborate_instance_members(item_id, instance));
+                }
                 Item::Type(_)
                 | Item::Class(_)
                 | Item::Domain(_)
                 | Item::SourceProviderContract(_)
-                | Item::Instance(_)
                 | Item::Use(_)
                 | Item::Export(_) => {}
             }
         }
-        GeneralExprElaborationReport::new(items)
+        GeneralExprElaborationReport::new(items, instance_members)
     }
 
     fn collect_markup_runtime_expr_sites(
@@ -660,6 +696,72 @@ impl<'a> GeneralExprElaborator<'a> {
         })
     }
 
+    fn elaborate_instance_members(
+        &mut self,
+        owner: ItemId,
+        instance: &InstanceItem,
+    ) -> Vec<GeneralExprInstanceMemberElaboration> {
+        let Some(class_item_id) = self.instance_class_item_id(instance) else {
+            return Vec::new();
+        };
+        let Some(argument_bindings) = self.instance_argument_bindings(class_item_id, instance) else {
+            return Vec::new();
+        };
+        let Item::Class(class_item) = &self.module.items()[class_item_id] else {
+            return Vec::new();
+        };
+        let expected_members = class_item
+            .members
+            .iter()
+            .map(|member| (member.name.text().to_owned(), member.annotation))
+            .collect::<HashMap<_, _>>();
+        instance
+            .members
+            .iter()
+            .enumerate()
+            .filter_map(|(member_index, member)| {
+                let annotation = expected_members.get(member.name.text()).copied()?;
+                let expected = self
+                    .typing
+                    .instantiate_poly_hir_type(annotation, &argument_bindings)?;
+                Some(self.elaborate_instance_member(owner, member_index, member, &expected))
+            })
+            .collect()
+    }
+
+    fn elaborate_instance_member(
+        &mut self,
+        owner: ItemId,
+        member_index: usize,
+        member: &InstanceMember,
+        expected: &GateType,
+    ) -> GeneralExprInstanceMemberElaboration {
+        let (parameters, env, result_ty) =
+            match self.lower_instance_member_parameters(member, expected) {
+                Ok(lowered) => lowered,
+                Err(blockers) => {
+                    return GeneralExprInstanceMemberElaboration {
+                        instance_owner: owner,
+                        member_index,
+                        body_expr: member.body,
+                        parameters: Vec::new(),
+                        outcome: GeneralExprOutcome::Blocked(BlockedGeneralExpr { blockers }),
+                    };
+                }
+            };
+        let outcome = match self.lower_expr(member.body, &env, None, Some(&result_ty)) {
+            Ok(body) => GeneralExprOutcome::Lowered(body),
+            Err(blockers) => GeneralExprOutcome::Blocked(BlockedGeneralExpr { blockers }),
+        };
+        GeneralExprInstanceMemberElaboration {
+            instance_owner: owner,
+            member_index,
+            body_expr: member.body,
+            parameters,
+            outcome,
+        }
+    }
+
     fn lower_parameters(
         &mut self,
         parameters: &[FunctionParameter],
@@ -695,6 +797,69 @@ impl<'a> GeneralExprElaborator<'a> {
         } else {
             Err(blockers)
         }
+    }
+
+    fn lower_instance_member_parameters(
+        &mut self,
+        member: &InstanceMember,
+        expected: &GateType,
+    ) -> Result<(Vec<GeneralExprParameter>, GateExprEnv, GateType), Vec<GeneralExprBlocker>> {
+        let mut env = GateExprEnv::default();
+        let mut lowered = Vec::with_capacity(member.parameters.len());
+        let mut current = expected.clone();
+        for parameter in &member.parameters {
+            let GateType::Arrow {
+                parameter: parameter_ty,
+                result,
+            } = current
+            else {
+                return Err(vec![GeneralExprBlocker::UnknownExprType { span: member.span }]);
+            };
+            let binding = &self.module.bindings()[parameter.binding];
+            let parameter_ty = parameter_ty.as_ref().clone();
+            env.locals.insert(parameter.binding, parameter_ty.clone());
+            lowered.push(GeneralExprParameter {
+                binding: parameter.binding,
+                span: binding.span,
+                name: binding.name.text().into(),
+                ty: parameter_ty,
+            });
+            current = *result;
+        }
+        Ok((lowered, env, current))
+    }
+
+    fn instance_class_item_id(&self, item: &InstanceItem) -> Option<ItemId> {
+        let ResolutionState::Resolved(TypeResolution::Item(item_id)) = item.class.resolution.as_ref()
+        else {
+            return None;
+        };
+        matches!(self.module.items()[*item_id], Item::Class(_)).then_some(*item_id)
+    }
+
+    fn instance_argument_bindings(
+        &mut self,
+        class_item_id: ItemId,
+        item: &InstanceItem,
+    ) -> Option<PolyTypeBindings> {
+        let Item::Class(class_item) = &self.module.items()[class_item_id] else {
+            return None;
+        };
+        if class_item.parameters.len() != item.arguments.len() {
+            return None;
+        }
+        let mut arguments = Vec::with_capacity(item.arguments.len());
+        for argument in item.arguments.iter() {
+            arguments.push(self.typing.poly_type_binding(*argument)?);
+        }
+        Some(
+            class_item
+                .parameters
+                .iter()
+                .copied()
+                .zip(arguments)
+                .collect(),
+        )
     }
 
     fn lower_expr(
@@ -742,7 +907,7 @@ impl<'a> GeneralExprElaborator<'a> {
         let ty = self.expr_type(expr_id, env, ambient, expected)?;
         let kind = match expr.kind {
             ExprKind::Name(reference) => GateRuntimeExprKind::Reference(
-                self.runtime_reference_for_name(expr.span, &reference)?,
+                self.runtime_reference_for_name(expr.span, &reference, &ty)?,
             ),
             ExprKind::Integer(literal) => GateRuntimeExprKind::Integer(literal),
             ExprKind::SuffixedInteger(literal) => GateRuntimeExprKind::SuffixedInteger(literal),
@@ -947,8 +1112,36 @@ impl<'a> GeneralExprElaborator<'a> {
 
         let callee_expected = inferred_parameter_types
             .map(|parameters| self.arrow_type(parameters, result_ty.clone()))
-            .unwrap_or_else(|| self.arrow_type(argument_types, result_ty.clone()));
-        let lowered_callee = self.lower_expr(callee, env, ambient, Some(&callee_expected))?;
+            .unwrap_or_else(|| self.arrow_type(argument_types.clone(), result_ty.clone()));
+        let lowered_callee = if let ExprKind::Name(reference) = &self.module.exprs()[callee].kind {
+            if matches!(
+                reference.resolution.as_ref(),
+                ResolutionState::Resolved(TermResolution::ClassMember(_))
+                    | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_))
+            ) {
+                let Some(dispatch) = resolve_class_member_dispatch(
+                    self.module,
+                    reference,
+                    &argument_types,
+                    Some(result_ty),
+                ) else {
+                    return Err(vec![GeneralExprBlocker::UnknownExprType {
+                        span: self.module.exprs()[callee].span,
+                    }]);
+                };
+                GateRuntimeExpr {
+                    span: self.module.exprs()[callee].span,
+                    ty: callee_expected.clone(),
+                    kind: GateRuntimeExprKind::Reference(GateRuntimeReference::ClassMember(
+                        dispatch,
+                    )),
+                }
+            } else {
+                self.lower_expr(callee, env, ambient, Some(&callee_expected))?
+            }
+        } else {
+            self.lower_expr(callee, env, ambient, Some(&callee_expected))?
+        };
         Ok(GateRuntimeExprKind::Apply {
             callee: Box::new(lowered_callee),
             arguments: lowered_arguments,
@@ -1417,6 +1610,7 @@ impl<'a> GeneralExprElaborator<'a> {
         &self,
         span: SourceSpan,
         reference: &TermReference,
+        expected: &GateType,
     ) -> Result<GateRuntimeReference, Vec<GeneralExprBlocker>> {
         match reference.resolution.as_ref() {
             ResolutionState::Resolved(TermResolution::Local(binding)) => {
@@ -1434,6 +1628,12 @@ impl<'a> GeneralExprElaborator<'a> {
                 .ok_or_else(|| vec![GeneralExprBlocker::UnknownExprType { span }]),
             ResolutionState::Resolved(TermResolution::Builtin(builtin)) => {
                 Ok(GateRuntimeReference::Builtin(*builtin))
+            }
+            ResolutionState::Resolved(TermResolution::ClassMember(_))
+            | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_)) => {
+                resolve_class_member_dispatch(self.module, reference, &[], Some(expected))
+                    .map(GateRuntimeReference::ClassMember)
+                    .ok_or_else(|| vec![GeneralExprBlocker::UnknownExprType { span }])
             }
             ResolutionState::Resolved(TermResolution::Import(_)) => {
                 Err(vec![GeneralExprBlocker::UnsupportedImportReference {
@@ -1458,7 +1658,7 @@ impl<'a> GeneralExprElaborator<'a> {
     fn constructor_reference_with_expected(
         &self,
         reference: &TermReference,
-        span: SourceSpan,
+        _span: SourceSpan,
     ) -> Option<GateRuntimeReference> {
         match reference.resolution.as_ref() {
             ResolutionState::Resolved(TermResolution::Builtin(
@@ -1467,7 +1667,12 @@ impl<'a> GeneralExprElaborator<'a> {
                 | BuiltinTerm::Err
                 | BuiltinTerm::Valid
                 | BuiltinTerm::Invalid,
-            )) => self.runtime_reference_for_name(span, reference).ok(),
+            )) => match reference.resolution.as_ref() {
+                ResolutionState::Resolved(TermResolution::Builtin(builtin)) => {
+                    Some(GateRuntimeReference::Builtin(*builtin))
+                }
+                _ => None,
+            },
             ResolutionState::Resolved(TermResolution::Item(item_id)) => self
                 .module
                 .sum_constructor_handle(*item_id, reference.path.segments().last().text())
@@ -1516,7 +1721,8 @@ impl<'a> GeneralExprElaborator<'a> {
                     expected,
                     actual,
                 },
-                GateIssue::UnsupportedApplicativeClusterMember { span, .. }
+                GateIssue::InvalidPipeStageInput { span, .. }
+                | GateIssue::UnsupportedApplicativeClusterMember { span, .. }
                 | GateIssue::ApplicativeClusterMismatch { span, .. }
                 | GateIssue::InvalidClusterFinalizer { span, .. } => {
                     GeneralExprBlocker::UnsupportedRuntimeExpr {
@@ -1652,6 +1858,8 @@ impl<'a> GeneralExprElaborator<'a> {
             | ResolutionState::Resolved(TermResolution::Import(_))
             | ResolutionState::Resolved(TermResolution::DomainMember(_))
             | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_))
+            | ResolutionState::Resolved(TermResolution::ClassMember(_))
+            | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_))
             | ResolutionState::Unresolved => None,
         }
     }
@@ -2139,6 +2347,56 @@ mod tests {
                 );
             }
             other => panic!("expected blocked duplicate body, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn elaborates_same_module_instance_member_bodies() {
+        let lowered = lower_text(
+            "general-expr-instance-member.aivi",
+            r#"
+class Semigroup A
+    append : A -> A -> A
+
+type Blob = Blob Int
+
+instance Semigroup Blob
+    append left right =
+        left
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "instance-member example should lower to HIR: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_general_expressions(lowered.module());
+        assert!(
+            report.items().is_empty(),
+            "instance-member-only module should not synthesize ordinary item elaborations"
+        );
+        let append = report
+            .instance_members()
+            .iter()
+            .find(|member| member.member_index == 0)
+            .expect("expected instance member elaboration");
+        assert_eq!(
+            append
+                .parameters
+                .iter()
+                .map(|parameter| parameter.name.as_ref())
+                .collect::<Vec<_>>(),
+            vec!["left", "right"]
+        );
+        match &append.outcome {
+            GeneralExprOutcome::Lowered(expr) => {
+                assert!(matches!(
+                    expr.kind,
+                    crate::GateRuntimeExprKind::Reference(crate::GateRuntimeReference::Local(_))
+                ));
+            }
+            other => panic!("expected lowered instance member body, found {other:?}"),
         }
     }
 }

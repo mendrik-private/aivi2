@@ -5,11 +5,13 @@ use std::{
 
 use aivi_base::SourceSpan;
 use aivi_hir as hir;
+use aivi_typing::RecurrenceTarget;
 
 use crate::{
     effects::{
         RuntimeSourceProvider, SourceInstanceId, SourceReplacementPolicy, SourceRuntimeSpec,
-        SourceStaleWorkPolicy, TaskSourceRuntime, TaskSourceRuntimeError,
+        SourceStaleWorkPolicy, TaskInstanceId, TaskRuntimeSpec, TaskSourceRuntime,
+        TaskSourceRuntimeError,
     },
     graph::{
         DerivedHandle, GraphBuildError, InputHandle, OwnerHandle, SignalGraph, SignalGraphBuilder,
@@ -25,6 +27,8 @@ use crate::{
 ///
 /// - every `sig` with a body becomes one public runtime signal node,
 /// - every `@source` contributes one concrete source runtime spec and publication input,
+/// - every directly annotated top-level `val ... : Task E A` contributes one concrete task
+///   runtime spec plus a dedicated scheduler-owned sink input,
 /// - source-decorated signals with bodies keep those identities separate so the unresolved
 ///   publication-to-body lowering gap stays explicit,
 /// - and gate/recurrence plans are preserved as typed runtime-facing attachments rather than being
@@ -217,6 +221,19 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
             *dependencies = resolved.into_boxed_slice();
         }
 
+        let mut task_wakeups = BTreeMap::new();
+        for node in self.recurrences.nodes() {
+            let hir::RecurrenceNodeOutcome::Planned(plan) = &node.outcome else {
+                continue;
+            };
+            if plan.target.target() != RecurrenceTarget::Task {
+                continue;
+            }
+            if task_wakeups.insert(node.owner, plan.wakeup).is_some() {
+                errors.push(HirRuntimeAdapterError::DuplicateTaskOwner { owner: node.owner });
+            }
+        }
+
         let mut sources = Vec::new();
         let mut seen_source_owners = BTreeSet::new();
         for binding in &signals {
@@ -312,6 +329,51 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
             }
         }
 
+        let mut tasks = Vec::new();
+        for (item_id, item) in self.module.items().iter() {
+            let hir::Item::Value(value) = item else {
+                continue;
+            };
+            let Some(annotation) = value.annotation else {
+                continue;
+            };
+            if !annotation_is_task(self.module, annotation) {
+                continue;
+            }
+
+            let owner = match graph_builder.add_owner(value.name.text(), None) {
+                Ok(owner) => owner,
+                Err(err) => {
+                    errors.push(HirRuntimeAdapterError::GraphBuild(err));
+                    continue;
+                }
+            };
+            owners.push(HirOwnerBinding {
+                item: item_id,
+                span: value.header.span,
+                name: value.name.text().into(),
+                handle: owner,
+            });
+
+            let input =
+                match graph_builder.add_input(format!("{}#task", value.name.text()), Some(owner)) {
+                    Ok(input) => input,
+                    Err(err) => {
+                        errors.push(HirRuntimeAdapterError::GraphBuild(err));
+                        continue;
+                    }
+                };
+            let mut spec = TaskRuntimeSpec::new(runtime_task_instance(item_id), input);
+            spec.wakeup = task_wakeups.get(&item_id).copied();
+            tasks.push(HirTaskBinding {
+                owner: item_id,
+                owner_handle: owner,
+                task_span: value.header.span,
+                input,
+                spec,
+            });
+        }
+
         let mut gates = Vec::new();
         let mut gate_sites = BTreeSet::new();
         for stage in self.gates.stages() {
@@ -385,6 +447,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
             owners: owners.into_boxed_slice(),
             signals: signals.into_boxed_slice(),
             sources: sources.into_boxed_slice(),
+            tasks: tasks.into_boxed_slice(),
             gates: gates.into_boxed_slice(),
             recurrences: recurrences.into_boxed_slice(),
         })
@@ -461,6 +524,7 @@ pub struct HirRuntimeAssembly {
     owners: Box<[HirOwnerBinding]>,
     signals: Box<[HirSignalBinding]>,
     sources: Box<[HirSourceBinding]>,
+    tasks: Box<[HirTaskBinding]>,
     gates: Box<[HirGateStageBinding]>,
     recurrences: Box<[HirRecurrenceBinding]>,
 }
@@ -480,6 +544,10 @@ impl HirRuntimeAssembly {
 
     pub fn sources(&self) -> &[HirSourceBinding] {
         &self.sources
+    }
+
+    pub fn tasks(&self) -> &[HirTaskBinding] {
+        &self.tasks
     }
 
     pub fn gates(&self) -> &[HirGateStageBinding] {
@@ -502,6 +570,10 @@ impl HirRuntimeAssembly {
         self.sources.iter().find(|binding| binding.owner == item)
     }
 
+    pub fn task_by_owner(&self, item: hir::ItemId) -> Option<&HirTaskBinding> {
+        self.tasks.iter().find(|binding| binding.owner == item)
+    }
+
     pub fn instantiate_runtime<V>(
         &self,
     ) -> Result<TaskSourceRuntime<V, hir::SourceDecodeProgram>, HirRuntimeInstantiationError> {
@@ -514,6 +586,15 @@ impl HirRuntimeAssembly {
                     instance: source.spec.instance,
                     error,
                 })?;
+        }
+        for task in &self.tasks {
+            runtime.register_task(task.spec.clone()).map_err(|error| {
+                HirRuntimeInstantiationError::RegisterTask {
+                    owner: task.owner,
+                    instance: task.spec.instance,
+                    error,
+                }
+            })?;
         }
         Ok(runtime)
     }
@@ -589,6 +670,15 @@ pub struct HirSourceBinding {
     pub spec: SourceRuntimeSpec<hir::SourceDecodeProgram>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HirTaskBinding {
+    pub owner: hir::ItemId,
+    pub owner_handle: OwnerHandle,
+    pub task_span: SourceSpan,
+    pub input: InputHandle,
+    pub spec: TaskRuntimeSpec,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct HirGateStageId {
     pub owner: hir::ItemId,
@@ -653,6 +743,11 @@ pub enum HirRuntimeInstantiationError {
         instance: SourceInstanceId,
         error: TaskSourceRuntimeError,
     },
+    RegisterTask {
+        owner: hir::ItemId,
+        instance: TaskInstanceId,
+        error: TaskSourceRuntimeError,
+    },
 }
 
 impl fmt::Display for HirRuntimeInstantiationError {
@@ -665,6 +760,14 @@ impl fmt::Display for HirRuntimeInstantiationError {
             } => write!(
                 f,
                 "failed to register adapted source {instance:?} for owner {owner}: {error:?}"
+            ),
+            Self::RegisterTask {
+                owner,
+                instance,
+                error,
+            } => write!(
+                f,
+                "failed to register adapted task {instance:?} for owner {owner}: {error:?}"
             ),
         }
     }
@@ -721,6 +824,9 @@ pub enum HirRuntimeAdapterError {
         owner: hir::ItemId,
     },
     UnexpectedSourceDecodeOwner {
+        owner: hir::ItemId,
+    },
+    DuplicateTaskOwner {
         owner: hir::ItemId,
     },
     BlockedSourceLifecycle {
@@ -803,6 +909,12 @@ impl fmt::Display for HirRuntimeAdapterError {
                 f,
                 "source decode report references non-source owner {owner}"
             ),
+            Self::DuplicateTaskOwner { owner } => {
+                write!(
+                    f,
+                    "task owner {owner} exposes more than one recurrence handoff"
+                )
+            }
             Self::BlockedSourceLifecycle {
                 owner, blockers, ..
             } => write!(
@@ -916,6 +1028,40 @@ fn signal_derived_handle(
 
 fn runtime_source_instance(instance: hir::SourceInstanceId) -> SourceInstanceId {
     SourceInstanceId::from_raw(instance.decorator().as_raw())
+}
+
+fn runtime_task_instance(item: hir::ItemId) -> TaskInstanceId {
+    TaskInstanceId::from_raw(item.as_raw())
+}
+
+fn annotation_is_task(module: &hir::Module, ty: hir::TypeId) -> bool {
+    type_head_with_arity(module, ty).is_some_and(|(head, arity)| {
+        head == hir::TypeResolution::Builtin(hir::BuiltinType::Task) && arity == 2
+    })
+}
+
+fn type_head_with_arity(
+    module: &hir::Module,
+    mut ty: hir::TypeId,
+) -> Option<(hir::TypeResolution, usize)> {
+    let mut arity = 0usize;
+    loop {
+        match &module.types()[ty].kind {
+            hir::TypeKind::Apply { callee, arguments } => {
+                arity += arguments.len();
+                ty = *callee;
+            }
+            hir::TypeKind::Name(reference) => {
+                return match reference.resolution {
+                    hir::ResolutionState::Resolved(head) => Some((head, arity)),
+                    hir::ResolutionState::Unresolved => None,
+                };
+            }
+            hir::TypeKind::Tuple(_) | hir::TypeKind::Record(_) | hir::TypeKind::Arrow { .. } => {
+                return None;
+            }
+        }
+    }
 }
 
 fn adapt_source_provider(
@@ -1201,6 +1347,56 @@ sig retried : Signal Int =
             .instantiate_runtime()
             .expect("assembled sources should register into a runtime");
         assert!(runtime.source_spec(source.spec.instance).is_some());
+        assert_eq!(
+            runtime.graph().signal_count(),
+            assembly.graph().signal_count()
+        );
+    }
+
+    #[test]
+    fn assembles_task_specs_from_task_values() {
+        let lowered = lower_text(
+            "runtime-hir-adapter-task.aivi",
+            r#"
+domain Retry over Int
+    literal x : Int -> Retry
+
+fun keep #value =>
+    value
+
+@recur.backoff 3x
+val retried : Task Int Int =
+    0
+     @|> keep
+     <|@ keep
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "task fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let assembly =
+            assemble_hir_runtime(lowered.module()).expect("task fixture should assemble");
+        let retried_id = item_id(lowered.module(), "retried");
+        let task = assembly
+            .task_by_owner(retried_id)
+            .expect("retried task binding should exist");
+
+        assert_eq!(task.owner, retried_id);
+        assert_eq!(
+            task.spec
+                .wakeup
+                .expect("task wakeup should be preserved")
+                .kind(),
+            RecurrenceWakeupKind::Backoff
+        );
+
+        let runtime: TaskSourceRuntime<i32, hir::SourceDecodeProgram> = assembly
+            .instantiate_runtime()
+            .expect("assembled tasks should register into a runtime");
+        assert!(runtime.task_spec(task.spec.instance).is_some());
         assert_eq!(
             runtime.graph().signal_count(),
             assembly.graph().signal_count()

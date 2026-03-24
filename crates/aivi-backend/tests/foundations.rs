@@ -1,10 +1,11 @@
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use aivi_backend::{
-    CodegenError, DecodeStepKind, DomainDecodeSurfaceKind, GateStage as BackendGateStage,
-    ItemKind as BackendItemKind, KernelEvaluator, KernelExprKind, LayoutKind, LoweringError,
-    NonSourceWakeupCause, RecurrenceTarget, RuntimeValue, SourceProvider,
-    StageKind as BackendStageKind, ValidationError, compile_program,
+    BuiltinAppendCarrier, BuiltinApplicativeCarrier, BuiltinClassMemberIntrinsic,
+    BuiltinFunctorCarrier, CodegenError, DecodeStepKind, DomainDecodeSurfaceKind,
+    GateStage as BackendGateStage, ItemKind as BackendItemKind, KernelEvaluator, KernelExprKind,
+    LayoutKind, LoweringError, NonSourceWakeupCause, RecurrenceTarget, RuntimeValue,
+    SourceProvider, StageKind as BackendStageKind, ValidationError, compile_program,
     lower_module as lower_backend_module, validate_program,
 };
 use aivi_base::{SourceDatabase, SourceSpan};
@@ -20,6 +21,7 @@ use aivi_hir::{
     BuiltinType, ExprId as HirExprId, IntegerLiteral, ItemId as HirItemId,
 };
 use aivi_lambda::{lower_module as lower_lambda_module, validate_module as validate_lambda_module};
+use aivi_query::RootDatabase;
 use aivi_syntax::parse_module;
 
 fn fixture_root() -> PathBuf {
@@ -57,6 +59,26 @@ fn lower_text(path: &str, text: &str) -> aivi_backend::Program {
 fn lower_fixture(path: &str) -> aivi_backend::Program {
     let text = fs::read_to_string(fixture_root().join(path)).expect("fixture should be readable");
     lower_text(path, &text)
+}
+
+fn lower_workspace_text(path: &str, text: &str) -> aivi_backend::Program {
+    let db = RootDatabase::new();
+    let absolute = fixture_root().join(path);
+    let file = db.open_file(&absolute, text);
+    let lowered = aivi_query::hir_module(&db, file);
+    assert!(
+        lowered.hir_diagnostics().is_empty(),
+        "workspace fixture should lower to HIR: {:?}",
+        lowered.hir_diagnostics()
+    );
+    let core =
+        lower_core_module(lowered.module()).expect("workspace HIR should lower into typed core");
+    validate_core_module(&core).expect("workspace typed core should validate");
+    let lambda = lower_lambda_module(&core).expect("workspace lambda lowering should succeed");
+    validate_lambda_module(&lambda).expect("workspace lambda module should validate");
+    let backend = lower_backend_module(&lambda).expect("workspace backend lowering should succeed");
+    validate_program(&backend).expect("workspace backend program should validate");
+    backend
 }
 
 fn find_item(program: &aivi_backend::Program, name: &str) -> aivi_backend::ItemId {
@@ -411,6 +433,209 @@ sig users : Signal Int
             .expect("refreshEvery option should evaluate"),
         RuntimeValue::Int(6)
     );
+}
+
+#[test]
+fn runtime_evaluates_builtin_overloaded_class_members() {
+    let backend = lower_text(
+        "backend-builtin-class-members.aivi",
+        r#"
+fun increment:Int #value:Int => value + 1
+
+val joined:Text =
+    append "hel" "lo"
+
+val lifted:Option Int =
+    map increment (Some 1)
+
+val singleton:Option Int =
+    pure 3
+
+val none:List Int =
+    empty
+"#,
+    );
+
+    let joined = find_item(&backend, "joined");
+    let lifted = find_item(&backend, "lifted");
+    let singleton = find_item(&backend, "singleton");
+    let none = find_item(&backend, "none");
+    let none_kernel_id = backend.items()[none]
+        .body
+        .expect("none should carry a body");
+
+    let joined_kernel = backend.kernels()[backend.items()[joined]
+        .body
+        .expect("joined should carry a body")]
+    .clone();
+    match &joined_kernel.exprs()[joined_kernel.root].kind {
+        KernelExprKind::Apply { callee, arguments } => {
+            assert_eq!(arguments.len(), 2);
+            assert!(matches!(
+                &joined_kernel.exprs()[*callee].kind,
+                KernelExprKind::BuiltinClassMember(BuiltinClassMemberIntrinsic::Append(
+                    BuiltinAppendCarrier::Text
+                ))
+            ));
+        }
+        other => panic!("expected append body to lower into an apply tree, found {other:?}"),
+    }
+
+    let lifted_kernel = backend.kernels()[backend.items()[lifted]
+        .body
+        .expect("lifted should carry a body")]
+    .clone();
+    match &lifted_kernel.exprs()[lifted_kernel.root].kind {
+        KernelExprKind::Apply { callee, arguments } => {
+            assert_eq!(arguments.len(), 2);
+            assert!(matches!(
+                &lifted_kernel.exprs()[*callee].kind,
+                KernelExprKind::BuiltinClassMember(BuiltinClassMemberIntrinsic::Map(
+                    BuiltinFunctorCarrier::Option
+                ))
+            ));
+        }
+        other => panic!("expected map body to lower into an apply tree, found {other:?}"),
+    }
+
+    let singleton_kernel = backend.kernels()[backend.items()[singleton]
+        .body
+        .expect("singleton should carry a body")]
+    .clone();
+    match &singleton_kernel.exprs()[singleton_kernel.root].kind {
+        KernelExprKind::Apply { callee, arguments } => {
+            assert_eq!(arguments.len(), 1);
+            assert!(matches!(
+                &singleton_kernel.exprs()[*callee].kind,
+                KernelExprKind::BuiltinClassMember(BuiltinClassMemberIntrinsic::Pure(
+                    BuiltinApplicativeCarrier::Option
+                ))
+            ));
+        }
+        other => panic!("expected pure body to lower into an apply tree, found {other:?}"),
+    }
+
+    assert!(matches!(
+        &backend.kernels()[none_kernel_id].exprs()[backend.kernels()[none_kernel_id].root].kind,
+        KernelExprKind::BuiltinClassMember(BuiltinClassMemberIntrinsic::Empty(
+            BuiltinAppendCarrier::List
+        ))
+    ));
+
+    let mut evaluator = KernelEvaluator::new(&backend);
+    let globals = BTreeMap::new();
+    assert_eq!(
+        evaluator
+            .evaluate_item(joined, &globals)
+            .expect("append should evaluate"),
+        RuntimeValue::Text("hello".into())
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(lifted, &globals)
+            .expect("map should evaluate"),
+        RuntimeValue::OptionSome(Box::new(RuntimeValue::Int(2)))
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(singleton, &globals)
+            .expect("pure should evaluate"),
+        RuntimeValue::OptionSome(Box::new(RuntimeValue::Int(3)))
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(none, &globals)
+            .expect("empty should evaluate"),
+        RuntimeValue::List(Vec::new())
+    );
+}
+
+#[test]
+fn workspace_imported_builtin_class_members_lower_through_backend_runtime() {
+    let backend = lower_workspace_text(
+        "milestone-2/valid/workspace-type-imports/main.aivi",
+        r#"
+use shared.types (
+    Envelope
+)
+
+fun increment:Int #value:Int =>
+    value + 1
+
+val lifted:Envelope (Option Int) =
+    map increment (Some 1)
+"#,
+    );
+
+    let lifted = find_item(&backend, "lifted");
+    let lifted_kernel_id = backend.items()[lifted]
+        .body
+        .expect("workspace lifted should lower a backend body kernel");
+    let lifted_kernel = &backend.kernels()[lifted_kernel_id];
+    match &lifted_kernel.exprs()[lifted_kernel.root].kind {
+        KernelExprKind::Apply { callee, arguments } => {
+            assert_eq!(arguments.len(), 2);
+            assert!(matches!(
+                &lifted_kernel.exprs()[*callee].kind,
+                KernelExprKind::BuiltinClassMember(BuiltinClassMemberIntrinsic::Map(
+                    BuiltinFunctorCarrier::Option
+                ))
+            ));
+        }
+        other => panic!("expected workspace map call to lower into an apply tree, found {other:?}"),
+    }
+
+    let mut evaluator = KernelEvaluator::new(&backend);
+    let globals = BTreeMap::new();
+    assert_eq!(
+        evaluator
+            .evaluate_item(lifted, &globals)
+            .expect("workspace map call should evaluate"),
+        RuntimeValue::OptionSome(Box::new(RuntimeValue::Int(2)))
+    );
+}
+
+#[test]
+fn typed_core_lowering_reports_same_module_class_member_boundary() {
+    let mut sources = SourceDatabase::new();
+    let file_id = sources.add_file(
+        "core-same-module-class-member.aivi",
+        r#"
+class Semigroup A
+    append : A -> A -> A
+
+type Blob = Blob Int
+
+instance Semigroup Blob
+    append left right =
+        left
+
+fun combine:Blob #left:Blob #right:Blob =>
+    append left right
+"#,
+    );
+    let parsed = parse_module(&sources[file_id]);
+    assert!(
+        !parsed.has_errors(),
+        "same-module class-member input should parse: {:?}",
+        parsed.all_diagnostics().collect::<Vec<_>>()
+    );
+    let hir = aivi_hir::lower_module(&parsed.module);
+    assert!(
+        !hir.has_errors(),
+        "same-module class-member input should lower to HIR: {:?}",
+        hir.diagnostics()
+    );
+
+    let errors = lower_core_module(hir.module()).expect_err(
+        "same-module overloaded class members should currently stop at typed-core lowering",
+    );
+    assert!(errors.errors().iter().any(|error| matches!(
+        error,
+        aivi_core::LoweringError::UnsupportedClassMemberDispatch { reason, .. }
+            if *reason
+                == "same-module instance member bodies are not yet materialized as typed-core items"
+    )));
 }
 
 #[test]

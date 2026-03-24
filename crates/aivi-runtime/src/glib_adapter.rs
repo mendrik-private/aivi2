@@ -392,6 +392,17 @@ impl GlibLinkedRuntimeDriver {
             .map_err(GlibLinkedRuntimeAccessError::Backend)
     }
 
+    pub fn dispatch_window_key_event(&self, name: &str, repeated: bool) {
+        self.with_state_mut(|state| {
+            state
+                .providers
+                .dispatch_window_key_event(crate::providers::WindowKeyEvent {
+                    name: name.into(),
+                    repeated,
+                });
+        });
+    }
+
     pub fn queued_message_count(&self) -> usize {
         self.with_state(|state| state.linked.queued_message_count())
     }

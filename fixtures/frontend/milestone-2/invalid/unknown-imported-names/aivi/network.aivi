@@ -1,5 +1,3 @@
-val http = "http"
-val socket = "socket"
+val http : Text = "http"
 
 export http
-export socket

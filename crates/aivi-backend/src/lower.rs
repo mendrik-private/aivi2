@@ -20,11 +20,16 @@ use aivi_typing::{
 };
 
 use crate::{
-    AbiParameter, AbiResult, BinaryOperator, BuiltinTerm, CallingConvention, CallingConventionKind,
-    DecodeExtraFieldPolicy, DecodeField, DecodeFieldRequirement, DecodeMode, DecodePlan,
-    DecodePlanId, DecodeStep, DecodeStepId, DecodeStepKind, DecodeSumStrategy, DecodeVariant,
-    DomainDecodeSurface, DomainDecodeSurfaceKind, EnvSlotId, FanoutCarrier, FanoutJoin,
-    FanoutStage, GateStage, InlinePipeCaseArm, InlinePipeExpr, InlinePipePattern,
+    AbiParameter, AbiResult, BinaryOperator, BuiltinAppendCarrier as BackendBuiltinAppendCarrier,
+    BuiltinApplicativeCarrier as BackendBuiltinApplicativeCarrier,
+    BuiltinApplyCarrier as BackendBuiltinApplyCarrier,
+    BuiltinClassMemberIntrinsic as BackendBuiltinClassMemberIntrinsic,
+    BuiltinFunctorCarrier as BackendBuiltinFunctorCarrier,
+    BuiltinOrdSubject as BackendBuiltinOrdSubject, BuiltinTerm, CallingConvention,
+    CallingConventionKind, DecodeExtraFieldPolicy, DecodeField, DecodeFieldRequirement, DecodeMode,
+    DecodePlan, DecodePlanId, DecodeStep, DecodeStepId, DecodeStepKind, DecodeSumStrategy,
+    DecodeVariant, DomainDecodeSurface, DomainDecodeSurfaceKind, EnvSlotId, FanoutCarrier,
+    FanoutJoin, FanoutStage, GateStage, InlinePipeCaseArm, InlinePipeExpr, InlinePipePattern,
     InlinePipePatternKind, InlinePipeRecordPatternField, InlinePipeStage, InlinePipeStageKind,
     InlinePipeTruthyFalsyBranch, InlineSubjectId, IntegerLiteral, Item, ItemId, ItemKind, Kernel,
     KernelExpr, KernelExprId, KernelExprKind, KernelId, KernelOrigin, KernelOriginKind, Layout,
@@ -1079,6 +1084,7 @@ impl<'a> ProgramLowerer<'a> {
                     }
                     core::Reference::SumConstructor(_) => {}
                     core::Reference::DomainMember(_) => {}
+                    core::Reference::BuiltinClassMember(_) => {}
                     core::Reference::HirItem(_) => {
                         return Err(UnresolvedItemReference { span: expr.span });
                     }
@@ -1372,6 +1378,11 @@ impl<'a> ProgramLowerer<'a> {
                                 }
                                 core::Reference::DomainMember(handle) => {
                                     KernelExprKind::DomainMember(handle.clone())
+                                }
+                                core::Reference::BuiltinClassMember(intrinsic) => {
+                                    KernelExprKind::BuiltinClassMember(
+                                        map_builtin_class_member_intrinsic(*intrinsic),
+                                    )
                                 }
                                 core::Reference::HirItem(_) => {
                                     return Err(UnresolvedItemReference { span: expr.span });
@@ -2529,6 +2540,87 @@ fn map_builtin_term(term: HirBuiltinTerm) -> BuiltinTerm {
         HirBuiltinTerm::Err => BuiltinTerm::Err,
         HirBuiltinTerm::Valid => BuiltinTerm::Valid,
         HirBuiltinTerm::Invalid => BuiltinTerm::Invalid,
+    }
+}
+
+fn map_builtin_class_member_intrinsic(
+    intrinsic: core::BuiltinClassMemberIntrinsic,
+) -> BackendBuiltinClassMemberIntrinsic {
+    match intrinsic {
+        core::BuiltinClassMemberIntrinsic::StructuralEq => {
+            BackendBuiltinClassMemberIntrinsic::StructuralEq
+        }
+        core::BuiltinClassMemberIntrinsic::Compare {
+            subject,
+            ordering_item,
+        } => BackendBuiltinClassMemberIntrinsic::Compare {
+            subject: map_builtin_ord_subject(subject),
+            ordering_item,
+        },
+        core::BuiltinClassMemberIntrinsic::Append(carrier) => {
+            BackendBuiltinClassMemberIntrinsic::Append(map_builtin_append_carrier(carrier))
+        }
+        core::BuiltinClassMemberIntrinsic::Empty(carrier) => {
+            BackendBuiltinClassMemberIntrinsic::Empty(map_builtin_append_carrier(carrier))
+        }
+        core::BuiltinClassMemberIntrinsic::Map(carrier) => {
+            BackendBuiltinClassMemberIntrinsic::Map(map_builtin_functor_carrier(carrier))
+        }
+        core::BuiltinClassMemberIntrinsic::Pure(carrier) => {
+            BackendBuiltinClassMemberIntrinsic::Pure(map_builtin_applicative_carrier(carrier))
+        }
+        core::BuiltinClassMemberIntrinsic::Apply(carrier) => {
+            BackendBuiltinClassMemberIntrinsic::Apply(map_builtin_apply_carrier(carrier))
+        }
+    }
+}
+
+fn map_builtin_functor_carrier(
+    carrier: core::BuiltinFunctorCarrier,
+) -> BackendBuiltinFunctorCarrier {
+    match carrier {
+        core::BuiltinFunctorCarrier::List => BackendBuiltinFunctorCarrier::List,
+        core::BuiltinFunctorCarrier::Option => BackendBuiltinFunctorCarrier::Option,
+        core::BuiltinFunctorCarrier::Result => BackendBuiltinFunctorCarrier::Result,
+        core::BuiltinFunctorCarrier::Validation => BackendBuiltinFunctorCarrier::Validation,
+        core::BuiltinFunctorCarrier::Signal => BackendBuiltinFunctorCarrier::Signal,
+    }
+}
+
+fn map_builtin_applicative_carrier(
+    carrier: core::BuiltinApplicativeCarrier,
+) -> BackendBuiltinApplicativeCarrier {
+    match carrier {
+        core::BuiltinApplicativeCarrier::List => BackendBuiltinApplicativeCarrier::List,
+        core::BuiltinApplicativeCarrier::Option => BackendBuiltinApplicativeCarrier::Option,
+        core::BuiltinApplicativeCarrier::Result => BackendBuiltinApplicativeCarrier::Result,
+        core::BuiltinApplicativeCarrier::Validation => BackendBuiltinApplicativeCarrier::Validation,
+        core::BuiltinApplicativeCarrier::Signal => BackendBuiltinApplicativeCarrier::Signal,
+    }
+}
+
+fn map_builtin_apply_carrier(carrier: core::BuiltinApplyCarrier) -> BackendBuiltinApplyCarrier {
+    match carrier {
+        core::BuiltinApplyCarrier::List => BackendBuiltinApplyCarrier::List,
+        core::BuiltinApplyCarrier::Option => BackendBuiltinApplyCarrier::Option,
+        core::BuiltinApplyCarrier::Result => BackendBuiltinApplyCarrier::Result,
+        core::BuiltinApplyCarrier::Signal => BackendBuiltinApplyCarrier::Signal,
+    }
+}
+
+fn map_builtin_append_carrier(carrier: core::BuiltinAppendCarrier) -> BackendBuiltinAppendCarrier {
+    match carrier {
+        core::BuiltinAppendCarrier::Text => BackendBuiltinAppendCarrier::Text,
+        core::BuiltinAppendCarrier::List => BackendBuiltinAppendCarrier::List,
+    }
+}
+
+fn map_builtin_ord_subject(subject: core::BuiltinOrdSubject) -> BackendBuiltinOrdSubject {
+    match subject {
+        core::BuiltinOrdSubject::Int => BackendBuiltinOrdSubject::Int,
+        core::BuiltinOrdSubject::Bool => BackendBuiltinOrdSubject::Bool,
+        core::BuiltinOrdSubject::Text => BackendBuiltinOrdSubject::Text,
+        core::BuiltinOrdSubject::Ordering => BackendBuiltinOrdSubject::Ordering,
     }
 }
 

@@ -21,11 +21,12 @@ use crate::{
     arena::{Arena, ArenaId},
     domain_operator_elaboration::select_domain_binary_operator,
     hir::{
-        ApplicativeSpineHead, BuiltinTerm, BuiltinType, ControlNode, ControlNodeKind,
-        CustomSourceRecurrenceWakeup, DecoratorPayload, DomainMemberKind, DomainMemberResolution,
-        ExprKind, ImportBindingMetadata, ImportValueType, Item, LiteralSuffixResolution,
-        MarkupAttributeValue, MarkupNodeKind, Module, Name, NamePath, PatternKind, PipeStage,
-        PipeStageKind, RecurrenceWakeupDecoratorKind, ResolutionState, SignalItem, SourceDecorator,
+        ApplicativeSpineHead, BuiltinTerm, BuiltinType, ClassMemberResolution, ControlNode,
+        ControlNodeKind, CustomSourceRecurrenceWakeup, DecoratorPayload, DomainMemberKind,
+        DomainMemberResolution, ExprKind, ImportBindingMetadata, ImportBindingResolution,
+        ImportValueType, Item, LiteralSuffixResolution, MarkupAttributeValue, MarkupNodeKind,
+        Module, Name, NamePath, PatternKind, PipeStage, PipeStageKind,
+        RecurrenceWakeupDecoratorKind, ResolutionState, SignalItem, SourceDecorator,
         SourceMetadata, SourceProviderRef, TermReference, TermResolution, TextLiteral, TextSegment,
         TypeItemBody, TypeKind, TypeReference, TypeResolution,
     },
@@ -136,6 +137,30 @@ impl Validator<'_> {
             self.check_span("import binding", import.span);
             self.check_name(&import.imported_name);
             self.check_name(&import.local_name);
+            match (import.resolution, &import.metadata) {
+                (ImportBindingResolution::Resolved, ImportBindingMetadata::Unknown)
+                | (
+                    ImportBindingResolution::UnknownModule
+                    | ImportBindingResolution::MissingExport
+                    | ImportBindingResolution::Cycle,
+                    ImportBindingMetadata::Value { .. }
+                    | ImportBindingMetadata::OpaqueValue
+                    | ImportBindingMetadata::TypeConstructor { .. }
+                    | ImportBindingMetadata::Bundle(_),
+                ) => {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "import binding resolution and metadata are inconsistent",
+                        )
+                        .with_code(code("invalid-import-resolution"))
+                        .with_primary_label(
+                            import.span,
+                            "resolved imports must carry metadata, while blocked imports must stay unknown",
+                        ),
+                    );
+                }
+                _ => {}
+            }
         }
     }
 
@@ -560,7 +585,10 @@ impl Validator<'_> {
     }
 
     fn validate_items(&mut self) {
-        for (_, item) in self.module.items().iter() {
+        for (item_id, item) in self.module.items().iter() {
+            if self.module.ambient_items().contains(&item_id) {
+                continue;
+            }
             self.check_span("item", item.span());
             for decorator in item.decorators() {
                 self.require_decorator(item.span(), "item", "decorator", *decorator);
@@ -611,6 +639,22 @@ impl Validator<'_> {
                 }
                 Item::Function(item) => {
                     self.check_name(&item.name);
+                    for parameter in &item.type_parameters {
+                        self.require_type_parameter(
+                            item.header.span,
+                            "function item",
+                            "type parameter",
+                            *parameter,
+                        );
+                    }
+                    for constraint in &item.context {
+                        self.require_type(
+                            item.header.span,
+                            "function item",
+                            "signature constraint",
+                            *constraint,
+                        );
+                    }
                     if let Some(annotation) = item.annotation {
                         self.require_type(
                             item.header.span,
@@ -707,6 +751,22 @@ impl Validator<'_> {
                     for member in &item.members {
                         self.check_span("class member", member.span);
                         self.check_name(&member.name);
+                        for parameter in &member.type_parameters {
+                            self.require_type_parameter(
+                                member.span,
+                                "class member",
+                                "type parameter",
+                                *parameter,
+                            );
+                        }
+                        for constraint in &member.context {
+                            self.require_type(
+                                member.span,
+                                "class member",
+                                "signature constraint",
+                                *constraint,
+                            );
+                        }
                         self.require_type(
                             member.span,
                             "class member",
@@ -761,6 +821,14 @@ impl Validator<'_> {
                 }
                 Item::Instance(item) => {
                     self.check_type_reference(&item.class);
+                    for parameter in &item.type_parameters {
+                        self.require_type_parameter(
+                            item.header.span,
+                            "instance item",
+                            "type parameter",
+                            *parameter,
+                        );
+                    }
                     for argument in item.arguments.iter() {
                         self.require_type(
                             item.header.span,
@@ -846,9 +914,9 @@ impl Validator<'_> {
 
         let items = self
             .module
-            .items()
+            .root_items()
             .iter()
-            .map(|(_, item)| item.clone())
+            .map(|item_id| self.module.items()[*item_id].clone())
             .collect::<Vec<_>>();
 
         for item in items {
@@ -878,14 +946,26 @@ impl Validator<'_> {
                     }
                 }
                 Item::Function(item) => {
+                    let parameters = item.type_parameters.clone();
+                    for constraint in &item.context {
+                        self.check_expected_type_kind(
+                            *constraint,
+                            &parameters,
+                            "function signature constraint",
+                        );
+                    }
                     if let Some(annotation) = item.annotation {
-                        self.check_expected_type_kind(annotation, &[], "function annotation");
+                        self.check_expected_type_kind(
+                            annotation,
+                            &parameters,
+                            "function annotation",
+                        );
                     }
                     for parameter in &item.parameters {
                         if let Some(annotation) = parameter.annotation {
                             self.check_expected_type_kind(
                                 annotation,
-                                &[],
+                                &parameters,
                                 "function parameter annotation",
                             );
                         }
@@ -902,9 +982,18 @@ impl Validator<'_> {
                         self.check_expected_type_kind(*superclass, &parameters, "class superclass");
                     }
                     for member in &item.members {
+                        let mut member_parameters = parameters.clone();
+                        member_parameters.extend(member.type_parameters.iter().copied());
+                        for constraint in &member.context {
+                            self.check_expected_type_kind(
+                                *constraint,
+                                &member_parameters,
+                                "class member constraint",
+                            );
+                        }
                         self.check_expected_type_kind(
                             member.annotation,
-                            &parameters,
+                            &member_parameters,
                             "class member annotation",
                         );
                     }
@@ -937,17 +1026,18 @@ impl Validator<'_> {
                     }
                 }
                 Item::Instance(item) => {
+                    let parameters = item.type_parameters.clone();
                     self.check_type_reference_kind(
                         &item.class,
-                        &[],
+                        &parameters,
                         Kind::constructor(item.arguments.len()),
                         "instance class head",
                     );
                     for argument in item.arguments.iter() {
-                        self.check_expected_type_kind(*argument, &[], "instance argument");
+                        self.check_expected_type_kind(*argument, &parameters, "instance argument");
                     }
                     for context in &item.context {
-                        self.check_expected_type_kind(*context, &[], "instance context");
+                        self.check_expected_type_kind(*context, &parameters, "instance context");
                     }
                     for member in &item.members {
                         if let Some(annotation) = member.annotation {
@@ -1953,7 +2043,9 @@ impl Validator<'_> {
             | ResolutionState::Resolved(TermResolution::Local(_))
             | ResolutionState::Resolved(TermResolution::Builtin(_))
             | ResolutionState::Resolved(TermResolution::DomainMember(_))
-            | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_)) => None,
+            | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_))
+            | ResolutionState::Resolved(TermResolution::ClassMember(_))
+            | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_)) => None,
         }
     }
 
@@ -2560,7 +2652,9 @@ impl Validator<'_> {
                 .import_value_type(*import_id)
                 .map(|actual| SourceOptionActualType::from_gate_type(&actual)),
             ResolutionState::Resolved(TermResolution::DomainMember(_))
-            | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_)) => None,
+            | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_))
+            | ResolutionState::Resolved(TermResolution::ClassMember(_))
+            | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_)) => None,
             ResolutionState::Resolved(TermResolution::Builtin(builtin)) => self
                 .infer_source_option_builtin_actual_type(
                     *builtin,
@@ -5431,6 +5525,23 @@ impl Validator<'_> {
 
     fn emit_gate_issue(&mut self, issue: GateIssue) {
         match issue {
+            GateIssue::InvalidPipeStageInput {
+                span,
+                expected,
+                actual,
+                ..
+            } => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "gate predicate pipe stage expects `{actual}` but the current subject is `{expected}`"
+                    ))
+                    .with_code(code("invalid-pipe-stage-input"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "make this staged predicate accept the current gate subject",
+                    )),
+                );
+            }
             GateIssue::InvalidProjection {
                 span,
                 path,
@@ -5580,6 +5691,23 @@ impl Validator<'_> {
             crate::TruthyFalsyBranchKind::Falsy => "falsy",
         };
         match issue {
+            GateIssue::InvalidPipeStageInput {
+                span,
+                expected,
+                actual,
+                ..
+            } => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "{branch_name} branch pipe stage expects `{actual}` but the matched payload is `{expected}`"
+                    ))
+                    .with_code(code("invalid-pipe-stage-input"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "make this staged branch expression accept the current payload",
+                    )),
+                );
+            }
             GateIssue::InvalidProjection {
                 span,
                 path,
@@ -5734,6 +5862,30 @@ impl Validator<'_> {
 
     fn emit_fanout_issue(&mut self, context: FanoutIssueContext, issue: GateIssue) {
         match (context, issue) {
+            (
+                context,
+                GateIssue::InvalidPipeStageInput {
+                    span,
+                    expected,
+                    actual,
+                    ..
+                },
+            ) => {
+                let subject = match context {
+                    FanoutIssueContext::MapElement => "fan-out body",
+                    FanoutIssueContext::JoinCollection => "fan-in body",
+                };
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "{subject} pipe stage expects `{actual}` but the current subject is `{expected}`"
+                    ))
+                    .with_code(code("invalid-pipe-stage-input"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "make this staged expression accept the current fan-out subject",
+                    )),
+                );
+            }
             (
                 FanoutIssueContext::MapElement,
                 GateIssue::InvalidProjection {
@@ -6308,6 +6460,7 @@ impl Validator<'_> {
         match &import.metadata {
             ImportBindingMetadata::TypeConstructor { kind } => Some(kind.clone()),
             ImportBindingMetadata::Value { .. }
+            | ImportBindingMetadata::OpaqueValue
             | ImportBindingMetadata::Bundle(_)
             | ImportBindingMetadata::Unknown => None,
         }
@@ -6413,6 +6566,24 @@ impl Validator<'_> {
                 TermResolution::AmbiguousDomainMembers(candidates) => {
                     for resolution in candidates.iter().copied() {
                         this.require_domain_member_resolution(reference.span(), resolution);
+                    }
+                }
+                TermResolution::ClassMember(resolution) => {
+                    this.require_item(
+                        reference.span(),
+                        "term reference",
+                        "class",
+                        resolution.class,
+                    );
+                }
+                TermResolution::AmbiguousClassMembers(candidates) => {
+                    for resolution in candidates.iter().copied() {
+                        this.require_item(
+                            reference.span(),
+                            "term reference",
+                            "class",
+                            resolution.class,
+                        );
                     }
                 }
                 TermResolution::Builtin(_) => {}
@@ -7091,6 +7262,32 @@ fn builtin_type_name(builtin: BuiltinType) -> &'static str {
     }
 }
 
+fn builtin_type_arity(builtin: BuiltinType) -> usize {
+    match builtin {
+        BuiltinType::Int
+        | BuiltinType::Float
+        | BuiltinType::Decimal
+        | BuiltinType::BigInt
+        | BuiltinType::Bool
+        | BuiltinType::Text
+        | BuiltinType::Unit
+        | BuiltinType::Bytes => 0,
+        BuiltinType::List | BuiltinType::Set | BuiltinType::Option | BuiltinType::Signal => 1,
+        BuiltinType::Map | BuiltinType::Result | BuiltinType::Validation | BuiltinType::Task => 2,
+    }
+}
+
+fn type_constructor_arity(head: TypeConstructorHead, module: &Module) -> usize {
+    match head {
+        TypeConstructorHead::Builtin(builtin) => builtin_type_arity(builtin),
+        TypeConstructorHead::Item(item_id) => match &module.items()[item_id] {
+            Item::Type(item) => item.parameters.len(),
+            Item::Domain(item) => item.parameters.len(),
+            _ => 0,
+        },
+    }
+}
+
 fn builtin_term_name(builtin: BuiltinTerm) -> &'static str {
     match builtin {
         BuiltinTerm::True => "True",
@@ -7326,6 +7523,12 @@ impl GateExprInfo {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum GateIssue {
+    InvalidPipeStageInput {
+        span: SourceSpan,
+        stage: &'static str,
+        expected: String,
+        actual: String,
+    },
     InvalidProjection {
         span: SourceSpan,
         path: String,
@@ -7373,6 +7576,21 @@ pub(crate) enum DomainMemberSelection<T> {
 pub(crate) struct DomainMemberCallMatch {
     pub(crate) parameters: Vec<GateType>,
     pub(crate) result: GateType,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ClassConstraintBinding {
+    pub(crate) class_item: ItemId,
+    pub(crate) subject: TypeBinding,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ClassMemberCallMatch {
+    pub(crate) resolution: ClassMemberResolution,
+    pub(crate) parameters: Vec<GateType>,
+    pub(crate) result: GateType,
+    pub(crate) evidence: ClassConstraintBinding,
+    pub(crate) constraints: Vec<ClassConstraintBinding>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -7567,6 +7785,50 @@ impl GateType {
     pub(crate) fn same_shape(&self, other: &Self) -> bool {
         self == other
     }
+
+    pub(crate) fn constructor_view(&self) -> Option<(TypeConstructorHead, Vec<GateType>)> {
+        match self {
+            Self::List(element) => Some((
+                TypeConstructorHead::Builtin(BuiltinType::List),
+                vec![element.as_ref().clone()],
+            )),
+            Self::Map { key, value } => Some((
+                TypeConstructorHead::Builtin(BuiltinType::Map),
+                vec![key.as_ref().clone(), value.as_ref().clone()],
+            )),
+            Self::Set(element) => Some((
+                TypeConstructorHead::Builtin(BuiltinType::Set),
+                vec![element.as_ref().clone()],
+            )),
+            Self::Option(element) => Some((
+                TypeConstructorHead::Builtin(BuiltinType::Option),
+                vec![element.as_ref().clone()],
+            )),
+            Self::Result { error, value } => Some((
+                TypeConstructorHead::Builtin(BuiltinType::Result),
+                vec![error.as_ref().clone(), value.as_ref().clone()],
+            )),
+            Self::Validation { error, value } => Some((
+                TypeConstructorHead::Builtin(BuiltinType::Validation),
+                vec![error.as_ref().clone(), value.as_ref().clone()],
+            )),
+            Self::Signal(element) => Some((
+                TypeConstructorHead::Builtin(BuiltinType::Signal),
+                vec![element.as_ref().clone()],
+            )),
+            Self::Task { error, value } => Some((
+                TypeConstructorHead::Builtin(BuiltinType::Task),
+                vec![error.as_ref().clone(), value.as_ref().clone()],
+            )),
+            Self::Domain {
+                item, arguments, ..
+            }
+            | Self::OpaqueItem {
+                item, arguments, ..
+            } => Some((TypeConstructorHead::Item(*item), arguments.clone())),
+            Self::Primitive(_) | Self::Tuple(_) | Self::Record(_) | Self::Arrow { .. } => None,
+        }
+    }
 }
 
 impl fmt::Display for GateType {
@@ -7723,6 +7985,56 @@ impl ApplicativeClusterKind {
         }
     }
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TypeBinding {
+    Type(GateType),
+    Constructor(TypeConstructorBinding),
+}
+
+impl TypeBinding {
+    pub(crate) fn matches(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Type(left), Self::Type(right)) => left.same_shape(right),
+            (Self::Constructor(left), Self::Constructor(right)) => left.matches(right),
+            _ => false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TypeConstructorBinding {
+    head: TypeConstructorHead,
+    arguments: Vec<GateType>,
+}
+
+impl TypeConstructorBinding {
+    pub(crate) fn matches(&self, other: &Self) -> bool {
+        self.head == other.head
+            && self.arguments.len() == other.arguments.len()
+            && self
+                .arguments
+                .iter()
+                .zip(other.arguments.iter())
+                .all(|(left, right)| left.same_shape(right))
+    }
+
+    pub fn head(&self) -> TypeConstructorHead {
+        self.head
+    }
+
+    pub fn arguments(&self) -> &[GateType] {
+        &self.arguments
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TypeConstructorHead {
+    Builtin(BuiltinType),
+    Item(ItemId),
+}
+
+pub(crate) type PolyTypeBindings = HashMap<TypeParameterId, TypeBinding>;
 
 pub(crate) struct GateTypeContext<'a> {
     module: &'a Module,
@@ -8093,6 +8405,123 @@ impl<'a> GateTypeContext<'a> {
         self.lower_type(ty, substitutions, &mut Vec::new())
     }
 
+    pub(crate) fn poly_type_binding(&mut self, ty: TypeId) -> Option<TypeBinding> {
+        if let Some(lowered) = self.lower_annotation(ty) {
+            return Some(TypeBinding::Type(lowered));
+        }
+        let mut item_stack = Vec::new();
+        self.partial_type_constructor_binding(ty, &mut item_stack)
+            .map(TypeBinding::Constructor)
+    }
+
+    pub(crate) fn instantiate_poly_hir_type(
+        &mut self,
+        ty: TypeId,
+        bindings: &PolyTypeBindings,
+    ) -> Option<GateType> {
+        self.lower_poly_type(ty, bindings, &mut Vec::new())
+    }
+
+    pub(crate) fn match_poly_hir_type(
+        &mut self,
+        ty: TypeId,
+        actual: &GateType,
+        bindings: &mut PolyTypeBindings,
+    ) -> bool {
+        self.match_poly_hir_type_inner(ty, actual, bindings, &mut Vec::new())
+    }
+
+    pub(crate) fn match_poly_type_binding(
+        &mut self,
+        ty: TypeId,
+        actual: &TypeBinding,
+        bindings: &mut PolyTypeBindings,
+    ) -> bool {
+        if let Some(candidate) = self.instantiate_poly_type_binding(ty, bindings) {
+            return candidate.matches(actual);
+        }
+        match (&self.module.types()[ty].kind, actual) {
+            (TypeKind::Name(reference), _) => match reference.resolution.as_ref() {
+                ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
+                    match bindings.entry(*parameter) {
+                        Entry::Occupied(entry) => entry.get().matches(actual),
+                        Entry::Vacant(entry) => {
+                            entry.insert(actual.clone());
+                            true
+                        }
+                    }
+                }
+                _ => false,
+            },
+            (TypeKind::Apply { callee, arguments }, TypeBinding::Constructor(actual_binding)) => {
+                let TypeKind::Name(reference) = &self.module.types()[*callee].kind else {
+                    return false;
+                };
+                match reference.resolution.as_ref() {
+                    ResolutionState::Resolved(TypeResolution::Item(_)) => {
+                        let Some((head, _)) = self.type_constructor_head_and_arity(*callee) else {
+                            return false;
+                        };
+                        if head != actual_binding.head()
+                            || arguments.len() != actual_binding.arguments.len()
+                        {
+                            return false;
+                        }
+                        let mut item_stack = Vec::new();
+                        arguments.iter().zip(actual_binding.arguments.iter()).all(
+                            |(argument, actual_argument)| {
+                                self.match_poly_hir_type_inner(
+                                    *argument,
+                                    actual_argument,
+                                    bindings,
+                                    &mut item_stack,
+                                )
+                            },
+                        )
+                    }
+                    ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
+                        let Some(prefix_len) =
+                            actual_binding.arguments.len().checked_sub(arguments.len())
+                        else {
+                            return false;
+                        };
+                        let prefix = TypeBinding::Constructor(TypeConstructorBinding {
+                            head: actual_binding.head(),
+                            arguments: actual_binding.arguments[..prefix_len].to_vec(),
+                        });
+                        let matches_prefix = match bindings.entry(*parameter) {
+                            Entry::Occupied(entry) => entry.get().matches(&prefix),
+                            Entry::Vacant(entry) => {
+                                entry.insert(prefix);
+                                true
+                            }
+                        };
+                        if !matches_prefix {
+                            return false;
+                        }
+                        let mut item_stack = Vec::new();
+                        arguments
+                            .iter()
+                            .zip(actual_binding.arguments[prefix_len..].iter())
+                            .all(|(argument, actual_argument)| {
+                                self.match_poly_hir_type_inner(
+                                    *argument,
+                                    actual_argument,
+                                    bindings,
+                                    &mut item_stack,
+                                )
+                            })
+                    }
+                    _ => false,
+                }
+            }
+            (TypeKind::Tuple(_), _)
+            | (TypeKind::Record(_), _)
+            | (TypeKind::Arrow { .. }, _)
+            | (TypeKind::Apply { .. }, TypeBinding::Type(_)) => false,
+        }
+    }
+
     fn recurrence_target_hint_for_annotation(
         &mut self,
         annotation: TypeId,
@@ -8225,6 +8654,7 @@ impl<'a> GateTypeContext<'a> {
         match &import.metadata {
             ImportBindingMetadata::Value { ty } => Some(self.lower_import_value_type(ty)),
             ImportBindingMetadata::TypeConstructor { .. }
+            | ImportBindingMetadata::OpaqueValue
             | ImportBindingMetadata::Bundle(_)
             | ImportBindingMetadata::Unknown => None,
         }
@@ -8298,6 +8728,8 @@ impl<'a> GateTypeContext<'a> {
             | ResolutionState::Resolved(TermResolution::Local(_))
             | ResolutionState::Resolved(TermResolution::Item(_))
             | ResolutionState::Resolved(TermResolution::Import(_))
+            | ResolutionState::Resolved(TermResolution::ClassMember(_))
+            | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_))
             | ResolutionState::Resolved(TermResolution::Builtin(_)) => None,
         }
     }
@@ -8350,6 +8782,175 @@ impl<'a> GateTypeContext<'a> {
                 this.match_domain_member_call_candidate(resolution, argument_types, expected_result)
             }),
         )
+    }
+
+    fn class_member_candidates(
+        &self,
+        reference: &TermReference,
+    ) -> Option<Vec<ClassMemberResolution>> {
+        match reference.resolution.as_ref() {
+            ResolutionState::Resolved(TermResolution::ClassMember(resolution)) => {
+                Some(vec![*resolution])
+            }
+            ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(candidates)) => {
+                Some(candidates.iter().copied().collect())
+            }
+            ResolutionState::Unresolved
+            | ResolutionState::Resolved(TermResolution::Local(_))
+            | ResolutionState::Resolved(TermResolution::Item(_))
+            | ResolutionState::Resolved(TermResolution::Import(_))
+            | ResolutionState::Resolved(TermResolution::DomainMember(_))
+            | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_))
+            | ResolutionState::Resolved(TermResolution::Builtin(_)) => None,
+        }
+    }
+
+    pub(crate) fn class_member_candidate_labels(
+        &self,
+        reference: &TermReference,
+    ) -> Option<Vec<String>> {
+        self.class_member_candidates(reference).map(|candidates| {
+            candidates
+                .into_iter()
+                .filter_map(|candidate| self.class_member_label(candidate))
+                .collect()
+        })
+    }
+
+    pub(crate) fn select_class_member_call(
+        &mut self,
+        reference: &TermReference,
+        argument_types: &[GateType],
+        expected_result: Option<&GateType>,
+    ) -> Option<DomainMemberSelection<ClassMemberCallMatch>> {
+        let candidates = self.class_member_candidates(reference)?;
+        let mut matches = Vec::new();
+        for candidate in candidates {
+            if let Some(matched) =
+                self.match_class_member_call_candidate(candidate, argument_types, expected_result)
+            {
+                matches.push(matched);
+            }
+        }
+        Some(match matches.len() {
+            0 => DomainMemberSelection::NoMatch,
+            1 => DomainMemberSelection::Unique(
+                matches
+                    .pop()
+                    .expect("exactly one class member match should be available"),
+            ),
+            _ => DomainMemberSelection::Ambiguous,
+        })
+    }
+
+    fn match_class_member_call_candidate(
+        &mut self,
+        resolution: ClassMemberResolution,
+        argument_types: &[GateType],
+        expected_result: Option<&GateType>,
+    ) -> Option<ClassMemberCallMatch> {
+        let (class_parameter, member_annotation, member_context) =
+            self.class_member_signature(resolution)?;
+        let mut bindings = PolyTypeBindings::new();
+        let mut current = member_annotation;
+        let mut parameter_type_ids = Vec::with_capacity(argument_types.len());
+        for argument in argument_types {
+            let TypeKind::Arrow { parameter, result } = self.module.types()[current].kind.clone()
+            else {
+                return None;
+            };
+            if !self.match_poly_hir_type(parameter, argument, &mut bindings) {
+                return None;
+            }
+            parameter_type_ids.push(parameter);
+            current = result;
+        }
+        if let Some(expected) = expected_result
+            && !self.match_poly_hir_type(current, expected, &mut bindings)
+        {
+            return None;
+        }
+
+        let mut parameters = Vec::with_capacity(parameter_type_ids.len());
+        for parameter in parameter_type_ids {
+            parameters.push(self.instantiate_poly_hir_type(parameter, &bindings)?);
+        }
+        let result = self.instantiate_poly_hir_type(current, &bindings)?;
+        if let Some(expected) = expected_result
+            && !result.same_shape(expected)
+        {
+            return None;
+        }
+
+        let evidence = ClassConstraintBinding {
+            class_item: resolution.class,
+            subject: bindings.get(&class_parameter)?.clone(),
+        };
+        let constraints = member_context
+            .iter()
+            .map(|constraint| self.class_constraint_binding(*constraint, &bindings))
+            .collect::<Option<Vec<_>>>()?;
+        Some(ClassMemberCallMatch {
+            resolution,
+            parameters,
+            result,
+            evidence,
+            constraints,
+        })
+    }
+
+    fn class_member_signature(
+        &self,
+        resolution: ClassMemberResolution,
+    ) -> Option<(TypeParameterId, TypeId, Vec<TypeId>)> {
+        let Item::Class(class_item) = &self.module.items()[resolution.class] else {
+            return None;
+        };
+        let member = class_item.members.get(resolution.member_index)?;
+        Some((
+            *class_item.parameters.first(),
+            member.annotation,
+            member.context.clone(),
+        ))
+    }
+
+    fn class_member_label(&self, resolution: ClassMemberResolution) -> Option<String> {
+        let Item::Class(class_item) = &self.module.items()[resolution.class] else {
+            return None;
+        };
+        let member = class_item.members.get(resolution.member_index)?;
+        Some(format!("{}.{}", class_item.name.text(), member.name.text()))
+    }
+
+    pub(crate) fn class_constraint_binding(
+        &mut self,
+        constraint: TypeId,
+        bindings: &PolyTypeBindings,
+    ) -> Option<ClassConstraintBinding> {
+        let (class_item, subject) = self.class_constraint_parts(constraint)?;
+        Some(ClassConstraintBinding {
+            class_item,
+            subject: self.instantiate_poly_type_binding(subject, bindings)?,
+        })
+    }
+
+    fn class_constraint_parts(&self, constraint: TypeId) -> Option<(ItemId, TypeId)> {
+        let ty = self.module.types().get(constraint)?;
+        match &ty.kind {
+            TypeKind::Apply { callee, arguments } if arguments.len() == 1 => {
+                let TypeKind::Name(reference) = &self.module.types()[*callee].kind else {
+                    return None;
+                };
+                let ResolutionState::Resolved(TypeResolution::Item(item_id)) =
+                    reference.resolution.as_ref()
+                else {
+                    return None;
+                };
+                matches!(self.module.items()[*item_id], Item::Class(_))
+                    .then_some((*item_id, *arguments.first()))
+            }
+            _ => None,
+        }
     }
 
     fn select_domain_member_candidate<T>(
@@ -8837,6 +9438,455 @@ impl<'a> GateTypeContext<'a> {
         lowered
     }
 
+    fn lower_poly_type(
+        &mut self,
+        type_id: TypeId,
+        bindings: &PolyTypeBindings,
+        item_stack: &mut Vec<ItemId>,
+    ) -> Option<GateType> {
+        match &self.module.types()[type_id].kind {
+            TypeKind::Name(reference) => {
+                self.lower_poly_type_reference(reference, bindings, item_stack)
+            }
+            TypeKind::Tuple(elements) => {
+                let mut lowered = Vec::with_capacity(elements.len());
+                for element in elements.iter() {
+                    lowered.push(self.lower_poly_type(*element, bindings, item_stack)?);
+                }
+                Some(GateType::Tuple(lowered))
+            }
+            TypeKind::Record(fields) => {
+                let mut lowered = Vec::with_capacity(fields.len());
+                for field in fields {
+                    lowered.push(GateRecordField {
+                        name: field.label.text().to_owned(),
+                        ty: self.lower_poly_type(field.ty, bindings, item_stack)?,
+                    });
+                }
+                Some(GateType::Record(lowered))
+            }
+            TypeKind::Arrow { parameter, result } => Some(GateType::Arrow {
+                parameter: Box::new(self.lower_poly_type(*parameter, bindings, item_stack)?),
+                result: Box::new(self.lower_poly_type(*result, bindings, item_stack)?),
+            }),
+            TypeKind::Apply { callee, arguments } => {
+                let TypeKind::Name(reference) = &self.module.types()[*callee].kind else {
+                    return None;
+                };
+                match reference.resolution.as_ref() {
+                    ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
+                        let TypeBinding::Constructor(binding) = bindings.get(parameter)? else {
+                            return None;
+                        };
+                        let mut all_arguments =
+                            Vec::with_capacity(binding.arguments.len() + arguments.len());
+                        all_arguments.extend(binding.arguments.iter().cloned());
+                        for argument in arguments.iter() {
+                            all_arguments
+                                .push(self.lower_poly_type(*argument, bindings, item_stack)?);
+                        }
+                        self.apply_type_constructor(binding.head, &all_arguments, item_stack)
+                    }
+                    _ => {
+                        let mut lowered_arguments = Vec::with_capacity(arguments.len());
+                        for argument in arguments.iter() {
+                            lowered_arguments
+                                .push(self.lower_poly_type(*argument, bindings, item_stack)?);
+                        }
+                        let (head, arity) = self.type_constructor_head_and_arity(*callee)?;
+                        (lowered_arguments.len() == arity)
+                            .then(|| {
+                                self.apply_type_constructor(head, &lowered_arguments, item_stack)
+                            })
+                            .flatten()
+                    }
+                }
+            }
+        }
+    }
+
+    fn lower_poly_type_reference(
+        &mut self,
+        reference: &TypeReference,
+        bindings: &PolyTypeBindings,
+        item_stack: &mut Vec<ItemId>,
+    ) -> Option<GateType> {
+        match reference.resolution.as_ref() {
+            ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
+                match bindings.get(parameter)? {
+                    TypeBinding::Type(ty) => Some(ty.clone()),
+                    TypeBinding::Constructor(binding) => {
+                        self.apply_type_constructor(binding.head, &binding.arguments, item_stack)
+                    }
+                }
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(
+                builtin @ (BuiltinType::Int
+                | BuiltinType::Float
+                | BuiltinType::Decimal
+                | BuiltinType::BigInt
+                | BuiltinType::Bool
+                | BuiltinType::Text
+                | BuiltinType::Unit
+                | BuiltinType::Bytes),
+            )) => Some(GateType::Primitive(*builtin)),
+            ResolutionState::Resolved(TypeResolution::Item(item_id)) => {
+                self.lower_type_item(*item_id, &[], item_stack)
+            }
+            ResolutionState::Resolved(TypeResolution::Import(_))
+            | ResolutionState::Resolved(TypeResolution::Builtin(_))
+            | ResolutionState::Unresolved => None,
+        }
+    }
+
+    fn instantiate_poly_type_binding(
+        &mut self,
+        type_id: TypeId,
+        bindings: &PolyTypeBindings,
+    ) -> Option<TypeBinding> {
+        let mut item_stack = Vec::new();
+        if let Some(ty) = self.lower_poly_type(type_id, bindings, &mut item_stack) {
+            return Some(TypeBinding::Type(ty));
+        }
+        match &self.module.types()[type_id].kind {
+            TypeKind::Name(reference) => match reference.resolution.as_ref() {
+                ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
+                    bindings.get(parameter).cloned()
+                }
+                _ => self
+                    .partial_poly_type_constructor_binding(type_id, bindings, &mut item_stack)
+                    .map(TypeBinding::Constructor),
+            },
+            TypeKind::Apply { .. } => self
+                .partial_poly_type_constructor_binding(type_id, bindings, &mut item_stack)
+                .map(TypeBinding::Constructor),
+            TypeKind::Tuple(_) | TypeKind::Record(_) | TypeKind::Arrow { .. } => None,
+        }
+    }
+
+    fn partial_poly_type_constructor_binding(
+        &mut self,
+        type_id: TypeId,
+        bindings: &PolyTypeBindings,
+        item_stack: &mut Vec<ItemId>,
+    ) -> Option<TypeConstructorBinding> {
+        match &self.module.types()[type_id].kind {
+            TypeKind::Name(reference) => match reference.resolution.as_ref() {
+                ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
+                    let TypeBinding::Constructor(binding) = bindings.get(parameter)? else {
+                        return None;
+                    };
+                    Some(binding.clone())
+                }
+                _ => {
+                    let (head, arity) = self.type_constructor_head_and_arity(type_id)?;
+                    (arity > 0).then_some(TypeConstructorBinding {
+                        head,
+                        arguments: Vec::new(),
+                    })
+                }
+            },
+            TypeKind::Apply { callee, arguments } => {
+                let TypeKind::Name(reference) = &self.module.types()[*callee].kind else {
+                    return None;
+                };
+                match reference.resolution.as_ref() {
+                    ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
+                        let TypeBinding::Constructor(binding) = bindings.get(parameter)? else {
+                            return None;
+                        };
+                        let mut all_arguments =
+                            Vec::with_capacity(binding.arguments.len() + arguments.len());
+                        all_arguments.extend(binding.arguments.iter().cloned());
+                        for argument in arguments.iter() {
+                            all_arguments
+                                .push(self.lower_poly_type(*argument, bindings, item_stack)?);
+                        }
+                        let arity = type_constructor_arity(binding.head, self.module);
+                        (all_arguments.len() < arity).then_some(TypeConstructorBinding {
+                            head: binding.head,
+                            arguments: all_arguments,
+                        })
+                    }
+                    _ => {
+                        let (head, arity) = self.type_constructor_head_and_arity(*callee)?;
+                        if arguments.len() >= arity {
+                            return None;
+                        }
+                        let mut lowered_arguments = Vec::with_capacity(arguments.len());
+                        for argument in arguments.iter() {
+                            lowered_arguments
+                                .push(self.lower_poly_type(*argument, bindings, item_stack)?);
+                        }
+                        Some(TypeConstructorBinding {
+                            head,
+                            arguments: lowered_arguments,
+                        })
+                    }
+                }
+            }
+            TypeKind::Tuple(_) | TypeKind::Record(_) | TypeKind::Arrow { .. } => None,
+        }
+    }
+
+    fn match_poly_hir_type_inner(
+        &mut self,
+        type_id: TypeId,
+        actual: &GateType,
+        bindings: &mut PolyTypeBindings,
+        item_stack: &mut Vec<ItemId>,
+    ) -> bool {
+        if let Some(lowered) = self.lower_poly_type(type_id, bindings, item_stack) {
+            return lowered.same_shape(actual);
+        }
+        let ty = self.module.types()[type_id].clone();
+        match ty.kind {
+            TypeKind::Name(reference) => match reference.resolution.as_ref() {
+                ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
+                    let candidate = TypeBinding::Type(actual.clone());
+                    match bindings.entry(*parameter) {
+                        Entry::Occupied(entry) => entry.get().matches(&candidate),
+                        Entry::Vacant(entry) => {
+                            entry.insert(candidate);
+                            true
+                        }
+                    }
+                }
+                _ => false,
+            },
+            TypeKind::Tuple(elements) => {
+                let GateType::Tuple(actual_elements) = actual else {
+                    return false;
+                };
+                elements.len() == actual_elements.len()
+                    && elements
+                        .iter()
+                        .zip(actual_elements.iter())
+                        .all(|(element, actual)| {
+                            self.match_poly_hir_type_inner(*element, actual, bindings, item_stack)
+                        })
+            }
+            TypeKind::Record(fields) => {
+                let GateType::Record(actual_fields) = actual else {
+                    return false;
+                };
+                fields.len() == actual_fields.len()
+                    && fields.iter().all(|field| {
+                        let Some(actual_field) = actual_fields
+                            .iter()
+                            .find(|candidate| candidate.name == field.label.text())
+                        else {
+                            return false;
+                        };
+                        self.match_poly_hir_type_inner(
+                            field.ty,
+                            &actual_field.ty,
+                            bindings,
+                            item_stack,
+                        )
+                    })
+            }
+            TypeKind::Arrow { parameter, result } => {
+                let GateType::Arrow {
+                    parameter: actual_parameter,
+                    result: actual_result,
+                } = actual
+                else {
+                    return false;
+                };
+                self.match_poly_hir_type_inner(parameter, actual_parameter, bindings, item_stack)
+                    && self.match_poly_hir_type_inner(result, actual_result, bindings, item_stack)
+            }
+            TypeKind::Apply { callee, arguments } => {
+                self.match_poly_type_application(callee, &arguments, actual, bindings, item_stack)
+            }
+        }
+    }
+
+    fn match_poly_type_application(
+        &mut self,
+        callee: TypeId,
+        arguments: &crate::NonEmpty<TypeId>,
+        actual: &GateType,
+        bindings: &mut PolyTypeBindings,
+        item_stack: &mut Vec<ItemId>,
+    ) -> bool {
+        let TypeKind::Name(reference) = &self.module.types()[callee].kind else {
+            return false;
+        };
+        match reference.resolution.as_ref() {
+            ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
+                let Some((head, actual_arguments)) = actual.constructor_view() else {
+                    return false;
+                };
+                let pattern_arguments = arguments.iter().copied().collect::<Vec<_>>();
+                if actual_arguments.len() < pattern_arguments.len() {
+                    return false;
+                }
+                let prefix_count = actual_arguments.len() - pattern_arguments.len();
+                let candidate = TypeBinding::Constructor(TypeConstructorBinding {
+                    head,
+                    arguments: actual_arguments[..prefix_count].to_vec(),
+                });
+                match bindings.entry(*parameter) {
+                    Entry::Occupied(entry) if !entry.get().matches(&candidate) => return false,
+                    Entry::Occupied(_) => {}
+                    Entry::Vacant(entry) => {
+                        entry.insert(candidate);
+                    }
+                }
+                pattern_arguments
+                    .iter()
+                    .zip(actual_arguments[prefix_count..].iter())
+                    .all(|(argument, actual_argument)| {
+                        self.match_poly_hir_type_inner(
+                            *argument,
+                            actual_argument,
+                            bindings,
+                            item_stack,
+                        )
+                    })
+            }
+            _ => {
+                let Some((expected_head, _)) = self.type_constructor_head_and_arity(callee) else {
+                    return false;
+                };
+                let Some((actual_head, actual_arguments)) = actual.constructor_view() else {
+                    return false;
+                };
+                expected_head == actual_head
+                    && actual_arguments.len() >= arguments.len()
+                    && arguments.iter().zip(actual_arguments.iter()).all(
+                        |(argument, actual_argument)| {
+                            self.match_poly_hir_type_inner(
+                                *argument,
+                                actual_argument,
+                                bindings,
+                                item_stack,
+                            )
+                        },
+                    )
+            }
+        }
+    }
+
+    fn partial_type_constructor_binding(
+        &mut self,
+        type_id: TypeId,
+        item_stack: &mut Vec<ItemId>,
+    ) -> Option<TypeConstructorBinding> {
+        match &self.module.types()[type_id].kind {
+            TypeKind::Name(_) => {
+                let (head, arity) = self.type_constructor_head_and_arity(type_id)?;
+                (arity > 0).then_some(TypeConstructorBinding {
+                    head,
+                    arguments: Vec::new(),
+                })
+            }
+            TypeKind::Apply { callee, arguments } => {
+                let (head, arity) = self.type_constructor_head_and_arity(*callee)?;
+                if arguments.len() >= arity {
+                    return None;
+                }
+                let mut lowered_arguments = Vec::with_capacity(arguments.len());
+                for argument in arguments.iter() {
+                    lowered_arguments.push(self.lower_type(
+                        *argument,
+                        &HashMap::new(),
+                        item_stack,
+                    )?);
+                }
+                Some(TypeConstructorBinding {
+                    head,
+                    arguments: lowered_arguments,
+                })
+            }
+            TypeKind::Tuple(_) | TypeKind::Record(_) | TypeKind::Arrow { .. } => None,
+        }
+    }
+
+    fn type_constructor_head_and_arity(
+        &self,
+        type_id: TypeId,
+    ) -> Option<(TypeConstructorHead, usize)> {
+        let TypeKind::Name(reference) = &self.module.types()[type_id].kind else {
+            return None;
+        };
+        match reference.resolution.as_ref() {
+            ResolutionState::Resolved(TypeResolution::Builtin(builtin)) => Some((
+                TypeConstructorHead::Builtin(*builtin),
+                builtin_type_arity(*builtin),
+            )),
+            ResolutionState::Resolved(TypeResolution::Item(item_id)) => {
+                let arity = match &self.module.items()[*item_id] {
+                    Item::Type(item) => item.parameters.len(),
+                    Item::Domain(item) => item.parameters.len(),
+                    _ => return None,
+                };
+                Some((TypeConstructorHead::Item(*item_id), arity))
+            }
+            ResolutionState::Resolved(TypeResolution::TypeParameter(_))
+            | ResolutionState::Resolved(TypeResolution::Import(_))
+            | ResolutionState::Unresolved => None,
+        }
+    }
+
+    fn apply_type_constructor(
+        &mut self,
+        head: TypeConstructorHead,
+        arguments: &[GateType],
+        item_stack: &mut Vec<ItemId>,
+    ) -> Option<GateType> {
+        match head {
+            TypeConstructorHead::Builtin(builtin) => {
+                self.apply_builtin_type_constructor(builtin, arguments)
+            }
+            TypeConstructorHead::Item(item_id) => {
+                self.lower_type_item(item_id, arguments, item_stack)
+            }
+        }
+    }
+
+    fn apply_builtin_type_constructor(
+        &self,
+        builtin: BuiltinType,
+        arguments: &[GateType],
+    ) -> Option<GateType> {
+        if arguments.len() != builtin_type_arity(builtin) {
+            return None;
+        }
+        match builtin {
+            BuiltinType::Int
+            | BuiltinType::Float
+            | BuiltinType::Decimal
+            | BuiltinType::BigInt
+            | BuiltinType::Bool
+            | BuiltinType::Text
+            | BuiltinType::Unit
+            | BuiltinType::Bytes => Some(GateType::Primitive(builtin)),
+            BuiltinType::List => Some(GateType::List(Box::new(arguments.first()?.clone()))),
+            BuiltinType::Map => Some(GateType::Map {
+                key: Box::new(arguments.first()?.clone()),
+                value: Box::new(arguments.get(1)?.clone()),
+            }),
+            BuiltinType::Set => Some(GateType::Set(Box::new(arguments.first()?.clone()))),
+            BuiltinType::Option => Some(GateType::Option(Box::new(arguments.first()?.clone()))),
+            BuiltinType::Result => Some(GateType::Result {
+                error: Box::new(arguments.first()?.clone()),
+                value: Box::new(arguments.get(1)?.clone()),
+            }),
+            BuiltinType::Validation => Some(GateType::Validation {
+                error: Box::new(arguments.first()?.clone()),
+                value: Box::new(arguments.get(1)?.clone()),
+            }),
+            BuiltinType::Signal => Some(GateType::Signal(Box::new(arguments.first()?.clone()))),
+            BuiltinType::Task => Some(GateType::Task {
+                error: Box::new(arguments.first()?.clone()),
+                value: Box::new(arguments.get(1)?.clone()),
+            }),
+        }
+    }
+
     pub(crate) fn infer_expr(
         &mut self,
         expr_id: ExprId,
@@ -9059,9 +10109,19 @@ impl<'a> GateTypeContext<'a> {
                     {
                         return self.finalize_expr_info(info);
                     }
+                    if let Some(info) =
+                        self.infer_class_member_apply_expr(reference, &arguments, env, ambient)
+                    {
+                        return self.finalize_expr_info(info);
+                    }
                     if let Some(info) = self.infer_same_module_constructor_apply_expr(
                         reference, &arguments, env, ambient,
                     ) {
+                        return self.finalize_expr_info(info);
+                    }
+                    if let Some(info) = self
+                        .infer_polymorphic_function_apply_expr(reference, &arguments, env, ambient)
+                    {
                         return self.finalize_expr_info(info);
                     }
                 }
@@ -9197,6 +10257,10 @@ impl<'a> GateTypeContext<'a> {
                 }],
                 ..GateExprInfo::default()
             },
+            ResolutionState::Resolved(TermResolution::ClassMember(_))
+            | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_)) => {
+                GateExprInfo::default()
+            }
             ResolutionState::Resolved(TermResolution::Builtin(builtin)) => {
                 let (ty, actual) = match builtin {
                     crate::hir::BuiltinTerm::True | crate::hir::BuiltinTerm::False => {
@@ -9456,6 +10520,107 @@ impl<'a> GateTypeContext<'a> {
         Some(info)
     }
 
+    fn match_function_signature(
+        &mut self,
+        function: &crate::hir::FunctionItem,
+        argument_types: &[GateType],
+        expected_result: Option<&GateType>,
+    ) -> Option<(Vec<GateType>, GateType)> {
+        if function.parameters.len() != argument_types.len() || function.annotation.is_none() {
+            return None;
+        }
+        let mut bindings = PolyTypeBindings::new();
+        let mut instantiated_parameters = Vec::with_capacity(function.parameters.len());
+        for (parameter, actual) in function.parameters.iter().zip(argument_types.iter()) {
+            let annotation = parameter.annotation?;
+            if let Some(lowered) = self.lower_annotation(annotation) {
+                if !lowered.same_shape(actual) {
+                    return None;
+                }
+                instantiated_parameters.push(lowered);
+                continue;
+            }
+            if !self.match_poly_hir_type(annotation, actual, &mut bindings) {
+                return None;
+            }
+            instantiated_parameters.push(self.instantiate_poly_hir_type(annotation, &bindings)?);
+        }
+        let result_annotation = function.annotation?;
+        if let Some(expected) = expected_result {
+            if let Some(lowered) = self.lower_annotation(result_annotation) {
+                if !lowered.same_shape(expected) {
+                    return None;
+                }
+            } else if !self.match_poly_hir_type(result_annotation, expected, &mut bindings) {
+                return None;
+            }
+        }
+        let result = self
+            .lower_annotation(result_annotation)
+            .or_else(|| self.instantiate_poly_hir_type(result_annotation, &bindings))?;
+        Some((instantiated_parameters, result))
+    }
+
+    fn infer_polymorphic_function_apply_expr(
+        &mut self,
+        reference: &TermReference,
+        arguments: &crate::NonEmpty<ExprId>,
+        env: &GateExprEnv,
+        ambient: Option<&GateType>,
+    ) -> Option<GateExprInfo> {
+        let ResolutionState::Resolved(TermResolution::Item(item_id)) =
+            reference.resolution.as_ref()
+        else {
+            return None;
+        };
+        let Item::Function(function) = &self.module.items()[*item_id] else {
+            return None;
+        };
+        if function.type_parameters.is_empty() {
+            return None;
+        }
+        let mut info = GateExprInfo::default();
+        let mut argument_types = Vec::with_capacity(arguments.len());
+        for argument in arguments.iter() {
+            let argument_info = self.infer_expr(*argument, env, ambient);
+            argument_types.push(argument_info.ty.clone());
+            info.merge(argument_info);
+        }
+        let Some(argument_types) = argument_types.into_iter().collect::<Option<Vec<_>>>() else {
+            return Some(info);
+        };
+        if let Some((_, result)) = self.match_function_signature(function, &argument_types, None) {
+            info.ty = Some(result);
+        }
+        Some(info)
+    }
+
+    fn infer_class_member_apply_expr(
+        &mut self,
+        reference: &TermReference,
+        arguments: &crate::NonEmpty<ExprId>,
+        env: &GateExprEnv,
+        ambient: Option<&GateType>,
+    ) -> Option<GateExprInfo> {
+        self.class_member_candidates(reference)?;
+        let mut info = GateExprInfo::default();
+        let mut argument_types = Vec::with_capacity(arguments.len());
+        for argument in arguments.iter() {
+            let argument_info = self.infer_expr(*argument, env, ambient);
+            argument_types.push(argument_info.ty.clone());
+            info.merge(argument_info);
+        }
+        let Some(argument_types) = argument_types.into_iter().collect::<Option<Vec<_>>>() else {
+            return Some(info);
+        };
+        if let DomainMemberSelection::Unique(matched) =
+            self.select_class_member_call(reference, &argument_types, None)?
+        {
+            info.ty = Some(matched.result);
+        }
+        Some(info)
+    }
+
     fn infer_domain_member_apply(
         &mut self,
         reference: &TermReference,
@@ -9510,6 +10675,14 @@ impl<'a> GateTypeContext<'a> {
         if let Some(GateType::Arrow { parameter, result }) = info.ty.clone() {
             if parameter.same_shape(&ambient) {
                 info.ty = Some(*result);
+            } else {
+                info.issues.push(GateIssue::InvalidPipeStageInput {
+                    span: self.module.exprs()[expr_id].span,
+                    stage: "pipe",
+                    expected: ambient.to_string(),
+                    actual: parameter.to_string(),
+                });
+                info.ty = None;
             }
         }
         self.finalize_expr_info(info)
@@ -9620,17 +10793,59 @@ impl<'a> GateTypeContext<'a> {
         if function.parameters.len() != 1 {
             return None;
         }
+        let function = function.clone();
         let parameter = function.parameters.first()?;
+        let mut bindings = PolyTypeBindings::new();
         if let Some(annotation) = parameter.annotation {
-            let parameter_ty = self.lower_annotation(annotation)?;
-            if !parameter_ty.same_shape(ambient) {
+            if let Some(parameter_ty) = self.lower_annotation(annotation) {
+                if !parameter_ty.same_shape(ambient) {
+                    return Some(GateExprInfo {
+                        issues: vec![GateIssue::InvalidPipeStageInput {
+                            span: self.module.exprs()[expr_id].span,
+                            stage: "pipe",
+                            expected: ambient.to_string(),
+                            actual: parameter_ty.to_string(),
+                        }],
+                        ..GateExprInfo::default()
+                    });
+                }
+            } else if !function.type_parameters.is_empty() {
+                if !self.match_poly_hir_type(annotation, ambient, &mut bindings) {
+                    return Some(GateExprInfo {
+                        issues: vec![GateIssue::InvalidPipeStageInput {
+                            span: self.module.exprs()[expr_id].span,
+                            stage: "pipe",
+                            expected: ambient.to_string(),
+                            actual: self
+                                .module
+                                .types()
+                                .get(annotation)
+                                .map(|_| "incompatible function input".to_owned())
+                                .unwrap_or_else(|| "incompatible function input".to_owned()),
+                        }],
+                        ..GateExprInfo::default()
+                    });
+                }
+            } else {
                 return None;
             }
         }
 
         let mut env = GateExprEnv::default();
         env.locals.insert(parameter.binding, ambient.clone());
-        Some(self.infer_expr(function.body, &env, Some(ambient)))
+        let expected = function
+            .annotation
+            .and_then(|annotation| self.lower_annotation(annotation))
+            .or_else(|| {
+                (!bindings.is_empty())
+                    .then(|| {
+                        function.annotation.and_then(|annotation| {
+                            self.instantiate_poly_hir_type(annotation, &bindings)
+                        })
+                    })
+                    .flatten()
+            });
+        Some(self.infer_expr(function.body, &env, expected.as_ref()))
     }
 
     pub(crate) fn infer_gate_stage(
@@ -10124,7 +11339,9 @@ fn case_constructor_key(reference: &TermReference) -> Option<CaseConstructorKey>
         | ResolutionState::Resolved(TermResolution::Local(_))
         | ResolutionState::Resolved(TermResolution::Import(_))
         | ResolutionState::Resolved(TermResolution::DomainMember(_))
-        | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_)) => None,
+        | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_))
+        | ResolutionState::Resolved(TermResolution::ClassMember(_))
+        | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_)) => None,
     }
 }
 
@@ -12123,6 +13340,7 @@ val resultLabel =
                 span: unit_span(),
                 imported_name: name(text),
                 local_name: name(text),
+                resolution: ImportBindingResolution::Resolved,
                 metadata: ImportBindingMetadata::TypeConstructor { kind },
             })
             .expect("import allocation should fit");
@@ -14391,6 +15609,8 @@ sig login : Signal (Result HttpError Session)
                     decorators: Vec::new(),
                 },
                 name: name("keepTrue"),
+                type_parameters: Vec::new(),
+                context: Vec::new(),
                 parameters: vec![FunctionParameter {
                     span: unit_span(),
                     binding: parameter_binding,

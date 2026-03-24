@@ -111,6 +111,39 @@ fn compile_writes_object_and_reports_codegen_boundary() {
 }
 
 #[test]
+fn compile_accepts_workspace_type_imports() {
+    let output_dir = TempDir::new("compile-workspace-types");
+    let output_path = output_dir.path().join("workspace.o");
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("compile")
+        .arg(fixture_path(
+            "milestone-2/valid/workspace-type-imports/main.aivi",
+        ))
+        .arg("-o")
+        .arg(&output_path)
+        .output()
+        .expect("compile command should run");
+
+    assert!(
+        output.status.success(),
+        "expected workspace compile to succeed, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let metadata =
+        fs::metadata(&output_path).expect("workspace compile should write an object file");
+    assert!(
+        metadata.len() > 0,
+        "workspace object file should not be empty"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("compile pipeline passed"),
+        "expected compile summary, got stdout: {stdout}"
+    );
+}
+
+#[test]
 fn compile_reports_typed_core_lowering_errors_without_hiding_stage() {
     let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
         .arg("compile")

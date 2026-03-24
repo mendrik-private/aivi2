@@ -173,6 +173,10 @@ impl RootDatabase {
             .files
             .insert(id, SourceInput::new(file, path.clone(), text, 0));
         state.paths.insert(path, file);
+        // A newly discovered file can satisfy previously missing imports or
+        // introduce new competing workspace modules, so all cached HIR results
+        // must be recomputed against the new workspace shape.
+        state.hir.clear();
         file
     }
 
@@ -183,13 +187,39 @@ impl RootDatabase {
 
     /// Return every file currently known to the database.
     pub fn files(&self) -> Vec<SourceFile> {
-        self.state
+        let mut files = self
+            .state
             .read()
             .files
             .keys()
             .copied()
             .map(|id| SourceFile { id })
-            .collect()
+            .collect::<Vec<_>>();
+        files.sort_by_key(|file| file.id);
+        files
+    }
+
+    /// Snapshot all currently known sources into an `aivi_base::SourceDatabase`
+    /// using stable file-id order so cached diagnostics keep pointing at the
+    /// correct source file.
+    pub fn source_database(&self) -> aivi_base::SourceDatabase {
+        let state = self.state.read();
+        let mut ids = state.files.keys().copied().collect::<Vec<_>>();
+        ids.sort_unstable();
+
+        let mut sources = aivi_base::SourceDatabase::new();
+        for id in ids {
+            let input = state
+                .files
+                .get(&id)
+                .expect("sorted file id must refer to a stored input");
+            let new_id = sources.add_file(
+                input.source.path().to_path_buf(),
+                input.source.text().to_owned(),
+            );
+            debug_assert_eq!(new_id.as_u32(), id);
+        }
+        sources
     }
 
     pub(crate) fn set_text(&self, file: SourceFile, text: String) -> bool {

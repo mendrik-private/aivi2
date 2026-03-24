@@ -5,15 +5,16 @@ use aivi_base::{Diagnostic, DiagnosticCode, SourceSpan};
 use crate::{
     domain_operator_elaboration::select_domain_binary_operator,
     hir::{
-        BinaryOperator, BuiltinTerm, BuiltinType, ExprKind, FunctionItem, ImportBindingMetadata,
-        ImportBundleKind, InstanceItem, InstanceMember, Item, MapExpr, Module, Name, NamePath,
-        ProjectionBase, RecordExpr, RecordExprField, RecordFieldSurface, ResolutionState,
-        SignalItem, TermReference, TermResolution, TypeItemBody, TypeResolution, UnaryOperator,
-        ValueItem,
+        BinaryOperator, BuiltinTerm, BuiltinType, ClassMemberResolution, ExprKind, FunctionItem,
+        ImportBindingMetadata, ImportBundleKind, InstanceItem, InstanceMember, Item, MapExpr,
+        Module, Name, NamePath, ProjectionBase, RecordExpr, RecordExprField, RecordFieldSurface,
+        ResolutionState, SignalItem, TermReference, TermResolution, TypeItemBody, TypeResolution,
+        UnaryOperator, ValueItem,
     },
     ids::{ExprId, ItemId, TypeParameterId},
     validate::{
-        DomainMemberSelection, GateExprEnv, GateIssue, GateRecordField, GateType, GateTypeContext,
+        ClassConstraintBinding, ClassMemberCallMatch, DomainMemberSelection, GateExprEnv,
+        GateIssue, GateRecordField, GateType, GateTypeContext, PolyTypeBindings, TypeBinding,
     },
 };
 
@@ -111,6 +112,22 @@ pub struct TypeCheckReport {
     elaborated_module: Module,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ClassMemberImplementation {
+    Builtin,
+    SameModuleInstance {
+        instance: ItemId,
+        member_index: usize,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedClassMemberDispatch {
+    pub member: ClassMemberResolution,
+    pub subject: TypeBinding,
+    pub implementation: ClassMemberImplementation,
+}
+
 impl TypeCheckReport {
     pub fn new(elaborated_module: Module, diagnostics: Vec<Diagnostic>) -> Self {
         Self {
@@ -160,6 +177,29 @@ pub(crate) fn expression_matches(
     let mut checker = TypeChecker::new(module);
     checker.check_expr(expr_id, env, Some(expected), &mut Vec::new())
         && checker.diagnostics.is_empty()
+}
+
+pub(crate) fn resolve_class_member_dispatch(
+    module: &Module,
+    reference: &TermReference,
+    argument_types: &[GateType],
+    expected_result: Option<&GateType>,
+) -> Option<ResolvedClassMemberDispatch> {
+    let mut checker = TypeChecker::new(module);
+    match checker
+        .typing
+        .select_class_member_call(reference, argument_types, expected_result)?
+    {
+        DomainMemberSelection::Unique(matched) => checker
+            .solve_class_constraint_bindings(
+                reference.span(),
+                &matched.evidence,
+                &matched.constraints,
+            )
+            .ok()
+            .and_then(|()| checker.class_member_dispatch(&matched)),
+        DomainMemberSelection::Ambiguous | DomainMemberSelection::NoMatch => None,
+    }
 }
 
 struct TypeChecker<'a> {
@@ -298,9 +338,7 @@ impl<'a> TypeChecker<'a> {
         let Some(class_item_id) = self.instance_class_item_id(item) else {
             return;
         };
-        let Some(argument_substitutions) =
-            self.instance_argument_substitutions(class_item_id, item)
-        else {
+        let Some(argument_bindings) = self.instance_argument_bindings(class_item_id, item) else {
             return;
         };
         let Item::Class(class_item) = &self.module.items()[class_item_id] else {
@@ -317,7 +355,7 @@ impl<'a> TypeChecker<'a> {
             };
             let Some(expected) = self
                 .typing
-                .lower_hir_type(annotation, &argument_substitutions)
+                .instantiate_poly_hir_type(annotation, &argument_bindings)
             else {
                 continue;
             };
@@ -573,6 +611,35 @@ impl<'a> TypeChecker<'a> {
             right_actual.as_ref(),
             expected,
         ) else {
+            if matches!(
+                operator,
+                BinaryOperator::GreaterThan | BinaryOperator::LessThan
+            ) && let (Some(left_actual), Some(right_actual)) =
+                (left_actual.as_ref(), right_actual.as_ref())
+                && left_actual.same_shape(right_actual)
+                && self.require_class_named("Ord", left_actual).is_ok()
+            {
+                let checkpoint = self.diagnostics.len();
+                let left_ok = self.check_expr(left, env, Some(left_actual), value_stack);
+                let right_ok = self.check_expr(right, env, Some(right_actual), value_stack);
+                if !left_ok || !right_ok {
+                    if self.diagnostics.len() == checkpoint {
+                        self.emit_invalid_binary_operator(
+                            self.module.exprs()[expr_id].span,
+                            operator,
+                            Some(left_actual),
+                            Some(right_actual),
+                            BinaryOperatorExpectation::MatchingNumericOperands,
+                        );
+                    }
+                    return false;
+                }
+                return self.check_result_type(
+                    expr_id,
+                    expected,
+                    &GateType::Primitive(BuiltinType::Bool),
+                );
+            }
             let checkpoint = self.diagnostics.len();
             self.check_expr(left, env, None, value_stack);
             self.check_expr(right, env, None, value_stack);
@@ -719,6 +786,7 @@ impl<'a> TypeChecker<'a> {
             ExprKind::Name(reference) => self
                 .check_builtin_constructor_name(&reference, expected)
                 .or_else(|| self.check_domain_member_name(&reference, expected))
+                .or_else(|| self.check_class_member_name(&reference, expected))
                 .or_else(|| {
                     self.check_unannotated_value_name(&reference, env, expected, value_stack)
                 })
@@ -738,6 +806,24 @@ impl<'a> TypeChecker<'a> {
                         return Some(result);
                     }
                     if let Some(result) = self.check_domain_member_apply(
+                        &reference,
+                        &arguments,
+                        env,
+                        expected,
+                        value_stack,
+                    ) {
+                        return Some(result);
+                    }
+                    if let Some(result) = self.check_class_member_apply(
+                        &reference,
+                        &arguments,
+                        env,
+                        expected,
+                        value_stack,
+                    ) {
+                        return Some(result);
+                    }
+                    if let Some(result) = self.check_function_apply_with_context(
                         &reference,
                         &arguments,
                         env,
@@ -1026,6 +1112,179 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn check_class_member_name(
+        &mut self,
+        reference: &TermReference,
+        expected: &GateType,
+    ) -> Option<bool> {
+        let labels = self.typing.class_member_candidate_labels(reference)?;
+        match self
+            .typing
+            .select_class_member_call(reference, &[], Some(expected))?
+        {
+            DomainMemberSelection::Unique(matched) => {
+                if let Err(reason) = self.solve_class_constraint_bindings(
+                    reference.span(),
+                    &matched.evidence,
+                    &matched.constraints,
+                ) {
+                    self.diagnostics.push(
+                        Diagnostic::error(format!(
+                            "this reference requires `{}`",
+                            self.class_constraint_binding_label(&matched.evidence)
+                        ))
+                        .with_code(code("missing-class-instance"))
+                        .with_primary_label(
+                            reference.span(),
+                            format!(
+                                "`{}` is not currently available here",
+                                self.class_constraint_binding_label(&matched.evidence)
+                            ),
+                        )
+                        .with_note(reason),
+                    );
+                    return Some(false);
+                }
+                Some(true)
+            }
+            DomainMemberSelection::Ambiguous => {
+                self.emit_ambiguous_class_member(reference.span(), reference, &labels);
+                Some(false)
+            }
+            DomainMemberSelection::NoMatch => (labels.len() > 1).then(|| {
+                self.emit_ambiguous_class_member(reference.span(), reference, &labels);
+                false
+            }),
+        }
+    }
+
+    fn check_class_member_apply(
+        &mut self,
+        reference: &TermReference,
+        arguments: &crate::NonEmpty<ExprId>,
+        env: &GateExprEnv,
+        expected: &GateType,
+        value_stack: &mut Vec<ItemId>,
+    ) -> Option<bool> {
+        let labels = self.typing.class_member_candidate_labels(reference)?;
+        let mut argument_types = Vec::with_capacity(arguments.len());
+        for argument in arguments.iter() {
+            let info = self.typing.infer_expr(*argument, env, None);
+            self.emit_expr_issues(&info.issues);
+            self.solve_constraints(&info.constraints);
+            let Some(argument_ty) = info.ty else {
+                return None;
+            };
+            argument_types.push(argument_ty);
+        }
+        match self
+            .typing
+            .select_class_member_call(reference, &argument_types, Some(expected))?
+        {
+            DomainMemberSelection::Unique(matched) => {
+                if let Err(reason) = self.solve_class_constraint_bindings(
+                    reference.span(),
+                    &matched.evidence,
+                    &matched.constraints,
+                ) {
+                    self.diagnostics.push(
+                        Diagnostic::error(format!(
+                            "this call requires `{}` evidence",
+                            self.class_constraint_binding_label(&matched.evidence)
+                        ))
+                        .with_code(code("missing-class-instance"))
+                        .with_primary_label(
+                            reference.span(),
+                            format!(
+                                "`{}` is not currently available here",
+                                self.class_constraint_binding_label(&matched.evidence)
+                            ),
+                        )
+                        .with_note(reason),
+                    );
+                    return Some(false);
+                }
+                for (argument, parameter) in arguments.iter().zip(matched.parameters.iter()) {
+                    if !self.check_expr(*argument, env, Some(parameter), value_stack) {
+                        return Some(false);
+                    }
+                }
+                Some(true)
+            }
+            DomainMemberSelection::Ambiguous => {
+                self.emit_ambiguous_class_member(reference.span(), reference, &labels);
+                Some(false)
+            }
+            DomainMemberSelection::NoMatch => (labels.len() > 1).then(|| {
+                self.emit_ambiguous_class_member(reference.span(), reference, &labels);
+                false
+            }),
+        }
+    }
+
+    fn check_function_apply_with_context(
+        &mut self,
+        reference: &TermReference,
+        arguments: &crate::NonEmpty<ExprId>,
+        env: &GateExprEnv,
+        expected: &GateType,
+        value_stack: &mut Vec<ItemId>,
+    ) -> Option<bool> {
+        let crate::ResolutionState::Resolved(TermResolution::Item(item_id)) =
+            reference.resolution.as_ref()
+        else {
+            return None;
+        };
+        let Item::Function(function) = &self.module.items()[*item_id] else {
+            return None;
+        };
+        if function.context.is_empty() {
+            return None;
+        }
+        let function = function.clone();
+        let mut argument_types = Vec::with_capacity(arguments.len());
+        for argument in arguments.iter() {
+            let info = self.typing.infer_expr(*argument, env, None);
+            self.emit_expr_issues(&info.issues);
+            self.solve_constraints(&info.constraints);
+            let Some(argument_ty) = info.ty else {
+                return None;
+            };
+            argument_types.push(argument_ty);
+        }
+        let Some((matched_parameters, constraints)) =
+            self.match_function_constraints(&function, &argument_types, expected)
+        else {
+            return None;
+        };
+        for constraint in &constraints {
+            if let Err(reason) = self.require_class_binding(constraint) {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "this call requires `{}`",
+                        self.class_constraint_binding_label(constraint)
+                    ))
+                    .with_code(code("missing-class-instance"))
+                    .with_primary_label(
+                        reference.span(),
+                        format!(
+                            "`{}` is not currently available here",
+                            self.class_constraint_binding_label(constraint)
+                        ),
+                    )
+                    .with_note(reason),
+                );
+                return Some(false);
+            }
+        }
+        for (argument, parameter) in arguments.iter().zip(matched_parameters.iter()) {
+            if !self.check_expr(*argument, env, Some(parameter), value_stack) {
+                return Some(false);
+            }
+        }
+        Some(true)
+    }
+
     fn check_expected_apply(
         &mut self,
         expr_id: ExprId,
@@ -1306,7 +1565,7 @@ impl<'a> TypeChecker<'a> {
         if matches!(ty, GateType::Option(_)) && self.option_default_in_scope {
             return Ok(DefaultEvidence::BuiltinOptionNone);
         }
-        if let Some(body) = self.same_module_default_member_body(ty) {
+        if let Some(body) = self.same_module_default_member_body(ty)? {
             return Ok(DefaultEvidence::SameModuleMemberBody(body));
         }
         match ty {
@@ -1324,6 +1583,19 @@ impl<'a> TypeChecker<'a> {
     fn emit_expr_issues(&mut self, issues: &[GateIssue]) {
         for issue in issues {
             let diagnostic = match issue {
+                GateIssue::InvalidPipeStageInput {
+                    span,
+                    stage,
+                    expected,
+                    actual,
+                } => Diagnostic::error(format!(
+                    "`{stage}` stage expects `{actual}` but the current subject is `{expected}`"
+                ))
+                .with_code(code("invalid-pipe-stage-input"))
+                .with_primary_label(
+                    *span,
+                    "this pipe stage cannot accept the current subject type",
+                ),
                 GateIssue::InvalidProjection {
                     span,
                     path,
@@ -1432,6 +1704,26 @@ impl<'a> TypeChecker<'a> {
             .with_primary_label(
                 span,
                 "add more type context or rename/import an alias for the desired member",
+            )
+            .with_note(format!("candidates: {}", candidates.join(", "))),
+        );
+    }
+
+    fn emit_ambiguous_class_member(
+        &mut self,
+        span: SourceSpan,
+        reference: &TermReference,
+        candidates: &[String],
+    ) {
+        let name = reference.path.segments().last().text().to_owned();
+        self.diagnostics.push(
+            Diagnostic::error(format!(
+                "class member `{name}` is ambiguous in this context"
+            ))
+            .with_code(code("ambiguous-class-member"))
+            .with_primary_label(
+                span,
+                "add more type context or rename a local binding that shadows the intended member",
             )
             .with_note(format!("candidates: {}", candidates.join(", "))),
         );
@@ -1594,6 +1886,57 @@ impl<'a> TypeChecker<'a> {
         )
     }
 
+    fn match_function_constraints(
+        &mut self,
+        function: &FunctionItem,
+        argument_types: &[GateType],
+        expected_result: &GateType,
+    ) -> Option<(Vec<GateType>, Vec<ClassConstraintBinding>)> {
+        if function.parameters.len() != argument_types.len() || function.annotation.is_none() {
+            return None;
+        }
+        let mut bindings = PolyTypeBindings::new();
+        let mut instantiated_parameters = Vec::with_capacity(function.parameters.len());
+        for (parameter, actual) in function.parameters.iter().zip(argument_types.iter()) {
+            let annotation = parameter.annotation?;
+            if let Some(lowered) = self.typing.lower_annotation(annotation) {
+                if !lowered.same_shape(actual) {
+                    return None;
+                }
+                instantiated_parameters.push(lowered);
+                continue;
+            }
+            if !self
+                .typing
+                .match_poly_hir_type(annotation, actual, &mut bindings)
+            {
+                return None;
+            }
+            instantiated_parameters.push(
+                self.typing
+                    .instantiate_poly_hir_type(annotation, &bindings)?,
+            );
+        }
+        let result_annotation = function.annotation?;
+        if let Some(lowered) = self.typing.lower_annotation(result_annotation) {
+            if !lowered.same_shape(expected_result) {
+                return None;
+            }
+        } else if !self.typing.match_poly_hir_type(
+            result_annotation,
+            expected_result,
+            &mut bindings,
+        ) {
+            return None;
+        }
+        let constraints = function
+            .context
+            .iter()
+            .map(|constraint| self.typing.class_constraint_binding(*constraint, &bindings))
+            .collect::<Option<Vec<_>>>()?;
+        Some((instantiated_parameters, constraints))
+    }
+
     fn arrow_type(&self, parameter_types: &[GateType], result: &GateType) -> GateType {
         let mut current = result.clone();
         for parameter in parameter_types.iter().rev() {
@@ -1609,8 +1952,13 @@ impl<'a> TypeChecker<'a> {
         if self.require_compiler_derived_eq(ty, item_stack).is_ok() {
             return Ok(());
         }
-        if self.has_same_module_instance("Eq", ty) {
-            return Ok(());
+        if let Some(class_item_id) = self.class_item_id_by_name("Eq") {
+            if self
+                .resolve_same_module_instance(class_item_id, ty)?
+                .is_some()
+            {
+                return Ok(());
+            }
         }
         self.require_compiler_derived_eq(ty, item_stack)
     }
@@ -1726,40 +2074,290 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn has_same_module_instance(&mut self, class_name: &str, ty: &GateType) -> bool {
-        let instances = self
-            .module
+    fn class_item_id_by_name(&self, class_name: &str) -> Option<ItemId> {
+        self.module
             .items()
             .iter()
-            .filter_map(|(_, item)| match item {
-                Item::Instance(instance) => Some(instance.clone()),
+            .find_map(|(item_id, item)| match item {
+                Item::Class(class_item) if class_item.name.text() == class_name => Some(item_id),
                 _ => None,
             })
-            .collect::<Vec<_>>();
-        for instance in instances {
-            let ResolutionState::Resolved(TypeResolution::Item(class_item_id)) =
-                instance.class.resolution.as_ref()
-            else {
-                continue;
-            };
-            let Item::Class(class_item) = &self.module.items()[*class_item_id] else {
-                continue;
-            };
-            if class_item.name.text() != class_name || instance.arguments.len() != 1 {
-                continue;
-            }
-            if self
-                .typing
-                .lower_annotation(*instance.arguments.first())
-                .is_some_and(|candidate| candidate.same_shape(ty))
-            {
-                return true;
-            }
-        }
-        false
     }
 
-    fn same_module_default_member_body(&mut self, ty: &GateType) -> Option<ExprId> {
+    fn class_name(&self, class_item_id: ItemId) -> Option<&str> {
+        match &self.module.items()[class_item_id] {
+            Item::Class(class_item) => Some(class_item.name.text()),
+            _ => None,
+        }
+    }
+
+    fn class_constraint_binding_label(&self, binding: &ClassConstraintBinding) -> String {
+        let class_name = self.class_name(binding.class_item).unwrap_or("<class>");
+        format!("{class_name} {}", self.type_binding_label(&binding.subject))
+    }
+
+    fn type_binding_label(&self, binding: &TypeBinding) -> String {
+        match binding {
+            TypeBinding::Type(ty) => ty.to_string(),
+            TypeBinding::Constructor(binding) => match binding.head() {
+                crate::validate::TypeConstructorHead::Builtin(builtin) => {
+                    format!("{builtin:?}")
+                }
+                crate::validate::TypeConstructorHead::Item(item_id) => {
+                    match &self.module.items()[item_id] {
+                        Item::Type(item) => item.name.text().to_owned(),
+                        Item::Domain(item) => item.name.text().to_owned(),
+                        Item::Class(item) => item.name.text().to_owned(),
+                        _ => "<constructor>".to_owned(),
+                    }
+                }
+            },
+        }
+    }
+
+    fn class_member_dispatch(
+        &mut self,
+        matched: &ClassMemberCallMatch,
+    ) -> Option<ResolvedClassMemberDispatch> {
+        let implementation =
+            self.class_member_implementation(matched.resolution, &matched.evidence.subject)?;
+        Some(ResolvedClassMemberDispatch {
+            member: matched.resolution,
+            subject: matched.evidence.subject.clone(),
+            implementation,
+        })
+    }
+
+    fn class_member_implementation(
+        &mut self,
+        resolution: ClassMemberResolution,
+        subject: &TypeBinding,
+    ) -> Option<ClassMemberImplementation> {
+        let class_name = self.class_name(resolution.class)?.to_owned();
+        if matches!(class_name.as_str(), "Eq" | "Setoid")
+            && matches!(subject, TypeBinding::Type(ty) if self.require_compiler_derived_eq(ty, &mut Vec::new()).is_ok())
+        {
+            return Some(ClassMemberImplementation::Builtin);
+        }
+        if self.has_builtin_class_instance_binding(class_name.as_str(), subject) {
+            return Some(ClassMemberImplementation::Builtin);
+        }
+        let (instance_id, instance) = self
+            .resolve_same_module_instance_binding_with_id(resolution.class, subject)
+            .ok()??;
+        let Item::Class(class_item) = &self.module.items()[resolution.class] else {
+            return None;
+        };
+        let member_name = class_item.members.get(resolution.member_index)?.name.text();
+        let member_index = instance
+            .members
+            .iter()
+            .position(|member| member.name.text() == member_name)?;
+        Some(ClassMemberImplementation::SameModuleInstance {
+            instance: instance_id,
+            member_index,
+        })
+    }
+
+    fn solve_class_constraint_bindings(
+        &mut self,
+        evidence_span: SourceSpan,
+        evidence: &ClassConstraintBinding,
+        constraints: &[ClassConstraintBinding],
+    ) -> Result<(), String> {
+        self.require_class_binding(evidence)?;
+        for constraint in constraints {
+            self.require_class_binding(constraint).map_err(|reason| {
+                format!(
+                    "{reason} (required by `{}` at {evidence_span:?})",
+                    self.class_constraint_binding_label(constraint)
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    fn require_class_binding(&mut self, binding: &ClassConstraintBinding) -> Result<(), String> {
+        let Some(class_name) = self.class_name(binding.class_item).map(str::to_owned) else {
+            return Err("constraint does not reference a class item".to_owned());
+        };
+        if matches!(class_name.as_str(), "Eq" | "Setoid")
+            && matches!(&binding.subject, TypeBinding::Type(_))
+        {
+            let TypeBinding::Type(ty) = &binding.subject else {
+                unreachable!();
+            };
+            if self
+                .require_compiler_derived_eq(ty, &mut Vec::new())
+                .is_ok()
+            {
+                return Ok(());
+            }
+        }
+        if self.has_builtin_class_instance_binding(class_name.as_str(), &binding.subject) {
+            return Ok(());
+        }
+        if self
+            .resolve_same_module_instance_binding(binding.class_item, &binding.subject)?
+            .is_some()
+        {
+            return Ok(());
+        }
+        Err(format!(
+            "no compiler-provided or same-module `{class_name}` instance matches `{}`",
+            self.type_binding_label(&binding.subject)
+        ))
+    }
+
+    #[allow(dead_code)]
+    fn require_class_named(&mut self, class_name: &str, ty: &GateType) -> Result<(), String> {
+        if self.has_builtin_class_instance(class_name, ty) {
+            return Ok(());
+        }
+        let Some(class_item_id) = self.class_item_id_by_name(class_name) else {
+            return Err(format!(
+                "no compiler-provided or same-module `{class_name}` instance matches `{ty}`"
+            ));
+        };
+        if self
+            .require_class_binding(&ClassConstraintBinding {
+                class_item: class_item_id,
+                subject: TypeBinding::Type(ty.clone()),
+            })
+            .is_ok()
+        {
+            return Ok(());
+        }
+        self.resolve_same_module_instance(class_item_id, ty)?
+            .map(|_| ())
+            .ok_or_else(|| {
+                format!(
+                    "no same-module `{class_name}` instance matches `{ty}` after resolved-HIR unification"
+                )
+            })
+    }
+
+    #[allow(dead_code)]
+    fn has_builtin_class_instance(&self, class_name: &str, ty: &GateType) -> bool {
+        match class_name {
+            "Functor" | "Applicative" => matches!(
+                ty,
+                GateType::List(_)
+                    | GateType::Option(_)
+                    | GateType::Result { .. }
+                    | GateType::Validation { .. }
+                    | GateType::Signal(_)
+                    | GateType::Task { .. }
+            ),
+            "Monad" => matches!(
+                ty,
+                GateType::List(_)
+                    | GateType::Option(_)
+                    | GateType::Result { .. }
+                    | GateType::Task { .. }
+            ),
+            _ => false,
+        }
+    }
+
+    fn has_builtin_class_instance_binding(
+        &mut self,
+        class_name: &str,
+        subject: &TypeBinding,
+    ) -> bool {
+        match subject {
+            TypeBinding::Type(ty) => match class_name {
+                "Ord" => {
+                    matches!(
+                        ty,
+                        GateType::Primitive(
+                            BuiltinType::Int
+                                | BuiltinType::Float
+                                | BuiltinType::Decimal
+                                | BuiltinType::BigInt
+                                | BuiltinType::Bool
+                                | BuiltinType::Text
+                        )
+                    ) || matches!(
+                        ty,
+                        GateType::OpaqueItem { name, .. } if name == "Ordering"
+                    )
+                }
+                "Semigroup" | "Monoid" => matches!(
+                    ty,
+                    GateType::Primitive(BuiltinType::Text) | GateType::List(_)
+                ),
+                "Bifunctor" => matches!(
+                    ty,
+                    GateType::Result { .. } | GateType::Validation { .. } | GateType::Task { .. }
+                ),
+                _ => self.has_builtin_class_instance(class_name, ty),
+            },
+            TypeBinding::Constructor(binding) => match class_name {
+                "Functor" | "Apply" | "Applicative" => self.matches_builtin_head(
+                    binding,
+                    &[
+                        BuiltinType::List,
+                        BuiltinType::Option,
+                        BuiltinType::Result,
+                        BuiltinType::Validation,
+                        BuiltinType::Signal,
+                        BuiltinType::Task,
+                    ],
+                ),
+                "Alt" | "Plus" | "Alternative" => self.matches_builtin_head(
+                    binding,
+                    &[
+                        BuiltinType::List,
+                        BuiltinType::Option,
+                        BuiltinType::Result,
+                        BuiltinType::Validation,
+                    ],
+                ),
+                "Chain" | "Monad" | "ChainRec" => self.matches_builtin_head(
+                    binding,
+                    &[
+                        BuiltinType::List,
+                        BuiltinType::Option,
+                        BuiltinType::Result,
+                        BuiltinType::Task,
+                    ],
+                ),
+                "Foldable" | "Traversable" | "Filterable" => self.matches_builtin_head(
+                    binding,
+                    &[
+                        BuiltinType::List,
+                        BuiltinType::Option,
+                        BuiltinType::Result,
+                        BuiltinType::Validation,
+                    ],
+                ),
+                "Bifunctor" => self.matches_builtin_head(
+                    binding,
+                    &[
+                        BuiltinType::Result,
+                        BuiltinType::Validation,
+                        BuiltinType::Task,
+                    ],
+                ),
+                _ => false,
+            },
+        }
+    }
+
+    fn matches_builtin_head(
+        &self,
+        binding: &crate::validate::TypeConstructorBinding,
+        allowed: &[BuiltinType],
+    ) -> bool {
+        matches!(binding.head(), crate::validate::TypeConstructorHead::Builtin(builtin) if allowed.contains(&builtin))
+    }
+
+    fn resolve_same_module_instance(
+        &mut self,
+        class_item_id: ItemId,
+        ty: &GateType,
+    ) -> Result<Option<InstanceItem>, String> {
         let instances = self
             .module
             .items()
@@ -1769,34 +2367,96 @@ impl<'a> TypeChecker<'a> {
                 _ => None,
             })
             .collect::<Vec<_>>();
+        let mut matches = Vec::new();
         for instance in instances {
-            let ResolutionState::Resolved(TypeResolution::Item(class_item_id)) =
-                instance.class.resolution.as_ref()
-            else {
-                continue;
-            };
-            let Item::Class(class_item) = &self.module.items()[*class_item_id] else {
-                continue;
-            };
-            if class_item.name.text() != "Default" || instance.arguments.len() != 1 {
+            if self.instance_class_item_id(&instance) != Some(class_item_id)
+                || instance.arguments.len() != 1
+            {
                 continue;
             }
-            if !self
+            let mut bindings = PolyTypeBindings::new();
+            if self
                 .typing
-                .lower_annotation(*instance.arguments.first())
-                .is_some_and(|candidate| candidate.same_shape(ty))
+                .match_poly_hir_type(*instance.arguments.first(), ty, &mut bindings)
             {
-                continue;
-            }
-            if let Some(member) = instance
-                .members
-                .iter()
-                .find(|member| member.name.text() == "default" && member.parameters.is_empty())
-            {
-                return Some(member.body);
+                matches.push(instance);
             }
         }
-        None
+        match matches.len() {
+            0 => Ok(None),
+            1 => Ok(matches.into_iter().next()),
+            _ => Err(format!(
+                "multiple same-module instances match `{ty}` for `{}`; overlapping instances are not yet supported here",
+                match &self.module.items()[class_item_id] {
+                    Item::Class(class_item) => class_item.name.text(),
+                    _ => "<class>",
+                }
+            )),
+        }
+    }
+
+    fn resolve_same_module_instance_binding(
+        &mut self,
+        class_item_id: ItemId,
+        subject: &TypeBinding,
+    ) -> Result<Option<InstanceItem>, String> {
+        self.resolve_same_module_instance_binding_with_id(class_item_id, subject)
+            .map(|resolved| resolved.map(|(_, instance)| instance))
+    }
+
+    fn resolve_same_module_instance_binding_with_id(
+        &mut self,
+        class_item_id: ItemId,
+        subject: &TypeBinding,
+    ) -> Result<Option<(ItemId, InstanceItem)>, String> {
+        let instances = self
+            .module
+            .items()
+            .iter()
+            .filter_map(|(item_id, item)| match item {
+                Item::Instance(instance) => Some((item_id, instance.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let mut matches = Vec::new();
+        for (instance_id, instance) in instances {
+            if self.instance_class_item_id(&instance) != Some(class_item_id)
+                || instance.arguments.len() != 1
+            {
+                continue;
+            }
+            let mut bindings = PolyTypeBindings::new();
+            if self.typing.match_poly_type_binding(
+                *instance.arguments.first(),
+                subject,
+                &mut bindings,
+            ) {
+                matches.push((instance_id, instance));
+            }
+        }
+        match matches.len() {
+            0 => Ok(None),
+            1 => Ok(matches.into_iter().next()),
+            _ => Err(format!(
+                "multiple same-module instances match `{}` for `{}`; overlapping instances are not yet supported here",
+                self.type_binding_label(subject),
+                self.class_name(class_item_id).unwrap_or("<class>")
+            )),
+        }
+    }
+
+    fn same_module_default_member_body(&mut self, ty: &GateType) -> Result<Option<ExprId>, String> {
+        let Some(class_item_id) = self.class_item_id_by_name("Default") else {
+            return Ok(None);
+        };
+        let Some(instance) = self.resolve_same_module_instance(class_item_id, ty)? else {
+            return Ok(None);
+        };
+        Ok(instance
+            .members
+            .iter()
+            .find(|member| member.name.text() == "default" && member.parameters.is_empty())
+            .map(|member| member.body))
     }
 
     fn instance_class_item_id(&self, item: &InstanceItem) -> Option<ItemId> {
@@ -1808,11 +2468,11 @@ impl<'a> TypeChecker<'a> {
         matches!(self.module.items()[*item_id], Item::Class(_)).then_some(*item_id)
     }
 
-    fn instance_argument_substitutions(
+    fn instance_argument_bindings(
         &mut self,
         class_item_id: ItemId,
         item: &InstanceItem,
-    ) -> Option<HashMap<TypeParameterId, GateType>> {
+    ) -> Option<PolyTypeBindings> {
         let Item::Class(class_item) = &self.module.items()[class_item_id] else {
             return None;
         };
@@ -1821,7 +2481,7 @@ impl<'a> TypeChecker<'a> {
         }
         let mut arguments = Vec::with_capacity(item.arguments.len());
         for argument in item.arguments.iter() {
-            arguments.push(self.typing.lower_annotation(*argument)?);
+            arguments.push(self.typing.poly_type_binding(*argument)?);
         }
         Some(
             class_item
@@ -2000,6 +2660,24 @@ mod tests {
             lowered.diagnostics()
         );
         typecheck_module(lowered.module())
+    }
+
+    fn lowered_module_text(path: &str, text: &str) -> Module {
+        let mut sources = SourceDatabase::new();
+        let file_id = sources.add_file(path, text);
+        let parsed = parse_module(&sources[file_id]);
+        assert!(
+            !parsed.has_errors(),
+            "module input should parse cleanly: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+        let lowered = lower_module(&parsed.module);
+        assert!(
+            !lowered.has_errors(),
+            "module input should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+        lowered.module().clone()
     }
 
     #[test]
@@ -2190,10 +2868,64 @@ mod tests {
     }
 
     #[test]
-    fn typecheck_reports_invalid_binary_operator_for_nonnumeric_comparison() {
+    fn typecheck_accepts_prelude_functor_map_calls() {
+        let report = typecheck_text(
+            "prelude-map-call.aivi",
+            "fun increment:Int #value:Int => value + 1\n\
+             val mapped:Option Int = map increment (Some 1)\n",
+        );
+        assert!(
+            report.is_ok(),
+            "expected ambient prelude Functor map call to typecheck, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_accepts_class_member_names_from_expected_arrow_types() {
+        let report = typecheck_text(
+            "class-member-name-expected-arrow.aivi",
+            "val pureOption:(Int -> Option Int) = pure\n",
+        );
+        assert!(
+            report.is_ok(),
+            "expected class member names to resolve from expected arrows, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_accepts_function_signature_constraints_at_call_sites() {
+        let report = typecheck_text(
+            "function-signature-constraints.aivi",
+            "fun same:Eq A => Bool #value:A => True\n\
+             val sameText:Bool = same \"Ada\"\n",
+        );
+        assert!(
+            report.is_ok(),
+            "expected signature constraints to solve at call sites, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_accepts_ord_comparison_for_text() {
+        let report = typecheck_text(
+            "ord-text-comparison.aivi",
+            "val ordered:Bool = \"a\" < \"b\"\n",
+        );
+        assert!(
+            report.is_ok(),
+            "expected Ord-backed text comparison to typecheck, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_reports_invalid_binary_operator_for_non_ord_comparison() {
         let report = typecheck_text(
             "invalid-binary-operator.aivi",
-            "val broken:Bool = \"a\" < \"b\"\n",
+            "val broken:Bool = [1] < [2]\n",
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
@@ -2473,6 +3205,125 @@ val resultLabel:Result Text Text =
             report.is_ok(),
             "expected partial builtin case runs to typecheck, got diagnostics: {:?}",
             report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_accepts_polymorphic_pipe_transforms() {
+        let report = typecheck_text(
+            "polymorphic-pipe-transforms.aivi",
+            "fun wrap:(Option A) #value:A => Some value\n\
+             val maybeNumber:Option Int = 1 |> wrap\n\
+             val maybeLabel:Option Text = \"Ada\" |> wrap\n",
+        );
+        assert!(
+            report.is_ok(),
+            "expected polymorphic pipe transforms to typecheck, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_accepts_polymorphic_function_application() {
+        let report = typecheck_text(
+            "polymorphic-function-application.aivi",
+            "fun wrap:(Option A) #value:A => Some value\n\
+             val maybeNumber:Option Int = wrap 1\n\
+             val maybeLabel:Option Text = wrap \"Ada\"\n",
+        );
+        assert!(
+            report.is_ok(),
+            "expected polymorphic function application to typecheck, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_reports_invalid_pipe_stage_input_for_transforms() {
+        let report = typecheck_text(
+            "invalid-pipe-stage-transform.aivi",
+            "fun describe:Text #value:Int => \"count\"\n\
+             val broken:Text = \"Ada\" |> describe\n",
+        );
+        assert!(
+            report.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code == Some(DiagnosticCode::new("hir", "invalid-pipe-stage-input"))
+            }),
+            "expected invalid pipe stage input diagnostic, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_reports_invalid_pipe_stage_input_for_taps() {
+        let report = typecheck_text(
+            "invalid-pipe-stage-tap.aivi",
+            "fun describe:Text #value:Int => \"count\"\n\
+             val broken:Text = \"Ada\" | describe\n",
+        );
+        assert!(
+            report.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code == Some(DiagnosticCode::new("hir", "invalid-pipe-stage-input"))
+            }),
+            "expected invalid pipe stage input diagnostic for tap, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_accepts_higher_kinded_instance_member_signatures() {
+        let report = typecheck_text(
+            "higher-kinded-instance-members.aivi",
+            "class Applicative F\n\
+             \x20\x20\x20\x20pureInt : F Int\n\
+             instance Applicative Option\n\
+             \x20\x20\x20\x20pureInt = Some 1\n\
+             class Functor F\n\
+             \x20\x20\x20\x20labelInt : F Int\n\
+             instance Functor (Result Text)\n\
+             \x20\x20\x20\x20labelInt = Ok 1\n",
+        );
+        assert!(
+            report.is_ok(),
+            "expected higher-kinded instance member signatures to typecheck, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_resolves_partial_same_module_instances_generically() {
+        let module = lowered_module_text(
+            "partial-same-module-instances.aivi",
+            "class Applicative F\n\
+             \x20\x20\x20\x20pureInt : F Int\n\
+             instance Applicative Option\n\
+             \x20\x20\x20\x20pureInt = Some 1\n\
+             class Monad F\n\
+             \x20\x20\x20\x20labelInt : F Int\n\
+             instance Monad (Result Text)\n\
+             \x20\x20\x20\x20labelInt = Ok 1\n",
+        );
+        let mut checker = TypeChecker::new(&module);
+        assert!(
+            checker
+                .require_class_named(
+                    "Applicative",
+                    &GateType::Option(Box::new(GateType::Primitive(BuiltinType::Int)))
+                )
+                .is_ok(),
+            "expected general class resolution to accept same-module `Applicative Option`"
+        );
+        assert!(
+            checker
+                .require_class_named(
+                    "Monad",
+                    &GateType::Result {
+                        error: Box::new(GateType::Primitive(BuiltinType::Text)),
+                        value: Box::new(GateType::Primitive(BuiltinType::Int)),
+                    },
+                )
+                .is_ok(),
+            "expected general class resolution to accept same-module `Monad (Result Text)`"
         );
     }
 

@@ -265,6 +265,7 @@ impl<'a> Parser<'a> {
             keyword_span: self.source_span_of_token(keyword_index),
             name,
             type_parameters,
+            constraints: Vec::new(),
             annotation: None,
             parameters: Vec::new(),
             body,
@@ -273,19 +274,8 @@ impl<'a> Parser<'a> {
 
     fn parse_class_item(&mut self, base: ItemBase, keyword_index: usize, end: usize) -> NamedItem {
         let mut cursor = keyword_index + 1;
-        let name = self.parse_named_item_name(keyword_index, &mut cursor, end, "class declaration");
-        let mut type_parameters = Vec::new();
-
-        while let Some(index) = self.peek_nontrivia(cursor, end) {
-            if self.tokens[index].line_start() {
-                break;
-            }
-            if self.tokens[index].kind() != TokenKind::Identifier {
-                break;
-            }
-            type_parameters.push(self.identifier_from_token(index));
-            cursor = index + 1;
-        }
+        let (constraints, name, type_parameters) =
+            self.parse_class_head(keyword_index, &mut cursor, end);
 
         let body = self
             .parse_class_body(&mut cursor, end)
@@ -304,6 +294,7 @@ impl<'a> Parser<'a> {
             keyword_span: self.source_span_of_token(keyword_index),
             name,
             type_parameters,
+            constraints,
             annotation: None,
             parameters: Vec::new(),
             body,
@@ -317,6 +308,7 @@ impl<'a> Parser<'a> {
         end: usize,
     ) -> InstanceItem {
         let mut cursor = keyword_index + 1;
+        let context = self.parse_optional_constraint_prefix(&mut cursor, end);
         let class = self.parse_qualified_name(&mut cursor, end).or_else(|| {
             self.diagnostics.push(
                 Diagnostic::error("instance declaration is missing its class name")
@@ -355,6 +347,7 @@ impl<'a> Parser<'a> {
         InstanceItem {
             base,
             keyword_span: self.source_span_of_token(keyword_index),
+            context,
             class,
             target,
             body,
@@ -484,6 +477,7 @@ impl<'a> Parser<'a> {
             keyword_span: self.source_span_of_token(keyword_index),
             name,
             type_parameters: Vec::new(),
+            constraints: Vec::new(),
             annotation,
             parameters: Vec::new(),
             body,
@@ -499,7 +493,7 @@ impl<'a> Parser<'a> {
         let mut cursor = keyword_index + 1;
         let name =
             self.parse_named_item_name(keyword_index, &mut cursor, end, "function declaration");
-        let annotation = self.parse_optional_type_annotation(&mut cursor, end);
+        let (constraints, annotation) = self.parse_optional_signature_annotation(&mut cursor, end);
         let mut parameters = Vec::new();
         while self.peek_kind(cursor, end) == Some(TokenKind::Hash) {
             let Some(parameter) = self.parse_function_param(&mut cursor, end) else {
@@ -537,6 +531,7 @@ impl<'a> Parser<'a> {
             keyword_span: self.source_span_of_token(keyword_index),
             name,
             type_parameters: Vec::new(),
+            constraints,
             annotation,
             parameters,
             body,
@@ -582,6 +577,7 @@ impl<'a> Parser<'a> {
             keyword_span: self.source_span_of_token(keyword_index),
             name,
             type_parameters: Vec::new(),
+            constraints: Vec::new(),
             annotation,
             parameters: Vec::new(),
             body,
@@ -687,9 +683,10 @@ impl<'a> Parser<'a> {
     fn parse_class_member(&mut self, cursor: &mut usize, end: usize) -> Option<ClassMember> {
         let start = *cursor;
         let name = self.parse_signature_member_name(cursor, end)?;
-        let annotation = if self.consume_kind(cursor, end, TokenKind::Colon).is_some() {
-            self.parse_type_expr(cursor, end, TypeStop::default())
-                .or_else(|| {
+        let (constraints, annotation) =
+            if self.consume_kind(cursor, end, TokenKind::Colon).is_some() {
+                let (constraints, annotation) = self.parse_constrained_type(cursor, end);
+                let annotation = annotation.or_else(|| {
                     self.diagnostics.push(
                         Diagnostic::error("class member is missing its type after `:`")
                             .with_code(MISSING_CLASS_MEMBER_TYPE)
@@ -699,18 +696,20 @@ impl<'a> Parser<'a> {
                             ),
                     );
                     None
-                })
-        } else {
-            self.diagnostics.push(
-                Diagnostic::error("class member is missing `:` before its type")
-                    .with_code(MISSING_CLASS_MEMBER_TYPE)
-                    .with_primary_label(name.span(), "expected `:` followed by a member type"),
-            );
-            None
-        };
+                });
+                (constraints, annotation)
+            } else {
+                self.diagnostics.push(
+                    Diagnostic::error("class member is missing `:` before its type")
+                        .with_code(MISSING_CLASS_MEMBER_TYPE)
+                        .with_primary_label(name.span(), "expected `:` followed by a member type"),
+                );
+                (Vec::new(), None)
+            };
 
         Some(ClassMember {
             name,
+            constraints,
             annotation,
             span: self.source_span_for_range(start, *cursor),
         })
@@ -1266,6 +1265,111 @@ impl<'a> Parser<'a> {
     ) -> Option<TypeExpr> {
         self.consume_kind(cursor, end, TokenKind::Colon)?;
         self.parse_type_expr(cursor, end, TypeStop::default())
+    }
+
+    fn parse_optional_signature_annotation(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+    ) -> (Vec<TypeExpr>, Option<TypeExpr>) {
+        if self.consume_kind(cursor, end, TokenKind::Colon).is_none() {
+            return (Vec::new(), None);
+        }
+        self.parse_constrained_type(cursor, end)
+    }
+
+    fn parse_constrained_type(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+    ) -> (Vec<TypeExpr>, Option<TypeExpr>) {
+        let checkpoint = *cursor;
+        if let Some(constraints) = self.parse_constraint_list(cursor, end)
+            && self.consume_kind(cursor, end, TokenKind::Arrow).is_some()
+        {
+            return (
+                constraints,
+                self.parse_type_expr(cursor, end, TypeStop::default()),
+            );
+        }
+        *cursor = checkpoint;
+        (
+            Vec::new(),
+            self.parse_type_expr(cursor, end, TypeStop::default()),
+        )
+    }
+
+    fn parse_constraint_list(&mut self, cursor: &mut usize, end: usize) -> Option<Vec<TypeExpr>> {
+        if self.peek_kind(*cursor, end) == Some(TokenKind::LParen) {
+            self.consume_kind(cursor, end, TokenKind::LParen)?;
+            let mut constraints = Vec::new();
+            loop {
+                constraints.push(self.parse_type_expr(cursor, end, TypeStop::paren_context())?);
+                if self.consume_kind(cursor, end, TokenKind::Comma).is_some() {
+                    continue;
+                }
+                self.consume_kind(cursor, end, TokenKind::RParen)?;
+                break;
+            }
+            return Some(constraints);
+        }
+        Some(vec![self.parse_type_expr(
+            cursor,
+            end,
+            TypeStop::default(),
+        )?])
+    }
+
+    fn parse_optional_constraint_prefix(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+    ) -> Vec<TypeExpr> {
+        let checkpoint = *cursor;
+        if let Some(constraints) = self.parse_constraint_list(cursor, end)
+            && self.consume_kind(cursor, end, TokenKind::Arrow).is_some()
+        {
+            return constraints;
+        }
+        *cursor = checkpoint;
+        Vec::new()
+    }
+
+    fn parse_type_parameters_same_line(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+    ) -> Vec<Identifier> {
+        let mut type_parameters = Vec::new();
+        while let Some(index) = self.peek_nontrivia(*cursor, end) {
+            if self.tokens[index].line_start() || self.tokens[index].kind() != TokenKind::Identifier
+            {
+                break;
+            }
+            type_parameters.push(self.identifier_from_token(index));
+            *cursor = index + 1;
+        }
+        type_parameters
+    }
+
+    fn parse_class_head(
+        &mut self,
+        keyword_index: usize,
+        cursor: &mut usize,
+        end: usize,
+    ) -> (Vec<TypeExpr>, Option<Identifier>, Vec<Identifier>) {
+        let checkpoint = *cursor;
+        if let Some(constraints) = self.parse_constraint_list(cursor, end)
+            && self.consume_kind(cursor, end, TokenKind::Arrow).is_some()
+        {
+            let name = self.parse_named_item_name(keyword_index, cursor, end, "class declaration");
+            let type_parameters = self.parse_type_parameters_same_line(cursor, end);
+            return (constraints, name, type_parameters);
+        }
+        *cursor = checkpoint;
+        let name = self.parse_named_item_name(keyword_index, cursor, end, "class declaration");
+        let type_parameters = self.parse_type_parameters_same_line(cursor, end);
+        (Vec::new(), name, type_parameters)
     }
 
     fn parse_function_param(&mut self, cursor: &mut usize, end: usize) -> Option<FunctionParam> {
@@ -3181,6 +3285,31 @@ val datePattern = rx"\d{4}-\d{2}-\d{2}"
     }
 
     #[test]
+    fn lexer_distinguishes_line_and_doc_comments_as_trivia() {
+        let mut sources = SourceDatabase::new();
+        let file_id = sources.add_file(
+            "comments.aivi",
+            "--- module doc\nval answer = 42 -- inline note\n",
+        );
+        let lexed = lex_module(&sources[file_id]);
+        let comment_kinds = lexed
+            .tokens()
+            .iter()
+            .filter_map(|token| match token.kind() {
+                TokenKind::DocComment | TokenKind::LineComment => Some(token.kind()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            comment_kinds,
+            vec![TokenKind::DocComment, TokenKind::LineComment]
+        );
+        assert!(comment_kinds.iter().all(|kind| kind.is_trivia()));
+        assert!(lexed.diagnostics().is_empty());
+    }
+
+    #[test]
     fn parser_builds_structured_items_and_source_decorators() {
         let (_, parsed) = load(
             r#"@source http.get "/users" with {
@@ -3396,6 +3525,89 @@ export main
     }
 
     #[test]
+    fn parser_respects_binary_precedence_and_left_associativity() {
+        let (_, parsed) = load(
+            "val ranked = left + middle > threshold and ready or fallback\nval diff = a - b - c\n",
+        );
+
+        assert!(!parsed.has_errors());
+
+        match &parsed.module.items[0] {
+            Item::Value(item) => match item.expr_body().map(|expr| &expr.kind) {
+                Some(ExprKind::Binary {
+                    operator: BinaryOperator::Or,
+                    left,
+                    right,
+                }) => {
+                    assert!(matches!(
+                        &right.kind,
+                        ExprKind::Name(identifier) if identifier.text == "fallback"
+                    ));
+                    match &left.kind {
+                        ExprKind::Binary {
+                            operator: BinaryOperator::And,
+                            left,
+                            right,
+                        } => {
+                            assert!(matches!(
+                                &right.kind,
+                                ExprKind::Name(identifier) if identifier.text == "ready"
+                            ));
+                            match &left.kind {
+                                ExprKind::Binary {
+                                    operator: BinaryOperator::GreaterThan,
+                                    left,
+                                    right,
+                                } => {
+                                    assert!(matches!(
+                                        &right.kind,
+                                        ExprKind::Name(identifier) if identifier.text == "threshold"
+                                    ));
+                                    assert!(matches!(
+                                        &left.kind,
+                                        ExprKind::Binary {
+                                            operator: BinaryOperator::Add,
+                                            ..
+                                        }
+                                    ));
+                                }
+                                other => panic!("expected comparison before `and`, got {other:?}"),
+                            }
+                        }
+                        other => panic!("expected `and` before `or`, got {other:?}"),
+                    }
+                }
+                other => panic!("expected precedence-shaped binary tree, got {other:?}"),
+            },
+            other => panic!("expected ranked value item, got {other:?}"),
+        }
+
+        match &parsed.module.items[1] {
+            Item::Value(item) => match item.expr_body().map(|expr| &expr.kind) {
+                Some(ExprKind::Binary {
+                    operator: BinaryOperator::Subtract,
+                    left,
+                    right,
+                }) => {
+                    assert!(matches!(
+                        &right.kind,
+                        ExprKind::Name(identifier) if identifier.text == "c"
+                    ));
+                    assert!(matches!(
+                        &left.kind,
+                        ExprKind::Binary {
+                            operator: BinaryOperator::Subtract,
+                            ..
+                        }
+                    ));
+                }
+                other => panic!("expected left-associative subtraction tree, got {other:?}"),
+            },
+            other => panic!("expected diff value item, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parser_builds_instance_members_with_parameters_and_multiline_bodies() {
         let (_, parsed) = load(
             r#"class Eq A
@@ -3482,6 +3694,42 @@ instance Eq Blob
             }
             other => panic!("expected domain item, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parser_tracks_constraint_prefixes_on_classes_functions_and_instances() {
+        let (_, parsed) = load(
+            r#"class Functor F
+    map : (A -> B) -> F A -> F B
+class (Functor F, Foldable F) => Traversable F
+    traverse : Applicative G => (A -> G B) -> F A -> G (F B)
+fun same:Eq A => Bool #value:A => value == value
+instance Eq A => Eq (Option A)
+    (==) left right = True
+"#,
+        );
+        assert!(
+            !parsed.has_errors(),
+            "expected constrained signatures to parse cleanly, got diagnostics: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+
+        let Item::Class(traversable) = &parsed.module.items[1] else {
+            panic!("expected traversable class item");
+        };
+        assert_eq!(traversable.constraints.len(), 2);
+        let body = traversable.class_body().expect("class body");
+        assert_eq!(body.members[0].constraints.len(), 1);
+
+        let Item::Function(function) = &parsed.module.items[2] else {
+            panic!("expected constrained function item");
+        };
+        assert_eq!(function.constraints.len(), 1);
+
+        let Item::Instance(instance) = &parsed.module.items[3] else {
+            panic!("expected constrained instance item");
+        };
+        assert_eq!(instance.context.len(), 1);
     }
 
     #[test]
@@ -3575,6 +3823,29 @@ instance Eq Blob
             },
             other => panic!("expected spaced value item, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parser_treats_builtin_suffix_like_forms_as_suffix_literal_candidates() {
+        fn expect_suffixed(item: &Item, raw: &str, suffix: &str) {
+            match item {
+                Item::Value(item) => match item.expr_body().map(|expr| &expr.kind) {
+                    Some(ExprKind::SuffixedInteger(literal)) => {
+                        assert_eq!(literal.literal.raw, raw);
+                        assert_eq!(literal.suffix.text, suffix);
+                    }
+                    other => panic!("expected suffixed integer literal candidate, got {other:?}"),
+                },
+                other => panic!("expected value item, got {other:?}"),
+            }
+        }
+
+        let (_, parsed) = load("val bigint = 123n\nval decimal = 19d\nval hexish = 0xFF\n");
+
+        assert!(!parsed.has_errors());
+        expect_suffixed(&parsed.module.items[0], "123", "n");
+        expect_suffixed(&parsed.module.items[1], "19", "d");
+        expect_suffixed(&parsed.module.items[2], "0", "xFF");
     }
 
     #[test]

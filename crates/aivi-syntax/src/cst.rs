@@ -240,6 +240,7 @@ impl ClassMemberName {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClassMember {
     pub name: ClassMemberName,
+    pub constraints: Vec<TypeExpr>,
     pub annotation: Option<TypeExpr>,
     pub span: SourceSpan,
 }
@@ -528,6 +529,7 @@ pub struct NamedItem {
     pub keyword_span: SourceSpan,
     pub name: Option<Identifier>,
     pub type_parameters: Vec<Identifier>,
+    pub constraints: Vec<TypeExpr>,
     pub annotation: Option<TypeExpr>,
     pub parameters: Vec<FunctionParam>,
     pub body: Option<NamedItemBody>,
@@ -568,6 +570,7 @@ impl NamedItem {
 pub struct InstanceItem {
     pub base: ItemBase,
     pub keyword_span: SourceSpan,
+    pub context: Vec<TypeExpr>,
     pub class: Option<QualifiedName>,
     pub target: Option<TypeExpr>,
     pub body: Option<InstanceBody>,

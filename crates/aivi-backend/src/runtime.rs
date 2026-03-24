@@ -6,9 +6,11 @@ use std::{
 use aivi_hir::{DomainMemberHandle, ItemId as HirItemId, SumConstructorHandle};
 
 use crate::{
-    BinaryOperator, BuiltinTerm, EnvSlotId, InlinePipePattern, InlinePipePatternKind,
-    InlinePipeStageKind, InlineSubjectId, ItemId, KernelExprId, KernelExprKind, KernelId, LayoutId,
-    LayoutKind, PrimitiveType, Program, ProjectionBase, SubjectRef, UnaryOperator,
+    BinaryOperator, BuiltinAppendCarrier, BuiltinApplicativeCarrier, BuiltinApplyCarrier,
+    BuiltinClassMemberIntrinsic, BuiltinFunctorCarrier, BuiltinOrdSubject, BuiltinTerm, EnvSlotId,
+    InlinePipePattern, InlinePipePatternKind, InlinePipeStageKind, InlineSubjectId, ItemId,
+    KernelExprId, KernelExprKind, KernelId, LayoutId, LayoutKind, PrimitiveType, Program,
+    ProjectionBase, SubjectRef, UnaryOperator,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,6 +60,10 @@ pub enum RuntimeCallable {
     },
     DomainMember {
         handle: DomainMemberHandle,
+        bound_arguments: Vec<RuntimeValue>,
+    },
+    BuiltinClassMember {
+        intrinsic: BuiltinClassMemberIntrinsic,
         bound_arguments: Vec<RuntimeValue>,
     },
 }
@@ -179,6 +185,9 @@ impl RuntimeValue {
                             "<domain-member {}.{}>",
                             handle.domain_name, handle.member_name
                         )?,
+                        RuntimeCallable::BuiltinClassMember { intrinsic, .. } => {
+                            write!(target, "<builtin-class-member {intrinsic:?}>")?
+                        }
                     },
                 },
                 DisplayFrame::StaticText(text) => target.write_str(text)?,
@@ -359,6 +368,12 @@ pub enum EvaluationError {
         expr: KernelExprId,
         handle: DomainMemberHandle,
     },
+    UnsupportedBuiltinClassMember {
+        kernel: KernelId,
+        expr: KernelExprId,
+        intrinsic: BuiltinClassMemberIntrinsic,
+        reason: &'static str,
+    },
     UnsupportedInlinePipe {
         kernel: KernelId,
         expr: KernelExprId,
@@ -495,6 +510,15 @@ impl fmt::Display for EvaluationError {
                 f,
                 "kernel {kernel} reached unresolved domain member {}.{} at runtime",
                 handle.domain_name, handle.member_name
+            ),
+            Self::UnsupportedBuiltinClassMember {
+                kernel,
+                intrinsic,
+                reason,
+                ..
+            } => write!(
+                f,
+                "kernel {kernel} cannot evaluate builtin class member `{intrinsic:?}`: {reason}"
             ),
             Self::UnsupportedInlinePipe { kernel, .. } => write!(
                 f,
@@ -784,6 +808,9 @@ impl<'a> KernelEvaluator<'a> {
                                 handle: handle.clone(),
                                 bound_arguments: Vec::new(),
                             }))
+                        }
+                        KernelExprKind::BuiltinClassMember(intrinsic) => {
+                            values.push(runtime_class_member_value(*intrinsic))
                         }
                         KernelExprKind::Builtin(term) => values.push(map_builtin(*term)),
                         KernelExprKind::Integer(integer) => {
@@ -1316,7 +1343,6 @@ impl<'a> KernelEvaluator<'a> {
         globals: &BTreeMap<ItemId, RuntimeValue>,
     ) -> Result<RuntimeValue, EvaluationError> {
         let callee = strip_signal(callee);
-        let arguments = arguments.into_iter().map(strip_signal).collect::<Vec<_>>();
         let RuntimeValue::Callable(callable) = callee else {
             return Err(EvaluationError::InvalidCallee {
                 kernel: kernel_id,
@@ -1331,7 +1357,7 @@ impl<'a> KernelEvaluator<'a> {
                 parameters,
                 mut bound_arguments,
             } => {
-                bound_arguments.extend(arguments);
+                bound_arguments.extend(arguments.into_iter().map(strip_signal));
                 if bound_arguments.len() < parameters.len() {
                     return Ok(RuntimeValue::Callable(RuntimeCallable::ItemBody {
                         item,
@@ -1352,7 +1378,7 @@ impl<'a> KernelEvaluator<'a> {
                 constructor,
                 mut bound_arguments,
             } => {
-                bound_arguments.extend(arguments);
+                bound_arguments.extend(arguments.into_iter().map(strip_signal));
                 if bound_arguments.is_empty() {
                     return Ok(RuntimeValue::Callable(
                         RuntimeCallable::BuiltinConstructor {
@@ -1382,7 +1408,7 @@ impl<'a> KernelEvaluator<'a> {
                 handle,
                 mut bound_arguments,
             } => {
-                bound_arguments.extend(arguments);
+                bound_arguments.extend(arguments.into_iter().map(strip_signal));
                 if bound_arguments.len() < handle.field_count as usize {
                     return Ok(RuntimeValue::Callable(RuntimeCallable::SumConstructor {
                         handle,
@@ -1407,12 +1433,393 @@ impl<'a> KernelEvaluator<'a> {
                 bound_arguments,
             } => {
                 let _ = bound_arguments;
+                let _ = arguments;
                 Err(EvaluationError::UnsupportedDomainMemberCall {
                     kernel: kernel_id,
                     expr,
                     handle,
                 })
             }
+            RuntimeCallable::BuiltinClassMember {
+                intrinsic,
+                mut bound_arguments,
+            } => {
+                bound_arguments.extend(arguments);
+                let arity = builtin_class_member_arity(intrinsic);
+                if bound_arguments.len() < arity {
+                    return Ok(RuntimeValue::Callable(
+                        RuntimeCallable::BuiltinClassMember {
+                            intrinsic,
+                            bound_arguments,
+                        },
+                    ));
+                }
+                let remaining = bound_arguments.split_off(arity);
+                let value = self.evaluate_builtin_class_member(
+                    kernel_id,
+                    expr,
+                    intrinsic,
+                    bound_arguments,
+                    globals,
+                )?;
+                if remaining.is_empty() {
+                    Ok(value)
+                } else {
+                    self.apply_callable(kernel_id, expr, value, remaining, globals)
+                }
+            }
+        }
+    }
+
+    fn evaluate_builtin_class_member(
+        &mut self,
+        kernel_id: KernelId,
+        expr: KernelExprId,
+        intrinsic: BuiltinClassMemberIntrinsic,
+        arguments: Vec<RuntimeValue>,
+        globals: &BTreeMap<ItemId, RuntimeValue>,
+    ) -> Result<RuntimeValue, EvaluationError> {
+        match intrinsic {
+            BuiltinClassMemberIntrinsic::StructuralEq => {
+                let [left, right] = expect_arity::<2>(arguments).map_err(|reason| {
+                    EvaluationError::UnsupportedBuiltinClassMember {
+                        kernel: kernel_id,
+                        expr,
+                        intrinsic,
+                        reason,
+                    }
+                })?;
+                Ok(RuntimeValue::Bool(structural_eq(
+                    kernel_id, expr, &left, &right,
+                )?))
+            }
+            BuiltinClassMemberIntrinsic::Compare {
+                subject,
+                ordering_item,
+            } => {
+                let [left, right] = expect_arity::<2>(arguments).map_err(|reason| {
+                    EvaluationError::UnsupportedBuiltinClassMember {
+                        kernel: kernel_id,
+                        expr,
+                        intrinsic,
+                        reason,
+                    }
+                })?;
+                self.compare_builtin_subject(kernel_id, expr, subject, ordering_item, left, right)
+            }
+            BuiltinClassMemberIntrinsic::Append(carrier) => {
+                let [left, right] = expect_arity::<2>(arguments).map_err(|reason| {
+                    EvaluationError::UnsupportedBuiltinClassMember {
+                        kernel: kernel_id,
+                        expr,
+                        intrinsic,
+                        reason,
+                    }
+                })?;
+                self.append_builtin_carrier(kernel_id, expr, intrinsic, carrier, left, right)
+            }
+            BuiltinClassMemberIntrinsic::Empty(carrier) => Ok(match carrier {
+                BuiltinAppendCarrier::Text => RuntimeValue::Text("".into()),
+                BuiltinAppendCarrier::List => RuntimeValue::List(Vec::new()),
+            }),
+            BuiltinClassMemberIntrinsic::Map(carrier) => {
+                let [function, subject] = expect_arity::<2>(arguments).map_err(|reason| {
+                    EvaluationError::UnsupportedBuiltinClassMember {
+                        kernel: kernel_id,
+                        expr,
+                        intrinsic,
+                        reason,
+                    }
+                })?;
+                self.map_builtin_carrier(
+                    kernel_id, expr, intrinsic, carrier, function, subject, globals,
+                )
+            }
+            BuiltinClassMemberIntrinsic::Pure(carrier) => {
+                let [payload] = expect_arity::<1>(arguments).map_err(|reason| {
+                    EvaluationError::UnsupportedBuiltinClassMember {
+                        kernel: kernel_id,
+                        expr,
+                        intrinsic,
+                        reason,
+                    }
+                })?;
+                Ok(match carrier {
+                    BuiltinApplicativeCarrier::List => RuntimeValue::List(vec![payload]),
+                    BuiltinApplicativeCarrier::Option => {
+                        RuntimeValue::OptionSome(Box::new(payload))
+                    }
+                    BuiltinApplicativeCarrier::Result => RuntimeValue::ResultOk(Box::new(payload)),
+                    BuiltinApplicativeCarrier::Validation => {
+                        RuntimeValue::ValidationValid(Box::new(payload))
+                    }
+                    BuiltinApplicativeCarrier::Signal => RuntimeValue::Signal(Box::new(payload)),
+                })
+            }
+            BuiltinClassMemberIntrinsic::Apply(carrier) => {
+                let [functions, values] = expect_arity::<2>(arguments).map_err(|reason| {
+                    EvaluationError::UnsupportedBuiltinClassMember {
+                        kernel: kernel_id,
+                        expr,
+                        intrinsic,
+                        reason,
+                    }
+                })?;
+                self.apply_builtin_carrier(
+                    kernel_id, expr, intrinsic, carrier, functions, values, globals,
+                )
+            }
+        }
+    }
+
+    fn compare_builtin_subject(
+        &self,
+        kernel_id: KernelId,
+        expr: KernelExprId,
+        subject: BuiltinOrdSubject,
+        ordering_item: HirItemId,
+        left: RuntimeValue,
+        right: RuntimeValue,
+    ) -> Result<RuntimeValue, EvaluationError> {
+        let ordering = match (subject, strip_signal(left), strip_signal(right)) {
+            (BuiltinOrdSubject::Int, RuntimeValue::Int(left), RuntimeValue::Int(right)) => {
+                left.cmp(&right)
+            }
+            (BuiltinOrdSubject::Bool, RuntimeValue::Bool(left), RuntimeValue::Bool(right)) => {
+                left.cmp(&right)
+            }
+            (BuiltinOrdSubject::Text, RuntimeValue::Text(left), RuntimeValue::Text(right)) => {
+                left.as_ref().cmp(right.as_ref())
+            }
+            (BuiltinOrdSubject::Ordering, RuntimeValue::Sum(left), RuntimeValue::Sum(right))
+                if left.type_name.as_ref() == "Ordering"
+                    && right.type_name.as_ref() == "Ordering" =>
+            {
+                ordering_rank(&left.variant_name).cmp(&ordering_rank(&right.variant_name))
+            }
+            _ => {
+                return Err(EvaluationError::UnsupportedBuiltinClassMember {
+                    kernel: kernel_id,
+                    expr,
+                    intrinsic: BuiltinClassMemberIntrinsic::Compare {
+                        subject,
+                        ordering_item,
+                    },
+                    reason: "compare received values outside the supported runtime carriers",
+                });
+            }
+        };
+        Ok(ordering_value(ordering_item, ordering))
+    }
+
+    fn append_builtin_carrier(
+        &self,
+        kernel_id: KernelId,
+        expr: KernelExprId,
+        intrinsic: BuiltinClassMemberIntrinsic,
+        carrier: BuiltinAppendCarrier,
+        left: RuntimeValue,
+        right: RuntimeValue,
+    ) -> Result<RuntimeValue, EvaluationError> {
+        match (carrier, strip_signal(left), strip_signal(right)) {
+            (BuiltinAppendCarrier::Text, RuntimeValue::Text(left), RuntimeValue::Text(right)) => {
+                Ok(RuntimeValue::Text(
+                    format!("{}{}", left.as_ref(), right.as_ref()).into_boxed_str(),
+                ))
+            }
+            (
+                BuiltinAppendCarrier::List,
+                RuntimeValue::List(mut left),
+                RuntimeValue::List(right),
+            ) => {
+                left.extend(right);
+                Ok(RuntimeValue::List(left))
+            }
+            _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                kernel: kernel_id,
+                expr,
+                intrinsic,
+                reason: "append received values outside the supported runtime carriers",
+            }),
+        }
+    }
+
+    fn map_builtin_carrier(
+        &mut self,
+        kernel_id: KernelId,
+        expr: KernelExprId,
+        intrinsic: BuiltinClassMemberIntrinsic,
+        carrier: BuiltinFunctorCarrier,
+        function: RuntimeValue,
+        subject: RuntimeValue,
+        globals: &BTreeMap<ItemId, RuntimeValue>,
+    ) -> Result<RuntimeValue, EvaluationError> {
+        match carrier {
+            BuiltinFunctorCarrier::List => match strip_signal(subject) {
+                RuntimeValue::List(values) => {
+                    let mut mapped = Vec::with_capacity(values.len());
+                    for value in values {
+                        mapped.push(self.apply_callable(
+                            kernel_id,
+                            expr,
+                            function.clone(),
+                            vec![value],
+                            globals,
+                        )?);
+                    }
+                    Ok(RuntimeValue::List(mapped))
+                }
+                _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                    kernel: kernel_id,
+                    expr,
+                    intrinsic,
+                    reason: "map received values outside the supported runtime carriers",
+                }),
+            },
+            BuiltinFunctorCarrier::Option => match strip_signal(subject) {
+                RuntimeValue::OptionNone => Ok(RuntimeValue::OptionNone),
+                RuntimeValue::OptionSome(value) => Ok(RuntimeValue::OptionSome(Box::new(
+                    self.apply_callable(kernel_id, expr, function, vec![*value], globals)?,
+                ))),
+                _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                    kernel: kernel_id,
+                    expr,
+                    intrinsic,
+                    reason: "map received values outside the supported runtime carriers",
+                }),
+            },
+            BuiltinFunctorCarrier::Result => match strip_signal(subject) {
+                RuntimeValue::ResultErr(error) => Ok(RuntimeValue::ResultErr(error)),
+                RuntimeValue::ResultOk(value) => Ok(RuntimeValue::ResultOk(Box::new(
+                    self.apply_callable(kernel_id, expr, function, vec![*value], globals)?,
+                ))),
+                _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                    kernel: kernel_id,
+                    expr,
+                    intrinsic,
+                    reason: "map received values outside the supported runtime carriers",
+                }),
+            },
+            BuiltinFunctorCarrier::Validation => match strip_signal(subject) {
+                RuntimeValue::ValidationInvalid(error) => {
+                    Ok(RuntimeValue::ValidationInvalid(error))
+                }
+                RuntimeValue::ValidationValid(value) => {
+                    Ok(RuntimeValue::ValidationValid(Box::new(
+                        self.apply_callable(kernel_id, expr, function, vec![*value], globals)?,
+                    )))
+                }
+                _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                    kernel: kernel_id,
+                    expr,
+                    intrinsic,
+                    reason: "map received values outside the supported runtime carriers",
+                }),
+            },
+            BuiltinFunctorCarrier::Signal => match subject {
+                RuntimeValue::Signal(value) => Ok(RuntimeValue::Signal(Box::new(
+                    self.apply_callable(kernel_id, expr, function, vec![*value], globals)?,
+                ))),
+                _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                    kernel: kernel_id,
+                    expr,
+                    intrinsic,
+                    reason: "map received values outside the supported runtime carriers",
+                }),
+            },
+        }
+    }
+
+    fn apply_builtin_carrier(
+        &mut self,
+        kernel_id: KernelId,
+        expr: KernelExprId,
+        intrinsic: BuiltinClassMemberIntrinsic,
+        carrier: BuiltinApplyCarrier,
+        functions: RuntimeValue,
+        values: RuntimeValue,
+        globals: &BTreeMap<ItemId, RuntimeValue>,
+    ) -> Result<RuntimeValue, EvaluationError> {
+        match carrier {
+            BuiltinApplyCarrier::List => match (strip_signal(functions), strip_signal(values)) {
+                (RuntimeValue::List(functions), RuntimeValue::List(values)) => {
+                    let mut results = Vec::new();
+                    for function in functions {
+                        for value in &values {
+                            results.push(self.apply_callable(
+                                kernel_id,
+                                expr,
+                                function.clone(),
+                                vec![value.clone()],
+                                globals,
+                            )?);
+                        }
+                    }
+                    Ok(RuntimeValue::List(results))
+                }
+                _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                    kernel: kernel_id,
+                    expr,
+                    intrinsic,
+                    reason: "apply received values outside the supported runtime carriers",
+                }),
+            },
+            BuiltinApplyCarrier::Option => match (strip_signal(functions), strip_signal(values)) {
+                (RuntimeValue::OptionSome(function), RuntimeValue::OptionSome(value)) => {
+                    Ok(RuntimeValue::OptionSome(Box::new(self.apply_callable(
+                        kernel_id,
+                        expr,
+                        *function,
+                        vec![*value],
+                        globals,
+                    )?)))
+                }
+                (RuntimeValue::OptionNone, _) | (_, RuntimeValue::OptionNone) => {
+                    Ok(RuntimeValue::OptionNone)
+                }
+                _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                    kernel: kernel_id,
+                    expr,
+                    intrinsic,
+                    reason: "apply received values outside the supported runtime carriers",
+                }),
+            },
+            BuiltinApplyCarrier::Result => match (strip_signal(functions), strip_signal(values)) {
+                (RuntimeValue::ResultErr(error), _) => Ok(RuntimeValue::ResultErr(error)),
+                (_, RuntimeValue::ResultErr(error)) => Ok(RuntimeValue::ResultErr(error)),
+                (RuntimeValue::ResultOk(function), RuntimeValue::ResultOk(value)) => {
+                    Ok(RuntimeValue::ResultOk(Box::new(self.apply_callable(
+                        kernel_id,
+                        expr,
+                        *function,
+                        vec![*value],
+                        globals,
+                    )?)))
+                }
+                _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                    kernel: kernel_id,
+                    expr,
+                    intrinsic,
+                    reason: "apply received values outside the supported runtime carriers",
+                }),
+            },
+            BuiltinApplyCarrier::Signal => match (functions, values) {
+                (RuntimeValue::Signal(function), RuntimeValue::Signal(value)) => {
+                    Ok(RuntimeValue::Signal(Box::new(self.apply_callable(
+                        kernel_id,
+                        expr,
+                        *function,
+                        vec![*value],
+                        globals,
+                    )?)))
+                }
+                _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                    kernel: kernel_id,
+                    expr,
+                    intrinsic,
+                    reason: "apply received values outside the supported runtime carriers",
+                }),
+            },
         }
     }
 
@@ -1557,6 +1964,64 @@ fn map_builtin(term: BuiltinTerm) -> RuntimeValue {
             constructor: RuntimeConstructor::Invalid,
             bound_arguments: Vec::new(),
         }),
+    }
+}
+
+fn runtime_class_member_value(intrinsic: BuiltinClassMemberIntrinsic) -> RuntimeValue {
+    match intrinsic {
+        BuiltinClassMemberIntrinsic::Empty(BuiltinAppendCarrier::Text) => {
+            RuntimeValue::Text("".into())
+        }
+        BuiltinClassMemberIntrinsic::Empty(BuiltinAppendCarrier::List) => {
+            RuntimeValue::List(Vec::new())
+        }
+        _ => RuntimeValue::Callable(RuntimeCallable::BuiltinClassMember {
+            intrinsic,
+            bound_arguments: Vec::new(),
+        }),
+    }
+}
+
+fn builtin_class_member_arity(intrinsic: BuiltinClassMemberIntrinsic) -> usize {
+    match intrinsic {
+        BuiltinClassMemberIntrinsic::Empty(_) => 0,
+        BuiltinClassMemberIntrinsic::Pure(_) => 1,
+        BuiltinClassMemberIntrinsic::StructuralEq
+        | BuiltinClassMemberIntrinsic::Compare { .. }
+        | BuiltinClassMemberIntrinsic::Append(_)
+        | BuiltinClassMemberIntrinsic::Map(_)
+        | BuiltinClassMemberIntrinsic::Apply(_) => 2,
+    }
+}
+
+fn expect_arity<const N: usize>(
+    arguments: Vec<RuntimeValue>,
+) -> Result<[RuntimeValue; N], &'static str> {
+    arguments
+        .try_into()
+        .map_err(|_| "applied argument count did not match the builtin class member arity")
+}
+
+fn ordering_value(ordering_item: HirItemId, ordering: std::cmp::Ordering) -> RuntimeValue {
+    let variant_name = match ordering {
+        std::cmp::Ordering::Less => "Less",
+        std::cmp::Ordering::Equal => "Equal",
+        std::cmp::Ordering::Greater => "Greater",
+    };
+    RuntimeValue::Sum(RuntimeSumValue {
+        item: ordering_item,
+        type_name: "Ordering".into(),
+        variant_name: variant_name.into(),
+        fields: Vec::new(),
+    })
+}
+
+fn ordering_rank(variant_name: &str) -> u8 {
+    match variant_name {
+        "Less" => 0,
+        "Equal" => 1,
+        "Greater" => 2,
+        _ => 3,
     }
 }
 

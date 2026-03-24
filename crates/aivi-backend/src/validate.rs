@@ -1140,6 +1140,7 @@ fn validate_kernel(
             }
             KernelExprKind::SumConstructor(_)
             | KernelExprKind::DomainMember(_)
+            | KernelExprKind::BuiltinClassMember(_)
             | KernelExprKind::Builtin(_)
             | KernelExprKind::Integer(_)
             | KernelExprKind::SuffixedInteger(_) => {}

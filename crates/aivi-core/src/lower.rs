@@ -7,23 +7,27 @@ use aivi_hir::{
     BlockedTruthyFalsyStage, ExprId as HirExprId, GateRuntimeExpr, GateRuntimeExprKind,
     GateRuntimePipeExpr, GateRuntimePipeStageKind, GateRuntimeProjectionBase, GateRuntimeReference,
     GateRuntimeTextLiteral, GateRuntimeTextSegment, GateRuntimeTruthyFalsyBranch, GateStageOutcome,
-    GeneralExprOutcome, GeneralExprParameter, Item as HirItem, ItemId as HirItemId,
-    PatternId as HirPatternId, RecurrenceNodeOutcome, SourceDecodeProgram,
-    SourceDecodeProgramOutcome, SourceLifecycleNodeOutcome, TruthyFalsyStageOutcome,
-    elaborate_fanouts, elaborate_gates, elaborate_general_expressions, elaborate_recurrences,
-    elaborate_source_lifecycles, elaborate_truthy_falsy, generate_source_decode_programs,
+    GeneralExprInstanceMemberElaboration, GeneralExprOutcome, GeneralExprParameter,
+    Item as HirItem, ItemId as HirItemId, PatternId as HirPatternId, RecurrenceNodeOutcome,
+    ResolvedClassMemberDispatch,
+    SourceDecodeProgram, SourceDecodeProgramOutcome, SourceLifecycleNodeOutcome,
+    TruthyFalsyStageOutcome, TypeBinding, TypeConstructorHead, elaborate_fanouts, elaborate_gates,
+    elaborate_general_expressions, elaborate_recurrences, elaborate_source_lifecycles,
+    elaborate_truthy_falsy, generate_source_decode_programs,
 };
 
 use crate::{
-    Arena, ArenaOverflow, DecodeField, DecodeProgram, DecodeProgramId, DecodeStep, DecodeStepId,
-    DomainDecodeSurface, DomainDecodeSurfaceKind, Expr, ExprId, FanoutFilter, FanoutJoin,
-    FanoutStage, GateStage, Item, ItemId, ItemKind, ItemParameter, MapEntry, Module,
-    NonSourceWakeup, Pattern, PatternBinding, PatternConstructor, PatternKind, Pipe, PipeCaseArm,
-    PipeExpr, PipeOrigin, PipeRecurrence, PipeStage, PipeTruthyFalsyBranch, PipeTruthyFalsyStage,
-    ProjectionBase, RecordExprField, RecordPatternField, RecurrenceGuard, RecurrenceStage,
-    Reference, SignalInfo, SourceArgumentValue, SourceId, SourceInstanceId, SourceNode,
-    SourceOptionBinding, SourceOptionValue, Stage, StageKind, TextLiteral, TextSegment,
-    TruthyFalsyBranch, TruthyFalsyStage, Type,
+    Arena, ArenaOverflow, BuiltinAppendCarrier, BuiltinApplicativeCarrier, BuiltinApplyCarrier,
+    BuiltinClassMemberIntrinsic, BuiltinFunctorCarrier, BuiltinOrdSubject, DecodeField,
+    DecodeProgram, DecodeProgramId, DecodeStep, DecodeStepId, DomainDecodeSurface,
+    DomainDecodeSurfaceKind, Expr, ExprId, FanoutFilter, FanoutJoin, FanoutStage, GateStage, Item,
+    ItemId, ItemKind, ItemParameter, MapEntry, Module, NonSourceWakeup, Pattern, PatternBinding,
+    PatternConstructor, PatternKind, Pipe, PipeCaseArm, PipeExpr, PipeOrigin, PipeRecurrence,
+    PipeStage, PipeTruthyFalsyBranch, PipeTruthyFalsyStage, ProjectionBase, RecordExprField,
+    RecordPatternField, RecurrenceGuard, RecurrenceStage, Reference, SignalInfo,
+    SourceArgumentValue, SourceId, SourceInstanceId, SourceNode, SourceOptionBinding,
+    SourceOptionValue, Stage, StageKind, TextLiteral, TextSegment, TruthyFalsyBranch,
+    TruthyFalsyStage, Type,
     expr::ExprKind,
     validate::{ValidationError, validate_module},
 };
@@ -141,6 +145,14 @@ pub enum LoweringError {
         arena: &'static str,
         attempted_len: usize,
     },
+    UnsupportedClassMemberDispatch {
+        owner: HirItemId,
+        span: SourceSpan,
+        class_name: Box<str>,
+        member_name: Box<str>,
+        subject: Box<str>,
+        reason: &'static str,
+    },
     Validation(ValidationError),
 }
 
@@ -238,6 +250,16 @@ impl std::fmt::Display for LoweringError {
                 f,
                 "typed-core {arena} arena overflowed after {attempted_len} entries"
             ),
+            Self::UnsupportedClassMemberDispatch {
+                class_name,
+                member_name,
+                subject,
+                reason,
+                ..
+            } => write!(
+                f,
+                "typed-core lowering cannot lower overloaded class member `{class_name}.{member_name}` for `{subject}`: {reason}"
+            ),
             Self::Validation(error) => write!(f, "typed-core validation failed: {error}"),
         }
     }
@@ -279,6 +301,12 @@ struct PipeKey {
     pipe_expr: HirExprId,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct InstanceMemberKey {
+    instance: HirItemId,
+    member_index: usize,
+}
+
 struct PipeBuilder {
     owner: ItemId,
     origin: PipeOrigin,
@@ -300,6 +328,7 @@ struct ModuleLowerer<'a> {
     included_items: Option<HashSet<HirItemId>>,
     module: Module,
     item_map: HashMap<HirItemId, ItemId>,
+    instance_member_item_map: HashMap<InstanceMemberKey, ItemId>,
     pipe_builders: BTreeMap<PipeKey, PipeBuilder>,
     source_by_owner: HashMap<ItemId, SourceId>,
     decode_by_owner: HashMap<ItemId, DecodeProgramId>,
@@ -310,8 +339,11 @@ struct RuntimeFragmentLowerer<'a> {
     lowerer: ModuleLowerer<'a>,
     fragment: &'a RuntimeFragmentSpec,
     report_by_owner: HashMap<HirItemId, aivi_hir::GeneralExprItemElaboration>,
+    instance_member_reports: HashMap<InstanceMemberKey, GeneralExprInstanceMemberElaboration>,
     lowering: HashSet<HirItemId>,
     lowered: HashSet<HirItemId>,
+    lowering_instance_members: HashSet<InstanceMemberKey>,
+    lowered_instance_members: HashSet<InstanceMemberKey>,
 }
 
 impl<'a> ModuleLowerer<'a> {
@@ -321,6 +353,7 @@ impl<'a> ModuleLowerer<'a> {
             included_items: None,
             module: Module::new(),
             item_map: HashMap::new(),
+            instance_member_item_map: HashMap::new(),
             pipe_builders: BTreeMap::new(),
             source_by_owner: HashMap::new(),
             decode_by_owner: HashMap::new(),
@@ -346,6 +379,7 @@ impl<'a> ModuleLowerer<'a> {
             included_items: Some(included_items),
             module: Module::new(),
             item_map: HashMap::new(),
+            instance_member_item_map: HashMap::new(),
             pipe_builders: BTreeMap::new(),
             source_by_owner: HashMap::new(),
             decode_by_owner: HashMap::new(),
@@ -434,11 +468,25 @@ impl<'a> ModuleLowerer<'a> {
                 .map_err(|overflow| LoweringErrors::new(vec![arena_overflow("items", overflow)]))?;
             self.item_map.insert(hir_id, item_id);
         }
+        for (hir_id, item) in self.hir.items().iter() {
+            if !self.includes_item(hir_id) {
+                continue;
+            }
+            let HirItem::Instance(instance) = item else {
+                continue;
+            };
+            for member_index in 0..instance.members.len() {
+                if self.seed_instance_member_item(hir_id, member_index).is_none() {
+                    break;
+                }
+            }
+        }
         Ok(())
     }
 
     fn lower_general_exprs(&mut self) {
-        for item in elaborate_general_expressions(self.hir).into_items() {
+        let (items, instance_members) = elaborate_general_expressions(self.hir).into_parts();
+        for item in items {
             if !self.includes_item(item.owner) {
                 continue;
             }
@@ -447,47 +495,85 @@ impl<'a> ModuleLowerer<'a> {
                     .push(LoweringError::UnknownOwner { owner: item.owner });
                 continue;
             };
-            match item.outcome {
-                GeneralExprOutcome::Lowered(body) => {
-                    let body = match self.lower_runtime_expr(item.owner, &body) {
-                        Ok(body) => body,
-                        Err(error) => {
-                            self.errors.push(error);
-                            continue;
-                        }
-                    };
-                    let parameters = item
-                        .parameters
-                        .into_iter()
-                        .map(|parameter| ItemParameter {
-                            binding: parameter.binding,
-                            span: parameter.span,
-                            name: parameter.name,
-                            ty: Type::lower(&parameter.ty),
-                        })
-                        .collect::<Vec<_>>();
-                    let Some(core_item) = self.module.items_mut().get_mut(owner) else {
-                        self.errors
-                            .push(LoweringError::UnknownOwner { owner: item.owner });
-                        continue;
-                    };
-                    core_item.parameters = parameters;
-                    core_item.body = Some(body);
-                }
-                GeneralExprOutcome::Blocked(blocked) => {
-                    if !blocked.requires_typed_core_error() {
-                        continue;
+            self.lower_general_expr_body(
+                item.owner,
+                owner,
+                item.body_expr,
+                item.parameters,
+                item.outcome,
+            );
+        }
+        for member in instance_members {
+            if !self.includes_item(member.instance_owner) {
+                continue;
+            }
+            let key = InstanceMemberKey {
+                instance: member.instance_owner,
+                member_index: member.member_index,
+            };
+            let Some(owner) = self.instance_member_item_map.get(&key).copied() else {
+                self.errors.push(LoweringError::UnknownOwner {
+                    owner: member.instance_owner,
+                });
+                continue;
+            };
+            self.lower_general_expr_body(
+                member.instance_owner,
+                owner,
+                member.body_expr,
+                member.parameters,
+                member.outcome,
+            );
+        }
+    }
+
+    fn lower_general_expr_body(
+        &mut self,
+        hir_owner: HirItemId,
+        core_owner: ItemId,
+        body_expr: HirExprId,
+        parameters: Vec<GeneralExprParameter>,
+        outcome: GeneralExprOutcome,
+    ) {
+        match outcome {
+            GeneralExprOutcome::Lowered(body) => {
+                let body = match self.lower_runtime_expr(hir_owner, &body) {
+                    Ok(body) => body,
+                    Err(error) => {
+                        self.errors.push(error);
+                        return;
                     }
-                    let span = blocked
-                        .primary_span()
-                        .unwrap_or(self.hir.exprs()[item.body_expr].span);
-                    self.errors.push(LoweringError::BlockedGeneralExpr {
-                        owner: item.owner,
-                        body_expr: item.body_expr,
-                        span,
-                        blocked,
-                    });
+                };
+                let parameters = parameters
+                    .into_iter()
+                    .map(|parameter| ItemParameter {
+                        binding: parameter.binding,
+                        span: parameter.span,
+                        name: parameter.name,
+                        ty: Type::lower(&parameter.ty),
+                    })
+                    .collect::<Vec<_>>();
+                let Some(core_item) = self.module.items_mut().get_mut(core_owner) else {
+                    self.errors
+                        .push(LoweringError::UnknownOwner { owner: hir_owner });
+                    return;
+                };
+                core_item.parameters = parameters;
+                core_item.body = Some(body);
+            }
+            GeneralExprOutcome::Blocked(blocked) => {
+                if !blocked.requires_typed_core_error() {
+                    return;
                 }
+                let span = blocked
+                    .primary_span()
+                    .unwrap_or(self.hir.exprs()[body_expr].span);
+                self.errors.push(LoweringError::BlockedGeneralExpr {
+                    owner: hir_owner,
+                    body_expr,
+                    span,
+                    blocked,
+                });
             }
         }
     }
@@ -1284,9 +1370,234 @@ impl<'a> ModuleLowerer<'a> {
             | aivi_hir::ResolutionState::Resolved(
                 aivi_hir::TermResolution::AmbiguousDomainMembers(_),
             )
+            | aivi_hir::ResolutionState::Resolved(aivi_hir::TermResolution::ClassMember(_))
+            | aivi_hir::ResolutionState::Resolved(
+                aivi_hir::TermResolution::AmbiguousClassMembers(_),
+            )
             | aivi_hir::ResolutionState::Unresolved => unreachable!(
                 "typed-core general-expression lowering should only see resolved constructor references"
             ),
+        }
+    }
+
+    fn lower_class_member_reference(
+        &self,
+        owner: HirItemId,
+        span: SourceSpan,
+        dispatch: &ResolvedClassMemberDispatch,
+        expr_ty: &aivi_hir::GateType,
+    ) -> Result<Reference, LoweringError> {
+        let (class_name, member_name) = self.class_member_names(dispatch.member);
+        let subject_label = self.type_binding_label(&dispatch.subject).into_boxed_str();
+        let unsupported = |reason| LoweringError::UnsupportedClassMemberDispatch {
+            owner,
+            span,
+            class_name: class_name.clone(),
+            member_name: member_name.clone(),
+            subject: subject_label.clone(),
+            reason,
+        };
+        match dispatch.implementation {
+            aivi_hir::ClassMemberImplementation::SameModuleInstance {
+                instance,
+                member_index,
+            } => {
+                let key = InstanceMemberKey {
+                    instance,
+                    member_index,
+                };
+                let lowered = self
+                    .instance_member_item_map
+                    .get(&key)
+                    .copied()
+                    .ok_or_else(|| {
+                        unsupported(
+                            "same-module instance member body was not seeded into typed-core lowering",
+                        )
+                    })?;
+                return Ok(Reference::Item(lowered));
+            }
+            aivi_hir::ClassMemberImplementation::Builtin => {}
+        }
+
+        let intrinsic = match (class_name.as_ref(), member_name.as_ref(), &dispatch.subject) {
+            ("Eq", "(==)", _) | ("Setoid", "equals", _) => {
+                BuiltinClassMemberIntrinsic::StructuralEq
+            }
+            (
+                "Semigroup",
+                "append",
+                TypeBinding::Type(aivi_hir::GateType::Primitive(aivi_hir::BuiltinType::Text)),
+            ) => BuiltinClassMemberIntrinsic::Append(BuiltinAppendCarrier::Text),
+            ("Semigroup", "append", TypeBinding::Type(aivi_hir::GateType::List(_))) => {
+                BuiltinClassMemberIntrinsic::Append(BuiltinAppendCarrier::List)
+            }
+            (
+                "Monoid",
+                "empty",
+                TypeBinding::Type(aivi_hir::GateType::Primitive(aivi_hir::BuiltinType::Text)),
+            ) => BuiltinClassMemberIntrinsic::Empty(BuiltinAppendCarrier::Text),
+            ("Monoid", "empty", TypeBinding::Type(aivi_hir::GateType::List(_))) => {
+                BuiltinClassMemberIntrinsic::Empty(BuiltinAppendCarrier::List)
+            }
+            ("Functor", "map", TypeBinding::Constructor(binding)) => match binding.head() {
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::List) => {
+                    BuiltinClassMemberIntrinsic::Map(BuiltinFunctorCarrier::List)
+                }
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Option) => {
+                    BuiltinClassMemberIntrinsic::Map(BuiltinFunctorCarrier::Option)
+                }
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Result) => {
+                    BuiltinClassMemberIntrinsic::Map(BuiltinFunctorCarrier::Result)
+                }
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Validation) => {
+                    BuiltinClassMemberIntrinsic::Map(BuiltinFunctorCarrier::Validation)
+                }
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Signal) => {
+                    BuiltinClassMemberIntrinsic::Map(BuiltinFunctorCarrier::Signal)
+                }
+                _ => {
+                    return Err(unsupported(
+                        "runtime lowering only supports map for List, Option, Result, Validation, and Signal",
+                    ));
+                }
+            },
+            ("Applicative", "pure", TypeBinding::Constructor(binding)) => match binding.head() {
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::List) => {
+                    BuiltinClassMemberIntrinsic::Pure(BuiltinApplicativeCarrier::List)
+                }
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Option) => {
+                    BuiltinClassMemberIntrinsic::Pure(BuiltinApplicativeCarrier::Option)
+                }
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Result) => {
+                    BuiltinClassMemberIntrinsic::Pure(BuiltinApplicativeCarrier::Result)
+                }
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Validation) => {
+                    BuiltinClassMemberIntrinsic::Pure(BuiltinApplicativeCarrier::Validation)
+                }
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Signal) => {
+                    BuiltinClassMemberIntrinsic::Pure(BuiltinApplicativeCarrier::Signal)
+                }
+                _ => {
+                    return Err(unsupported(
+                        "runtime lowering only supports pure for List, Option, Result, Validation, and Signal",
+                    ));
+                }
+            },
+            ("Apply", "apply", TypeBinding::Constructor(binding)) => match binding.head() {
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::List) => {
+                    BuiltinClassMemberIntrinsic::Apply(BuiltinApplyCarrier::List)
+                }
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Option) => {
+                    BuiltinClassMemberIntrinsic::Apply(BuiltinApplyCarrier::Option)
+                }
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Result) => {
+                    BuiltinClassMemberIntrinsic::Apply(BuiltinApplyCarrier::Result)
+                }
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Signal) => {
+                    BuiltinClassMemberIntrinsic::Apply(BuiltinApplyCarrier::Signal)
+                }
+                _ => {
+                    return Err(unsupported(
+                        "runtime lowering only supports apply for List, Option, Result, and Signal",
+                    ));
+                }
+            },
+            ("Ord", "compare", _) => {
+                let ordering_item =
+                    self.ordering_item_from_gate_type(expr_ty).ok_or_else(|| {
+                        unsupported("runtime lowering could not recover the Ordering result type")
+                    })?;
+                let subject = match &dispatch.subject {
+                    TypeBinding::Type(aivi_hir::GateType::Primitive(
+                        aivi_hir::BuiltinType::Int,
+                    )) => BuiltinOrdSubject::Int,
+                    TypeBinding::Type(aivi_hir::GateType::Primitive(
+                        aivi_hir::BuiltinType::Bool,
+                    )) => BuiltinOrdSubject::Bool,
+                    TypeBinding::Type(aivi_hir::GateType::Primitive(
+                        aivi_hir::BuiltinType::Text,
+                    )) => BuiltinOrdSubject::Text,
+                    TypeBinding::Type(aivi_hir::GateType::OpaqueItem { name, .. })
+                        if name == "Ordering" =>
+                    {
+                        BuiltinOrdSubject::Ordering
+                    }
+                    _ => {
+                        return Err(unsupported(
+                            "runtime lowering only supports compare for Int, Bool, Text, and Ordering",
+                        ));
+                    }
+                };
+                BuiltinClassMemberIntrinsic::Compare {
+                    subject,
+                    ordering_item,
+                }
+            }
+            _ => {
+                return Err(unsupported(
+                    "this builtin class member is not yet wired into typed-core lowering",
+                ));
+            }
+        };
+        Ok(Reference::BuiltinClassMember(intrinsic))
+    }
+
+    fn class_member_names(
+        &self,
+        resolution: aivi_hir::ClassMemberResolution,
+    ) -> (Box<str>, Box<str>) {
+        let class_name = match &self.hir.items()[resolution.class] {
+            aivi_hir::Item::Class(class_item) => class_item.name.text().to_owned(),
+            _ => "<class>".to_owned(),
+        };
+        let member_name = match &self.hir.items()[resolution.class] {
+            aivi_hir::Item::Class(class_item) => class_item
+                .members
+                .get(resolution.member_index)
+                .map(|member| member.name.text().to_owned())
+                .unwrap_or_else(|| "<member>".to_owned()),
+            _ => "<member>".to_owned(),
+        };
+        (class_name.into_boxed_str(), member_name.into_boxed_str())
+    }
+
+    fn type_binding_label(&self, binding: &TypeBinding) -> String {
+        match binding {
+            TypeBinding::Type(ty) => ty.to_string(),
+            TypeBinding::Constructor(binding) => {
+                let head = match binding.head() {
+                    TypeConstructorHead::Builtin(builtin) => format!("{builtin:?}"),
+                    TypeConstructorHead::Item(item_id) => match &self.hir.items()[item_id] {
+                        aivi_hir::Item::Type(item) => item.name.text().to_owned(),
+                        aivi_hir::Item::Domain(item) => item.name.text().to_owned(),
+                        aivi_hir::Item::Class(item) => item.name.text().to_owned(),
+                        _ => "<constructor>".to_owned(),
+                    },
+                };
+                if binding.arguments().is_empty() {
+                    head
+                } else {
+                    let suffix = binding
+                        .arguments()
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    format!("{head} {suffix}")
+                }
+            }
+        }
+    }
+
+    fn ordering_item_from_gate_type(&self, ty: &aivi_hir::GateType) -> Option<HirItemId> {
+        let mut current = ty;
+        while let aivi_hir::GateType::Arrow { result, .. } = current {
+            current = result.as_ref();
+        }
+        match current {
+            aivi_hir::GateType::OpaqueItem { item, name, .. } if name == "Ordering" => Some(*item),
+            _ => None,
         }
     }
 
@@ -1303,6 +1614,56 @@ impl<'a> ModuleLowerer<'a> {
                 arena: "exprs",
                 attempted_len: overflow.attempted_len(),
             })
+    }
+
+    fn seed_instance_member_item(
+        &mut self,
+        instance: HirItemId,
+        member_index: usize,
+    ) -> Option<ItemId> {
+        let key = InstanceMemberKey {
+            instance,
+            member_index,
+        };
+        if let Some(item) = self.instance_member_item_map.get(&key).copied() {
+            return Some(item);
+        }
+        let HirItem::Instance(item) = self.hir.items().get(instance)? else {
+            self.errors.push(LoweringError::UnknownOwner { owner: instance });
+            return None;
+        };
+        let Some(member) = item.members.get(member_index) else {
+            self.errors.push(LoweringError::UnknownOwner { owner: instance });
+            return None;
+        };
+        let kind = if member.parameters.is_empty() {
+            ItemKind::Value
+        } else {
+            ItemKind::Function
+        };
+        let item_id = match self.module.items_mut().alloc(Item {
+            origin: instance,
+            span: member.span,
+            name: format!(
+                "instance#{}::member#{}::{}",
+                instance.as_raw(),
+                member_index,
+                member.name.text()
+            )
+            .into_boxed_str(),
+            kind,
+            parameters: Vec::new(),
+            body: None,
+            pipes: Vec::new(),
+        }) {
+            Ok(item_id) => item_id,
+            Err(overflow) => {
+                self.errors.push(arena_overflow("items", overflow));
+                return None;
+            }
+        };
+        self.instance_member_item_map.insert(key, item_id);
+        Some(item_id)
     }
 
     fn lower_runtime_expr(
@@ -1413,6 +1774,10 @@ impl<'a> ModuleLowerer<'a> {
                                             GateRuntimeReference::DomainMember(handle) => {
                                                 Reference::DomainMember(handle.clone())
                                             }
+                                            GateRuntimeReference::ClassMember(dispatch) => self
+                                                .lower_class_member_reference(
+                                                    owner, expr.span, dispatch, &expr.ty,
+                                                )?,
                                             GateRuntimeReference::Builtin(term) => {
                                                 Reference::Builtin(*term)
                                             }
@@ -2338,6 +2703,7 @@ fn referenced_hir_items(root: &GateRuntimeExpr) -> Vec<HirItemId> {
             | GateRuntimeExprKind::SuffixedInteger(_)
             | GateRuntimeExprKind::Reference(GateRuntimeReference::Local(_))
             | GateRuntimeExprKind::Reference(GateRuntimeReference::Builtin(_))
+            | GateRuntimeExprKind::Reference(GateRuntimeReference::ClassMember(_))
             | GateRuntimeExprKind::Reference(GateRuntimeReference::DomainMember(_))
             | GateRuntimeExprKind::Reference(GateRuntimeReference::SumConstructor(_)) => {}
             GateRuntimeExprKind::Reference(GateRuntimeReference::Item(item)) => {

@@ -1,20 +1,18 @@
-use aivi.network (
-    http
-    socket
-)
-
 type HttpError =
   | Timeout
 
-type User = {
-    id: Int
+type Session = {
+    token: Text
 }
 
-type Map K V =
-  | EmptyMap
-  | Entry K V (Map K V)
+type DecodeMode =
+  | Strict
+  | Permissive
 
-@source http.get "/users" with {
-    query: Entry http socket EmptyMap
+val decodeMode:DecodeMode =
+    Strict
+
+@source http.post "/login" with {
+    decode: decodeMode
 }
-sig users : Signal (Result HttpError (List User))
+sig login : Signal (Result HttpError Session)

@@ -1,0 +1,7 @@
+use shared.logic (
+    liftOne
+    earlier
+)
+
+val lifted:Option Int = liftOne (Some 1)
+val ordered:Bool = earlier "Ada" "Bob"

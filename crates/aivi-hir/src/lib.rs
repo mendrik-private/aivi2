@@ -51,31 +51,33 @@ pub use gate_elaboration::{
 };
 pub use general_expr_elaboration::{
     BlockedGeneralExpr, GeneralExprBlocker, GeneralExprElaborationReport,
-    GeneralExprItemElaboration, GeneralExprOutcome, GeneralExprParameter, MarkupRuntimeExprSite,
+    GeneralExprInstanceMemberElaboration, GeneralExprItemElaboration, GeneralExprOutcome,
+    GeneralExprParameter, MarkupRuntimeExprSite,
     MarkupRuntimeExprSiteError, MarkupRuntimeExprSites, collect_markup_runtime_expr_sites,
     elaborate_general_expressions, elaborate_runtime_expr_with_env,
 };
 pub use hir::{
     ApplicativeCluster, ApplicativeSpine, ApplicativeSpineHead, BinaryOperator, Binding,
     BindingKind, BindingPattern, BuiltinTerm, BuiltinType, CaseControl, ClassItem, ClassMember,
-    ClusterFinalizer, ClusterPresentation, ControlNode, ControlNodeKind,
+    ClassMemberResolution, ClusterFinalizer, ClusterPresentation, ControlNode, ControlNodeKind,
     CustomSourceArgumentSchema, CustomSourceContractMetadata, CustomSourceOptionSchema,
     CustomSourceRecurrenceWakeup, Decorator, DecoratorCall, DecoratorPayload, DomainItem,
     DomainMember, DomainMemberHandle, DomainMemberKind, DomainMemberResolution, EachControl,
     EmptyControl, ExportItem, Expr, ExprKind, FragmentControl, FunctionItem, FunctionParameter,
-    ImportBinding, ImportBindingMetadata, ImportBundleKind, ImportRecordField, ImportValueType,
-    InstanceItem, InstanceMember, IntegerLiteral, Item, ItemHeader, ItemKind,
-    LiteralSuffixResolution, MapExpr, MapExprEntry, MarkupAttribute, MarkupAttributeValue,
-    MarkupElement, MarkupNode, MarkupNodeKind, MatchControl, Module, ModuleArenas, Name, NameError,
-    NamePath, NamePathError, Pattern, PatternKind, PipeExpr, PipeFanoutSegment,
-    PipeRecurrenceShapeError, PipeRecurrenceSuffix, PipeStage, PipeStageKind, ProjectionBase,
-    RecordExpr, RecordExprField, RecordFieldSurface, RecordPatternField, RecurrenceWakeupDecorator,
-    RecurrenceWakeupDecoratorKind, RegexLiteral, ResolutionState, RootItemError, ShowControl,
-    SignalItem, SourceDecorator, SourceLifecycleDependencies, SourceMetadata,
-    SourceProviderContractItem, SourceProviderRef, SuffixedIntegerLiteral, SumConstructorHandle,
-    TermReference, TermResolution, TextFragment, TextInterpolation, TextLiteral, TextSegment,
-    TupleConstructorArity, TypeField, TypeItem, TypeItemBody, TypeKind, TypeNode, TypeParameter,
-    TypeReference, TypeResolution, TypeVariant, UnaryOperator, UseItem, ValueItem, WithControl,
+    ImportBinding, ImportBindingMetadata, ImportBindingResolution, ImportBundleKind,
+    ImportRecordField, ImportValueType, InstanceItem, InstanceMember, IntegerLiteral, Item,
+    ItemHeader, ItemKind, LiteralSuffixResolution, MapExpr, MapExprEntry, MarkupAttribute,
+    MarkupAttributeValue, MarkupElement, MarkupNode, MarkupNodeKind, MatchControl, Module,
+    ModuleArenas, Name, NameError, NamePath, NamePathError, Pattern, PatternKind, PipeExpr,
+    PipeFanoutSegment, PipeRecurrenceShapeError, PipeRecurrenceSuffix, PipeStage, PipeStageKind,
+    ProjectionBase, RecordExpr, RecordExprField, RecordFieldSurface, RecordPatternField,
+    RecurrenceWakeupDecorator, RecurrenceWakeupDecoratorKind, RegexLiteral, ResolutionState,
+    RootItemError, ShowControl, SignalItem, SourceDecorator, SourceLifecycleDependencies,
+    SourceMetadata, SourceProviderContractItem, SourceProviderRef, SuffixedIntegerLiteral,
+    SumConstructorHandle, TermReference, TermResolution, TextFragment, TextInterpolation,
+    TextLiteral, TextSegment, TupleConstructorArity, TypeField, TypeItem, TypeItemBody, TypeKind,
+    TypeNode, TypeParameter, TypeReference, TypeResolution, TypeVariant, UnaryOperator, UseItem,
+    ValueItem, WithControl,
 };
 pub use ids::{
     BindingId, ClusterId, ControlNodeId, DecoratorId, ExprId, ImportId, ItemId, MarkupNodeId,
@@ -89,7 +91,7 @@ pub use recurrence_elaboration::{
     RecurrenceNonSourceWakeupBinding, RecurrenceRuntimeExpr, RecurrenceRuntimeStageBlocker,
     RecurrenceStagePlan, elaborate_recurrences,
 };
-pub use resolver::{ImportResolver, NullImportResolver};
+pub use resolver::{ImportCycle, ImportModuleResolution, ImportResolver, NullImportResolver};
 pub use sequence::{AtLeastTwo, NonEmpty, SequenceError};
 pub use source_contract_resolution::{
     ResolvedSourceContractType, ResolvedSourceTypeConstructor, SourceContractResolutionError,
@@ -109,7 +111,10 @@ pub use truthy_falsy_elaboration::{
     TruthyFalsyStageOutcome, TruthyFalsyStagePlan, elaborate_truthy_falsy,
 };
 pub use typecheck::{
-    ConstraintClass, TypeCheckReport, TypeConstraint, elaborate_default_record_fields,
-    typecheck_module,
+    ClassMemberImplementation, ConstraintClass, ResolvedClassMemberDispatch, TypeCheckReport,
+    TypeConstraint, elaborate_default_record_fields, typecheck_module,
 };
-pub use validate::{GateRecordField, GateType, ValidationMode, ValidationReport, validate_module};
+pub use validate::{
+    GateRecordField, GateType, TypeBinding, TypeConstructorBinding, TypeConstructorHead,
+    ValidationMode, ValidationReport, validate_module,
+};

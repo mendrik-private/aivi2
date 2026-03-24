@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
     sync::Arc,
+    thread::{self, JoinHandle},
 };
 
 use aivi_backend::{
@@ -12,9 +13,9 @@ use aivi_core as core;
 use aivi_hir as hir;
 
 use crate::{
-    InputHandle, RuntimeSourceProvider, SourceInstanceId, SourceLifecycleActionKind,
-    SourcePublicationPort, TaskSourceRuntime, TaskSourceRuntimeError, TickOutcome,
-    TryDerivedNodeEvaluator,
+    InputHandle, PublicationPortError, RuntimeSourceProvider, SourceInstanceId,
+    SourceLifecycleActionKind, SourcePublicationPort, TaskCompletionPort, TaskInstanceId,
+    TaskSourceRuntime, TaskSourceRuntimeError, TickOutcome, TryDerivedNodeEvaluator,
     graph::{DerivedHandle, OwnerHandle, SignalHandle},
     hir_adapter::{HirRuntimeAssembly, HirRuntimeInstantiationError},
     scheduler::DependencyValues,
@@ -42,6 +43,7 @@ pub fn link_backend_runtime(
         runtime_signal_by_item: linked.runtime_signal_by_item,
         derived_signals: linked.derived_signals,
         source_bindings: linked.source_bindings,
+        task_bindings: linked.task_bindings,
     })
 }
 
@@ -59,6 +61,7 @@ pub struct BackendLinkedRuntime {
     runtime_signal_by_item: BTreeMap<BackendItemId, SignalHandle>,
     derived_signals: BTreeMap<DerivedHandle, LinkedDerivedSignal>,
     source_bindings: BTreeMap<SourceInstanceId, LinkedSourceBinding>,
+    task_bindings: BTreeMap<TaskInstanceId, LinkedTaskBinding>,
 }
 
 impl BackendLinkedRuntime {
@@ -94,6 +97,16 @@ impl BackendLinkedRuntime {
             .find(|binding| binding.owner == owner)
     }
 
+    pub fn task_binding(&self, instance: TaskInstanceId) -> Option<&LinkedTaskBinding> {
+        self.task_bindings.get(&instance)
+    }
+
+    pub fn task_by_owner(&self, owner: hir::ItemId) -> Option<&LinkedTaskBinding> {
+        self.task_bindings
+            .values()
+            .find(|binding| binding.owner == owner)
+    }
+
     pub fn queued_message_count(&self) -> usize {
         self.runtime.queued_message_count()
     }
@@ -102,6 +115,37 @@ impl BackendLinkedRuntime {
         &self,
     ) -> Result<BTreeMap<BackendItemId, RuntimeValue>, BackendRuntimeError> {
         self.committed_signal_snapshots()
+    }
+
+    pub fn spawn_task_worker(
+        &mut self,
+        instance: TaskInstanceId,
+    ) -> Result<
+        JoinHandle<Result<LinkedTaskWorkerOutcome, LinkedTaskWorkerError>>,
+        BackendRuntimeError,
+    > {
+        let task = self.prepare_task_execution(instance)?;
+        thread::Builder::new()
+            .name(format!("aivi-task-{}", instance.as_raw()))
+            .spawn(move || execute_task_plan(task))
+            .map_err(|error| BackendRuntimeError::SpawnTaskWorker {
+                instance,
+                message: error.to_string().into(),
+            })
+    }
+
+    pub fn spawn_task_worker_by_owner(
+        &mut self,
+        owner: hir::ItemId,
+    ) -> Result<
+        JoinHandle<Result<LinkedTaskWorkerOutcome, LinkedTaskWorkerError>>,
+        BackendRuntimeError,
+    > {
+        let instance = self
+            .task_by_owner(owner)
+            .map(|binding| binding.instance)
+            .ok_or(BackendRuntimeError::UnknownTaskOwner { owner })?;
+        self.spawn_task_worker(instance)
     }
 
     pub fn tick(&mut self) -> Result<TickOutcome, BackendRuntimeError> {
@@ -249,6 +293,12 @@ impl BackendLinkedRuntime {
                 .expect("linked runtime should preserve registered source specs")
                 .provider
                 .clone(),
+            decode: self
+                .runtime
+                .source_spec(instance)
+                .expect("linked runtime should preserve registered source specs")
+                .decode
+                .clone(),
             arguments: arguments.into_boxed_slice(),
             options: options.into_boxed_slice(),
         })
@@ -284,6 +334,70 @@ impl BackendLinkedRuntime {
             )?;
             let value = snapshots.get(item).cloned().ok_or(
                 BackendRuntimeError::MissingCommittedSignalSnapshot {
+                    instance,
+                    kernel,
+                    signal,
+                },
+            )?;
+            globals.insert(*item, value);
+        }
+        Ok(globals)
+    }
+
+    fn prepare_task_execution(
+        &mut self,
+        instance: TaskInstanceId,
+    ) -> Result<PreparedTaskExecution, BackendRuntimeError> {
+        let binding = self
+            .task_bindings
+            .get(&instance)
+            .cloned()
+            .ok_or(BackendRuntimeError::UnknownTaskInstance { instance })?;
+        let (kernel, required_signals) = match &binding.execution {
+            LinkedTaskExecutionBinding::Ready {
+                kernel,
+                required_signals,
+            } => (*kernel, required_signals.clone()),
+            LinkedTaskExecutionBinding::Blocked(blocker) => {
+                return Err(BackendRuntimeError::TaskExecutionBlocked {
+                    instance,
+                    owner: binding.owner,
+                    blocker: blocker.clone(),
+                });
+            }
+        };
+        let snapshots = self.committed_signal_snapshots()?;
+        let globals =
+            self.required_task_globals(instance, kernel, required_signals.as_ref(), &snapshots)?;
+        let completion = self.runtime.start_task(instance)?;
+        Ok(PreparedTaskExecution {
+            instance,
+            owner: binding.owner,
+            backend_item: binding.backend_item,
+            backend: self.backend.clone(),
+            globals,
+            completion,
+        })
+    }
+
+    fn required_task_globals(
+        &self,
+        instance: TaskInstanceId,
+        kernel: KernelId,
+        required: &[BackendItemId],
+        snapshots: &BTreeMap<BackendItemId, RuntimeValue>,
+    ) -> Result<BTreeMap<BackendItemId, RuntimeValue>, BackendRuntimeError> {
+        let mut globals = BTreeMap::new();
+        for item in required {
+            let signal = self.runtime_signal_by_item.get(item).copied().ok_or(
+                BackendRuntimeError::MissingTaskSignalItemMapping {
+                    instance,
+                    kernel,
+                    item: *item,
+                },
+            )?;
+            let value = snapshots.get(item).cloned().ok_or(
+                BackendRuntimeError::MissingCommittedTaskSignalSnapshot {
                     instance,
                     kernel,
                     signal,
@@ -330,11 +444,100 @@ pub struct LinkedSourceOption {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkedTaskBinding {
+    pub owner: hir::ItemId,
+    pub owner_handle: OwnerHandle,
+    pub input: InputHandle,
+    pub instance: TaskInstanceId,
+    pub backend_item: BackendItemId,
+    pub execution: LinkedTaskExecutionBinding,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LinkedTaskExecutionBinding {
+    Ready {
+        kernel: KernelId,
+        required_signals: Box<[BackendItemId]>,
+    },
+    Blocked(LinkedTaskExecutionBlocker),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LinkedTaskExecutionBlocker {
+    MissingLoweredBody,
+    UnsupportedParameters { parameter_count: usize },
+}
+
+impl fmt::Display for LinkedTaskExecutionBlocker {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingLoweredBody => {
+                f.write_str("the current compiler slice did not lower a backend task body")
+            }
+            Self::UnsupportedParameters { parameter_count } => write!(
+                f,
+                "task items with {parameter_count} parameter(s) are not directly schedulable yet"
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkedTaskWorkerOutcome {
+    Published,
+    Cancelled,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LinkedTaskWorkerError {
+    Evaluation {
+        instance: TaskInstanceId,
+        owner: hir::ItemId,
+        backend_item: BackendItemId,
+        error: EvaluationError,
+    },
+    Disconnected {
+        instance: TaskInstanceId,
+        owner: hir::ItemId,
+        stamp: crate::PublicationStamp,
+        value: RuntimeValue,
+    },
+}
+
+impl fmt::Display for LinkedTaskWorkerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Evaluation {
+                instance,
+                owner,
+                backend_item,
+                error,
+            } => write!(
+                f,
+                "task instance {} for owner {owner} failed while evaluating backend item item{backend_item}: {error}",
+                instance.as_raw()
+            ),
+            Self::Disconnected {
+                instance, stamp, ..
+            } => write!(
+                f,
+                "task instance {} could not publish completion for stamp {:?} because the runtime disconnected",
+                instance.as_raw(),
+                stamp
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LinkedTaskWorkerError {}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EvaluatedSourceConfig {
     pub owner: hir::ItemId,
     pub instance: SourceInstanceId,
     pub source: BackendSourceId,
     pub provider: RuntimeSourceProvider,
+    pub decode: Option<hir::SourceDecodeProgram>,
     pub arguments: Box<[RuntimeValue]>,
     pub options: Box<[EvaluatedSourceOption]>,
 }
@@ -398,6 +601,52 @@ impl LinkedSourceLifecycleAction {
         match self {
             Self::Activate { config, .. } | Self::Reconfigure { config, .. } => Some(config),
             Self::Suspend { .. } => None,
+        }
+    }
+}
+
+struct PreparedTaskExecution {
+    instance: TaskInstanceId,
+    owner: hir::ItemId,
+    backend_item: BackendItemId,
+    backend: Arc<BackendProgram>,
+    globals: BTreeMap<BackendItemId, RuntimeValue>,
+    completion: TaskCompletionPort<RuntimeValue>,
+}
+
+fn execute_task_plan(
+    task: PreparedTaskExecution,
+) -> Result<LinkedTaskWorkerOutcome, LinkedTaskWorkerError> {
+    let PreparedTaskExecution {
+        instance,
+        owner,
+        backend_item,
+        backend,
+        globals,
+        completion,
+    } = task;
+    if completion.is_cancelled() {
+        return Ok(LinkedTaskWorkerOutcome::Cancelled);
+    }
+    let mut evaluator = KernelEvaluator::new(backend.as_ref());
+    let value = evaluator
+        .evaluate_item(backend_item, &globals)
+        .map_err(|error| LinkedTaskWorkerError::Evaluation {
+            instance,
+            owner,
+            backend_item,
+            error,
+        })?;
+    match completion.complete(value) {
+        Ok(()) => Ok(LinkedTaskWorkerOutcome::Published),
+        Err(PublicationPortError::Cancelled { .. }) => Ok(LinkedTaskWorkerOutcome::Cancelled),
+        Err(PublicationPortError::Disconnected { stamp, value }) => {
+            Err(LinkedTaskWorkerError::Disconnected {
+                instance,
+                owner,
+                stamp,
+                value,
+            })
         }
     }
 }
@@ -613,6 +862,12 @@ pub enum BackendRuntimeError {
     UnknownSourceInstance {
         instance: SourceInstanceId,
     },
+    UnknownTaskInstance {
+        instance: TaskInstanceId,
+    },
+    UnknownTaskOwner {
+        owner: hir::ItemId,
+    },
     MissingCommittedSignalSnapshot {
         instance: SourceInstanceId,
         kernel: KernelId,
@@ -622,6 +877,25 @@ pub enum BackendRuntimeError {
         instance: SourceInstanceId,
         kernel: KernelId,
         item: BackendItemId,
+    },
+    MissingCommittedTaskSignalSnapshot {
+        instance: TaskInstanceId,
+        kernel: KernelId,
+        signal: SignalHandle,
+    },
+    MissingTaskSignalItemMapping {
+        instance: TaskInstanceId,
+        kernel: KernelId,
+        item: BackendItemId,
+    },
+    TaskExecutionBlocked {
+        instance: TaskInstanceId,
+        owner: hir::ItemId,
+        blocker: LinkedTaskExecutionBlocker,
+    },
+    SpawnTaskWorker {
+        instance: TaskInstanceId,
+        message: Box<str>,
     },
     EvaluateDerivedSignal {
         signal: DerivedHandle,
@@ -677,6 +951,16 @@ impl fmt::Display for BackendRuntimeError {
                     instance.as_raw()
                 )
             }
+            Self::UnknownTaskInstance { instance } => {
+                write!(
+                    f,
+                    "startup linker does not know task instance {}",
+                    instance.as_raw()
+                )
+            }
+            Self::UnknownTaskOwner { owner } => {
+                write!(f, "startup linker does not know task owner {owner}")
+            }
             Self::MissingCommittedSignalSnapshot {
                 instance,
                 kernel,
@@ -694,6 +978,39 @@ impl fmt::Display for BackendRuntimeError {
             } => write!(
                 f,
                 "source instance {} could not map backend item {item} to a runtime signal while evaluating kernel{kernel}",
+                instance.as_raw()
+            ),
+            Self::MissingCommittedTaskSignalSnapshot {
+                instance,
+                kernel,
+                signal,
+            } => write!(
+                f,
+                "task instance {} requires committed snapshot for signal {:?} while evaluating kernel{kernel}",
+                instance.as_raw(),
+                signal
+            ),
+            Self::MissingTaskSignalItemMapping {
+                instance,
+                kernel,
+                item,
+            } => write!(
+                f,
+                "task instance {} could not map backend item {item} to a runtime signal while evaluating kernel{kernel}",
+                instance.as_raw()
+            ),
+            Self::TaskExecutionBlocked {
+                instance,
+                owner,
+                blocker,
+            } => write!(
+                f,
+                "task instance {} for owner {owner} cannot execute yet: {blocker}",
+                instance.as_raw()
+            ),
+            Self::SpawnTaskWorker { instance, message } => write!(
+                f,
+                "failed to spawn worker thread for task instance {}: {message}",
                 instance.as_raw()
             ),
             Self::EvaluateDerivedSignal {
@@ -786,6 +1103,7 @@ struct LinkArtifacts {
     runtime_signal_by_item: BTreeMap<BackendItemId, SignalHandle>,
     derived_signals: BTreeMap<DerivedHandle, LinkedDerivedSignal>,
     source_bindings: BTreeMap<SourceInstanceId, LinkedSourceBinding>,
+    task_bindings: BTreeMap<TaskInstanceId, LinkedTaskBinding>,
 }
 
 struct LinkBuilder<'a> {
@@ -800,6 +1118,7 @@ struct LinkBuilder<'a> {
     runtime_signal_by_item: BTreeMap<BackendItemId, SignalHandle>,
     derived_signals: BTreeMap<DerivedHandle, LinkedDerivedSignal>,
     source_bindings: BTreeMap<SourceInstanceId, LinkedSourceBinding>,
+    task_bindings: BTreeMap<TaskInstanceId, LinkedTaskBinding>,
 }
 
 impl<'a> LinkBuilder<'a> {
@@ -820,6 +1139,7 @@ impl<'a> LinkBuilder<'a> {
             runtime_signal_by_item: BTreeMap::new(),
             derived_signals: BTreeMap::new(),
             source_bindings: BTreeMap::new(),
+            task_bindings: BTreeMap::new(),
         }
     }
 
@@ -827,6 +1147,7 @@ impl<'a> LinkBuilder<'a> {
         self.index_origins();
         self.index_signal_items();
         self.link_sources();
+        self.link_tasks();
         self.link_derived_signals();
         if self.errors.is_empty() {
             Ok(LinkArtifacts {
@@ -834,6 +1155,7 @@ impl<'a> LinkBuilder<'a> {
                 runtime_signal_by_item: std::mem::take(&mut self.runtime_signal_by_item),
                 derived_signals: std::mem::take(&mut self.derived_signals),
                 source_bindings: std::mem::take(&mut self.source_bindings),
+                task_bindings: std::mem::take(&mut self.task_bindings),
             })
         } else {
             Err(BackendRuntimeLinkErrors::new(std::mem::take(
@@ -963,6 +1285,55 @@ impl<'a> LinkBuilder<'a> {
                     backend_source: backend_source_id,
                     arguments: arguments.into_boxed_slice(),
                     options: options.into_boxed_slice(),
+                },
+            );
+        }
+    }
+
+    fn link_tasks(&mut self) {
+        for task in self.assembly.tasks() {
+            let Some(&backend_item) = self.hir_to_backend.get(&task.owner) else {
+                self.errors
+                    .push(BackendRuntimeLinkError::MissingBackendItem { item: task.owner });
+                continue;
+            };
+            let Some(owner_handle) = self
+                .assembly
+                .owner(task.owner)
+                .map(|binding| binding.handle)
+            else {
+                self.errors
+                    .push(BackendRuntimeLinkError::MissingRuntimeOwner { owner: task.owner });
+                continue;
+            };
+            let Some(item) = self.backend.items().get(backend_item) else {
+                self.errors
+                    .push(BackendRuntimeLinkError::MissingBackendItem { item: task.owner });
+                continue;
+            };
+            let execution = if !item.parameters.is_empty() {
+                LinkedTaskExecutionBinding::Blocked(
+                    LinkedTaskExecutionBlocker::UnsupportedParameters {
+                        parameter_count: item.parameters.len(),
+                    },
+                )
+            } else if let Some(kernel) = item.body {
+                LinkedTaskExecutionBinding::Ready {
+                    kernel,
+                    required_signals: self.collect_required_signal_items(task.owner, kernel),
+                }
+            } else {
+                LinkedTaskExecutionBinding::Blocked(LinkedTaskExecutionBlocker::MissingLoweredBody)
+            };
+            self.task_bindings.insert(
+                task.spec.instance,
+                LinkedTaskBinding {
+                    owner: task.owner,
+                    owner_handle,
+                    input: task.input,
+                    instance: task.spec.instance,
+                    backend_item,
+                    execution,
                 },
             );
         }
@@ -1134,12 +1505,15 @@ fn active_when_value(
 
 #[cfg(test)]
 mod tests {
+    use std::{collections::BTreeMap, sync::Arc};
+
     use aivi_base::SourceDatabase;
     use aivi_hir::{Item, lower_module as lower_hir_module};
     use aivi_lambda::lower_module as lower_lambda_module;
     use aivi_syntax::parse_module;
 
     use super::*;
+    use crate::{SignalGraphBuilder, TaskRuntimeSpec, TaskSourceRuntime};
 
     struct LoweredStack {
         hir: hir::LoweringResult,
@@ -1182,6 +1556,66 @@ mod tests {
                 _ => None,
             })
             .unwrap_or_else(|| panic!("expected item named {name}"))
+    }
+
+    fn backend_item_id(program: &BackendProgram, name: &str) -> BackendItemId {
+        program
+            .items()
+            .iter()
+            .find_map(|(item_id, item)| (item.name.as_ref() == name).then_some(item_id))
+            .unwrap_or_else(|| panic!("expected backend item named {name}"))
+    }
+
+    fn manual_task_linked_runtime(
+        lowered: &LoweredStack,
+        owner_name: &str,
+    ) -> BackendLinkedRuntime {
+        let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+            .expect("manual task fixture should assemble");
+        let owner = item_id(lowered.hir.module(), owner_name);
+        let backend_item = backend_item_id(&lowered.backend, owner_name);
+
+        let mut graph = SignalGraphBuilder::new();
+        let owner_handle = graph
+            .add_owner(owner_name, None)
+            .expect("task owner should allocate");
+        let input = graph
+            .add_input(format!("{owner_name}#task"), Some(owner_handle))
+            .expect("task input should allocate");
+        let graph = graph.build().expect("task graph should build");
+
+        let mut runtime: TaskSourceRuntime<RuntimeValue, hir::SourceDecodeProgram> =
+            TaskSourceRuntime::new(graph);
+        let instance = TaskInstanceId::from_raw(owner.as_raw());
+        runtime
+            .register_task(TaskRuntimeSpec::new(instance, input))
+            .expect("task spec should register");
+
+        let kernel = lowered.backend.items()[backend_item]
+            .body
+            .expect("manual task fixture should have a lowered backend body");
+        let binding = LinkedTaskBinding {
+            owner,
+            owner_handle,
+            input,
+            instance,
+            backend_item,
+            execution: LinkedTaskExecutionBinding::Ready {
+                kernel,
+                required_signals: Vec::new().into_boxed_slice(),
+            },
+        };
+
+        BackendLinkedRuntime {
+            assembly,
+            runtime,
+            backend: Arc::new(lowered.backend.clone()),
+            signal_items_by_handle: BTreeMap::new(),
+            runtime_signal_by_item: BTreeMap::new(),
+            derived_signals: BTreeMap::new(),
+            source_bindings: BTreeMap::new(),
+            task_bindings: BTreeMap::from([(instance, binding)]),
+        }
     }
 
     #[test]
@@ -1319,6 +1753,177 @@ sig users : Signal Text
                 item,
                 ..
             } if instance == binding.instance && item == required_item
+        ));
+    }
+
+    #[test]
+    fn linked_runtime_spawns_task_workers_and_commits_publications() {
+        let lowered = lower_text(
+            "runtime-startup-manual-task-success.aivi",
+            r#"
+val answer = 42
+"#,
+        );
+        let mut linked = manual_task_linked_runtime(&lowered, "answer");
+        let binding = linked
+            .task_by_owner(item_id(lowered.hir.module(), "answer"))
+            .expect("manual task binding should exist")
+            .clone();
+
+        let handle = linked
+            .spawn_task_worker(binding.instance)
+            .expect("task worker should spawn");
+        assert_eq!(
+            handle
+                .join()
+                .expect("task worker thread should join cleanly"),
+            Ok(LinkedTaskWorkerOutcome::Published)
+        );
+
+        let outcome = linked.tick().expect("task publication tick should succeed");
+        assert!(!outcome.is_empty());
+        assert_eq!(
+            linked
+                .runtime()
+                .current_value(binding.input.as_signal())
+                .expect("task sink should be readable"),
+            Some(&RuntimeValue::Int(42))
+        );
+    }
+
+    #[test]
+    fn linked_runtime_reports_task_worker_evaluation_failures_explicitly() {
+        let lowered = lower_text(
+            "runtime-startup-manual-task-error.aivi",
+            r#"
+val compare = [1] == [1]
+"#,
+        );
+        let mut linked = manual_task_linked_runtime(&lowered, "compare");
+        let binding = linked
+            .task_by_owner(item_id(lowered.hir.module(), "compare"))
+            .expect("manual task binding should exist")
+            .clone();
+
+        let handle = linked
+            .spawn_task_worker(binding.instance)
+            .expect("task worker should spawn");
+        let result = handle
+            .join()
+            .expect("task worker thread should join cleanly");
+        assert!(matches!(
+            result,
+            Err(LinkedTaskWorkerError::Evaluation { instance, .. }) if instance == binding.instance
+        ));
+        let outcome = linked
+            .tick()
+            .expect("failed task should still allow empty ticks");
+        assert!(outcome.is_empty());
+        assert_eq!(
+            linked
+                .runtime()
+                .current_value(binding.input.as_signal())
+                .expect("task sink should be readable"),
+            None
+        );
+    }
+
+    #[test]
+    fn linked_runtime_task_execution_respects_cancellation_and_owner_teardown() {
+        let lowered = lower_text(
+            "runtime-startup-manual-task-cancel.aivi",
+            r#"
+val answer = 42
+"#,
+        );
+        let mut linked = manual_task_linked_runtime(&lowered, "answer");
+        let binding = linked
+            .task_by_owner(item_id(lowered.hir.module(), "answer"))
+            .expect("manual task binding should exist")
+            .clone();
+
+        let prepared = linked
+            .prepare_task_execution(binding.instance)
+            .expect("task execution should prepare");
+        linked
+            .runtime_mut()
+            .cancel_task(binding.instance)
+            .expect("task cancellation should succeed");
+        assert_eq!(
+            execute_task_plan(prepared).expect("cancelled task execution should not error"),
+            LinkedTaskWorkerOutcome::Cancelled
+        );
+        let outcome = linked.tick().expect("cancelled task tick should succeed");
+        assert!(outcome.is_empty());
+        assert_eq!(
+            linked
+                .runtime()
+                .current_value(binding.input.as_signal())
+                .expect("task sink should be readable"),
+            None
+        );
+
+        let prepared = linked
+            .prepare_task_execution(binding.instance)
+            .expect("task execution should prepare again");
+        linked
+            .runtime_mut()
+            .dispose_owner(binding.owner_handle)
+            .expect("owner disposal should succeed");
+        assert_eq!(
+            execute_task_plan(prepared).expect("disposed task execution should not error"),
+            LinkedTaskWorkerOutcome::Cancelled
+        );
+        linked.tick().expect("owner-disposal tick should succeed");
+        assert_eq!(
+            linked
+                .runtime()
+                .is_owner_active(binding.owner_handle)
+                .expect("task owner should be queryable"),
+            false
+        );
+    }
+
+    #[test]
+    fn linked_runtime_keeps_recurrent_task_body_gap_explicit() {
+        let lowered = lower_text(
+            "runtime-startup-task-body-gap.aivi",
+            r#"
+domain Retry over Int
+    literal x : Int -> Retry
+
+fun step:Int #value:Int =>
+    value
+
+@recur.backoff 3x
+val retried : Task Int Int =
+    0
+     @|> step
+     <|@ step
+"#,
+        );
+        let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+            .expect("task-body-gap runtime assembly should build");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("task-body-gap startup link should succeed");
+        let binding = linked
+            .task_by_owner(item_id(lowered.hir.module(), "retried"))
+            .expect("recurrent task binding should exist");
+        assert!(matches!(
+            &binding.execution,
+            LinkedTaskExecutionBinding::Blocked(LinkedTaskExecutionBlocker::MissingLoweredBody)
+        ));
+        let instance = binding.instance;
+        assert!(matches!(
+            linked.spawn_task_worker(instance),
+            Err(BackendRuntimeError::TaskExecutionBlocked {
+                instance: blocked_instance,
+                ..
+            }) if blocked_instance == instance
         ));
     }
 

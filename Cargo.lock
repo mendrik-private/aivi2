@@ -19,6 +19,7 @@ dependencies = [
  "aivi-core",
  "aivi-hir",
  "aivi-lambda",
+ "aivi-query",
  "aivi-syntax",
  "aivi-typing",
  "cranelift-codegen",
@@ -43,6 +44,7 @@ dependencies = [
  "aivi-hir",
  "aivi-lambda",
  "aivi-lsp",
+ "aivi-query",
  "aivi-runtime",
  "aivi-syntax",
  "gtk4",
@@ -134,6 +136,8 @@ dependencies = [
  "aivi-syntax",
  "aivi-typing",
  "glib",
+ "serde_json",
+ "url",
 ]
 
 [[package]]

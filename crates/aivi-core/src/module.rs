@@ -678,6 +678,7 @@ fn format_expr(module: &Module, expr_id: ExprId, f: &mut fmt::Formatter<'_>) -> 
             Reference::DomainMember(handle) => {
                 write!(f, "{}.{}", handle.domain_name, handle.member_name)
             }
+            Reference::BuiltinClassMember(intrinsic) => write!(f, "{intrinsic:?}"),
             Reference::Builtin(term) => write!(f, "{term:?}"),
         },
         crate::expr::ExprKind::Integer(value) => write!(f, "{}", value.raw),

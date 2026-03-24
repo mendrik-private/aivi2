@@ -1,0 +1,5 @@
+type Greeting = Text
+type Envelope A = A
+
+export Greeting
+export Envelope

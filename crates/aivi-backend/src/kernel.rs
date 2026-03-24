@@ -21,6 +21,60 @@ pub enum BuiltinTerm {
     Invalid,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BuiltinClassMemberIntrinsic {
+    StructuralEq,
+    Compare {
+        subject: BuiltinOrdSubject,
+        ordering_item: aivi_hir::ItemId,
+    },
+    Append(BuiltinAppendCarrier),
+    Empty(BuiltinAppendCarrier),
+    Map(BuiltinFunctorCarrier),
+    Pure(BuiltinApplicativeCarrier),
+    Apply(BuiltinApplyCarrier),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BuiltinFunctorCarrier {
+    List,
+    Option,
+    Result,
+    Validation,
+    Signal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BuiltinApplicativeCarrier {
+    List,
+    Option,
+    Result,
+    Validation,
+    Signal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BuiltinApplyCarrier {
+    List,
+    Option,
+    Result,
+    Signal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BuiltinAppendCarrier {
+    Text,
+    List,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BuiltinOrdSubject {
+    Int,
+    Bool,
+    Text,
+    Ordering,
+}
+
 impl fmt::Display for BuiltinTerm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -323,6 +377,7 @@ pub enum KernelExprKind {
     Item(ItemId),
     SumConstructor(SumConstructorHandle),
     DomainMember(DomainMemberHandle),
+    BuiltinClassMember(BuiltinClassMemberIntrinsic),
     Builtin(BuiltinTerm),
     Integer(IntegerLiteral),
     SuffixedInteger(SuffixedIntegerLiteral),
@@ -484,6 +539,9 @@ pub fn describe_expr_kind(kind: &KernelExprKind) -> String {
                 "domain-member {}.{}",
                 handle.domain_name, handle.member_name
             )
+        }
+        KernelExprKind::BuiltinClassMember(intrinsic) => {
+            format!("builtin-class-member {intrinsic:?}")
         }
         KernelExprKind::Builtin(term) => format!("builtin {term}"),
         KernelExprKind::Integer(integer) => integer.raw.to_string(),

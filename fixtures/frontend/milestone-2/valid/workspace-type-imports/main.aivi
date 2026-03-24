@@ -1,0 +1,7 @@
+use shared.types (
+    Greeting
+    Envelope
+)
+
+type Welcome = Greeting
+val hello:Envelope Text = "hello"

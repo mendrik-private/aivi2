@@ -189,7 +189,17 @@ pub struct ImportBinding {
     pub span: SourceSpan,
     pub imported_name: Name,
     pub local_name: Name,
+    pub resolution: ImportBindingResolution,
     pub metadata: ImportBindingMetadata,
+}
+
+/// Resolution outcome for one imported binding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ImportBindingResolution {
+    Resolved,
+    UnknownModule,
+    MissingExport,
+    Cycle,
 }
 
 /// Resolved destination for one domain-owned term member.
@@ -204,6 +214,13 @@ pub struct DomainMemberResolution {
 pub struct DomainMemberHandle {
     pub domain_name: Box<str>,
     pub member_name: Box<str>,
+    pub member_index: usize,
+}
+
+/// Stable semantic handle for one class-owned callable surfaced past HIR elaboration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ClassMemberResolution {
+    pub class: ItemId,
     pub member_index: usize,
 }
 
@@ -259,6 +276,7 @@ pub enum BuiltinType {
 pub enum ImportBindingMetadata {
     Unknown,
     Value { ty: ImportValueType },
+    OpaqueValue,
     TypeConstructor { kind: Kind },
     Bundle(ImportBundleKind),
 }
@@ -318,6 +336,8 @@ pub enum TermResolution {
     Import(ImportId),
     DomainMember(DomainMemberResolution),
     AmbiguousDomainMembers(NonEmpty<DomainMemberResolution>),
+    ClassMember(ClassMemberResolution),
+    AmbiguousClassMembers(NonEmpty<ClassMemberResolution>),
     Builtin(BuiltinTerm),
 }
 
@@ -511,6 +531,8 @@ pub struct ValueItem {
 pub struct FunctionItem {
     pub header: ItemHeader,
     pub name: Name,
+    pub type_parameters: Vec<TypeParameterId>,
+    pub context: Vec<TypeId>,
     pub parameters: Vec<FunctionParameter>,
     pub annotation: Option<TypeId>,
     pub body: ExprId,
@@ -675,6 +697,8 @@ pub struct ClassItem {
 pub struct ClassMember {
     pub span: SourceSpan,
     pub name: Name,
+    pub type_parameters: Vec<TypeParameterId>,
+    pub context: Vec<TypeId>,
     pub annotation: TypeId,
 }
 
@@ -717,6 +741,7 @@ pub struct InstanceItem {
     pub header: ItemHeader,
     pub class: TypeReference,
     pub arguments: NonEmpty<TypeId>,
+    pub type_parameters: Vec<TypeParameterId>,
     pub context: Vec<TypeId>,
     pub members: Vec<InstanceMember>,
 }
@@ -1528,6 +1553,7 @@ pub struct ModuleArenas {
 pub struct Module {
     pub(crate) file: FileId,
     pub(crate) root_items: Vec<ItemId>,
+    pub(crate) ambient_items: Vec<ItemId>,
     pub(crate) arenas: ModuleArenas,
 }
 
@@ -1556,6 +1582,7 @@ impl Module {
         Self {
             file,
             root_items: Vec::new(),
+            ambient_items: Vec::new(),
             arenas: ModuleArenas::default(),
         }
     }
@@ -1571,6 +1598,10 @@ impl Module {
 
     pub fn root_items(&self) -> &[ItemId] {
         &self.root_items
+    }
+
+    pub fn ambient_items(&self) -> &[ItemId] {
+        &self.ambient_items
     }
 
     pub fn items(&self) -> &Arena<ItemId, Item> {
@@ -1661,6 +1692,12 @@ impl Module {
     pub fn push_item(&mut self, item: Item) -> Result<ItemId, ArenaOverflow> {
         let id = self.alloc_item(item)?;
         self.root_items.push(id);
+        Ok(id)
+    }
+
+    pub fn push_ambient_item(&mut self, item: Item) -> Result<ItemId, ArenaOverflow> {
+        let id = self.alloc_item(item)?;
+        self.ambient_items.push(id);
         Ok(id)
     }
 

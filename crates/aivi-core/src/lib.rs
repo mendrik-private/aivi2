@@ -25,9 +25,11 @@ mod validate;
 
 pub use arena::{Arena, ArenaId, ArenaOverflow};
 pub use expr::{
-    Expr, ExprKind, MapEntry, Pattern, PatternBinding, PatternConstructor, PatternKind,
-    PipeCaseArm, PipeExpr, PipeStage, PipeStageKind, PipeTruthyFalsyBranch, PipeTruthyFalsyStage,
-    ProjectionBase, RecordExprField, RecordPatternField, Reference, TextLiteral, TextSegment,
+    BuiltinAppendCarrier, BuiltinApplicativeCarrier, BuiltinApplyCarrier,
+    BuiltinClassMemberIntrinsic, BuiltinFunctorCarrier, BuiltinOrdSubject, Expr, ExprKind,
+    MapEntry, Pattern, PatternBinding, PatternConstructor, PatternKind, PipeCaseArm, PipeExpr,
+    PipeStage, PipeStageKind, PipeTruthyFalsyBranch, PipeTruthyFalsyStage, ProjectionBase,
+    RecordExprField, RecordPatternField, Reference, TextLiteral, TextSegment,
 };
 pub use ids::{DecodeProgramId, DecodeStepId, ExprId, ItemId, PipeId, SourceId, StageId};
 pub use lower::{

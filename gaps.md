@@ -1,86 +1,47 @@
 # AIVI RFC Gap Analysis
 
-> Based on: `AIVI_RFC.md` Draft v0.4  
+> Based on: `AIVI_RFC.md` Draft v0.5  
 > Scope: implementation-facing gaps, underspecified semantics, missing definitions, and suggested resolutions.
 
-Gaps are organized by severity: **🔴 HIGH** (blocks implementation), **🟡 MEDIUM** (blocks correctness or tooling), **🟢 LOW** (polish or future work).
+Gaps are organized by severity: **🔴 HIGH** (blocks implementation), **🟡 MEDIUM** (blocks
+correctness or tooling), **🟢 LOW** (polish or future work). Items closed by later RFC text keep
+their numbering as historical notes and are marked **✅ RESOLVED**.
 
 //-
 
-## 1. `Action` Type — Undefined Internal Type
+## 1. Event Routing Surface — Resolved for Current GTK Slice
 
-**Severity:** 🔴 HIGH  
-**Section:** §15.3 Event handler normalization
+**Severity:** ✅ RESOLVED  
+**Section:** §15.3, §17.2.1
 
-### Problem
+### Resolution
 
-Section 15.3 states that UI event handlers may elaborate to one of:
+Draft v0.5 now defines the implemented live GTK surface as direct routing from supported
+`on*={handler}` markup attributes into publishable input signals. The RFC no longer needs an
+unexplained `Action` type to specify the current slice.
 
-- a pure patch/state update
-- an `Action`
-- a `Task E Action`
-
-`Action` is never declared, described, or given a structure anywhere in the RFC. Section 25 reinforces that "`Task` must remain the only user-visible one-shot effect carrier" — which implies `Action` is **not** user-visible. But nothing specifies what it is.
-
-### Suggested Fix
-
-Add a subsection **§15.2.1 The `Action` type** (internal runtime type):
-
-```
-Action is a sealed internal runtime type owned by the scheduler.
-It represents a committed UI state change instruction produced after
-a Task completes or an event handler is evaluated.
-
-From the user's perspective, event handlers return either pure
-expressions or `Task E A` where A carries the update payload.
-The elaborator wraps the result in an Action before dispatching
-to the scheduler.
-
-Users never name, construct, or inspect Action directly.
-The runtime's event dispatch layer owns the Action-to-scheduler
-pipeline. This is the Elm-architecture equivalent of a `Msg`.
-```
-
-An alternative stronger fix: replace `Action` with a user-visible `Msg A` convention and document the event-to-scheduler loop explicitly, as it is a key part of the GTK integration story.
+Broader normalization of arbitrary handler expressions into runtime-owned actions remains future
+work, but it is now explicitly outside the implemented surface contract instead of being presented
+as already normative behavior.
 
 //-
 
-## 2. Comment Syntax — Not Specified
+## 2. Comment Syntax — Resolved
 
-**Severity:** 🔴 HIGH  
-**Section:** §5 Top-level forms / §19 Strings
+**Severity:** ✅ RESOLVED  
+**Section:** §5 Top-level forms
 
-### Problem
+### Resolution
 
-No syntax for comments exists anywhere in the RFC. The formatter section (§22) cannot be implemented without knowing comment syntax. The CST section (§4.1) says it is "lossless enough for formatting and diagnostics" — which requires comment preservation.
+Draft v0.5 now freezes the implemented syntax:
 
-### Suggested Fix
+- `--` line comments
+- `---` doc comments
+- both forms preserved as trivia in the lossless token stream
+- no block comments in v1
 
-Add **§5.1 Comments**:
-
-```
-Single-line comments use `//`:
-
-    // this is a comment
-    val x = 42 // inline comment
-
-Multi-line comments use `{- -}`, nestable:
-
-    /*
-      This is a block comment.
-      /* Nested block comment is legal. */
-    */
-
-Documentation comments use `/*> <*/` and attach to the
-immediately following declaration:
-
-    /** The canonical empty value for a type. **/
-    class Default A
-        default : A
-
-The CST must preserve all comment tokens and their positions.
-The formatter must round-trip comments without loss.
-```
+The remaining work in this area is comment-aware formatting and doc extraction, not comment syntax
+definition.
 
 //-
 
@@ -131,98 +92,44 @@ reports the cycle and stops.
 
 //-
 
-## 4. Literal Syntax — Underspecified
+## 4. Literal Surface — Resolved for v1
 
-**Severity:** 🔴 HIGH  
-**Section:** §6.2 Core primitive types
+**Severity:** ✅ RESOLVED  
+**Section:** §6.2.1
 
-### Problem
+### Resolution
 
-`Int`, `Float`, `Decimal`, `BigInt` are listed but:
-- `Int` range is unspecified (32-bit? 64-bit? arbitrary precision?)
-- `Float` precision is unspecified (IEEE 754 f64? f32?)
-- `Decimal` semantics are entirely absent
-- No hex, binary, or octal literal syntax
-- No underscores in numeric literals
-- No `Char` type or character literal syntax
-- Integer overflow behavior is unspecified
+Draft v0.5 now chooses the narrowest implementation-aligned v1 surface:
 
-### Suggested Fix
+- unsuffixed literals are ASCII decimal integers only
+- compact `digits + identifier` forms are suffix-literal candidates (`250ms`, `123n`, `19d`,
+  `0xFF`)
+- there are no builtin signed, underscored, hex, binary, octal, float, decimal, bigint, or
+  exponent literal families in v1
 
-Add **§6.2.1 Numeric literal syntax and semantics**:
-
-```
-Int:
-- 64-bit signed integer (i64)
-- Overflow is a compile-time error for literals, runtime trap for computed values
-- Decimal: 42, -7, 1_000_000
-- Hex: 0xFF, 0xDEAD_BEEF
-- Binary: 0b1010_0011
-- Octal: 0o755
-
-Float:
-- IEEE 754 double (f64)
-- NaN and Infinity are not constructible by user code; sources
-  that decode them produce a decode error
-- Literals: 3.14, -0.5, 1.0e10, 1_000.5
-
-BigInt:
-- Arbitrary-precision integer; no overflow
-- Literal form: 123n (suffix n)
-
-Decimal:
-- Arbitrary-precision decimal (base-10 safe arithmetic)
-- Intended for financial/currency use
-- Literal form: 19.99d (suffix d)
-
-There is no Char type in v1. Single characters are Text of length 1.
-```
+This matches the current parser and keeps later refinement cheap: forms such as `123n` or `0xFF`
+do **not** carry builtin BigInt or hex meaning unless a domain literal suffix defines that
+identifier.
 
 //-
 
-## 5. Operator Precedence Table — Missing
+## 5. Operator Precedence Table — Resolved
 
-**Severity:** 🔴 HIGH  
-**Section:** §11 Pipe algebra
+**Severity:** ✅ RESOLVED  
+**Section:** §11.1
 
-### Problem
+### Resolution
 
-Eight pipe operators are defined (`|>`, `?|>`, `||>`, `*|>`, `&|>`, `@|>`, `<|@`, `|`, `<|*`) alongside standard arithmetic and comparison operators, but no precedence table or associativity rules exist. This makes the grammar ambiguous and the parser unimplementable without guessing.
+Draft v0.5 now states the currently implemented ordinary-expression precedence:
 
-### Suggested Fix
+1. function application
+2. binary `+` and `-`
+3. binary `>`, `<`, `==`, `!=`
+4. `and`
+5. `or`
 
-Add **§11.0 Operator precedence**:
-
-```
-Precedence (low to high binding), all left-associative unless noted:
-
-1. |>   ?|>   ||>   *|>   &|>   @|>   <|@   |   <|*   (pipe operators)
-2. or
-3. and
-4. not                                                  (right-assoc, unary)
-5. ==   !=
-6. <   <=   >   >=
-7. +   -                                               (arithmetic additive)
-8. *   /   %                                           (arithmetic multiplicative)
-9. unary -                                             (prefix)
-10. function application                                (left-assoc, highest)
-
-Pipe operators bind lower than all arithmetic and comparison so that:
-
-    xs ?|> .age > 18
-
-parses as:
-
-    xs ?|> (.age > 18)
-
-and not as:
-
-    (xs ?|> .age) > 18
-
-Within pipe operators themselves, all are left-to-right sequential at the
-same precedence level. Mixing pipe variants in a single spine is legal
-subject to the cluster and recurrence rules in §11.
-```
+Same-precedence binary operators associate left-to-right. Pipe operators are documented as a
+separate left-to-right spine layer rather than as ordinary binary operators.
 
 //-
 
@@ -278,44 +185,18 @@ Instance resolution:
 
 ## 7. IR Specifications — No Formal Definitions
 
-**Severity:** 🔴 HIGH  
+**Severity:** ✅ RESOLVED  
 **Section:** §4 Compiler pipeline, §3.5 IR invariants
 
-### Problem
+### Resolution
 
-Section 3.5 requires each IR to define ownership model, identity strategy, source span strategy, validation rules, and pretty-print form. None of the seven IR boundaries (CST, HIR, typed core, lambda IR, backend IR) provide this. The pipeline is named but not specified.
+Draft v0.5 now closes this with:
 
-### Suggested Fix
-
-Add **§4.0 IR boundary contract** (template applied to each IR):
-
-```
-Each IR must document:
-
-Ownership:
-  - Are nodes owned by an arena? A bump allocator? A Vec index?
-  - Can nodes be mutated after construction?
-
-Identity:
-  - How are nodes uniquely identified? (index, interned ID, pointer?)
-  - Are IDs stable across passes?
-
-Source spans:
-  - Every node that can produce a diagnostic carries a SourceSpan.
-  - Desugared synthetic nodes carry the span of the surface construct
-    they were derived from.
-
-Validation:
-  - The invariants that must hold on a well-formed IR node.
-  - The pass responsible for establishing each invariant.
-  - A validate() entry point that checks all invariants in debug builds.
-
-Pretty-print:
-  - A Display implementation suitable for //dump-ir flags.
-  - Sufficient to reconstruct the structure for snapshot tests.
-```
-
-Then apply this to each: CST, HIR, TypedCore, LambdaIR, BackendIR.
+- RFC §3.5 requiring validation entry points and losslessness expectations in addition to ownership,
+  identity, spans, and debug output
+- RFC §4 applying a concrete boundary contract to CST, HIR, typed core, lambda, and backend
+- `docs/ir-boundary-contracts.md` recording the repository-local implementation details, ids, spans,
+  and entry points that the Rust crates already expose
 
 //-
 
@@ -653,97 +534,54 @@ Reactive predicates:
 
 //-
 
-## 16. `<show keepMounted>` — Handler/Subscription Behavior During Hide
+## 16. `<show keepMounted>` — Resolved
 
-**Severity:** 🟡 MEDIUM  
+**Severity:** ✅ RESOLVED  
 **Section:** §17.3.1
 
-### Problem
+### Resolution
 
-When `keepMounted=True` and the subtree is hidden, it's unclear whether event handlers fire, whether signals continue to propagate, and whether sources continue to run.
+Draft v0.5 now states the current implementation boundary:
 
-### Suggested Fix
-
-Add **§17.3.1.1 keepMounted semantics**:
-
-```
-keepMounted = False (default):
-  On hide: child subtree is fully torn down per §17.4 rules.
-  On show: child subtree is fully recreated and subscribed.
-  Cost: widget allocation/deallocation on each toggle.
-  Use when: the subtree is expensive to keep alive.
-
-keepMounted = True:
-  On hide: the GTK widget is set to invisible (gtk_widget_set_visible false).
-  Signal subscriptions remain active and continue to propagate.
-  Event handlers remain connected but GTK will not deliver input events
-  to invisible widgets (GTK4 behavior: invisible widgets do not receive
-  pointer or keyboard events).
-  Source subscriptions remain active.
-  On show: visibility is restored; no re-creation occurs.
-  Cost: continued signal and source activity even while hidden.
-  Use when: the subtree is cheap to maintain and toggled frequently.
-```
+- `keepMounted = False` tears down the subtree on hide and recreates it on show
+- `keepMounted = True` keeps the subtree mounted and changes visibility instead of unmounting
+- while hidden with `keepMounted = True`, property bindings, signal subscriptions, source
+  subscriptions, and event hookups remain installed
+- concrete input delivery while hidden follows the host toolkit; the current GTK host keeps
+  handlers connected but invisible widgets do not receive pointer or keyboard events
 
 //-
 
-## 17. HTTP `activeWhen` — Non-Normative Language
+## 17. HTTP `activeWhen` — Resolved
 
-**Severity:** 🟡 MEDIUM  
-**Section:** §14.1.2
+**Severity:** ✅ RESOLVED  
+**Section:** §14.1.3, §14.3
 
-### Problem
+### Resolution
 
-"in-flight work **may be** cancelled or marked stale" is non-normative. An implementation cannot be correct without a definitive answer.
+Draft v0.5 now makes `activeWhen` normative for the implemented HTTP lifecycle slice:
 
-### Suggested Fix
-
-Replace the sentence with:
-
-```
-activeWhen gates all request issuance and polling.
-
-When activeWhen transitions from True to False:
-- Any in-flight request is cancelled at the network layer if
-  cancellation is supported by the underlying runtime.
-- If the request cannot be cancelled (e.g., already in the OS
-  network stack), its response is discarded and not published
-  into the scheduler. The signal retains its last published value.
-- Polling is suspended immediately.
-
-When activeWhen transitions from False to True:
-- If refreshEvery or refreshOn is configured, the source behaves
-  as if a refresh trigger just fired.
-- Otherwise, the source re-issues its initial request.
-```
+- `activeWhen` gates startup and refresh
+- when it becomes `False`, the current request generation becomes inactive and later completions
+  from that generation must not publish
+- request-like sources ask for best-effort cancellation when replaced, suspended, or disposed
+- stale completions are always dropped regardless of whether network-layer cancellation succeeds
 
 //-
 
-## 18. `refreshOn` Backpressure — Unspecified
+## 18. `refreshOn` Backpressure — Resolved
 
-**Severity:** 🟡 MEDIUM  
-**Section:** §14.1.2
+**Severity:** ✅ RESOLVED  
+**Section:** §14.1.3
 
-### Problem
+### Resolution
 
-If `refreshOn` fires while a request is already in flight, the behavior is unspecified. Queuing, dropping, or coalescing are all valid but produce different UX behavior.
+Draft v0.5 now picks an explicit latest-generation-wins policy for HTTP request refresh:
 
-### Suggested Fix
-
-Add to the HTTP source contract:
-
-```
-When a refreshOn trigger fires while a request is already in flight:
-- The current in-flight request is cancelled if cancellable.
-- A new request is issued immediately with the latest source configuration.
-- This is a "latest-wins" policy, consistent with the signal model.
-- No queue of pending requests is maintained. A new trigger always
-  supersedes the previous in-flight request.
-
-If dropping/cancellation is undesirable (e.g., a form submission),
-use Task directly instead of an HTTP source, as Task gives explicit
-control over concurrency and queuing.
-```
+- `refreshOn`, `refreshEvery`, or reactive reconfiguration supersede an older in-flight request
+- the runtime requests best-effort cancellation of the superseded request
+- stale completions from superseded requests are dropped
+- v1 does not require a queue of pending HTTP refreshes
 
 //-
 
@@ -1188,13 +1026,13 @@ Debugger:
 
 | # | Gap | Severity | Section |
 |//-|////-|//////////|////////-|
-| 1 | `Action` type undefined | 🔴 | §15.3 |
-| 2 | Comment syntax absent | 🔴 | §5 |
+| 1 | Event routing surface resolved for current GTK slice | ✅ | §15.3, §17.2.1 |
+| 2 | Comment syntax resolved | ✅ | §5 |
 | 3 | Module system (scoping, qualified names) | 🔴 | §5 |
-| 4 | Literal syntax (Int range, Float, Decimal, overflow) | 🔴 | §6.2 |
-| 5 | Operator precedence table | 🔴 | §11 |
+| 4 | Literal surface resolved for v1 | ✅ | §6.2.1 |
+| 5 | Operator precedence resolved | ✅ | §11.1 |
 | 6 | Type inference and constraint-solving algorithm | 🔴 | §4.3, §7.1 |
-| 7 | IR node/ownership/span/validation/pretty-print specs | 🔴 | §3.5, §4 |
+| 7 | IR boundary contracts resolved | ✅ | §3.5, §4 |
 | 8 | Scheduler transaction semantics and deadlock proof | 🔴 | §13.3, §16.3 |
 | 9 | Signal cycle detection | 🔴 | §13.1 |
 | 10 | `<each>` key reconciliation algorithm | 🔴 | §17.3.2 |
@@ -1203,9 +1041,9 @@ Debugger:
 | 13 | `Eq` for `Map`, `Set`, `Bytes` deferred | 🟡 | §7.3 |
 | 14 | `Default` bundles — only `Option` specified | 🟡 | §9.2 |
 | 15 | `?|>` gate subscription and reactive predicate | 🟡 | §11.3 |
-| 16 | `<show keepMounted>` handler/subscription behavior | 🟡 | §17.3.1 |
-| 17 | HTTP `activeWhen` — non-normative "may be" | 🟡 | §14.1.2 |
-| 18 | `refreshOn` backpressure | 🟡 | §14.1.2 |
+| 16 | `<show keepMounted>` semantics resolved | ✅ | §17.3.1 |
+| 17 | HTTP `activeWhen` semantics resolved | ✅ | §14.1.3, §14.3 |
+| 18 | HTTP refresh latest-wins policy resolved | ✅ | §14.1.3 |
 | 19 | Recurrence (`@|>` / `<|@`) termination and repr | 🟡 | §11.7 |
 | 20 | Orphan/overlapping instance rules vague | 🟡 | §7.1 |
 | 21 | Domain `Eq` opt-out syntax missing | 🟡 | §20.9 |

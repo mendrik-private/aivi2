@@ -93,8 +93,9 @@ Each IR boundary must define:
 - node ownership model
 - identity strategy
 - source span strategy
-- validation rules
+- validation rules and entry points
 - pretty-print/debug output
+- losslessness expectations when the layer claims source fidelity
 
 ### 3.6 Error-reporting invariants
 
@@ -117,11 +118,41 @@ The implementation pipeline is:
 7. **Cranelift code generation**
 8. **Runtime integration**
 
+The repository keeps the implementation-facing companion contract for these layers in
+`docs/ir-boundary-contracts.md`. The RFC freezes the minimum semantics each boundary must
+preserve.
+
 ### 4.1 CST
 
 The CST is source-oriented and lossless enough for formatting and diagnostics.
 
+Boundary contract:
+
+- ownership: `aivi_syntax::ParsedModule` owns both the lossless token buffer and the structural
+  CST module
+- identity: top-level items are source-addressed by `TokenRange` into the token buffer rather than
+  synthetic arena ids; nested nodes are structural within their parent item
+- source spans: user-addressable CST nodes carry `SourceSpan`; top-level items additionally retain
+  `TokenRange` so tooling can map back into trivia-preserving source
+- validation entry points: `aivi_syntax::lex_module` establishes token/trivia invariants and
+  `aivi_syntax::parse_module` establishes CST shape plus recoverable syntax diagnostics
+- losslessness: comments, whitespace, and other trivia remain in the token buffer even when the
+  structured tree does not lower them into dedicated CST nodes
+
 ### 4.2 HIR
+
+HIR is the first module-owned arena IR.
+
+Boundary contract:
+
+- ownership: one `aivi_hir::Module` owns arenas for items, expressions, patterns, decorators,
+  bindings, markup nodes, control nodes, and type nodes
+- identity: opaque arena ids such as `ItemId`, `ExprId`, `PatternId`, `DecoratorId`,
+  `MarkupNodeId`, and `ControlNodeId`
+- source spans: every user-facing name, item header, expression, pattern, markup node, and control
+  node carries the source span that diagnostics must report
+- validation entry points: `aivi_hir::lower_module` / `lower_module_with_resolver`,
+  `aivi_hir::validate_module`, and `aivi_hir::typecheck_module`
 
 HIR responsibilities:
 
@@ -131,8 +162,24 @@ HIR responsibilities:
 - markup nodes represented explicitly
 - pipe clusters represented explicitly
 - surface sugar preserved where useful for diagnostics
+- source metadata and source-lifecycle/decode/fanout/recurrence elaboration reports made explicit
+- body-less annotated `sig` declarations preserved as first-class input signals rather than erased
 
 ### 4.3 Typed core
+
+Typed core is the first post-HIR layer that owns fully typed runtime-facing nodes rather than
+resolved surface syntax.
+
+Boundary contract:
+
+- ownership: one `aivi_core::Module` owns typed arenas for items, expressions, pipes, stages,
+  sources, and decode programs
+- identity: opaque ids such as `ItemId`, `ExprId`, `PipeId`, `StageId`, `SourceId`,
+  `DecodeProgramId`, and `DecodeStepId`
+- source spans: expressions, patterns, stages, items, source nodes, and decode nodes preserve
+  source spans; origin handles back into HIR stay attached where later layers need them
+- validation entry points: `aivi_core::lower_module`, `aivi_core::lower_runtime_module`, and
+  `aivi_core::validate_module`
 
 Typed core responsibilities:
 
@@ -144,8 +191,21 @@ Typed core responsibilities:
 - record default elision elaborated
 - markup control nodes typed
 - signal dependency graph extracted
+- blocked or not-yet-proven ordinary expression slices kept explicit rather than guessed into core
 
 ### 4.4 Closed typed lambda IR
+
+The typed lambda layer keeps closure structure explicit without collapsing directly into backend
+layout or ABI choices.
+
+Boundary contract:
+
+- ownership: one `aivi_lambda::Module` owns closure and capture arenas while embedding the
+  validated typed-core module it wraps
+- identity: explicit `ClosureId` and `CaptureId` plus carried-through core ids for items, pipes,
+  stages, sources, and decode programs
+- source spans: closure, item, pipe, and stage nodes preserve source spans from typed core / HIR
+- validation entry points: `aivi_lambda::lower_module` and `aivi_lambda::validate_module`
 
 Responsibilities:
 
@@ -156,6 +216,20 @@ Responsibilities:
 - no remaining surface sugar
 
 ### 4.5 Backend IR and codegen
+
+Backend IR is the first layer that owns ABI/layout/runtime call contracts outright.
+
+Boundary contract:
+
+- ownership: one backend `Program` owns items, pipelines, kernels, layouts, sources, and decode
+  plans
+- identity: backend-owned ids such as `PipelineId`, `KernelId`, `KernelExprId`, `LayoutId`,
+  `SourceId`, `DecodePlanId`, `DecodeStepId`, `EnvSlotId`, and `InlineSubjectId`, plus origin
+  links back into earlier IRs
+- source spans: item, pipeline, stage, source, and kernel origins preserve source spans; backend
+  expressions keep source spans for diagnostics and debug dumps
+- validation entry points: `aivi_backend::lower_module`, `aivi_backend::validate_program`, and
+  `aivi_backend::compile_program`
 
 Responsibilities:
 
@@ -202,6 +276,16 @@ The core top-level forms are:
 - decorators via `@name`
 
 A module may export exactly one process entry point named `main`.
+
+Comment syntax in v1 is intentionally narrow:
+
+- `--` starts a line comment and runs to end of line
+- `---` starts a doc comment and runs to end of line
+- both forms are trivia in the lossless token stream; they do not create ordinary expression or
+  item nodes in the CST
+- block comments are out of scope for v1
+- the lexical distinction between `--` and `---` is stable; declaration attachment and doc
+  extraction remain tooling-owned work above the syntax layer
 
 ### 5.1 Import rules
 
@@ -291,6 +375,32 @@ Minimum practical v1 set:
 - `Validation E A`
 - `Signal A`
 - `Task E A`
+
+### 6.2.1 Numeric literal surface in v1
+
+The implemented v1 literal surface is intentionally narrower than the full set of numeric types
+listed above.
+
+Accepted surface forms:
+
+- unsuffixed integer literals are ASCII decimal digits only: `0`, `42`, `9000`
+- a compact `digits + identifier` form is parsed as a domain literal suffix candidate:
+  `250ms`, `123n`, `19d`, `0xFF`
+- spacing is semantic: `250ms` is one suffixed literal candidate, while `250 ms` is ordinary
+  application
+- leading zeroes do not introduce octal or any other alternate base; `007` is decimal
+
+Not part of the v1 literal grammar:
+
+- sign-prefixed numeric literals
+- `_` separators inside numeric tokens
+- built-in hex, binary, or octal integer forms
+- built-in `Float`, `Decimal`, or `BigInt` literal forms
+- exponent notation
+
+A compact suffix form is only well-typed when exactly one domain literal suffix in scope claims
+that suffix name and accepts the base integer family. Otherwise it is rejected during later
+validation as an unresolved or ambiguous suffix literal.
 
 ## 6.3 Closed types
 
@@ -697,6 +807,23 @@ Core v1 operators:
 - `<|@` recurrence step
 - ` | ` tap
 - `<|*` fan-out join
+
+Ordinary expression precedence, from tighter to looser binding:
+
+1. function application
+2. binary `+` and `-`
+3. binary `>`, `<`, `==`, `!=`
+4. `and`
+5. `or`
+
+Operators at the same binary precedence associate left-to-right.
+
+The current surface subset also supports prefix `not`; it applies to its following ordinary
+expression before binary reassociation.
+
+Pipe operators are **not** part of that binary table. A pipe spine starts from one ordinary
+expression head, then consumes pipe stages left-to-right. Each stage payload is parsed as an
+ordinary expression using the table above until the next pipe operator boundary.
 
 Reactivity does **not** come from pipe operators. Reactivity comes from `sig` and `@source`. Pipe operators are flow combinators inside those reactive or ordinary expressions.
 
@@ -1279,9 +1406,17 @@ HTTP source semantics:
 
 - a request source issues one request when subscribed unless the provider defines a different default
 - `refreshOn` reissues the request whenever the trigger signal updates
-- `refreshEveryMs` creates scheduler-owned polling using the latest stable source configuration
-- `activeWhen` gates startup and refresh; when it becomes `False`, polling is suspended and in-flight work may be cancelled or marked stale by the runtime
-- when reactive URL, query, header, or body inputs change, the runtime issues a new request with the latest values and must not publish stale responses from superseded requests
+- `refreshEvery` creates scheduler-owned polling using the latest stable source configuration
+- `activeWhen` gates startup and refresh; when it becomes `False`, polling is suspended, the
+  current request generation becomes inactive, and any later completion from that inactive
+  generation must not publish
+- when reactive URL, query, header, or body inputs change, the runtime creates a replacement
+  request generation using the latest stable values
+- if `refreshOn`, `refreshEvery`, or reactive reconfiguration fires while an earlier HTTP request
+  is still in flight, the newest request supersedes the older one
+- built-in HTTP providers request best-effort cancellation of the superseded request; regardless of
+  cancellation success, stale completions from superseded generations are dropped
+- v1 does not require a queue of pending HTTP refreshes; request issuance is latest-generation-wins
 
 #### Timer
 
@@ -1422,13 +1557,23 @@ Decode failures are reported through the source's typed error channel. They do n
 
 ### 14.3 Cancellation and lifecycle
 
-Source subscriptions must carry explicit runtime cancellation and disposal semantics. When the owning graph or view is torn down, the source subscription is disposed.
+Source subscriptions must carry explicit runtime cancellation and disposal semantics. Every
+`@source` site owns one stable runtime instance identity. When the owning graph or view is torn
+down, that instance is disposed.
 
 Additional lifecycle rules:
 
-- reconfiguration caused by reactive source arguments disposes the superseded runtime resource before publishing new values from the replacement resource
-- long-lived sources may use `activeWhen` to suspend or resume delivery without changing the static graph shape
-- request-like sources such as HTTP and `fs.read` must either cancel in-flight work when reconfigured or mark stale completions so they cannot publish into the live graph
+- reconfiguration caused by reactive source arguments or options replaces the superseded runtime
+  resource before the replacement may publish
+- stale work from a superseded, disposed, or inactive source generation is dropped and must never
+  publish into the live graph
+- built-in `activeWhen` gates suspend delivery without changing the static graph shape; while the
+  gate is `False`, new trigger work is not started for that inactive generation
+- request-like built-ins such as HTTP and `fs.read` additionally request best-effort in-flight
+  cancellation when they are replaced, suspended, or disposed
+- custom providers inherit the generic replacement and stale-publication rules, but option names
+  such as `activeWhen` or `refreshOn` have built-in meaning only where the provider contract
+  explicitly defines that wakeup surface
 
 ### 14.4 Custom provider declarations
 
@@ -1482,16 +1627,24 @@ Effects enter through:
 - is schedulable by the runtime
 - is lawful as `Functor`, `Applicative`, and `Monad`
 
-## 15.3 Event handler normalization
+## 15.3 Event handler routing
 
-UI event handlers may elaborate to one of:
+The implemented GTK event surface is intentionally narrower than a future general callback
+language.
 
-- a pure patch/state update
-- an `Action`
-- a `Task E Action`
-- a runtime-normalized batch of those
+In v1 live GTK routing:
 
-Normalization is internal. The user model remains pure plus explicit `Task`.
+- markup `on*={handler}` attributes are routing declarations, not arbitrary callback bodies
+- `handler` must resolve to a directly publishable input signal declared as a body-less annotated
+  `sig name : Signal T`
+- the concrete GTK host must recognize the exact widget/event pair before the attribute is treated
+  as live event routing
+- the routed input signal payload type must match the concrete GTK event payload type
+- discrete GTK events publish one payload into the scheduler input signal and force their own
+  runtime tick
+
+Broader internal normalization of arbitrary handler expressions into runtime-owned actions remains
+future work. It is not part of the current implemented surface contract.
 
 ## 15.4 Inter-thread communication
 
@@ -1589,21 +1742,27 @@ If an expression is reactive, the compiler extracts a derived signal and the run
 
 ### 17.2.1 Event hookups
 
-Expression-valued markup attributes whose names start with `on` are treated as event hookups when the concrete GTK host recognizes that exact widget/event pair.
+Expression-valued markup attributes whose names start with `on` are treated as event-route
+declarations only when the concrete GTK host recognizes that exact widget/event pair.
 
 ```aivi
+sig clicked : Signal Unit
+
 <Button label="Click me" onClick={clicked} />
 ```
 
 Event hookup rules:
 
-- the handler expression must name a directly publishable input signal (see §13.5)
+- the handler expression must name a directly publishable input signal (see §13.5 and §15.3)
+- only direct input signals are legal in the current live GTK surface; arbitrary callback
+  expressions are future work
 - the input signal's payload type must match the GTK event's concrete payload type
 - unsupported `on*` names on a given widget type remain ordinary attributes and are rejected by run-surface validation rather than silently treated as live events
 - the `on*` naming convention is explicit and will be replaced by widget-schema metadata when that surface exists
 - GTK discrete events (such as button clicks) force their own runtime ticks; rapid repeated events are processed as separate transactions and not collapsed within one tick
 
-Event props lower to direct GTK signal connections, not user-visible callbacks.
+Event props lower to direct GTK signal connections that publish into runtime input signals, not
+user-visible callbacks.
 
 ## 17.3 Control nodes
 
@@ -1632,8 +1791,17 @@ Optional flag:
 ```
 
 - `keepMounted = False` is the default
-- if `False`, hide means dispose/unsubscribe; show means recreate
-- if `True`, the subtree remains mounted and toggles visibility-sensitive state instead
+- if `False`, hide means full subtree teardown per §17.4: unmount widgets, disconnect event
+  handlers, and dispose owned subscriptions; show means recreate the subtree from scratch
+- if `True`, the subtree mounts once and hide/show becomes a visibility transition rather than an
+  unmount/remount cycle
+- while hidden under `keepMounted = True`, property bindings, signal subscriptions, source
+  subscriptions, and event hookups remain installed
+- concrete input delivery while hidden follows the host toolkit; for the current GTK host,
+  invisible widgets do not receive pointer or keyboard events even though their handlers remain
+  connected
+- when visibility returns under `keepMounted = True`, the existing subtree becomes visible again
+  without recreation
 
 ### 17.3.2 `<each>`
 
@@ -2236,8 +2404,9 @@ Status legend: **COMPLETE** = fully implemented; **PARTIAL** = core slice implem
 - CST (lossless for formatting and diagnostics) ✓
 - formatter (canonical pipe, arrow, cluster alignment) ✓
 - syntax for `type`, `class`, `instance`, `val`, `fun`, `sig`, `use`, `export`, markup, and pipe operators ✓
+- line/doc comment lexing (`--`, `---`) and trivia retention in the token stream ✓
 - regex literal lexing and HIR validation ✓
-- suffix literal lexing (`250ms`) ✓
+- compact suffix literal lexing (`250ms`) ✓
 
 ### Milestone 2 — HIR and names — **COMPLETE**
 
@@ -2303,12 +2472,12 @@ Status legend: **COMPLETE** = fully implemented; **PARTIAL** = core slice implem
 - GTK bridge graph and child-group lowering ✓
 - executor with direct setter/event/child management ✓
 - `<show>` (mount/unmount) ✓
+- `keepMounted` on `<show>` ✓
 - `<each>` with keys and localized child edits ✓
 - `<empty>` branch ✓
 - `<match>` ✓
 - `<fragment>` ✓
-- `<with>` — pending
-- `keepMounted` on `<show>` — pending
+- `<with>` ✓
 - widget schema metadata (replaces `on*` naming convention) — pending
 - full widget property catalog — pending
 
@@ -2493,7 +2662,11 @@ The `Task` typed IR and scheduler ports exist. Workers publish through typed sch
 
 ### 28.3 Source provider coverage
 
-Timer sources (`timer.every`, `timer.after`) are fully working. HTTP, `fs.read`, `fs.watch`, socket, mailbox, process, and window-event sources have their runtime contracts wired but provider execution is pending.
+Timer sources (`timer.every`, `timer.after`) are fully working. HTTP, `fs.read`, `fs.watch`,
+socket, mailbox, process, and window-event sources have their runtime contracts wired but provider
+execution is pending. For request-like sources, that wired contract already uses a latest-wins
+policy: refresh or reconfiguration supersedes older work, requests best-effort cancellation where
+the provider supports it, and drops stale completions before publication.
 
 **Gap**: Any stdlib module that uses non-timer sources cannot be exercised end-to-end until those providers are implemented.
 
@@ -2505,11 +2678,10 @@ Typed-lambda IR with explicit closures and environments exists. Backend item-bod
 
 ### 28.5 GTK widget coverage
 
-The GTK executor, bridge graph, and host are implemented. `<show>`, `<each>` (with keys), `<empty>`, `<match>`, and `<fragment>` work.
+The GTK executor, bridge graph, and host are implemented. `<show>` including `keepMounted`,
+`<each>` (with keys), `<empty>`, `<match>`, `<fragment>`, and `<with>` work.
 
 **Gap**:
-- `<with>` control node is not yet implemented
-- `keepMounted` on `<show>` is not yet implemented
 - widget property catalogs and event schemas rely on a hand-maintained `on*` convention rather than widget-metadata-driven lookup; GTK widget coverage is limited to the set explicitly supported by the concrete host
 - libadwaita widget bindings beyond basic GTK4 widgets are not yet enumerated
 

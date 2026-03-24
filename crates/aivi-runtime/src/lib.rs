@@ -8,6 +8,7 @@ pub mod graph;
 pub mod hir_adapter;
 pub mod providers;
 pub mod scheduler;
+mod source_decode;
 pub mod startup;
 
 pub use effects::{
@@ -29,9 +30,9 @@ pub use hir_adapter::{
     HirGateStageBinding, HirGateStageId, HirOwnerBinding, HirRecurrenceBinding,
     HirRecurrenceNodeId, HirRuntimeAdapterError, HirRuntimeAdapterErrors, HirRuntimeAssembly,
     HirRuntimeAssemblyBuilder, HirRuntimeGatePlan, HirRuntimeInstantiationError, HirSignalBinding,
-    HirSignalBindingKind, HirSourceBinding, assemble_hir_runtime,
+    HirSignalBindingKind, HirSourceBinding, HirTaskBinding, assemble_hir_runtime,
 };
-pub use providers::{SourceProviderExecutionError, SourceProviderManager};
+pub use providers::{MailboxPublishError, SourceProviderExecutionError, SourceProviderManager};
 pub use scheduler::{
     DependencyValue, DependencyValues, DerivedNodeEvaluator, DroppedPublication, Generation,
     Publication, PublicationDropReason, PublicationStamp, Scheduler, SchedulerAccessError,
@@ -42,5 +43,6 @@ pub use startup::{
     BackendLinkedRuntime, BackendRuntimeError, BackendRuntimeLinkError, BackendRuntimeLinkErrors,
     EvaluatedSourceConfig, EvaluatedSourceOption, LinkedDerivedSignal, LinkedSourceArgument,
     LinkedSourceBinding, LinkedSourceLifecycleAction, LinkedSourceOption, LinkedSourceTickOutcome,
-    link_backend_runtime,
+    LinkedTaskBinding, LinkedTaskExecutionBinding, LinkedTaskExecutionBlocker,
+    LinkedTaskWorkerError, LinkedTaskWorkerOutcome, link_backend_runtime,
 };

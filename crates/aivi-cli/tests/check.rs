@@ -15,6 +15,8 @@ fn check_accepts_valid_hir_fixtures() {
         "milestone-2/valid/local-top-level-refs/main.aivi",
         "milestone-2/valid/use-member-imports/main.aivi",
         "milestone-2/valid/use-member-import-aliases/main.aivi",
+        "milestone-2/valid/workspace-type-imports/main.aivi",
+        "milestone-2/valid/workspace-typeclass-prelude/main.aivi",
         "milestone-2/valid/source-provider-contract-declarations/main.aivi",
         "milestone-2/valid/custom-source-provider-wakeup/main.aivi",
         "milestone-2/valid/custom-source-recurrence-wakeup/main.aivi",

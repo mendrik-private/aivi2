@@ -3,5 +3,4 @@ use aivi.network (
     mailbox
 )
 
-val primaryProvider = http
-val secondaryProvider = mailbox
+val importedHttp = http

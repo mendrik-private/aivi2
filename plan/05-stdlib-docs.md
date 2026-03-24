@@ -19,7 +19,10 @@ This plan does not design the stdlib itself — it designs the documentation *in
 
 ## 2. Doc comment syntax
 
-Doc comments in AIVI source use triple-dash `---` for doc comments, distinguished from ordinary `--` line comments. They attach to the declaration immediately below them.
+Doc comments in AIVI source use triple-dash `---` for doc comments, distinguished from ordinary
+`--` line comments. The current compiler only freezes that lexical distinction and preserves the
+tokens as trivia; the planned doc-extraction surface attaches a doc comment block to the
+declaration immediately below it.
 
 ```aivi
 --- The integer type.
@@ -47,7 +50,8 @@ fun length: Int #xs: List A =>
 
 - `---` followed by a space (or nothing) starts a doc comment line.
 - Doc comment lines must be consecutive; a blank line or `--` line ends the block.
-- Doc comments attach to the *next* top-level declaration. Attachment fails if there is no declaration below (diagnostic: `W_ORPHAN_DOC`).
+- In the planned extraction phase, doc comments attach to the *next* top-level declaration.
+  Attachment fails if there is no declaration below (diagnostic: `W_ORPHAN_DOC`).
 - Nested declarations (class methods, constructors) have their own doc comments written directly above them inside the block.
 - Inline markup inside doc comment text uses Markdown: `**bold**`, `*italic*`, `\`code\``, `` ```aivi ... ``` `` fenced blocks, `[link text]` cross-references.
 

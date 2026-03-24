@@ -213,6 +213,7 @@ pub enum GateRuntimeReference {
     Item(ItemId),
     SumConstructor(crate::SumConstructorHandle),
     DomainMember(DomainMemberHandle),
+    ClassMember(crate::ResolvedClassMemberDispatch),
     Builtin(BuiltinTerm),
 }
 
@@ -1376,6 +1377,8 @@ fn runtime_reference_for_name(
             Ok(GateRuntimeReference::Builtin(*builtin))
         }
         crate::ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_))
+        | crate::ResolutionState::Resolved(TermResolution::ClassMember(_))
+        | crate::ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_))
         | crate::ResolutionState::Resolved(TermResolution::Import(_))
         | crate::ResolutionState::Unresolved => {
             Err(GateElaborationBlocker::UnknownRuntimeExprType { span })
@@ -1402,6 +1405,7 @@ fn blocker_for_issue(issue: GateIssue) -> GateElaborationBlocker {
             GateElaborationBlocker::UnknownField { path, subject }
         }
         GateIssue::AmbiguousDomainMember { span, .. }
+        | GateIssue::InvalidPipeStageInput { span, .. }
         | GateIssue::UnsupportedApplicativeClusterMember { span, .. }
         | GateIssue::ApplicativeClusterMismatch { span, .. }
         | GateIssue::InvalidClusterFinalizer { span, .. }

@@ -11,17 +11,18 @@ use crate::{
     DecoratorId, DecoratorPayload, DomainItem, DomainMember, DomainMemberKind,
     DomainMemberResolution, EachControl, EmptyControl, ExportItem, Expr, ExprId, ExprKind,
     FragmentControl, FunctionItem, FunctionParameter, ImportBinding, ImportBindingMetadata,
-    ImportBundleKind, ImportId, ImportValueType, InstanceItem, InstanceMember, IntegerLiteral,
-    Item, ItemHeader, ItemId, ItemKind, LiteralSuffixResolution, MapExpr, MapExprEntry,
-    MarkupAttribute, MarkupAttributeValue, MarkupElement, MarkupNode, MarkupNodeId, MarkupNodeKind,
-    MatchControl, Module, Name, NamePath, Pattern, PatternId, PatternKind, PipeExpr, PipeStage,
-    PipeStageKind, ProjectionBase, RecordExpr, RecordExprField, RecordFieldSurface,
-    RecordPatternField, RecurrenceWakeupDecorator, RecurrenceWakeupDecoratorKind, RegexLiteral,
-    ResolutionState, ShowControl, SignalItem, SourceDecorator, SourceLifecycleDependencies,
-    SourceMetadata, SourceProviderContractItem, SourceProviderRef, SuffixedIntegerLiteral,
-    TermReference, TermResolution, TextFragment, TextInterpolation, TextLiteral, TextSegment,
-    TypeField, TypeId, TypeItem, TypeItemBody, TypeKind, TypeNode, TypeParameter, TypeParameterId,
-    TypeReference, TypeResolution, TypeVariant, UnaryOperator, UseItem, ValueItem, WithControl,
+    ImportBindingResolution, ImportBundleKind, ImportId, ImportModuleResolution, ImportValueType,
+    InstanceItem, InstanceMember, IntegerLiteral, Item, ItemHeader, ItemId, ItemKind,
+    LiteralSuffixResolution, MapExpr, MapExprEntry, MarkupAttribute, MarkupAttributeValue,
+    MarkupElement, MarkupNode, MarkupNodeId, MarkupNodeKind, MatchControl, Module, Name, NamePath,
+    Pattern, PatternId, PatternKind, PipeExpr, PipeStage, PipeStageKind, ProjectionBase,
+    RecordExpr, RecordExprField, RecordFieldSurface, RecordPatternField, RecurrenceWakeupDecorator,
+    RecurrenceWakeupDecoratorKind, RegexLiteral, ResolutionState, ShowControl, SignalItem,
+    SourceDecorator, SourceLifecycleDependencies, SourceMetadata, SourceProviderContractItem,
+    SourceProviderRef, SuffixedIntegerLiteral, TermReference, TermResolution, TextFragment,
+    TextInterpolation, TextLiteral, TextSegment, TypeField, TypeId, TypeItem, TypeItemBody,
+    TypeKind, TypeNode, TypeParameter, TypeParameterId, TypeReference, TypeResolution, TypeVariant,
+    UnaryOperator, UseItem, ValueItem, WithControl,
 };
 
 pub struct LoweringResult {
@@ -62,12 +63,14 @@ pub fn lower_module(module: &syn::Module) -> LoweringResult {
 
 pub fn lower_module_with_resolver(
     module: &syn::Module,
-    _resolver: Option<&dyn crate::resolver::ImportResolver>,
+    resolver: Option<&dyn crate::resolver::ImportResolver>,
 ) -> LoweringResult {
-    let mut lowerer = Lowerer::new(module.file);
+    let null_resolver = crate::resolver::NullImportResolver;
+    let mut lowerer = Lowerer::new(module.file, resolver.unwrap_or(&null_resolver));
     for item in &module.items {
         lowerer.lower_item(item);
     }
+    lowerer.lower_ambient_prelude();
     let namespaces = lowerer.build_namespaces();
     lowerer.resolve_module(&namespaces);
     lowerer.validate_cluster_normalization();
@@ -75,9 +78,89 @@ pub fn lower_module_with_resolver(
     LoweringResult::new(lowerer.module, lowerer.diagnostics)
 }
 
-struct Lowerer {
+const AMBIENT_PRELUDE_SOURCE: &str = r#"type Ordering = LT | EQ | GT
+
+class Setoid A
+    equals : A -> A -> Bool
+
+class Semigroupoid C
+    compose : C B C -> C A B -> C A C
+
+class Semigroup A
+    append : A -> A -> A
+
+class Foldable F
+    reduce : (B -> A -> B) -> B -> F A -> B
+
+class Functor F
+    map : (A -> B) -> F A -> F B
+
+class Contravariant F
+    contramap : (B -> A) -> F A -> F B
+
+class Functor F => Filterable F
+    filterMap : (A -> Option B) -> F A -> F B
+
+class Eq A
+    (==) : A -> A -> Bool
+    (!=) : A -> A -> Bool
+
+class Eq A => Ord A
+    compare : A -> A -> Ordering
+
+class Semigroupoid C => Category C
+    id : C A A
+
+class Semigroup A => Monoid A
+    empty : A
+
+class (Functor T, Foldable T) => Traversable T
+    traverse : Applicative G => (A -> G B) -> T A -> G (T B)
+
+class Profunctor P
+    dimap : (A2 -> A1) -> (B1 -> B2) -> P A1 B1 -> P A2 B2
+
+class Bifunctor F
+    bimap : (A -> C) -> (B -> D) -> F A B -> F C D
+
+class Monoid A => Group A
+    invert : A -> A
+
+class Functor F => Alt F
+    alt : F A -> F A -> F A
+
+class Functor F => Apply F
+    apply : F (A -> B) -> F A -> F B
+
+class Functor W => Extend W
+    extend : (W A -> B) -> W A -> W B
+
+class Alt F => Plus F
+    zero : F A
+
+class Apply F => Applicative F
+    pure : A -> F A
+
+class Apply M => Chain M
+    chain : (A -> M B) -> M A -> M B
+
+class Extend W => Comonad W
+    extract : W A -> A
+
+class (Applicative F, Plus F) => Alternative F
+    guard : Bool -> F Unit
+
+class (Applicative M, Chain M) => Monad M
+    join : M (M A) -> M A
+
+class Monad M => ChainRec M
+    chainRec : (A -> M (Result A B)) -> A -> M B
+"#;
+
+struct Lowerer<'a> {
     module: Module,
     diagnostics: Vec<Diagnostic>,
+    resolver: &'a dyn crate::resolver::ImportResolver,
 }
 
 #[derive(Clone, Copy)]
@@ -114,8 +197,12 @@ struct NamedSite<T> {
 #[derive(Default)]
 struct Namespaces {
     term_items: HashMap<String, Vec<NamedSite<ItemId>>>,
+    ambient_term_items: HashMap<String, Vec<NamedSite<ItemId>>>,
     domain_terms: HashMap<String, Vec<NamedSite<DomainMemberResolution>>>,
+    class_terms: HashMap<String, Vec<NamedSite<crate::hir::ClassMemberResolution>>>,
+    ambient_class_terms: HashMap<String, Vec<NamedSite<crate::hir::ClassMemberResolution>>>,
     type_items: HashMap<String, Vec<NamedSite<ItemId>>>,
+    ambient_type_items: HashMap<String, Vec<NamedSite<ItemId>>>,
     any_items: HashMap<String, Vec<NamedSite<ItemId>>>,
     provider_contracts: HashMap<String, Vec<NamedSite<ItemId>>>,
     literal_suffixes: HashMap<String, Vec<NamedSite<LiteralSuffixResolution>>>,
@@ -134,6 +221,8 @@ enum LookupResult<T> {
 struct ResolveEnv {
     term_scopes: Vec<HashMap<String, BindingId>>,
     type_scopes: Vec<HashMap<String, TypeParameterId>>,
+    implicit_type_parameters: Vec<TypeParameterId>,
+    allow_implicit_type_parameters: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -149,15 +238,41 @@ enum LoweredMarkup {
     Case(ControlNodeId),
 }
 
-impl Lowerer {
-    fn new(file: aivi_base::FileId) -> Self {
+impl<'a> Lowerer<'a> {
+    fn new(file: aivi_base::FileId, resolver: &'a dyn crate::resolver::ImportResolver) -> Self {
         Self {
             module: Module::new(file),
             diagnostics: Vec::new(),
+            resolver,
+        }
+    }
+
+    fn lower_ambient_prelude(&mut self) {
+        let source = aivi_base::SourceFile::new(
+            self.module.file(),
+            "<aivi.prelude>",
+            AMBIENT_PRELUDE_SOURCE,
+        );
+        let parsed = syn::parse_module(&source);
+        debug_assert!(
+            !parsed.has_errors(),
+            "ambient prelude must parse cleanly: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+        for item in &parsed.module.items {
+            self.lower_ambient_item(item);
         }
     }
 
     fn lower_item(&mut self, item: &syn::Item) {
+        self.lower_item_with_storage(item, false);
+    }
+
+    fn lower_ambient_item(&mut self, item: &syn::Item) {
+        self.lower_item_with_storage(item, true);
+    }
+
+    fn lower_item_with_storage(&mut self, item: &syn::Item, ambient: bool) {
         let lowered = match item {
             syn::Item::Type(item) => Some(Item::Type(self.lower_type_item(item))),
             syn::Item::Value(item) => Some(Item::Value(self.lower_value_item(item))),
@@ -182,9 +297,15 @@ impl Lowerer {
         };
 
         if let Some(item) = lowered {
-            self.module
-                .push_item(item)
-                .expect("HIR item arena should not overflow during lowering");
+            if ambient {
+                self.module
+                    .push_ambient_item(item)
+                    .expect("HIR ambient item arena should not overflow during lowering");
+            } else {
+                self.module
+                    .push_item(item)
+                    .expect("HIR item arena should not overflow during lowering");
+            }
         }
     }
 
@@ -291,6 +412,11 @@ impl Lowerer {
             .iter()
             .map(|parameter| self.lower_function_parameter(parameter))
             .collect();
+        let context = item
+            .constraints
+            .iter()
+            .map(|constraint| self.lower_type_expr(constraint))
+            .collect();
         let annotation = item
             .annotation
             .as_ref()
@@ -310,6 +436,8 @@ impl Lowerer {
         FunctionItem {
             header,
             name,
+            type_parameters: Vec::new(),
+            context,
             parameters,
             annotation,
             body,
@@ -361,10 +489,10 @@ impl Lowerer {
         let parameters = crate::NonEmpty::from_vec(parameters)
             .expect("class fallback parameter list should be non-empty");
         let superclasses = item
-            .annotation
-            .as_ref()
-            .map(|annotation| vec![self.lower_type_expr(annotation)])
-            .unwrap_or_default();
+            .constraints
+            .iter()
+            .map(|constraint| self.lower_type_expr(constraint))
+            .collect();
         let members = item
             .class_body()
             .map(|body| {
@@ -373,6 +501,12 @@ impl Lowerer {
                     .map(|member| ClassMember {
                         span: member.span,
                         name: self.make_name(member.name.text(), member.name.span()),
+                        type_parameters: Vec::new(),
+                        context: member
+                            .constraints
+                            .iter()
+                            .map(|constraint| self.lower_type_expr(constraint))
+                            .collect(),
                         annotation: member
                             .annotation
                             .as_ref()
@@ -478,7 +612,12 @@ impl Lowerer {
             header,
             class,
             arguments: crate::NonEmpty::new(argument, Vec::new()),
-            context: Vec::new(),
+            type_parameters: Vec::new(),
+            context: item
+                .context
+                .iter()
+                .map(|constraint| self.lower_type_expr(constraint))
+                .collect(),
             members,
         }
     }
@@ -778,6 +917,26 @@ impl Lowerer {
                 self.make_path(&[self.make_name("invalid", item.base.span)])
             });
         let module_name = path_text(&module);
+        let module_segments = module.segments().iter().map(Name::text).collect::<Vec<_>>();
+        let module_resolution = self.resolver.resolve(&module_segments);
+        if let ImportModuleResolution::Cycle(cycle) = &module_resolution {
+            self.diagnostics.push(
+                Diagnostic::error(format!(
+                    "import cycle detected: {}",
+                    cycle
+                        .modules()
+                        .iter()
+                        .map(|module| module.as_ref())
+                        .collect::<Vec<_>>()
+                        .join(" -> ")
+                ))
+                .with_code(code("import-cycle"))
+                .with_primary_label(
+                    item.base.span,
+                    "this `use` item closes a cycle in the workspace import graph",
+                ),
+            );
+        }
         let mut imports = item
             .imports
             .iter()
@@ -793,12 +952,13 @@ impl Lowerer {
                     .as_ref()
                     .map(|alias| self.make_name(&alias.text, alias.span))
                     .unwrap_or_else(|| imported_name.clone());
-                let metadata = known_import_metadata(&module_name, imported_name.text())
-                    .unwrap_or(ImportBindingMetadata::Unknown);
+                let (resolution, metadata) =
+                    self.resolve_import_binding(&module_name, &imported_name, &module_resolution);
                 self.alloc_import(ImportBinding {
                     span: import.path.span,
                     imported_name: imported_name.clone(),
                     local_name,
+                    resolution,
                     metadata,
                 })
             })
@@ -813,6 +973,7 @@ impl Lowerer {
                 span: item.base.span,
                 imported_name: self.make_name("invalid", item.base.span),
                 local_name: self.make_name("invalid", item.base.span),
+                resolution: ImportBindingResolution::UnknownModule,
                 metadata: ImportBindingMetadata::Unknown,
             }));
         }
@@ -836,6 +997,40 @@ impl Lowerer {
             header,
             target,
             resolution: ResolutionState::Unresolved,
+        }
+    }
+
+    fn resolve_import_binding(
+        &self,
+        module_name: &str,
+        imported_name: &Name,
+        module_resolution: &ImportModuleResolution,
+    ) -> (ImportBindingResolution, ImportBindingMetadata) {
+        match module_resolution {
+            ImportModuleResolution::Resolved(exports) => match exports.find(imported_name.text()) {
+                Some(exported) => (ImportBindingResolution::Resolved, exported.metadata.clone()),
+                None => (
+                    ImportBindingResolution::MissingExport,
+                    ImportBindingMetadata::Unknown,
+                ),
+            },
+            ImportModuleResolution::Missing => {
+                match known_import_metadata(module_name, imported_name.text()) {
+                    Some(metadata) => (ImportBindingResolution::Resolved, metadata),
+                    None if is_known_module(module_name) => (
+                        ImportBindingResolution::MissingExport,
+                        ImportBindingMetadata::Unknown,
+                    ),
+                    None => (
+                        ImportBindingResolution::UnknownModule,
+                        ImportBindingMetadata::Unknown,
+                    ),
+                }
+            }
+            ImportModuleResolution::Cycle(_) => (
+                ImportBindingResolution::Cycle,
+                ImportBindingMetadata::Unknown,
+            ),
         }
     }
 
@@ -2575,11 +2770,11 @@ impl Lowerer {
         }
     }
 
-    fn required_markup_attr<'a>(
+    fn required_markup_attr<'node>(
         &mut self,
-        node: &'a syn::MarkupNode,
+        node: &'node syn::MarkupNode,
         name: &str,
-    ) -> Option<&'a syn::Expr> {
+    ) -> Option<&'node syn::Expr> {
         let Some(attribute) = self.find_markup_attr(node, name) else {
             self.emit_error(
                 node.span,
@@ -2609,11 +2804,11 @@ impl Lowerer {
         }
     }
 
-    fn find_markup_attr<'a>(
+    fn find_markup_attr<'node>(
         &self,
-        node: &'a syn::MarkupNode,
+        node: &'node syn::MarkupNode,
         name: &str,
-    ) -> Option<&'a syn::MarkupAttribute> {
+    ) -> Option<&'node syn::MarkupAttribute> {
         node.attributes
             .iter()
             .find(|attribute| attribute.name.text == name)
@@ -2774,6 +2969,17 @@ impl Lowerer {
                         code("duplicate-item-name"),
                         "item",
                     );
+                    for (member_index, member) in item.members.iter().enumerate() {
+                        insert_site(
+                            &mut namespaces.class_terms,
+                            member.name.text(),
+                            crate::hir::ClassMemberResolution {
+                                class: item_id,
+                                member_index,
+                            },
+                            member.span,
+                        );
+                    }
                 }
                 Item::Domain(item) => {
                     insert_named(
@@ -2837,6 +3043,56 @@ impl Lowerer {
                 Item::Export(_) | Item::Instance(_) => {}
             }
         }
+        for item_id in self.module.ambient_items().to_vec() {
+            let item = self.module.items()[item_id].clone();
+            match item {
+                Item::Type(item) => {
+                    insert_site(
+                        &mut namespaces.ambient_type_items,
+                        item.name.text(),
+                        item_id,
+                        item.header.span,
+                    );
+                    if let TypeItemBody::Sum(variants) = &item.body {
+                        for variant in variants.iter() {
+                            insert_site(
+                                &mut namespaces.ambient_term_items,
+                                variant.name.text(),
+                                item_id,
+                                variant.span,
+                            );
+                        }
+                    }
+                }
+                Item::Class(item) => {
+                    insert_site(
+                        &mut namespaces.ambient_type_items,
+                        item.name.text(),
+                        item_id,
+                        item.header.span,
+                    );
+                    for (member_index, member) in item.members.iter().enumerate() {
+                        insert_site(
+                            &mut namespaces.ambient_class_terms,
+                            member.name.text(),
+                            crate::hir::ClassMemberResolution {
+                                class: item_id,
+                                member_index,
+                            },
+                            member.span,
+                        );
+                    }
+                }
+                Item::Value(_)
+                | Item::Function(_)
+                | Item::Signal(_)
+                | Item::Domain(_)
+                | Item::SourceProviderContract(_)
+                | Item::Instance(_)
+                | Item::Use(_)
+                | Item::Export(_) => {}
+            }
+        }
         namespaces
     }
 
@@ -2844,14 +3100,47 @@ impl Lowerer {
         let module_name = path_text(&item.module);
         for import_id in item.imports.iter() {
             let import = self.module.imports()[*import_id].clone();
-            let metadata = import.metadata.clone();
-            match metadata {
-                ImportBindingMetadata::Value { .. } => insert_site(
-                    &mut namespaces.term_imports,
-                    import.local_name.text(),
-                    *import_id,
-                    import.span,
-                ),
+            match import.resolution {
+                ImportBindingResolution::Resolved => {}
+                ImportBindingResolution::UnknownModule => {
+                    self.diagnostics.push(
+                        Diagnostic::error(format!("unknown import module `{module_name}`"))
+                            .with_code(code("unknown-import-module"))
+                            .with_primary_label(
+                                import.span,
+                                "this workspace does not contain the imported module",
+                            )
+                            .with_secondary_label(item.header.span, "declared by this `use` item"),
+                    );
+                    continue;
+                }
+                ImportBindingResolution::MissingExport => {
+                    self.diagnostics.push(
+                        Diagnostic::error(format!(
+                            "module `{module_name}` does not export `{}`",
+                            import.imported_name.text()
+                        ))
+                        .with_code(code("unknown-imported-name"))
+                        .with_primary_label(
+                            import.span,
+                            "this imported name is not exported by the target module",
+                        )
+                        .with_secondary_label(item.header.span, "declared by this `use` item"),
+                    );
+                    continue;
+                }
+                ImportBindingResolution::Cycle => continue,
+            }
+
+            match import.metadata.clone() {
+                ImportBindingMetadata::Value { .. } | ImportBindingMetadata::OpaqueValue => {
+                    insert_site(
+                        &mut namespaces.term_imports,
+                        import.local_name.text(),
+                        *import_id,
+                        import.span,
+                    )
+                }
                 ImportBindingMetadata::TypeConstructor { .. } => insert_site(
                     &mut namespaces.type_imports,
                     import.local_name.text(),
@@ -2860,25 +3149,15 @@ impl Lowerer {
                 ),
                 ImportBindingMetadata::Bundle(_) => {}
                 ImportBindingMetadata::Unknown => {
-                    let message = if is_known_module(&module_name) {
-                        format!(
-                            "module `{module_name}` does not export `{}` in Milestone 2",
-                            import.imported_name.text()
-                        )
-                    } else {
-                        format!("unknown import module `{module_name}`")
-                    };
-                    let error_code = if is_known_module(&module_name) {
-                        code("unknown-imported-name")
-                    } else {
-                        code("unknown-import-module")
-                    };
                     self.diagnostics.push(
-                        Diagnostic::error(message)
-                            .with_code(error_code)
+                        Diagnostic::error(format!(
+                            "import `{}` from `{module_name}` resolved without compiler-known metadata",
+                            import.imported_name.text()
+                        ))
+                            .with_code(code("invalid-import-resolution"))
                             .with_primary_label(
                                 import.span,
-                                "this import cannot be resolved by the current Milestone 2 catalog",
+                                "resolved imports must carry explicit metadata before name registration",
                             )
                             .with_secondary_label(item.header.span, "declared by this `use` item"),
                     );
@@ -2889,8 +3168,9 @@ impl Lowerer {
     }
 
     fn resolve_module(&mut self, namespaces: &Namespaces) {
-        let root_ids = self.module.root_items().to_vec();
-        for item_id in root_ids {
+        let mut item_ids = self.module.root_items().to_vec();
+        item_ids.extend(self.module.ambient_items().iter().copied());
+        for item_id in item_ids {
             self.resolve_item(item_id, namespaces);
         }
     }
@@ -3241,11 +3521,11 @@ impl Lowerer {
                 let mut env = ResolveEnv::default();
                 env.push_type_scope(self.type_parameter_scope(item.parameters.iter().copied()));
                 match &item.body {
-                    TypeItemBody::Alias(alias) => self.resolve_type(*alias, namespaces, &env),
+                    TypeItemBody::Alias(alias) => self.resolve_type(*alias, namespaces, &mut env),
                     TypeItemBody::Sum(variants) => {
                         for variant in variants.iter() {
                             for field in &variant.fields {
-                                self.resolve_type(*field, namespaces, &env);
+                                self.resolve_type(*field, namespaces, &mut env);
                             }
                         }
                     }
@@ -3253,33 +3533,38 @@ impl Lowerer {
                 Item::Type(item)
             }
             Item::Value(item) => {
-                let env = ResolveEnv::default();
+                let mut env = ResolveEnv::default();
                 if let Some(annotation) = item.annotation {
-                    self.resolve_type(annotation, namespaces, &env);
+                    self.resolve_type(annotation, namespaces, &mut env);
                 }
                 self.resolve_expr(item.body, namespaces, &env);
                 Item::Value(item)
             }
-            Item::Function(item) => {
+            Item::Function(mut item) => {
                 let mut env = ResolveEnv::default();
+                env.enable_implicit_type_parameters();
+                for constraint in &item.context {
+                    self.resolve_type(*constraint, namespaces, &mut env);
+                }
                 env.push_term_scope(
                     self.binding_scope(item.parameters.iter().map(|parameter| parameter.binding)),
                 );
                 for parameter in &item.parameters {
                     if let Some(annotation) = parameter.annotation {
-                        self.resolve_type(annotation, namespaces, &env);
+                        self.resolve_type(annotation, namespaces, &mut env);
                     }
                 }
                 if let Some(annotation) = item.annotation {
-                    self.resolve_type(annotation, namespaces, &env);
+                    self.resolve_type(annotation, namespaces, &mut env);
                 }
                 self.resolve_expr(item.body, namespaces, &env);
+                item.type_parameters = env.implicit_type_parameters();
                 Item::Function(item)
             }
             Item::Signal(item) => {
-                let env = ResolveEnv::default();
+                let mut env = ResolveEnv::default();
                 if let Some(annotation) = item.annotation {
-                    self.resolve_type(annotation, namespaces, &env);
+                    self.resolve_type(annotation, namespaces, &mut env);
                 }
                 if let Some(body) = item.body {
                     self.resolve_expr(body, namespaces, &env);
@@ -3290,17 +3575,24 @@ impl Lowerer {
                 let mut env = ResolveEnv::default();
                 env.push_type_scope(self.type_parameter_scope(item.parameters.iter().copied()));
                 for superclass in &item.superclasses {
-                    self.resolve_type(*superclass, namespaces, &env);
+                    self.resolve_type(*superclass, namespaces, &mut env);
                 }
-                for member in &item.members {
-                    self.resolve_type(member.annotation, namespaces, &env);
+                let mut item = item;
+                for member in &mut item.members {
+                    let mut member_env = env.clone();
+                    member_env.enable_implicit_type_parameters();
+                    for constraint in &member.context {
+                        self.resolve_type(*constraint, namespaces, &mut member_env);
+                    }
+                    self.resolve_type(member.annotation, namespaces, &mut member_env);
+                    member.type_parameters = member_env.implicit_type_parameters();
                 }
                 Item::Class(item)
             }
             Item::Domain(item) => {
                 let mut env = ResolveEnv::default();
                 env.push_type_scope(self.type_parameter_scope(item.parameters.iter().copied()));
-                self.resolve_type(item.carrier, namespaces, &env);
+                self.resolve_type(item.carrier, namespaces, &mut env);
                 if self.type_contains_item_reference(item.carrier, item_id) {
                     self.emit_error(
                         item.header.span,
@@ -3312,18 +3604,18 @@ impl Lowerer {
                     );
                 }
                 for member in &item.members {
-                    self.resolve_type(member.annotation, namespaces, &env);
+                    self.resolve_type(member.annotation, namespaces, &mut env);
                 }
                 Item::Domain(item)
             }
             Item::SourceProviderContract(item) => {
-                let env = ResolveEnv::default();
+                let mut env = ResolveEnv::default();
                 let item = item;
                 for argument in &item.contract.arguments {
-                    self.resolve_type(argument.annotation, namespaces, &env);
+                    self.resolve_type(argument.annotation, namespaces, &mut env);
                 }
                 for option in &item.contract.options {
-                    self.resolve_type(option.annotation, namespaces, &env);
+                    self.resolve_type(option.annotation, namespaces, &mut env);
                 }
                 Item::SourceProviderContract(item)
             }
@@ -3333,17 +3625,18 @@ impl Lowerer {
                 Item::Export(item)
             }
             Item::Instance(mut item) => {
-                let env = ResolveEnv::default();
-                self.resolve_type_reference(&mut item.class, namespaces, &env);
+                let mut env = ResolveEnv::default();
+                env.enable_implicit_type_parameters();
+                self.resolve_type_reference(&mut item.class, namespaces, &mut env);
                 for argument in item.arguments.iter() {
-                    self.resolve_type(*argument, namespaces, &env);
+                    self.resolve_type(*argument, namespaces, &mut env);
                 }
                 for context in &item.context {
-                    self.resolve_type(*context, namespaces, &env);
+                    self.resolve_type(*context, namespaces, &mut env);
                 }
                 for member in &item.members {
                     if let Some(annotation) = member.annotation {
-                        self.resolve_type(annotation, namespaces, &env);
+                        self.resolve_type(annotation, namespaces, &mut env);
                     }
                     let mut member_env = env.clone();
                     member_env.push_term_scope(self.binding_scope(
@@ -3351,6 +3644,7 @@ impl Lowerer {
                     ));
                     self.resolve_expr(member.body, namespaces, &member_env);
                 }
+                item.type_parameters = env.implicit_type_parameters();
                 Item::Instance(item)
             }
         };
@@ -4154,7 +4448,7 @@ impl Lowerer {
         }
     }
 
-    fn resolve_type(&mut self, type_id: TypeId, namespaces: &Namespaces, env: &ResolveEnv) {
+    fn resolve_type(&mut self, type_id: TypeId, namespaces: &Namespaces, env: &mut ResolveEnv) {
         let ty = self.module.types()[type_id].clone();
         let resolved = match ty.kind {
             TypeKind::Name(mut reference) => {
@@ -4233,6 +4527,7 @@ impl Lowerer {
             return;
         }
         let term_lookup = lookup_item(&namespaces.term_items, name);
+        let ambient_term_lookup = lookup_item(&namespaces.ambient_term_items, name);
         let domain_candidates = namespaces
             .domain_terms
             .get(name)
@@ -4262,6 +4557,19 @@ impl Lowerer {
                 reference.resolution = ResolutionState::Unresolved;
                 return;
             }
+            reference.resolution = ResolutionState::Resolved(TermResolution::Item(item));
+            return;
+        }
+        if let LookupResult::Ambiguous = ambient_term_lookup {
+            self.emit_error(
+                reference.span(),
+                format!("ambient term `{name}` is ambiguous"),
+                code("ambiguous-term-name"),
+            );
+            reference.resolution = ResolutionState::Unresolved;
+            return;
+        }
+        if let LookupResult::Unique(item) = ambient_term_lookup {
             reference.resolution = ResolutionState::Resolved(TermResolution::Item(item));
             return;
         }
@@ -4303,6 +4611,52 @@ impl Lowerer {
             }
             LookupResult::Missing => {}
         }
+        match lookup_item(&namespaces.class_terms, name) {
+            LookupResult::Unique(resolution) => {
+                reference.resolution =
+                    ResolutionState::Resolved(TermResolution::ClassMember(resolution));
+                return;
+            }
+            LookupResult::Ambiguous => {
+                if let Some(candidates) = namespaces.class_terms.get(name)
+                    && let Ok(candidates) = crate::NonEmpty::from_vec(
+                        candidates
+                            .iter()
+                            .map(|site| site.value)
+                            .collect::<Vec<crate::hir::ClassMemberResolution>>(),
+                    )
+                {
+                    reference.resolution = ResolutionState::Resolved(
+                        TermResolution::AmbiguousClassMembers(candidates),
+                    );
+                    return;
+                }
+            }
+            LookupResult::Missing => {}
+        }
+        match lookup_item(&namespaces.ambient_class_terms, name) {
+            LookupResult::Unique(resolution) => {
+                reference.resolution =
+                    ResolutionState::Resolved(TermResolution::ClassMember(resolution));
+                return;
+            }
+            LookupResult::Ambiguous => {
+                if let Some(candidates) = namespaces.ambient_class_terms.get(name)
+                    && let Ok(candidates) = crate::NonEmpty::from_vec(
+                        candidates
+                            .iter()
+                            .map(|site| site.value)
+                            .collect::<Vec<crate::hir::ClassMemberResolution>>(),
+                    )
+                {
+                    reference.resolution = ResolutionState::Resolved(
+                        TermResolution::AmbiguousClassMembers(candidates),
+                    );
+                    return;
+                }
+            }
+            LookupResult::Missing => {}
+        }
         if let Some(builtin) = builtin_term(name) {
             reference.resolution = ResolutionState::Resolved(TermResolution::Builtin(builtin));
             return;
@@ -4319,7 +4673,7 @@ impl Lowerer {
         &mut self,
         reference: &mut TypeReference,
         namespaces: &Namespaces,
-        env: &ResolveEnv,
+        env: &mut ResolveEnv,
     ) {
         if reference.path.segments().len() != 1 {
             self.emit_error(
@@ -4355,6 +4709,22 @@ impl Lowerer {
             }
             LookupResult::Missing => {}
         }
+        match lookup_item(&namespaces.ambient_type_items, name) {
+            LookupResult::Unique(item) => {
+                reference.resolution = ResolutionState::Resolved(TypeResolution::Item(item));
+                return;
+            }
+            LookupResult::Ambiguous => {
+                self.emit_error(
+                    reference.span(),
+                    format!("ambient type `{name}` is ambiguous"),
+                    code("ambiguous-type-name"),
+                );
+                reference.resolution = ResolutionState::Unresolved;
+                return;
+            }
+            LookupResult::Missing => {}
+        }
         match lookup_item(&namespaces.type_imports, name) {
             LookupResult::Unique(import) => {
                 reference.resolution = ResolutionState::Resolved(TypeResolution::Import(import));
@@ -4373,6 +4743,12 @@ impl Lowerer {
         }
         if let Some(builtin) = builtin_type(name) {
             reference.resolution = ResolutionState::Resolved(TypeResolution::Builtin(builtin));
+            return;
+        }
+        if is_implicit_type_parameter_candidate(name) && env.allow_implicit_type_parameters() {
+            let parameter = env.bind_implicit_type_parameter(name, reference.span(), self);
+            reference.resolution =
+                ResolutionState::Resolved(TypeResolution::TypeParameter(parameter));
             return;
         }
         self.emit_error(
@@ -4668,6 +5044,13 @@ impl ResolveEnv {
         self.type_scopes.push(scope);
     }
 
+    fn enable_implicit_type_parameters(&mut self) {
+        self.allow_implicit_type_parameters = true;
+        if self.type_scopes.is_empty() {
+            self.type_scopes.push(HashMap::new());
+        }
+    }
+
     fn lookup_term(&self, name: &str) -> Option<BindingId> {
         self.term_scopes
             .iter()
@@ -4681,6 +5064,44 @@ impl ResolveEnv {
             .rev()
             .find_map(|scope| scope.get(name).copied())
     }
+
+    fn allow_implicit_type_parameters(&self) -> bool {
+        self.allow_implicit_type_parameters
+    }
+
+    fn bind_implicit_type_parameter(
+        &mut self,
+        name: &str,
+        span: SourceSpan,
+        lowerer: &mut Lowerer,
+    ) -> TypeParameterId {
+        if let Some(parameter) = self.lookup_type(name) {
+            return parameter;
+        }
+        if self.type_scopes.is_empty() {
+            self.type_scopes.push(HashMap::new());
+        }
+        let parameter = lowerer.alloc_type_parameter(TypeParameter {
+            span,
+            name: lowerer.make_name(name, span),
+        });
+        self.type_scopes
+            .last_mut()
+            .expect("implicit type parameter scope should exist")
+            .insert(name.to_owned(), parameter);
+        self.implicit_type_parameters.push(parameter);
+        parameter
+    }
+
+    fn implicit_type_parameters(&self) -> Vec<TypeParameterId> {
+        self.implicit_type_parameters.clone()
+    }
+}
+
+fn is_implicit_type_parameter_candidate(name: &str) -> bool {
+    name.chars()
+        .next()
+        .is_some_and(|first| first.is_ascii_uppercase())
 }
 
 impl LoweredMarkup {
@@ -5045,6 +5466,26 @@ mod tests {
         lower_text(path, &text)
     }
 
+    fn find_ambient_named_item<'a>(module: &'a crate::Module, name: &str) -> &'a Item {
+        module
+            .ambient_items()
+            .iter()
+            .map(|item_id| &module.items()[*item_id])
+            .find(|item| match item {
+                Item::Type(item) => item.name.text() == name,
+                Item::Class(item) => item.name.text() == name,
+                Item::Value(_)
+                | Item::Function(_)
+                | Item::Signal(_)
+                | Item::Domain(_)
+                | Item::SourceProviderContract(_)
+                | Item::Instance(_)
+                | Item::Use(_)
+                | Item::Export(_) => false,
+            })
+            .unwrap_or_else(|| panic!("expected to find ambient item `{name}`"))
+    }
+
     fn find_named_item<'a>(module: &'a crate::Module, name: &str) -> &'a Item {
         module
             .root_items()
@@ -5143,6 +5584,45 @@ mod tests {
                 report.diagnostics()
             );
         }
+    }
+
+    #[test]
+    fn lower_injects_ambient_typeclass_prelude() {
+        let lowered = lower_text("ambient-prelude.aivi", "val answer:Int = 42\n");
+        assert!(
+            !lowered.has_errors(),
+            "ambient prelude should lower cleanly, got diagnostics: {:?}",
+            lowered.diagnostics()
+        );
+        let module = lowered.module();
+        assert!(
+            module.ambient_items().len() >= 10,
+            "expected ambient prelude items to be injected"
+        );
+        assert!(
+            matches!(find_ambient_named_item(module, "Ordering"), Item::Type(_)),
+            "expected ambient Ordering type to be present"
+        );
+        let Item::Class(traversable) = find_ambient_named_item(module, "Traversable") else {
+            panic!("expected ambient Traversable class");
+        };
+        let traverse = traversable
+            .members
+            .iter()
+            .find(|member| member.name.text() == "traverse")
+            .expect("Traversable should expose traverse");
+        assert_eq!(
+            traverse.context.len(),
+            1,
+            "expected traverse to keep its Applicative constraint"
+        );
+        let Item::Class(applicative) = find_ambient_named_item(module, "Applicative") else {
+            panic!("expected ambient Applicative class");
+        };
+        assert!(
+            !applicative.superclasses.is_empty(),
+            "Applicative should retain its superclass edge"
+        );
     }
 
     #[test]

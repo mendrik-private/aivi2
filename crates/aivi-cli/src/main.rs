@@ -34,9 +34,13 @@ use aivi_hir::{
     BuiltinTerm, BuiltinType, ExprId as HirExprId, ExprKind, GeneralExprParameter, Item,
     Module as HirModule, PatternId as HirPatternId, PatternKind, TermResolution, TypeKind,
     TypeResolution, ValidationMode, ValueItem, collect_markup_runtime_expr_sites,
-    elaborate_runtime_expr_with_env, lower_module as lower_hir_module,
+    elaborate_runtime_expr_with_env,
 };
 use aivi_lambda::{lower_module as lower_lambda_module, validate_module as validate_lambda_module};
+use aivi_query::{
+    RootDatabase, SourceFile as QuerySourceFile, hir_module as query_hir_module,
+    parsed_file as query_parsed_file,
+};
 use aivi_runtime::{
     GlibLinkedRuntimeDriver, HirRuntimeAssembly, InputHandle as RuntimeInputHandle, Publication,
     SourceProviderManager, assemble_hir_runtime, link_backend_runtime,
@@ -181,6 +185,95 @@ fn load_source(path: &Path) -> Result<(SourceDatabase, FileId), String> {
     let mut sources = SourceDatabase::new();
     let file_id = sources.add_file(path.to_path_buf(), text);
     Ok((sources, file_id))
+}
+
+struct WorkspaceFrontend {
+    db: RootDatabase,
+    entry: QuerySourceFile,
+}
+
+impl WorkspaceFrontend {
+    fn load(path: &Path) -> Result<Self, String> {
+        let text = fs::read_to_string(path)
+            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+        let db = RootDatabase::new();
+        let entry = QuerySourceFile::new(&db, path.to_path_buf(), text);
+        Ok(Self { db, entry })
+    }
+
+    fn warm(&self) {
+        let _ = query_hir_module(&self.db, self.entry);
+    }
+
+    fn files(&self) -> Vec<QuerySourceFile> {
+        self.db.files()
+    }
+
+    fn sources(&self) -> SourceDatabase {
+        self.db.source_database()
+    }
+}
+
+struct WorkspaceHirSnapshot {
+    frontend: WorkspaceFrontend,
+    sources: SourceDatabase,
+    files: Vec<QuerySourceFile>,
+}
+
+impl WorkspaceHirSnapshot {
+    fn load(path: &Path) -> Result<Self, String> {
+        let frontend = WorkspaceFrontend::load(path)?;
+        frontend.warm();
+        let sources = frontend.sources();
+        let files = frontend.files();
+        Ok(Self {
+            frontend,
+            sources,
+            files,
+        })
+    }
+
+    fn entry_parsed(&self) -> Arc<aivi_query::ParsedFileResult> {
+        query_parsed_file(&self.frontend.db, self.frontend.entry)
+    }
+
+    fn entry_hir(&self) -> Arc<aivi_query::HirModuleResult> {
+        query_hir_module(&self.frontend.db, self.frontend.entry)
+    }
+}
+
+fn workspace_syntax_failed(
+    snapshot: &WorkspaceHirSnapshot,
+    mut print: impl FnMut(&SourceDatabase, &[Diagnostic]) -> bool,
+) -> bool {
+    let mut failed = false;
+    for file in &snapshot.files {
+        let parsed = query_parsed_file(&snapshot.frontend.db, *file);
+        failed |= print(&snapshot.sources, parsed.diagnostics());
+    }
+    failed
+}
+
+fn workspace_hir_failed(
+    snapshot: &WorkspaceHirSnapshot,
+    mut print_hir: impl FnMut(&SourceDatabase, &[Diagnostic]) -> bool,
+    mut print_validation: impl FnMut(&SourceDatabase, &[Diagnostic]) -> bool,
+) -> (bool, bool) {
+    let mut lowering_failed = false;
+    let mut validation_failed = false;
+    for file in &snapshot.files {
+        let hir = query_hir_module(&snapshot.frontend.db, *file);
+        let file_lowering_failed = print_hir(&snapshot.sources, hir.hir_diagnostics());
+        lowering_failed |= file_lowering_failed;
+        let validation_mode = if file_lowering_failed {
+            ValidationMode::Structural
+        } else {
+            ValidationMode::RequireResolvedNames
+        };
+        let validation = hir.module().validate(validation_mode);
+        validation_failed |= print_validation(&snapshot.sources, validation.diagnostics());
+    }
+    (lowering_failed, validation_failed)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -453,62 +546,55 @@ fn run_hydration_worker_loop(
 }
 
 fn check_file(path: &Path) -> Result<ExitCode, String> {
-    let (sources, file_id) = load_source(path)?;
-    let file = &sources[file_id];
-    let parsed = parse_module(file);
-    let syntax_failed = print_diagnostics(&sources, parsed.all_diagnostics());
-    if syntax_failed {
-        Ok(ExitCode::FAILURE)
-    } else {
-        let lowered = lower_hir_module(&parsed.module);
-        let lowering_failed = print_diagnostics(&sources, lowered.diagnostics());
-        let validation_mode = if lowering_failed {
-            ValidationMode::Structural
-        } else {
-            ValidationMode::RequireResolvedNames
-        };
-        let validation = lowered.module().validate(validation_mode);
-        let validation_failed = print_diagnostics(&sources, validation.diagnostics());
-        if lowering_failed || validation_failed {
-            return Ok(ExitCode::FAILURE);
-        }
-        println!(
-            "syntax + HIR passed: {} ({} item{})",
-            path.display(),
-            parsed.module.items.len(),
-            if parsed.module.items.len() == 1 {
-                ""
-            } else {
-                "s"
-            }
-        );
-        Ok(ExitCode::SUCCESS)
-    }
-}
-
-fn run_markup_file(path: &Path, requested_view: Option<&str>) -> Result<ExitCode, String> {
-    let (sources, file_id) = load_source(path)?;
-    let file = &sources[file_id];
-    let parsed = parse_module(file);
-    let syntax_failed = print_diagnostics(&sources, parsed.all_diagnostics());
+    let snapshot = WorkspaceHirSnapshot::load(path)?;
+    let syntax_failed = workspace_syntax_failed(&snapshot, |sources, diagnostics| {
+        print_diagnostics(sources, diagnostics.iter())
+    });
     if syntax_failed {
         return Ok(ExitCode::FAILURE);
     }
 
-    let lowered = lower_hir_module(&parsed.module);
-    let hir_lowering_failed = print_diagnostics(&sources, lowered.diagnostics());
-    let validation_mode = if hir_lowering_failed {
-        ValidationMode::Structural
-    } else {
-        ValidationMode::RequireResolvedNames
-    };
-    let validation = lowered.module().validate(validation_mode);
-    let hir_validation_failed = print_diagnostics(&sources, validation.diagnostics());
+    let (lowering_failed, validation_failed) = workspace_hir_failed(
+        &snapshot,
+        |sources, diagnostics| print_diagnostics(sources, diagnostics.iter()),
+        |sources, diagnostics| print_diagnostics(sources, diagnostics.iter()),
+    );
+    if lowering_failed || validation_failed {
+        return Ok(ExitCode::FAILURE);
+    }
+
+    let parsed = snapshot.entry_parsed();
+    println!(
+        "syntax + HIR passed: {} ({} surface item{}, {} workspace file{})",
+        path.display(),
+        parsed.cst().items.len(),
+        plural_suffix(parsed.cst().items.len()),
+        snapshot.files.len(),
+        plural_suffix(snapshot.files.len())
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_markup_file(path: &Path, requested_view: Option<&str>) -> Result<ExitCode, String> {
+    let snapshot = WorkspaceHirSnapshot::load(path)?;
+    let syntax_failed = workspace_syntax_failed(&snapshot, |sources, diagnostics| {
+        print_diagnostics(sources, diagnostics.iter())
+    });
+    if syntax_failed {
+        return Ok(ExitCode::FAILURE);
+    }
+
+    let (hir_lowering_failed, hir_validation_failed) = workspace_hir_failed(
+        &snapshot,
+        |sources, diagnostics| print_diagnostics(sources, diagnostics.iter()),
+        |sources, diagnostics| print_diagnostics(sources, diagnostics.iter()),
+    );
     if hir_lowering_failed || hir_validation_failed {
         return Ok(ExitCode::FAILURE);
     }
 
-    let artifact = match prepare_run_artifact(&sources, lowered.module(), requested_view) {
+    let lowered = snapshot.entry_hir();
+    let artifact = match prepare_run_artifact(&snapshot.sources, lowered.module(), requested_view) {
         Ok(artifact) => artifact,
         Err(message) => {
             eprintln!("{message}");
@@ -1422,6 +1508,11 @@ impl RunSession {
                     })?;
             }
         }
+        let queued_window_keys = self.executor.host_mut().drain_window_key_events();
+        for event in queued_window_keys {
+            self.driver
+                .dispatch_window_key_event(event.name.as_ref(), event.repeated);
+        }
         let failures = self.driver.drain_failures();
         if !failures.is_empty() {
             let mut rendered = String::from("live runtime failed during `aivi run`:\n");
@@ -2186,29 +2277,23 @@ fn text_literal_static_text(text: &aivi_hir::TextLiteral) -> Option<String> {
 }
 
 fn compile_file(path: &Path, output: Option<&Path>) -> Result<ExitCode, String> {
-    let (sources, file_id) = load_source(path)?;
-    let file = &sources[file_id];
-    let parsed = parse_module(file);
-    let syntax_failed =
-        print_stage_diagnostics(CompileStage::Syntax, &sources, parsed.all_diagnostics());
+    let snapshot = WorkspaceHirSnapshot::load(path)?;
+    let syntax_failed = workspace_syntax_failed(&snapshot, |sources, diagnostics| {
+        print_stage_diagnostics(CompileStage::Syntax, sources, diagnostics.iter())
+    });
     if syntax_failed {
         print_pipeline_stop(CompileStage::Syntax);
         return Ok(ExitCode::FAILURE);
     }
 
-    let lowered = lower_hir_module(&parsed.module);
-    let hir_lowering_failed =
-        print_stage_diagnostics(CompileStage::HirLowering, &sources, lowered.diagnostics());
-    let validation_mode = if hir_lowering_failed {
-        ValidationMode::Structural
-    } else {
-        ValidationMode::RequireResolvedNames
-    };
-    let validation = lowered.module().validate(validation_mode);
-    let hir_validation_failed = print_stage_diagnostics(
-        CompileStage::HirValidation,
-        &sources,
-        validation.diagnostics(),
+    let (hir_lowering_failed, hir_validation_failed) = workspace_hir_failed(
+        &snapshot,
+        |sources, diagnostics| {
+            print_stage_diagnostics(CompileStage::HirLowering, sources, diagnostics.iter())
+        },
+        |sources, diagnostics| {
+            print_stage_diagnostics(CompileStage::HirValidation, sources, diagnostics.iter())
+        },
     );
     if hir_lowering_failed {
         print_pipeline_stop(CompileStage::HirLowering);
@@ -2219,6 +2304,8 @@ fn compile_file(path: &Path, output: Option<&Path>) -> Result<ExitCode, String> 
         return Ok(ExitCode::FAILURE);
     }
 
+    let parsed = snapshot.entry_parsed();
+    let lowered = snapshot.entry_hir();
     let hir_module = lowered.module();
     let core = match lower_core_module(hir_module) {
         Ok(core) => core,
@@ -2278,8 +2365,8 @@ fn compile_file(path: &Path, output: Option<&Path>) -> Result<ExitCode, String> 
     println!("compile pipeline passed: {}", path.display());
     println!(
         "  syntax: ok ({} surface item{})",
-        parsed.module.items.len(),
-        plural_suffix(parsed.module.items.len())
+        parsed.cst().items.len(),
+        plural_suffix(parsed.cst().items.len())
     );
     let hir_item_count = hir_module.items().iter().count();
     println!(
@@ -2560,21 +2647,63 @@ fn print_usage() {
 #[cfg(test)]
 mod tests {
     use super::{
-        HydratedRunNode, RunHydrationStaticState, check_file, plan_run_hydration,
-        prepare_run_artifact,
+        HydratedRunNode, RunHydrationStaticState, WorkspaceHirSnapshot, check_file,
+        plan_run_hydration, prepare_run_artifact,
     };
     use aivi_backend::RuntimeValue;
     use aivi_base::SourceDatabase;
     use aivi_gtk::{GtkBridgeNodeKind, RuntimePropertyBinding, RuntimeShowMountPolicy};
     use aivi_hir::{ValidationMode, lower_module as lower_hir_module};
     use aivi_syntax::parse_module;
-    use std::{collections::BTreeMap, path::PathBuf, process::ExitCode};
+    use std::{
+        collections::BTreeMap,
+        env, fs,
+        path::{Path, PathBuf},
+        process::ExitCode,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn fixture(path: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
             .join("fixtures/frontend")
             .join(path)
+    }
+
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        fn new(prefix: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock should be after unix epoch")
+                .as_nanos();
+            let path =
+                env::temp_dir().join(format!("aivi-cli-{prefix}-{}-{unique}", std::process::id()));
+            fs::create_dir_all(&path).expect("temporary directory should be creatable");
+            Self { path }
+        }
+
+        fn write(&self, relative: &str, text: &str) -> PathBuf {
+            let path = self.path.join(relative);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).expect("temporary parent directories should exist");
+            }
+            fs::write(&path, text).expect("temporary workspace file should be writable");
+            path
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
     }
 
     fn prepare_run_from_text(
@@ -2602,6 +2731,40 @@ mod tests {
             validation.diagnostics()
         );
         prepare_run_artifact(&sources, lowered.module(), requested_view)
+    }
+
+    fn prepare_run_from_workspace(
+        root: &TempDir,
+        entry_relative: &str,
+        requested_view: Option<&str>,
+    ) -> Result<super::RunArtifact, String> {
+        let snapshot = WorkspaceHirSnapshot::load(&root.path().join(entry_relative))?;
+        assert!(
+            !super::workspace_syntax_failed(&snapshot, |_, diagnostics| diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.severity == aivi_base::Severity::Error)),
+            "workspace fixture should parse cleanly"
+        );
+        let (hir_failed, validation_failed) = super::workspace_hir_failed(
+            &snapshot,
+            |_, diagnostics| {
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.severity == aivi_base::Severity::Error)
+            },
+            |_, diagnostics| {
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.severity == aivi_base::Severity::Error)
+            },
+        );
+        assert!(!hir_failed, "workspace fixture should lower cleanly");
+        assert!(
+            !validation_failed,
+            "workspace fixture should validate cleanly"
+        );
+        let lowered = snapshot.entry_hir();
+        prepare_run_artifact(&snapshot.sources, lowered.module(), requested_view)
     }
 
     fn control_window_source() -> &'static str {
@@ -2697,6 +2860,36 @@ val screenView =
             panic!("expected a root widget, found {:?}", root.kind.tag());
         };
         assert_eq!(widget.widget.segments().last().text(), "Window");
+    }
+
+    #[test]
+    fn prepare_run_accepts_workspace_type_imports() {
+        let workspace = TempDir::new("workspace-run");
+        workspace.write(
+            "main.aivi",
+            r#"
+use shared.types (
+    Greeting
+)
+
+type Welcome = Greeting
+
+val view =
+    <Window title="Workspace" />
+"#,
+        );
+        workspace.write(
+            "shared/types.aivi",
+            r#"
+type Greeting = Text
+
+export Greeting
+"#,
+        );
+
+        let artifact = prepare_run_from_workspace(&workspace, "main.aivi", None)
+            .expect("workspace run preparation should resolve imported types");
+        assert_eq!(artifact.view_name.as_ref(), "view");
     }
 
     #[test]

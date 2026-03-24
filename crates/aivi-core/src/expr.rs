@@ -56,7 +56,62 @@ pub enum Reference {
     HirItem(HirItemId),
     SumConstructor(SumConstructorHandle),
     DomainMember(DomainMemberHandle),
+    BuiltinClassMember(BuiltinClassMemberIntrinsic),
     Builtin(BuiltinTerm),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuiltinClassMemberIntrinsic {
+    StructuralEq,
+    Compare {
+        subject: BuiltinOrdSubject,
+        ordering_item: HirItemId,
+    },
+    Append(BuiltinAppendCarrier),
+    Empty(BuiltinAppendCarrier),
+    Map(BuiltinFunctorCarrier),
+    Pure(BuiltinApplicativeCarrier),
+    Apply(BuiltinApplyCarrier),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuiltinFunctorCarrier {
+    List,
+    Option,
+    Result,
+    Validation,
+    Signal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuiltinApplicativeCarrier {
+    List,
+    Option,
+    Result,
+    Validation,
+    Signal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuiltinApplyCarrier {
+    List,
+    Option,
+    Result,
+    Signal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuiltinAppendCarrier {
+    Text,
+    List,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuiltinOrdSubject {
+    Int,
+    Bool,
+    Text,
+    Ordering,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

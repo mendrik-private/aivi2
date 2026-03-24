@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     error::Error,
     fmt,
     rc::Rc,
@@ -7,7 +7,11 @@ use std::{
 };
 
 use aivi_hir::{NamePath, TextLiteral, TextSegment};
-use gtk::{Orientation, glib::SignalHandlerId, prelude::*};
+use gtk::{
+    Orientation,
+    glib::{self, SignalHandlerId},
+    prelude::*,
+};
 
 use crate::{
     GtkEventRoute, GtkEventRouteId, GtkRuntimeHost, RuntimeSetterBinding, StaticPropertyPlan,
@@ -42,6 +46,12 @@ pub struct GtkQueuedEvent<V> {
     pub value: V,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GtkQueuedWindowKeyEvent {
+    pub name: Box<str>,
+    pub repeated: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GtkConcreteEventPayload {
     Unit,
@@ -64,6 +74,35 @@ impl<V> Default for GtkEventQueue<V> {
         Self {
             events: Mutex::new(VecDeque::new()),
         }
+    }
+}
+
+struct GtkWindowKeyQueue {
+    events: Mutex<VecDeque<GtkQueuedWindowKeyEvent>>,
+}
+
+impl Default for GtkWindowKeyQueue {
+    fn default() -> Self {
+        Self {
+            events: Mutex::new(VecDeque::new()),
+        }
+    }
+}
+
+impl GtkWindowKeyQueue {
+    fn push(&self, event: GtkQueuedWindowKeyEvent) {
+        self.events
+            .lock()
+            .expect("GtkWindowKeyQueue mutex should not be poisoned")
+            .push_back(event);
+    }
+
+    fn drain(&self) -> Vec<GtkQueuedWindowKeyEvent> {
+        self.events
+            .lock()
+            .expect("GtkWindowKeyQueue mutex should not be poisoned")
+            .drain(..)
+            .collect()
     }
 }
 
@@ -93,6 +132,7 @@ where
     widgets: BTreeMap<u64, MountedWidget>,
     events: BTreeMap<u64, MountedEvent>,
     queued_events: Rc<GtkEventQueue<V>>,
+    queued_window_keys: Rc<GtkWindowKeyQueue>,
     event_notifier: Option<Rc<dyn Fn()>>,
 }
 
@@ -107,6 +147,7 @@ where
             widgets: BTreeMap::new(),
             events: BTreeMap::new(),
             queued_events: Rc::new(GtkEventQueue::default()),
+            queued_window_keys: Rc::new(GtkWindowKeyQueue::default()),
             event_notifier: None,
         }
     }
@@ -136,6 +177,10 @@ where
         self.queued_events.drain()
     }
 
+    pub fn drain_window_key_events(&mut self) -> Vec<GtkQueuedWindowKeyEvent> {
+        self.queued_window_keys.drain()
+    }
+
     pub fn present_root_windows(&self) {
         for mounted in self.widgets.values() {
             if mounted.kind == SupportedWidget::Window && mounted.widget.parent().is_none() {
@@ -155,10 +200,40 @@ where
     ) -> Result<(SupportedWidget, gtk::Widget), GtkConcreteHostError> {
         let name = widget_name(widget);
         let (kind, widget) = match name {
-            "Window" => (
-                SupportedWidget::Window,
-                gtk::Window::new().upcast::<gtk::Widget>(),
-            ),
+            "Window" => {
+                let window = gtk::Window::new();
+                let key_events = self.queued_window_keys.clone();
+                let notifier = self.event_notifier.clone();
+                let pressed = Rc::new(Mutex::new(BTreeSet::<Box<str>>::new()));
+                let released = pressed.clone();
+                let controller = gtk::EventControllerKey::new();
+                controller.connect_key_pressed(move |_, key, _, _| {
+                    let Some(name) = normalize_window_key_name(key) else {
+                        return glib::Propagation::Proceed;
+                    };
+                    let repeated = {
+                        let mut pressed = pressed
+                            .lock()
+                            .expect("window key state mutex should not be poisoned");
+                        !pressed.insert(name.clone())
+                    };
+                    key_events.push(GtkQueuedWindowKeyEvent { name, repeated });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                    glib::Propagation::Proceed
+                });
+                controller.connect_key_released(move |_, key, _, _| {
+                    if let Some(name) = normalize_window_key_name(key) {
+                        released
+                            .lock()
+                            .expect("window key state mutex should not be poisoned")
+                            .remove(name.as_ref());
+                    }
+                });
+                window.add_controller(controller);
+                (SupportedWidget::Window, window.upcast::<gtk::Widget>())
+            }
             "Box" => (
                 SupportedWidget::Box,
                 gtk::Box::new(Orientation::Vertical, 0).upcast::<gtk::Widget>(),
@@ -891,6 +966,20 @@ fn widget_name(path: &NamePath) -> &str {
         .text()
 }
 
+fn normalize_window_key_name(key: gtk::gdk::Key) -> Option<Box<str>> {
+    let name = key.name()?;
+    let mapped = match name.as_str() {
+        "Up" => "ArrowUp".to_owned(),
+        "Down" => "ArrowDown".to_owned(),
+        "Left" => "ArrowLeft".to_owned(),
+        "Right" => "ArrowRight".to_owned(),
+        "space" => "Space".to_owned(),
+        "Return" | "KP_Enter" => "Enter".to_owned(),
+        other => other.to_owned(),
+    };
+    Some(mapped.into_boxed_str())
+}
+
 fn text_literal(text: &TextLiteral) -> String {
     text.segments
         .iter()
@@ -1122,6 +1211,41 @@ val view =
             assert_eq!(queued.len(), 1);
             assert_eq!(queued[0].route, routes[0].id);
             assert_eq!(queued[0].value, TestValue::Unit);
+        });
+    }
+
+    #[test]
+    fn concrete_host_attaches_window_key_controllers() {
+        gtk::test_synced(|| {
+            let graph = lower_graph(
+                "gtk-window-keys.aivi",
+                r#"
+val view =
+    <Window title="Host" />
+"#,
+            );
+            let executor = GtkRuntimeExecutor::new_with_values(
+                graph,
+                GtkConcreteHost::<TestValue>::default(),
+                [],
+            )
+            .expect("concrete GTK host should mount a static window");
+            let root = executor
+                .root_widgets()
+                .expect("window root should exist")
+                .into_iter()
+                .next()
+                .expect("expected one window root");
+            let window = executor
+                .host()
+                .widget(&root)
+                .expect("window handle should resolve")
+                .downcast::<gtk::Window>()
+                .expect("root should be a GTK window");
+            assert!(
+                window.observe_controllers().n_items() > 0,
+                "window widgets should install a key controller for @source window.keyDown events"
+            );
         });
     }
 
