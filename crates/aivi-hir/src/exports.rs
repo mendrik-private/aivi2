@@ -407,6 +407,7 @@ fn resolve_type_constructor(
             | ImportBindingMetadata::Value { .. }
             | ImportBindingMetadata::IntrinsicValue { .. }
             | ImportBindingMetadata::OpaqueValue
+            | ImportBindingMetadata::AmbientValue { .. }
             | ImportBindingMetadata::TypeConstructor { .. }
             | ImportBindingMetadata::BuiltinTerm(_)
             | ImportBindingMetadata::AmbientType => None,

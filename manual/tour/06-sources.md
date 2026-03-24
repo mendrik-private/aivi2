@@ -54,7 +54,7 @@ The snake game uses this to drive the game loop:
 ```aivi
 type Status = Running | GameOver
 
-type Pixel = { x: Int, y: Int }
+type Pixel = Pixel Int Int
 
 type Direction =
   | Up
@@ -71,7 +71,8 @@ type Game = {
     snake: List Pixel,
     food: Pixel,
     score: Int,
-    status: Status
+    status: Status,
+    seed: Int
 }
 
 val boardSize:BoardSize = {
@@ -80,10 +81,15 @@ val boardSize:BoardSize = {
 }
 
 val initialGame:Game = {
-    snake: [],
-    food: { x: 10, y: 1 },
+    snake: [
+        Pixel 6 5,
+        Pixel 5 5,
+        Pixel 4 5
+    ],
+    food: Pixel 10 1,
     score: 0,
-    status: Running
+    status: Running,
+    seed: 2463534242
 }
 
 val direction:Direction = Right
@@ -132,7 +138,9 @@ sig submitClicked : Signal Unit
 This is an input signal — it has no body and is driven externally. In markup, connect it via
 `onClick={submitClicked}` on a `<Button>` element.
 
-The source name `"submit"` corresponds to the `id` attribute on a `<Button>` in markup:
+This is a direct widget binding. Unlike the provider-based `@source button.clicked "id"` pattern
+used for recurrent signals, `onClick={submitClicked}` does not need a separate `id` or `@source`
+declaration:
 
 ```aivi
 sig submitClicked : Signal Unit

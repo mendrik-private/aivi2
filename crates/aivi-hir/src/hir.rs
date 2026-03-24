@@ -299,6 +299,9 @@ pub enum ImportBindingMetadata {
         ty: ImportValueType,
     },
     OpaqueValue,
+    AmbientValue {
+        name: Box<str>,
+    },
     TypeConstructor {
         kind: Kind,
     },

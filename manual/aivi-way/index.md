@@ -23,7 +23,7 @@ The runtime wires all of this together. Your code is a pure description of the r
 
 In most UI frameworks, you mutate state in response to events:
 
-```
+```text
 // typical imperative approach (pseudo-code)
 button.on('click', () => {
   this.count += 1
@@ -33,11 +33,21 @@ button.on('click', () => {
 
 In AIVI, you declare the relationships once:
 
-```text
-// declare a helper function 'add' that adds x to n
-// bind 'count' to the "increment" button click, starting at 0
-// on each click, fold "add 1" into the accumulated count
-// derive 'labelText' from count, formatted as "Clicked N times"
+```aivi
+fun addOne:Int #n:Int =>
+    n + 1
+
+provider button.clicked
+    wakeup: sourceEvent
+    argument id: Text
+
+@source button.clicked "increment"
+sig count : Signal Int =
+    0
+     @|> addOne
+     <|@ addOne
+
+sig labelText : Signal Text = "Clicked {count} times"
 ```
 
 `labelText` is always `"Clicked {count} times"`. You do not update it. You declared it.
@@ -47,10 +57,51 @@ In AIVI, you declare the relationships once:
 The rule of thumb: if a value can change, it is a signal. If it is derived from a signal,
 it is also a signal. If it is constant, it is a `val`.
 
-```text
-// declare 'boardSize' as a constant with width 12 and height 10
-// 'game' is a signal that changes on every timer tick
-// derive 'board' from game by applying toBoard with boardSize, also a signal
+```aivi
+type Status = Running | GameOver
+
+type Pixel = Pixel Int Int
+
+type BoardSize = {
+    width: Int,
+    height: Int
+}
+
+type Game = {
+    snake: List Pixel,
+    food: Pixel,
+    score: Int,
+    status: Status,
+    seed: Int
+}
+
+fun toBoard:Game #size:BoardSize #game:Game =>
+    game
+
+val boardSize:BoardSize = {
+    width: 12,
+    height: 10
+}
+
+@source timer.every 160 with {
+    immediate: True,
+    coalesce: True
+}
+sig game : Signal Game = {
+    snake: [
+        Pixel 6 5,
+        Pixel 5 5,
+        Pixel 4 5
+    ],
+    food: Pixel 10 1,
+    score: 0,
+    status: Running,
+    seed: 2463534242
+}
+
+sig board : Signal Game =
+    game
+     |> toBoard boardSize
 ```
 
 ## Keep functions pure
@@ -71,6 +122,6 @@ Functions just describe *how to transform* a value.
 |---|---|
 | [Async Data](/aivi-way/async-data) | `@source http.get` → `Ok`/`Err` pipe chains |
 | [Forms](/aivi-way/forms) | Per-field signals + `?\|>` gate + combined signal |
-| [State](/aivi-way/state) | Local `sig` vs shared domain-level signal |
+| [State](/aivi-way/state) | Local `sig` + shared top-level signals |
 | [List Rendering](/aivi-way/list-rendering) | `<each>` + `*\|>` fan-out |
 | [Error Handling](/aivi-way/error-handling) | `Ok`/`Err` as values, not exceptions |

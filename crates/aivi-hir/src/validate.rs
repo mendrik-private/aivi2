@@ -38,7 +38,7 @@ use crate::{
         ResolvedSourceContractType, ResolvedSourceTypeConstructor,
         SourceContractResolutionErrorKind, SourceContractTypeResolver,
     },
-    typecheck::{TypeConstraint, typecheck_module},
+    typecheck::{TypeConstraint, expression_matches, typecheck_module},
 };
 
 /// Validation strictness for HIR modules.
@@ -6486,6 +6486,7 @@ impl Validator<'_> {
             ImportBindingMetadata::Value { .. }
             | ImportBindingMetadata::IntrinsicValue { .. }
             | ImportBindingMetadata::OpaqueValue
+            | ImportBindingMetadata::AmbientValue { .. }
             | ImportBindingMetadata::BuiltinTerm(_)
             | ImportBindingMetadata::AmbientType
             | ImportBindingMetadata::Bundle(_)
@@ -7547,6 +7548,14 @@ impl GateExprInfo {
         self.ty = actual.to_gate_type();
         self.actual = Some(actual);
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PipeFunctionSignatureMatch {
+    pub(crate) callee_expr: ExprId,
+    pub(crate) explicit_arguments: Vec<ExprId>,
+    pub(crate) parameter_types: Vec<GateType>,
+    pub(crate) result_type: GateType,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -8786,6 +8795,7 @@ impl<'a> GateTypeContext<'a> {
                 Some(self.lower_import_value_type(ty))
             }
             ImportBindingMetadata::TypeConstructor { .. }
+            | ImportBindingMetadata::AmbientValue { .. }
             | ImportBindingMetadata::OpaqueValue
             | ImportBindingMetadata::BuiltinType(_)
             | ImportBindingMetadata::BuiltinTerm(_)
@@ -10773,6 +10783,177 @@ impl<'a> GateTypeContext<'a> {
         Some((instantiated_parameters, result))
     }
 
+    fn flatten_apply_expr(&self, expr_id: ExprId) -> (ExprId, Vec<ExprId>) {
+        let mut callee = expr_id;
+        let mut segments = Vec::new();
+        while let ExprKind::Apply {
+            callee: next_callee,
+            arguments: next_arguments,
+        } = &self.module.exprs()[callee].kind
+        {
+            segments.push(next_arguments.iter().copied().collect::<Vec<_>>());
+            callee = *next_callee;
+        }
+        let mut arguments = Vec::new();
+        for segment in segments.into_iter().rev() {
+            arguments.extend(segment);
+        }
+        (callee, arguments)
+    }
+
+    fn match_function_parameter_annotation(
+        &mut self,
+        annotation: TypeId,
+        actual: &GateType,
+        bindings: &mut PolyTypeBindings,
+    ) -> Option<()> {
+        if let Some(lowered) = self.lower_annotation(annotation) {
+            lowered.same_shape(actual).then_some(())
+        } else {
+            self.match_poly_hir_type(annotation, actual, bindings)
+                .then_some(())
+        }
+    }
+
+    fn instantiate_function_parameter_annotation(
+        &mut self,
+        annotation: TypeId,
+        bindings: &PolyTypeBindings,
+    ) -> Option<GateType> {
+        self.lower_annotation(annotation)
+            .or_else(|| self.instantiate_poly_hir_type(annotation, bindings))
+    }
+
+    pub(crate) fn match_pipe_function_signature(
+        &mut self,
+        expr_id: ExprId,
+        env: &GateExprEnv,
+        ambient: &GateType,
+        expected_result: Option<&GateType>,
+    ) -> Option<PipeFunctionSignatureMatch> {
+        let (callee_expr, explicit_arguments) = self.flatten_apply_expr(expr_id);
+        let ExprKind::Name(reference) = &self.module.exprs()[callee_expr].kind else {
+            return None;
+        };
+        if let ResolutionState::Resolved(TermResolution::Item(item_id)) =
+            reference.resolution.as_ref()
+        {
+            let Item::Function(function) = &self.module.items()[*item_id] else {
+                return None;
+            };
+            if function.parameters.len() != explicit_arguments.len() + 1
+                || function.annotation.is_none()
+            {
+                return None;
+            }
+
+            let mut bindings = PolyTypeBindings::new();
+            for (argument, parameter) in explicit_arguments.iter().zip(function.parameters.iter()) {
+                let annotation = parameter.annotation?;
+                let argument_info = self.infer_expr(*argument, env, Some(ambient));
+                let Some(argument_ty) = argument_info.actual_gate_type().or(argument_info.ty) else {
+                    continue;
+                };
+                self.match_function_parameter_annotation(annotation, &argument_ty, &mut bindings)?;
+            }
+
+            let ambient_parameter = function
+                .parameters
+                .last()
+                .expect("checked pipe arity above");
+            let ambient_annotation = ambient_parameter.annotation?;
+            self.match_function_parameter_annotation(ambient_annotation, ambient, &mut bindings)?;
+
+            let result_annotation = function.annotation?;
+            if let Some(expected) = expected_result {
+                self.match_function_parameter_annotation(result_annotation, expected, &mut bindings)?;
+            }
+
+            let mut parameter_types = Vec::with_capacity(function.parameters.len());
+            for parameter in &function.parameters {
+                let annotation = parameter.annotation?;
+                parameter_types
+                    .push(self.instantiate_function_parameter_annotation(annotation, &bindings)?);
+            }
+            let result_type =
+                self.instantiate_function_parameter_annotation(result_annotation, &bindings)?;
+
+            return Some(PipeFunctionSignatureMatch {
+                callee_expr,
+                explicit_arguments,
+                parameter_types,
+                result_type,
+            });
+        }
+
+        let explicit_argument_types = explicit_arguments
+            .iter()
+            .map(|argument| {
+                let argument_info = self.infer_expr(*argument, env, Some(ambient));
+                argument_info.actual_gate_type().or(argument_info.ty)
+            })
+            .collect::<Vec<_>>();
+        let candidates = self.class_member_candidates(reference)?;
+        let mut matches = Vec::new();
+        for candidate in candidates {
+            let (_, member_annotation, _) = self.class_member_signature(candidate)?;
+            let mut bindings = PolyTypeBindings::new();
+            let mut current = member_annotation;
+            let mut parameter_type_ids = Vec::with_capacity(explicit_arguments.len() + 1);
+            for argument_ty in explicit_argument_types
+                .iter()
+                .cloned()
+                .chain(std::iter::once(Some(ambient.clone())))
+            {
+                let TypeKind::Arrow { parameter, result } = self.module.types()[current].kind.clone()
+                else {
+                    continue;
+                };
+                if let Some(argument_ty) = argument_ty.as_ref()
+                    && !self.match_poly_hir_type(parameter, argument_ty, &mut bindings)
+                {
+                    parameter_type_ids.clear();
+                    break;
+                }
+                parameter_type_ids.push(parameter);
+                current = result;
+            }
+            if parameter_type_ids.len() != explicit_arguments.len() + 1 {
+                continue;
+            }
+            if let Some(expected) = expected_result
+                && !self.match_poly_hir_type(current, expected, &mut bindings)
+            {
+                continue;
+            }
+            let Some(parameter_types) = parameter_type_ids
+                .into_iter()
+                .map(|parameter| self.instantiate_poly_hir_type(parameter, &bindings))
+                .collect::<Option<Vec<_>>>()
+            else {
+                continue;
+            };
+            let Some(result_type) = self.instantiate_poly_hir_type(current, &bindings) else {
+                continue;
+            };
+            if let Some(expected) = expected_result
+                && !result_type.same_shape(expected)
+            {
+                continue;
+            }
+            matches.push(PipeFunctionSignatureMatch {
+                callee_expr,
+                explicit_arguments: explicit_arguments.clone(),
+                parameter_types,
+                result_type,
+            });
+        }
+        if matches.len() != 1 {
+            return None;
+        }
+        matches.pop()
+    }
+
     fn infer_polymorphic_function_apply_expr(
         &mut self,
         reference: &TermReference,
@@ -10879,7 +11060,7 @@ impl<'a> GateTypeContext<'a> {
         let mut info = self.infer_expr(expr_id, env, Some(&ambient));
         if info.ty.is_none() {
             if let Some(function_body) =
-                self.infer_single_parameter_function_pipe_body(expr_id, &ambient)
+                self.infer_function_pipe_body(expr_id, env, &ambient, None)
             {
                 info = function_body;
             }
@@ -10986,78 +11167,35 @@ impl<'a> GateTypeContext<'a> {
         self.finalize_expr_info(info)
     }
 
-    fn infer_single_parameter_function_pipe_body(
+    fn infer_function_pipe_body(
         &mut self,
         expr_id: ExprId,
+        env: &GateExprEnv,
         ambient: &GateType,
+        expected_result: Option<&GateType>,
     ) -> Option<GateExprInfo> {
-        let ExprKind::Name(reference) = &self.module.exprs()[expr_id].kind else {
-            return None;
-        };
-        let ResolutionState::Resolved(TermResolution::Item(item_id)) =
-            reference.resolution.as_ref()
-        else {
-            return None;
-        };
-        let Item::Function(function) = &self.module.items()[*item_id] else {
-            return None;
-        };
-        if function.parameters.len() != 1 {
-            return None;
-        }
-        let function = function.clone();
-        let parameter = function.parameters.first()?;
-        let mut bindings = PolyTypeBindings::new();
-        if let Some(annotation) = parameter.annotation {
-            if let Some(parameter_ty) = self.lower_annotation(annotation) {
-                if !parameter_ty.same_shape(ambient) {
-                    return Some(GateExprInfo {
-                        issues: vec![GateIssue::InvalidPipeStageInput {
-                            span: self.module.exprs()[expr_id].span,
-                            stage: "pipe",
-                            expected: ambient.to_string(),
-                            actual: parameter_ty.to_string(),
-                        }],
-                        ..GateExprInfo::default()
-                    });
-                }
-            } else if !function.type_parameters.is_empty() {
-                if !self.match_poly_hir_type(annotation, ambient, &mut bindings) {
-                    return Some(GateExprInfo {
-                        issues: vec![GateIssue::InvalidPipeStageInput {
-                            span: self.module.exprs()[expr_id].span,
-                            stage: "pipe",
-                            expected: ambient.to_string(),
-                            actual: self
-                                .module
-                                .types()
-                                .get(annotation)
-                                .map(|_| "incompatible function input".to_owned())
-                                .unwrap_or_else(|| "incompatible function input".to_owned()),
-                        }],
-                        ..GateExprInfo::default()
-                    });
-                }
-            } else {
-                return None;
+        let plan = self.match_pipe_function_signature(expr_id, env, ambient, expected_result)?;
+        let mut info = GateExprInfo::default();
+        for (argument, expected) in plan
+            .explicit_arguments
+            .iter()
+            .zip(plan.parameter_types.iter())
+        {
+            let argument_info = self.infer_expr(*argument, env, Some(ambient));
+            let argument_ty = argument_info.actual_gate_type().or(argument_info.ty.clone());
+            info.merge(argument_info);
+            let matches_expected = argument_ty
+                .as_ref()
+                .is_some_and(|actual| actual.same_shape(expected))
+                || expression_matches(self.module, *argument, env, expected);
+            if !matches_expected {
+                return Some(info);
             }
         }
-
-        let mut env = GateExprEnv::default();
-        env.locals.insert(parameter.binding, ambient.clone());
-        let expected = function
-            .annotation
-            .and_then(|annotation| self.lower_annotation(annotation))
-            .or_else(|| {
-                (!bindings.is_empty())
-                    .then(|| {
-                        function.annotation.and_then(|annotation| {
-                            self.instantiate_poly_hir_type(annotation, &bindings)
-                        })
-                    })
-                    .flatten()
-            });
-        Some(self.infer_expr(function.body, &env, expected.as_ref()))
+        if info.issues.is_empty() {
+            info.ty = Some(plan.result_type);
+        }
+        Some(info)
     }
 
     pub(crate) fn infer_gate_stage(

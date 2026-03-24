@@ -1,7 +1,7 @@
 # State
 
 AIVI programs can have state at two levels: **local** (owned by one component) and **shared**
-(owned by the application domain and accessible across components).
+(used by multiple parts of the program).
 
 ## Local state with sig
 
@@ -10,19 +10,54 @@ It is created when the component mounts and destroyed when it unmounts.
 
 A counter is the canonical example of local state:
 
-```text
-// declare a local signal 'count' starting at 0
-// bind 'increment' to the "increment" button click, updating count by adding 1
-// bind 'decrement' to the "decrement" button click, updating count by subtracting 1
-// derive 'label' as the text representation of count
-// render a Window titled "Counter" with a vertical Box
-//   containing a Label bound to label, a "+" Button, and a "−" Button
-// export main as the application entry point
+```aivi
+type Orientation =
+  | Vertical
+  | Horizontal
+
+fun applyIncrement:Int #id:Text #n:Int =>
+    id == "increment"
+     T|> n + 1
+     F|> n
+
+fun applyDecrement:Int #id:Text #n:Int =>
+    id == "decrement"
+     T|> n - 1
+     F|> n
+
+fun updateFromButton:Int #id:Text #n:Int =>
+    n
+     |> applyIncrement id
+     |> applyDecrement id
+
+provider button.clicked
+    wakeup: sourceEvent
+    argument id: Text
+
+@source button.clicked "increment"
+@source button.clicked "decrement"
+sig count : Signal Int =
+    0
+     @|> updateFromButton
+     <|@ updateFromButton
+
+sig label : Signal Text = "{count}"
+
+val main =
+    <Window title="Counter">
+        <Box orientation={Vertical} spacing={8}>
+            <Label text={label} />
+            <Button id="increment" label="+" />
+            <Button id="decrement" label="-" />
+        </Box>
+    </Window>
+
+export main
 ```
 
-`count` starts at `0`. `@|>` opens the recurrence on `increment`; `<|@` adds `decrement` as
-a second recurse point. Each event folds through `update`. Nothing else in the application
-can see or modify `count`.
+`count` starts at `0`. The two button ids drive the recurrence, and `updateFromButton` inspects
+the incoming id to decide whether to increment or decrement. Nothing else in the application can
+see or modify `count` unless you explicitly derive another signal from it.
 
 ## When to use local state
 
@@ -30,76 +65,132 @@ Use a local `sig` when:
 
 - The state is only relevant to one part of the UI.
 - No other component needs to read or write it.
-- The state should reset when the component is removed (e.g., a modal's open/closed state).
+- The state should reset when the component is removed.
 
 Examples: accordion open/closed, tooltip visibility, input focus, scroll position.
 
-## Shared state with domain
+## Shared state as top-level signals
 
-When state needs to be accessible from multiple parts of the UI, it belongs in a `domain`:
+When state needs to be accessible from multiple parts of the UI, model it as named top-level
+signals rather than inventing a separate mutable container:
 
-```text
-// declare a domain 'AppState' holding application-wide signals
-// 'currentUser' starts as None (no logged-in user)
-// 'theme' starts as Light
-// 'notifications' starts as an empty list
+```aivi
+type Theme = Light | Dark
+
+type User = {
+    id: Int,
+    name: Text
+}
+
+type Notification = {
+    id: Int,
+    message: Text
+}
+
+sig currentUser : Signal (Option User) = None
+sig theme : Signal Theme = Light
+sig notifications : Signal (List Notification) = []
 ```
 
-A `domain` is a named collection of signals. Any component can read from a domain signal.
-Only the domain itself (or providers) can write to it.
+These are shared because any other signal or markup binding can derive from them.
+The current compiler does not have a separate `domain` state feature — plain top-level signals are
+the right tool here.
 
-## Reading from a domain
+## Reading shared state
 
-```text
-// derive 'headerUser' by reading AppState.currentUser
-// if a user is logged in, use their name
-// if no user, use the text "Guest"
+```aivi
+type User = {
+    id: Int,
+    name: Text
+}
+
+sig currentUser : Signal (Option User) = None
+
+fun headerUserName:Text #user:(Option User) =>
+    user
+     ||> Some u => u.name
+     ||> None   => "Guest"
+
+sig headerUser : Signal Text =
+    currentUser
+     |> headerUserName
 ```
 
-The dot notation `AppState.currentUser` reads a signal from the domain.
+A header label, profile panel, and status bar can all derive their own views from the same shared
+signal without mutating it directly.
 
-## Writing to a domain
+## Updating shared state from sources
 
-Domain signals accept updates through `provider` declarations:
+Shared state is still source-driven. Instead of "writing into a domain", derive the next shared
+value from the result of a source:
 
-```text
-// declare a provider 'LoginProvider' that writes to the AppState domain
-// bind 'loginResult' to the result of an HTTP POST to "/api/login"
-// when the login succeeds, set AppState.currentUser to Some user
-// when the login fails, set AppState.currentUser to None
+```aivi
+type HttpError = {
+    message: Text,
+    code: Int
+}
+
+type User = {
+    id: Int,
+    name: Text
+}
+
+type Credentials = {
+    username: Text,
+    password: Text
+}
+
+sig credentials : Signal Credentials = {
+    username: "",
+    password: ""
+}
+
+@source http.post "/api/login" with {
+    body: credentials
+}
+sig loginResult : Signal (Result HttpError User)
+
+fun userFromLogin:(Option User) #result:(Result HttpError User) =>
+    result
+     ||> Ok user => Some user
+     ||> Err _   => None
+
+sig currentUser : Signal (Option User) =
+    loginResult
+     |> userFromLogin
 ```
 
-Providers are the only mechanism for writing to domain state.
-This keeps updates centralized and auditable.
+The source produces a `Result`, and the shared signal is just another pure transformation of that
+source output.
 
-## When to use domain state
+## When to use shared state
 
-Use domain state when:
+Use shared state when:
 
-- Multiple components read the same value (e.g., the current user's name in a header and a profile page).
-- State must survive component unmount (e.g., a shopping cart that persists while navigating).
-- You want a single source of truth for application-wide data.
+- Multiple components read the same value.
+- State must survive the lifetime of one particular view.
+- You want one authoritative signal that other signals derive from.
 
 ## Avoiding over-sharing
 
-Not every signal needs to be in a domain. Start with local state and only promote to domain
-state when you actually need it in two or more places.
+Not every signal needs to be shared. Start with local state and only promote to a top-level signal
+when you actually need it in two or more places.
 
 Over-shared state makes programs harder to understand because the number of things that can
-change a value grows. Local state's value can only change via its own declared recurrence.
+affect a value grows. Local state keeps the update path small and explicit.
 
 ## Comparison
 
-| | Local `sig` | Domain `sig` |
+| | Local `sig` | Shared top-level signal |
 |---|---|---|
-| Scope | Component | Application |
-| Lifetime | Component lifetime | Application lifetime |
-| Who can write | Declared recurrence | Provider declarations |
-| When to use | One component needs it | Multiple components or persists across navigation |
+| Scope | One component | Whole program |
+| Lifetime | Component lifetime | Program lifetime |
+| How it updates | Local recurrence and attached sources | Top-level source-driven derivation |
+| When to use | One component needs it | Multiple views depend on it |
 
 ## Summary
 
 - Local `sig` is scoped to one component and resets on unmount.
-- `domain` holds application-wide signals readable by any component.
-- `provider` is the only way to update domain signals.
-- Start local; promote to domain when needed.
+- Shared state is modeled with top-level signals derived from sources.
+- Read shared state by deriving more signals from it.
+- Start local; promote to shared when multiple views depend on it.

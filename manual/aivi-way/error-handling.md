@@ -7,8 +7,8 @@ that you handle them. Nothing can go wrong silently.
 
 ## Result E A: the error type
 
-```text
-// declare the Result type: Ok carrying a success value of type A, or Err carrying an error of type E
+```aivi
+type Result E A = Ok A | Err E
 ```
 
 A `Result E A` is either a successful value (`Ok A`) or an error (`Err E`).
@@ -18,10 +18,11 @@ Every operation that can fail returns `Result`.
 
 Use `\|\|>` to branch on `Ok` vs `Err`:
 
-```text
-// declare a function 'describeResult' matching on a Result Text Int
-// when Ok, format the number as "Success: N"
-// when Err, format the message as "Failed: msg"
+```aivi
+fun describeResult:Text #result:(Result Text Int) =>
+    result
+     ||> Ok n    => "Success: {n}"
+     ||> Err msg => "Failed: {msg}"
 ```
 
 The compiler ensures you handle both cases. You cannot accidentally ignore an error.
@@ -31,12 +32,29 @@ The compiler ensures you handle both cases. You cannot accidentally ignore an er
 A common pattern is a sequence of operations where each step can fail.
 Use `||>` to branch on `Ok` and `Err` at each step:
 
-```text
-// declare a function 'validateAge' that returns Ok n if n is between 1 and 149, otherwise Err with a message
-// declare a function 'validateUser' that parses raw input
-//   convert ageText to an integer, returning Err if it is not a number
-//   then validate the parsed integer with validateAge
-//   if both succeed, return Ok with a User record containing name and age
+```aivi
+type User = {
+    name: Text,
+    age: Int
+}
+
+fun parseIntResult:(Result Text Int) #text:Text =>
+    Ok 0
+
+fun validateAge:(Result Text Int) #n:Int =>
+    n > 0
+     T|> Ok n
+     F|> Err "Age must be positive"
+
+fun checkedAge:(Result Text Int) #ageText:Text =>
+    parseIntResult ageText
+     ||> Ok age  => validateAge age
+     ||> Err msg => Err msg
+
+fun validateUser:(Result Text User) #name:Text #ageText:Text =>
+    checkedAge ageText
+     ||> Ok age  => Ok { name: name, age: age }
+     ||> Err msg => Err msg
 ```
 
 ## Propagating errors in signals
@@ -44,30 +62,130 @@ Use `||>` to branch on `Ok` and `Err` at each step:
 When a signal holds a `Result`, downstream signals can propagate the `Ok` value or branch
 on the `Err`:
 
-```text
-// bind 'profileResult' to an HTTP GET for the user profile, producing Ok Profile or Err HttpError
-// derive 'profileName': the user's name on success, "Unknown" on error
-// derive 'profileError': None on success, Some with the error message on error
+```aivi
+type HttpError = {
+    message: Text,
+    code: Int
+}
+
+type Profile = {
+    name: Text,
+    bio: Text
+}
+
+fun nameFromResult:Text #result:(Result HttpError Profile) =>
+    result
+     ||> Ok profile => profile.name
+     ||> Err _      => "Unknown"
+
+fun errorFromResult:(Option Text) #result:(Result HttpError Profile) =>
+    result
+     ||> Ok _    => None
+     ||> Err err => Some err.message
+
+@source http.get "/api/profile"
+sig profileResult : Signal (Result HttpError Profile)
+
+sig profileName : Signal Text =
+    profileResult
+     |> nameFromResult
+
+sig profileError : Signal (Option Text) =
+    profileResult
+     |> errorFromResult
 ```
 
 ## Showing errors in markup
 
-```text
-// derive 'hasError' as True when profileError holds a message, False otherwise
-// derive 'errorText' as the error message when present, empty string otherwise
-// render a vertical Box
-//   show an error Label with the error text only when hasError is True
-//   always show a Label with the profile name
+```aivi
+type HttpError = {
+    message: Text,
+    code: Int
+}
+
+type Profile = {
+    name: Text,
+    bio: Text
+}
+
+type Orientation =
+  | Vertical
+  | Horizontal
+
+fun nameFromResult:Text #result:(Result HttpError Profile) =>
+    result
+     ||> Ok profile => profile.name
+     ||> Err _      => "Unknown"
+
+fun errorFromResult:(Option Text) #result:(Result HttpError Profile) =>
+    result
+     ||> Ok _    => None
+     ||> Err err => Some err.message
+
+fun hasErrorMsg:Bool #err:(Option Text) =>
+    err
+     T|> True
+     F|> False
+
+fun errorText:Text #err:(Option Text) =>
+    err
+     ||> Some msg => msg
+     ||> None     => ""
+
+@source http.get "/api/profile"
+sig profileResult : Signal (Result HttpError Profile)
+
+sig profileName : Signal Text =
+    profileResult
+     |> nameFromResult
+
+sig profileError : Signal (Option Text) =
+    profileResult
+     |> errorFromResult
+
+sig hasError : Signal Bool =
+    profileError
+     |> hasErrorMsg
+
+sig errText : Signal Text =
+    profileError
+     |> errorText
+
+val main =
+    <Window title="Profile">
+        <Box orientation={Vertical} spacing={8}>
+            <show when={hasError}>
+                <Label text={errText} />
+            </show>
+            <Label text={profileName} />
+        </Box>
+    </Window>
+
+export main
 ```
 
 ## The Option type for optional values
 
 `Option A` handles absence (not failure):
 
-```text
-// Option A is a sum type: Some (carrying A) or None
-// declare a signal 'selectedItem' of type Option Item
-// derive 'selectionLabel': show "Selected: name" when an item is selected, "Nothing selected" otherwise
+```aivi
+type Option A = Some A | None
+
+type Item = {
+    id: Int,
+    name: Text
+}
+
+sig selectedItem : Signal (Option Item) = None
+
+fun selectionLabel:Text #selected:(Option Item) =>
+    selected
+     ||> Some item => "Selected: {item.name}"
+     ||> None      => "Nothing selected"
+
+sig selectionText : Signal Text =
+    selectedItem
+     |> selectionLabel
 ```
 
 Use `Result` when an operation attempted and failed.
@@ -90,29 +208,72 @@ The return type tells you whether the operation can fail before you even read th
 
 To fall back to a default value when a result is an error:
 
-```text
-// declare a generic function 'withDefault' that returns the Ok value on success, or the default on error
-// use withDefault to extract a name from profileResult, falling back to "Anonymous"
+```aivi
+type HttpError = {
+    message: Text,
+    code: Int
+}
+
+type Profile = { name: Text }
+
+fun withDefault:A #fallback:A #result:(Result HttpError A) =>
+    result
+     ||> Ok value => value
+     ||> Err _    => fallback
+
+fun profileNameOrAnon:Text #result:(Result HttpError Profile) =>
+    withDefault { name: "Anonymous" } result
+     |> .name
 ```
 
 Or inline in a pipe:
 
-```text
-// derive 'displayName' from profileResult: use the profile name on success, "Anonymous" on error
+```aivi
+type HttpError = {
+    message: Text,
+    code: Int
+}
+
+type Profile = { name: Text }
+
+fun nameOrFallback:Text #result:(Result HttpError Profile) =>
+    result
+     ||> Ok profile => profile.name
+     ||> Err _      => "Anonymous"
+
+@source http.get "/api/profile"
+sig profileResult : Signal (Result HttpError Profile)
+
+sig displayName : Signal Text =
+    profileResult
+     |> nameOrFallback
 ```
 
-## Collecting errors from a list
+## Counting valid items in a list
 
-When validating a list of items, validate each item independently and filter to keep only
-the valid ones. Use named predicate functions with `List.filter`:
+When validating a list of items, derive a count of the valid values with a named predicate:
 
-```text
-// declare a predicate 'isValidAge' returning True when an integer is between 1 and 149
-// derive 'validAges' from ageInputs by filtering out values that do not pass isValidAge
+```aivi
+use aivi.list (count)
+
+fun isValidAge:Bool #n:Int =>
+    n > 0 and n < 150
+
+val ageInputs:List Int = [
+    25,
+    0,
+    30,
+    200,
+    42
+]
+
+val validCount:Int =
+    ageInputs
+     |> count isValidAge
 ```
 
-This keeps only the items that pass validation. For error reporting, match on each item
-individually with `||>` in the calling code.
+This gives you a stable summary signal or value you can render directly. For detailed error
+reporting, branch on each item individually with `||>` in the calling code.
 
 ## Summary
 

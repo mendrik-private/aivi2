@@ -10,10 +10,15 @@ is a derived signal.
 
 Declare a signal for each form field, driven by an `@source input.changed` event:
 
-```text
-// declare 'rawName' driven by text-input changes from the "name-field" widget
-// declare 'rawEmail' driven by text-input changes from the "email-field" widget
-// declare 'rawBio' driven by text-input changes from the "bio-field" widget
+```aivi
+@source input.changed "name-field"
+sig rawName : Signal Text
+
+@source input.changed "email-field"
+sig rawEmail : Signal Text
+
+@source input.changed "bio-field"
+sig rawBio : Signal Text
 ```
 
 Each source fires whenever the user types in the corresponding input widget.
@@ -25,16 +30,31 @@ A validated signal only has a value when the field is valid.
 
 The gate predicate must be a named function — not a lambda:
 
-```text
-// declare a predicate 'isValidEmail' that checks a text value contains "@"
-// declare a predicate 'isNonEmpty' that checks a text value is not empty
-// derive 'validName' from rawName, suppressing the value when the name is empty
-// derive 'validEmail' from rawEmail, suppressing when empty or when it lacks "@"
-// validEmail only carries a value when both predicates pass
+```aivi
+fun isValidEmail:Bool #email:Text =>
+    email != ""
+
+fun isNonEmpty:Bool #text:Text =>
+    text != ""
+
+@source input.changed "name-field"
+sig rawName : Signal Text
+
+@source input.changed "email-field"
+sig rawEmail : Signal Text
+
+sig validName : Signal Text =
+    rawName
+     ?|> isNonEmpty
+
+sig validEmail : Signal Text =
+    rawEmail
+     ?|> isNonEmpty
+     ?|> isValidEmail
 ```
 
 `validName` only has a value when `rawName` is non-empty.
-`validEmail` only has a value when `rawEmail` is non-empty AND contains `@`.
+`validEmail` only has a value when `rawEmail` is non-empty and valid.
 
 When a signal has no value (because a gate suppressed it), downstream signals depending on it
 also have no value.
@@ -45,24 +65,78 @@ also have no value.
 `Signal` is applicative, not monadic: `&|>` does **not** bind the unwrapped value into a lambda.
 Instead, stack the signals with `&|>` and then apply a pure constructor function:
 
-```text
-// declare a product type 'ProfileForm' with text fields name, email, and bio
-// declare a constructor function 'makeProfile' combining three text values into a ProfileForm
-// combine validName, validEmail, and validBio signals applicatively
-// apply makeProfile to produce 'validForm', which only has a value when all three fields are valid
+```aivi
+fun isNonEmpty:Bool #text:Text =>
+    text != ""
+
+fun isValidEmail:Bool #email:Text =>
+    email != ""
+
+type ProfileForm =
+  | ProfileForm Text Text Text
+
+@source input.changed "name-field"
+sig rawName : Signal Text
+
+@source input.changed "email-field"
+sig rawEmail : Signal Text
+
+@source input.changed "bio-field"
+sig rawBio : Signal Text
+
+sig validName : Signal Text =
+    rawName
+     ?|> isNonEmpty
+
+sig validEmail : Signal Text =
+    rawEmail
+     ?|> isNonEmpty
+     ?|> isValidEmail
+
+sig validBio : Signal Text =
+    rawBio
+     ?|> isNonEmpty
+
+sig validForm : Signal ProfileForm =
+  &|> validName
+  &|> validEmail
+  &|> validBio
+  |> ProfileForm
 ```
 
 `validForm` only has a value when all three fields are valid simultaneously.
-`makeProfile` receives the unwrapped `Text` values from each validated signal in declaration order.
+The constructor receives the unwrapped `Text` values from each validated signal in declaration order.
 
 ## Enabling the submit button
 
-```text
-// declare a function 'bothTrue' returning True only when both boolean arguments are True
-// derive 'nameValid' as True when rawName is non-empty
-// derive 'emailValid' as True when rawEmail is a valid email
-// combine nameValid and emailValid applicatively, applying bothTrue to get 'canSubmit'
-// canSubmit is True when both fields pass validation simultaneously
+```aivi
+fun isNonEmpty:Bool #text:Text =>
+    text != ""
+
+fun isValidEmail:Bool #email:Text =>
+    email != ""
+
+fun bothTrue:Bool #a:Bool #b:Bool =>
+    a and b
+
+@source input.changed "name-field"
+sig rawName : Signal Text
+
+@source input.changed "email-field"
+sig rawEmail : Signal Text
+
+sig nameValid : Signal Bool =
+    rawName
+     |> isNonEmpty
+
+sig emailValid : Signal Bool =
+    rawEmail
+     |> isValidEmail
+
+sig canSubmit : Signal Bool =
+  &|> nameValid
+  &|> emailValid
+  |> bothTrue
 ```
 
 `canSubmit` is `True` when both fields are valid. Bind it to the button's `sensitive` attribute
@@ -70,33 +144,79 @@ so the button enables itself the moment both fields pass validation.
 
 ## Wiring submission
 
-```text
-// declare 'submitClicked' driven by clicks on the "submit" button
-// validForm already guarantees validity by construction
-// in a real app, validForm would feed into an HTTP post source
+```aivi
+sig submitClicked : Signal Unit
 ```
+
+`submitClicked` is an input signal. In markup, connect it with `onClick={submitClicked}` on the
+submit button.
 
 ## Full example
 
-```text
-// declare a product type 'ContactForm' with text fields name and message
-// declare a predicate 'isNonEmpty' checking text is not empty
-// declare a predicate 'isLongEnough' checking text is longer than 10 characters
-// declare a constructor 'makeContact' combining name and message into a ContactForm
-// declare a function 'bothTrue' returning True only when both arguments are True
-// bind 'rawName' to text-input changes from the "name-input" widget
-// bind 'rawMessage' to text-input changes from the "message-input" widget
-// derive 'validName' from rawName, gating on isNonEmpty
-// derive 'validMessage' from rawMessage, gating on isLongEnough
-// combine validName and validMessage applicatively to produce 'validForm'
-// derive 'nameValid' as a Bool indicating whether the name passes validation
-// derive 'msgValid' as a Bool indicating whether the message passes validation
-// combine nameValid and msgValid to produce 'canSubmit'
-// bind 'submitClicked' to clicks on the "submit" button
-// render a Window titled "Contact" with a vertical Box
-//   containing a name Entry, a message Entry, and a Send Button
-//   the Send Button is enabled only when canSubmit is True
-// export main as the application entry point
+```aivi
+type Orientation =
+  | Vertical
+  | Horizontal
+
+type ContactForm =
+  | ContactForm Text Text
+
+fun isNonEmpty:Bool #text:Text =>
+    text != ""
+
+fun isLongEnough:Bool #text:Text =>
+    text != ""
+
+fun makeContact:ContactForm #name:Text #message:Text =>
+    ContactForm name message
+
+fun bothTrue:Bool #a:Bool #b:Bool =>
+    a and b
+
+@source input.changed "name-input"
+sig rawName : Signal Text
+
+@source input.changed "message-input"
+sig rawMessage : Signal Text
+
+sig validName : Signal Text =
+    rawName
+     ?|> isNonEmpty
+
+sig validMessage : Signal Text =
+    rawMessage
+     ?|> isLongEnough
+
+sig validForm : Signal ContactForm =
+  &|> validName
+  &|> validMessage
+  |> makeContact
+
+sig nameValid : Signal Bool =
+    rawName
+     |> isNonEmpty
+
+sig msgValid : Signal Bool =
+    rawMessage
+     |> isLongEnough
+
+sig canSubmit : Signal Bool =
+  &|> nameValid
+  &|> msgValid
+  |> bothTrue
+
+sig submitClicked : Signal Unit
+
+val main =
+    <Window title="Contact">
+        <Box orientation={Vertical} spacing={8}>
+            <Entry id="name-input" placeholderText="Name" />
+            <Entry id="message-input" placeholderText="Message" />
+            <Button label="Send" sensitive={canSubmit} onClick={submitClicked} />
+        </Box>
+    </Window>
+
+export main
 ```
 
 The `sensitive` attribute on `<Button>` controls whether it is clickable.
@@ -105,7 +225,7 @@ It is bound to `canSubmit`, so the button enables itself the moment both fields 
 ## Summary
 
 - One `sig` per field, driven by `@source input.changed`.
-- Gate predicates must be named functions; use `?|> isNonEmpty`, not `?|> \t => t != ""`.
+- Gate predicates must be named functions; use `?|> isNonEmpty`, not inline lambdas.
 - Combine validated fields with `&|>` and a pure constructor — `Signal` is applicative, not monadic.
 - `canSubmit` is a derived boolean signal built with `&|>` and a combining function.
 - Bind `sensitive={canSubmit}` to the submit button.

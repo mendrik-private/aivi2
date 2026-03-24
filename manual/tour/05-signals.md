@@ -126,7 +126,7 @@ to the current direction, storing the result as the new direction.
 ```aivi
 type Status = Running | GameOver
 
-type Pixel = { x: Int, y: Int }
+type Pixel = Pixel Int Int
 
 type Direction =
   | Up
@@ -143,7 +143,8 @@ type Game = {
     snake: List Pixel,
     food: Pixel,
     score: Int,
-    status: Status
+    status: Status,
+    seed: Int
 }
 
 val boardSize:BoardSize = {
@@ -152,10 +153,15 @@ val boardSize:BoardSize = {
 }
 
 val initialGame:Game = {
-    snake: [],
-    food: { x: 10, y: 1 },
+    snake: [
+        Pixel 6 5,
+        Pixel 5 5,
+        Pixel 4 5
+    ],
+    food: Pixel 10 1,
     score: 0,
-    status: Running
+    status: Running,
+    seed: 2463534242
 }
 
 fun stepGame:Game #size:BoardSize #direction:Direction #game:Game =>

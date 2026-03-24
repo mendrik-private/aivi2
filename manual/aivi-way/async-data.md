@@ -19,53 +19,196 @@ There is no `async`/`await`, no `.then()`, no `Promise`.
 
 Fetching a user profile:
 
-```text
-// declare a product type 'User' with integer id and text fields name, email, bio
-// declare a parametric type 'LoadState A' with variants Loading, Loaded (carrying A), Failed (carrying error text)
-// bind 'userResponse' to an HTTP GET request for user 1, producing Ok User or Err HttpError
-// derive 'userState' by mapping Ok to Loaded and Err to Failed
-// derive 'userName': show user's name when loaded, "Loading…" when loading, "Unknown" on failure
-// derive 'userBio': show user's bio when loaded, empty string when loading, error message on failure
-// render a Window titled "User Profile" with a vertical Box
-//   containing Labels bound to userName and userBio
-// export main as the application entry point
+```aivi
+type HttpError = {
+    message: Text,
+    code: Int
+}
+
+type User = {
+    id: Int,
+    name: Text,
+    email: Text,
+    bio: Text
+}
+
+type LoadState A =
+  | Loading
+  | Loaded A
+  | Failed Text
+
+type Orientation =
+  | Vertical
+  | Horizontal
+
+fun toLoadState:(LoadState User) #result:(Result HttpError User) =>
+    result
+     ||> Ok user => Loaded user
+     ||> Err err => Failed err.message
+
+fun nameFromState:Text #state:(LoadState User) =>
+    state
+     ||> Loading     => "Loading..."
+     ||> Loaded user => user.name
+     ||> Failed _    => "Unknown"
+
+fun bioFromState:Text #state:(LoadState User) =>
+    state
+     ||> Loading     => ""
+     ||> Loaded user => user.bio
+     ||> Failed err  => err
+
+@source http.get "/api/users/1"
+sig userResponse : Signal (Result HttpError User)
+
+sig userState : Signal (LoadState User) =
+    userResponse
+     |> toLoadState
+
+sig userName : Signal Text =
+    userState
+     |> nameFromState
+
+sig userBio : Signal Text =
+    userState
+     |> bioFromState
+
+val main =
+    <Window title="User Profile">
+        <Box orientation={Vertical} spacing={8}>
+            <Label text={userName} />
+            <Label text={userBio} />
+        </Box>
+    </Window>
+
+export main
 ```
 
 ## Handling the loading state
 
-The above example maps `Loading` to a placeholder string. For a proper loading spinner:
+The above example maps `Loading` to a placeholder string. For a visible loading indicator:
 
-```text
-// derive 'isLoading' as True when userState is Loading, False otherwise
-// render a Window titled "Profile" with a vertical Box
-// show an active Spinner only while isLoading is True
-// show a Label with the user name below
+```aivi
+type HttpError = {
+    message: Text,
+    code: Int
+}
+
+type User = {
+    id: Int,
+    name: Text
+}
+
+type LoadState A =
+  | Loading
+  | Loaded A
+  | Failed Text
+
+fun toLoadState:(LoadState User) #result:(Result HttpError User) =>
+    result
+     ||> Ok user => Loaded user
+     ||> Err err => Failed err.message
+
+fun isLoadingState:Bool #state:(LoadState User) =>
+    state
+     ||> Loading  => True
+     ||> Loaded _ => False
+     ||> Failed _ => False
+
+fun nameFromState:Text #state:(LoadState User) =>
+    state
+     ||> Loading     => ""
+     ||> Loaded user => user.name
+     ||> Failed _    => "Unknown"
+
+type Orientation =
+  | Vertical
+  | Horizontal
+
+@source http.get "/api/users/1"
+sig userResponse : Signal (Result HttpError User)
+
+sig userState : Signal (LoadState User) =
+    userResponse
+     |> toLoadState
+
+sig isLoading : Signal Bool =
+    userState
+     |> isLoadingState
+
+sig userName : Signal Text =
+    userState
+     |> nameFromState
+
+val main =
+    <Window title="Profile">
+        <Box orientation={Vertical} spacing={8}>
+            <show when={isLoading}>
+                <Label text="Loading..." />
+            </show>
+            <Label text={userName} />
+        </Box>
+    </Window>
+
+export main
 ```
 
 ## Retrying on error
 
-```text
-// bind 'retryClicked' to clicks on the "retry" button
-// bind 'data' to an HTTP GET request that re-fetches whenever retryClicked fires
-// the signal carries either a Payload or an HttpError
+```aivi
+type HttpError = {
+    message: Text,
+    code: Int
+}
+
+type Payload = { data: Text }
+
+provider button.clicked
+    wakeup: sourceEvent
+    argument id: Text
+
+@source button.clicked "retry"
+sig retryClicked : Signal Unit
+
+@source http.get "/api/data" with {
+    refreshOn: retryClicked
+}
+sig data : Signal (Result HttpError Payload)
 ```
 
 Passing `refreshOn: retryClicked` tells the source to re-fetch when `retryClicked` fires.
 
 ## Chaining requests
 
-When a second request depends on the result of a first, use `||>` to extract the `Ok` value.
-The signal only produces a value when the result is `Ok`:
+When a second request depends on the result of a first, start by extracting the `Ok` value into
+its own signal:
 
-```text
-// bind 'userResult' to an HTTP GET for user 1
-// derive 'userId' as Some user's id when the user loaded successfully, or None on error
-// bind 'postsResult' to an HTTP GET for posts, passing userId as a query parameter
-// postsResult only fetches when userId has a value
+```aivi
+type HttpError = {
+    message: Text,
+    code: Int
+}
+
+type User = {
+    id: Int,
+    name: Text
+}
+
+fun extractUserId:(Option Int) #result:(Result HttpError User) =>
+    result
+     ||> Ok user => Some user.id
+     ||> Err _   => None
+
+@source http.get "/api/users/1"
+sig userResult : Signal (Result HttpError User)
+
+sig userId : Signal (Option Int) =
+    userResult
+     |> extractUserId
 ```
 
 `userId` holds `Some id` when the user loaded successfully and `None` on error.
-The posts request can use `userId` as a reactive source argument.
+A later source can depend on `userId` the same way other sources depend on ordinary values.
 
 ## Why this is better than callbacks
 
@@ -84,11 +227,28 @@ fetchUser(id, (err, user) => {
 
 In AIVI, the dependency is declared, not nested:
 
-```text
-// derive userId from userResult: Some id on success, None on error
-// derive posts using userId as a dependency
-// derive view by rendering posts when they load successfully
-// each step is a separate named signal with no nesting
+```aivi
+type HttpError = {
+    message: Text,
+    code: Int
+}
+
+type User = {
+    id: Int,
+    name: Text
+}
+
+fun extractUserId:(Option Int) #result:(Result HttpError User) =>
+    result
+     ||> Ok user => Some user.id
+     ||> Err _   => None
+
+@source http.get "/api/users/1"
+sig userResult : Signal (Result HttpError User)
+
+sig userId : Signal (Option Int) =
+    userResult
+     |> extractUserId
 ```
 
 Each step is a separate named signal. No nesting, no error routing, no lifecycle cleanup.
@@ -98,5 +258,5 @@ Each step is a separate named signal. No nesting, no error routing, no lifecycle
 - `@source http.get "url"` produces a `Signal (Result HttpError T)`.
 - Map the result through `||>` arms for `Ok` and `Err`.
 - Use `LoadState A` or similar to represent `Loading` / `Loaded` / `Failed`.
-- Extract `Ok` values with `||>` to chain dependent requests.
+- Extract `Ok` values into their own signals before wiring dependent work.
 - Retry by passing a click signal to `refreshOn` in the source options.

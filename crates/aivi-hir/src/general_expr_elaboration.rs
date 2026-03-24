@@ -1515,8 +1515,9 @@ impl<'a> GeneralExprElaborator<'a> {
         let mut lowered = match self.lower_expr(expr_id, env, ambient, expected) {
             Ok(lowered) => lowered,
             Err(blockers) if ambient.is_some() && blockers.iter().all(is_unknown_type_blocker) => {
-                self.lower_single_parameter_function_pipe_body(
+                self.lower_function_pipe_body(
                     expr_id,
+                    env,
                     ambient.expect("checked above"),
                     expected,
                 )?
@@ -1547,74 +1548,39 @@ impl<'a> GeneralExprElaborator<'a> {
         Ok(lowered)
     }
 
-    fn lower_single_parameter_function_pipe_body(
+    fn lower_function_pipe_body(
         &mut self,
         expr_id: ExprId,
+        env: &GateExprEnv,
         ambient: &GateType,
         expected: Option<&GateType>,
     ) -> Result<GateRuntimeExpr, Vec<GeneralExprBlocker>> {
         let expr = self.module.exprs()[expr_id].clone();
-        let ExprKind::Name(reference) = expr.kind else {
-            return Err(vec![GeneralExprBlocker::UnknownExprType {
-                span: expr.span,
-            }]);
-        };
-        let ResolutionState::Resolved(TermResolution::Item(item_id)) =
-            reference.resolution.as_ref()
-        else {
-            return Err(vec![GeneralExprBlocker::UnknownExprType {
-                span: expr.span,
-            }]);
-        };
-        let Item::Function(function) = &self.module.items()[*item_id] else {
-            return Err(vec![GeneralExprBlocker::UnknownExprType {
-                span: expr.span,
-            }]);
-        };
-        if function.parameters.len() != 1 {
-            return Err(vec![GeneralExprBlocker::UnknownExprType {
-                span: expr.span,
-            }]);
+        let plan = self
+            .typing
+            .match_pipe_function_signature(expr_id, env, ambient, expected)
+            .ok_or_else(|| vec![GeneralExprBlocker::UnknownExprType { span: expr.span }])?;
+        let callee_ty = self.arrow_type(plan.parameter_types.clone(), plan.result_type.clone());
+        let callee = self.lower_expr(plan.callee_expr, env, Some(ambient), Some(&callee_ty))?;
+        let mut arguments = Vec::with_capacity(plan.explicit_arguments.len() + 1);
+        for (argument, expected_parameter) in plan
+            .explicit_arguments
+            .iter()
+            .zip(plan.parameter_types.iter())
+        {
+            arguments.push(self.lower_expr(*argument, env, Some(ambient), Some(expected_parameter))?);
         }
-        let parameter = function
-            .parameters
-            .first()
-            .expect("checked single-parameter function above");
-        if let Some(annotation) = parameter.annotation {
-            let parameter_ty = self
-                .typing
-                .lower_annotation(annotation)
-                .ok_or_else(|| vec![GeneralExprBlocker::UnknownExprType { span: expr.span }])?;
-            if !parameter_ty.same_shape(ambient) {
-                return Err(vec![GeneralExprBlocker::UnknownExprType {
-                    span: expr.span,
-                }]);
-            }
-        }
-
-        let mut function_env = GateExprEnv::default();
-        function_env
-            .locals
-            .insert(parameter.binding, ambient.clone());
-        let body = self.lower_expr(function.body, &function_env, Some(ambient), expected)?;
-        let callee = GateRuntimeExpr {
+        arguments.push(GateRuntimeExpr {
             span: expr.span,
-            ty: GateType::Arrow {
-                parameter: Box::new(ambient.clone()),
-                result: Box::new(body.ty.clone()),
-            },
-            kind: GateRuntimeExprKind::Reference(GateRuntimeReference::Item(*item_id)),
-        };
+            ty: ambient.clone(),
+            kind: GateRuntimeExprKind::AmbientSubject,
+        });
         Ok(GateRuntimeExpr {
             span: expr.span,
-            ty: body.ty.clone(),
+            ty: plan.result_type.clone(),
             kind: GateRuntimeExprKind::Apply {
                 callee: Box::new(callee),
-                arguments: vec![GateRuntimeExpr {
-                    span: expr.span,
-                    ty: ambient.clone(),
-                    kind: GateRuntimeExprKind::AmbientSubject,
-                }],
+                arguments,
             },
         })
     }

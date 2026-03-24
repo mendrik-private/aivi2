@@ -159,6 +159,67 @@ class (Applicative M, Chain M) => Monad M
 
 class Monad M => ChainRec M
     chainRec : (A -> M (Result A B)) -> A -> M B
+
+type __AiviListTailState A = {
+    seenFirst: Bool,
+    items: List A
+}
+
+fun __aivi_option_getOrElse:A #fallback:A #value:(Option A) =>
+    value
+     ||> Some item => item
+     ||> None      => fallback
+
+fun __aivi_list_keepSome:(Option A) #item:A =>
+    Some item
+
+fun __aivi_list_keepFirst:(Option A) #found:(Option A) #item:A =>
+    found
+     T|> __aivi_list_keepSome
+     F|> Some item
+
+fun __aivi_list_lengthStep:Int #total:Int #item:A =>
+    total + 1
+
+fun __aivi_list_length:Int #items:(List A) =>
+    items
+     |> reduce __aivi_list_lengthStep 0
+
+fun __aivi_list_head:(Option A) #items:(List A) =>
+    items
+     |> reduce __aivi_list_keepFirst None
+
+fun __aivi_list_tailState:(__AiviListTailState A) #items:(List A) #item:A #seenFirst:Bool =>
+    seenFirst
+     T|> { seenFirst: True, items: append items [item] }
+     F|> { seenFirst: True, items: [] }
+
+fun __aivi_list_tailStep:(__AiviListTailState A) #state:(__AiviListTailState A) #item:A =>
+    state
+     ||> { seenFirst, items } => __aivi_list_tailState items item seenFirst
+
+fun __aivi_list_tailItems:(Option (List A)) #items:(List A) #seenFirst:Bool =>
+    seenFirst
+     T|> Some items
+     F|> None
+
+fun __aivi_list_tailFromState:(Option (List A)) #state:(__AiviListTailState A) =>
+    state
+     ||> { seenFirst, items } => __aivi_list_tailItems items seenFirst
+
+fun __aivi_list_tail:(Option (List A)) #items:(List A) =>
+    items
+     |> reduce __aivi_list_tailStep { seenFirst: False, items: [] }
+     |> __aivi_list_tailFromState
+
+fun __aivi_list_anyStep:Bool #predicate:(A -> Bool) #found:Bool #item:A =>
+    found
+     T|> True
+     F|> predicate item
+
+fun __aivi_list_any:Bool #predicate:(A -> Bool) #items:(List A) =>
+    items
+     |> reduce (__aivi_list_anyStep predicate) False
 "#;
 
 struct Lowerer<'a> {
@@ -3139,11 +3200,64 @@ impl<'a> Lowerer<'a> {
                         );
                     }
                 }
-                Item::Value(_)
-                | Item::Function(_)
-                | Item::Signal(_)
-                | Item::Domain(_)
-                | Item::SourceProviderContract(_)
+                Item::Value(item) => {
+                    insert_site(
+                        &mut namespaces.ambient_term_items,
+                        item.name.text(),
+                        item_id,
+                        item.header.span,
+                    );
+                }
+                Item::Function(item) => {
+                    insert_site(
+                        &mut namespaces.ambient_term_items,
+                        item.name.text(),
+                        item_id,
+                        item.header.span,
+                    );
+                }
+                Item::Signal(item) => {
+                    insert_site(
+                        &mut namespaces.ambient_term_items,
+                        item.name.text(),
+                        item_id,
+                        item.header.span,
+                    );
+                }
+                Item::Domain(item) => {
+                    insert_site(
+                        &mut namespaces.ambient_type_items,
+                        item.name.text(),
+                        item_id,
+                        item.header.span,
+                    );
+                    for (member_index, member) in item.members.iter().enumerate() {
+                        if member.kind == DomainMemberKind::Literal {
+                            insert_site(
+                                &mut namespaces.literal_suffixes,
+                                member.name.text(),
+                                LiteralSuffixResolution {
+                                    domain: item_id,
+                                    member_index,
+                                },
+                                member.span,
+                            );
+                            continue;
+                        }
+                        if member.kind == DomainMemberKind::Method {
+                            insert_site(
+                                &mut namespaces.domain_terms,
+                                member.name.text(),
+                                DomainMemberResolution {
+                                    domain: item_id,
+                                    member_index,
+                                },
+                                member.span,
+                            );
+                        }
+                    }
+                }
+                Item::SourceProviderContract(_)
                 | Item::Instance(_)
                 | Item::Use(_)
                 | Item::Export(_) => {}
@@ -3192,6 +3306,7 @@ impl<'a> Lowerer<'a> {
                 ImportBindingMetadata::Value { .. }
                 | ImportBindingMetadata::IntrinsicValue { .. }
                 | ImportBindingMetadata::OpaqueValue
+                | ImportBindingMetadata::AmbientValue { .. }
                 | ImportBindingMetadata::BuiltinTerm(_) => insert_site(
                     &mut namespaces.term_imports,
                     import.local_name.text(),
@@ -4674,6 +4789,14 @@ impl<'a> Lowerer<'a> {
                     ImportBindingMetadata::IntrinsicValue { value, .. } => {
                         ResolutionState::Resolved(TermResolution::IntrinsicValue(value))
                     }
+                    ImportBindingMetadata::AmbientValue { ref name } => {
+                        match lookup_item(&namespaces.ambient_term_items, name) {
+                            LookupResult::Unique(item) => {
+                                ResolutionState::Resolved(TermResolution::Item(item))
+                            }
+                            _ => ResolutionState::Resolved(TermResolution::Import(import)),
+                        }
+                    }
                     _ => ResolutionState::Resolved(TermResolution::Import(import)),
                 };
                 return;
@@ -5426,6 +5549,21 @@ fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMeta
         ("aivi.defaults", "Option") => Some(ImportBindingMetadata::Bundle(
             ImportBundleKind::BuiltinOption,
         )),
+        ("aivi.option", "getOrElse") => Some(ImportBindingMetadata::AmbientValue {
+            name: "__aivi_option_getOrElse".into(),
+        }),
+        ("aivi.list", "length") => Some(ImportBindingMetadata::AmbientValue {
+            name: "__aivi_list_length".into(),
+        }),
+        ("aivi.list", "head") => Some(ImportBindingMetadata::AmbientValue {
+            name: "__aivi_list_head".into(),
+        }),
+        ("aivi.list", "tail") => Some(ImportBindingMetadata::AmbientValue {
+            name: "__aivi_list_tail".into(),
+        }),
+        ("aivi.list", "any") => Some(ImportBindingMetadata::AmbientValue {
+            name: "__aivi_list_any".into(),
+        }),
         ("aivi.random", "RandomError") => Some(ImportBindingMetadata::TypeConstructor {
             kind: Kind::constructor(0),
         }),
