@@ -1,6 +1,7 @@
 use std::{
-    fs,
+    env, fs,
     path::{Path, PathBuf},
+    sync::OnceLock,
 };
 
 use crate::{RootDatabase, SourceFile};
@@ -10,13 +11,17 @@ use crate::{RootDatabase, SourceFile};
 #[derive(Clone, Debug)]
 pub(crate) struct Workspace {
     root: PathBuf,
+    bundled_stdlib_root: Option<PathBuf>,
 }
 
 impl Workspace {
     pub(crate) fn discover(db: &RootDatabase, file: SourceFile) -> Self {
         let path = file.path(db);
+        let root = discover_workspace_root(&path);
         Self {
-            root: discover_workspace_root(&path),
+            bundled_stdlib_root: discover_bundled_stdlib_root()
+                .filter(|bundled_root| bundled_root != &root),
+            root,
         }
     }
 
@@ -25,7 +30,12 @@ impl Workspace {
         db: &RootDatabase,
         file: SourceFile,
     ) -> Option<String> {
-        module_name_for_path(&self.root, &file.path(db))
+        let path = file.path(db);
+        module_name_for_path(&self.root, &path).or_else(|| {
+            self.bundled_stdlib_root
+                .as_deref()
+                .and_then(|root| module_name_for_path(root, &path))
+        })
     }
 
     pub(crate) fn resolve_module_file(
@@ -37,7 +47,24 @@ impl Workspace {
             return None;
         }
 
-        let mut path = self.root.clone();
+        self.resolve_module_file_in_root(db, &self.root, module)
+            .or_else(|| {
+                if !is_bundled_stdlib_module(module) {
+                    return None;
+                }
+
+                let root = self.bundled_stdlib_root.as_deref()?;
+                self.resolve_module_file_in_root(db, root, module)
+            })
+    }
+
+    fn resolve_module_file_in_root(
+        &self,
+        db: &RootDatabase,
+        root: &Path,
+        module: &[&str],
+    ) -> Option<SourceFile> {
+        let mut path = root.to_path_buf();
         for segment in module {
             path.push(segment);
         }
@@ -82,4 +109,42 @@ fn module_name_for_path(root: &Path, path: &Path) -> Option<String> {
     let stem = Path::new(&file_name).file_stem()?.to_str()?.to_owned();
     segments.push(stem);
     Some(segments.join("."))
+}
+
+fn is_bundled_stdlib_module(module: &[&str]) -> bool {
+    matches!(module.first(), Some(segment) if *segment == "aivi")
+}
+
+fn discover_bundled_stdlib_root() -> Option<PathBuf> {
+    static BUNDLED_STDLIB_ROOT: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+    BUNDLED_STDLIB_ROOT
+        .get_or_init(find_bundled_stdlib_root)
+        .clone()
+}
+
+fn find_bundled_stdlib_root() -> Option<PathBuf> {
+    let mut candidates = vec![PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib")];
+
+    if let Ok(executable) = env::current_exe() {
+        if let Some(parent) = executable.parent() {
+            candidates.push(parent.join("stdlib"));
+            candidates.push(parent.join("../stdlib"));
+        }
+    }
+
+    candidates
+        .into_iter()
+        .find_map(|candidate| canonical_existing_workspace_root(&candidate))
+}
+
+fn canonical_existing_workspace_root(path: &Path) -> Option<PathBuf> {
+    let manifest = path.join("aivi.toml");
+    if !manifest.is_file() {
+        return None;
+    }
+
+    fs::canonicalize(path)
+        .ok()
+        .or_else(|| Some(path.to_path_buf()))
 }

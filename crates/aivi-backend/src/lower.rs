@@ -20,29 +20,30 @@ use aivi_typing::{
 };
 
 use crate::{
-    AbiParameter, AbiResult, BinaryOperator, BuiltinAppendCarrier as BackendBuiltinAppendCarrier,
+    AbiParameter, AbiResult, BigIntLiteral, BinaryOperator,
+    BuiltinAppendCarrier as BackendBuiltinAppendCarrier,
     BuiltinApplicativeCarrier as BackendBuiltinApplicativeCarrier,
     BuiltinApplyCarrier as BackendBuiltinApplyCarrier,
     BuiltinClassMemberIntrinsic as BackendBuiltinClassMemberIntrinsic,
     BuiltinFoldableCarrier as BackendBuiltinFoldableCarrier,
     BuiltinFunctorCarrier as BackendBuiltinFunctorCarrier,
     BuiltinOrdSubject as BackendBuiltinOrdSubject, BuiltinTerm, CallingConvention,
-    CallingConventionKind, DecodeExtraFieldPolicy, DecodeField, DecodeFieldRequirement, DecodeMode,
-    DecodePlan, DecodePlanId, DecodeStep, DecodeStepId, DecodeStepKind, DecodeSumStrategy,
-    DecodeVariant, DomainDecodeSurface, DomainDecodeSurfaceKind, EnvSlotId, FanoutCarrier,
-    FanoutJoin, FanoutStage, GateStage, InlinePipeCaseArm, InlinePipeExpr, InlinePipePattern,
-    InlinePipePatternKind, InlinePipeRecordPatternField, InlinePipeStage, InlinePipeStageKind,
-    InlinePipeTruthyFalsyBranch, InlineSubjectId, IntegerLiteral, FloatLiteral, DecimalLiteral,
-    BigIntLiteral, Item, ItemId, ItemKind, Kernel, KernelExpr, KernelExprId, KernelExprKind,
-    KernelId, KernelOrigin, KernelOriginKind, Layout, LayoutId, LayoutKind, LoweringError::*,
-    MapEntry, NonSourceWakeup, NonSourceWakeupCause, ParameterRole, Pipeline, PipelineId,
-    PipelineOrigin, PrimitiveType, Program, ProjectionBase, RecordExprField, RecordFieldLayout,
-    Recurrence, RecurrenceStage, RecurrenceTarget, RecurrenceWakeupKind, SignalInfo,
-    SourceArgumentKernel, SourceCancellationPolicy, SourceInstanceId, SourceOptionBinding,
-    SourceOptionKernel, SourcePlan, SourceProvider, SourceReplacementPolicy,
-    SourceStaleWorkPolicy, SourceTeardownPolicy, Stage, StageKind, SubjectRef,
-    SuffixedIntegerLiteral, TextLiteral, TextSegment, TruthyFalsyBranch, TruthyFalsyStage,
-    UnaryOperator, ValidationError, VariantLayout, validate_program,
+    CallingConventionKind, DecimalLiteral, DecodeExtraFieldPolicy, DecodeField,
+    DecodeFieldRequirement, DecodeMode, DecodePlan, DecodePlanId, DecodeStep, DecodeStepId,
+    DecodeStepKind, DecodeSumStrategy, DecodeVariant, DomainDecodeSurface, DomainDecodeSurfaceKind,
+    EnvSlotId, FanoutCarrier, FanoutJoin, FanoutStage, FloatLiteral, GateStage, InlinePipeCaseArm,
+    InlinePipeConstructor, InlinePipeExpr, InlinePipePattern, InlinePipePatternKind,
+    InlinePipeRecordPatternField, InlinePipeStage, InlinePipeStageKind,
+    InlinePipeTruthyFalsyBranch, InlineSubjectId, IntegerLiteral, Item, ItemId, ItemKind, Kernel,
+    KernelExpr, KernelExprId, KernelExprKind, KernelId, KernelOrigin, KernelOriginKind, Layout,
+    LayoutId, LayoutKind, LoweringError::*, MapEntry, NonSourceWakeup, NonSourceWakeupCause,
+    ParameterRole, Pipeline, PipelineId, PipelineOrigin, PrimitiveType, Program, ProjectionBase,
+    RecordExprField, RecordFieldLayout, Recurrence, RecurrenceStage, RecurrenceTarget,
+    RecurrenceWakeupKind, SignalInfo, SourceArgumentKernel, SourceCancellationPolicy,
+    SourceInstanceId, SourceOptionBinding, SourceOptionKernel, SourcePlan, SourceProvider,
+    SourceReplacementPolicy, SourceStaleWorkPolicy, SourceTeardownPolicy, Stage, StageKind,
+    SubjectRef, SuffixedIntegerLiteral, TextLiteral, TextSegment, TruthyFalsyBranch,
+    TruthyFalsyStage, UnaryOperator, ValidationError, VariantLayout, validate_program,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -2110,26 +2111,65 @@ impl<'a> ProgramLowerer<'a> {
                 )
             }
             core::PatternKind::Constructor { callee, arguments } => {
-                let core::Reference::Builtin(term) = callee.reference else {
-                    return Err(UnsupportedInlinePipePattern { span: pattern.span });
-                };
-                let constructor = map_builtin_term(term);
-                let argument_layouts: Vec<LayoutId> =
-                    match (constructor, &self.program.layouts()[layout].kind) {
+                let (constructor, argument_layouts) = match &callee.reference {
+                    core::Reference::Builtin(term) => {
+                        let constructor = map_builtin_term(*term);
+                        let argument_layouts =
+                            match (constructor, &self.program.layouts()[layout].kind) {
+                                (
+                                    BuiltinTerm::True | BuiltinTerm::False,
+                                    LayoutKind::Primitive(PrimitiveType::Bool),
+                                ) => Vec::new(),
+                                (BuiltinTerm::None, LayoutKind::Option { .. }) => Vec::new(),
+                                (BuiltinTerm::Some, LayoutKind::Option { element }) => {
+                                    vec![*element]
+                                }
+                                (BuiltinTerm::Ok, LayoutKind::Result { value, .. }) => vec![*value],
+                                (BuiltinTerm::Err, LayoutKind::Result { error, .. }) => {
+                                    vec![*error]
+                                }
+                                (BuiltinTerm::Valid, LayoutKind::Validation { value, .. }) => {
+                                    vec![*value]
+                                }
+                                (BuiltinTerm::Invalid, LayoutKind::Validation { error, .. }) => {
+                                    vec![*error]
+                                }
+                                _ => {
+                                    return Err(UnsupportedInlinePipePattern {
+                                        span: pattern.span,
+                                    });
+                                }
+                            };
                         (
-                            BuiltinTerm::True | BuiltinTerm::False,
-                            LayoutKind::Primitive(PrimitiveType::Bool),
-                        ) => Vec::new(),
-                        (BuiltinTerm::None, LayoutKind::Option { .. }) => Vec::new(),
-                        (BuiltinTerm::Some, LayoutKind::Option { element }) => vec![*element],
-                        (BuiltinTerm::Ok, LayoutKind::Result { value, .. }) => vec![*value],
-                        (BuiltinTerm::Err, LayoutKind::Result { error, .. }) => vec![*error],
-                        (BuiltinTerm::Valid, LayoutKind::Validation { value, .. }) => vec![*value],
-                        (BuiltinTerm::Invalid, LayoutKind::Validation { error, .. }) => {
-                            vec![*error]
+                            InlinePipeConstructor::Builtin(constructor),
+                            argument_layouts,
+                        )
+                    }
+                    core::Reference::SumConstructor(handle) => {
+                        let matches_layout = match &self.program.layouts()[layout].kind {
+                            LayoutKind::Opaque { name, .. } => {
+                                name.as_ref() == handle.type_name.as_ref()
+                            }
+                            LayoutKind::Sum(variants) => variants.iter().any(|variant| {
+                                variant.name.as_ref() == handle.variant_name.as_ref()
+                            }),
+                            _ => false,
+                        };
+                        if !matches_layout {
+                            return Err(UnsupportedInlinePipePattern { span: pattern.span });
                         }
-                        _ => return Err(UnsupportedInlinePipePattern { span: pattern.span }),
-                    };
+                        let field_types = callee
+                            .field_types
+                            .as_ref()
+                            .ok_or(UnsupportedInlinePipePattern { span: pattern.span })?;
+                        let argument_layouts = field_types
+                            .iter()
+                            .map(|field| self.intern_core_type(field))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        (InlinePipeConstructor::Sum(handle.clone()), argument_layouts)
+                    }
+                    _ => return Err(UnsupportedInlinePipePattern { span: pattern.span }),
+                };
                 if arguments.len() != argument_layouts.len() {
                     return Err(UnsupportedInlinePipePattern { span: pattern.span });
                 }
@@ -2648,6 +2688,7 @@ fn map_builtin_apply_carrier(carrier: core::BuiltinApplyCarrier) -> BackendBuilt
         core::BuiltinApplyCarrier::List => BackendBuiltinApplyCarrier::List,
         core::BuiltinApplyCarrier::Option => BackendBuiltinApplyCarrier::Option,
         core::BuiltinApplyCarrier::Result => BackendBuiltinApplyCarrier::Result,
+        core::BuiltinApplyCarrier::Validation => BackendBuiltinApplyCarrier::Validation,
         core::BuiltinApplyCarrier::Signal => BackendBuiltinApplyCarrier::Signal,
     }
 }

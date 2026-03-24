@@ -59,6 +59,7 @@ pub enum BuiltinApplyCarrier {
     List,
     Option,
     Result,
+    Validation,
     Signal,
 }
 
@@ -533,6 +534,12 @@ pub struct InlinePipePattern {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InlinePipeConstructor {
+    Builtin(BuiltinTerm),
+    Sum(SumConstructorHandle),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InlinePipePatternKind {
     Wildcard,
     Binding {
@@ -543,7 +550,7 @@ pub enum InlinePipePatternKind {
     Tuple(Vec<InlinePipePattern>),
     Record(Vec<InlinePipeRecordPatternField>),
     Constructor {
-        constructor: BuiltinTerm,
+        constructor: InlinePipeConstructor,
         arguments: Vec<InlinePipePattern>,
     },
 }

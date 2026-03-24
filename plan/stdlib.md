@@ -258,7 +258,25 @@ Required option concepts:
 - `coalesce`
 - `activeWhen`
 
-### 4.4 Logging
+### 4.4 Randomness
+
+Implement randomness under `aivi.random` as a narrow one-shot `Task` surface.
+
+Required shape:
+
+```aivi
+fun randomInt:(Task RandomError Int) #low:Int #high:Int
+fun randomBytes:(Task RandomError Bytes) #count:Int
+```
+
+Rules:
+
+- randomness is effectful and must not appear as a pure helper
+- the first wave uses OS-backed secure entropy only
+- seeded or replayable PRNG surfaces are later work
+- there is no long-lived random `@source` in the first wave
+
+### 4.5 Logging
 
 Implement a minimal structured logging surface under `aivi.log`.
 
@@ -272,7 +290,7 @@ It should support:
 This surface is for tracing, diagnostics, and application logs. It should stay
 small and not grow into a general observability framework.
 
-### 4.5 Database
+### 4.6 Database
 
 Implement local persistent storage as:
 
@@ -419,7 +437,7 @@ transaction does not directly push a publication into the scheduler. Reactive
 queries that cover affected rows will pick up the change on their next
 configured wakeup (next `refreshOn` trigger or next timer tick).
 
-### 4.6 Auth: OAuth2 with PKCE
+### 4.7 Auth: OAuth2 with PKCE
 
 Implement an auth provider surface under `aivi.auth` that covers the OAuth2
 PKCE flow required for non-GOA providers and for providers where GOA does not
@@ -478,7 +496,7 @@ and leaves token storage, expiry tracking, and proactive refresh scheduling to
 the application layer. A higher-level credential manager can be built on top in
 a later phase if demand emerges.
 
-### 4.7 Mail protocols: IMAP and SMTP
+### 4.8 Mail protocols: IMAP and SMTP
 
 For the GNOME email client, IMAP and SMTP are first-wave requirements. The
 architecture is local-first: IMAP drives a background sync process that writes
@@ -582,7 +600,7 @@ smtp.send : SmtpConfig -> SmtpMessage -> Task SmtpError Unit
 For GOA-backed accounts the `SmtpConfig` can be derived from the GOA account
 metadata; no manual host/port configuration is required in that case.
 
-### 4.8 D-Bus IPC
+### 4.9 D-Bus IPC
 
 Implement a minimal user-facing D-Bus surface under `aivi.dbus`. This is the
 primary IPC mechanism between the sync daemon, the main UI, and the GNOME Shell
@@ -1021,6 +1039,7 @@ Later work should reuse the same rules:
 - HTTP types plus `http` provider family
 - filesystem types plus `fs.read` and `fs.watch`
 - timer provider family
+- `aivi.random` one-shot entropy tasks
 - minimal `aivi.log`
 - typed decode support and source option types
 

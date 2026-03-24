@@ -1,12 +1,13 @@
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use aivi_backend::{
-    BuiltinAppendCarrier, BuiltinApplicativeCarrier, BuiltinClassMemberIntrinsic,
-    BuiltinFoldableCarrier, BuiltinFunctorCarrier, CodegenError, DecodeStepKind,
-    DomainDecodeSurfaceKind, EvaluationError, GateStage as BackendGateStage,
-    ItemKind as BackendItemKind, KernelEvaluator, KernelExprKind, LayoutKind, LoweringError,
-    NonSourceWakeupCause, RecurrenceTarget, RuntimeBigInt, RuntimeDecimal, RuntimeFloat,
-    RuntimeValue, SourceProvider, StageKind as BackendStageKind, ValidationError, compile_program,
+    BuiltinAppendCarrier, BuiltinApplicativeCarrier, BuiltinApplyCarrier,
+    BuiltinClassMemberIntrinsic, BuiltinFoldableCarrier, BuiltinFunctorCarrier, CodegenError,
+    DecodeStepKind, DomainDecodeSurfaceKind, EvaluationError, GateStage as BackendGateStage,
+    InlinePipeConstructor, InlinePipePatternKind, InlinePipeStageKind, ItemKind as BackendItemKind,
+    KernelEvaluator, KernelExprKind, LayoutKind, LoweringError, NonSourceWakeupCause,
+    RecurrenceTarget, RuntimeBigInt, RuntimeDecimal, RuntimeFloat, RuntimeSumValue, RuntimeValue,
+    SourceProvider, StageKind as BackendStageKind, ValidationError, compile_program,
     lower_module as lower_backend_module, validate_program,
 };
 use aivi_base::{SourceDatabase, SourceSpan};
@@ -750,6 +751,67 @@ val invalidTotal:Int =
 }
 
 #[test]
+fn runtime_evaluates_validation_apply_through_backend_runtime() {
+    let backend = lower_text(
+        "backend-validation-apply.aivi",
+        r#"
+type Pair = Pair Text Text
+
+fun pair:Pair #left:Text #right:Text =>
+    Pair left right
+
+val first:Validation Text Text =
+    Valid "Ada"
+
+val second:Validation Text Text =
+    Valid "Lovelace"
+
+val combined:Validation Text Pair =
+    apply (map pair first) second
+"#,
+    );
+
+    let combined = find_item(&backend, "combined");
+    let combined_kernel = &backend.kernels()[backend.items()[combined]
+        .body
+        .expect("combined should carry a body")];
+    assert!(
+        combined_kernel.exprs().iter().any(|(_, expr)| {
+            matches!(
+                expr.kind,
+                KernelExprKind::BuiltinClassMember(BuiltinClassMemberIntrinsic::Apply(
+                    BuiltinApplyCarrier::Validation
+                ))
+            )
+        }),
+        "expected validation applicative clusters to lower through builtin Apply"
+    );
+
+    let mut evaluator = KernelEvaluator::new(&backend);
+    let globals = BTreeMap::new();
+    match evaluator
+        .evaluate_item(combined, &globals)
+        .expect("validation apply should evaluate")
+    {
+        RuntimeValue::ValidationValid(value) => match *value {
+            RuntimeValue::Sum(value) => {
+                assert_eq!(value.type_name.as_ref(), "Pair");
+                assert_eq!(value.variant_name.as_ref(), "Pair");
+                assert_eq!(
+                    value.fields,
+                    vec![
+                        RuntimeValue::Text("Ada".into()),
+                        RuntimeValue::Text("Lovelace".into()),
+                    ]
+                );
+            }
+            other => panic!("expected Pair payload, found {other:?}"),
+        },
+        other => panic!("expected valid validation result, found {other:?}"),
+    }
+}
+
+#[test]
 fn workspace_imported_builtin_class_members_lower_through_backend_runtime() {
     let backend = lower_workspace_text(
         "milestone-2/valid/workspace-type-imports/main.aivi",
@@ -977,6 +1039,92 @@ sig status : Signal Text =
             .evaluate_item(status, &waiting_globals)
             .expect("signal-carried falsy branch should evaluate"),
         RuntimeValue::Text("state:wait".into())
+    );
+}
+
+#[test]
+fn evaluates_inline_case_pipes_with_same_module_sum_variants_and_multiple_fields() {
+    let backend = lower_text(
+        "backend-inline-case-same-module-sums.aivi",
+        r#"
+type Status =
+  | Idle
+  | Ready Text
+  | Failed Text Text
+
+sig current : Signal Status
+
+fun render:Text #status:Status =>
+    status
+     ||> Idle => "idle"
+     ||> Ready name => name
+     ||> Failed code message => "{code}:{message}"
+
+val idleLabel =
+    render current
+
+val readyLabel =
+    render (Ready "Ada")
+
+val failedLabel =
+    render (Failed "503" "offline")
+"#,
+    );
+
+    let mut evaluator = KernelEvaluator::new(&backend);
+    let current = find_item(&backend, "current");
+    let render = find_item(&backend, "render");
+    let render_kernel = backend.items()[render]
+        .body
+        .expect("render should lower to a backend body");
+    let render_root = backend.kernels()[render_kernel].root;
+    let KernelExprKind::Pipe(render_pipe) =
+        &backend.kernels()[render_kernel].exprs()[render_root].kind
+    else {
+        panic!("render should lower to a pipe expression");
+    };
+    let InlinePipeStageKind::Case { arms } = &render_pipe.stages[0].kind else {
+        panic!("render should lower to an inline case stage");
+    };
+    let InlinePipePatternKind::Constructor {
+        constructor: InlinePipeConstructor::Sum(idle_handle),
+        arguments,
+    } = &arms[0].pattern.kind
+    else {
+        panic!("first case arm should carry the Idle constructor handle");
+    };
+    assert!(
+        arguments.is_empty(),
+        "Idle should remain a zero-field constructor arm"
+    );
+    let idle_globals = BTreeMap::from([(
+        current,
+        RuntimeValue::Signal(Box::new(RuntimeValue::Sum(RuntimeSumValue {
+            item: idle_handle.item,
+            type_name: idle_handle.type_name.clone(),
+            variant_name: idle_handle.variant_name.clone(),
+            fields: Vec::new(),
+        }))),
+    )]);
+    let globals = BTreeMap::new();
+
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "idleLabel"), &idle_globals)
+            .expect("zero-field sum arm should evaluate"),
+        RuntimeValue::Text("idle".into())
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "readyLabel"), &globals)
+            .expect("single-field sum arm should evaluate"),
+        RuntimeValue::Text("Ada".into())
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "failedLabel"), &globals)
+            .expect("multi-field sum arm should evaluate"),
+        RuntimeValue::Text("503:offline".into())
     );
 }
 

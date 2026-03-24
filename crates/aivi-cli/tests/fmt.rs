@@ -9,6 +9,14 @@ struct TempFile {
     path: PathBuf,
 }
 
+fn stdlib_path(relative: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("stdlib")
+        .join(relative)
+}
+
 impl TempFile {
     fn new(prefix: &str, contents: &str) -> Self {
         let unique = SystemTime::now()
@@ -82,5 +90,68 @@ fn fmt_fails_on_syntax_errors() {
     assert!(
         !output.stderr.is_empty(),
         "fmt should report diagnostics on stderr"
+    );
+}
+
+#[test]
+fn fmt_normalizes_grouped_exports() {
+    let input = TempFile::new(
+        "fmt-grouped-export",
+        "type Greeting=Text\ntype Farewell=Text\nexport(Greeting,Farewell)\nexport (Greeting)\n",
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("fmt")
+        .arg(input.path())
+        .output()
+        .expect("fmt command should run");
+
+    assert!(
+        output.status.success(),
+        "fmt should succeed, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout should be utf-8"),
+        concat!(
+            "type Greeting = Text\n",
+            "\n",
+            "type Farewell = Text\n",
+            "\n",
+            "export (Greeting, Farewell)\n",
+            "export Greeting\n",
+        )
+    );
+}
+
+#[test]
+fn fmt_check_accepts_stdlib_modules() {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_aivi"));
+    command.arg("fmt").arg("--check");
+    for relative in [
+        "aivi/bundledsmokesupport.aivi",
+        "aivi/bundledsmoketest.aivi",
+        "aivi/color.aivi",
+        "aivi/defaults.aivi",
+        "aivi/duration.aivi",
+        "aivi/list.aivi",
+        "aivi/nonEmpty.aivi",
+        "aivi/option.aivi",
+        "aivi/path.aivi",
+        "aivi/result.aivi",
+        "aivi/text.aivi",
+        "aivi/url.aivi",
+        "aivi/validation.aivi",
+    ] {
+        command.arg(stdlib_path(relative));
+    }
+
+    let output = command.output().expect("fmt --check command should run");
+
+    assert!(
+        output.status.success(),
+        "expected stdlib modules to already be formatted, stdout was: {}, stderr was: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
 }

@@ -2947,8 +2947,9 @@ val view =
             "shared/types.aivi",
             r#"
 type Greeting = Text
+type Farewell = Text
 
-export Greeting
+export (Greeting, Farewell)
 "#,
         );
 

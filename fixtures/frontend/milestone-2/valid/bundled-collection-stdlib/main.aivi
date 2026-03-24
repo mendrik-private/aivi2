@@ -1,0 +1,140 @@
+use aivi.option (
+    isSome
+    isNone
+    getOrElse
+    orElse as optionOrElse
+    flatMap as optionFlatMap
+    flatten as flattenOption
+    toList as optionToList
+    toResult
+)
+
+use aivi.result (
+    isOk
+    isErr
+    mapErr
+    withDefault
+    orElse as resultOrElse
+    flatMap as resultFlatMap
+    flatten as flattenResult
+    toOption
+    toList as resultToList
+)
+
+use aivi.list (
+    Partition
+    isEmpty as listIsEmpty
+    nonEmpty as listNonEmpty
+    length
+    head
+    tail
+    last
+    zip
+    any
+    all
+    count
+    find
+    findMap
+    partition
+)
+
+use aivi.text (
+    isEmpty as textIsEmpty
+    nonEmpty as textNonEmpty
+    join
+    concat
+    surround
+)
+
+fun positive:Bool #value:Int =>
+    value > 0
+
+fun even:Bool #value:Int =>
+    value == 2 or value == 4
+
+fun adminIfAda:(Option Text) #name:Text =>
+    name == "Ada"
+     T|> Some "admin"
+     F|> None
+
+fun prefixError:Text #message:Text =>
+    "error:{message}"
+
+fun lessThanTen:(Result Text Int) #value:Int =>
+    value < 10
+     T|> Ok value
+     F|> Err "too-large"
+
+fun onlyTwo:(Option Text) #value:Int =>
+    value == 2
+     T|> Some "two"
+     F|> None
+
+val emptyNumbers:List Int = []
+
+val numbers:List Int = [
+    1,
+    2,
+    3,
+    4
+]
+
+val noneName:Option Text = None
+val someName:Option Text = Some "Ada"
+val nestedName:Option (Option Text) = Some someName
+val namePresent:Bool = isSome someName
+val nameMissing:Bool = isNone noneName
+val chosenName:Text = getOrElse "guest" noneName
+val fallbackName:Option Text = optionOrElse someName noneName
+val maybeAdmin:Option Text = optionFlatMap adminIfAda someName
+val flattenedName:Option Text = flattenOption nestedName
+val nameItems:List Text = optionToList someName
+val nameResult:Result Text Text = toResult "missing" someName
+val okCount:Result Text Int = Ok 4
+val errCount:Result Text Int = Err "missing"
+val nestedCount:Result Text (Result Text Int) = Ok okCount
+val countOk:Bool = isOk okCount
+val countErr:Bool = isErr errCount
+val prefixedErr:Result Text Int = mapErr prefixError errCount
+val countValue:Int = withDefault 0 okCount
+val recoveredCount:Result Text Int = resultOrElse okCount errCount
+val checkedCount:Result Text Int = resultFlatMap lessThanTen okCount
+val flattenedCount:Result Text Int = flattenResult nestedCount
+val countOption:Option Int = toOption okCount
+val countItems:List Int = resultToList okCount
+val numbersEmpty:Bool = listIsEmpty emptyNumbers
+val numbersNonEmpty:Bool = listNonEmpty numbers
+val numbersLength:Int = length numbers
+val firstNumber:Option Int = head numbers
+val remainingNumbers:Option (List Int) = tail numbers
+val lastNumber:Option Int = last numbers
+val anyEven:Bool = any even numbers
+val allPositive:Bool = all positive numbers
+val evenCount:Int = count even numbers
+val foundEven:Option Int = find even numbers
+val foundLabel:Option Text = findMap onlyTwo numbers
+val splitNumbers:(Partition Int) = partition even numbers
+
+val zippedNumbers:(List (Int, Text)) =
+    zip numbers [
+        "one",
+        "two",
+        "three"
+    ]
+
+val emptyText:Bool = textIsEmpty ""
+val presentText:Bool = textNonEmpty "Ada"
+
+val joinedNames:Text =
+    join ", " [
+        "Ada",
+        "Grace"
+    ]
+
+val mergedText:Text =
+    concat [
+        "a",
+        "ivi"
+    ]
+
+val framedText:Text = surround "[" "]" joinedNames

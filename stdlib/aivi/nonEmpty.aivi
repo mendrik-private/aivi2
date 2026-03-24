@@ -1,0 +1,14 @@
+type NonEmpty A =
+  | NonEmpty A (List A)
+
+type NonEmptyList A =
+  | NonEmptyList A (List A)
+
+val sampleNames:NonEmptyList Text =
+    NonEmptyList "Ada" [
+        "Lovelace"
+    ]
+
+export NonEmpty
+export NonEmptyList
+export sampleNames

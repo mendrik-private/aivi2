@@ -3087,6 +3087,26 @@ mod tests {
     }
 
     #[test]
+    fn typecheck_accepts_ambient_default_class_for_record_elision() {
+        let report = typecheck_text(
+            "ambient-default-instance.aivi",
+            "type Nickname = Nickname Text\n\
+             instance Default Nickname\n\
+             \x20\x20\x20\x20default = Nickname \"\"\n\
+             type User = {\n\
+                 name: Text,\n\
+                 nickname: Nickname\n\
+             }\n\
+             val user:User = { name: \"Ada\" }\n",
+        );
+        assert!(
+            report.is_ok(),
+            "expected ambient Default class to satisfy record elision, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
     fn typecheck_elaborates_same_module_default_instances_into_explicit_fields() {
         let report = typecheck_text(
             "same-module-default-instance-hir.aivi",

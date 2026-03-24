@@ -19,6 +19,15 @@ fn fixture_path(relative: &str) -> PathBuf {
         .join(relative)
 }
 
+fn stdlib_path(relative: &str) -> PathBuf {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("stdlib")
+        .join(relative);
+    fs::canonicalize(&path).unwrap_or(path)
+}
+
 struct TempDir {
     path: PathBuf,
 }
@@ -147,6 +156,133 @@ fn hir_queries_resolve_workspace_imports_and_respect_explicit_exports() {
     assert!(
         exported.find("mailbox").is_none(),
         "explicit exports should hide unexported top-level values"
+    );
+}
+
+#[test]
+fn hir_queries_fallback_to_bundled_stdlib_modules() {
+    let workspace = TempDir::new("bundled-stdlib-fallback");
+    let main_path = workspace.write(
+        "main.aivi",
+        "use aivi.bundledsmoketest (\n    bundledSentinel\n    BundledToken\n)\n\ntype Alias = BundledToken\nval marker = bundledSentinel\n",
+    );
+
+    let db = RootDatabase::new();
+    let main = SourceFile::new(
+        &db,
+        main_path.clone(),
+        fs::read_to_string(&main_path).expect("main fixture should exist"),
+    );
+
+    let hir = hir_module(&db, main);
+    assert!(
+        hir.hir_diagnostics().is_empty(),
+        "bundled stdlib import fallback should lower cleanly: {:?}",
+        hir.hir_diagnostics()
+    );
+
+    let bundled_module = db
+        .file_at_path(&stdlib_path("aivi/bundledsmoketest.aivi"))
+        .expect("bundled stdlib module should be loaded lazily");
+    let bundled_support = db
+        .file_at_path(&stdlib_path("aivi/bundledsmokesupport.aivi"))
+        .expect("bundled stdlib dependencies should also resolve lazily");
+
+    let bundled_exports = exported_names(&db, bundled_module);
+    assert!(bundled_exports.find("bundledSentinel").is_some());
+    assert!(bundled_exports.find("BundledToken").is_some());
+    assert!(
+        exported_names(&db, bundled_support)
+            .find("bundledSupportSentinel")
+            .is_some()
+    );
+}
+
+#[test]
+fn hir_queries_fallback_to_bundled_root_and_prelude_modules() {
+    let workspace = TempDir::new("bundled-root-prelude-fallback");
+    let main_path = workspace.write(
+        "main.aivi",
+        "use aivi (\n    Option\n    Result\n    Validation\n    Signal\n    Task\n    Some\n    None\n    Ok\n    Err\n    Valid\n    Invalid\n)\n\nuse aivi.prelude (\n    Int\n    Bool\n    Text\n    List\n    Eq\n    Default\n    Functor\n    Applicative\n    Monad\n    Foldable\n    getOrElse\n    withDefault\n    length\n    head\n    join\n)\n\ntype NameSignal = Signal Text\ntype CountTask = Task Text Int\ntype CheckedName = Validation Text Text\n\nval maybeName:Option Text = Some \"Ada\"\nval missingName:Option Text = None\nval chosenName:Text = getOrElse \"guest\" missingName\n\nval okCount:Result Text Int = Ok 2\nval errCount:Result Text Int = Err \"missing\"\nval chosenCount:Int = withDefault 0 okCount\n\nval checkedName:CheckedName = Valid \"Ada\"\nval nameCount:Int = length [\"Ada\", \"Grace\"]\nval firstName:Option Text = head [\"Ada\", \"Grace\"]\nval labels:Text = join \", \" [\"Ada\", \"Grace\"]\nval sameCount:Bool = chosenCount == 2\n",
+    );
+
+    let db = RootDatabase::new();
+    let main = SourceFile::new(
+        &db,
+        main_path.clone(),
+        fs::read_to_string(&main_path).expect("main fixture should exist"),
+    );
+
+    let hir = hir_module(&db, main);
+    assert!(
+        hir.hir_diagnostics().is_empty(),
+        "bundled root/prelude imports should lower cleanly: {:?}",
+        hir.hir_diagnostics()
+    );
+
+    let root_module = db
+        .file_at_path(&stdlib_path("aivi.aivi"))
+        .expect("bundled root stdlib module should be loaded lazily");
+    let prelude_module = db
+        .file_at_path(&stdlib_path("aivi/prelude.aivi"))
+        .expect("bundled prelude stdlib module should be loaded lazily");
+
+    let root_exports = exported_names(&db, root_module);
+    assert!(root_exports.find("Option").is_some());
+    assert!(root_exports.find("Some").is_some());
+    assert!(root_exports.find("Eq").is_some());
+
+    let prelude_exports = exported_names(&db, prelude_module);
+    assert!(prelude_exports.find("Int").is_some());
+    assert!(prelude_exports.find("getOrElse").is_some());
+    assert!(prelude_exports.find("length").is_some());
+    assert!(prelude_exports.find("join").is_some());
+}
+
+#[test]
+fn hir_queries_prefer_workspace_modules_over_bundled_stdlib_fallback() {
+    let workspace = TempDir::new("bundled-stdlib-overlay");
+    workspace.write("aivi.toml", "");
+    let main_path = workspace.write(
+        "main.aivi",
+        "use aivi.bundledsmoketest (\n    workspaceOnly\n    LocalToken\n)\n\ntype Alias = LocalToken\nval marker = workspaceOnly\n",
+    );
+    let local_module_path = workspace.write(
+        "aivi/bundledsmoketest.aivi",
+        "use aivi.bundledsmokesupport (\n    bundledSupportSentinel\n)\n\nval workspaceOnly:Text = bundledSupportSentinel\ntype LocalToken = Text\n\nexport (workspaceOnly, LocalToken)\n",
+    );
+
+    let db = RootDatabase::new();
+    let main = SourceFile::new(
+        &db,
+        main_path.clone(),
+        fs::read_to_string(&main_path).expect("main fixture should exist"),
+    );
+
+    let hir = hir_module(&db, main);
+    assert!(
+        hir.hir_diagnostics().is_empty(),
+        "workspace module should override bundled stdlib fallback: {:?}",
+        hir.hir_diagnostics()
+    );
+
+    let local_module = db
+        .file_at_path(&local_module_path)
+        .expect("workspace override should satisfy the import");
+    assert!(
+        exported_names(&db, local_module)
+            .find("workspaceOnly")
+            .is_some()
+    );
+    assert!(
+        db.file_at_path(&stdlib_path("aivi/bundledsmoketest.aivi"))
+            .is_none(),
+        "bundled stdlib should not load when a workspace module already exists"
+    );
+    assert!(
+        db.file_at_path(&stdlib_path("aivi/bundledsmokesupport.aivi"))
+            .is_some(),
+        "workspace overrides should still be able to fall back to bundled stdlib dependencies"
     );
 }
 

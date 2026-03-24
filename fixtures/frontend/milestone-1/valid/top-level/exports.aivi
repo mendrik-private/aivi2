@@ -13,5 +13,4 @@ val main =
         </Box>
     </Window>
 
-export statusLabel
-export main
+export (statusLabel, main)

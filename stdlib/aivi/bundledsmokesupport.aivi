@@ -1,0 +1,6 @@
+val bundledSupportSentinel:Text = "bundled-stdlib"
+
+type BundledSupportToken = Text
+
+export bundledSupportSentinel
+export BundledSupportToken

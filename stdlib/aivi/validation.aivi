@@ -1,0 +1,14 @@
+use aivi.nonEmpty (NonEmptyList)
+
+type Errors E = NonEmptyList E
+
+type NamePair =
+  | NamePair Text Text
+
+val okPair:Validation (Errors Text) NamePair =
+  &|> Valid "Ada"
+  &|> Valid "Lovelace"
+  |> NamePair
+
+export Errors
+export okPair

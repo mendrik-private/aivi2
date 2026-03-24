@@ -1,6 +1,7 @@
 use crate::{
-    ExportItem, ImportBindingMetadata, ImportBundleKind, ImportRecordField, ImportValueType, Item,
-    ItemId, Module, ResolutionState, TypeId, TypeKind, TypeReference, TypeResolution,
+    BuiltinTerm, ExportItem, ExportResolution, ImportBindingMetadata, ImportBundleKind,
+    ImportRecordField, ImportValueType, Item, ItemId, Module, ResolutionState, TypeId,
+    TypeItemBody, TypeKind, TypeReference, TypeResolution,
 };
 
 /// The kind of an exported name.
@@ -39,24 +40,15 @@ impl ExportedNames {
 /// Explicit `export` declarations narrow the set; if there are none, all
 /// top-level named items are considered exported.
 pub fn exports(module: &Module) -> ExportedNames {
-    let explicit_exports = explicit_export_targets(module);
-    let has_explicit_exports = !explicit_exports.is_empty()
-        || module
-            .root_items()
-            .iter()
-            .any(|item_id| matches!(module.items().get(*item_id), Some(Item::Export(_))));
-
-    let mut names = Vec::new();
-    for &id in module.root_items() {
-        if has_explicit_exports && !explicit_exports.contains(&id) {
-            continue;
-        }
-        if let Some(item) = module.items().get(id)
-            && let Some(exported) = item_to_exported_name(module, item)
-        {
-            names.push(exported);
-        }
-    }
+    let mut names = if module
+        .root_items()
+        .iter()
+        .any(|item_id| matches!(module.items().get(*item_id), Some(Item::Export(_))))
+    {
+        explicit_exported_names(module)
+    } else {
+        implicit_exported_names(module)
+    };
 
     names.sort_by(|left, right| {
         left.name
@@ -66,19 +58,145 @@ pub fn exports(module: &Module) -> ExportedNames {
     ExportedNames(names)
 }
 
-fn explicit_export_targets(module: &Module) -> Vec<ItemId> {
-    let mut targets = Vec::new();
+fn explicit_exported_names(module: &Module) -> Vec<ExportedName> {
+    let mut names = Vec::new();
     for &id in module.root_items() {
-        let Some(Item::Export(ExportItem { resolution, .. })) = module.items().get(id) else {
+        let Some(Item::Export(export)) = module.items().get(id) else {
             continue;
         };
-        if let ResolutionState::Resolved(target) = resolution
-            && !targets.contains(target)
+        let Some(exported) = export_item_to_exported_name(module, export) else {
+            continue;
+        };
+        push_unique_exported_name(&mut names, exported);
+    }
+    names
+}
+
+fn implicit_exported_names(module: &Module) -> Vec<ExportedName> {
+    let mut names = Vec::new();
+    for &id in module.root_items() {
+        if let Some(item) = module.items().get(id)
+            && let Some(exported) = item_to_exported_name(module, item)
         {
-            targets.push(*target);
+            push_unique_exported_name(&mut names, exported);
         }
     }
-    targets
+    names
+}
+
+fn push_unique_exported_name(names: &mut Vec<ExportedName>, exported: ExportedName) {
+    if names
+        .iter()
+        .any(|existing| existing.name == exported.name && existing.kind == exported.kind)
+    {
+        return;
+    }
+    names.push(exported);
+}
+
+fn export_item_to_exported_name(module: &Module, export: &ExportItem) -> Option<ExportedName> {
+    let ResolutionState::Resolved(resolution) = export.resolution else {
+        return None;
+    };
+    let exported_name = export.target.segments().first().text().to_owned();
+    match resolution {
+        ExportResolution::BuiltinType(builtin) => Some(ExportedName {
+            name: exported_name,
+            kind: ExportedNameKind::Type,
+            metadata: ImportBindingMetadata::BuiltinType(builtin),
+        }),
+        ExportResolution::BuiltinTerm(builtin) => Some(ExportedName {
+            name: exported_name,
+            kind: ExportedNameKind::Value,
+            metadata: ImportBindingMetadata::BuiltinTerm(builtin),
+        }),
+        ExportResolution::Item(item_id) => {
+            explicit_item_exported_name(module, item_id, exported_name.as_str())
+        }
+    }
+}
+
+fn explicit_item_exported_name(
+    module: &Module,
+    item_id: ItemId,
+    exported_name: &str,
+) -> Option<ExportedName> {
+    let item = module.items().get(item_id)?;
+    let ambient = module
+        .ambient_items()
+        .iter()
+        .any(|ambient_id| *ambient_id == item_id);
+    match item {
+        Item::Type(item) => {
+            if item.name.text() == exported_name {
+                let metadata = if ambient {
+                    ImportBindingMetadata::AmbientType
+                } else {
+                    ImportBindingMetadata::TypeConstructor {
+                        kind: aivi_typing::Kind::constructor(item.parameters.len()),
+                    }
+                };
+                return Some(ExportedName {
+                    name: exported_name.to_owned(),
+                    kind: ExportedNameKind::Type,
+                    metadata,
+                });
+            }
+
+            let TypeItemBody::Sum(variants) = &item.body else {
+                return None;
+            };
+            variants
+                .iter()
+                .any(|variant| variant.name.text() == exported_name)
+                .then(|| ExportedName {
+                    name: exported_name.to_owned(),
+                    kind: ExportedNameKind::Value,
+                    metadata: builtin_term_metadata(exported_name)
+                        .unwrap_or(ImportBindingMetadata::OpaqueValue),
+                })
+        }
+        Item::Class(item) => (item.name.text() == exported_name).then(|| ExportedName {
+            name: exported_name.to_owned(),
+            kind: ExportedNameKind::Class,
+            metadata: if ambient {
+                ImportBindingMetadata::AmbientType
+            } else {
+                ImportBindingMetadata::TypeConstructor {
+                    kind: aivi_typing::Kind::constructor(item.parameters.len()),
+                }
+            },
+        }),
+        Item::Domain(item) => (item.name.text() == exported_name).then(|| ExportedName {
+            name: exported_name.to_owned(),
+            kind: ExportedNameKind::Domain,
+            metadata: if ambient {
+                ImportBindingMetadata::AmbientType
+            } else {
+                ImportBindingMetadata::TypeConstructor {
+                    kind: aivi_typing::Kind::constructor(item.parameters.len()),
+                }
+            },
+        }),
+        Item::Value(item) => (item.name.text() == exported_name).then(|| ExportedName {
+            name: exported_name.to_owned(),
+            kind: ExportedNameKind::Value,
+            metadata: exported_value_metadata(module, item.annotation),
+        }),
+        Item::Function(item) => (item.name.text() == exported_name).then(|| ExportedName {
+            name: exported_name.to_owned(),
+            kind: ExportedNameKind::Function,
+            metadata: exported_value_metadata(module, item.annotation),
+        }),
+        Item::Signal(item) => (item.name.text() == exported_name).then(|| ExportedName {
+            name: exported_name.to_owned(),
+            kind: ExportedNameKind::Signal,
+            metadata: exported_value_metadata(module, item.annotation),
+        }),
+        Item::SourceProviderContract(_) | Item::Instance(_) | Item::Use(_) | Item::Export(_) => {
+            None
+        }
+    }
 }
 
 fn item_to_exported_name(module: &Module, item: &Item) -> Option<ExportedName> {
@@ -281,11 +399,16 @@ fn resolve_type_constructor(
             [*import_id]
             .metadata
         {
+            ImportBindingMetadata::BuiltinType(builtin) => {
+                Some(ResolvedTypeConstructor::Builtin(*builtin))
+            }
             ImportBindingMetadata::Bundle(bundle) => Some(ResolvedTypeConstructor::Bundle(*bundle)),
             ImportBindingMetadata::Unknown
             | ImportBindingMetadata::Value { .. }
             | ImportBindingMetadata::OpaqueValue
-            | ImportBindingMetadata::TypeConstructor { .. } => None,
+            | ImportBindingMetadata::TypeConstructor { .. }
+            | ImportBindingMetadata::BuiltinTerm(_)
+            | ImportBindingMetadata::AmbientType => None,
         },
         ResolutionState::Resolved(TypeResolution::Item(_))
         | ResolutionState::Resolved(TypeResolution::TypeParameter(_))
@@ -303,5 +426,19 @@ fn exported_kind_rank(kind: ExportedNameKind) -> u8 {
         ExportedNameKind::Domain => 5,
         ExportedNameKind::SourceProvider => 6,
         ExportedNameKind::Instance => 7,
+    }
+}
+
+fn builtin_term_metadata(name: &str) -> Option<ImportBindingMetadata> {
+    match name {
+        "True" => Some(ImportBindingMetadata::BuiltinTerm(BuiltinTerm::True)),
+        "False" => Some(ImportBindingMetadata::BuiltinTerm(BuiltinTerm::False)),
+        "None" => Some(ImportBindingMetadata::BuiltinTerm(BuiltinTerm::None)),
+        "Some" => Some(ImportBindingMetadata::BuiltinTerm(BuiltinTerm::Some)),
+        "Ok" => Some(ImportBindingMetadata::BuiltinTerm(BuiltinTerm::Ok)),
+        "Err" => Some(ImportBindingMetadata::BuiltinTerm(BuiltinTerm::Err)),
+        "Valid" => Some(ImportBindingMetadata::BuiltinTerm(BuiltinTerm::Valid)),
+        "Invalid" => Some(ImportBindingMetadata::BuiltinTerm(BuiltinTerm::Invalid)),
+        _ => None,
     }
 }

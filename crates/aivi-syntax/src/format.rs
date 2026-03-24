@@ -1,9 +1,9 @@
 use crate::cst::{
     BinaryOperator, ClassMember, ClassMemberName, Decorator, DecoratorArguments, DecoratorPayload,
-    DomainItem, DomainMember, DomainMemberName, Expr, ExprKind, FunctionParam, Identifier,
-    InstanceItem, InstanceMember, Item, MapExpr, MarkupAttribute, MarkupAttributeValue, MarkupNode,
-    Module, NamedItem, Pattern, PatternKind, PipeExpr, PipeStage, PipeStageKind, ProjectionPath,
-    QualifiedName, RecordExpr, RecordField, RecordPatternField, SourceDecorator,
+    DomainItem, DomainMember, DomainMemberName, ExportItem, Expr, ExprKind, FunctionParam,
+    Identifier, InstanceItem, InstanceMember, Item, MapExpr, MarkupAttribute, MarkupAttributeValue,
+    MarkupNode, Module, NamedItem, Pattern, PatternKind, PipeExpr, PipeStage, PipeStageKind,
+    ProjectionPath, QualifiedName, RecordExpr, RecordField, RecordPatternField, SourceDecorator,
     SourceProviderContractItem, SourceProviderContractMember, SourceProviderContractSchemaMember,
     SuffixedIntegerLiteral, TextLiteral, TextSegment, TypeDeclBody, TypeExpr, TypeExprKind,
     TypeField, TypeVariant, UnaryOperator, UseItem,
@@ -77,9 +77,7 @@ impl Formatter {
                 lines.extend(self.format_source_provider_contract_item(item))
             }
             Item::Use(item) => lines.extend(self.format_use_item(item)),
-            Item::Export(item) => {
-                lines.push(format!("export {}", self.item_name(&item.name)));
-            }
+            Item::Export(item) => lines.extend(self.format_export_item(item)),
             Item::Error(_) => {
                 unreachable!("formatter requires a parsed module without error items")
             }
@@ -283,6 +281,21 @@ impl Formatter {
             text.push_str(&alias.text);
         }
         text
+    }
+
+    fn format_export_item(&self, item: &ExportItem) -> Vec<String> {
+        match item.targets.as_slice() {
+            [] => vec!["export _".to_owned()],
+            [target] => vec![format!("export {}", target.text)],
+            targets => vec![format!(
+                "export ({})",
+                targets
+                    .iter()
+                    .map(|target| target.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )],
+        }
     }
 
     fn format_domain_item(&self, item: &DomainItem) -> Vec<String> {
@@ -1203,8 +1216,8 @@ impl Formatter {
         )
     }
 
-    fn pipe_alignment_prefix(&self, operator: &str) -> &'static str {
-        if operator.starts_with('|') { " " } else { "" }
+    fn pipe_alignment_prefix(&self, _operator: &str) -> &'static str {
+        " "
     }
 
     fn format_markup_block(&self, node: &MarkupNode) -> Block {
@@ -1619,8 +1632,8 @@ mod tests {
                 "sig documentBody = \"Hello\"\n",
                 "\n",
                 "sig draft =\n",
-                " &|> documentTitle\n",
-                " &|> documentBody\n",
+                "  &|> documentTitle\n",
+                "  &|> documentBody\n",
                 "  |> Pair\n",
                 "\n",
                 "fun label:Text #state:SaveState =>\n",
@@ -1854,6 +1867,19 @@ mod tests {
                 "    http as primary\n",
                 "    Request as HttpRequest\n",
                 ")\n",
+            )
+        );
+    }
+
+    #[test]
+    fn formatter_normalizes_grouped_exports() {
+        let formatted =
+            format_text("export(bundledSupportSentinel,BundledSupportToken)\nexport (main)\n");
+        assert_eq!(
+            formatted,
+            concat!(
+                "export (bundledSupportSentinel, BundledSupportToken)\n",
+                "export main\n",
             )
         );
     }

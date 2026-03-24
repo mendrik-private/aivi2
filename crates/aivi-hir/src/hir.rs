@@ -278,6 +278,9 @@ pub enum ImportBindingMetadata {
     Value { ty: ImportValueType },
     OpaqueValue,
     TypeConstructor { kind: Kind },
+    BuiltinType(BuiltinType),
+    BuiltinTerm(BuiltinTerm),
+    AmbientType,
     Bundle(ImportBundleKind),
 }
 
@@ -768,7 +771,15 @@ pub struct UseItem {
 pub struct ExportItem {
     pub header: ItemHeader,
     pub target: NamePath,
-    pub resolution: ResolutionState<ItemId>,
+    pub resolution: ResolutionState<ExportResolution>,
+}
+
+/// Resolved destination for one explicit `export` target.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ExportResolution {
+    Item(ItemId),
+    BuiltinTerm(BuiltinTerm),
+    BuiltinType(BuiltinType),
 }
 
 /// One integer literal preserved in raw form.

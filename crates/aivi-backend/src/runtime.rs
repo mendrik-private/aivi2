@@ -8,9 +8,9 @@ use aivi_hir::{DomainMemberHandle, ItemId as HirItemId, SumConstructorHandle};
 use crate::{
     BinaryOperator, BuiltinAppendCarrier, BuiltinApplicativeCarrier, BuiltinApplyCarrier,
     BuiltinClassMemberIntrinsic, BuiltinFoldableCarrier, BuiltinFunctorCarrier, BuiltinOrdSubject,
-    BuiltinTerm, EnvSlotId, InlinePipePattern, InlinePipePatternKind, InlinePipeStageKind,
-    InlineSubjectId, ItemId, KernelExprId, KernelExprKind, KernelId, LayoutId, LayoutKind,
-    PrimitiveType, Program, ProjectionBase, SubjectRef, UnaryOperator,
+    BuiltinTerm, EnvSlotId, InlinePipeConstructor, InlinePipePattern, InlinePipePatternKind,
+    InlinePipeStageKind, InlineSubjectId, ItemId, KernelExprId, KernelExprKind, KernelId, LayoutId,
+    LayoutKind, PrimitiveType, Program, ProjectionBase, SubjectRef, UnaryOperator,
     numeric::{RuntimeBigInt, RuntimeDecimal, RuntimeFloat},
 };
 
@@ -1459,26 +1459,52 @@ impl<'a> KernelEvaluator<'a> {
             InlinePipePatternKind::Constructor {
                 constructor,
                 arguments,
-            } => {
-                let Some(payload) = truthy_falsy_payload(value, *constructor) else {
-                    return Ok(false);
-                };
-                match (payload, arguments.as_slice()) {
-                    (None, []) => Ok(true),
-                    (Some(payload), [argument]) => self.match_inline_pipe_pattern(
-                        kernel_id,
-                        expr_id,
-                        kernel,
-                        argument,
-                        &payload,
-                        inline_subjects,
-                    ),
-                    _ => Err(EvaluationError::UnsupportedInlinePipePattern {
-                        kernel: kernel_id,
-                        expr: expr_id,
-                    }),
+            } => match constructor {
+                InlinePipeConstructor::Builtin(constructor) => {
+                    let Some(payload) = truthy_falsy_payload(value, *constructor) else {
+                        return Ok(false);
+                    };
+                    match (payload, arguments.as_slice()) {
+                        (None, []) => Ok(true),
+                        (Some(payload), [argument]) => self.match_inline_pipe_pattern(
+                            kernel_id,
+                            expr_id,
+                            kernel,
+                            argument,
+                            &payload,
+                            inline_subjects,
+                        ),
+                        _ => Err(EvaluationError::UnsupportedInlinePipePattern {
+                            kernel: kernel_id,
+                            expr: expr_id,
+                        }),
+                    }
                 }
-            }
+                InlinePipeConstructor::Sum(handle) => {
+                    let RuntimeValue::Sum(value) = value else {
+                        return Ok(false);
+                    };
+                    if value.item != handle.item
+                        || value.variant_name.as_ref() != handle.variant_name.as_ref()
+                        || value.fields.len() != arguments.len()
+                    {
+                        return Ok(false);
+                    }
+                    for (argument, field) in arguments.iter().zip(value.fields.iter()) {
+                        if !self.match_inline_pipe_pattern(
+                            kernel_id,
+                            expr_id,
+                            kernel,
+                            argument,
+                            field,
+                            inline_subjects,
+                        )? {
+                            return Ok(false);
+                        }
+                    }
+                    Ok(true)
+                }
+            },
         }
     }
 
@@ -1999,6 +2025,41 @@ impl<'a> KernelEvaluator<'a> {
                     reason: "apply received values outside the supported runtime carriers",
                 }),
             },
+            BuiltinApplyCarrier::Validation => {
+                match (strip_signal(functions), strip_signal(values)) {
+                    (
+                        RuntimeValue::ValidationInvalid(left),
+                        RuntimeValue::ValidationInvalid(right),
+                    ) => Ok(RuntimeValue::ValidationInvalid(Box::new(
+                        append_validation_errors(*left, *right).map_err(|reason| {
+                            EvaluationError::UnsupportedBuiltinClassMember {
+                                kernel: kernel_id,
+                                expr,
+                                intrinsic,
+                                reason,
+                            }
+                        })?,
+                    ))),
+                    (RuntimeValue::ValidationInvalid(error), _) => {
+                        Ok(RuntimeValue::ValidationInvalid(error))
+                    }
+                    (_, RuntimeValue::ValidationInvalid(error)) => {
+                        Ok(RuntimeValue::ValidationInvalid(error))
+                    }
+                    (
+                        RuntimeValue::ValidationValid(function),
+                        RuntimeValue::ValidationValid(value),
+                    ) => Ok(RuntimeValue::ValidationValid(Box::new(
+                        self.apply_callable(kernel_id, expr, *function, vec![*value], globals)?,
+                    ))),
+                    _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                        kernel: kernel_id,
+                        expr,
+                        intrinsic,
+                        reason: "apply received values outside the supported runtime carriers",
+                    }),
+                }
+            }
             BuiltinApplyCarrier::Signal => match (functions, values) {
                 (RuntimeValue::Signal(function), RuntimeValue::Signal(value)) => {
                     Ok(RuntimeValue::Signal(Box::new(self.apply_callable(
@@ -2644,12 +2705,84 @@ fn strip_signal(value: RuntimeValue) -> RuntimeValue {
     }
 }
 
+fn append_validation_errors(
+    left: RuntimeValue,
+    right: RuntimeValue,
+) -> Result<RuntimeValue, &'static str> {
+    let RuntimeValue::Sum(left) = left else {
+        return Err(
+            "Validation apply only accumulates Invalid payloads shaped as `NonEmpty`/`NonEmptyList`",
+        );
+    };
+    let RuntimeValue::Sum(right) = right else {
+        return Err(
+            "Validation apply only accumulates Invalid payloads shaped as `NonEmpty`/`NonEmptyList`",
+        );
+    };
+    if !matches_non_empty_runtime(&left) || !matches_non_empty_runtime(&right) {
+        return Err(
+            "Validation apply only accumulates Invalid payloads shaped as `NonEmpty`/`NonEmptyList`",
+        );
+    }
+
+    let RuntimeSumValue {
+        item,
+        type_name,
+        variant_name,
+        fields: left_fields,
+    } = left;
+    let mut left_fields = left_fields;
+    let head = left_fields.remove(0);
+    let left_tail = match left_fields.remove(0) {
+        RuntimeValue::List(values) => values,
+        _ => {
+            return Err(
+                "Validation apply only accumulates Invalid payloads shaped as `NonEmpty`/`NonEmptyList`",
+            );
+        }
+    };
+
+    let RuntimeSumValue {
+        fields: right_fields,
+        ..
+    } = right;
+    let mut right_fields = right_fields;
+    let right_head = right_fields.remove(0);
+    let right_tail = match right_fields.remove(0) {
+        RuntimeValue::List(values) => values,
+        _ => {
+            return Err(
+                "Validation apply only accumulates Invalid payloads shaped as `NonEmpty`/`NonEmptyList`",
+            );
+        }
+    };
+
+    let mut tail = left_tail;
+    tail.push(right_head);
+    tail.extend(right_tail);
+
+    Ok(RuntimeValue::Sum(RuntimeSumValue {
+        item,
+        type_name,
+        variant_name,
+        fields: vec![head, RuntimeValue::List(tail)],
+    }))
+}
+
+fn matches_non_empty_runtime(value: &RuntimeSumValue) -> bool {
+    matches!(value.type_name.as_ref(), "NonEmpty" | "NonEmptyList")
+        && matches!(value.variant_name.as_ref(), "NonEmpty" | "NonEmptyList")
+        && value.fields.len() == 2
+        && matches!(value.fields.get(1), Some(RuntimeValue::List(_)))
+}
+
 #[cfg(test)]
 mod tests {
     use aivi_hir::{ItemId as HirItemId, SumConstructorHandle};
 
     use super::{
         DetachedRuntimeValue, RuntimeMapEntry, RuntimeRecordField, RuntimeSumValue, RuntimeValue,
+        append_validation_errors,
     };
 
     #[test]
@@ -2721,6 +2854,47 @@ mod tests {
         });
 
         assert_eq!(format!("{value}"), "<constructor Status.Ready>");
+    }
+
+    #[test]
+    fn validation_error_accumulation_appends_non_empty_payloads() {
+        let left = RuntimeValue::Sum(RuntimeSumValue {
+            item: HirItemId::from_raw(11),
+            type_name: "NonEmptyList".into(),
+            variant_name: "NonEmptyList".into(),
+            fields: vec![
+                RuntimeValue::Text("missing name".into()),
+                RuntimeValue::List(Vec::new()),
+            ],
+        });
+        let right = RuntimeValue::Sum(RuntimeSumValue {
+            item: HirItemId::from_raw(11),
+            type_name: "NonEmptyList".into(),
+            variant_name: "NonEmptyList".into(),
+            fields: vec![
+                RuntimeValue::Text("missing email".into()),
+                RuntimeValue::List(vec![RuntimeValue::Text("missing age".into())]),
+            ],
+        });
+
+        let accumulated = append_validation_errors(left, right)
+            .expect("non-empty validation errors should append");
+
+        assert_eq!(
+            accumulated,
+            RuntimeValue::Sum(RuntimeSumValue {
+                item: HirItemId::from_raw(11),
+                type_name: "NonEmptyList".into(),
+                variant_name: "NonEmptyList".into(),
+                fields: vec![
+                    RuntimeValue::Text("missing name".into()),
+                    RuntimeValue::List(vec![
+                        RuntimeValue::Text("missing email".into()),
+                        RuntimeValue::Text("missing age".into()),
+                    ]),
+                ],
+            })
+        );
     }
 
     #[test]

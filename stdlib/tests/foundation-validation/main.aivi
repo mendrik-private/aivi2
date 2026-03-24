@@ -1,0 +1,17 @@
+use aivi.defaults (Option)
+
+use aivi.nonEmpty (
+    NonEmpty
+    NonEmptyList
+)
+
+type LeadingName = NonEmpty Text
+
+type User = {
+    name: Text,
+    nickname: Option Text,
+    email: Option Text
+}
+
+val user:User = { name: "Ada" }
+val ok:Validation (NonEmptyList Text) Text = Valid "Ada"

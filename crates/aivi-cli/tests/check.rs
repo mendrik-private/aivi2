@@ -1,4 +1,9 @@
-use std::{env, path::PathBuf, process::Command};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    process::Command,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 fn fixture_path(relative: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -7,6 +12,50 @@ fn fixture_path(relative: &str) -> PathBuf {
         .join("fixtures")
         .join("frontend")
         .join(relative)
+}
+
+fn stdlib_path(relative: &str) -> PathBuf {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("stdlib")
+        .join(relative);
+    fs::canonicalize(&path).unwrap_or(path)
+}
+
+struct TempDir {
+    path: PathBuf,
+}
+
+impl TempDir {
+    fn new(prefix: &str) -> Self {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after unix epoch")
+            .as_nanos();
+        let path = env::temp_dir().join(format!("aivi-{prefix}-{}-{unique}", std::process::id()));
+        fs::create_dir_all(&path).expect("temporary directory should be creatable");
+        Self { path }
+    }
+
+    fn write(&self, relative: &str, text: &str) -> PathBuf {
+        let path = self.path.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("temporary parent directories should be creatable");
+        }
+        fs::write(&path, text).expect("temporary file should be writable");
+        path
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
 }
 
 #[test]
@@ -39,6 +88,8 @@ fn check_accepts_valid_hir_fixtures() {
         "milestone-2/valid/domain-operator-usage/main.aivi",
         "milestone-2/valid/domain-operator-usage-parameterized/main.aivi",
         "milestone-2/valid/type-kinds/main.aivi",
+        "milestone-2/valid/bundled-collection-stdlib/main.aivi",
+        "milestone-2/valid/bundled-root-prelude-stdlib/main.aivi",
         "milestone-2/valid/pipe-branch-and-join/main.aivi",
         "milestone-2/valid/pipe-truthy-falsy-carriers/main.aivi",
         "milestone-2/valid/pipe-fanout-carriers/main.aivi",
@@ -209,6 +260,33 @@ fn check_reports_non_exhaustive_case_from_hir() {
         stderr.contains("case split over `Status` is not exhaustive; missing `Pending`, `Failed`"),
         "expected explicit non-exhaustive case message, got stderr: {stderr}"
     );
+}
+
+#[test]
+fn check_accepts_stdlib_foundation_validation_files() {
+    for relative in [
+        "aivi/nonEmpty.aivi",
+        "aivi/validation.aivi",
+        "tests/foundation-validation/main.aivi",
+    ] {
+        let path = stdlib_path(relative);
+        let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+            .arg("check")
+            .arg(&path)
+            .output()
+            .expect("check command should run");
+
+        assert!(
+            output.status.success(),
+            "expected {relative} to pass check, stderr was: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("syntax + HIR passed"),
+            "expected success output for {relative}, got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
 }
 
 #[test]
@@ -387,6 +465,143 @@ fn check_reports_trailing_body_tokens_from_syntax() {
     assert!(
         stderr.contains("function declaration body must contain exactly one expression"),
         "expected explicit trailing body token message, got stderr: {stderr}"
+    );
+}
+
+#[test]
+fn check_accepts_phase_one_collection_stdlib_modules() {
+    for relative in [
+        "aivi/list.aivi",
+        "aivi/option.aivi",
+        "aivi/result.aivi",
+        "aivi/text.aivi",
+    ] {
+        let path = stdlib_path(relative);
+        let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+            .arg("check")
+            .arg(&path)
+            .output()
+            .expect("check command should run");
+
+        assert!(
+            output.status.success(),
+            "expected {relative} to pass check, stderr was: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("syntax + HIR passed"),
+            "expected success output for {relative}, got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+#[test]
+fn check_accepts_phase_one_domain_stdlib_modules() {
+    for relative in [
+        "aivi/duration.aivi",
+        "aivi/url.aivi",
+        "aivi/path.aivi",
+        "aivi/color.aivi",
+    ] {
+        let path = stdlib_path(relative);
+        let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+            .arg("check")
+            .arg(&path)
+            .output()
+            .expect("check command should run");
+
+        assert!(
+            output.status.success(),
+            "expected {relative} to pass check, stderr was: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("syntax + HIR passed"),
+            "expected success output for {relative}, got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+#[test]
+fn check_accepts_bundled_phase_one_domain_stdlib_imports() {
+    let workspace = TempDir::new("check-domain-stdlib");
+    workspace.write("aivi.toml", "");
+    let main = workspace.write(
+        "main.aivi",
+        "use aivi.duration (\n    Duration\n    DurationError\n)\n\nuse aivi.url (\n    Url\n    UrlError\n)\n\nuse aivi.path (\n    Path\n    PathError\n)\n\nuse aivi.color (\n    Color\n)\n\ntype Delay = Duration\ntype DelayFailure = DurationError\ntype Endpoint = Url\ntype EndpointFailure = UrlError\ntype FilePath = Path\ntype FilePathFailure = PathError\ntype ThemeColor = Color\n",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&main)
+        .current_dir(workspace.path())
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        output.status.success(),
+        "expected bundled phase-one domain imports to pass check, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("syntax + HIR passed"),
+        "expected success output, got stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
+fn check_accepts_bundled_stdlib_fallback() {
+    let workspace = TempDir::new("check-bundled-stdlib");
+    workspace.write("aivi.toml", "");
+    let main = workspace.write(
+        "main.aivi",
+        "use aivi.bundledsmoketest (\n    bundledSentinel\n    BundledToken\n)\n\ntype Alias = BundledToken\nval marker = bundledSentinel\n",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&main)
+        .current_dir(workspace.path())
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        output.status.success(),
+        "expected bundled stdlib fallback to pass check, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("syntax + HIR passed"),
+        "expected success output, got stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
+fn check_accepts_bundled_root_and_prelude_stdlib_imports() {
+    let workspace = TempDir::new("check-root-prelude-stdlib");
+    workspace.write("aivi.toml", "");
+    let main = workspace.write(
+        "main.aivi",
+        "use aivi (\n    Option\n    Result\n    Validation\n    Signal\n    Task\n    Some\n    None\n    Ok\n    Err\n    Valid\n    Invalid\n)\n\nuse aivi.prelude (\n    Int\n    Bool\n    Text\n    List\n    Eq\n    Default\n    Functor\n    Applicative\n    Monad\n    Foldable\n    getOrElse\n    withDefault\n    length\n    head\n    join\n)\n\ntype NameSignal = Signal Text\ntype CountTask = Task Text Int\ntype CheckedName = Validation Text Text\n\nval maybeName:Option Text = Some \"Ada\"\nval missingName:Option Text = None\nval chosenName:Text = getOrElse \"guest\" missingName\n\nval okCount:Result Text Int = Ok 2\nval errCount:Result Text Int = Err \"missing\"\nval chosenCount:Int = withDefault 0 okCount\n\nval checkedName:CheckedName = Valid \"Ada\"\nval nameCount:Int = length [\"Ada\", \"Grace\"]\nval firstName:Option Text = head [\"Ada\", \"Grace\"]\nval labels:Text = join \", \" [\"Ada\", \"Grace\"]\nval sameCount:Bool = chosenCount == 2\n",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&main)
+        .current_dir(workspace.path())
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        output.status.success(),
+        "expected bundled root/prelude imports to pass check, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("syntax + HIR passed"),
+        "expected success output, got stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
     );
 }
 

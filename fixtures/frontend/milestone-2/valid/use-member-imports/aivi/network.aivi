@@ -8,7 +8,4 @@ type Channel A B = {
     right: B
 }
 
-export http
-export socket
-export Request
-export Channel
+export (http, socket, Request, Channel)

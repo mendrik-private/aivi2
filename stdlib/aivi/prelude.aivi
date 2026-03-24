@@ -1,0 +1,58 @@
+use aivi.option (
+    getOrElse as optionGetOrElse
+)
+
+use aivi.result (
+    withDefault as resultWithDefault
+)
+
+use aivi.list (
+    length as listLength
+    head as listHead
+)
+
+use aivi.text (
+    join as textJoin
+)
+
+fun getOrElse:A #fallback:A #value:(Option A) =>
+    optionGetOrElse fallback value
+
+fun withDefault:A #fallback:A #value:(Result E A) =>
+    resultWithDefault fallback value
+
+fun length:Int #items:(List A) =>
+    listLength items
+
+fun head:(Option A) #items:(List A) =>
+    listHead items
+
+fun join:Text #separator:Text #parts:(List Text) =>
+    textJoin separator parts
+
+export (
+    Int,
+    Float,
+    Decimal,
+    BigInt,
+    Bool,
+    Text,
+    Unit,
+    List,
+    Option,
+    Result,
+    Validation,
+    Signal,
+    Task,
+    Eq,
+    Default,
+    Functor,
+    Applicative,
+    Monad,
+    Foldable,
+    getOrElse,
+    withDefault,
+    length,
+    head,
+    join
+)

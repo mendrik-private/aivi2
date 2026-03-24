@@ -8,7 +8,7 @@ use std::{
 use aivi_backend::{
     DetachedRuntimeValue, EvaluationError, ItemId as BackendItemId, ItemKind as BackendItemKind,
     KernelEvaluator, KernelId, MovingRuntimeValueStore, Program as BackendProgram, RuntimeValue,
-    SourceId as BackendSourceId,
+    SourceId as BackendSourceId, StageKind as BackendStageKind,
 };
 use aivi_core as core;
 use aivi_hir as hir;
@@ -1465,7 +1465,7 @@ impl<'a> LinkBuilder<'a> {
                     });
                 continue;
             };
-            if !item.pipelines.is_empty() {
+            if !item.pipelines.is_empty() && !self.supported_body_backed_signal_pipelines(item) {
                 self.errors
                     .push(BackendRuntimeLinkError::SignalPipelinesNotYetLinked {
                         item: binding.item,
@@ -1571,6 +1571,18 @@ impl<'a> LinkBuilder<'a> {
             }
         }
         required.into_iter().collect::<Vec<_>>().into_boxed_slice()
+    }
+
+    fn supported_body_backed_signal_pipelines(&self, item: &aivi_backend::Item) -> bool {
+        item.body.is_some()
+            && item.pipelines.iter().copied().all(|pipeline_id| {
+                let pipeline = &self.backend.pipelines()[pipeline_id];
+                pipeline.recurrence.is_none()
+                    && pipeline
+                        .stages
+                        .iter()
+                        .all(|stage| matches!(stage.kind, BackendStageKind::TruthyFalsy(_)))
+            })
     }
 }
 
@@ -2232,6 +2244,212 @@ sig status : Signal Text =
             Some(&RuntimeValue::Text("state:go".into()))
         );
         assert!(outcome.source_actions().is_empty());
+    }
+
+    #[test]
+    fn linked_runtime_evaluates_direct_signal_truthy_falsy_bodies() {
+        let lowered = lower_text(
+            "runtime-startup-direct-signal-truthy-falsy.aivi",
+            r#"
+type User = {
+    name: Text
+}
+
+type LoadError = {
+    message: Text
+}
+
+type FormError = {
+    message: Text
+}
+
+sig ready : Signal Bool = True
+
+sig maybeUser : Signal (Option User) = Some { name: "Ada" }
+
+sig loaded : Signal (Result LoadError User) = Err { message: "offline" }
+
+sig submitted : Signal (Validation FormError User) = Valid { name: "Grace" }
+
+sig readyText : Signal Text =
+    ready
+     T|> "start"
+     F|> "wait"
+
+sig greeting : Signal Text =
+    maybeUser
+     T|> .name
+     F|> "guest"
+
+sig rendered : Signal Text =
+    loaded
+     T|> .name
+     F|> .message
+
+sig summary : Signal Text =
+    submitted
+     T|> .name
+     F|> .message
+"#,
+        );
+        let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+            .expect("runtime assembly should build");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("startup link should succeed");
+        let outcome = linked
+            .tick_with_source_lifecycle()
+            .expect("linked runtime tick should succeed");
+        for (name, expected) in [
+            ("readyText", RuntimeValue::Text("start".into())),
+            ("greeting", RuntimeValue::Text("Ada".into())),
+            ("rendered", RuntimeValue::Text("offline".into())),
+            ("summary", RuntimeValue::Text("Grace".into())),
+        ] {
+            let signal = linked
+                .assembly()
+                .signal(item_id(lowered.hir.module(), name))
+                .unwrap_or_else(|| panic!("signal binding should exist for {name}"))
+                .signal();
+            assert_eq!(
+                linked.runtime().current_value(signal).unwrap(),
+                Some(&expected),
+                "signal {name} should commit the expected truthy/falsy result"
+            );
+        }
+        assert!(outcome.source_actions().is_empty());
+    }
+
+    #[test]
+    fn linked_runtime_evaluates_direct_signal_transform_bodies() {
+        let lowered = lower_text(
+            "runtime-startup-direct-signal-transform.aivi",
+            r#"
+type User = {
+    name: Text
+}
+
+type Session = {
+    user: User
+}
+
+sig session : Signal Session = { user: { name: "Ada" } }
+
+sig label : Signal Text =
+    session
+     |> .user
+     |> .name
+"#,
+        );
+        let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+            .expect("runtime assembly should build");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("startup link should succeed");
+        let outcome = linked
+            .tick_with_source_lifecycle()
+            .expect("linked runtime tick should succeed");
+        let label_signal = linked
+            .assembly()
+            .signal(item_id(lowered.hir.module(), "label"))
+            .expect("label signal binding should exist")
+            .signal();
+        assert_eq!(
+            linked.runtime().current_value(label_signal).unwrap(),
+            Some(&RuntimeValue::Text("Ada".into()))
+        );
+        assert!(outcome.source_actions().is_empty());
+    }
+
+    #[test]
+    fn linked_runtime_evaluates_direct_signal_case_bodies_with_same_module_sum_patterns() {
+        let lowered = lower_text(
+            "runtime-startup-direct-signal-inline-case.aivi",
+            r#"
+type Status =
+  | Idle
+  | Ready Text
+  | Failed Text Text
+
+sig current : Signal Status =
+    Failed "503" "offline"
+
+sig label : Signal Text =
+    current
+     ||> Idle => "idle"
+     ||> Ready name => name
+     ||> Failed code message => "{code}:{message}"
+"#,
+        );
+        let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+            .expect("runtime assembly should build");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("startup link should succeed");
+        let outcome = linked
+            .tick_with_source_lifecycle()
+            .expect("linked runtime tick should succeed");
+        let label_signal = linked
+            .assembly()
+            .signal(item_id(lowered.hir.module(), "label"))
+            .expect("label signal binding should exist")
+            .signal();
+        assert_eq!(
+            linked.runtime().current_value(label_signal).unwrap(),
+            Some(&RuntimeValue::Text("503:offline".into()))
+        );
+        assert!(outcome.source_actions().is_empty());
+    }
+
+    #[test]
+    fn linked_runtime_still_blocks_signal_filter_gate_pipelines() {
+        let lowered = lower_text(
+            "runtime-startup-direct-signal-gate.aivi",
+            r#"
+type User = {
+    active: Bool,
+    email: Text
+}
+
+type Session = {
+    user: User
+}
+
+val seed:User = { active: True, email: "ada@example.com" }
+
+sig sessions : Signal Session = { user: seed }
+
+sig activeUsers : Signal User =
+    sessions
+     |> .user
+     ?|> .active
+"#,
+        );
+        let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+            .expect("runtime assembly should build");
+        let errors = match link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        ) {
+            Ok(_) => panic!("signal filter pipelines should remain an explicit runtime boundary"),
+            Err(errors) => errors,
+        };
+        let active_users = item_id(lowered.hir.module(), "activeUsers");
+        assert!(errors.errors().iter().any(|error| matches!(
+            error,
+            BackendRuntimeLinkError::SignalPipelinesNotYetLinked { item, count }
+                if *item == active_users && *count == 1
+        )));
     }
 
     #[test]

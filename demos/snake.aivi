@@ -1,4 +1,4 @@
-type Vec2 = Vec2 Int Int
+type Pixel = Vec2 Int Int
 
 type Direction =
   | Up
@@ -32,12 +32,12 @@ type BoardSize = {
 }
 
 type Snake = {
-    head: Vec2,
-    second: Vec2,
-    third: Vec2,
-    fourth: Vec2,
-    fifth: Vec2,
-    sixth: Vec2,
+    head: Pixel,
+    second: Pixel,
+    third: Pixel,
+    fourth: Pixel,
+    fifth: Pixel,
+    sixth: Pixel,
     length: Int
 }
 
@@ -83,12 +83,12 @@ fun bottomInnerY:Int #size:BoardSize =>
 
 fun initialSnakeFor:Snake #size:BoardSize =>
     {
-        head: Vec2 6 5,
-        second: Vec2 5 5,
-        third: Vec2 4 5,
-        fourth: Vec2 4 5,
-        fifth: Vec2 4 5,
-        sixth: Vec2 4 5,
+        head: Pixel 6 5,
+        second: Pixel 5 5,
+        third: Pixel 4 5,
+        fourth: Pixel 4 5,
+        fifth: Pixel 4 5,
+        sixth: Pixel 4 5,
         length: 3
     }
 
@@ -115,30 +115,30 @@ fun isOpposite:Bool #candidate:Direction #current:Direction =>
 
 fun applyDirection:Direction #current:Direction #candidate:Direction =>
     isOpposite candidate current
-    T|> current
-    F|> candidate
+     T|> current
+     F|> candidate
 
 fun keepDirection:Direction #latest:Key #current:Direction =>
     directionFromKey latest
      |> applyDirection current
 
-fun moveUp:Vec2 #head:Vec2 =>
+fun moveUp:Pixel #head:Pixel =>
     head
-     ||> Vec2 x y => Vec2 x (y - 1)
+     ||> Pixel x y => Pixel x (y - 1)
 
-fun moveDown:Vec2 #head:Vec2 =>
+fun moveDown:Pixel #head:Pixel =>
     head
-     ||> Vec2 x y => Vec2 x (y + 1)
+     ||> Pixel x y => Pixel x (y + 1)
 
-fun moveLeft:Vec2 #head:Vec2 =>
+fun moveLeft:Pixel #head:Pixel =>
     head
-     ||> Vec2 x y => Vec2 (x - 1) y
+     ||> Pixel x y => Pixel (x - 1) y
 
-fun moveRight:Vec2 #head:Vec2 =>
+fun moveRight:Pixel #head:Pixel =>
     head
-     ||> Vec2 x y => Vec2 (x + 1) y
+     ||> Pixel x y => Pixel (x + 1) y
 
-fun nextHead:Vec2 #direction:Direction #head:Vec2 =>
+fun nextHead:Pixel #direction:Direction #head:Pixel =>
     direction
      ||> Up => moveUp head
      ||> Down => moveDown head
@@ -156,17 +156,17 @@ fun growLength:Int #length:Int =>
 
 fun nextLength:Int #grew:Bool #length:Int =>
     grew
-    T|> growLength length
-    F|> length
+     T|> growLength length
+     F|> length
 
-fun foodAt:Vec2 #size:BoardSize #food:FoodSpawn =>
+fun foodAt:Pixel #size:BoardSize #food:FoodSpawn =>
     food
-     ||> SpawnA => Vec2 (rightInnerX size) 1
-     ||> SpawnB => Vec2 (rightInnerX size) (bottomInnerY size)
-     ||> SpawnC => Vec2 1 (bottomInnerY size)
-     ||> SpawnD => Vec2 4 2
-     ||> SpawnE => Vec2 2 1
-     ||> SpawnF => Vec2 5 1
+     ||> SpawnA => Pixel (rightInnerX size) 1
+     ||> SpawnB => Pixel (rightInnerX size) (bottomInnerY size)
+     ||> SpawnC => Pixel 1 (bottomInnerY size)
+     ||> SpawnD => Pixel 4 2
+     ||> SpawnE => Pixel 2 1
+     ||> SpawnF => Pixel 5 1
 
 fun nextFood:FoodSpawn #food:FoodSpawn =>
     food
@@ -194,11 +194,11 @@ fun advanceSnake:Snake #direction:Direction #grew:Bool #snake:Snake =>
 fun nextSnake:Snake #size:BoardSize #direction:Direction #food:FoodSpawn #snake:Snake =>
     advanceSnake direction (willEat size direction food snake) snake
 
-fun hitsWall:Bool #size:BoardSize #head:Vec2 =>
+fun hitsWall:Bool #size:BoardSize #head:Pixel =>
     head
-     ||> Vec2 x y => x < 0 or x > (size.width - 1) or y < 0 or y > (size.height - 1)
+     ||> Pixel x y => x < 0 or x > (size.width - 1) or y < 0 or y > (size.height - 1)
 
-fun isBodyAt:Bool #snake:Snake #position:Vec2 =>
+fun isBodyAt:Bool #snake:Snake #position:Pixel =>
     snake.length
      ||> 1 => False
      ||> 2 => snake.second == position
@@ -218,8 +218,8 @@ fun hitsSelf:Bool #snake:Snake =>
 
 fun nextStatus:Status #size:BoardSize #snake:Snake =>
     hitsWall size snake.head or hitsSelf snake
-    T|> GameOver
-    F|> Running
+     T|> GameOver
+     F|> Running
 
 fun nextFoodState:FoodSpawn #ateFood:Bool #food:FoodSpawn =>
     ateFood
@@ -228,8 +228,8 @@ fun nextFoodState:FoodSpawn #ateFood:Bool #food:FoodSpawn =>
 
 fun nextScore:Int #ateFood:Bool #score:Int =>
     ateFood
-    T|> score + 1
-    F|> score
+     T|> score + 1
+     F|> score
 
 fun movedGame:Game #size:BoardSize #direction:Direction #snake:Snake #food:FoodSpawn #score:Int =>
     {
@@ -248,17 +248,17 @@ fun stepGame:Game #size:BoardSize #direction:Direction #current:Game =>
      ||> GameOver => current
      ||> Running => runningStep size direction current
 
-fun foodOrEmpty:CellKind #size:BoardSize #game:Game #position:Vec2 =>
+fun foodOrEmpty:CellKind #size:BoardSize #game:Game #position:Pixel =>
     position == foodAt size game.food
      ||> True => Food
      ||> False => Empty
 
-fun bodyOrFood:CellKind #size:BoardSize #game:Game #position:Vec2 =>
+fun bodyOrFood:CellKind #size:BoardSize #game:Game #position:Pixel =>
     isBodyAt game.snake position
      ||> True => SnakeBody
      ||> False => foodOrEmpty size game position
 
-fun cellKindAt:CellKind #size:BoardSize #game:Game #position:Vec2 =>
+fun cellKindAt:CellKind #size:BoardSize #game:Game #position:Pixel =>
     position == game.snake.head
      ||> True => SnakeHead
      ||> False => bodyOrFood size game position
@@ -266,7 +266,7 @@ fun cellKindAt:CellKind #size:BoardSize #game:Game #position:Vec2 =>
 fun makeBoardCell:BoardCell #size:BoardSize #game:Game #row:Int #column:Int =>
     {
         id: column,
-        kind: cellKindAt size game (Vec2 column row)
+        kind: cellKindAt size game (Pixel column row)
     }
 
 fun makeBoardCells:List BoardCell #size:BoardSize #game:Game #row:Int #column:Int =>
@@ -335,8 +335,8 @@ sig keyDown : Signal Key
 }
 sig direction : Signal Direction =
     Right
-    @|> keepDirection keyDown
-    <|@ keepDirection keyDown
+     @|> keepDirection keyDown
+     <|@ keepDirection keyDown
 
 @source timer.every 160 with {
     immediate: True,
@@ -344,8 +344,8 @@ sig direction : Signal Direction =
 }
 sig game : Signal Game =
     initialGame
-    @|> stepGame boardSize direction
-    <|@ stepGame boardSize direction
+     @|> stepGame boardSize direction
+     <|@ stepGame boardSize direction
 
 sig board : Signal GameBoard =
     game

@@ -124,6 +124,11 @@ a value (not the condition) depending on whether it is `True` or `False`:
 If `isOpposite candidate current` is `True`, the result is `current`.
 Otherwise it is `candidate`.
 
+On signals, `T|>` / `F|>` runs pointwise over the committed snapshot for the currently supported
+carrier slice: `Signal Bool`, `Signal (Option A)`, `Signal (Result E A)`, and
+`Signal (Validation E A)`. The branch result stays a signal. Signal-filter `?|>` remains a
+separate scheduler-owned pipeline slice.
+
 ## Operator quick reference
 
 ::: details Pipe operator quick reference

@@ -1,0 +1,62 @@
+use aivi (
+    Option
+    Result
+    Validation
+    Signal
+    Task
+    Some
+    None
+    Ok
+    Err
+    Valid
+    Invalid
+)
+
+use aivi.prelude (
+    Int
+    Bool
+    Text
+    List
+    Eq
+    Default
+    Functor
+    Applicative
+    Monad
+    Foldable
+    getOrElse
+    withDefault
+    length
+    head
+    join
+)
+
+type NameSignal = Signal Text
+type CountTask = Task Text Int
+type CheckedName = Validation Text Text
+
+val maybeName:Option Text = Some "Ada"
+val missingName:Option Text = None
+val chosenName:Text = getOrElse "guest" missingName
+
+val okCount:Result Text Int = Ok 2
+val errCount:Result Text Int = Err "missing"
+val chosenCount:Int = withDefault 0 okCount
+
+val checkedName:CheckedName = Valid "Ada"
+
+val nameCount:Int = length [
+    "Ada",
+    "Grace"
+]
+
+val firstName:Option Text = head [
+    "Ada",
+    "Grace"
+]
+
+val labels:Text = join ", " [
+    "Ada",
+    "Grace"
+]
+
+val sameCount:Bool = chosenCount == 2

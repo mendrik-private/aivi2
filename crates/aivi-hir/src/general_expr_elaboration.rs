@@ -9,12 +9,12 @@ use aivi_typing::GatePlanner;
 use crate::{
     BigIntLiteral, BindingId, BuiltinTerm, DecimalLiteral, ExprId, ExprKind, FloatLiteral,
     FunctionItem, FunctionParameter, GateRuntimeCaseArm, GateRuntimeExpr, GateRuntimeExprKind,
-    GateRuntimePipeExpr, GateRuntimePipeStage, GateRuntimePipeStageKind,
-    GateRuntimeProjectionBase, GateRuntimeRecordField, GateRuntimeReference,
-    GateRuntimeTextLiteral, GateRuntimeTextSegment, GateRuntimeTruthyFalsyBranch,
-    GateRuntimeUnsupportedKind, GateRuntimeUnsupportedPipeStageKind, InstanceItem, InstanceMember,
-    Item, ItemId, Module, PipeExpr, PipeStageKind, ProjectionBase, ResolutionState, SignalItem,
-    TermReference, TermResolution, TypeItemBody, TypeResolution, ValueItem,
+    GateRuntimePipeExpr, GateRuntimePipeStage, GateRuntimePipeStageKind, GateRuntimeProjectionBase,
+    GateRuntimeRecordField, GateRuntimeReference, GateRuntimeTextLiteral, GateRuntimeTextSegment,
+    GateRuntimeTruthyFalsyBranch, GateRuntimeUnsupportedKind, GateRuntimeUnsupportedPipeStageKind,
+    InstanceItem, InstanceMember, Item, ItemId, Module, PipeExpr, PipeStageKind, ProjectionBase,
+    ResolutionState, SignalItem, TermReference, TermResolution, TypeItemBody, TypeResolution,
+    ValueItem,
     gate_elaboration::{GateElaborationBlocker, GateRuntimeMapEntry},
     typecheck::{expression_matches, resolve_class_member_dispatch},
     validate::{
@@ -363,6 +363,33 @@ pub(crate) fn elaborate_runtime_expr(
         .map_err(|blockers| BlockedGeneralExpr { blockers })
 }
 
+fn signal_pipe_body_candidate(pipe: &PipeExpr) -> bool {
+    pipe.stages.iter().all(|stage| {
+        matches!(
+            stage.kind,
+            PipeStageKind::Transform { .. }
+                | PipeStageKind::Tap { .. }
+                | PipeStageKind::Gate { .. }
+                | PipeStageKind::Case { .. }
+                | PipeStageKind::Truthy { .. }
+                | PipeStageKind::Falsy { .. }
+        )
+    })
+}
+
+fn signal_pipe_body_runtime_supported(expr: &GateRuntimeExpr) -> bool {
+    let GateRuntimeExprKind::Pipe(pipe) = &expr.kind else {
+        return true;
+    };
+    pipe.stages.iter().all(|stage| match &stage.kind {
+        GateRuntimePipeStageKind::Transform { .. }
+        | GateRuntimePipeStageKind::Tap { .. }
+        | GateRuntimePipeStageKind::Case { .. }
+        | GateRuntimePipeStageKind::TruthyFalsy { .. } => true,
+        GateRuntimePipeStageKind::Gate { .. } => !stage.input_subject.is_signal(),
+    })
+}
+
 struct GeneralExprElaborator<'a> {
     module: &'a Module,
     typing: GateTypeContext<'a>,
@@ -659,41 +686,57 @@ impl<'a> GeneralExprElaborator<'a> {
         signal: &SignalItem,
     ) -> Option<GeneralExprItemElaboration> {
         let body = signal.body?;
-        if matches!(self.module.exprs()[body].kind, ExprKind::Pipe(_)) {
-            return None;
-        }
+        let pipe_candidate = match &self.module.exprs()[body].kind {
+            ExprKind::Pipe(pipe) => {
+                if !signal_pipe_body_candidate(pipe) {
+                    return None;
+                }
+                true
+            }
+            _ => false,
+        };
         let expected = signal
             .annotation
             .and_then(|annotation| self.typing.lower_annotation(annotation));
-        let outcome = match expected.as_ref() {
+        let lowered = match expected.as_ref() {
             Some(annotation @ GateType::Signal(_)) => {
                 match self.lower_expr(body, &GateExprEnv::default(), None, Some(annotation)) {
-                    Ok(body) => GeneralExprOutcome::Lowered(body),
+                    Ok(lowered_body) => Ok(lowered_body),
                     Err(blockers) => match annotation {
-                        GateType::Signal(payload) => match self.lower_expr(
-                            body,
-                            &GateExprEnv::default(),
-                            None,
-                            Some(payload.as_ref()),
-                        ) {
-                            Ok(body) => GeneralExprOutcome::Lowered(body),
-                            Err(_) => GeneralExprOutcome::Blocked(BlockedGeneralExpr { blockers }),
-                        },
+                        GateType::Signal(payload) => self
+                            .lower_expr(body, &GateExprEnv::default(), None, Some(payload.as_ref()))
+                            .map_err(|_| blockers),
                         _ => unreachable!("signal elaboration only falls back from `Signal A`"),
                     },
                 }
             }
-            _ => match self.lower_expr(body, &GateExprEnv::default(), None, expected.as_ref()) {
-                Ok(body) => GeneralExprOutcome::Lowered(body),
-                Err(blockers) => GeneralExprOutcome::Blocked(BlockedGeneralExpr { blockers }),
-            },
+            _ => self.lower_expr(body, &GateExprEnv::default(), None, expected.as_ref()),
         };
-        Some(GeneralExprItemElaboration {
-            owner,
-            body_expr: body,
-            parameters: Vec::new(),
-            outcome,
-        })
+        match lowered {
+            Ok(lowered_body)
+                if !pipe_candidate || signal_pipe_body_runtime_supported(&lowered_body) =>
+            {
+                Some(GeneralExprItemElaboration {
+                    owner,
+                    body_expr: body,
+                    parameters: Vec::new(),
+                    outcome: GeneralExprOutcome::Lowered(lowered_body),
+                })
+            }
+            Ok(_) => None,
+            Err(blockers) if pipe_candidate => Some(GeneralExprItemElaboration {
+                owner,
+                body_expr: body,
+                parameters: Vec::new(),
+                outcome: GeneralExprOutcome::Blocked(BlockedGeneralExpr { blockers }),
+            }),
+            Err(blockers) => Some(GeneralExprItemElaboration {
+                owner,
+                body_expr: body,
+                parameters: Vec::new(),
+                outcome: GeneralExprOutcome::Blocked(BlockedGeneralExpr { blockers }),
+            }),
+        }
     }
 
     fn elaborate_instance_members(
@@ -914,15 +957,15 @@ impl<'a> GeneralExprElaborator<'a> {
                 self.runtime_reference_for_name(expr.span, &reference, &ty)?,
             ),
             ExprKind::Integer(literal) => GateRuntimeExprKind::Integer(literal),
-            ExprKind::Float(literal) => GateRuntimeExprKind::Float(FloatLiteral {
-                raw: literal.raw,
-            }),
-            ExprKind::Decimal(literal) => GateRuntimeExprKind::Decimal(DecimalLiteral {
-                raw: literal.raw,
-            }),
-            ExprKind::BigInt(literal) => GateRuntimeExprKind::BigInt(BigIntLiteral {
-                raw: literal.raw,
-            }),
+            ExprKind::Float(literal) => {
+                GateRuntimeExprKind::Float(FloatLiteral { raw: literal.raw })
+            }
+            ExprKind::Decimal(literal) => {
+                GateRuntimeExprKind::Decimal(DecimalLiteral { raw: literal.raw })
+            }
+            ExprKind::BigInt(literal) => {
+                GateRuntimeExprKind::BigInt(BigIntLiteral { raw: literal.raw })
+            }
             ExprKind::SuffixedInteger(literal) => GateRuntimeExprKind::SuffixedInteger(literal),
             ExprKind::Text(text) => {
                 GateRuntimeExprKind::Text(self.lower_text_literal(&text, env, ambient)?)
@@ -1196,7 +1239,7 @@ impl<'a> GeneralExprElaborator<'a> {
                     )?;
                     lowered.push(GateRuntimePipeStage {
                         span: stage.span,
-                        input_subject: current.clone(),
+                        input_subject: current.gate_payload().clone(),
                         result_subject: result_subject.clone(),
                         kind: GateRuntimePipeStageKind::Transform { expr: body },
                     });
@@ -1208,7 +1251,7 @@ impl<'a> GeneralExprElaborator<'a> {
                         self.lower_body_expr(*expr, env, Some(current.gate_payload()), None)?;
                     lowered.push(GateRuntimePipeStage {
                         span: stage.span,
-                        input_subject: current.clone(),
+                        input_subject: current.gate_payload().clone(),
                         result_subject: current.clone(),
                         kind: GateRuntimePipeStageKind::Tap { expr: body },
                     });

@@ -63,9 +63,7 @@ impl PrimitiveType {
 
     pub const fn default_abi(self) -> AbiPassMode {
         match self {
-            Self::Int | Self::Float | Self::Bool | Self::Unit => {
-                AbiPassMode::ByValue
-            }
+            Self::Int | Self::Float | Self::Bool | Self::Unit => AbiPassMode::ByValue,
             Self::Decimal | Self::BigInt => AbiPassMode::ByReference,
             Self::Text
             | Self::Bytes

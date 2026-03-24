@@ -211,6 +211,25 @@ val total = 10ms + 5ms
     }
 
     #[test]
+    fn selects_same_module_subtractive_domain_operator_match() {
+        let matched = match_value_binary(
+            "domain-operator-duration-subtract.aivi",
+            r#"
+domain Duration over Int
+    literal ms : Int -> Duration
+    (-) : Duration -> Duration -> Duration
+
+val remaining = 10ms - 5ms
+"#,
+            "remaining",
+        );
+
+        assert_eq!(matched.callee.domain_name.as_ref(), "Duration");
+        assert_eq!(matched.callee.member_name.as_ref(), "-");
+        assert!(matches!(matched.result_type, GateType::Domain { .. }));
+    }
+
+    #[test]
     fn selects_parameterized_domain_operator_match() {
         let matched = match_value_binary(
             "domain-operator-amount.aivi",
@@ -230,6 +249,25 @@ val total = wrap 1 + wrap 2
             GateType::Domain { ref name, .. } => assert_eq!(name, "Amount"),
             other => panic!("expected parameterized domain result type, found {other:?}"),
         }
+    }
+
+    #[test]
+    fn selects_same_module_path_join_domain_operator_match() {
+        let matched = match_value_binary(
+            "domain-operator-path.aivi",
+            r#"
+domain Path over Text
+    root : Text -> Path
+    (/) : Path -> Text -> Path
+
+val nested = root "/tmp" / "config"
+"#,
+            "nested",
+        );
+
+        assert_eq!(matched.callee.domain_name.as_ref(), "Path");
+        assert_eq!(matched.callee.member_name.as_ref(), "/");
+        assert!(matches!(matched.result_type, GateType::Domain { .. }));
     }
 
     #[test]

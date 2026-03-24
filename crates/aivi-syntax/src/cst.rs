@@ -624,7 +624,7 @@ pub struct UseItem {
 pub struct ExportItem {
     pub base: ItemBase,
     pub keyword_span: SourceSpan,
-    pub name: Option<Identifier>,
+    pub targets: Vec<Identifier>,
 }
 
 /// `domain` declaration.

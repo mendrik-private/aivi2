@@ -1063,23 +1063,86 @@ impl<'a> Parser<'a> {
         end: usize,
     ) -> ExportItem {
         let mut cursor = keyword_index + 1;
-        let name = self.parse_identifier(&mut cursor, end);
-        if name.is_none() {
-            self.diagnostics.push(
-                Diagnostic::error("`export` declaration is missing the exported name")
-                    .with_code(MISSING_EXPORT_NAME)
-                    .with_primary_label(
-                        self.source_span_of_token(keyword_index),
-                        "expected an identifier after `export`",
-                    ),
-            );
-        }
+        let targets = self.parse_export_targets(&mut cursor, end, keyword_index);
 
         ExportItem {
             base,
             keyword_span: self.source_span_of_token(keyword_index),
-            name,
+            targets,
         }
+    }
+
+    fn parse_export_targets(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+        keyword_index: usize,
+    ) -> Vec<Identifier> {
+        let Some(next_index) = self.peek_nontrivia(*cursor, end) else {
+            self.diagnostics.push(self.missing_export_name_diagnostic(
+                self.source_span_of_token(keyword_index),
+                "expected an identifier after `export`",
+            ));
+            return Vec::new();
+        };
+
+        if self.tokens[next_index].kind() != TokenKind::LParen {
+            let target = self.parse_identifier(cursor, end);
+            if target.is_none() {
+                self.diagnostics.push(self.missing_export_name_diagnostic(
+                    self.source_span_of_token(keyword_index),
+                    "expected an identifier after `export`",
+                ));
+            }
+            return target.into_iter().collect();
+        }
+
+        *cursor = next_index + 1;
+        let group_span = self.source_span_of_token(next_index);
+        let mut targets = Vec::new();
+        let mut emitted_missing_target = false;
+
+        loop {
+            if self.consume_kind(cursor, end, TokenKind::RParen).is_some() {
+                break;
+            }
+
+            match self.parse_identifier(cursor, end) {
+                Some(target) => targets.push(target),
+                None => {
+                    let span = self
+                        .peek_nontrivia(*cursor, end)
+                        .map(|index| self.source_span_of_token(index))
+                        .unwrap_or(group_span);
+                    let message = if targets.is_empty() {
+                        "expected at least one identifier inside `export (...)`"
+                    } else {
+                        "expected an identifier after `,` inside `export (...)`"
+                    };
+                    self.diagnostics
+                        .push(self.missing_export_name_diagnostic(span, message));
+                    emitted_missing_target = true;
+                    break;
+                }
+            }
+
+            let _ = self.consume_kind(cursor, end, TokenKind::Comma);
+        }
+
+        if targets.is_empty() && !emitted_missing_target {
+            self.diagnostics.push(self.missing_export_name_diagnostic(
+                group_span,
+                "expected at least one identifier inside `export (...)`",
+            ));
+        }
+
+        targets
+    }
+
+    fn missing_export_name_diagnostic(&self, span: SourceSpan, label: &str) -> Diagnostic {
+        Diagnostic::error("`export` declaration is missing the exported name")
+            .with_code(MISSING_EXPORT_NAME)
+            .with_primary_label(span, label)
     }
 
     fn parse_error_item(&mut self, start: usize) -> Item {
@@ -3489,6 +3552,26 @@ export main
     }
 
     #[test]
+    fn parser_builds_grouped_exports() {
+        let (_, parsed) = load(
+            r#"export (bundledSupportSentinel, BundledSupportToken)
+"#,
+        );
+
+        assert!(!parsed.has_errors());
+        let Item::Export(item) = &parsed.module.items[0] else {
+            panic!("expected export item");
+        };
+        assert_eq!(
+            item.targets
+                .iter()
+                .map(|target| target.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["bundledSupportSentinel", "BundledSupportToken"]
+        );
+    }
+
+    #[test]
     fn parser_structures_text_interpolation_segments() {
         let (_, parsed) = load(r#"val greeting = "Hello {name}, use \{literal\} braces""#);
 
@@ -4085,6 +4168,23 @@ instance Eq A => Eq (Option A)
         match &parsed.module.items[0] {
             Item::Value(item) => assert!(item.name.is_none()),
             other => panic!("expected a value item, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parser_reports_missing_grouped_export_targets() {
+        let (_, parsed) = load("export ()\n");
+
+        assert!(parsed.has_errors());
+        assert!(
+            parsed
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code == Some(MISSING_EXPORT_NAME))
+        );
+        match &parsed.module.items[0] {
+            Item::Export(item) => assert!(item.targets.is_empty()),
+            other => panic!("expected an export item, got {other:?}"),
         }
     }
 

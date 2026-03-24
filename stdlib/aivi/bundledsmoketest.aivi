@@ -1,0 +1,11 @@
+use aivi.bundledsmokesupport (
+    bundledSupportSentinel
+    BundledSupportToken
+)
+
+val bundledSentinel:Text = bundledSupportSentinel
+
+type BundledToken = BundledSupportToken
+
+export bundledSentinel
+export BundledToken

@@ -1,8 +1,8 @@
 use aivi_base::SourceSpan;
 use aivi_hir::{
     BigIntLiteral, BinaryOperator, BindingId as HirBindingId, BuiltinTerm, DecimalLiteral,
-    DomainMemberHandle, FloatLiteral, IntegerLiteral, ItemId as HirItemId,
-    SuffixedIntegerLiteral, SumConstructorHandle, UnaryOperator,
+    DomainMemberHandle, FloatLiteral, IntegerLiteral, ItemId as HirItemId, SuffixedIntegerLiteral,
+    SumConstructorHandle, UnaryOperator,
 };
 
 use crate::{ids::ExprId, ty::Type};
@@ -102,6 +102,7 @@ pub enum BuiltinApplyCarrier {
     List,
     Option,
     Result,
+    Validation,
     Signal,
 }
 
@@ -198,6 +199,7 @@ pub struct RecordPatternField {
 pub struct PatternConstructor {
     pub display: Box<str>,
     pub reference: Reference,
+    pub field_types: Option<Vec<Type>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

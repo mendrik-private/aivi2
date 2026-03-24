@@ -23,10 +23,10 @@ use crate::{
     hir::{
         ApplicativeSpineHead, BuiltinTerm, BuiltinType, ClassMemberResolution, ControlNode,
         ControlNodeKind, CustomSourceRecurrenceWakeup, DecoratorPayload, DomainMemberKind,
-        DomainMemberResolution, ExprKind, ImportBindingMetadata, ImportBindingResolution,
-        ImportValueType, Item, LiteralSuffixResolution, MarkupAttributeValue, MarkupNodeKind,
-        Module, Name, NamePath, PatternKind, PipeStage, PipeStageKind,
-        RecurrenceWakeupDecoratorKind, ResolutionState, SignalItem, SourceDecorator,
+        DomainMemberResolution, ExportResolution, ExprKind, ImportBindingMetadata,
+        ImportBindingResolution, ImportValueType, Item, LiteralSuffixResolution,
+        MarkupAttributeValue, MarkupNodeKind, Module, Name, NamePath, PatternKind, PipeStage,
+        PipeStageKind, RecurrenceWakeupDecoratorKind, ResolutionState, SignalItem, SourceDecorator,
         SourceMetadata, SourceProviderRef, TermReference, TermResolution, TextLiteral, TextSegment,
         TypeItemBody, TypeKind, TypeReference, TypeResolution,
     },
@@ -146,6 +146,9 @@ impl Validator<'_> {
                     ImportBindingMetadata::Value { .. }
                     | ImportBindingMetadata::OpaqueValue
                     | ImportBindingMetadata::TypeConstructor { .. }
+                    | ImportBindingMetadata::BuiltinType(_)
+                    | ImportBindingMetadata::BuiltinTerm(_)
+                    | ImportBindingMetadata::AmbientType
                     | ImportBindingMetadata::Bundle(_),
                 ) => {
                     self.diagnostics.push(
@@ -897,12 +900,14 @@ impl Validator<'_> {
                         "export target",
                         item.resolution.as_ref(),
                         |this, resolved| {
-                            this.require_item(
-                                item.header.span,
-                                "export item",
-                                "resolved target",
-                                *resolved,
-                            );
+                            if let ExportResolution::Item(item_id) = resolved {
+                                this.require_item(
+                                    item.header.span,
+                                    "export item",
+                                    "resolved target",
+                                    *item_id,
+                                );
+                            }
                         },
                     );
                 }
@@ -6474,8 +6479,11 @@ impl Validator<'_> {
         let import = &self.module.imports()[import_id];
         match &import.metadata {
             ImportBindingMetadata::TypeConstructor { kind } => Some(kind.clone()),
+            ImportBindingMetadata::BuiltinType(builtin) => Some(builtin_kind(*builtin)),
             ImportBindingMetadata::Value { .. }
             | ImportBindingMetadata::OpaqueValue
+            | ImportBindingMetadata::BuiltinTerm(_)
+            | ImportBindingMetadata::AmbientType
             | ImportBindingMetadata::Bundle(_)
             | ImportBindingMetadata::Unknown => None,
         }
@@ -7704,6 +7712,87 @@ impl CaseSiteKind {
     }
 }
 
+pub fn case_pattern_field_types(
+    module: &Module,
+    callee: &TermReference,
+    subject: &GateType,
+) -> Option<Vec<GateType>> {
+    fn same_module_constructor_fields(
+        module: &Module,
+        item_id: ItemId,
+        callee: &TermReference,
+        subject: &GateType,
+    ) -> Option<Vec<GateType>> {
+        let Item::Type(item) = &module.items()[item_id] else {
+            return None;
+        };
+        let TypeItemBody::Sum(variants) = &item.body else {
+            return None;
+        };
+        let GateType::OpaqueItem {
+            item: subject_item,
+            arguments,
+            ..
+        } = subject
+        else {
+            return None;
+        };
+        if *subject_item != item_id || item.parameters.len() != arguments.len() {
+            return None;
+        }
+        let variant_name = callee.path.segments().last().text();
+        let variant = variants
+            .iter()
+            .find(|variant| variant.name.text() == variant_name)?;
+        let substitutions = item
+            .parameters
+            .iter()
+            .copied()
+            .zip(arguments.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        let mut typing = GateTypeContext::new(module);
+        variant
+            .fields
+            .iter()
+            .map(|field| typing.lower_hir_type(*field, &substitutions))
+            .collect()
+    }
+
+    match callee.resolution.as_ref() {
+        ResolutionState::Resolved(TermResolution::Builtin(BuiltinTerm::True))
+        | ResolutionState::Resolved(TermResolution::Builtin(BuiltinTerm::False)) => {
+            matches!(subject, GateType::Primitive(BuiltinType::Bool)).then(Vec::new)
+        }
+        ResolutionState::Resolved(TermResolution::Builtin(BuiltinTerm::Some)) => match subject {
+            GateType::Option(payload) => Some(vec![payload.as_ref().clone()]),
+            _ => None,
+        },
+        ResolutionState::Resolved(TermResolution::Builtin(BuiltinTerm::None)) => {
+            matches!(subject, GateType::Option(_)).then(Vec::new)
+        }
+        ResolutionState::Resolved(TermResolution::Builtin(BuiltinTerm::Ok)) => match subject {
+            GateType::Result { value, .. } => Some(vec![value.as_ref().clone()]),
+            _ => None,
+        },
+        ResolutionState::Resolved(TermResolution::Builtin(BuiltinTerm::Err)) => match subject {
+            GateType::Result { error, .. } => Some(vec![error.as_ref().clone()]),
+            _ => None,
+        },
+        ResolutionState::Resolved(TermResolution::Builtin(BuiltinTerm::Valid)) => match subject {
+            GateType::Validation { value, .. } => Some(vec![value.as_ref().clone()]),
+            _ => None,
+        },
+        ResolutionState::Resolved(TermResolution::Builtin(BuiltinTerm::Invalid)) => match subject {
+            GateType::Validation { error, .. } => Some(vec![error.as_ref().clone()]),
+            _ => None,
+        },
+        ResolutionState::Resolved(TermResolution::Item(item_id)) => {
+            same_module_constructor_fields(module, *item_id, callee, subject)
+        }
+        ResolutionState::Resolved(_) | ResolutionState::Unresolved => None,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GateType {
     Primitive(BuiltinType),
@@ -8670,6 +8759,9 @@ impl<'a> GateTypeContext<'a> {
             ImportBindingMetadata::Value { ty } => Some(self.lower_import_value_type(ty)),
             ImportBindingMetadata::TypeConstructor { .. }
             | ImportBindingMetadata::OpaqueValue
+            | ImportBindingMetadata::BuiltinType(_)
+            | ImportBindingMetadata::BuiltinTerm(_)
+            | ImportBindingMetadata::AmbientType
             | ImportBindingMetadata::Bundle(_)
             | ImportBindingMetadata::Unknown => None,
         }

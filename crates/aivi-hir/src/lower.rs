@@ -9,20 +9,21 @@ use crate::{
     BindingId, BindingKind, BindingPattern, BuiltinTerm, BuiltinType, CaseControl, ClassItem,
     ClassMember, ClusterFinalizer, ClusterPresentation, ControlNode, ControlNodeId, DecimalLiteral,
     Decorator, DecoratorCall, DecoratorId, DecoratorPayload, DomainItem, DomainMember,
-    DomainMemberKind, DomainMemberResolution, EachControl, EmptyControl, ExportItem, Expr, ExprId,
-    ExprKind, FloatLiteral, FragmentControl, FunctionItem, FunctionParameter, ImportBinding,
-    ImportBindingMetadata, ImportBindingResolution, ImportBundleKind, ImportId,
-    ImportModuleResolution, ImportValueType, InstanceItem, InstanceMember, IntegerLiteral, Item,
-    ItemHeader, ItemId, ItemKind, LiteralSuffixResolution, MapExpr, MapExprEntry, MarkupAttribute,
-    MarkupAttributeValue, MarkupElement, MarkupNode, MarkupNodeId, MarkupNodeKind, MatchControl,
-    Module, Name, NamePath, Pattern, PatternId, PatternKind, PipeExpr, PipeStage, PipeStageKind,
-    ProjectionBase, RecordExpr, RecordExprField, RecordFieldSurface, RecordPatternField,
-    RecurrenceWakeupDecorator, RecurrenceWakeupDecoratorKind, RegexLiteral, ResolutionState,
-    ShowControl, SignalItem, SourceDecorator, SourceLifecycleDependencies, SourceMetadata,
-    SourceProviderContractItem, SourceProviderRef, SuffixedIntegerLiteral, TermReference,
-    TermResolution, TextFragment, TextInterpolation, TextLiteral, TextSegment, TypeField, TypeId,
-    TypeItem, TypeItemBody, TypeKind, TypeNode, TypeParameter, TypeParameterId, TypeReference,
-    TypeResolution, TypeVariant, UnaryOperator, UseItem, ValueItem, WithControl,
+    DomainMemberKind, DomainMemberResolution, EachControl, EmptyControl, ExportItem,
+    ExportResolution, Expr, ExprId, ExprKind, FloatLiteral, FragmentControl, FunctionItem,
+    FunctionParameter, ImportBinding, ImportBindingMetadata, ImportBindingResolution,
+    ImportBundleKind, ImportId, ImportModuleResolution, ImportValueType, InstanceItem,
+    InstanceMember, IntegerLiteral, Item, ItemHeader, ItemId, ItemKind, LiteralSuffixResolution,
+    MapExpr, MapExprEntry, MarkupAttribute, MarkupAttributeValue, MarkupElement, MarkupNode,
+    MarkupNodeId, MarkupNodeKind, MatchControl, Module, Name, NamePath, Pattern, PatternId,
+    PatternKind, PipeExpr, PipeStage, PipeStageKind, ProjectionBase, RecordExpr, RecordExprField,
+    RecordFieldSurface, RecordPatternField, RecurrenceWakeupDecorator,
+    RecurrenceWakeupDecoratorKind, RegexLiteral, ResolutionState, ShowControl, SignalItem,
+    SourceDecorator, SourceLifecycleDependencies, SourceMetadata, SourceProviderContractItem,
+    SourceProviderRef, SuffixedIntegerLiteral, TermReference, TermResolution, TextFragment,
+    TextInterpolation, TextLiteral, TextSegment, TypeField, TypeId, TypeItem, TypeItemBody,
+    TypeKind, TypeNode, TypeParameter, TypeParameterId, TypeReference, TypeResolution, TypeVariant,
+    UnaryOperator, UseItem, ValueItem, WithControl,
 };
 
 pub struct LoweringResult {
@@ -104,6 +105,9 @@ class Functor F => Filterable F
 class Eq A
     (==) : A -> A -> Bool
     (!=) : A -> A -> Bool
+
+class Default A
+    default : A
 
 class Eq A => Ord A
     compare : A -> A -> Ordering
@@ -273,6 +277,13 @@ impl<'a> Lowerer<'a> {
     }
 
     fn lower_item_with_storage(&mut self, item: &syn::Item, ambient: bool) {
+        if let syn::Item::Export(item) = item {
+            for export in self.lower_export_items(item) {
+                self.store_item(Item::Export(export), ambient);
+            }
+            return;
+        }
+
         let lowered = match item {
             syn::Item::Type(item) => Some(Item::Type(self.lower_type_item(item))),
             syn::Item::Value(item) => Some(Item::Value(self.lower_value_item(item))),
@@ -285,7 +296,9 @@ impl<'a> Lowerer<'a> {
                 self.lower_source_provider_contract_item(item),
             )),
             syn::Item::Use(item) => Some(Item::Use(self.lower_use_item(item))),
-            syn::Item::Export(item) => Some(Item::Export(self.lower_export_item(item))),
+            syn::Item::Export(_) => {
+                unreachable!("export items are handled before single-item lowering")
+            }
             syn::Item::Error(item) => {
                 self.emit_error(
                     item.base.span,
@@ -297,15 +310,19 @@ impl<'a> Lowerer<'a> {
         };
 
         if let Some(item) = lowered {
-            if ambient {
-                self.module
-                    .push_ambient_item(item)
-                    .expect("HIR ambient item arena should not overflow during lowering");
-            } else {
-                self.module
-                    .push_item(item)
-                    .expect("HIR item arena should not overflow during lowering");
-            }
+            self.store_item(item, ambient);
+        }
+    }
+
+    fn store_item(&mut self, item: Item, ambient: bool) {
+        if ambient {
+            self.module
+                .push_ambient_item(item)
+                .expect("HIR ambient item arena should not overflow during lowering");
+        } else {
+            self.module
+                .push_item(item)
+                .expect("HIR item arena should not overflow during lowering");
         }
     }
 
@@ -987,11 +1004,25 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    fn lower_export_item(&mut self, item: &syn::ExportItem) -> ExportItem {
+    fn lower_export_items(&mut self, item: &syn::ExportItem) -> Vec<ExportItem> {
+        if item.targets.is_empty() {
+            return vec![self.lower_export_target(item, None)];
+        }
+
+        item.targets
+            .iter()
+            .map(|target| self.lower_export_target(item, Some(target)))
+            .collect()
+    }
+
+    fn lower_export_target(
+        &mut self,
+        item: &syn::ExportItem,
+        target: Option<&syn::Identifier>,
+    ) -> ExportItem {
         let header =
             self.lower_item_header(&item.base.decorators, ItemKind::Export, item.base.span);
-        let target_name =
-            self.required_name(item.name.as_ref(), item.base.span, "export declaration");
+        let target_name = self.required_name(target, item.base.span, "export declaration");
         let target = self.make_path(&[target_name]);
         ExportItem {
             header,
@@ -1007,13 +1038,20 @@ impl<'a> Lowerer<'a> {
         module_resolution: &ImportModuleResolution,
     ) -> (ImportBindingResolution, ImportBindingMetadata) {
         match module_resolution {
-            ImportModuleResolution::Resolved(exports) => match exports.find(imported_name.text()) {
-                Some(exported) => (ImportBindingResolution::Resolved, exported.metadata.clone()),
-                None => (
-                    ImportBindingResolution::MissingExport,
-                    ImportBindingMetadata::Unknown,
-                ),
-            },
+            ImportModuleResolution::Resolved(exports) => {
+                match known_import_metadata(module_name, imported_name.text()) {
+                    Some(metadata) => (ImportBindingResolution::Resolved, metadata),
+                    None => match exports.find(imported_name.text()) {
+                        Some(exported) => {
+                            (ImportBindingResolution::Resolved, exported.metadata.clone())
+                        }
+                        None => (
+                            ImportBindingResolution::MissingExport,
+                            ImportBindingMetadata::Unknown,
+                        ),
+                    },
+                }
+            }
             ImportModuleResolution::Missing => {
                 match known_import_metadata(module_name, imported_name.text()) {
                     Some(metadata) => (ImportBindingResolution::Resolved, metadata),
@@ -3151,15 +3189,17 @@ impl<'a> Lowerer<'a> {
             }
 
             match import.metadata.clone() {
-                ImportBindingMetadata::Value { .. } | ImportBindingMetadata::OpaqueValue => {
-                    insert_site(
-                        &mut namespaces.term_imports,
-                        import.local_name.text(),
-                        *import_id,
-                        import.span,
-                    )
-                }
-                ImportBindingMetadata::TypeConstructor { .. } => insert_site(
+                ImportBindingMetadata::Value { .. }
+                | ImportBindingMetadata::OpaqueValue
+                | ImportBindingMetadata::BuiltinTerm(_) => insert_site(
+                    &mut namespaces.term_imports,
+                    import.local_name.text(),
+                    *import_id,
+                    import.span,
+                ),
+                ImportBindingMetadata::TypeConstructor { .. }
+                | ImportBindingMetadata::BuiltinType(_)
+                | ImportBindingMetadata::AmbientType => insert_site(
                     &mut namespaces.type_imports,
                     import.local_name.text(),
                     *import_id,
@@ -4625,7 +4665,13 @@ impl<'a> Lowerer<'a> {
         }
         match import_lookup {
             LookupResult::Unique(import) => {
-                reference.resolution = ResolutionState::Resolved(TermResolution::Import(import));
+                let import_binding = &self.module.imports()[import];
+                reference.resolution = match import_binding.metadata {
+                    ImportBindingMetadata::BuiltinTerm(builtin) => {
+                        ResolutionState::Resolved(TermResolution::Builtin(builtin))
+                    }
+                    _ => ResolutionState::Resolved(TermResolution::Import(import)),
+                };
                 return;
             }
             LookupResult::Ambiguous => {
@@ -4755,7 +4801,45 @@ impl<'a> Lowerer<'a> {
         }
         match lookup_item(&namespaces.type_imports, name) {
             LookupResult::Unique(import) => {
-                reference.resolution = ResolutionState::Resolved(TypeResolution::Import(import));
+                let import_binding = &self.module.imports()[import];
+                reference.resolution = match import_binding.metadata {
+                    ImportBindingMetadata::BuiltinType(builtin) => {
+                        ResolutionState::Resolved(TypeResolution::Builtin(builtin))
+                    }
+                    ImportBindingMetadata::AmbientType => {
+                        match lookup_item(
+                            &namespaces.ambient_type_items,
+                            import_binding.imported_name.text(),
+                        ) {
+                            LookupResult::Unique(item) => {
+                                ResolutionState::Resolved(TypeResolution::Item(item))
+                            }
+                            LookupResult::Ambiguous => {
+                                self.emit_error(
+                                    reference.span(),
+                                    format!(
+                                        "ambient type `{}` is ambiguous",
+                                        import_binding.imported_name.text()
+                                    ),
+                                    code("ambiguous-type-name"),
+                                );
+                                ResolutionState::Unresolved
+                            }
+                            LookupResult::Missing => {
+                                self.emit_error(
+                                    reference.span(),
+                                    format!(
+                                        "import `{}` resolved without an ambient type target",
+                                        import_binding.imported_name.text()
+                                    ),
+                                    code("invalid-import-resolution"),
+                                );
+                                ResolutionState::Unresolved
+                            }
+                        }
+                    }
+                    _ => ResolutionState::Resolved(TypeResolution::Import(import)),
+                };
                 return;
             }
             LookupResult::Ambiguous => {
@@ -4791,11 +4875,46 @@ impl<'a> Lowerer<'a> {
         &mut self,
         target: &NamePath,
         namespaces: &Namespaces,
-    ) -> ResolutionState<ItemId> {
+    ) -> ResolutionState<ExportResolution> {
+        if let Some(resolution) =
+            self.resolve_export_item_target(target, &namespaces.term_items, &namespaces.type_items)
+        {
+            return resolution;
+        }
+        if let Some(resolution) = self.resolve_export_item_target(
+            target,
+            &namespaces.ambient_term_items,
+            &namespaces.ambient_type_items,
+        ) {
+            return resolution;
+        }
+
+        let name = target.segments().first().text();
+        if let Some(builtin) = builtin_term(name) {
+            return ResolutionState::Resolved(ExportResolution::BuiltinTerm(builtin));
+        }
+        if let Some(builtin) = builtin_type(name) {
+            return ResolutionState::Resolved(ExportResolution::BuiltinType(builtin));
+        }
+
+        self.emit_error(
+            target.span(),
+            format!("cannot export unknown item `{}`", path_text(target)),
+            code("unknown-export-target"),
+        );
+        ResolutionState::Unresolved
+    }
+
+    fn resolve_export_item_target(
+        &mut self,
+        target: &NamePath,
+        term_items: &HashMap<String, Vec<NamedSite<ItemId>>>,
+        type_items: &HashMap<String, Vec<NamedSite<ItemId>>>,
+    ) -> Option<ResolutionState<ExportResolution>> {
         let name = target.segments().first().text();
         let mut candidates = Vec::new();
 
-        match lookup_item(&namespaces.term_items, name) {
+        match lookup_item(term_items, name) {
             LookupResult::Unique(item) => candidates.push(item),
             LookupResult::Ambiguous => {
                 self.emit_error(
@@ -4803,12 +4922,12 @@ impl<'a> Lowerer<'a> {
                     format!("export `{}` is ambiguous", path_text(target)),
                     code("ambiguous-export"),
                 );
-                return ResolutionState::Unresolved;
+                return Some(ResolutionState::Unresolved);
             }
             LookupResult::Missing => {}
         }
 
-        match lookup_item(&namespaces.type_items, name) {
+        match lookup_item(type_items, name) {
             LookupResult::Unique(item) => {
                 if !candidates.contains(&item) {
                     candidates.push(item);
@@ -4820,28 +4939,21 @@ impl<'a> Lowerer<'a> {
                     format!("export `{}` is ambiguous", path_text(target)),
                     code("ambiguous-export"),
                 );
-                return ResolutionState::Unresolved;
+                return Some(ResolutionState::Unresolved);
             }
             LookupResult::Missing => {}
         }
 
         match candidates.as_slice() {
-            [item] => ResolutionState::Resolved(*item),
-            [] => {
-                self.emit_error(
-                    target.span(),
-                    format!("cannot export unknown item `{}`", path_text(target)),
-                    code("unknown-export-target"),
-                );
-                ResolutionState::Unresolved
-            }
+            [item] => Some(ResolutionState::Resolved(ExportResolution::Item(*item))),
+            [] => None,
             _ => {
                 self.emit_error(
                     target.span(),
                     format!("export `{}` is ambiguous", path_text(target)),
                     code("ambiguous-export"),
                 );
-                ResolutionState::Unresolved
+                Some(ResolutionState::Unresolved)
             }
         }
     }
@@ -5468,10 +5580,11 @@ mod tests {
 
     use super::{lower_module, path_text};
     use crate::{
-        ApplicativeSpineHead, BuiltinType, ClusterFinalizer, ClusterPresentation, DecoratorPayload,
-        DomainMemberKind, ExprKind, ImportBindingMetadata, ImportBundleKind, ImportValueType, Item,
-        LiteralSuffixResolution, PipeStageKind, RecurrenceWakeupDecoratorKind, ResolutionState,
-        SourceProviderRef, TermResolution, TextSegment, TypeKind, TypeResolution, ValidationMode,
+        ApplicativeSpineHead, BuiltinTerm, BuiltinType, ClusterFinalizer, ClusterPresentation,
+        DecoratorPayload, DomainMemberKind, ExportResolution, ExprKind, ImportBindingMetadata,
+        ImportBundleKind, ImportValueType, Item, LiteralSuffixResolution, PipeStageKind,
+        RecurrenceWakeupDecoratorKind, ResolutionState, SourceProviderRef, TermResolution,
+        TextSegment, TypeKind, TypeResolution, ValidationMode, exports,
     };
 
     fn fixture_root() -> PathBuf {
@@ -5636,6 +5749,10 @@ mod tests {
         assert!(
             matches!(find_ambient_named_item(module, "Ordering"), Item::Type(_)),
             "expected ambient Ordering type to be present"
+        );
+        assert!(
+            matches!(find_ambient_named_item(module, "Default"), Item::Class(_)),
+            "expected ambient Default class to be present"
         );
         let Item::Class(traversable) = find_ambient_named_item(module, "Traversable") else {
             panic!("expected ambient Traversable class");
@@ -7862,12 +7979,114 @@ sig updates : Signal Int
             ResolutionState::Resolved(item) => item,
             ResolutionState::Unresolved => panic!("constructor export should resolve"),
         };
+        let ExportResolution::Item(resolved) = resolved else {
+            panic!("constructor export should resolve to the parent type item");
+        };
         match &lowered.module().items()[resolved] {
             Item::Type(item) => assert_eq!(item.name.text(), "Status"),
             other => {
                 panic!("constructor export should resolve to the parent type item, found {other:?}")
             }
         }
+    }
+
+    #[test]
+    fn grouped_exports_lower_to_individual_resolved_hir_items() {
+        let lowered = lower_text(
+            "grouped-export.aivi",
+            "type Status = Idle | Busy\nval main = Idle\nexport (Idle, main)\n",
+        );
+        assert!(
+            !lowered.has_errors(),
+            "grouped export source should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+        let report = lowered
+            .module()
+            .validate(ValidationMode::RequireResolvedNames);
+        assert!(
+            report.is_ok(),
+            "grouped export source should validate as resolved HIR: {:?}",
+            report.diagnostics()
+        );
+
+        let exports = lowered
+            .module()
+            .root_items()
+            .iter()
+            .filter_map(|item_id| match &lowered.module().items()[*item_id] {
+                Item::Export(item) => Some(item),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            exports.len(),
+            2,
+            "grouped export should lower to two HIR export items"
+        );
+        assert_eq!(
+            exports
+                .iter()
+                .map(|export| export.target.segments().first().text())
+                .collect::<Vec<_>>(),
+            vec!["Idle", "main"]
+        );
+
+        let exported_names = crate::exports::exports(lowered.module());
+        assert!(exported_names.find("main").is_some());
+        assert!(exported_names.find("Idle").is_some());
+        assert!(exported_names.find("Status").is_none());
+    }
+
+    #[test]
+    fn exports_support_builtin_and_ambient_root_surface_targets() {
+        let lowered = lower_text(
+            "builtin-export.aivi",
+            "export (Int, Option, Some, Eq, Foldable)\n",
+        );
+        assert!(
+            !lowered.has_errors(),
+            "builtin export source should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+        let report = lowered
+            .module()
+            .validate(ValidationMode::RequireResolvedNames);
+        assert!(
+            report.is_ok(),
+            "builtin export source should validate as resolved HIR: {:?}",
+            report.diagnostics()
+        );
+
+        let exported_names = exports(lowered.module());
+        assert_eq!(
+            exported_names
+                .find("Int")
+                .map(|exported| &exported.metadata),
+            Some(&ImportBindingMetadata::BuiltinType(BuiltinType::Int))
+        );
+        assert_eq!(
+            exported_names
+                .find("Option")
+                .map(|exported| &exported.metadata),
+            Some(&ImportBindingMetadata::BuiltinType(BuiltinType::Option))
+        );
+        assert_eq!(
+            exported_names
+                .find("Some")
+                .map(|exported| &exported.metadata),
+            Some(&ImportBindingMetadata::BuiltinTerm(BuiltinTerm::Some))
+        );
+        assert_eq!(
+            exported_names.find("Eq").map(|exported| &exported.metadata),
+            Some(&ImportBindingMetadata::AmbientType)
+        );
+        assert_eq!(
+            exported_names
+                .find("Foldable")
+                .map(|exported| &exported.metadata),
+            Some(&ImportBindingMetadata::AmbientType)
+        );
     }
 
     #[test]

@@ -408,6 +408,26 @@ A compact suffix form is only well-typed when exactly one domain literal suffix 
 that suffix name and accepts the base integer family. Otherwise it is rejected during later
 validation as an unresolved or ambiguous suffix literal.
 
+### 6.2.2 Executable numeric literal slice
+
+The current executable backend/runtime slice intentionally stops short of a general numeric tower.
+
+- `Int` literals execute as by-value `i64`.
+- `Float` literals execute as finite IEEE-754 `f64` values and keep the backend's native by-value
+  scalar ABI.
+- `Decimal` literals execute as exact decimal runtime values, but backend layout marks them
+  by-reference and Cranelift materializes them only as immutable literal cells with
+  `mantissa:i128 (little-endian) + scale:u32 (little-endian)`.
+- `BigInt` literals execute as exact arbitrary-precision integer runtime values, but backend layout
+  marks them by-reference and Cranelift materializes them only as immutable literal cells with
+  `sign:u8 + 7 bytes padding + byte_len:u64 (little-endian) + magnitude bytes (little-endian)`.
+- `Decimal` and `BigInt` literal cells are introduction-only in the current Cranelift slice. This
+  is an explicit layout/runtime boundary, not an implicit promise of full decimal/bignum arithmetic
+  in backend codegen yet.
+- Non-`Int` arithmetic and ordered comparison remain deferred in the executable backend slice even
+  though the parser, HIR, and literal execution path recognize these builtin literal families.
+- Diagnostics must preserve the user's raw numeric spelling for all literal families.
+
 ## 6.3 Closed types
 
 Closed types mean:
@@ -2543,8 +2563,9 @@ Status legend: **COMPLETE** = fully implemented; **PARTIAL** = core slice implem
 - Cranelift AOT codegen for scalars and item-body kernels ✓
 - runtime startup linking (HIR → backend → scheduler) ✓
 - inline helper pipe execution in item/source kernels ✓
+- body-backed signal inline transform/tap/case/truthy-falsy execution against committed snapshots ✓
 - general lambda/closure conversion for arbitrary bodies — pending
-- full signal-carried inline pipe execution — pending
+- scheduler-owned signal filter/fanout/recurrence pipeline execution — pending
 - GC integration — pending
 - performance pass plan frozen; implementation pending (see §28.9)
 - fuzzing and stress infrastructure — pending
@@ -2733,7 +2754,7 @@ the provider supports it, and drops stale completions before publication.
 
 Typed-lambda IR with explicit closures and environments exists. Backend item-body kernels cover same-module value/function bodies with explicit parameter contracts.
 
-**Gap**: General lambda/closure conversion for arbitrary higher-order function values (closures captured by source or task workers, callbacks passed as arguments) is not yet complete. Inline helper pipes execute correctly within item/source kernels, but signal-carried inline pipes remain blocked.
+**Gap**: General lambda/closure conversion for arbitrary higher-order function values (closures captured by source or task workers, callbacks passed as arguments) is not yet complete. Body-backed signal inline `|>` / `|` / `||>` / `T|>` / `F|>` execution now works against committed snapshots, including same-module closed-sum case patterns, but scheduler-owned signal filter/fanout/recurrence pipelines remain blocked.
 
 ### 28.5 GTK widget coverage
 

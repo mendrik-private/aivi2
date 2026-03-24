@@ -1298,7 +1298,11 @@ impl<'a> ModuleLowerer<'a> {
         }
     }
 
-    fn lower_pattern(&self, pattern_id: HirPatternId) -> Pattern {
+    fn lower_pattern(
+        &self,
+        pattern_id: HirPatternId,
+        subject: Option<&aivi_hir::GateType>,
+    ) -> Pattern {
         let pattern = self.hir.patterns()[pattern_id].clone();
         let kind = match pattern.kind {
             aivi_hir::PatternKind::Wildcard => PatternKind::Wildcard,
@@ -1308,35 +1312,75 @@ impl<'a> ModuleLowerer<'a> {
             }),
             aivi_hir::PatternKind::Integer(literal) => PatternKind::Integer(literal),
             aivi_hir::PatternKind::Text(text) => PatternKind::Text(lower_text_pattern(&text)),
-            aivi_hir::PatternKind::Tuple(elements) => PatternKind::Tuple(
-                elements
-                    .iter()
-                    .map(|element| self.lower_pattern(*element))
-                    .collect(),
-            ),
-            aivi_hir::PatternKind::Record(fields) => PatternKind::Record(
-                fields
-                    .into_iter()
-                    .map(|field| RecordPatternField {
-                        label: field.label.text().into(),
-                        pattern: self.lower_pattern(field.pattern),
-                    })
-                    .collect(),
-            ),
-            aivi_hir::PatternKind::Constructor { callee, arguments } => PatternKind::Constructor {
-                callee: PatternConstructor {
-                    display: callee.path.to_string().into_boxed_str(),
-                    reference: self.lower_term_reference(&callee),
-                },
-                arguments: arguments
-                    .into_iter()
-                    .map(|argument| self.lower_pattern(argument))
-                    .collect(),
-            },
+            aivi_hir::PatternKind::Tuple(elements) => {
+                let subject_elements = match subject {
+                    Some(aivi_hir::GateType::Tuple(elements)) => Some(elements.as_slice()),
+                    _ => None,
+                };
+                PatternKind::Tuple(
+                    elements
+                        .iter()
+                        .enumerate()
+                        .map(|(index, element)| {
+                            self.lower_pattern(
+                                *element,
+                                subject_elements.and_then(|elements| elements.get(index)),
+                            )
+                        })
+                        .collect(),
+                )
+            }
+            aivi_hir::PatternKind::Record(fields) => {
+                let subject_fields = match subject {
+                    Some(aivi_hir::GateType::Record(fields)) => Some(fields.as_slice()),
+                    _ => None,
+                };
+                PatternKind::Record(
+                    fields
+                        .into_iter()
+                        .map(|field| {
+                            let field_subject = subject_fields.and_then(|subject_fields| {
+                                subject_fields
+                                    .iter()
+                                    .find(|candidate| candidate.name.as_str() == field.label.text())
+                                    .map(|field_ty| &field_ty.ty)
+                            });
+                            RecordPatternField {
+                                label: field.label.text().into(),
+                                pattern: self.lower_pattern(field.pattern, field_subject),
+                            }
+                        })
+                        .collect(),
+                )
+            }
+            aivi_hir::PatternKind::Constructor { callee, arguments } => {
+                let hir_field_types = subject.and_then(|subject| {
+                    aivi_hir::case_pattern_field_types(self.hir, &callee, subject)
+                });
+                let field_types = self.pattern_field_types(&callee, subject);
+                PatternKind::Constructor {
+                    callee: PatternConstructor {
+                        display: callee.path.to_string().into_boxed_str(),
+                        reference: self.lower_term_reference(&callee),
+                        field_types: field_types.clone(),
+                    },
+                    arguments: arguments
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, argument)| {
+                            let field_subject = hir_field_types
+                                .as_ref()
+                                .and_then(|field_types| field_types.get(index));
+                            self.lower_pattern(argument, field_subject)
+                        })
+                        .collect(),
+                }
+            }
             aivi_hir::PatternKind::UnresolvedName(callee) => PatternKind::Constructor {
                 callee: PatternConstructor {
                     display: callee.path.to_string().into_boxed_str(),
                     reference: self.lower_term_reference(&callee),
+                    field_types: self.pattern_field_types(&callee, subject),
                 },
                 arguments: Vec::new(),
             },
@@ -1345,6 +1389,16 @@ impl<'a> ModuleLowerer<'a> {
             span: pattern.span,
             kind,
         }
+    }
+
+    fn pattern_field_types(
+        &self,
+        callee: &aivi_hir::TermReference,
+        subject: Option<&aivi_hir::GateType>,
+    ) -> Option<Vec<Type>> {
+        subject
+            .and_then(|subject| aivi_hir::case_pattern_field_types(self.hir, callee, subject))
+            .map(|field_types| field_types.into_iter().map(|ty| Type::lower(&ty)).collect())
     }
 
     fn lower_term_reference(&self, reference: &aivi_hir::TermReference) -> Reference {
@@ -1496,12 +1550,15 @@ impl<'a> ModuleLowerer<'a> {
                 TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Result) => {
                     BuiltinClassMemberIntrinsic::Apply(BuiltinApplyCarrier::Result)
                 }
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Validation) => {
+                    BuiltinClassMemberIntrinsic::Apply(BuiltinApplyCarrier::Validation)
+                }
                 TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Signal) => {
                     BuiltinClassMemberIntrinsic::Apply(BuiltinApplyCarrier::Signal)
                 }
                 _ => {
                     return Err(unsupported(
-                        "runtime lowering only supports apply for List, Option, Result, and Signal",
+                        "runtime lowering only supports apply for List, Option, Result, Validation, and Signal",
                     ));
                 }
             },
@@ -1817,6 +1874,39 @@ impl<'a> ModuleLowerer<'a> {
                                     span: expr.span,
                                     ty,
                                     kind: ExprKind::Integer(integer.clone()),
+                                },
+                            )?);
+                        }
+                        GateRuntimeExprKind::Float(float) => {
+                            values.push(self.alloc_expr(
+                                owner,
+                                expr.span,
+                                Expr {
+                                    span: expr.span,
+                                    ty,
+                                    kind: ExprKind::Float(float.clone()),
+                                },
+                            )?);
+                        }
+                        GateRuntimeExprKind::Decimal(decimal) => {
+                            values.push(self.alloc_expr(
+                                owner,
+                                expr.span,
+                                Expr {
+                                    span: expr.span,
+                                    ty,
+                                    kind: ExprKind::Decimal(decimal.clone()),
+                                },
+                            )?);
+                        }
+                        GateRuntimeExprKind::BigInt(bigint) => {
+                            values.push(self.alloc_expr(
+                                owner,
+                                expr.span,
+                                Expr {
+                                    span: expr.span,
+                                    ty,
+                                    kind: ExprKind::BigInt(bigint.clone()),
                                 },
                             )?);
                         }
@@ -2195,7 +2285,10 @@ impl<'a> ModuleLowerer<'a> {
                                                 .into_iter()
                                                 .map(|arm| PipeCaseArm {
                                                     span: arm.span,
-                                                    pattern: self.lower_pattern(arm.pattern),
+                                                    pattern: self.lower_pattern(
+                                                        arm.pattern,
+                                                        Some(&arm.subject),
+                                                    ),
                                                     body: bodies
                                                         .next()
                                                         .expect("case arm body should exist"),
@@ -2434,6 +2527,7 @@ fn pipe_stage_specs(pipe: &GateRuntimePipeExpr) -> Vec<PipeStageSpec> {
                         .map(|arm| CaseArmSpec {
                             span: arm.span,
                             pattern: arm.pattern,
+                            subject: stage.input_subject.clone(),
                         })
                         .collect(),
                 },
@@ -2498,6 +2592,7 @@ impl PipeStageKindSpec {
 struct CaseArmSpec {
     span: SourceSpan,
     pattern: HirPatternId,
+    subject: aivi_hir::GateType,
 }
 
 #[derive(Clone)]
@@ -2817,6 +2912,9 @@ fn referenced_hir_dependencies(root: &GateRuntimeExpr) -> HirDependencies {
         match &expr.kind {
             GateRuntimeExprKind::AmbientSubject
             | GateRuntimeExprKind::Integer(_)
+            | GateRuntimeExprKind::Float(_)
+            | GateRuntimeExprKind::Decimal(_)
+            | GateRuntimeExprKind::BigInt(_)
             | GateRuntimeExprKind::SuffixedInteger(_)
             | GateRuntimeExprKind::Reference(GateRuntimeReference::Local(_))
             | GateRuntimeExprKind::Reference(GateRuntimeReference::Builtin(_))

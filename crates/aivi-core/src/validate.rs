@@ -987,7 +987,7 @@ fn inline_pipe_body_result_type(
     result: &crate::ty::Type,
 ) -> crate::ty::Type {
     match (input, result) {
-        (crate::ty::Type::Signal(_), crate::ty::Type::Signal(payload)) => payload.as_ref().clone(),
+        (_, crate::ty::Type::Signal(payload)) => payload.as_ref().clone(),
         _ => result.clone(),
     }
 }

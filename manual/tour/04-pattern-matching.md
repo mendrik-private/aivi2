@@ -33,6 +33,9 @@ The most common use is matching on sum type variants:
 // GameOver maps to "Game over"
 ```
 
+The same constructor syntax works for your own same-module sum types and for builtin carriers like
+`Some` / `None`, including data-carrying variants.
+
 ## Exhaustiveness
 
 Pattern matching in AIVI is **exhaustive**: the compiler rejects any match that does not
