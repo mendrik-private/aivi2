@@ -1,16 +1,12 @@
-type Pixel = Vec2 Int Int
+use aivi.defaults (Option)
+
+type Key = Key Text
 
 type Direction =
   | Up
   | Down
   | Left
   | Right
-
-type Key =
-  | ArrowUp
-  | ArrowDown
-  | ArrowLeft
-  |   ArrowRight
 
 type Orientation =
   | Vertical
@@ -26,6 +22,8 @@ type FoodSpawn =
   | SpawnE
   | SpawnF
 
+type Pixel = { x: Int, y: Int }
+
 type BoardSize = {
     width: Int,
     height: Int
@@ -33,11 +31,11 @@ type BoardSize = {
 
 type Snake = {
     head: Pixel,
-    second: Pixel,
-    third: Pixel,
-    fourth: Pixel,
-    fifth: Pixel,
-    sixth: Pixel,
+    body2: Pixel,
+    body3: Pixel,
+    body4: Pixel,
+    body5: Pixel,
+    body6: Pixel,
     length: Int
 }
 
@@ -75,98 +73,72 @@ val boardSize:BoardSize = {
     height: 10
 }
 
-fun rightInnerX:Int #size:BoardSize =>
-    size.width - 2
-
-fun bottomInnerY:Int #size:BoardSize =>
-    size.height - 2
-
-fun initialSnakeFor:Snake #size:BoardSize =>
-    {
-        head: Pixel 6 5,
-        second: Pixel 5 5,
-        third: Pixel 4 5,
-        fourth: Pixel 4 5,
-        fifth: Pixel 4 5,
-        sixth: Pixel 4 5,
-        length: 3
-    }
+val initialSnake:Snake = {
+    head: { x: 6, y: 5 },
+    body2: { x: 5, y: 5 },
+    body3: { x: 4, y: 5 },
+    body4: { x: 4, y: 5 },
+    body5: { x: 4, y: 5 },
+    body6: { x: 4, y: 5 },
+    length: 3
+}
 
 val initialGame:Game = {
-    snake: initialSnakeFor boardSize,
+    snake: initialSnake,
     food: SpawnA,
     status: Running,
     score: 0
 }
 
-fun directionFromKey:Direction #key:Key =>
+fun arrowKey:(Option Direction) #key:Key =>
     key
-     ||> ArrowUp => Up
-     ||> ArrowDown => Down
-     ||> ArrowLeft => Left
-     ||> ArrowRight => Right
+     ||> Key "ArrowUp"    => Some Up
+     ||> Key "ArrowDown"  => Some Down
+     ||> Key "ArrowLeft"  => Some Left
+     ||> Key "ArrowRight" => Some Right
+     ||> _                => None
 
 fun isOpposite:Bool #candidate:Direction #current:Direction =>
     current
-     ||> Up => candidate == Down
-     ||> Down => candidate == Up
-     ||> Left => candidate == Right
+     ||> Up    => candidate == Down
+     ||> Down  => candidate == Up
+     ||> Left  => candidate == Right
      ||> Right => candidate == Left
 
-fun applyDirection:Direction #current:Direction #candidate:Direction =>
+fun guardDirection:Direction #candidate:Direction #current:Direction =>
     isOpposite candidate current
      T|> current
      F|> candidate
 
-fun keepDirection:Direction #latest:Key #current:Direction =>
-    directionFromKey latest
-     |> applyDirection current
+fun updateDirection:Direction #key:Key #current:Direction =>
+    arrowKey key
+     ||> Some dir => guardDirection dir current
+     ||> None     => current
 
-fun moveUp:Pixel #head:Pixel =>
-    head
-     ||> Pixel x y => Pixel x (y - 1)
-
-fun moveDown:Pixel #head:Pixel =>
-    head
-     ||> Pixel x y => Pixel x (y + 1)
-
-fun moveLeft:Pixel #head:Pixel =>
-    head
-     ||> Pixel x y => Pixel (x - 1) y
-
-fun moveRight:Pixel #head:Pixel =>
-    head
-     ||> Pixel x y => Pixel (x + 1) y
+fun moveHead:Pixel #dx:Int #dy:Int #p:Pixel =>
+    { x: p.x + dx, y: p.y + dy }
 
 fun nextHead:Pixel #direction:Direction #head:Pixel =>
     direction
-     ||> Up => moveUp head
-     ||> Down => moveDown head
-     ||> Left => moveLeft head
-     ||> Right => moveRight head
+     ||> Up    => moveHead 0 - 1 head
+     ||> Down  => moveHead 0 1 head
+     ||> Left  => moveHead - 1 0 head
+     ||> Right => moveHead 1 0 head
 
-fun growLength:Int #length:Int =>
-    length
-     ||> 1 => 2
-     ||> 2 => 3
-     ||> 3 => 4
-     ||> 4 => 5
-     ||> 5 => 6
-     ||> _ => 6
+fun innerRight:Int #size:BoardSize =>
+    size.width - 2
 
-fun nextLength:Int #grew:Bool #length:Int =>
-    grew
-     T|> growLength length
-     F|> length
+fun innerBottom:Int #size:BoardSize =>
+    size.height - 2
 
-fun foodAt:Pixel #size:BoardSize #food:FoodSpawn =>
+fun foodPixel:Pixel #size:BoardSize #food:FoodSpawn =>
     food
-     ||> SpawnA => Pixel (rightInnerX size) 1
-     ||> SpawnB => Pixel (rightInnerX size) (bottomInnerY size)
-     ||> SpawnC => Pixel 1 (bottomInnerY size)
-     ||> SpawnD => Pixel 4 2
-     ||> SpawnE => Pixel 2 1
-     ||> SpawnF => Pixel 5 1
+     ||> SpawnA => { x: innerRight size, y: 1 }
+     ||> SpawnB => { x: innerRight size, y: innerBottom size }
+     ||> SpawnC => { x: 1, y: innerBottom size }
+     ||> SpawnD => { x: 4, y: 2 }
+     ||> SpawnE => { x: 2, y: 1 }
+     ||> SpawnF => { x: 5, y: 1 }
 
 fun nextFood:FoodSpawn #food:FoodSpawn =>
     food
@@ -177,102 +149,120 @@ fun nextFood:FoodSpawn #food:FoodSpawn =>
      ||> SpawnE => SpawnF
      ||> SpawnF => SpawnA
 
-fun willEat:Bool #size:BoardSize #direction:Direction #food:FoodSpawn #snake:Snake =>
-    nextHead direction snake.head == foodAt size food
+fun growLength:Int #length:Int =>
+    length
+     ||> 1 => 2
+     ||> 2 => 3
+     ||> 3 => 4
+     ||> 4 => 5
+     ||> 5 => 6
+     ||> _ => 6
 
-fun advanceSnake:Snake #direction:Direction #grew:Bool #snake:Snake =>
+fun nextLength:Int #ate:Bool #length:Int =>
+    ate
+     T|> growLength length
+     F|> length
+
+fun willEat:Bool #size:BoardSize #direction:Direction #food:FoodSpawn #snake:Snake =>
+    nextHead direction snake.head == foodPixel size food
+
+fun advanceSnake:Snake #direction:Direction #ate:Bool #snake:Snake =>
     {
         head: nextHead direction snake.head,
-        second: snake.head,
-        third: snake.second,
-        fourth: snake.third,
-        fifth: snake.fourth,
-        sixth: snake.fifth,
-        length: nextLength grew snake.length
+        body2: snake.head,
+        body3: snake.body2,
+        body4: snake.body3,
+        body5: snake.body4,
+        body6: snake.body5,
+        length: nextLength ate snake.length
     }
 
 fun nextSnake:Snake #size:BoardSize #direction:Direction #food:FoodSpawn #snake:Snake =>
     advanceSnake direction (willEat size direction food snake) snake
 
-fun hitsWall:Bool #size:BoardSize #head:Pixel =>
-    head
-     ||> Pixel x y => x < 0 or x > (size.width - 1) or y < 0 or y > (size.height - 1)
+fun hitsWall:Bool #size:BoardSize #p:Pixel =>
+    p.x < 0 or p.x > size.width - 1 or p.y < 0 or p.y > size.height - 1
 
-fun isBodyAt:Bool #snake:Snake #position:Pixel =>
+fun occupiesBody:Bool #snake:Snake #p:Pixel =>
     snake.length
      ||> 1 => False
-     ||> 2 => snake.second == position
-     ||> 3 => snake.second == position or snake.third == position
-     ||> 4 => snake.second == position or snake.third == position or snake.fourth == position
-     ||> 5 => snake.second == position or snake.third == position or snake.fourth == position or snake.fifth == position
-     ||> _ => snake.second == position or snake.third == position or snake.fourth == position or snake.fifth == position or snake.sixth == position
+     ||> 2 => snake.body2 == p
+     ||> 3 => snake.body2 == p or snake.body3 == p
+     ||> 4 => snake.body2 == p or snake.body3 == p or snake.body4 == p
+     ||> 5 => snake.body2 == p or snake.body3 == p or snake.body4 == p or snake.body5 == p
+     ||> _ => snake.body2 == p or snake.body3 == p or snake.body4 == p or snake.body5 == p or snake.body6 == p
 
-fun hitsSelf:Bool #snake:Snake =>
+fun selfCollision:Bool #snake:Snake =>
     snake.length
      ||> 1 => False
-     ||> 2 => snake.head == snake.second
-     ||> 3 => snake.head == snake.second or snake.head == snake.third
-     ||> 4 => snake.head == snake.second or snake.head == snake.third or snake.head == snake.fourth
-     ||> 5 => snake.head == snake.second or snake.head == snake.third or snake.head == snake.fourth or snake.head == snake.fifth
-     ||> _ => snake.head == snake.second or snake.head == snake.third or snake.head == snake.fourth or snake.head == snake.fifth or snake.head == snake.sixth
+     ||> 2 => snake.head == snake.body2
+     ||> 3 => snake.head == snake.body2 or snake.head == snake.body3
+     ||> 4 => snake.head == snake.body2 or snake.head == snake.body3 or snake.head == snake.body4
+     ||> 5 => snake.head == snake.body2 or snake.head == snake.body3 or snake.head == snake.body4 or snake.head == snake.body5
+     ||> _ => snake.head == snake.body2 or snake.head == snake.body3 or snake.head == snake.body4 or snake.head == snake.body5 or snake.head == snake.body6
 
 fun nextStatus:Status #size:BoardSize #snake:Snake =>
-    hitsWall size snake.head or hitsSelf snake
+    hitsWall size snake.head or selfCollision snake
      T|> GameOver
      F|> Running
 
-fun nextFoodState:FoodSpawn #ateFood:Bool #food:FoodSpawn =>
-    ateFood
+fun nextFoodState:FoodSpawn #ate:Bool #food:FoodSpawn =>
+    ate
      T|> nextFood food
      F|> food
 
-fun nextScore:Int #ateFood:Bool #score:Int =>
-    ateFood
+fun nextScore:Int #ate:Bool #score:Int =>
+    ate
      T|> score + 1
      F|> score
 
-fun movedGame:Game #size:BoardSize #direction:Direction #snake:Snake #food:FoodSpawn #score:Int =>
+fun applyStep:Game #size:BoardSize #ate:Bool #moved:Snake #food:FoodSpawn #score:Int =>
     {
-        snake: nextSnake size direction food snake,
-        food: nextFoodState (willEat size direction food snake) food,
-        status: nextStatus size (nextSnake size direction food snake),
-        score: nextScore (willEat size direction food snake) score
+        snake: moved,
+        food: nextFoodState ate food,
+        status: nextStatus size moved,
+        score: nextScore ate score
     }
 
-fun runningStep:Game #size:BoardSize #direction:Direction #current:Game =>
-    current
-     ||> { snake, food, score } => movedGame size direction snake food score
+fun gameAte:Bool #size:BoardSize #direction:Direction #game:Game =>
+    willEat size direction game.food game.snake
 
-fun stepGame:Game #size:BoardSize #direction:Direction #current:Game =>
-    current.status
-     ||> GameOver => current
-     ||> Running => runningStep size direction current
+fun gameMoved:Snake #size:BoardSize #direction:Direction #game:Game =>
+    nextSnake size direction game.food game.snake
 
-fun foodOrEmpty:CellKind #size:BoardSize #game:Game #position:Pixel =>
-    position == foodAt size game.food
-     ||> True => Food
-     ||> False => Empty
+fun runStep:Game #size:BoardSize #direction:Direction #game:Game =>
+    applyStep size (gameAte size direction game) (gameMoved size direction game) game.food game.score
 
-fun bodyOrFood:CellKind #size:BoardSize #game:Game #position:Pixel =>
-    isBodyAt game.snake position
-     ||> True => SnakeBody
-     ||> False => foodOrEmpty size game position
+fun stepGame:Game #size:BoardSize #direction:Direction #game:Game =>
+    game.status
+     ||> GameOver => game
+     ||> Running  => runStep size direction game
 
-fun cellKindAt:CellKind #size:BoardSize #game:Game #position:Pixel =>
-    position == game.snake.head
-     ||> True => SnakeHead
-     ||> False => bodyOrFood size game position
+fun foodOrEmpty:CellKind #size:BoardSize #game:Game #pos:Pixel =>
+    pos == foodPixel size game.food
+     T|> Food
+     F|> Empty
 
-fun makeBoardCell:BoardCell #size:BoardSize #game:Game #row:Int #column:Int =>
+fun bodyOrContent:CellKind #size:BoardSize #game:Game #pos:Pixel =>
+    occupiesBody game.snake pos
+     T|> SnakeBody
+     F|> foodOrEmpty size game pos
+
+fun cellKindAt:CellKind #size:BoardSize #game:Game #pos:Pixel =>
+    pos == game.snake.head
+     T|> SnakeHead
+     F|> bodyOrContent size game pos
+
+fun makeBoardCell:BoardCell #size:BoardSize #game:Game #row:Int #col:Int =>
     {
-        id: column,
-        kind: cellKindAt size game (Pixel column row)
+        id: col,
+        kind: cellKindAt size game { x: col, y: row }
     }
 
-fun makeBoardCells:List BoardCell #size:BoardSize #game:Game #row:Int #column:Int =>
-    column == (size.width - 1)
-     T|> [ makeBoardCell size game row column ]
-     F|> [ makeBoardCell size game row column, makeBoardCells size game row (column + 1) ]
+fun makeBoardCells:(List BoardCell) #size:BoardSize #game:Game #row:Int #col:Int =>
+    col == size.width - 1
+     T|> [makeBoardCell size game row col]
+     F|> append [makeBoardCell size game row col] (makeBoardCells size game row (col + 1))
 
 fun makeBoardRow:BoardRow #size:BoardSize #game:Game #row:Int =>
     {
@@ -280,10 +270,10 @@ fun makeBoardRow:BoardRow #size:BoardSize #game:Game #row:Int =>
         cells: makeBoardCells size game row 0
     }
 
-fun makeBoardRows:List BoardRow #size:BoardSize #game:Game #row:Int =>
-    row == (size.height - 1)
-     T|> [ makeBoardRow size game row ]
-     F|> [ makeBoardRow size game row, makeBoardRows size game (row + 1) ]
+fun makeBoardRows:(List BoardRow) #size:BoardSize #game:Game #row:Int =>
+    row == size.height - 1
+     T|> [makeBoardRow size game row]
+     F|> append [makeBoardRow size game row] (makeBoardRows size game (row + 1))
 
 fun toBoard:GameBoard #size:BoardSize #game:Game =>
     {
@@ -296,32 +286,26 @@ fun cellGlyph:Text #kind:CellKind =>
     kind
      ||> SnakeHead => "@"
      ||> SnakeBody => "o"
-     ||> Food => "*"
-     ||> Empty => "."
+     ||> Food      => "*"
+     ||> Empty     => "."
 
-fun statusText:Text #status:Status =>
+fun statusLabel:Text #status:Status =>
     status
-     ||> Running => "running"
-     ||> GameOver => "game over"
+     ||> Running  => "Running"
+     ||> GameOver => "Game Over"
 
-fun directionText:Text #direction:Direction =>
+fun directionLabel:Text #direction:Direction =>
     direction
-     ||> Up => "up"
-     ||> Down => "down"
-     ||> Left => "left"
-     ||> Right => "right"
-
-fun boardLineFor:Text #board:GameBoard =>
-    "Board: {board.width} x {board.height}"
+     ||> Up    => "Up"
+     ||> Down  => "Down"
+     ||> Left  => "Left"
+     ||> Right => "Right"
 
 fun scoreLineFor:Text #game:Game =>
     "Score: {game.score}"
 
 fun statusLineFor:Text #game:Game =>
-    "Status: {statusText game.status}"
-
-fun directionLineFor:Text #direction:Direction =>
-    "Direction: {directionText direction}"
+    "Status: {statusLabel game.status}"
 
 @source window.keyDown with {
     repeat: False,
@@ -335,8 +319,7 @@ sig keyDown : Signal Key
 }
 sig direction : Signal Direction =
     Right
-     @|> keepDirection keyDown
-     <|@ keepDirection keyDown
+     @|> updateDirection keyDown
 
 @source timer.every 160 with {
     immediate: True,
@@ -345,37 +328,30 @@ sig direction : Signal Direction =
 sig game : Signal Game =
     initialGame
      @|> stepGame boardSize direction
-     <|@ stepGame boardSize direction
 
 sig board : Signal GameBoard =
     game
      |> toBoard boardSize
 
-sig boardLine:Signal Text =
-    board
-     |> boardLineFor
-
-sig boardRows:Signal (List BoardRow) =
+sig boardRows : Signal (List BoardRow) =
     board
      |> .rows
 
-sig scoreLine:Signal Text =
+sig scoreLine : Signal Text =
     game
      |> scoreLineFor
 
-sig statusLine:Signal Text =
+sig statusLine : Signal Text =
     game
      |> statusLineFor
 
-sig directionLine:Signal Text =
+sig directionLine : Signal Text =
     direction
-     |> directionLineFor
+     |> directionLabel
 
 val main =
     <Window title="AIVI Snake">
         <Box orientation={Vertical} spacing={8}>
-            <Label text="Board is rendered from a real matrix." />
-            <Label text={boardLine} />
             <Label text={directionLine} />
             <Label text={scoreLine} />
             <Label text={statusLine} />
