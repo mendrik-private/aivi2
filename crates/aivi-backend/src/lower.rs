@@ -2634,6 +2634,9 @@ fn map_binary_operator(operator: HirBinaryOperator) -> BinaryOperator {
     match operator {
         HirBinaryOperator::Add => BinaryOperator::Add,
         HirBinaryOperator::Subtract => BinaryOperator::Subtract,
+        HirBinaryOperator::Multiply => BinaryOperator::Multiply,
+        HirBinaryOperator::Divide => BinaryOperator::Divide,
+        HirBinaryOperator::Modulo => BinaryOperator::Modulo,
         HirBinaryOperator::GreaterThan => BinaryOperator::GreaterThan,
         HirBinaryOperator::LessThan => BinaryOperator::LessThan,
         HirBinaryOperator::Equals => BinaryOperator::Equals,

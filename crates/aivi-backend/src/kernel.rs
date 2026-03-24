@@ -107,6 +107,9 @@ impl fmt::Display for UnaryOperator {
 pub enum BinaryOperator {
     Add,
     Subtract,
+    Multiply,
+    Divide,
+    Modulo,
     GreaterThan,
     LessThan,
     Equals,
@@ -120,6 +123,9 @@ impl fmt::Display for BinaryOperator {
         match self {
             Self::Add => f.write_str("+"),
             Self::Subtract => f.write_str("-"),
+            Self::Multiply => f.write_str("*"),
+            Self::Divide => f.write_str("/"),
+            Self::Modulo => f.write_str("%"),
             Self::GreaterThan => f.write_str(">"),
             Self::LessThan => f.write_str("<"),
             Self::Equals => f.write_str("=="),

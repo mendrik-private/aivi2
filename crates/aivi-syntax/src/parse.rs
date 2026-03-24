@@ -966,6 +966,7 @@ impl<'a> Parser<'a> {
             | TokenKind::Minus
             | TokenKind::Star
             | TokenKind::Slash
+            | TokenKind::Percent
             | TokenKind::EqualEqual
             | TokenKind::BangEqual
             | TokenKind::Less
@@ -2535,6 +2536,9 @@ impl<'a> Parser<'a> {
         match self.tokens[index].kind() {
             TokenKind::Plus => Some((BinaryOperator::Add, 4)),
             TokenKind::Minus => Some((BinaryOperator::Subtract, 4)),
+            TokenKind::Star => Some((BinaryOperator::Multiply, 5)),
+            TokenKind::Slash => Some((BinaryOperator::Divide, 5)),
+            TokenKind::Percent => Some((BinaryOperator::Modulo, 5)),
             TokenKind::Greater => Some((BinaryOperator::GreaterThan, 3)),
             TokenKind::Less => Some((BinaryOperator::LessThan, 3)),
             TokenKind::EqualEqual => Some((BinaryOperator::Equals, 3)),
@@ -3246,6 +3250,8 @@ domain Duration over Int
 sig flow = value |> compute ?|> ready ||> Ready => keep *|> .email &|> build @|> loop <|@ step | debug <|* merge T|> start F|> stop
 val same = left == right
 val different = left != right
+val quotient = left / right
+val remainder = left % right
 <Label text={status} />
 </match>
 val datePattern = rx"\d{4}-\d{2}-\d{2}"
@@ -3267,6 +3273,8 @@ val datePattern = rx"\d{4}-\d{2}-\d{2}"
         assert!(kinds.contains(&TokenKind::EqualEqual));
         assert!(kinds.contains(&TokenKind::BangEqual));
         assert!(kinds.contains(&TokenKind::Star));
+        assert!(kinds.contains(&TokenKind::Slash));
+        assert!(kinds.contains(&TokenKind::Percent));
         assert!(kinds.contains(&TokenKind::PipeTransform));
         assert!(kinds.contains(&TokenKind::PipeGate));
         assert!(kinds.contains(&TokenKind::PipeCase));
@@ -3604,6 +3612,62 @@ export main
                 other => panic!("expected left-associative subtraction tree, got {other:?}"),
             },
             other => panic!("expected diff value item, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parser_respects_multiplicative_precedence_and_left_associativity() {
+        let (_, parsed) =
+            load("val total = base + rate * scale\nval grouped = total / count % bucket\n");
+
+        assert!(!parsed.has_errors());
+
+        match &parsed.module.items[0] {
+            Item::Value(item) => match item.expr_body().map(|expr| &expr.kind) {
+                Some(ExprKind::Binary {
+                    operator: BinaryOperator::Add,
+                    left,
+                    right,
+                }) => {
+                    assert!(matches!(
+                        &left.kind,
+                        ExprKind::Name(identifier) if identifier.text == "base"
+                    ));
+                    assert!(matches!(
+                        &right.kind,
+                        ExprKind::Binary {
+                            operator: BinaryOperator::Multiply,
+                            ..
+                        }
+                    ));
+                }
+                other => panic!("expected additive root with multiplicative rhs, got {other:?}"),
+            },
+            other => panic!("expected total value item, got {other:?}"),
+        }
+
+        match &parsed.module.items[1] {
+            Item::Value(item) => match item.expr_body().map(|expr| &expr.kind) {
+                Some(ExprKind::Binary {
+                    operator: BinaryOperator::Modulo,
+                    left,
+                    right,
+                }) => {
+                    assert!(matches!(
+                        &right.kind,
+                        ExprKind::Name(identifier) if identifier.text == "bucket"
+                    ));
+                    assert!(matches!(
+                        &left.kind,
+                        ExprKind::Binary {
+                            operator: BinaryOperator::Divide,
+                            ..
+                        }
+                    ));
+                }
+                other => panic!("expected left-associative multiplicative tree, got {other:?}"),
+            },
+            other => panic!("expected grouped value item, got {other:?}"),
         }
     }
 

@@ -5123,6 +5123,9 @@ fn lower_binary_operator(operator: syn::BinaryOperator) -> BinaryOperator {
     match operator {
         syn::BinaryOperator::Add => BinaryOperator::Add,
         syn::BinaryOperator::Subtract => BinaryOperator::Subtract,
+        syn::BinaryOperator::Multiply => BinaryOperator::Multiply,
+        syn::BinaryOperator::Divide => BinaryOperator::Divide,
+        syn::BinaryOperator::Modulo => BinaryOperator::Modulo,
         syn::BinaryOperator::GreaterThan => BinaryOperator::GreaterThan,
         syn::BinaryOperator::LessThan => BinaryOperator::LessThan,
         syn::BinaryOperator::Equals => BinaryOperator::Equals,

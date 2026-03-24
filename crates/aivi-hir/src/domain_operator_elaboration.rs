@@ -23,6 +23,9 @@ pub(crate) fn select_domain_binary_operator(
         operator,
         BinaryOperator::Add
             | BinaryOperator::Subtract
+            | BinaryOperator::Multiply
+            | BinaryOperator::Divide
+            | BinaryOperator::Modulo
             | BinaryOperator::GreaterThan
             | BinaryOperator::LessThan
     ) {
@@ -112,6 +115,9 @@ fn binary_operator_text(operator: BinaryOperator) -> &'static str {
     match operator {
         BinaryOperator::Add => "+",
         BinaryOperator::Subtract => "-",
+        BinaryOperator::Multiply => "*",
+        BinaryOperator::Divide => "/",
+        BinaryOperator::Modulo => "%",
         BinaryOperator::GreaterThan => ">",
         BinaryOperator::LessThan => "<",
         BinaryOperator::Equals => "==",
@@ -224,5 +230,24 @@ val total = wrap 1 + wrap 2
             GateType::Domain { ref name, .. } => assert_eq!(name, "Amount"),
             other => panic!("expected parameterized domain result type, found {other:?}"),
         }
+    }
+
+    #[test]
+    fn selects_same_module_multiplicative_domain_operator_match() {
+        let matched = match_value_binary(
+            "domain-operator-scale.aivi",
+            r#"
+domain Duration over Int
+    literal ms : Int -> Duration
+    (*) : Duration -> Int -> Duration
+
+val scaled = 10ms * 2
+"#,
+            "scaled",
+        );
+
+        assert_eq!(matched.callee.domain_name.as_ref(), "Duration");
+        assert_eq!(matched.callee.member_name.as_ref(), "*");
+        assert!(matches!(matched.result_type, GateType::Domain { .. }));
     }
 }

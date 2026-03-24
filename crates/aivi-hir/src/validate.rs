@@ -10185,6 +10185,9 @@ impl<'a> GateTypeContext<'a> {
                     }
                     (Some(left), Some(right), crate::hir::BinaryOperator::Add)
                     | (Some(left), Some(right), crate::hir::BinaryOperator::Subtract)
+                    | (Some(left), Some(right), crate::hir::BinaryOperator::Multiply)
+                    | (Some(left), Some(right), crate::hir::BinaryOperator::Divide)
+                    | (Some(left), Some(right), crate::hir::BinaryOperator::Modulo)
                         if is_numeric_gate_type(left) && left.same_shape(right) =>
                     {
                         Some(left.clone())

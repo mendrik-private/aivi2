@@ -405,6 +405,14 @@ pub enum EvaluationError {
         left: RuntimeValue,
         right: RuntimeValue,
     },
+    InvalidBinaryArithmetic {
+        kernel: KernelId,
+        expr: KernelExprId,
+        operator: BinaryOperator,
+        left: RuntimeValue,
+        right: RuntimeValue,
+        reason: &'static str,
+    },
     InvalidInterpolationValue {
         kernel: KernelId,
         expr: KernelExprId,
@@ -556,6 +564,17 @@ impl fmt::Display for EvaluationError {
             } => write!(
                 f,
                 "kernel {kernel} cannot apply binary operator `{operator}` to `{left}` and `{right}`"
+            ),
+            Self::InvalidBinaryArithmetic {
+                kernel,
+                operator,
+                left,
+                right,
+                reason,
+                ..
+            } => write!(
+                f,
+                "kernel {kernel} cannot apply binary arithmetic `{operator}` to `{left}` and `{right}`: {reason}"
             ),
             Self::InvalidInterpolationValue { kernel, found, .. } => write!(
                 f,
@@ -1869,6 +1888,66 @@ impl<'a> KernelEvaluator<'a> {
                 (RuntimeValue::Int(left), RuntimeValue::Int(right)) => {
                     Ok(RuntimeValue::Int(left - right))
                 }
+                _ => Err(EvaluationError::UnsupportedBinary {
+                    kernel: kernel_id,
+                    expr,
+                    operator,
+                    left,
+                    right,
+                }),
+            },
+            BinaryOperator::Multiply => match (&left, &right) {
+                (RuntimeValue::Int(left), RuntimeValue::Int(right)) => {
+                    Ok(RuntimeValue::Int(left * right))
+                }
+                _ => Err(EvaluationError::UnsupportedBinary {
+                    kernel: kernel_id,
+                    expr,
+                    operator,
+                    left,
+                    right,
+                }),
+            },
+            BinaryOperator::Divide => match (&left, &right) {
+                (RuntimeValue::Int(left_int), RuntimeValue::Int(right_int)) => left_int
+                    .checked_div(*right_int)
+                    .map(RuntimeValue::Int)
+                    .ok_or_else(|| EvaluationError::InvalidBinaryArithmetic {
+                        kernel: kernel_id,
+                        expr,
+                        operator,
+                        left: left.clone(),
+                        right: right.clone(),
+                        reason: if *right_int == 0 {
+                            "division by zero"
+                        } else {
+                            "signed division overflow"
+                        },
+                    }),
+                _ => Err(EvaluationError::UnsupportedBinary {
+                    kernel: kernel_id,
+                    expr,
+                    operator,
+                    left,
+                    right,
+                }),
+            },
+            BinaryOperator::Modulo => match (&left, &right) {
+                (RuntimeValue::Int(left_int), RuntimeValue::Int(right_int)) => left_int
+                    .checked_rem(*right_int)
+                    .map(RuntimeValue::Int)
+                    .ok_or_else(|| EvaluationError::InvalidBinaryArithmetic {
+                        kernel: kernel_id,
+                        expr,
+                        operator,
+                        left: left.clone(),
+                        right: right.clone(),
+                        reason: if *right_int == 0 {
+                            "modulo by zero"
+                        } else {
+                            "signed remainder overflow"
+                        },
+                    }),
                 _ => Err(EvaluationError::UnsupportedBinary {
                     kernel: kernel_id,
                     expr,

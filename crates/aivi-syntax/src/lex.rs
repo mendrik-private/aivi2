@@ -36,6 +36,7 @@ pub enum TokenKind {
     Less,
     Greater,
     Slash,
+    Percent,
     CloseTagStart,
     SelfCloseTagEnd,
     Arrow,
@@ -369,6 +370,7 @@ fn lex_range(source: &SourceFile, range: std::ops::Range<usize>) -> LexedModule 
             '<' => TokenKind::Less,
             '>' => TokenKind::Greater,
             '/' => TokenKind::Slash,
+            '%' => TokenKind::Percent,
             '|' => TokenKind::PipeTap,
             _ => TokenKind::Unknown,
         };

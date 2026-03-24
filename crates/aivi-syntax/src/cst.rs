@@ -317,6 +317,9 @@ pub enum UnaryOperator {
 pub enum BinaryOperator {
     Add,
     Subtract,
+    Multiply,
+    Divide,
+    Modulo,
     GreaterThan,
     LessThan,
     Equals,

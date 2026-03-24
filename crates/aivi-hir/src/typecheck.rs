@@ -512,6 +512,9 @@ impl<'a> TypeChecker<'a> {
             ),
             BinaryOperator::Add
             | BinaryOperator::Subtract
+            | BinaryOperator::Multiply
+            | BinaryOperator::Divide
+            | BinaryOperator::Modulo
             | BinaryOperator::GreaterThan
             | BinaryOperator::LessThan => self.check_numeric_binary_expr(
                 expr_id,
@@ -675,7 +678,11 @@ impl<'a> TypeChecker<'a> {
             BinaryOperator::GreaterThan | BinaryOperator::LessThan => {
                 GateType::Primitive(BuiltinType::Bool)
             }
-            BinaryOperator::Add | BinaryOperator::Subtract => operand_ty,
+            BinaryOperator::Add
+            | BinaryOperator::Subtract
+            | BinaryOperator::Multiply
+            | BinaryOperator::Divide
+            | BinaryOperator::Modulo => operand_ty,
             _ => unreachable!("numeric binary operator helper only handles numeric operators"),
         };
         self.check_result_type(expr_id, expected, &result_ty)
@@ -753,9 +760,16 @@ impl<'a> TypeChecker<'a> {
             .cloned()
             .or_else(|| right.filter(|ty| is_numeric_gate_type(ty)).cloned())
             .or_else(|| {
-                matches!(operator, BinaryOperator::Add | BinaryOperator::Subtract)
-                    .then(|| expected.filter(|ty| is_numeric_gate_type(ty)).cloned())
-                    .flatten()
+                matches!(
+                    operator,
+                    BinaryOperator::Add
+                        | BinaryOperator::Subtract
+                        | BinaryOperator::Multiply
+                        | BinaryOperator::Divide
+                        | BinaryOperator::Modulo
+                )
+                .then(|| expected.filter(|ty| is_numeric_gate_type(ty)).cloned())
+                .flatten()
             })
     }
 
@@ -2544,6 +2558,9 @@ fn binary_operator_text(operator: BinaryOperator) -> &'static str {
     match operator {
         BinaryOperator::Add => "+",
         BinaryOperator::Subtract => "-",
+        BinaryOperator::Multiply => "*",
+        BinaryOperator::Divide => "/",
+        BinaryOperator::Modulo => "%",
         BinaryOperator::GreaterThan => ">",
         BinaryOperator::LessThan => "<",
         BinaryOperator::Equals => "==",

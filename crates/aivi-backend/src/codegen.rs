@@ -426,7 +426,11 @@ impl<'a> CraneliftCompiler<'a> {
                         work.push(*right);
                         work.push(*left);
                         match operator {
-                            BinaryOperator::Add | BinaryOperator::Subtract => {
+                            BinaryOperator::Add
+                            | BinaryOperator::Subtract
+                            | BinaryOperator::Multiply
+                            | BinaryOperator::Divide
+                            | BinaryOperator::Modulo => {
                                 if let Err(error) = self.require_int_expression(
                                     kernel_id,
                                     *left,
@@ -949,6 +953,69 @@ impl<'a> CraneliftCompiler<'a> {
                                 "subtract result",
                             )?;
                             builder.ins().isub(lhs, rhs)
+                        }
+                        BinaryOperator::Multiply => {
+                            self.require_int_expression(
+                                kernel_id,
+                                *left,
+                                kernel.exprs()[*left].layout,
+                                "multiply lhs",
+                            )?;
+                            self.require_int_expression(
+                                kernel_id,
+                                *right,
+                                kernel.exprs()[*right].layout,
+                                "multiply rhs",
+                            )?;
+                            self.require_int_expression(
+                                kernel_id,
+                                expr_id,
+                                expr.layout,
+                                "multiply result",
+                            )?;
+                            builder.ins().imul(lhs, rhs)
+                        }
+                        BinaryOperator::Divide => {
+                            self.require_int_expression(
+                                kernel_id,
+                                *left,
+                                kernel.exprs()[*left].layout,
+                                "divide lhs",
+                            )?;
+                            self.require_int_expression(
+                                kernel_id,
+                                *right,
+                                kernel.exprs()[*right].layout,
+                                "divide rhs",
+                            )?;
+                            self.require_int_expression(
+                                kernel_id,
+                                expr_id,
+                                expr.layout,
+                                "divide result",
+                            )?;
+                            builder.ins().sdiv(lhs, rhs)
+                        }
+                        BinaryOperator::Modulo => {
+                            self.require_int_expression(
+                                kernel_id,
+                                *left,
+                                kernel.exprs()[*left].layout,
+                                "modulo lhs",
+                            )?;
+                            self.require_int_expression(
+                                kernel_id,
+                                *right,
+                                kernel.exprs()[*right].layout,
+                                "modulo rhs",
+                            )?;
+                            self.require_int_expression(
+                                kernel_id,
+                                expr_id,
+                                expr.layout,
+                                "modulo result",
+                            )?;
+                            builder.ins().srem(lhs, rhs)
                         }
                         BinaryOperator::GreaterThan => {
                             self.require_int_expression(

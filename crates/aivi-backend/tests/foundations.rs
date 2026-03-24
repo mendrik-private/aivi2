@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use aivi_backend::{
     BuiltinAppendCarrier, BuiltinApplicativeCarrier, BuiltinClassMemberIntrinsic,
-    BuiltinFunctorCarrier, CodegenError, DecodeStepKind, DomainDecodeSurfaceKind,
+    BuiltinFunctorCarrier, CodegenError, DecodeStepKind, DomainDecodeSurfaceKind, EvaluationError,
     GateStage as BackendGateStage, ItemKind as BackendItemKind, KernelEvaluator, KernelExprKind,
     LayoutKind, LoweringError, NonSourceWakeupCause, RecurrenceTarget, RuntimeValue,
     SourceProvider, StageKind as BackendStageKind, ValidationError, compile_program,
@@ -257,6 +257,36 @@ sig timeout : Signal Duration
     assert!(matches!(
         backend.layouts()[root.layout].kind,
         LayoutKind::AnonymousDomain { .. }
+    ));
+}
+
+#[test]
+fn evaluates_multiplicative_builtin_arithmetic_with_precedence() {
+    let backend = lower_text(
+        "backend-multiplicative-builtins.aivi",
+        "val total:Int = 2 + 3 * 4 - 8 / 2 + 14 % 4\n",
+    );
+
+    let mut evaluator = KernelEvaluator::new(&backend);
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "total"), &BTreeMap::new())
+            .expect("multiplicative builtin arithmetic should evaluate"),
+        RuntimeValue::Int(12)
+    );
+}
+
+#[test]
+fn division_by_zero_reports_backend_evaluation_error() {
+    let backend = lower_text("backend-division-by-zero.aivi", "val broken:Int = 1 / 0\n");
+
+    let mut evaluator = KernelEvaluator::new(&backend);
+    assert!(matches!(
+        evaluator.evaluate_item(find_item(&backend, "broken"), &BTreeMap::new()),
+        Err(EvaluationError::InvalidBinaryArithmetic {
+            reason: "division by zero",
+            ..
+        })
     ));
 }
 

@@ -18,9 +18,10 @@ const EXPR_OR_PREC: u8 = 1;
 const EXPR_AND_PREC: u8 = 2;
 const EXPR_COMPARE_PREC: u8 = 3;
 const EXPR_ADD_PREC: u8 = 4;
-const EXPR_APPLY_PREC: u8 = 5;
-const EXPR_PROJECTION_PREC: u8 = 6;
-const EXPR_PREFIX_PREC: u8 = 7;
+const EXPR_MUL_PREC: u8 = 5;
+const EXPR_APPLY_PREC: u8 = 6;
+const EXPR_PROJECTION_PREC: u8 = 7;
+const EXPR_PREFIX_PREC: u8 = 8;
 const TYPE_ARROW_PREC: u8 = 0;
 const TYPE_APPLY_PREC: u8 = 1;
 const PATTERN_APPLY_PREC: u8 = 1;
@@ -1385,6 +1386,9 @@ impl Formatter {
             BinaryOperator::NotEquals => "!=",
             BinaryOperator::And => "and",
             BinaryOperator::Or => "or",
+            BinaryOperator::Multiply => "*",
+            BinaryOperator::Divide => "/",
+            BinaryOperator::Modulo => "%",
         }
     }
 
@@ -1397,6 +1401,9 @@ impl Formatter {
             | BinaryOperator::Equals
             | BinaryOperator::NotEquals => EXPR_COMPARE_PREC,
             BinaryOperator::Add | BinaryOperator::Subtract => EXPR_ADD_PREC,
+            BinaryOperator::Multiply | BinaryOperator::Divide | BinaryOperator::Modulo => {
+                EXPR_MUL_PREC
+            }
         }
     }
 
@@ -1710,6 +1717,27 @@ mod tests {
                 "provider custom.timer\n",
                 "    option activeWhen: Signal Bool\n",
                 "    wakeup: timer\n",
+            )
+        );
+    }
+
+    #[test]
+    fn formatter_normalizes_multiplicative_operator_layout() {
+        let formatted = format_text("val total=left+middle*right/scale%modulo\n");
+        assert_eq!(
+            formatted,
+            "val total = left + middle * right / scale % modulo\n"
+        );
+    }
+
+    #[test]
+    fn formatter_normalizes_percent_domain_operator_layout() {
+        let formatted = format_text("domain Bucket over Int\n    (%):Bucket -> Int -> Bucket\n");
+        assert_eq!(
+            formatted,
+            concat!(
+                "domain Bucket over Int\n",
+                "    (%) : Bucket -> Int -> Bucket\n",
             )
         );
     }
