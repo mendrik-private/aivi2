@@ -1255,9 +1255,6 @@ impl<'a> TypeChecker<'a> {
         let Item::Function(function) = &self.module.items()[*item_id] else {
             return None;
         };
-        if function.context.is_empty() {
-            return None;
-        }
         let function = function.clone();
         let mut argument_types = Vec::with_capacity(arguments.len());
         for argument in arguments.iter() {
@@ -3354,6 +3351,25 @@ fun items:(List A) #acc:(TakeAcc A) => acc.items
         assert!(
             report.is_ok(),
             "expected polymorphic function application to typecheck, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_accepts_expected_polymorphic_ambient_helper_application() {
+        let report = typecheck_text(
+            "expected-polymorphic-ambient-helper-application.aivi",
+            "fun even:Bool #value:Int => value == 2 or value == 4\n\
+             val maybeName:Option Text = Some \"Ada\"\n\
+             val numbers:List Int = [1, 2, 3, 4]\n\
+             val chosenName:Text = __aivi_option_getOrElse \"guest\" maybeName\n\
+             val count:Int = __aivi_list_length numbers\n\
+             val firstNumber:Option Int = __aivi_list_head numbers\n\
+             val hasEven:Bool = __aivi_list_any even numbers\n",
+        );
+        assert!(
+            report.is_ok(),
+            "expected ambient polymorphic helper application to typecheck, got diagnostics: {:?}",
             report.diagnostics()
         );
     }

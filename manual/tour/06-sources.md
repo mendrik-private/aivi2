@@ -8,111 +8,149 @@ Sources are attached to signals using the `@source` decorator.
 ## The @source decorator
 
 ```text
-// TODO: add a verified AIVI example here
+@source window.keyDown with {
+    repeat: False,
+    focusOnly: True
+}
+sig keyDown : Signal Key
 ```
 
-`@source` names the source (`window.keyDown`) and passes a configuration record.
-The signal `keyDown` will fire whenever the user presses a key, emitting a `Key` value.
-
-The source is declared *above* the `sig` it decorates — the decorator binds to the next
-`sig` declaration.
+`@source` names the provider (`window.keyDown`) and passes a configuration record in
+`with { ... }`. The decorator binds to the **next** `sig` declaration below it.
 
 ## Source lifecycle
 
-AIVI manages the source lifecycle automatically:
+AIVI manages source lifecycle automatically:
 
-1. When the UI component that owns the signal is mounted, the source is activated.
-2. While active, each event from the source drives the signal's recurrence.
+1. When the component that owns the signal is mounted, the source is activated.
+2. Each event from the source drives the signal's recurrence.
 3. When the component is unmounted, the source is torn down.
 
-You never unsubscribe manually. The runtime handles it.
+You never subscribe or unsubscribe manually.
 
-## Timer source
+## `@recur.timer` — periodic signals
 
-The `timer.every` source fires at a fixed interval:
-
-```text
-// TODO: add a verified AIVI example here
-```
-
-- `timer.every 160` fires every 160 milliseconds.
-- `immediate: True` fires once immediately on activation (useful for initial render).
-- `coalesce: True` drops ticks that accumulate while the handler is busy.
-
-The snake game uses this to drive the game loop:
+`@recur.timer` drives a recurrent signal at a fixed interval:
 
 ```text
-// TODO: add a verified AIVI example here
+@recur.timer 160ms
+sig game : Signal Game =
+    initialGame
+     @|> stepGame boardSize direction
+     <|@ stepGame boardSize direction
 ```
 
-Every 160 ms, `stepGame` runs and the `game` signal updates, which cascades to `board`,
-`boardRows`, `scoreLine`, and everything else derived from `game`.
+The interval uses the `Duration` domain literal (`ms`, `sec`, `min`). On every tick the
+recurrence step runs, producing the next accumulated state.
 
-## HTTP source
+Options on the accompanying `@source timer.every N with { ... }` block:
+
+| Option | Type | Meaning |
+|---|---|---|
+| `immediate` | `Bool` | Fire once on activation before the first tick |
+| `coalesce` | `Bool` | Drop accumulated ticks when the handler is busy |
+
+## `@recur.backoff` — retry with back-off
+
+`@recur.backoff` drives a `Task E A` recurrence that retries on failure with exponential
+back-off:
 
 ```text
-// TODO: add a verified AIVI example here
+@recur.backoff 3x
+val fetched : Task HttpError User =
+    initialState
+     @|> fetchUser
+     <|@ fetchUser
 ```
 
-The signal starts empty (`None` or a loading state depending on the source type).
-When the HTTP response arrives, the signal fires with `Ok user` or `Err message`.
+The retry count uses the `Retry` domain literal (`x`).
 
-## Button click source
+## `window.keyDown` — keyboard events
 
 ```text
-// TODO: add a verified AIVI example here
+@source window.keyDown with {
+    repeat: False,
+    focusOnly: True
+}
+sig keyDown : Signal Key
 ```
 
-This is an input signal — it has no body and is driven externally. In markup, connect it via
-`onClick={submitClicked}` on a `<Button>` element.
+Emits a `Key` value on every key press. `repeat: False` suppresses held-key repeats.
+`focusOnly: True` only fires when the window has focus.
 
-This is a direct widget binding. Unlike the provider-based `@source button.clicked "id"` pattern
-used for recurrent signals, `onClick={submitClicked}` does not need a separate `id` or `@source`
-declaration:
+## `http.get` / `http.post` — HTTP requests
 
 ```text
-// TODO: add a verified AIVI example here
+@source http.get "{apiHost}/users" with {
+    headers: authHeaders,
+    decode: Strict,
+    retry: 3x,
+    timeout: 5s
+}
+sig users : Signal (Result HttpError (List User))
 ```
 
-## Source configuration
+The signal type is `Signal (Result HttpError A)`. It holds the latest response, or the
+latest error if the request failed. `decode` controls JSON decoding strictness (`Strict`
+or `Permissive`). `retry` and `timeout` use domain literals from `aivi.http`.
 
-Sources accept configuration via the `with { ... }` block.
-Each source type documents its own options.
+## `fs.watch` — filesystem events
 
-| Source | Common options |
-|---|---|
-| `timer.every N` | `immediate`, `coalesce` |
-| `window.keyDown` | `repeat`, `focusOnly` |
-| `button.clicked "id"` | — |
-| `http.get "url"` | `headers`, `refreshOn` |
-| `http.post "url"` | `body`, `headers`, `refreshOn` |
+```text
+@source fs.watch "/tmp/demo.txt" with {
+    events: [Created, Changed, Deleted]
+}
+sig fileEvents : Signal FsEvent
+```
+
+Emits `FsEvent` values (`Created`, `Changed`, `Deleted`) as the watched path changes.
+Import `FsEvent` and its constructors from `aivi.fs`.
+
+## `process.spawn` — subprocess output
+
+```text
+@source process.spawn "rg" ["TODO", "."] with {
+    stdout: Lines,
+    stderr: Ignore
+}
+sig grepEvents : Signal ProcessEvent
+```
+
+Spawns a child process and streams its output as `ProcessEvent` values. `stdout` and
+`stderr` accept `Lines`, `Bytes`, or `Ignore`.
+
+## Source configuration reference
+
+| Source | Emits | Key options |
+|---|---|---|
+| `timer.every N` | `TimerTick` | `immediate`, `coalesce` |
+| `window.keyDown` | `Key` | `repeat`, `focusOnly` |
+| `http.get "url"` | `Result HttpError A` | `headers`, `decode`, `retry`, `timeout` |
+| `http.post "url"` | `Result HttpError A` | `body`, `headers`, `decode`, `retry`, `timeout` |
+| `fs.watch "path"` | `FsEvent` | `events` |
+| `process.spawn "cmd" args` | `ProcessEvent` | `stdout`, `stderr` |
 
 ## How sources feed signals
 
-The full picture:
-
-1. `@source` declares the external event stream.
-2. The `sig` declaration with `@\|>...<\|@` says how each event updates the signal.
-3. Derived signals (using `\|>`) update automatically whenever their dependency changes.
+1. `@source` / `@recur.timer` declares the external event stream.
+2. The `sig` body with `@|>` / `<|@` describes how each event updates the signal.
+3. Derived signals (`|>` chains) recompute automatically when their dependency changes.
 4. Markup binds to signals with `{signalName}` attributes.
-5. GTK widgets re-render when the signals they are bound to change.
+5. GTK widgets re-render when bound signals change.
 
-Everything between step 1 (external event) and step 5 (widget update) is managed by the AIVI
-runtime. User code is a pure description of transformations.
+Everything between step 1 and step 5 is managed by the AIVI runtime.
 
 ## Stale suppression
 
-If a source fires faster than the signal can process, `coalesce: True` drops the intermediate
-events and only delivers the latest. This is important for timers at high frequency — without
-coalescing, a slow step function could cause event queue buildup.
+If a source fires faster than the handler can process, `coalesce: True` drops intermediate
+events and delivers only the latest. Essential for high-frequency timers.
 
 ## Summary
 
-- `@source provider.method config` decorates the next `sig` declaration.
-- Sources are activated when the owning component mounts and deactivated on unmount.
-- `timer.every N` drives periodic updates.
-- `window.keyDown`, `button.clicked` respond to user interaction.
-- `http.get` fetches data asynchronously.
-- `coalesce: True` prevents event queue buildup.
+- `@source provider.name config` decorates the next `sig` declaration.
+- `@recur.timer Nms` drives a periodic recurrent signal.
+- `@recur.backoff Nx` drives a retrying `Task`.
+- Sources are activated on mount and torn down on unmount automatically.
+- All source types emit typed values — no raw events reach user code.
 
 [Next: Markup →](/tour/07-markup)

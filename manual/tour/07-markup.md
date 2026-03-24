@@ -73,7 +73,7 @@ based on a value:
 // TODO: add a verified AIVI example here
 ```
 
-Like `\|\|>`, `<match>` is exhaustive — all variants must be covered.
+Like `||>`, `<match>` is exhaustive — all variants must be covered.
 
 ## The show tag
 

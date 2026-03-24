@@ -288,6 +288,7 @@ struct ResolveEnv {
     type_scopes: Vec<HashMap<String, TypeParameterId>>,
     implicit_type_parameters: Vec<TypeParameterId>,
     allow_implicit_type_parameters: bool,
+    prefer_ambient_names: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -3342,10 +3343,11 @@ impl<'a> Lowerer<'a> {
     }
 
     fn resolve_module(&mut self, namespaces: &Namespaces) {
-        let mut item_ids = self.module.root_items().to_vec();
-        item_ids.extend(self.module.ambient_items().iter().copied());
-        for item_id in item_ids {
-            self.resolve_item(item_id, namespaces);
+        for item_id in self.module.root_items().to_vec() {
+            self.resolve_item(item_id, namespaces, false);
+        }
+        for item_id in self.module.ambient_items().to_vec() {
+            self.resolve_item(item_id, namespaces, true);
         }
     }
 
@@ -3688,14 +3690,22 @@ impl<'a> Lowerer<'a> {
         None
     }
 
-    fn resolve_item(&mut self, item_id: ItemId, namespaces: &Namespaces) {
+    fn resolve_item(
+        &mut self,
+        item_id: ItemId,
+        namespaces: &Namespaces,
+        prefer_ambient_names: bool,
+    ) {
         let item = self.module.items()[item_id].clone();
         for decorator in item.decorators() {
-            self.resolve_decorator(*decorator, namespaces);
+            self.resolve_decorator(*decorator, namespaces, prefer_ambient_names);
         }
         let resolved = match item {
             Item::Type(item) => {
                 let mut env = ResolveEnv::default();
+                if prefer_ambient_names {
+                    env.set_prefer_ambient_names();
+                }
                 env.push_type_scope(self.type_parameter_scope(item.parameters.iter().copied()));
                 match &item.body {
                     TypeItemBody::Alias(alias) => self.resolve_type(*alias, namespaces, &mut env),
@@ -3711,6 +3721,9 @@ impl<'a> Lowerer<'a> {
             }
             Item::Value(item) => {
                 let mut env = ResolveEnv::default();
+                if prefer_ambient_names {
+                    env.set_prefer_ambient_names();
+                }
                 if let Some(annotation) = item.annotation {
                     self.resolve_type(annotation, namespaces, &mut env);
                 }
@@ -3719,6 +3732,9 @@ impl<'a> Lowerer<'a> {
             }
             Item::Function(mut item) => {
                 let mut env = ResolveEnv::default();
+                if prefer_ambient_names {
+                    env.set_prefer_ambient_names();
+                }
                 env.enable_implicit_type_parameters();
                 for constraint in &item.context {
                     self.resolve_type(*constraint, namespaces, &mut env);
@@ -3740,6 +3756,9 @@ impl<'a> Lowerer<'a> {
             }
             Item::Signal(item) => {
                 let mut env = ResolveEnv::default();
+                if prefer_ambient_names {
+                    env.set_prefer_ambient_names();
+                }
                 if let Some(annotation) = item.annotation {
                     self.resolve_type(annotation, namespaces, &mut env);
                 }
@@ -3750,6 +3769,9 @@ impl<'a> Lowerer<'a> {
             }
             Item::Class(item) => {
                 let mut env = ResolveEnv::default();
+                if prefer_ambient_names {
+                    env.set_prefer_ambient_names();
+                }
                 env.push_type_scope(self.type_parameter_scope(item.parameters.iter().copied()));
                 for superclass in &item.superclasses {
                     self.resolve_type(*superclass, namespaces, &mut env);
@@ -3768,6 +3790,9 @@ impl<'a> Lowerer<'a> {
             }
             Item::Domain(item) => {
                 let mut env = ResolveEnv::default();
+                if prefer_ambient_names {
+                    env.set_prefer_ambient_names();
+                }
                 env.push_type_scope(self.type_parameter_scope(item.parameters.iter().copied()));
                 self.resolve_type(item.carrier, namespaces, &mut env);
                 if self.type_contains_item_reference(item.carrier, item_id) {
@@ -3787,6 +3812,9 @@ impl<'a> Lowerer<'a> {
             }
             Item::SourceProviderContract(item) => {
                 let mut env = ResolveEnv::default();
+                if prefer_ambient_names {
+                    env.set_prefer_ambient_names();
+                }
                 let item = item;
                 for argument in &item.contract.arguments {
                     self.resolve_type(argument.annotation, namespaces, &mut env);
@@ -3803,6 +3831,9 @@ impl<'a> Lowerer<'a> {
             }
             Item::Instance(mut item) => {
                 let mut env = ResolveEnv::default();
+                if prefer_ambient_names {
+                    env.set_prefer_ambient_names();
+                }
                 env.enable_implicit_type_parameters();
                 self.resolve_type_reference(&mut item.class, namespaces, &mut env);
                 for argument in item.arguments.iter() {
@@ -4225,9 +4256,17 @@ impl<'a> Lowerer<'a> {
         signal_dependencies
     }
 
-    fn resolve_decorator(&mut self, decorator_id: DecoratorId, namespaces: &Namespaces) {
+    fn resolve_decorator(
+        &mut self,
+        decorator_id: DecoratorId,
+        namespaces: &Namespaces,
+        prefer_ambient_names: bool,
+    ) {
         let decorator = self.module.decorators()[decorator_id].clone();
-        let env = ResolveEnv::default();
+        let mut env = ResolveEnv::default();
+        if prefer_ambient_names {
+            env.set_prefer_ambient_names();
+        }
         match &decorator.payload {
             DecoratorPayload::Bare => {}
             DecoratorPayload::Call(call) => {
@@ -4710,6 +4749,51 @@ impl<'a> Lowerer<'a> {
             reference.resolution = ResolutionState::Resolved(TermResolution::Local(binding));
             return;
         }
+        if env.prefer_ambient_names() {
+            match lookup_item(&namespaces.ambient_term_items, name) {
+                LookupResult::Unique(item) => {
+                    reference.resolution = ResolutionState::Resolved(TermResolution::Item(item));
+                    return;
+                }
+                LookupResult::Ambiguous => {
+                    self.emit_error(
+                        reference.span(),
+                        format!("ambient term `{name}` is ambiguous"),
+                        code("ambiguous-term-name"),
+                    );
+                    reference.resolution = ResolutionState::Unresolved;
+                    return;
+                }
+                LookupResult::Missing => {}
+            }
+            match lookup_item(&namespaces.ambient_class_terms, name) {
+                LookupResult::Unique(resolution) => {
+                    reference.resolution =
+                        ResolutionState::Resolved(TermResolution::ClassMember(resolution));
+                    return;
+                }
+                LookupResult::Ambiguous => {
+                    if let Some(candidates) = namespaces.ambient_class_terms.get(name)
+                        && let Ok(candidates) = crate::NonEmpty::from_vec(
+                            candidates
+                                .iter()
+                                .map(|site| site.value)
+                                .collect::<Vec<crate::hir::ClassMemberResolution>>(),
+                        )
+                    {
+                        reference.resolution = ResolutionState::Resolved(
+                            TermResolution::AmbiguousClassMembers(candidates),
+                        );
+                        return;
+                    }
+                }
+                LookupResult::Missing => {}
+            }
+            if let Some(builtin) = builtin_term(name) {
+                reference.resolution = ResolutionState::Resolved(TermResolution::Builtin(builtin));
+                return;
+            }
+        }
         let term_lookup = lookup_item(&namespaces.term_items, name);
         let ambient_term_lookup = lookup_item(&namespaces.ambient_term_items, name);
         let domain_candidates = namespaces
@@ -4893,6 +4977,28 @@ impl<'a> Lowerer<'a> {
             reference.resolution =
                 ResolutionState::Resolved(TypeResolution::TypeParameter(parameter));
             return;
+        }
+        if env.prefer_ambient_names() {
+            match lookup_item(&namespaces.ambient_type_items, name) {
+                LookupResult::Unique(item) => {
+                    reference.resolution = ResolutionState::Resolved(TypeResolution::Item(item));
+                    return;
+                }
+                LookupResult::Ambiguous => {
+                    self.emit_error(
+                        reference.span(),
+                        format!("ambient type `{name}` is ambiguous"),
+                        code("ambiguous-type-name"),
+                    );
+                    reference.resolution = ResolutionState::Unresolved;
+                    return;
+                }
+                LookupResult::Missing => {}
+            }
+            if let Some(builtin) = builtin_type(name) {
+                reference.resolution = ResolutionState::Resolved(TypeResolution::Builtin(builtin));
+                return;
+            }
         }
         match lookup_item(&namespaces.type_items, name) {
             LookupResult::Unique(item) => {
@@ -5318,6 +5424,10 @@ impl ResolveEnv {
         }
     }
 
+    fn set_prefer_ambient_names(&mut self) {
+        self.prefer_ambient_names = true;
+    }
+
     fn lookup_term(&self, name: &str) -> Option<BindingId> {
         self.term_scopes
             .iter()
@@ -5334,6 +5444,10 @@ impl ResolveEnv {
 
     fn allow_implicit_type_parameters(&self) -> bool {
         self.allow_implicit_type_parameters
+    }
+
+    fn prefer_ambient_names(&self) -> bool {
+        self.prefer_ambient_names
     }
 
     fn bind_implicit_type_parameter(
@@ -5810,12 +5924,12 @@ mod tests {
             .map(|item_id| &module.items()[*item_id])
             .find(|item| match item {
                 Item::Type(item) => item.name.text() == name,
+                Item::Value(item) => item.name.text() == name,
+                Item::Function(item) => item.name.text() == name,
+                Item::Signal(item) => item.name.text() == name,
                 Item::Class(item) => item.name.text() == name,
-                Item::Value(_)
-                | Item::Function(_)
-                | Item::Signal(_)
-                | Item::Domain(_)
-                | Item::SourceProviderContract(_)
+                Item::Domain(item) => item.name.text() == name,
+                Item::SourceProviderContract(_)
                 | Item::Instance(_)
                 | Item::Use(_)
                 | Item::Export(_) => false,
@@ -5964,6 +6078,49 @@ mod tests {
             !applicative.superclasses.is_empty(),
             "Applicative should retain its superclass edge"
         );
+    }
+
+    #[test]
+    fn ambient_prelude_prefers_builtin_names_over_user_shadowing() {
+        let lowered = lower_text(
+            "ambient-shadow-bool.aivi",
+            r#"
+type Bool = True | False
+
+val answer:Int = 42
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "fixture should lower cleanly before validation: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = lowered
+            .module()
+            .validate(ValidationMode::RequireResolvedNames);
+        assert!(
+            report.is_ok(),
+            "ambient prelude should validate even when the user shadows builtin Bool: {:?}",
+            report.diagnostics()
+        );
+
+        let Item::Function(any_step) =
+            find_ambient_named_item(lowered.module(), "__aivi_list_anyStep")
+        else {
+            panic!("expected `__aivi_list_anyStep` to lower as an ambient function");
+        };
+        let found_annotation = any_step.parameters[1]
+            .annotation
+            .expect("ambient helper parameter should retain its annotation");
+        assert!(matches!(
+            lowered.module().types()[found_annotation].kind,
+            TypeKind::Name(ref reference)
+                if matches!(
+                    reference.resolution,
+                    ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Bool))
+                )
+        ));
     }
 
     #[test]

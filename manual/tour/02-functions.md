@@ -75,15 +75,17 @@ The `->` in `(Int -> Int)` is a function type: a function that takes `Int` and r
 
 ## Anonymous functions (lambdas)
 
-> **Note:** Lambda syntax (`\param => body`) is a planned feature not yet in the current implementation. Use named functions instead.
+Anonymous functions use `#param =>` for single-argument lambdas or `_ op value` for simple operator sections:
 
 ```text
-// planned syntax (not yet implemented):
-val double = \x => x * 2
-val add5 = \x => x + 5
+// single parameter lambda
+val double = #x => x * 2
+
+// operator section (implicit argument)
+val add5 = _ + 5
 ```
 
-The equivalent in current AIVI uses named functions:
+The equivalent using named functions:
 
 ```text
 // TODO: add a verified AIVI example here
@@ -115,7 +117,7 @@ This means AIVI functions are easy to reason about and easy to test:
 - Return type comes immediately after the name, before parameters.
 - All parameters are labeled with `#`.
 - Function application is juxtaposition; parentheses group subexpressions.
-- Lambdas: `\param => body`.
+- Lambdas: `#param => body` or `_ op value` for operator sections.
 - Functions are pure — no side effects.
 
 [Next: Pipes →](/tour/03-pipes)

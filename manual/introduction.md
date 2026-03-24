@@ -74,10 +74,10 @@ and a pipe-oriented surface syntax rather than an ML-style record syntax.
   pattern matches are exhaustive.
 - **No `null`.** The absence of a value is represented by `type Option A = Some A | None`,
   which the compiler forces you to handle.
-- **No `if`/`else`, no loops.** Control flow is pattern matching (`\|\|>`) and recursion.
+- **No `if`/`else`, no loops.** Control flow is pattern matching (`||>`) and recursion.
   This sounds restrictive; in practice it is liberating.
-- **Pipe algebra.** Data flows left-to-right through a family of pipe operators. `\|>` transforms,
-  `?\|>` gates, `\|\|>` matches, `*\|>` maps over lists, `@\|>...<\|@` folds over time.
+- **Pipe algebra.** Data flows left-to-right through a family of pipe operators. `|>` transforms,
+  `?|>` gates, `||>` matches, `*|>` maps over lists, `@|>...<|@` folds over time.
 - **Native compilation.** AIVI compiles to native binaries via Cranelift. No JVM, no V8, no
   interpreted runtime.
 

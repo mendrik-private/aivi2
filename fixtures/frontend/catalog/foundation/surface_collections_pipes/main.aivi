@@ -1,0 +1,116 @@
+use aivi.option (
+    getOrElse
+    toResult
+    toList as optionToList
+)
+
+use aivi.result (
+    withDefault
+    toOption
+)
+
+use aivi.list (
+    Partition
+    length
+    head
+    tail
+    any
+    partition
+)
+
+use aivi.text (join)
+
+type CollectionSummary = {
+    count: Int,
+    total: Int,
+    first: Option Int,
+    rest: Option (List Int),
+    hasEven: Bool,
+    displayName: Text,
+    note: Text
+}
+
+fun add:Int #total:Int #value:Int =>
+    total + value
+
+fun even:Bool #value:Int =>
+    value == 2 or value == 4
+
+val numbers: List Int = [
+    1,
+    2,
+    3,
+    4
+]
+
+val emptyNumbers: List Int = []
+val maybeName: Option Text = Some "Ada"
+val missingName: Option Text = None
+
+val countFromPipe: Int =
+    numbers
+     |> length
+
+val totalFromReduce: Int =
+    numbers
+     |> reduce add 0
+
+val firstFromPipe: Option Int =
+    numbers
+     |> head
+
+val restFromPipe: Option (List Int) =
+    numbers
+     |> tail
+
+val hasEvenFromPipe: Bool =
+    numbers
+     |> any even
+
+val splitNumbers: (Partition Int) =
+    numbers
+     |> partition even
+
+val displayNameFromPipe: Text =
+    missingName
+     |> getOrElse "guest"
+
+val presentNameItems: List Text =
+    maybeName
+     |> optionToList
+
+val nameResult: Result Text Text =
+    maybeName
+     |> toResult "missing"
+
+val recoveredName: Text =
+    nameResult
+     |> withDefault "guest"
+
+val nameOption: Option Text =
+    nameResult
+     |> toOption
+
+val emptyFirst: Option Int =
+    emptyNumbers
+     |> head
+
+val collectionNote: Text =
+    join ", " [
+        "{countFromPipe} items",
+        "total {totalFromReduce}",
+        displayNameFromPipe,
+        recoveredName
+    ]
+
+val collectionSummary: CollectionSummary = {
+    count: countFromPipe,
+    total: totalFromReduce,
+    first: firstFromPipe,
+    rest: restFromPipe,
+    hasEven: hasEvenFromPipe,
+    displayName: displayNameFromPipe,
+    note: collectionNote
+}
+
+export collectionSummary

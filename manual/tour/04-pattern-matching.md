@@ -4,16 +4,16 @@ Pattern matching is AIVI's mechanism for inspecting the **shape** of a value and
 based on what you find. It is more powerful than a `switch` statement because it matches
 structure, not just equality.
 
-## The match pipe \|\|>
+## The match pipe `||>`
 
-`\|\|>` is the case pipe. It takes a value on the left and a pattern `=>` body arm on the right.
-Multiple arms are written as successive `\|\|>` lines:
+`||>` is the case pipe. It takes a value on the left and a pattern `=>` body arm on the right.
+Multiple arms are written as successive `||>` lines:
 
 ```text
 // TODO: add a verified AIVI example here
 ```
 
-Each arm is: `\|\|> pattern => expression`.
+Each arm is: `||> pattern => expression`.
 The value (`direction`) is matched top-to-bottom against each pattern.
 The body of the first matching arm is evaluated and returned.
 
@@ -102,9 +102,9 @@ from a record:
 The record pattern `{ snake, food, score }` binds three fields of `Game` simultaneously,
 without needing intermediate `let` bindings.
 
-## \|\|> vs T\|>/F\|>
+## `||>` vs `T|>`/`F|>`
 
-Use `\|\|>` when matching on a general sum type or literal. Use `T\|>` / `F\|>` when the
+Use `||>` when matching on a general sum type or literal. Use `T|>` / `F|>` when the
 value is already a `Bool` and you want a two-branch conditional:
 
 ```text
@@ -117,7 +117,7 @@ value is already a `Bool` and you want a two-branch conditional:
 
 ## Summary
 
-- `\|\|>` is the match pipe. Each arm is `\|\|> pattern => body`.
+- `||>` is the match pipe. Each arm is `||> pattern => body`.
 - Matching is exhaustive — every variant must be covered.
 - `_` is the wildcard that matches anything.
 - Patterns can destructure records and data-carrying constructors.

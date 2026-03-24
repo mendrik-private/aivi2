@@ -1,0 +1,80 @@
+type Role =
+  | Admin
+  | Member
+  | Guest
+
+type Profile = {
+    name: Text,
+    nickname: Option Text,
+    role: Role,
+    ready: Bool
+}
+
+type LoadState =
+  | NotAsked
+  | Loaded Profile
+  | Failed Text
+
+type SurfaceSummary = {
+    banner: Text,
+    activeLoad: Text,
+    idleLoad: Text,
+    failedLoad: Text
+}
+
+fun displayName:Text #profile:Profile =>
+    profile
+     ||> { nickname: Some alias } => alias
+     ||> { name, nickname: None } => name
+
+fun roleLabel:Text #role:Role =>
+    role
+     ||> Admin  => "admin"
+     ||> Member => "member"
+     ||> Guest  => "guest"
+
+fun readyLabel:Text #ready:Bool =>
+    ready
+     T|> "ready"
+     F|> "waiting"
+
+fun loadLabel:Text #state:LoadState =>
+    state
+     ||> NotAsked       => "idle"
+     ||> Loaded profile => displayName profile
+     ||> Failed message => "error:{message}"
+
+val sampleProfile: Profile = {
+    name: "Ada",
+    nickname: Some "Countess",
+    role: Admin,
+    ready: True
+}
+
+val sampleState: LoadState = Loaded sampleProfile
+val failedState: LoadState = Failed "offline"
+val summaryName: Text = displayName sampleProfile
+
+val summaryRole: Text =
+    sampleProfile
+     |> .role
+     |> roleLabel
+
+val summaryReady: Text =
+    sampleProfile
+     |> .ready
+     |> readyLabel
+
+val summaryLoad: Text = loadLabel sampleState
+val idleLoad: Text = loadLabel NotAsked
+val failedLoad: Text = loadLabel failedState
+val banner: Text = "{summaryName} / {summaryRole} / {summaryReady}"
+
+val surfaceSummary: SurfaceSummary = {
+    banner,
+    activeLoad: summaryLoad,
+    idleLoad,
+    failedLoad
+}
+
+export surfaceSummary

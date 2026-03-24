@@ -197,6 +197,9 @@ pub fn elaborate_recurrences(module: &Module) -> RecurrenceElaborationReport {
     let mut typing = GateTypeContext::new(module);
 
     for (owner, item) in items {
+        if module.ambient_items().contains(&owner) {
+            continue;
+        }
         match item {
             Item::Value(item) => {
                 let target = item.annotation.and_then(|annotation| {

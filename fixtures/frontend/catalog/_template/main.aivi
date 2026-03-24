@@ -1,0 +1,43 @@
+type CatalogUser = {
+    name: Text
+}
+
+type CatalogInput = {
+    values: List Int,
+    user: Option CatalogUser
+}
+
+type CatalogOutput = {
+    total: Int,
+    label: Text
+}
+
+fun sumStep:Int #total:Int #value:Int =>
+    total + value
+
+fun chooseLabel:Text #user:(Option CatalogUser) =>
+    user
+     T|> .name
+     F|> "guest"
+
+val sample: CatalogInput = {
+    values: [1, 2, 3],
+    user: Some { name: "Ada" }
+}
+
+val sampleTotal: Int =
+    sample
+     |> .values
+     |> reduce sumStep 0
+
+val sampleLabel: Text =
+    sample
+     |> .user
+     |> chooseLabel
+
+val catalogResult: CatalogOutput = {
+    total: sampleTotal,
+    label: sampleLabel
+}
+
+export catalogResult

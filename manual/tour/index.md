@@ -16,7 +16,8 @@ Each chapter builds on the previous one. Read them in order on your first pass.
 | [05 · Signals](/tour/05-signals) | `sig`, recurrence with `@\|>...<\|@` | Time-varying values |
 | [06 · Sources](/tour/06-sources) | `@source`, `@recur.timer`, lifecycle | Where values come from |
 | [07 · Markup](/tour/07-markup) | `<label>`, `<each>`, `<match>` | GTK widgets as AIVI expressions |
-| [08 · Type Classes](/tour/08-typeclasses) | `class`, `instance`, `Eq`, `Show` | Interfaces with laws |
+| [08 · Type Classes](/tour/08-typeclasses) | `class`, `instance`, `Eq`, `Functor`, HKT | Interfaces with laws |
+| [09 · Domains](/tour/09-domains) | `domain`, `literal`, suffix syntax | Typed refinements of base types |
 
 ## A complete program
 

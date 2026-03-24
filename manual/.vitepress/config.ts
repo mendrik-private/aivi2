@@ -41,6 +41,7 @@ export default defineConfig({
           { text: '06 · Sources',          link: '/tour/06-sources' },
           { text: '07 · Markup',           link: '/tour/07-markup' },
           { text: '08 · Type Classes',     link: '/tour/08-typeclasses' },
+          { text: '09 · Domains',          link: '/tour/09-domains' },
         ],
       },
       {

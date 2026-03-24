@@ -15,7 +15,7 @@ Think of it like a spreadsheet cell: when a cell it depends on changes, it updat
 
 This declares a signal named `count` that holds an `Int`. Its initial value is `0`.
 
-A signal that derives from another signal uses `\|>`:
+A signal that derives from another signal uses `|>`:
 
 ```text
 // TODO: add a verified AIVI example here
@@ -32,13 +32,13 @@ Any pipe chain that starts with a signal produces a new signal:
 // TODO: add a verified AIVI example here
 ```
 
-`scoreLine` recomputes whenever `game` changes. The `\|>` pipes you already know work
+`scoreLine` recomputes whenever `game` changes. The `|>` pipes you already know work
 identically on signals.
 
-## Recurrence: @\|>...<\|@
+## Recurrence: `@|>` and `<|@`
 
-The recurrence pattern is how signals accumulate state over time.
-`@\|>` starts the recurrent flow; `<\|@` is the recurrence step.
+The recurrence pattern is how a signal accumulates state over time.
+The shape is always: **seed → enter → guards → step**.
 
 ```text
 // TODO: add a verified AIVI example here
@@ -46,11 +46,10 @@ The recurrence pattern is how signals accumulate state over time.
 
 Reading this:
 
-- `0` — the initial value (the seed of the accumulator).
-- `@\|>` — recurrent flow start: enter the recurrent region with an explicit start stage.
-- `<\|@` — recurrence step: apply the per-wakeup state transition.
-- In this simple counter, `keep` preserves the current state at the start stage and
-  `<\|@ addOne` performs the actual increment.
+- `initial` — the seed value before any events arrive.
+- `@|> cursor` — enter the recurrence driven by `cursor` (the source that wakes the loop).
+- `?|> cursor.hasNext` — an optional guard; the step is skipped when the predicate is false.
+- `<|@ cursor.next` — the step function: receives the current state, returns the next state.
 
 ## Example: direction signal in Snake
 
@@ -58,8 +57,8 @@ Reading this:
 // TODO: add a verified AIVI example here
 ```
 
-On each `keyDown` event, the recurrent region starts from the current direction and
-`<|@ updateDirection keyDown` computes the next one.
+`Right` is the seed. On each `keyDown` event, `<|@ updateDirection keyDown` computes
+the next direction from the current one.
 
 ## Example: game state signal
 
@@ -72,15 +71,14 @@ Every 160 ms the timer fires. `stepGame` runs with the current `direction`, prod
 
 ## Recurrence guards
 
-Guards sit between the start stage and the first recurrence step. They let the scheduler skip
-an iteration unless the current recurrent state passes a predicate:
+A `?|>` between `@|>` and `<|@` acts as a guard. If the predicate is false, the current
+iteration is skipped:
 
 ```text
 // TODO: add a verified AIVI example here
 ```
 
-Here `?|> .hasNext` suppresses further iterations once the recurrent state no longer satisfies
-the guard.
+Here `?|> .hasNext` skips the step once the recurrent state no longer has a next element.
 
 ## Signals are values, not variables
 
@@ -104,8 +102,8 @@ A recurrent signal has memory — it folds over a stream of events.
 ## Summary
 
 - `sig name : Signal T = initialValue` declares a time-varying value.
-- Derived signals use `\|>` chains; they recompute automatically.
-- Recurrent signals use `@\|>` (flow start) and `<\|@` (recurrence step) to fold events into accumulated state.
+- Derived signals use `|>` chains; they recompute automatically.
+- Recurrent signals: `seed @|> source` enters the loop; `?|>` guards are optional; `<|@ step` updates the state on each wakeup.
 - Signals form a dependency graph maintained by the runtime.
 - You never write to a signal; you only declare how it is computed.
 

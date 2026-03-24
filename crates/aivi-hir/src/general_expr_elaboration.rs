@@ -407,6 +407,9 @@ impl<'a> GeneralExprElaborator<'a> {
         let mut items = Vec::new();
         let mut instance_members = Vec::new();
         for (item_id, item) in self.module.items().iter() {
+            if self.module.ambient_items().contains(&item_id) {
+                continue;
+            }
             match item {
                 Item::Value(value) => items.push(self.elaborate_value(item_id, value)),
                 Item::Function(function) => items.push(self.elaborate_function(item_id, function)),
