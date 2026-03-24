@@ -202,7 +202,7 @@ impl BackendLinkedRuntime {
                 let port = self.runtime.activate_source(instance)?;
                 actions.push(LinkedSourceLifecycleAction::Activate {
                     instance,
-                    port,
+                    port: DetachedRuntimePublicationPort { inner: port },
                     config,
                 });
                 continue;
@@ -223,7 +223,7 @@ impl BackendLinkedRuntime {
                 let port = self.runtime.reconfigure_source(instance)?;
                 actions.push(LinkedSourceLifecycleAction::Reconfigure {
                     instance,
-                    port,
+                    port: DetachedRuntimePublicationPort { inner: port },
                     config,
                 });
             }

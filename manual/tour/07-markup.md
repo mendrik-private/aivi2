@@ -12,6 +12,8 @@ native GTK4/libadwaita widgets — no web rendering, no virtual DOM, no Electron
 ```
 
 Tags are PascalCase GTK widget names. Attributes set widget properties.
+The current executable widget catalog ships `Window`, `Box`, `Label`, and `Button`: `Window`
+accepts one child, `Box` accepts a list of children, and `Label`/`Button` are leaf widgets.
 Self-closing tags (`<Label ... />`) have no children.
 
 The outer `<Window>` is the root widget. Every AIVI application has exactly one `export main`

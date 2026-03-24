@@ -44,7 +44,7 @@ fn child_id(op: ChildOp) -> aivi_gtk::PlanNodeId {
 }
 
 #[test]
-fn lowers_on_prefix_expr_attributes_as_direct_event_hooks() {
+fn lowers_schema_declared_event_attributes_as_direct_event_hooks() {
     let hir = lower_text(
         "event-attrs.aivi",
         r#"
@@ -92,6 +92,42 @@ val view =
         }
     ));
     assert_eq!(widget.event_hooks[0].name.text(), "onClick");
+}
+
+#[test]
+fn leaves_unsupported_widget_event_names_as_ordinary_attributes() {
+    let hir = lower_text(
+        "unsupported-widget-event.aivi",
+        r#"
+val clickHandler = True
+val view =
+    <Label onClick={clickHandler} />
+"#,
+    );
+    assert!(
+        !hir.has_errors(),
+        "HIR lowering should succeed before GTK lowering: {:?}",
+        hir.diagnostics()
+    );
+
+    let module = hir.module();
+    let value = find_value_item(module, "view");
+    let plan = lower_markup_expr(module, value.body).expect("markup should lower to a widget plan");
+
+    let root = plan.node(plan.root()).expect("root node should exist");
+    let PlanNodeKind::Widget(widget) = &root.kind else {
+        panic!("expected root widget, found {:?}", root.kind.tag());
+    };
+
+    assert_eq!(widget.widget.to_string(), "Label");
+    assert!(widget.event_hooks.is_empty());
+    assert_eq!(widget.properties.len(), 1);
+    assert!(matches!(
+        &widget.properties[0],
+        PropertyPlan::Setter(setter)
+            if setter.name.text() == "onClick"
+                && matches!(setter.source, SetterSource::Expr(_))
+    ));
 }
 
 #[test]

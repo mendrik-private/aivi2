@@ -15,8 +15,8 @@ use std::{
 };
 
 use aivi_backend::{
-    ItemId as BackendItemId, KernelEvaluator, Program as BackendProgram, RuntimeValue,
-    compile_program, lower_module as lower_backend_module, validate_program,
+    DetachedRuntimeValue, ItemId as BackendItemId, KernelEvaluator, Program as BackendProgram,
+    RuntimeValue, compile_program, lower_module as lower_backend_module, validate_program,
 };
 use aivi_base::{Diagnostic, FileId, Severity, SourceDatabase, SourceSpan};
 use aivi_core::{
@@ -27,8 +27,8 @@ use aivi_gtk::{
     GtkBridgeGraph, GtkBridgeNodeKind, GtkBridgeNodeRef, GtkChildGroup, GtkCollectionKey,
     GtkConcreteEventPayload, GtkConcreteHost, GtkExecutionPath, GtkHostValue, GtkNodeInstance,
     GtkRuntimeExecutor, RepeatedChildPolicy, RuntimePropertyBinding, RuntimeShowMountPolicy,
-    SetterSource, concrete_event_payload, concrete_supports_property, concrete_widget_is_window,
-    lower_markup_expr, lower_widget_bridge,
+    SetterSource, lookup_widget_event, lookup_widget_schema, lower_markup_expr,
+    lower_widget_bridge,
 };
 use aivi_hir::{
     BuiltinTerm, BuiltinType, ExprId as HirExprId, ExprKind, GeneralExprParameter, Item,
@@ -277,23 +277,23 @@ fn workspace_hir_failed(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct RunHostValue(RuntimeValue);
+struct RunHostValue(DetachedRuntimeValue);
 
 impl GtkHostValue for RunHostValue {
     fn unit() -> Self {
-        Self(RuntimeValue::Unit)
+        Self(DetachedRuntimeValue::unit())
     }
 
     fn as_bool(&self) -> Option<bool> {
-        strip_signal_runtime_value(self.0.clone()).as_bool()
+        strip_signal_runtime_value(self.0.to_runtime()).as_bool()
     }
 
     fn as_i64(&self) -> Option<i64> {
-        strip_signal_runtime_value(self.0.clone()).as_i64()
+        strip_signal_runtime_value(self.0.to_runtime()).as_i64()
     }
 
     fn as_text(&self) -> Option<&str> {
-        match &self.0 {
+        match self.0.as_runtime() {
             RuntimeValue::Text(value) => Some(value.as_ref()),
             RuntimeValue::Signal(value) => match value.as_ref() {
                 RuntimeValue::Text(value) => Some(value.as_ref()),
@@ -365,7 +365,7 @@ struct RunHydrationStaticState {
 #[derive(Debug)]
 struct RunHydrationRequest {
     revision: u64,
-    globals: BTreeMap<BackendItemId, RuntimeValue>,
+    globals: BTreeMap<BackendItemId, DetachedRuntimeValue>,
 }
 
 #[derive(Debug)]
@@ -434,7 +434,7 @@ enum HydratedRunNode {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct HydratedRunProperty {
     input: RuntimeInputHandle,
-    value: RuntimeValue,
+    value: DetachedRuntimeValue,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -496,7 +496,7 @@ impl RunHydrationWorker {
     fn request(
         &self,
         revision: u64,
-        globals: BTreeMap<BackendItemId, RuntimeValue>,
+        globals: BTreeMap<BackendItemId, DetachedRuntimeValue>,
     ) -> Result<(), String> {
         self.request_tx
             .as_ref()
@@ -748,6 +748,16 @@ fn validate_run_plan(sources: &SourceDatabase, bridge: &GtkBridgeGraph) -> Resul
         let GtkBridgeNodeKind::Widget(widget) = &node.kind else {
             continue;
         };
+        let Some(schema) = lookup_widget_schema(&widget.widget) else {
+            blockers.push(RunValidationBlocker {
+                span: node.span,
+                message: format!(
+                    "`aivi run` does not support GTK widget `{}` yet",
+                    run_widget_name(&widget.widget)
+                ),
+            });
+            continue;
+        };
         for property in &widget.properties {
             let (name, span) = match property {
                 RuntimePropertyBinding::Static(property) => {
@@ -755,28 +765,34 @@ fn validate_run_plan(sources: &SourceDatabase, bridge: &GtkBridgeGraph) -> Resul
                 }
                 RuntimePropertyBinding::Setter(binding) => (binding.name.text(), binding.site.span),
             };
-            if !concrete_supports_property(&widget.widget, name) {
+            if schema.property(name).is_none() {
                 blockers.push(RunValidationBlocker {
                     span,
                     message: format!(
                         "`aivi run` does not support property `{name}` on GTK widget `{}` yet",
-                        run_widget_name(&widget.widget)
+                        schema.markup_name
                     ),
                 });
             }
         }
         for event in &widget.event_hooks {
-            if concrete_event_payload(&widget.widget, event.name.text()).is_none() {
+            if schema.event(event.name.text()).is_none() {
                 blockers.push(RunValidationBlocker {
                     span: event.site.span,
                     message: format!(
                         "`aivi run` does not support event `{}` on GTK widget `{}` yet",
                         event.name.text(),
-                        run_widget_name(&widget.widget)
+                        schema.markup_name
                     ),
                 });
             }
         }
+        validate_run_widget_children(
+            node.span,
+            widget.default_children.roots.len(),
+            schema,
+            &mut blockers,
+        );
     }
 
     let mut root_widgets = collect_run_root_widgets(bridge, bridge.root());
@@ -797,12 +813,15 @@ fn validate_run_plan(sources: &SourceDatabase, bridge: &GtkBridgeGraph) -> Resul
         let GtkBridgeNodeKind::Widget(widget) = &node.kind else {
             continue;
         };
-        if !concrete_widget_is_window(&widget.widget) {
+        let Some(schema) = lookup_widget_schema(&widget.widget) else {
+            continue;
+        };
+        if !schema.is_window_root() {
             blockers.push(RunValidationBlocker {
                 span: node.span,
                 message: format!(
                     "`aivi run` currently requires reachable root widgets to be `Window`; found `{}`",
-                    run_widget_name(&widget.widget)
+                    schema.markup_name
                 ),
             });
         }
@@ -823,6 +842,48 @@ fn validate_run_plan(sources: &SourceDatabase, bridge: &GtkBridgeGraph) -> Resul
         rendered.push('\n');
     }
     Err(rendered)
+}
+
+fn validate_run_widget_children(
+    span: SourceSpan,
+    child_count: usize,
+    schema: &aivi_gtk::GtkWidgetSchema,
+    blockers: &mut Vec<RunValidationBlocker>,
+) {
+    match schema.default_child_group() {
+        aivi_gtk::GtkDefaultChildGroup::None if child_count == 0 => {}
+        aivi_gtk::GtkDefaultChildGroup::None => blockers.push(RunValidationBlocker {
+            span,
+            message: format!(
+                "`aivi run` does not support child widgets under `{}`; the current widget schema defines no child group for this widget",
+                schema.markup_name
+            ),
+        }),
+        aivi_gtk::GtkDefaultChildGroup::One(group) if group.accepts_child_count(child_count) => {}
+        aivi_gtk::GtkDefaultChildGroup::One(group) => blockers.push(RunValidationBlocker {
+            span,
+            message: match group.max_children {
+                Some(max_children) => format!(
+                    "`aivi run` does not support {child_count} child widget(s) in `{}` group `{}`; this {} group allows at most {max_children}",
+                    schema.markup_name,
+                    group.name,
+                    group.container.label()
+                ),
+                None => format!(
+                    "`aivi run` does not support {child_count} child widget(s) in `{}` group `{}`",
+                    schema.markup_name,
+                    group.name
+                ),
+            },
+        }),
+        aivi_gtk::GtkDefaultChildGroup::Ambiguous => blockers.push(RunValidationBlocker {
+            span,
+            message: format!(
+                "`aivi run` cannot place unnamed children under `{}` because the widget schema declares multiple child groups",
+                schema.markup_name
+            ),
+        }),
+    }
 }
 
 fn collect_run_root_widgets(
@@ -1013,7 +1074,7 @@ fn resolve_run_event_handler(
             signal.name.text()
         ));
     };
-    let Some(payload) = concrete_event_payload(widget, event_name) else {
+    let Some(event) = lookup_widget_event(widget, event_name) else {
         return Err(format!(
             "event handler `{}` at {location} uses unsupported GTK event `{}` on widget `{}`",
             name_path_text(&reference.path),
@@ -1021,6 +1082,7 @@ fn resolve_run_event_handler(
             run_widget_name(widget)
         ));
     };
+    let payload = event.payload;
     if !signal_accepts_event_payload(module, signal, payload) {
         return Err(format!(
             "event handler `{}` at {location} points at signal `{}`, but `{}` on `{}` publishes `{}` and requires `{}`",
@@ -1028,8 +1090,8 @@ fn resolve_run_event_handler(
             signal.name.text(),
             event_name,
             run_widget_name(widget),
-            event_payload_label(payload),
-            required_signal_type_label(payload)
+            payload.label(),
+            payload.required_signal_type_label()
         ));
     }
     Ok(ResolvedRunEventHandler {
@@ -1081,18 +1143,6 @@ fn type_is_builtin(module: &HirModule, ty: aivi_hir::TypeId, builtin: BuiltinTyp
         | TypeKind::Record(_)
         | TypeKind::Arrow { .. }
         | TypeKind::Apply { .. } => false,
-    }
-}
-
-fn event_payload_label(payload: GtkConcreteEventPayload) -> &'static str {
-    match payload {
-        GtkConcreteEventPayload::Unit => "Unit",
-    }
-}
-
-fn required_signal_type_label(payload: GtkConcreteEventPayload) -> &'static str {
-    match payload {
-        GtkConcreteEventPayload::Unit => "`Signal Unit`",
     }
 }
 
@@ -1624,16 +1674,26 @@ impl aivi_gtk::GtkEventSink<RunHostValue> for RunEventSink<'_> {
 
 fn plan_run_hydration(
     shared: &RunHydrationStaticState,
-    globals: &BTreeMap<BackendItemId, RuntimeValue>,
+    globals: &BTreeMap<BackendItemId, DetachedRuntimeValue>,
 ) -> Result<RunHydrationPlan, String> {
+    let runtime_globals = runtime_globals_from_detached(globals);
     Ok(RunHydrationPlan {
         root: plan_run_node(
             shared,
-            globals,
+            &runtime_globals,
             &GtkNodeInstance::root(shared.bridge.root()),
             &RuntimeBindingEnv::new(),
         )?,
     })
+}
+
+fn runtime_globals_from_detached(
+    globals: &BTreeMap<BackendItemId, DetachedRuntimeValue>,
+) -> BTreeMap<BackendItemId, RuntimeValue> {
+    globals
+        .iter()
+        .map(|(&item, value)| (item, value.to_runtime()))
+        .collect()
 }
 
 fn plan_run_node(
@@ -3154,6 +3214,58 @@ val view =
         .expect_err("non-window roots should be rejected before launch");
         assert!(error.contains("reachable root widgets"));
         assert!(error.contains("Window"));
+    }
+
+    #[test]
+    fn prepare_run_rejects_unsupported_widget_catalog_entries() {
+        let error = prepare_run_from_text(
+            "unsupported-widget.aivi",
+            r#"
+val view =
+    <Window title="Host">
+        <Entry />
+    </Window>
+"#,
+            None,
+        )
+        .expect_err("widgets outside the schema catalog should be rejected before launch");
+        assert!(error.contains("does not support GTK widget `Entry`"));
+    }
+
+    #[test]
+    fn prepare_run_rejects_child_widgets_on_leaf_widgets() {
+        let error = prepare_run_from_text(
+            "leaf-children.aivi",
+            r#"
+val view =
+    <Window title="Host">
+        <Button label="Save">
+            <Label text="Nested" />
+        </Button>
+    </Window>
+"#,
+            None,
+        )
+        .expect_err("leaf widgets should reject child markup from schema validation");
+        assert!(error.contains("does not support child widgets under `Button`"));
+    }
+
+    #[test]
+    fn prepare_run_rejects_multiple_window_children() {
+        let error = prepare_run_from_text(
+            "window-too-many-children.aivi",
+            r#"
+val view =
+    <Window title="Host">
+        <Label text="First" />
+        <Label text="Second" />
+    </Window>
+"#,
+            None,
+        )
+        .expect_err("single-child window content should be validated before launch");
+        assert!(error.contains("group `content`"));
+        assert!(error.contains("allows at most 1"));
     }
 
     #[test]

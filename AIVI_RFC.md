@@ -1748,8 +1748,8 @@ If an expression is reactive, the compiler extracts a derived signal and the run
 
 ### 17.2.1 Event hookups
 
-Expression-valued markup attributes whose names start with `on` are treated as event-route
-declarations only when the concrete GTK host recognizes that exact widget/event pair.
+Expression-valued markup attributes lower as live GTK event routes only when the widget schema
+catalog declares that exact widget/event pair.
 
 ```aivi
 sig clicked : Signal Unit
@@ -1763,12 +1763,39 @@ Event hookup rules:
 - only direct input signals are legal in the current live GTK surface; arbitrary callback
   expressions are future work
 - the input signal's payload type must match the GTK event's concrete payload type
-- unsupported `on*` names on a given widget type remain ordinary attributes and are rejected by run-surface validation rather than silently treated as live events
-- the `on*` naming convention is explicit and will be replaced by widget-schema metadata when that surface exists
+- unsupported event names on a given widget type remain ordinary attributes and are rejected by
+  run-surface validation rather than silently treated as live events
 - GTK discrete events (such as button clicks) force their own runtime ticks; rapid repeated events are processed as separate transactions and not collapsed within one tick
 
 Event props lower to direct GTK signal connections that publish into runtime input signals, not
 user-visible callbacks.
+
+### 17.2.2 Executable widget schema metadata
+
+The live GTK host is driven by one compiled widget schema catalog shared by lowering, `aivi run`
+validation, and concrete GTK hookup.
+
+Each widget schema entry defines:
+
+- the current markup lookup key (today: the final widget path segment)
+- property descriptors: exact property name, semantic value shape, and GTK setter route
+- event descriptors: exact event name, GTK signal route, and payload shape
+- child-group descriptors: group name, container policy, and child-count bounds
+- whether the widget is window-like for root validation/presentation
+
+Current executable catalog:
+
+- `Window` — properties `title`, `visible`, `sensitive`, `hexpand`, `vexpand`; no markup events;
+  child group `content` accepting at most one child; treated as a window root
+- `Box` — properties `orientation`, `spacing`, `visible`, `sensitive`, `hexpand`, `vexpand`; no
+  markup events; child group `children` with append-only sequence semantics
+- `Label` — properties `text`, `label`, `visible`, `sensitive`, `hexpand`, `vexpand`; no markup
+  events; no child groups
+- `Button` — properties `label`, `visible`, `sensitive`, `hexpand`, `vexpand`; event `onClick`
+  publishing `Unit`; no child groups
+
+Widgets outside this catalog are not part of the current live GTK surface. Expanding the catalog to
+more GTK4/libadwaita widgets is separate follow-on work.
 
 ## 17.3 Control nodes
 
@@ -2484,7 +2511,7 @@ Status legend: **COMPLETE** = fully implemented; **PARTIAL** = core slice implem
 - `<match>` ✓
 - `<fragment>` ✓
 - `<with>` ✓
-- widget schema metadata (replaces `on*` naming convention) — pending
+- widget schema metadata for the current live widget surface ✓
 - full widget property catalog — pending
 
 ### Milestone 8 — Backend and hardening — **PARTIAL**
@@ -2497,8 +2524,12 @@ Status legend: **COMPLETE** = fully implemented; **PARTIAL** = core slice implem
 - general lambda/closure conversion for arbitrary bodies — pending
 - full signal-carried inline pipe execution — pending
 - GC integration — pending
-- performance passes — pending
+- performance pass plan frozen; implementation pending (see §28.9)
 - fuzzing and stress infrastructure — pending
+
+Milestone 8 performance work is scoped narrowly: post-typed-core lambda/backend/codegen/runtime
+passes only. HIR, typechecking, and typed core remain the proof and diagnostic source-of-truth
+layers. The normative pass order and benchmark gates are defined in §28.9.
 
 ---
 
@@ -2688,8 +2719,9 @@ The GTK executor, bridge graph, and host are implemented. `<show>` including `ke
 `<each>` (with keys), `<empty>`, `<match>`, `<fragment>`, and `<with>` work.
 
 **Gap**:
-- widget property catalogs and event schemas rely on a hand-maintained `on*` convention rather than widget-metadata-driven lookup; GTK widget coverage is limited to the set explicitly supported by the concrete host
-- libadwaita widget bindings beyond basic GTK4 widgets are not yet enumerated
+- the executable widget schema catalog currently covers only `Window`, `Box`, `Label`, and
+  `Button`; broader GTK4 and libadwaita widget/property/event coverage is the next expansion step
+- libadwaita widget bindings beyond that basic GTK4 slice are not yet enumerated
 
 ### 28.6 Multi-file compilation and modules
 
@@ -2709,7 +2741,152 @@ The implementation uses explicit worklists in the compiler and scheduler. Cranel
 
 **Gap**: User-authored recursive `fun` bodies that could overflow the native stack are not yet protected. Tail recursion must be compiled in a stack-safe form per §3.4.
 
-### 28.9 Summary: what must close before stdlib work begins
+### 28.9 Milestone 8 performance pass plan
+
+Milestone 8's `performance passes` are defined narrowly. They are post-typing implementation
+passes that improve compile-time or runtime cost without changing the proof surface, inventing new
+type facts, or moving runtime semantics into earlier layers. Frontend/query/LSP performance work
+is tracked separately from this milestone.
+
+General constraints:
+
+- no performance pass runs before successful HIR/type/kind checking and
+  `aivi_core::validate_module`
+- `aivi-lambda` passes may rewrite only closure/capture metadata and must re-run
+  `aivi_lambda::validate_module`
+- `aivi-backend` / codegen passes may rewrite only backend-owned kernels/layout/call-lowering data
+  and must re-run `aivi_backend::validate_program`
+- runtime/GTK passes must be differential-tested against the committed scheduler/bridge behavior on
+  the same publication trace
+- surviving optimized nodes keep the root source span/origin of the surface construct they came
+  from; performance work must not erase diagnostic provenance
+
+The first implementation wave is fixed in this order:
+
+1. typed-lambda capture pruning and environment compaction
+2. backend kernel simplification
+3. direct self-tail recursion loop lowering in codegen
+4. scheduler frontier dedup and per-tick hydration coalescing
+
+#### Pass P1 — typed-lambda capture pruning and environment compaction
+
+- **Owning layer**: `aivi-lambda`, after `aivi_lambda::lower_module` and before
+  `aivi_backend::lower_module`
+- **Transform**: compute the live free bindings of each closure body/runtime edge, remove unused
+  captures, canonicalize zero-capture closures to empty environments, and keep surviving captures
+  in lexical-binding order so backend env slots stay deterministic
+- **Must preserve**:
+  - explicit closure boundaries
+  - `ClosureId` / `CaptureId` validity
+  - capture binding ids, types, and source spans
+  - item/pipe/stage identity carried from typed core
+  - the existing lambda validation rules for free-binding coverage
+- **Must not**:
+  - inline closure bodies
+  - merge distinct closures
+  - reorder surviving captures by heuristic cost
+  - invent broader closure-conversion rules than the validated lambda layer already proves
+- **Benchmark / acceptance gate**: `closure-thin`
+  - fixture shape: 200 closures; each scope exposes 16 candidate locals and each closure body reads
+    exactly 2 free bindings; until the surface can express that corpus directly, the fixture may be
+    built at the `aivi-lambda` layer
+  - structural gate: total capture count after the pass is exactly `400`, and backend environment
+    slots equal `parameters + live captures` only
+  - timing gate: median lambda→backend lowering time in `--release`, measured over 30 runs on the
+    same machine, improves by at least `5%` versus the same corpus with the pass disabled, while
+    RSS does not regress by more than `10%`
+
+#### Pass P2 — backend kernel simplification
+
+- **Owning layer**: `aivi-backend::Program`, after `aivi_backend::lower_module` and before
+  `aivi_backend::compile_program`
+- **Transform**: eliminate subject/env copy chains, fold projections from closed tuple/record/sum
+  constructor values, collapse aggregate literals whose children are already constants, and remove
+  backend-only dead temporary nodes created by those rewrites
+- **Must preserve**:
+  - `aivi_backend::validate_program` success
+  - item/stage/source boundary layouts and calling conventions
+  - constructor identities and closed-sum arity
+  - root source spans/origins for every surviving kernel root
+  - runtime error timing by refusing to fold fallible operations
+- **Must not**:
+  - evaluate domain-member calls, class-member intrinsics, decode programs, source/task/signal
+    runtime nodes, or GTK/runtime handles
+  - fold arithmetic that can change observable failure behavior such as division or modulo by zero
+  - perform cross-item inlining or rewrite scheduler-visible pipeline structure
+- **Benchmark / acceptance gate**: `kernel-const`
+  - fixture shape: 1,000 backend kernels built from total tuple/record/sum constructors,
+    projections, and copy chains
+  - structural gate: no remaining `projection(constant)` or `copy(copy(...))` nodes; every closed
+    projection chain simplifies to a literal, constructor, env slot, or inline-subject read
+  - timing gate: median `validate_program + compile_program` time or emitted object bytes improve
+    by at least `5%` versus the pass-disabled baseline on the same corpus
+
+#### Pass P3 — direct self-tail recursion loop lowering
+
+- **Owning layer**: `aivi-backend::codegen` during Cranelift lowering
+- **Transform**: direct self-tail recursion in proven item bodies and hidden callable items lowers
+  to a loop/trampoline with slot reassignment instead of recursive native calls
+- **Initial slice only**:
+  - direct self recursion with statically known callee and arity
+  - validated item bodies and hidden callable items already owned by the backend
+  - mutual recursion, heap-allocated closures, and general higher-order worker callbacks stay out
+    of scope until the broader closure-conversion gap (§28.4) is closed
+- **Must preserve**:
+  - result value and error behavior
+  - parameter evaluation order
+  - closure environment contents
+  - source-span mapping for the root callable
+  - zero scheduler interaction from ordinary recursive computation
+- **Must not**:
+  - depend on host tail-call support
+  - allocate one environment frame per step
+  - rewrite non-tail calls
+- **Benchmark / acceptance gate**: `tail-loop-sum`
+  - fixture shape: one direct self-tail-recursive accumulator with `1_000_000` tail steps,
+    compiled through the backend/codegen path
+  - correctness gate: the `--release` binary completes the full depth with no stack overflow
+  - structural gate: the codegen dump for the hot tail path shows a loop/backedge and no recursive
+    self-call
+  - timing gate: zero per-step heap allocations after entry and median runtime no worse than `2x`
+    the hand-written Rust loop in the same harness
+
+#### Pass P4 — scheduler frontier dedup and per-tick hydration coalescing
+
+- **Owning layer**: `aivi-runtime` scheduler and runtime-owned view-hydration scheduling;
+  concrete GTK mutation still happens in `aivi-gtk`
+- **Transform**: once a tick's ingress publication set is frozen, queue each reachable derived
+  signal, source reconfiguration site, and dirty view owner at most once for that tick; repeated
+  dirty marks set scheduler-owned bits/counters rather than pushing duplicate work items
+- **Must preserve**:
+  - topological propagation order
+  - latest stable upstream values per tick
+  - transactional visibility and no mixed-time observations
+  - generation-stamp rejection and latest-wins source supersession
+  - separate runtime ticks for discrete GTK events
+  - GTK-main-thread-only widget mutation
+- **Must not**:
+  - coalesce publications across tick boundaries
+  - drop distinct discrete GTK events
+  - let workers mutate UI-owned state directly
+  - recurse unboundedly during propagation
+- **Benchmark / acceptance gate**: `scheduler-fanout-1024`
+  - fixture shape: 1 input signal, 1,024 reachable derived nodes in a shared DAG, 64 view-owned
+    sinks, and 10,000 ticks; correctness traces additionally include stale generations and rapid
+    GTK click bursts
+  - structural gate: for each tick, `eval_count <= dirty_derived_nodes`,
+    `source_reconfig_count <= dirty_source_sites`, `hydration_count <= dirty_view_owners`, and
+    `queue_pushes <= ingress_publications + dirty_derived_nodes + dirty_source_sites + dirty_view_owners`
+  - correctness gate: committed snapshots and hydration decisions match the reference scheduler
+    exactly on the recorded traces
+  - timing gate: p95 tick latency in `--release` improves by at least `20%` on the synthetic DAG,
+    otherwise the pass does not land
+
+Deferred from the first wave: cross-item inlining, signal-graph fusion, aggregate ABI reshaping,
+speculative GTK setter elision, and frontend/query caching work. Those remain out of scope until
+the first-wave passes exist and the benchmark corpus shows where the real cost sits.
+
+### 28.10 Summary: what must close before stdlib work begins
 
 | Gap | Blocking for stdlib? |
 |---|---|
@@ -2721,3 +2898,4 @@ The implementation uses explicit worklists in the compiler and scheduler. Cranel
 | GTK widget coverage (§28.5) | **Medium** — needed for UI component stdlib |
 | GC (§28.7) | **Medium** — needed for runtime correctness guarantees |
 | Stack-safety for recursion (§28.8) | **Medium** — needed before recursive stdlib functions are safe |
+| Performance passes (§28.9) | No — not a semantic blocker for the first stdlib slice, but required before Milestone 8 can claim production compile/run budgets |

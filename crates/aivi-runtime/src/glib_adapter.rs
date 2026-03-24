@@ -9,7 +9,7 @@ use std::{
     },
 };
 
-use aivi_backend::RuntimeValue;
+use aivi_backend::DetachedRuntimeValue;
 use glib::MainContext;
 
 use crate::{
@@ -356,9 +356,15 @@ impl GlibLinkedRuntimeDriver {
 
     pub fn queue_publication(
         &self,
-        publication: Publication<RuntimeValue>,
+        publication: Publication<DetachedRuntimeValue>,
     ) -> Result<(), GlibLinkedRuntimeAccessError> {
-        self.with_state_mut(|state| state.linked.runtime_mut().queue_publication(publication))
+        let (stamp, value) = publication.into_parts();
+        self.with_state_mut(|state| {
+            state
+                .linked
+                .runtime_mut()
+                .queue_publication(Publication::new(stamp, value.into_runtime()))
+        })
             .map_err(GlibLinkedRuntimeAccessError::RuntimeAccess)?;
         self.shared.request_tick();
         Ok(())
@@ -366,9 +372,15 @@ impl GlibLinkedRuntimeDriver {
 
     pub fn queue_publication_now(
         &self,
-        publication: Publication<RuntimeValue>,
+        publication: Publication<DetachedRuntimeValue>,
     ) -> Result<(), GlibLinkedRuntimeAccessError> {
-        self.with_state_mut(|state| state.linked.runtime_mut().queue_publication(publication))
+        let (stamp, value) = publication.into_parts();
+        self.with_state_mut(|state| {
+            state
+                .linked
+                .runtime_mut()
+                .queue_publication(Publication::new(stamp, value.into_runtime()))
+        })
             .map_err(GlibLinkedRuntimeAccessError::RuntimeAccess)?;
         self.tick_now();
         Ok(())
@@ -385,7 +397,7 @@ impl GlibLinkedRuntimeDriver {
     pub fn current_signal_globals(
         &self,
     ) -> Result<
-        std::collections::BTreeMap<aivi_backend::ItemId, RuntimeValue>,
+        std::collections::BTreeMap<aivi_backend::ItemId, DetachedRuntimeValue>,
         GlibLinkedRuntimeAccessError,
     > {
         self.with_state(|state| state.linked.current_signal_globals())
@@ -607,18 +619,68 @@ struct GlibLinkedRuntimeState {
 #[cfg(test)]
 mod tests {
     use std::{
+        sync::{Arc, Mutex},
         panic::{AssertUnwindSafe, catch_unwind},
         thread,
     };
 
+    use aivi_backend::{DetachedRuntimeValue, ItemId as BackendItemId, RuntimeValue};
+    use aivi_base::SourceDatabase;
+    use aivi_core as core;
+    use aivi_hir as hir;
+    use aivi_hir::lower_module as lower_hir_module;
+    use aivi_lambda::lower_module as lower_lambda_module;
+    use aivi_syntax::parse_module;
     use glib::MainContext;
 
     use crate::{
+        SourceProviderManager,
         graph::SignalGraphBuilder,
         scheduler::{DependencyValues, Publication, Scheduler},
     };
 
-    use super::{GlibSchedulerDriver, TickExecutionGuard};
+    use super::{GlibLinkedRuntimeDriver, GlibSchedulerDriver, TickExecutionGuard};
+
+    struct LoweredStack {
+        hir: hir::LoweringResult,
+        core: core::Module,
+        backend: aivi_backend::Program,
+    }
+
+    fn lower_text(path: &str, text: &str) -> LoweredStack {
+        let mut sources = SourceDatabase::new();
+        let file_id = sources.add_file(path, text);
+        let parsed = parse_module(&sources[file_id]);
+        assert!(
+            !parsed.has_errors(),
+            "fixture {path} should parse: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+        let hir = lower_hir_module(&parsed.module);
+        assert!(
+            !hir.has_errors(),
+            "fixture {path} should lower to HIR: {:?}",
+            hir.diagnostics()
+        );
+        let core = core::lower_module(hir.module()).expect("typed-core lowering should succeed");
+        let lambda = lower_lambda_module(&core).expect("lambda lowering should succeed");
+        let backend = aivi_backend::lower_module(&lambda).expect("backend lowering should succeed");
+        LoweredStack { hir, core, backend }
+    }
+
+    fn backend_item_id(program: &aivi_backend::Program, name: &str) -> BackendItemId {
+        program
+            .items()
+            .iter()
+            .find_map(|(item_id, item)| (item.name.as_ref() == name).then_some(item_id))
+            .unwrap_or_else(|| panic!("expected backend item named {name}"))
+    }
+
+    fn expected_signal_text(value: &str) -> DetachedRuntimeValue {
+        DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Signal(Box::new(
+            RuntimeValue::Text(value.into()),
+        )))
+    }
 
     fn pump_until(context: &MainContext, mut condition: impl FnMut() -> bool) {
         for _ in 0..32 {
@@ -731,6 +793,116 @@ mod tests {
                 );
                 assert_eq!(driver.current_value(mirror.as_signal()).unwrap(), Some(11));
                 assert_eq!(driver.tick_count(), 1);
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn glib_linked_runtime_processes_window_key_source_events_via_context_wakeups() {
+        let context = MainContext::new();
+        context
+            .with_thread_default(|| {
+                let lowered = lower_text(
+                    "glib-runtime-window-key-source.aivi",
+                    r#"
+@source window.keyDown with {
+    repeat: True
+    focusOnly: True
+}
+sig keyDown : Signal Text
+"#,
+                );
+                let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+                    .expect("runtime assembly should build");
+                let linked = crate::link_backend_runtime(
+                    assembly,
+                    &lowered.core,
+                    Arc::new(lowered.backend.clone()),
+                )
+                .expect("startup link should succeed");
+                let driver = GlibLinkedRuntimeDriver::new(
+                    context.clone(),
+                    linked,
+                    SourceProviderManager::new(),
+                    None,
+                );
+                let key_item = backend_item_id(&lowered.backend, "keyDown");
+
+                driver.tick_now();
+                for name in ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"] {
+                    driver.dispatch_window_key_event(name, false);
+                    pump_until(&context, || {
+                        driver.failure_count() > 0
+                            || driver
+                                .current_signal_globals()
+                                .ok()
+                                .and_then(|globals| globals.get(&key_item).cloned())
+                                == Some(expected_signal_text(name))
+                    });
+
+                    assert_eq!(driver.failure_count(), 0);
+                    let outcomes = driver.drain_outcomes();
+                    assert!(
+                        !outcomes.is_empty(),
+                        "window key event {name} should commit at least one linked runtime tick"
+                    );
+                    assert_eq!(
+                        driver
+                            .current_signal_globals()
+                            .expect("signal globals should remain readable")
+                            .get(&key_item),
+                        Some(&expected_signal_text(name))
+                    );
+                }
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn glib_driver_panics_when_evaluator_reenters_driver_api() {
+        let context = MainContext::new();
+        context
+            .with_thread_default(|| {
+                let mut builder = SignalGraphBuilder::new();
+                let input = builder.add_input("input", None).unwrap();
+                let mirror = builder.add_derived("mirror", None).unwrap();
+                builder.define_derived(mirror, [input.as_signal()]).unwrap();
+
+                let reenter: Arc<Mutex<Option<Box<dyn Fn() + Send + 'static>>>> =
+                    Arc::new(Mutex::new(None));
+                let reenter_in_evaluator = reenter.clone();
+                let driver = GlibSchedulerDriver::new(
+                    context.clone(),
+                    Scheduler::new(builder.build().unwrap()),
+                    move |_signal, inputs: DependencyValues<'_, i32>| {
+                        if let Some(callback) = reenter_in_evaluator
+                            .lock()
+                            .expect("reentry hook mutex should not be poisoned")
+                            .as_ref()
+                        {
+                            callback();
+                        }
+                        inputs.value(0).copied()
+                    },
+                );
+                let driver_for_hook = driver.clone();
+                *reenter
+                    .lock()
+                    .expect("reentry hook mutex should not be poisoned") =
+                    Some(Box::new(move || {
+                        let _ = driver_for_hook.tick_count();
+                    }));
+
+                let stamp = driver.current_stamp(input).unwrap();
+                let panic = catch_unwind(AssertUnwindSafe(|| {
+                    driver
+                        .queue_publication_now(Publication::new(stamp, 1_i32))
+                        .unwrap();
+                }));
+                assert!(
+                    panic.is_err(),
+                    "reentrant evaluator access should fail fast instead of blocking on the driver"
+                );
             })
             .unwrap();
     }

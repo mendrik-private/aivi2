@@ -14,8 +14,10 @@ use gtk::{
 };
 
 use crate::{
-    GtkEventRoute, GtkEventRouteId, GtkRuntimeHost, RuntimeSetterBinding, StaticPropertyPlan,
-    StaticPropertyValue,
+    GtkBoolPropertySetter, GtkChildMountRoute, GtkConcreteWidgetKind, GtkDefaultChildGroup,
+    GtkEventRoute, GtkEventRouteId, GtkEventSignal, GtkPropertyDescriptor, GtkPropertySetter,
+    GtkRuntimeHost, GtkTextOrI64PropertySetter, GtkTextPropertySetter, GtkWidgetSchema,
+    RuntimeSetterBinding, StaticPropertyPlan, StaticPropertyValue, lookup_widget_schema,
 };
 
 pub trait GtkHostValue: Clone + 'static {
@@ -50,11 +52,6 @@ pub struct GtkQueuedEvent<V> {
 pub struct GtkQueuedWindowKeyEvent {
     pub name: Box<str>,
     pub repeated: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum GtkConcreteEventPayload {
-    Unit,
 }
 
 /// Event queue shared between GTK signal closures and the host evaluation loop.
@@ -183,7 +180,7 @@ where
 
     pub fn present_root_windows(&self) {
         for mounted in self.widgets.values() {
-            if mounted.kind == SupportedWidget::Window && mounted.widget.parent().is_none() {
+            if mounted.schema.is_window_root() && mounted.widget.parent().is_none() {
                 let window = mounted
                     .widget
                     .clone()
@@ -197,10 +194,14 @@ where
     fn create_supported_widget(
         &self,
         widget: &NamePath,
-    ) -> Result<(SupportedWidget, gtk::Widget), GtkConcreteHostError> {
-        let name = widget_name(widget);
-        let (kind, widget) = match name {
-            "Window" => {
+    ) -> Result<(&'static GtkWidgetSchema, gtk::Widget), GtkConcreteHostError> {
+        let schema = lookup_widget_schema(widget).ok_or_else(|| {
+            GtkConcreteHostError::UnsupportedWidget {
+                widget: widget_label(widget).to_owned().into_boxed_str(),
+            }
+        })?;
+        let widget = match schema.kind {
+            GtkConcreteWidgetKind::Window => {
                 let window = gtk::Window::new();
                 let key_events = self.queued_window_keys.clone();
                 let notifier = self.event_notifier.clone();
@@ -232,33 +233,28 @@ where
                     }
                 });
                 window.add_controller(controller);
-                (SupportedWidget::Window, window.upcast::<gtk::Widget>())
+                window.upcast::<gtk::Widget>()
             }
-            "Box" => (
-                SupportedWidget::Box,
-                gtk::Box::new(Orientation::Vertical, 0).upcast::<gtk::Widget>(),
-            ),
-            "Label" => (
-                SupportedWidget::Label,
-                gtk::Label::new(None).upcast::<gtk::Widget>(),
-            ),
-            "Button" => (
-                SupportedWidget::Button,
-                gtk::Button::new().upcast::<gtk::Widget>(),
-            ),
-            other => {
-                return Err(GtkConcreteHostError::UnsupportedWidget {
-                    widget: other.to_owned().into_boxed_str(),
-                });
+            GtkConcreteWidgetKind::Box => {
+                gtk::Box::new(Orientation::Vertical, 0).upcast::<gtk::Widget>()
             }
+            GtkConcreteWidgetKind::Label => gtk::Label::new(None).upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::Button => gtk::Button::new().upcast::<gtk::Widget>(),
         };
-        Ok((kind, widget))
+        Ok((schema, widget))
     }
 
     fn mounted_snapshot(
         &self,
         handle: &GtkConcreteWidget,
-    ) -> Result<(SupportedWidget, gtk::Widget, Vec<GtkConcreteWidget>), GtkConcreteHostError> {
+    ) -> Result<
+        (
+            &'static GtkWidgetSchema,
+            gtk::Widget,
+            Vec<GtkConcreteWidget>,
+        ),
+        GtkConcreteHostError,
+    > {
         let mounted =
             self.widgets
                 .get(&handle.0)
@@ -266,7 +262,7 @@ where
                     widget: handle.clone(),
                 })?;
         Ok((
-            mounted.kind,
+            mounted.schema,
             mounted.widget.clone(),
             mounted.children.clone(),
         ))
@@ -299,23 +295,52 @@ where
         Ok(())
     }
 
+    fn lookup_property<'a>(
+        &self,
+        schema: &'static GtkWidgetSchema,
+        property: &'a str,
+    ) -> Result<&'static GtkPropertyDescriptor, GtkConcreteHostError> {
+        schema
+            .property(property)
+            .ok_or_else(|| GtkConcreteHostError::UnsupportedProperty {
+                widget: schema.markup_name.into(),
+                property: property.to_owned().into_boxed_str(),
+            })
+    }
+
+    fn invalid_property_value(
+        &self,
+        schema: &'static GtkWidgetSchema,
+        property: &GtkPropertyDescriptor,
+        expected: &'static str,
+    ) -> GtkConcreteHostError {
+        GtkConcreteHostError::InvalidPropertyValue {
+            widget: schema.markup_name.into(),
+            property: property.name.into(),
+            expected,
+        }
+    }
+
     fn apply_bool_property(
         &self,
         widget: &gtk::Widget,
-        kind: SupportedWidget,
-        property: &str,
+        schema: &'static GtkWidgetSchema,
+        property: &GtkPropertyDescriptor,
         value: bool,
     ) -> Result<(), GtkConcreteHostError> {
-        match property {
-            "visible" => widget.set_visible(value),
-            "sensitive" => widget.set_sensitive(value),
-            "hexpand" => widget.set_hexpand(value),
-            "vexpand" => widget.set_vexpand(value),
+        match property.setter {
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::Visible) => widget.set_visible(value),
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::Sensitive) => {
+                widget.set_sensitive(value)
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::Hexpand) => widget.set_hexpand(value),
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::Vexpand) => widget.set_vexpand(value),
             _ => {
-                return Err(GtkConcreteHostError::UnsupportedProperty {
-                    widget: kind.label().into(),
-                    property: property.to_owned().into_boxed_str(),
-                });
+                return Err(self.invalid_property_value(
+                    schema,
+                    property,
+                    property.setter.host_value_label(),
+                ));
             }
         }
         Ok(())
@@ -324,46 +349,42 @@ where
     fn apply_text_property(
         &self,
         widget: &gtk::Widget,
-        kind: SupportedWidget,
-        property: &str,
+        schema: &'static GtkWidgetSchema,
+        property: &GtkPropertyDescriptor,
         value: &str,
     ) -> Result<(), GtkConcreteHostError> {
-        match (kind, property) {
-            (SupportedWidget::Window, "title") => {
+        match property.setter {
+            GtkPropertySetter::Text(GtkTextPropertySetter::WindowTitle) => {
                 widget
                     .clone()
                     .downcast::<gtk::Window>()
                     .expect("window widget should downcast")
                     .set_title(Some(value));
             }
-            (SupportedWidget::Label, "text") => {
+            GtkPropertySetter::Text(GtkTextPropertySetter::LabelText) => {
                 widget
                     .clone()
                     .downcast::<gtk::Label>()
                     .expect("label widget should downcast")
                     .set_text(value);
             }
-            (SupportedWidget::Label, "label") => {
+            GtkPropertySetter::Text(GtkTextPropertySetter::LabelLabel) => {
                 widget
                     .clone()
                     .downcast::<gtk::Label>()
                     .expect("label widget should downcast")
                     .set_label(value);
             }
-            (SupportedWidget::Button, "label") => {
+            GtkPropertySetter::Text(GtkTextPropertySetter::ButtonLabel) => {
                 widget
                     .clone()
                     .downcast::<gtk::Button>()
                     .expect("button widget should downcast")
                     .set_label(value);
             }
-            (SupportedWidget::Box, "orientation") => {
+            GtkPropertySetter::Text(GtkTextPropertySetter::BoxOrientation) => {
                 let orientation = parse_orientation(value).ok_or_else(|| {
-                    GtkConcreteHostError::InvalidPropertyValue {
-                        widget: kind.label().into(),
-                        property: property.to_owned().into_boxed_str(),
-                        expected: "Vertical or Horizontal",
-                    }
+                    self.invalid_property_value(schema, property, "Vertical or Horizontal")
                 })?;
                 widget
                     .clone()
@@ -371,13 +392,9 @@ where
                     .expect("box widget should downcast")
                     .set_orientation(orientation);
             }
-            (SupportedWidget::Box, "spacing") => {
+            GtkPropertySetter::TextOrI64(GtkTextOrI64PropertySetter::BoxSpacing) => {
                 let spacing = value.parse::<i32>().map_err(|_| {
-                    GtkConcreteHostError::InvalidPropertyValue {
-                        widget: kind.label().into(),
-                        property: property.to_owned().into_boxed_str(),
-                        expected: "signed 32-bit integer text",
-                    }
+                    self.invalid_property_value(schema, property, "signed 32-bit integer text")
                 })?;
                 widget
                     .clone()
@@ -386,10 +403,11 @@ where
                     .set_spacing(spacing);
             }
             _ => {
-                return Err(GtkConcreteHostError::UnsupportedProperty {
-                    widget: kind.label().into(),
-                    property: property.to_owned().into_boxed_str(),
-                });
+                return Err(self.invalid_property_value(
+                    schema,
+                    property,
+                    property.setter.host_value_label(),
+                ));
             }
         }
         Ok(())
@@ -398,18 +416,14 @@ where
     fn apply_i64_property(
         &self,
         widget: &gtk::Widget,
-        kind: SupportedWidget,
-        property: &str,
+        schema: &'static GtkWidgetSchema,
+        property: &GtkPropertyDescriptor,
         value: i64,
     ) -> Result<(), GtkConcreteHostError> {
-        match (kind, property) {
-            (SupportedWidget::Box, "spacing") => {
+        match property.setter {
+            GtkPropertySetter::TextOrI64(GtkTextOrI64PropertySetter::BoxSpacing) => {
                 let spacing = i32::try_from(value).map_err(|_| {
-                    GtkConcreteHostError::InvalidPropertyValue {
-                        widget: kind.label().into(),
-                        property: property.to_owned().into_boxed_str(),
-                        expected: "signed 32-bit integer",
-                    }
+                    self.invalid_property_value(schema, property, "signed 32-bit integer")
                 })?;
                 widget
                     .clone()
@@ -418,10 +432,29 @@ where
                     .set_spacing(spacing);
                 Ok(())
             }
-            _ => Err(GtkConcreteHostError::UnsupportedProperty {
-                widget: kind.label().into(),
-                property: property.to_owned().into_boxed_str(),
-            }),
+            _ => Err(self.invalid_property_value(
+                schema,
+                property,
+                property.setter.host_value_label(),
+            )),
+        }
+    }
+
+    fn child_mount_route(
+        &self,
+        parent: &GtkConcreteWidget,
+        schema: &'static GtkWidgetSchema,
+        operation: &'static str,
+    ) -> Result<GtkChildMountRoute, GtkConcreteHostError> {
+        match schema.default_child_group() {
+            GtkDefaultChildGroup::One(group) => Ok(group.mount),
+            GtkDefaultChildGroup::None | GtkDefaultChildGroup::Ambiguous => {
+                Err(GtkConcreteHostError::UnsupportedParentOperation {
+                    parent: parent.clone(),
+                    widget: schema.markup_name.into(),
+                    operation: operation.into(),
+                })
+            }
         }
     }
 }
@@ -444,11 +477,11 @@ where
             .next_widget
             .checked_add(1)
             .expect("concrete GTK widget handle counter should not overflow");
-        let (kind, widget) = self.create_supported_widget(widget)?;
+        let (schema, widget) = self.create_supported_widget(widget)?;
         self.widgets.insert(
             handle.0,
             MountedWidget {
-                kind,
+                schema,
                 widget,
                 children: Vec::new(),
             },
@@ -461,19 +494,20 @@ where
         widget: &Self::Widget,
         property: &StaticPropertyPlan,
     ) -> Result<(), Self::Error> {
-        let (kind, widget, _) = self.mounted_snapshot(widget)?;
+        let (schema, widget, _) = self.mounted_snapshot(widget)?;
+        let descriptor = self.lookup_property(schema, property.name.text())?;
         match &property.value {
             StaticPropertyValue::ImplicitTrue => {
-                self.apply_bool_property(&widget, kind, property.name.text(), true)
+                self.apply_bool_property(&widget, schema, descriptor, true)
             }
             StaticPropertyValue::Text(text) if text.has_interpolation() => {
                 Err(GtkConcreteHostError::InterpolatedStaticText {
-                    widget: kind.label().into(),
+                    widget: schema.markup_name.into(),
                     property: property.name.text().to_owned().into_boxed_str(),
                 })
             }
             StaticPropertyValue::Text(text) => {
-                self.apply_text_property(&widget, kind, property.name.text(), &text_literal(text))
+                self.apply_text_property(&widget, schema, descriptor, &text_literal(text))
             }
         }
     }
@@ -484,24 +518,43 @@ where
         binding: &RuntimeSetterBinding,
         value: &V,
     ) -> Result<(), Self::Error> {
-        let (kind, widget, _) = self.mounted_snapshot(widget)?;
-        let property = binding.name.text();
-        if let Some(value) = value.as_bool() {
-            if matches!(property, "visible" | "sensitive" | "hexpand" | "vexpand") {
-                return self.apply_bool_property(&widget, kind, property, value);
+        let (schema, widget, _) = self.mounted_snapshot(widget)?;
+        let descriptor = self.lookup_property(schema, binding.name.text())?;
+        match descriptor.setter {
+            GtkPropertySetter::Bool(_) => {
+                let value = value.as_bool().ok_or_else(|| {
+                    self.invalid_property_value(
+                        schema,
+                        descriptor,
+                        descriptor.setter.host_value_label(),
+                    )
+                })?;
+                self.apply_bool_property(&widget, schema, descriptor, value)
+            }
+            GtkPropertySetter::Text(_) => {
+                let value = value.as_text().ok_or_else(|| {
+                    self.invalid_property_value(
+                        schema,
+                        descriptor,
+                        descriptor.setter.host_value_label(),
+                    )
+                })?;
+                self.apply_text_property(&widget, schema, descriptor, value)
+            }
+            GtkPropertySetter::TextOrI64(_) => {
+                if let Some(value) = value.as_i64() {
+                    self.apply_i64_property(&widget, schema, descriptor, value)
+                } else if let Some(value) = value.as_text() {
+                    self.apply_text_property(&widget, schema, descriptor, value)
+                } else {
+                    Err(self.invalid_property_value(
+                        schema,
+                        descriptor,
+                        descriptor.setter.host_value_label(),
+                    ))
+                }
             }
         }
-        if let Some(value) = value.as_text() {
-            return self.apply_text_property(&widget, kind, property, value);
-        }
-        if let Some(value) = value.as_i64() {
-            return self.apply_i64_property(&widget, kind, property, value);
-        }
-        Err(GtkConcreteHostError::InvalidPropertyValue {
-            widget: kind.label().into(),
-            property: property.to_owned().into_boxed_str(),
-            expected: "a supported GTK host value",
-        })
     }
 
     fn connect_event(
@@ -509,7 +562,7 @@ where
         widget: &Self::Widget,
         route: &GtkEventRoute,
     ) -> Result<Self::EventHandle, Self::Error> {
-        let (kind, widget, _) = self.mounted_snapshot(widget)?;
+        let (schema, widget, _) = self.mounted_snapshot(widget)?;
         let handle = GtkConcreteEventHandle(self.next_event);
         self.next_event = self
             .next_event
@@ -518,8 +571,14 @@ where
         let queue = self.queued_events.clone();
         let notifier = self.event_notifier.clone();
         let route_id = route.id;
-        let signal = match (kind, route.binding.name.text()) {
-            (SupportedWidget::Button, "onClick") => widget
+        let event = schema.event(route.binding.name.text()).ok_or_else(|| {
+            GtkConcreteHostError::UnsupportedEvent {
+                widget: schema.markup_name.into(),
+                event: route.binding.name.text().to_owned().into_boxed_str(),
+            }
+        })?;
+        let signal = match event.signal {
+            GtkEventSignal::ButtonClicked => widget
                 .clone()
                 .downcast::<gtk::Button>()
                 .expect("button widget should downcast")
@@ -532,12 +591,6 @@ where
                         notifier();
                     }
                 }),
-            _ => {
-                return Err(GtkConcreteHostError::UnsupportedEvent {
-                    widget: kind.label().into(),
-                    event: route.binding.name.text().to_owned().into_boxed_str(),
-                });
-            }
         };
         self.events.insert(
             handle.0,
@@ -569,7 +622,7 @@ where
         index: usize,
         children: &[Self::Widget],
     ) -> Result<(), Self::Error> {
-        let (kind, parent_widget, current_children) = self.mounted_snapshot(parent)?;
+        let (schema, parent_widget, current_children) = self.mounted_snapshot(parent)?;
         if index > current_children.len() {
             return Err(GtkConcreteHostError::ChildIndexOutOfRange {
                 parent: parent.clone(),
@@ -582,19 +635,19 @@ where
             .map(|child| self.widget_object(child))
             .collect::<Result<Vec<_>, _>>()?;
         let mut next_children = current_children.clone();
-        match kind {
-            SupportedWidget::Window => {
+        match self.child_mount_route(parent, schema, "insert_children")? {
+            GtkChildMountRoute::WindowContent => {
                 if current_children.len() + children.len() > 1 || index != 0 {
                     return Err(GtkConcreteHostError::UnsupportedParentOperation {
                         parent: parent.clone(),
-                        widget: kind.label().into(),
+                        widget: schema.markup_name.into(),
                         operation: "insert_children".into(),
                     });
                 }
                 let child = child_widgets.first().ok_or_else(|| {
                     GtkConcreteHostError::UnsupportedParentOperation {
                         parent: parent.clone(),
-                        widget: kind.label().into(),
+                        widget: schema.markup_name.into(),
                         operation: "insert_children".into(),
                     }
                 })?;
@@ -605,7 +658,7 @@ where
                     .set_child(Some(child));
                 next_children.splice(index..index, children.iter().cloned());
             }
-            SupportedWidget::Box => {
+            GtkChildMountRoute::BoxChildren => {
                 let box_widget = parent_widget
                     .clone()
                     .downcast::<gtk::Box>()
@@ -622,13 +675,6 @@ where
                     insertion_index += 1;
                 }
             }
-            _ => {
-                return Err(GtkConcreteHostError::UnsupportedParentOperation {
-                    parent: parent.clone(),
-                    widget: kind.label().into(),
-                    operation: "insert_children".into(),
-                });
-            }
         }
         self.update_children(parent, next_children)
     }
@@ -639,7 +685,7 @@ where
         index: usize,
         children: &[Self::Widget],
     ) -> Result<(), Self::Error> {
-        let (kind, parent_widget, current_children) = self.mounted_snapshot(parent)?;
+        let (schema, parent_widget, current_children) = self.mounted_snapshot(parent)?;
         if index + children.len() > current_children.len() {
             return Err(GtkConcreteHostError::ChildIndexOutOfRange {
                 parent: parent.clone(),
@@ -657,8 +703,8 @@ where
             .map(|child| self.widget_object(child))
             .collect::<Result<Vec<_>, _>>()?;
         let mut next_children = current_children.clone();
-        match kind {
-            SupportedWidget::Window => {
+        match self.child_mount_route(parent, schema, "remove_children")? {
+            GtkChildMountRoute::WindowContent => {
                 parent_widget
                     .clone()
                     .downcast::<gtk::Window>()
@@ -666,7 +712,7 @@ where
                     .set_child(None::<&gtk::Widget>);
                 next_children.clear();
             }
-            SupportedWidget::Box => {
+            GtkChildMountRoute::BoxChildren => {
                 let box_widget = parent_widget
                     .clone()
                     .downcast::<gtk::Box>()
@@ -675,13 +721,6 @@ where
                     box_widget.remove(child);
                 }
                 next_children.drain(index..index + children.len());
-            }
-            _ => {
-                return Err(GtkConcreteHostError::UnsupportedParentOperation {
-                    parent: parent.clone(),
-                    widget: kind.label().into(),
-                    operation: "remove_children".into(),
-                });
             }
         }
         self.update_children(parent, next_children)
@@ -695,7 +734,7 @@ where
         to: usize,
         children: &[Self::Widget],
     ) -> Result<(), Self::Error> {
-        let (kind, parent_widget, current_children) = self.mounted_snapshot(parent)?;
+        let (schema, parent_widget, current_children) = self.mounted_snapshot(parent)?;
         if from + count > current_children.len()
             || to > current_children.len().saturating_sub(count)
         {
@@ -710,8 +749,8 @@ where
                 parent: parent.clone(),
             });
         }
-        match kind {
-            SupportedWidget::Box => {
+        match self.child_mount_route(parent, schema, "move_children")? {
+            GtkChildMountRoute::BoxChildren => {
                 let box_widget = parent_widget
                     .clone()
                     .downcast::<gtk::Box>()
@@ -736,12 +775,14 @@ where
                 }
                 self.update_children(parent, next_children)
             }
-            SupportedWidget::Window if from == 0 && count == 1 && to == 0 => Ok(()),
-            _ => Err(GtkConcreteHostError::UnsupportedParentOperation {
-                parent: parent.clone(),
-                widget: kind.label().into(),
-                operation: "move_children".into(),
-            }),
+            GtkChildMountRoute::WindowContent if from == 0 && count == 1 && to == 0 => Ok(()),
+            GtkChildMountRoute::WindowContent => {
+                Err(GtkConcreteHostError::UnsupportedParentOperation {
+                    parent: parent.clone(),
+                    widget: schema.markup_name.into(),
+                    operation: "move_children".into(),
+                })
+            }
         }
     }
 
@@ -770,34 +811,19 @@ where
                 event.widget.disconnect(event.signal);
             }
         }
-        if let Ok(window) = mounted.widget.downcast::<gtk::Window>() {
+        if mounted.schema.is_window_root() {
+            let window = mounted
+                .widget
+                .downcast::<gtk::Window>()
+                .expect("window schema should downcast to gtk::Window");
             window.close();
         }
         Ok(())
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SupportedWidget {
-    Window,
-    Box,
-    Label,
-    Button,
-}
-
-impl SupportedWidget {
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Window => "Window",
-            Self::Box => "Box",
-            Self::Label => "Label",
-            Self::Button => "Button",
-        }
-    }
-}
-
 struct MountedWidget {
-    kind: SupportedWidget,
+    schema: &'static GtkWidgetSchema,
     widget: gtk::Widget,
     children: Vec<GtkConcreteWidget>,
 }
@@ -909,61 +935,22 @@ impl fmt::Display for GtkConcreteHostError {
 
 impl Error for GtkConcreteHostError {}
 
-pub fn concrete_widget_is_window(widget: &NamePath) -> bool {
-    matches!(supported_widget(widget), Some(SupportedWidget::Window))
-}
-
-pub fn concrete_supports_property(widget: &NamePath, property: &str) -> bool {
-    let Some(kind) = supported_widget(widget) else {
-        return false;
-    };
-    concrete_widget_supports_property(kind, property)
-}
-
-pub fn concrete_event_payload(widget: &NamePath, event: &str) -> Option<GtkConcreteEventPayload> {
-    match (supported_widget(widget), event) {
-        (Some(SupportedWidget::Button), "onClick") => Some(GtkConcreteEventPayload::Unit),
-        _ => None,
-    }
-}
-
-fn supported_widget(path: &NamePath) -> Option<SupportedWidget> {
-    match widget_name(path) {
-        "Window" => Some(SupportedWidget::Window),
-        "Box" => Some(SupportedWidget::Box),
-        "Label" => Some(SupportedWidget::Label),
-        "Button" => Some(SupportedWidget::Button),
-        _ => None,
-    }
-}
-
-fn concrete_widget_supports_property(kind: SupportedWidget, property: &str) -> bool {
-    if matches!(property, "visible" | "sensitive" | "hexpand" | "vexpand") {
-        return true;
-    }
-    matches!(
-        (kind, property),
-        (SupportedWidget::Window, "title")
-            | (SupportedWidget::Box, "orientation")
-            | (SupportedWidget::Box, "spacing")
-            | (SupportedWidget::Label, "text")
-            | (SupportedWidget::Label, "label")
-            | (SupportedWidget::Button, "label")
-    )
-}
-
-/// Return the leaf segment of a widget name path.
+/// Return the catalog label for a widget path.
 ///
 /// **Invariant**: `NamePath` is constructed by the HIR parser which guarantees
 /// at least one segment per path node.  An empty path is a parser bug, not a
 /// user error, so the `expect` here is a programmer assertion rather than a
 /// recoverable condition (I4).
-fn widget_name(path: &NamePath) -> &str {
-    path.segments()
-        .iter()
-        .last()
-        .expect("NamePath must contain at least one segment — this is a parser invariant")
-        .text()
+fn widget_label(path: &NamePath) -> &str {
+    lookup_widget_schema(path)
+        .map(|schema| schema.markup_name)
+        .unwrap_or_else(|| {
+            path.segments()
+                .iter()
+                .last()
+                .expect("NamePath must contain at least one segment — this is a parser invariant")
+                .text()
+        })
 }
 
 fn normalize_window_key_name(key: gtk::gdk::Key) -> Option<Box<str>> {
@@ -1092,7 +1079,7 @@ mod tests {
             .iter()
             .find_map(|node| match &node.kind {
                 GtkBridgeNodeKind::Widget(widget)
-                    if super::widget_name(&widget.widget) == widget_name =>
+                    if super::widget_label(&widget.widget) == widget_name =>
                 {
                     widget.properties.iter().find_map(|binding| match binding {
                         RuntimePropertyBinding::Setter(binding)

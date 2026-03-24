@@ -18,7 +18,8 @@ use crate::{
 ///
 /// This layer keeps the contract intentionally narrow and explicit:
 ///
-/// - widget nodes currently expose one default append-only child group until widget schemas exist,
+/// - widget nodes expose their schema-declared default child group; widgets with richer multi-slot
+///   child schemas still need future markup syntax before they can be addressed,
 /// - control nodes lower to concrete body/case/empty groups instead of opaque child metadata, and
 /// - localized child edits stay explicit so keyed collection updates cannot regress into VDOM-style
 ///   diffing.

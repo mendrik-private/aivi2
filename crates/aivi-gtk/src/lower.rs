@@ -5,7 +5,6 @@ use aivi_hir::{
     MarkupNodeId, MarkupNodeKind, Module, NonEmpty, PatternId, TextLiteral, TextSegment,
 };
 
-use crate::host::concrete_event_payload;
 use crate::plan::{
     AttributeSite, CaseNode, ChildOp, ChildUpdateMode, EachNode, EmptyNode, EventHookPlan,
     EventHookStrategy, EventHookTeardown, FragmentNode, MatchNode, PlanNode, PlanNodeId,
@@ -13,13 +12,14 @@ use crate::plan::{
     SetterTeardown, SetterUpdateStrategy, ShowMountPolicy, ShowNode, StableNodeId,
     StaticPropertyPlan, StaticPropertyValue, WidgetNode, WidgetPlan, WithNode,
 };
+use crate::schema::lookup_widget_event;
 
 /// Lowering options for the first GTK bridge slice.
 ///
-/// The RFC defines direct event hookups but does not yet ship full widget/event metadata.
-/// This foundation therefore recognizes only the currently supported concrete GTK events inside the
-/// default `on*` namespace, while keeping the choice explicit and easy to replace once widget
-/// schemas exist.
+/// The live GTK surface is driven by explicit widget schema metadata.
+///
+/// Callers may optionally keep event lowering inside a narrower attribute namespace, but schema
+/// lookup remains the source of truth for whether a widget/attribute pair is a live GTK event.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoweringOptions {
     event_attribute_prefix: Box<str>,
@@ -50,13 +50,13 @@ impl LoweringOptions {
                 .name
                 .text()
                 .starts_with(self.event_attribute_prefix())
-            && concrete_event_payload(widget, attribute.name.text()).is_some()
+            && lookup_widget_event(widget, attribute.name.text()).is_some()
     }
 }
 
 impl Default for LoweringOptions {
     fn default() -> Self {
-        Self::new("on")
+        Self::new("")
     }
 }
 
