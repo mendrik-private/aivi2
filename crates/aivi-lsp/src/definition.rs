@@ -19,7 +19,7 @@ pub async fn definition(
     let cursor = analysis.source.lsp_position_to_offset(LspPosition {
         line: lsp_pos.line,
         character: lsp_pos.character,
-    });
+    })?;
     let sym = analysis.tightest_symbol_at_offset(cursor)?;
 
     let lsp_range = analysis.source.span_to_lsp_range(sym.selection_span.span());

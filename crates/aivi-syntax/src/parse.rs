@@ -65,6 +65,10 @@ const INVALID_TEXT_INTERPOLATION: DiagnosticCode =
     DiagnosticCode::new("syntax", "invalid-text-interpolation");
 const UNTERMINATED_TEXT_INTERPOLATION: DiagnosticCode =
     DiagnosticCode::new("syntax", "unterminated-text-interpolation");
+const PARSE_DEPTH_EXCEEDED: DiagnosticCode =
+    DiagnosticCode::new("syntax", "parse-depth-exceeded");
+
+const MAX_PARSE_DEPTH: u32 = 256;
 
 /// Parser output retaining the lossless token buffer and recoverable diagnostics.
 #[derive(Clone, Debug)]
@@ -108,6 +112,7 @@ struct Parser<'a> {
     tokens: &'a [Token],
     cursor: usize,
     diagnostics: Vec<Diagnostic>,
+    depth: u32,
 }
 
 impl<'a> Parser<'a> {
@@ -117,7 +122,31 @@ impl<'a> Parser<'a> {
             tokens,
             cursor: 0,
             diagnostics: Vec::new(),
+            depth: 0,
         }
+    }
+
+    fn with_depth<T>(&mut self, f: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {
+        if self.depth >= MAX_PARSE_DEPTH {
+            let diagnostic = if self.tokens.is_empty() {
+                Diagnostic::error("expression is nested too deeply to parse")
+                    .with_code(PARSE_DEPTH_EXCEEDED)
+            } else {
+                let token_index = self.cursor.min(self.tokens.len() - 1);
+                Diagnostic::error("expression is nested too deeply to parse")
+                    .with_code(PARSE_DEPTH_EXCEEDED)
+                    .with_primary_label(
+                        self.source_span_of_token(token_index),
+                        "maximum parse depth exceeded here",
+                    )
+            };
+            self.diagnostics.push(diagnostic);
+            return None;
+        }
+        self.depth += 1;
+        let result = f(self);
+        self.depth -= 1;
+        result
     }
 
     fn parse(mut self) -> (Module, Vec<Diagnostic>) {
@@ -1518,16 +1547,20 @@ impl<'a> Parser<'a> {
         end: usize,
         stop: TypeStop,
     ) -> Option<TypeExpr> {
-        let parameter = self.parse_type_application_expr(cursor, end, stop)?;
-        let Some(index) = self.peek_nontrivia(*cursor, end) else {
-            return Some(parameter);
-        };
-        if self.type_should_stop(index, stop) || self.tokens[index].kind() != TokenKind::ThinArrow {
-            return Some(parameter);
-        }
-        *cursor = index + 1;
-        let result = self.parse_type_expr(cursor, end, stop)?;
-        Some(self.make_type_arrow(parameter, result))
+        self.with_depth(|this| {
+            let parameter = this.parse_type_application_expr(cursor, end, stop)?;
+            let Some(index) = this.peek_nontrivia(*cursor, end) else {
+                return Some(parameter);
+            };
+            if this.type_should_stop(index, stop)
+                || this.tokens[index].kind() != TokenKind::ThinArrow
+            {
+                return Some(parameter);
+            }
+            *cursor = index + 1;
+            let result = this.parse_type_expr(cursor, end, stop)?;
+            Some(this.make_type_arrow(parameter, result))
+        })
     }
 
     fn parse_type_application_expr(
@@ -1655,7 +1688,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expr(&mut self, cursor: &mut usize, end: usize, stop: ExprStop) -> Option<Expr> {
-        self.parse_pipe_expr(cursor, end, stop)
+        self.with_depth(|this| this.parse_pipe_expr(cursor, end, stop))
     }
 
     fn parse_pipe_expr(&mut self, cursor: &mut usize, end: usize, stop: ExprStop) -> Option<Expr> {
@@ -2240,8 +2273,8 @@ impl<'a> Parser<'a> {
 
     fn parse_markup_node(&mut self, cursor: &mut usize, end: usize) -> Option<MarkupNode> {
         let start = self.consume_kind(cursor, end, TokenKind::Less)?;
-        let name = self.parse_identifier(cursor, end)?;
-        let case_pattern_attrs = name.text == "case";
+        let name = self.parse_qualified_name(cursor, end)?;
+        let case_pattern_attrs = name.as_dotted() == "case";
         let mut attributes = Vec::new();
 
         loop {
@@ -2290,20 +2323,23 @@ impl<'a> Parser<'a> {
             match self.tokens[index].kind() {
                 TokenKind::CloseTagStart => {
                     *cursor = index + 1;
-                    close_name = self.parse_identifier(cursor, end);
+                    close_name = self.parse_qualified_name(cursor, end);
                     let _ = self.consume_kind(cursor, end, TokenKind::Greater);
                     if let Some(close_name_value) = close_name.as_ref() {
-                        if close_name_value.text != name.text {
+                        if close_name_value.as_dotted() != name.as_dotted() {
                             self.diagnostics.push(
                                 Diagnostic::error("markup closing tag does not match the open tag")
                                     .with_code(MISMATCHED_MARKUP_CLOSE)
                                     .with_primary_label(
                                         close_name_value.span,
-                                        format!("expected `</{}>` to close this node", name.text),
+                                        format!(
+                                            "expected `</{}>` to close this node",
+                                            name.as_dotted()
+                                        ),
                                     )
                                     .with_secondary_label(
                                         name.span,
-                                        format!("`<{}>` was opened here", name.text),
+                                        format!("`<{}>` was opened here", name.as_dotted()),
                                     ),
                             );
                         }
@@ -2409,18 +2445,20 @@ impl<'a> Parser<'a> {
         end: usize,
         stop: PatternStop,
     ) -> Option<Pattern> {
-        let mut pattern = self.parse_pattern_atom(cursor, end, stop)?;
-        while let Some(index) = self.peek_nontrivia(*cursor, end) {
-            if self.pattern_should_stop(index, stop) || !self.starts_pattern(index) {
-                break;
+        self.with_depth(|this| {
+            let mut pattern = this.parse_pattern_atom(cursor, end, stop)?;
+            while let Some(index) = this.peek_nontrivia(*cursor, end) {
+                if this.pattern_should_stop(index, stop) || !this.starts_pattern(index) {
+                    break;
+                }
+                if this.tokens[index].line_start() {
+                    break;
+                }
+                let argument = this.parse_pattern_atom(cursor, end, stop)?;
+                pattern = this.make_pattern_apply(pattern, argument);
             }
-            if self.tokens[index].line_start() {
-                break;
-            }
-            let argument = self.parse_pattern_atom(cursor, end, stop)?;
-            pattern = self.make_pattern_apply(pattern, argument);
-        }
-        Some(pattern)
+            Some(pattern)
+        })
     }
 
     fn parse_pattern_atom(

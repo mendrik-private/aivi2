@@ -5,6 +5,8 @@ use aivi_hir::{BindingId, NamePath, PatternId};
 use aivi_runtime::{OwnerHandle, SignalGraph};
 
 use crate::{
+    GtkChildContainerKind, GtkChildGroupDescriptor, GtkChildMountRoute, GtkDefaultChildGroup,
+    lookup_widget_schema,
     plan::{PlanNodeId, PlanNodeTag, RepeatedChildPolicy, StableNodeId, WidgetPlan},
     runtime_adapter::{
         RuntimeCaseBranch, RuntimeChildOp, RuntimeEventBinding, RuntimeExprInput, RuntimeNodeRef,
@@ -12,6 +14,14 @@ use crate::{
         WidgetRuntimeAdapterError, WidgetRuntimeAdapterErrors, WidgetRuntimeAssembly,
         assemble_widget_runtime,
     },
+};
+
+const INVALID_WIDGET_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "<invalid>",
+    container: GtkChildContainerKind::Sequence,
+    mount: GtkChildMountRoute::BoxChildren,
+    min_children: 0,
+    max_children: None,
 };
 
 /// Lower one widget plan through runtime assembly into a GTK-oriented executable bridge graph.
@@ -107,13 +117,14 @@ impl GtkBridgeGraphBuilder {
             span: node.span,
             owner: node.owner,
             parent: node.parent.map(GtkBridgeNodeRef::from),
-            kind: self.build_node_kind(node_ref, &node.kind, errors),
+            kind: self.build_node_kind(node_ref, node, &node.kind, errors),
         }
     }
 
     fn build_node_kind(
         &self,
         node_ref: GtkBridgeNodeRef,
+        node: &RuntimePlanNode,
         kind: &RuntimePlanNodeKind,
         errors: &mut Vec<GtkBridgeLoweringError>,
     ) -> GtkBridgeNodeKind {
@@ -122,6 +133,12 @@ impl GtkBridgeGraphBuilder {
                 widget: widget.widget.clone(),
                 properties: widget.properties.clone(),
                 event_hooks: widget.event_hooks.clone(),
+                default_group_descriptor: lookup_widget_schema(&widget.widget).and_then(|schema| {
+                    match schema.default_child_group() {
+                        GtkDefaultChildGroup::One(group) => Some(group),
+                        GtkDefaultChildGroup::None | GtkDefaultChildGroup::Ambiguous => None,
+                    }
+                }),
                 default_children: self.child_group(
                     node_ref,
                     GtkChildGroupKind::WidgetDefault,
@@ -129,6 +146,19 @@ impl GtkBridgeGraphBuilder {
                     errors,
                 ),
             }),
+            RuntimePlanNodeKind::Group(group) => {
+                let descriptor = self.resolve_widget_child_group(node, group, errors);
+                GtkBridgeNodeKind::Group(GtkGroupNode {
+                    widget: group.widget.clone(),
+                    descriptor,
+                    body: self.child_group(
+                        node_ref,
+                        GtkChildGroupKind::WidgetNamed,
+                        &group.children,
+                        errors,
+                    ),
+                })
+            }
             RuntimePlanNodeKind::Show(show) => GtkBridgeNodeKind::Show(GtkShowNode {
                 when: show.when.clone(),
                 mount: show.mount.clone(),
@@ -201,6 +231,59 @@ impl GtkBridgeGraphBuilder {
                 ),
             }),
         }
+    }
+
+    fn resolve_widget_child_group(
+        &self,
+        node: &RuntimePlanNode,
+        group: &crate::runtime_adapter::RuntimeGroupNode,
+        errors: &mut Vec<GtkBridgeLoweringError>,
+    ) -> &'static GtkChildGroupDescriptor {
+        let Some(parent_ref) = node.parent else {
+            errors.push(GtkBridgeLoweringError::MissingWidgetChildGroupParent {
+                group: node.plan,
+            });
+            return &INVALID_WIDGET_CHILD_GROUP;
+        };
+        let Some(parent) = self.assembly.node(parent_ref.plan) else {
+            errors.push(GtkBridgeLoweringError::MissingRuntimeNode {
+                node: parent_ref.plan,
+            });
+            return &INVALID_WIDGET_CHILD_GROUP;
+        };
+        let RuntimePlanNodeKind::Widget(parent_widget) = &parent.kind else {
+            errors.push(GtkBridgeLoweringError::UnexpectedWidgetChildGroupParent {
+                group: node.plan,
+                parent: parent.plan,
+                found: runtime_kind_tag(&parent.kind),
+            });
+            return &INVALID_WIDGET_CHILD_GROUP;
+        };
+        if parent_widget.widget != group.widget {
+            errors.push(GtkBridgeLoweringError::WidgetChildGroupOwnerMismatch {
+                group: node.plan,
+                parent: parent.plan,
+                expected_widget: group.widget.to_string().into_boxed_str(),
+                found_widget: parent_widget.widget.to_string().into_boxed_str(),
+            });
+            return &INVALID_WIDGET_CHILD_GROUP;
+        }
+        let Some(schema) = lookup_widget_schema(&group.widget) else {
+            errors.push(GtkBridgeLoweringError::UnsupportedWidgetChildGroupOwner {
+                group: node.plan,
+                widget: group.widget.to_string().into_boxed_str(),
+            });
+            return &INVALID_WIDGET_CHILD_GROUP;
+        };
+        let Some(descriptor) = schema.child_group(group.group.text()) else {
+            errors.push(GtkBridgeLoweringError::UnknownWidgetChildGroup {
+                group: node.plan,
+                widget: schema.markup_name.into(),
+                child_group: group.group.text().to_owned().into_boxed_str(),
+            });
+            return &INVALID_WIDGET_CHILD_GROUP;
+        };
+        descriptor
     }
 
     fn build_case_branch(
@@ -659,6 +742,7 @@ pub struct GtkBridgeNode {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GtkBridgeNodeKind {
     Widget(GtkWidgetNode),
+    Group(GtkGroupNode),
     Show(GtkShowNode),
     Each(GtkEachNode),
     Empty(GtkEmptyNode),
@@ -672,6 +756,7 @@ impl GtkBridgeNodeKind {
     pub const fn tag(&self) -> PlanNodeTag {
         match self {
             Self::Widget(_) => PlanNodeTag::Widget,
+            Self::Group(_) => PlanNodeTag::Group,
             Self::Show(_) => PlanNodeTag::Show,
             Self::Each(_) => PlanNodeTag::Each,
             Self::Empty(_) => PlanNodeTag::Empty,
@@ -688,7 +773,15 @@ pub struct GtkWidgetNode {
     pub widget: NamePath,
     pub properties: Box<[RuntimePropertyBinding]>,
     pub event_hooks: Box<[RuntimeEventBinding]>,
+    pub default_group_descriptor: Option<&'static GtkChildGroupDescriptor>,
     pub default_children: GtkChildGroup,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GtkGroupNode {
+    pub widget: NamePath,
+    pub descriptor: &'static GtkChildGroupDescriptor,
+    pub body: GtkChildGroup,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -812,6 +905,7 @@ impl GtkChildGroup {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GtkChildGroupKind {
     WidgetDefault,
+    WidgetNamed,
     ShowBody,
     EachItemTemplate,
     EachEmptyBranch,
@@ -1077,6 +1171,29 @@ pub enum GtkBridgeLoweringError {
     MissingRuntimeNode {
         node: PlanNodeId,
     },
+    MissingWidgetChildGroupParent {
+        group: PlanNodeId,
+    },
+    UnexpectedWidgetChildGroupParent {
+        group: PlanNodeId,
+        parent: PlanNodeId,
+        found: PlanNodeTag,
+    },
+    WidgetChildGroupOwnerMismatch {
+        group: PlanNodeId,
+        parent: PlanNodeId,
+        expected_widget: Box<str>,
+        found_widget: Box<str>,
+    },
+    UnsupportedWidgetChildGroupOwner {
+        group: PlanNodeId,
+        widget: Box<str>,
+    },
+    UnknownWidgetChildGroup {
+        group: PlanNodeId,
+        widget: Box<str>,
+        child_group: Box<str>,
+    },
     RootHasParent {
         root: PlanNodeId,
         parent: PlanNodeId,
@@ -1109,6 +1226,39 @@ impl fmt::Display for GtkBridgeLoweringError {
             Self::MissingRuntimeNode { node } => {
                 write!(f, "runtime assembly node {node} is missing")
             }
+            Self::MissingWidgetChildGroupParent { group } => write!(
+                f,
+                "runtime assembly group node {group} is missing its parent widget"
+            ),
+            Self::UnexpectedWidgetChildGroupParent {
+                group,
+                parent,
+                found,
+            } => write!(
+                f,
+                "runtime assembly group node {group} expected widget parent {parent}, found {found:?}"
+            ),
+            Self::WidgetChildGroupOwnerMismatch {
+                group,
+                parent,
+                expected_widget,
+                found_widget,
+            } => write!(
+                f,
+                "runtime assembly group node {group} under parent {parent} expected widget `{expected_widget}`, found `{found_widget}`"
+            ),
+            Self::UnsupportedWidgetChildGroupOwner { group, widget } => write!(
+                f,
+                "runtime assembly group node {group} references unsupported widget `{widget}`"
+            ),
+            Self::UnknownWidgetChildGroup {
+                group,
+                widget,
+                child_group,
+            } => write!(
+                f,
+                "runtime assembly group node {group} references unknown child group `{child_group}` on widget `{widget}`"
+            ),
             Self::RootHasParent { root, parent } => write!(
                 f,
                 "runtime assembly root {root} unexpectedly records parent {parent}"
@@ -1173,6 +1323,7 @@ fn validate_unique_collection_keys(
 fn runtime_kind_tag(kind: &RuntimePlanNodeKind) -> PlanNodeTag {
     match kind {
         RuntimePlanNodeKind::Widget(_) => PlanNodeTag::Widget,
+        RuntimePlanNodeKind::Group(_) => PlanNodeTag::Group,
         RuntimePlanNodeKind::Show(_) => PlanNodeTag::Show,
         RuntimePlanNodeKind::Each(_) => PlanNodeTag::Each,
         RuntimePlanNodeKind::Empty(_) => PlanNodeTag::Empty,

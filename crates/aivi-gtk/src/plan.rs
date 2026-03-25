@@ -37,6 +37,8 @@ pub enum StableNodeId {
     Control(ControlNodeId),
 }
 
+const MAX_PLAN_NESTING_DEPTH: usize = 128;
+
 /// Full lowered widget/control graph rooted at one markup expression.
 ///
 /// Ownership model: the plan owns its node arena and refers back into HIR only through typed IDs.
@@ -93,6 +95,9 @@ impl WidgetPlan {
                 PlanNodeKind::Widget(widget) => {
                     self.validate_child_ops(plan_id, &widget.children)?;
                 }
+                PlanNodeKind::Group(group) => {
+                    self.validate_child_ops(plan_id, &group.children)?;
+                }
                 PlanNodeKind::Show(show) => {
                     self.validate_child_ops(plan_id, &show.children)?;
                 }
@@ -146,6 +151,61 @@ impl WidgetPlan {
             }
         }
 
+        self.validate_nesting_depth(self.root, 0)?;
+
+        Ok(())
+    }
+
+    fn validate_nesting_depth(
+        &self,
+        node_id: PlanNodeId,
+        depth: usize,
+    ) -> Result<(), PlanValidationError> {
+        if depth > MAX_PLAN_NESTING_DEPTH {
+            return Err(PlanValidationError::NestingTooDeep {
+                max: MAX_PLAN_NESTING_DEPTH,
+            });
+        }
+        let Some(node) = self.node(node_id) else {
+            return Ok(());
+        };
+        let children: Vec<PlanNodeId> = match &node.kind {
+            PlanNodeKind::Widget(widget) => {
+                widget.children.iter().map(|op| op.child()).collect()
+            }
+            PlanNodeKind::Group(group) => {
+                group.children.iter().map(|op| op.child()).collect()
+            }
+            PlanNodeKind::Show(show) => {
+                show.children.iter().map(|op| op.child()).collect()
+            }
+            PlanNodeKind::Each(each) => {
+                let mut ids: Vec<PlanNodeId> =
+                    each.item_children.iter().map(|op| op.child()).collect();
+                if let Some(empty) = each.empty_branch {
+                    ids.push(empty);
+                }
+                ids
+            }
+            PlanNodeKind::Empty(empty) => {
+                empty.children.iter().map(|op| op.child()).collect()
+            }
+            PlanNodeKind::Match(match_node) => {
+                match_node.cases.iter().copied().collect()
+            }
+            PlanNodeKind::Case(case) => {
+                case.children.iter().map(|op| op.child()).collect()
+            }
+            PlanNodeKind::Fragment(fragment) => {
+                fragment.children.iter().map(|op| op.child()).collect()
+            }
+            PlanNodeKind::With(with_node) => {
+                with_node.children.iter().map(|op| op.child()).collect()
+            }
+        };
+        for child in children {
+            self.validate_nesting_depth(child, depth + 1)?;
+        }
         Ok(())
     }
 
@@ -179,6 +239,7 @@ pub struct PlanNode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PlanNodeTag {
     Widget,
+    Group,
     Show,
     Each,
     Empty,
@@ -192,6 +253,7 @@ pub enum PlanNodeTag {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PlanNodeKind {
     Widget(WidgetNode),
+    Group(GroupNode),
     Show(ShowNode),
     Each(EachNode),
     Empty(EmptyNode),
@@ -205,6 +267,7 @@ impl PlanNodeKind {
     pub const fn tag(&self) -> PlanNodeTag {
         match self {
             Self::Widget(_) => PlanNodeTag::Widget,
+            Self::Group(_) => PlanNodeTag::Group,
             Self::Show(_) => PlanNodeTag::Show,
             Self::Each(_) => PlanNodeTag::Each,
             Self::Empty(_) => PlanNodeTag::Empty,
@@ -236,6 +299,14 @@ pub struct WidgetNode {
     pub widget: NamePath,
     pub properties: Vec<PropertyPlan>,
     pub event_hooks: Vec<EventHookPlan>,
+    pub children: Vec<ChildOp>,
+}
+
+/// Explicit named child-group wrapper such as `<Paned.start>...</Paned.start>`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroupNode {
+    pub widget: NamePath,
+    pub group: Name,
     pub children: Vec<ChildOp>,
 }
 
@@ -420,6 +491,9 @@ pub enum PlanValidationError {
         first: PlanNodeId,
         duplicate: PlanNodeId,
     },
+    NestingTooDeep {
+        max: usize,
+    },
 }
 
 impl fmt::Display for PlanValidationError {
@@ -455,6 +529,10 @@ impl fmt::Display for PlanValidationError {
                 f,
                 "stable node identity {stable_id:?} appears at both {first} and {duplicate}"
             ),
+            Self::NestingTooDeep { max } => write!(
+                f,
+                "widget plan nesting depth exceeds the maximum of {max}"
+            ),
         }
     }
 }
@@ -467,9 +545,9 @@ mod tests {
     use aivi_hir::{ControlNodeId, Name, NamePath, TextLiteral};
 
     use super::{
-        ChildOp, EachNode, EmptyNode, PlanNode, PlanNodeId, PlanNodeKind, PlanValidationError,
-        RepeatedChildPolicy, StableNodeId, StaticPropertyPlan, StaticPropertyValue, WidgetNode,
-        WidgetPlan,
+        ChildOp, EachNode, EmptyNode, GroupNode, PlanNode, PlanNodeId, PlanNodeKind,
+        PlanValidationError, RepeatedChildPolicy, StableNodeId, StaticPropertyPlan,
+        StaticPropertyValue, WidgetNode, WidgetPlan,
     };
 
     fn span() -> SourceSpan {
@@ -487,6 +565,10 @@ mod tests {
         }
     }
 
+    fn name(text: &str) -> Name {
+        Name::new(text, span()).expect("name should be valid")
+    }
+
     #[test]
     fn validate_rejects_missing_child_references() {
         let plan = WidgetPlan::new(
@@ -502,7 +584,7 @@ mod tests {
                             index: 0,
                             span: span(),
                         },
-                        name: Name::new("text", span()).expect("name should be valid"),
+                        name: name("text"),
                         value: StaticPropertyValue::Text(empty_text()),
                     })],
                     event_hooks: Vec::new(),
@@ -586,5 +668,45 @@ mod tests {
         );
 
         plan.validate().expect("empty branch should validate");
+    }
+
+    #[test]
+    fn validate_accepts_group_nodes() {
+        let plan = WidgetPlan::new(
+            PlanNodeId::new(0),
+            vec![
+                PlanNode {
+                    stable_id: StableNodeId::Markup(aivi_hir::MarkupNodeId::from_raw(0)),
+                    span: span(),
+                    kind: PlanNodeKind::Widget(WidgetNode {
+                        widget: widget_name("Paned"),
+                        properties: Vec::new(),
+                        event_hooks: Vec::new(),
+                        children: vec![ChildOp::Append(PlanNodeId::new(1))],
+                    }),
+                },
+                PlanNode {
+                    stable_id: StableNodeId::Markup(aivi_hir::MarkupNodeId::from_raw(1)),
+                    span: span(),
+                    kind: PlanNodeKind::Group(GroupNode {
+                        widget: widget_name("Paned"),
+                        group: name("start"),
+                        children: vec![ChildOp::Append(PlanNodeId::new(2))],
+                    }),
+                },
+                PlanNode {
+                    stable_id: StableNodeId::Markup(aivi_hir::MarkupNodeId::from_raw(2)),
+                    span: span(),
+                    kind: PlanNodeKind::Widget(WidgetNode {
+                        widget: widget_name("Label"),
+                        properties: Vec::new(),
+                        event_hooks: Vec::new(),
+                        children: Vec::new(),
+                    }),
+                },
+            ],
+        );
+
+        plan.validate().expect("group wrappers should validate");
     }
 }

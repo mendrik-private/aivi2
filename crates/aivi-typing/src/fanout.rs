@@ -70,6 +70,11 @@ impl FanoutPlan {
 pub struct FanoutPlanner;
 
 impl FanoutPlanner {
+    // TODO: Nested fanout semantics not defined.
+    // A map body that contains another fanout expression has no plan representation.
+    // The current `FanoutPlan` is single-stage.
+    // HIR fanout_elaboration.rs must detect and block nested fanout explicitly.
+    // See CODE_REVIEW.md §5 (fanout_elaboration.rs problem #9).
     pub const fn plan(stage: FanoutStageKind, carrier: FanoutCarrier) -> FanoutPlan {
         FanoutPlan::for_stage(stage, carrier)
     }

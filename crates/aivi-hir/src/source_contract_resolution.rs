@@ -81,15 +81,15 @@ impl<'a> SourceContractTypeResolver<'a> {
             SourceContractType::Atom(atom) => self.resolve_atom(atom),
             SourceContractType::List(element) => Ok(ResolvedSourceContractType::Apply {
                 callee: ResolvedSourceTypeConstructor::Builtin(BuiltinType::List),
-                arguments: vec![self.resolve_atom(element)?],
+                arguments: vec![self.resolve(*element)?],
             }),
             SourceContractType::Map { key, value } => Ok(ResolvedSourceContractType::Apply {
                 callee: ResolvedSourceTypeConstructor::Item(self.resolve_named_type("Map", 2)?),
-                arguments: vec![self.resolve_atom(key)?, self.resolve_atom(value)?],
+                arguments: vec![self.resolve_atom(key)?, self.resolve(*value)?],
             }),
             SourceContractType::Signal(payload) => Ok(ResolvedSourceContractType::Apply {
                 callee: ResolvedSourceTypeConstructor::Builtin(BuiltinType::Signal),
-                arguments: vec![self.resolve_atom(payload)?],
+                arguments: vec![self.resolve(*payload)?],
             }),
         }
     }

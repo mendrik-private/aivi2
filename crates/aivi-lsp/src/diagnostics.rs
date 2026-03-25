@@ -1,5 +1,8 @@
-use aivi_base::{Diagnostic, LspRange, Severity};
-use tower_lsp::lsp_types::{self as lsp, DiagnosticSeverity, NumberOrString, Position, Range, Url};
+use aivi_base::{Diagnostic, LabelStyle, LspRange, Severity};
+use tower_lsp::lsp_types::{
+    self as lsp, DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString,
+    Position, Range, Url,
+};
 
 /// Convert an aivi_base::LspRange to a tower-lsp Range.
 pub fn lsp_range(r: LspRange) -> Range {
@@ -19,18 +22,22 @@ pub fn lsp_range(r: LspRange) -> Range {
 pub fn collect_lsp_diagnostics(
     db: &aivi_query::RootDatabase,
     file: aivi_query::SourceFile,
-    _uri: &Url,
+    uri: &Url,
 ) -> Vec<lsp::Diagnostic> {
     let analysis = crate::analysis::FileAnalysis::load(db, file);
 
     analysis
         .diagnostics
         .iter()
-        .map(|diagnostic| convert_diagnostic(diagnostic, analysis.source.as_ref()))
+        .map(|diagnostic| convert_diagnostic(diagnostic, analysis.source.as_ref(), uri))
         .collect()
 }
 
-fn convert_diagnostic(d: &Diagnostic, source_file: &aivi_base::SourceFile) -> lsp::Diagnostic {
+fn convert_diagnostic(
+    d: &Diagnostic,
+    source_file: &aivi_base::SourceFile,
+    uri: &Url,
+) -> lsp::Diagnostic {
     let severity = match d.severity {
         Severity::Error => DiagnosticSeverity::ERROR,
         Severity::Warning => DiagnosticSeverity::WARNING,
@@ -60,6 +67,25 @@ fn convert_diagnostic(d: &Diagnostic, source_file: &aivi_base::SourceFile) -> ls
 
     let code = d.code.map(|c| NumberOrString::String(c.to_string()));
 
+    let related_information: Vec<DiagnosticRelatedInformation> = d
+        .labels
+        .iter()
+        .filter(|l| l.style != LabelStyle::Primary)
+        .filter_map(|label| {
+            if label.span.file() != source_file.id() {
+                return None;
+            }
+            let lsp_r = source_file.span_to_lsp_range(label.span.span());
+            Some(DiagnosticRelatedInformation {
+                location: Location {
+                    uri: uri.clone(),
+                    range: lsp_range(lsp_r),
+                },
+                message: label.message.clone(),
+            })
+        })
+        .collect();
+
     lsp::Diagnostic {
         range,
         severity: Some(severity),
@@ -67,7 +93,11 @@ fn convert_diagnostic(d: &Diagnostic, source_file: &aivi_base::SourceFile) -> ls
         code_description: None,
         source: Some("aivi".to_owned()),
         message: d.message.clone(),
-        related_information: None,
+        related_information: if related_information.is_empty() {
+            None
+        } else {
+            Some(related_information)
+        },
         tags: None,
         data: None,
     }

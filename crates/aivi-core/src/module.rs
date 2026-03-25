@@ -22,6 +22,22 @@ use crate::{
     ty::Type,
 };
 
+/// # Expression Closure Invariant
+///
+/// All expressions stored in this module's expression arena are assumed to be
+/// *closed*: they contain no free variable references (`Reference::Local`)
+/// that are not bound by the expression's own enclosing patterns or parameters.
+///
+/// This invariant is NOT enforced at construction time. It is checked
+/// post-hoc during lambda lowering by `capture_free_bindings()` in `aivi-lambda`.
+/// A violation will only be detected when lambda lowering processes the offending
+/// expression.
+///
+/// # Arena ID Ownership
+///
+/// Arena IDs (`ExprId`, `ItemId`, etc.) from this module MUST NOT be used to
+/// index arenas from a different `Module` instance. The type system does not
+/// prevent this — it is enforced by convention only.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Module {
     items: Arena<ItemId, Item>,

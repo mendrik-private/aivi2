@@ -1435,7 +1435,12 @@ Runtime decode wire shape:
 - plain `Text` targets accept the raw text unchanged
 - structural targets decode from JSON
 - closed sums, `Option`, `Result`, and `Validation` use canonical JSON shape `{ tag, payload }`
-- unsupported scalar targets in the current provider startup slice (`Bytes`, `Float`, `Decimal`, `BigInt`, and domain-surface direct transport) fail explicitly at provider registration
+- JSON-backed scalar targets decode through explicit wire contracts:
+  - `Float` from JSON numbers
+  - `Decimal` from JSON strings carrying canonical decimal literals like `"19.25d"`
+  - `BigInt` from JSON strings carrying canonical bigint literals like `"123n"`
+  - `Bytes` from JSON arrays of integer octets like `[104, 105]`
+- domain-surface direct transport still fails explicitly at provider registration
 
 Domain decode resolution order:
 
@@ -2329,7 +2334,7 @@ The selected root must be a `Window`. The CLI does not auto-wrap arbitrary widge
 
 `aivi run` links the compiled runtime stack, evaluates the selected view fragments against committed runtime snapshots, re-evaluates after each meaningful committed tick, and applies GTK updates through the bridge executor.
 
-The current cataloged widget/runtime slice includes `Window`, `HeaderBar`, `Box`, `ScrolledWindow`, `Frame`, `Viewport`, `Label`, `Button`, `Entry`, `Switch`, `CheckButton`, `ToggleButton`, `Image`, `Spinner`, `ProgressBar`, `Revealer`, and `Separator`. `Entry.onChange` publishes `Text`, `Switch.onToggle` publishes `Bool`, and JSON-backed source payloads may decode `Float` values directly.
+The current cataloged widget/runtime slice includes `Window`, `HeaderBar`, `Box`, `ScrolledWindow`, `Frame`, `Viewport`, `Label`, `Button`, `Entry`, `Switch`, `CheckButton`, `ToggleButton`, `Image`, `Spinner`, `ProgressBar`, `Revealer`, and `Separator`. `Entry.onChange` publishes `Text`, `Switch.onToggle` publishes `Bool`, and JSON-backed source payloads may now decode `Float`, `Decimal`, `BigInt`, and `Bytes` through explicit contracts.
 
 Exits 0 on clean application close, 1 on startup/compilation error.
 

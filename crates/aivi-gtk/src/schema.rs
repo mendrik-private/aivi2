@@ -29,6 +29,7 @@ impl GtkConcreteEventPayload {
 pub enum GtkConcreteWidgetKind {
     Window,
     HeaderBar,
+    Paned,
     Box,
     ScrolledWindow,
     Frame,
@@ -51,6 +52,7 @@ impl GtkConcreteWidgetKind {
         match self {
             Self::Window => "Window",
             Self::HeaderBar => "HeaderBar",
+            Self::Paned => "Paned",
             Self::Box => "Box",
             Self::ScrolledWindow => "ScrolledWindow",
             Self::Frame => "Frame",
@@ -132,6 +134,7 @@ pub enum GtkTextPropertySetter {
     LabelLabel,
     ButtonLabel,
     BoxOrientation,
+    PanedOrientation,
     SeparatorOrientation,
     EntryText,
     EntryPlaceholderText,
@@ -173,7 +176,9 @@ impl GtkPropertySetter {
         match self {
             Self::Bool(_) => "Bool",
             Self::Text(
-                GtkTextPropertySetter::BoxOrientation | GtkTextPropertySetter::SeparatorOrientation,
+                GtkTextPropertySetter::BoxOrientation
+                | GtkTextPropertySetter::PanedOrientation
+                | GtkTextPropertySetter::SeparatorOrientation,
             ) => {
                 "text naming a valid Orientation value"
             }
@@ -228,6 +233,10 @@ impl GtkChildContainerKind {
 pub enum GtkChildMountRoute {
     WindowContent,
     HeaderBarTitleWidget,
+    HeaderBarStart,
+    HeaderBarEnd,
+    PanedStart,
+    PanedEnd,
     BoxChildren,
     ScrolledWindowContent,
     FrameChild,
@@ -270,6 +279,7 @@ pub struct GtkWidgetSchema {
     pub root_kind: GtkWidgetRootKind,
     pub properties: &'static [GtkPropertyDescriptor],
     pub events: &'static [GtkEventDescriptor],
+    pub default_child_group_override: Option<&'static GtkChildGroupDescriptor>,
     pub child_groups: &'static [GtkChildGroupDescriptor],
 }
 
@@ -286,11 +296,21 @@ impl GtkWidgetSchema {
             .find(|descriptor| descriptor.name == name)
     }
 
+    pub fn child_group(&self, name: &str) -> Option<&'static GtkChildGroupDescriptor> {
+        self.child_groups
+            .iter()
+            .find(|descriptor| descriptor.name == name)
+    }
+
     pub fn default_child_group(&self) -> GtkDefaultChildGroup {
-        match self.child_groups {
-            [] => GtkDefaultChildGroup::None,
-            [group] => GtkDefaultChildGroup::One(group),
-            _ => GtkDefaultChildGroup::Ambiguous,
+        if let Some(group) = self.default_child_group_override {
+            GtkDefaultChildGroup::One(group)
+        } else {
+            match self.child_groups {
+                [] => GtkDefaultChildGroup::None,
+                [group] => GtkDefaultChildGroup::One(group),
+                _ => GtkDefaultChildGroup::Ambiguous,
+            }
         }
     }
 
@@ -344,6 +364,12 @@ const BOX_ORIENTATION_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
     name: "orientation",
     value_shape: GtkPropertyValueShape::Enum(ORIENTATION_VALUE_SHAPE),
     setter: GtkPropertySetter::Text(GtkTextPropertySetter::BoxOrientation),
+};
+
+const PANED_ORIENTATION_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "orientation",
+    value_shape: GtkPropertyValueShape::Enum(ORIENTATION_VALUE_SHAPE),
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::PanedOrientation),
 };
 
 const BOX_SPACING_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
@@ -440,6 +466,38 @@ const HEADER_BAR_TITLE_WIDGET_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGro
     max_children: Some(1),
 };
 
+const HEADER_BAR_START_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "start",
+    container: GtkChildContainerKind::Sequence,
+    mount: GtkChildMountRoute::HeaderBarStart,
+    min_children: 0,
+    max_children: None,
+};
+
+const HEADER_BAR_END_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "end",
+    container: GtkChildContainerKind::Sequence,
+    mount: GtkChildMountRoute::HeaderBarEnd,
+    min_children: 0,
+    max_children: None,
+};
+
+const PANED_START_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "start",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::PanedStart,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const PANED_END_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "end",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::PanedEnd,
+    min_children: 0,
+    max_children: Some(1),
+};
+
 const BOX_CHILDREN_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
     name: "children",
     container: GtkChildContainerKind::Sequence,
@@ -484,6 +542,7 @@ const WINDOW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         WINDOW_TITLE_PROPERTY,
     ],
     events: &[],
+    default_child_group_override: None,
     child_groups: &[WINDOW_CONTENT_CHILD_GROUP],
 };
 
@@ -499,7 +558,28 @@ const HEADER_BAR_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         HEADER_BAR_SHOW_TITLE_BUTTONS_PROPERTY,
     ],
     events: &[],
-    child_groups: &[HEADER_BAR_TITLE_WIDGET_CHILD_GROUP],
+    default_child_group_override: Some(&HEADER_BAR_TITLE_WIDGET_CHILD_GROUP),
+    child_groups: &[
+        HEADER_BAR_START_CHILD_GROUP,
+        HEADER_BAR_END_CHILD_GROUP,
+        HEADER_BAR_TITLE_WIDGET_CHILD_GROUP,
+    ],
+};
+
+const PANED_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Paned",
+    kind: GtkConcreteWidgetKind::Paned,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        PANED_ORIENTATION_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[PANED_START_CHILD_GROUP, PANED_END_CHILD_GROUP],
 };
 
 const BOX_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
@@ -515,6 +595,7 @@ const BOX_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         BOX_SPACING_PROPERTY,
     ],
     events: &[],
+    default_child_group_override: None,
     child_groups: &[BOX_CHILDREN_CHILD_GROUP],
 };
 
@@ -529,6 +610,7 @@ const SCROLLED_WINDOW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         VEXPAND_PROPERTY,
     ],
     events: &[],
+    default_child_group_override: None,
     child_groups: &[SCROLLED_WINDOW_CONTENT_CHILD_GROUP],
 };
 
@@ -544,6 +626,7 @@ const FRAME_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         FRAME_LABEL_PROPERTY,
     ],
     events: &[],
+    default_child_group_override: None,
     child_groups: &[FRAME_CHILD_GROUP],
 };
 
@@ -553,6 +636,7 @@ const VIEWPORT_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     root_kind: GtkWidgetRootKind::Embedded,
     properties: &[VISIBLE_PROPERTY, SENSITIVE_PROPERTY, HEXPAND_PROPERTY, VEXPAND_PROPERTY],
     events: &[],
+    default_child_group_override: None,
     child_groups: &[VIEWPORT_CHILD_GROUP],
 };
 
@@ -569,6 +653,7 @@ const LABEL_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         LABEL_LABEL_PROPERTY,
     ],
     events: &[],
+    default_child_group_override: None,
     child_groups: &[],
 };
 
@@ -584,6 +669,7 @@ const BUTTON_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         BUTTON_LABEL_PROPERTY,
     ],
     events: &[BUTTON_CLICK_EVENT],
+    default_child_group_override: None,
     child_groups: &[],
 };
 
@@ -601,6 +687,7 @@ const ENTRY_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         ENTRY_EDITABLE_PROPERTY,
     ],
     events: &[ENTRY_CHANGE_EVENT, ENTRY_ACTIVATE_EVENT],
+    default_child_group_override: None,
     child_groups: &[],
 };
 
@@ -616,6 +703,7 @@ const SWITCH_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SWITCH_ACTIVE_PROPERTY,
     ],
     events: &[SWITCH_TOGGLE_EVENT],
+    default_child_group_override: None,
     child_groups: &[],
 };
 
@@ -650,6 +738,7 @@ const CHECK_BUTTON_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         CHECK_BUTTON_ACTIVE_PROPERTY,
     ],
     events: &[CHECK_BUTTON_TOGGLE_EVENT],
+    default_child_group_override: None,
     child_groups: &[],
 };
 
@@ -684,6 +773,7 @@ const TOGGLE_BUTTON_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         TOGGLE_BUTTON_ACTIVE_PROPERTY,
     ],
     events: &[TOGGLE_BUTTON_TOGGLE_EVENT],
+    default_child_group_override: None,
     child_groups: &[],
 };
 
@@ -718,6 +808,7 @@ const IMAGE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         IMAGE_PIXEL_SIZE_PROPERTY,
     ],
     events: &[],
+    default_child_group_override: None,
     child_groups: &[],
 };
 
@@ -738,6 +829,7 @@ const SPINNER_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SPINNER_SPINNING_PROPERTY,
     ],
     events: &[],
+    default_child_group_override: None,
     child_groups: &[],
 };
 
@@ -765,6 +857,7 @@ const PROGRESS_BAR_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         PROGRESS_BAR_TEXT_PROPERTY,
     ],
     events: &[],
+    default_child_group_override: None,
     child_groups: &[],
 };
 
@@ -807,6 +900,7 @@ const REVEALER_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         REVEALER_TRANSITION_DURATION_PROPERTY,
     ],
     events: &[],
+    default_child_group_override: None,
     child_groups: &[REVEALER_CHILD_GROUP],
 };
 
@@ -828,12 +922,14 @@ const SEPARATOR_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SEPARATOR_ORIENTATION_PROPERTY,
     ],
     events: &[],
+    default_child_group_override: None,
     child_groups: &[],
 };
 
 const GTK_WIDGET_SCHEMAS: &[GtkWidgetSchema] = &[
     WINDOW_SCHEMA,
     HEADER_BAR_SCHEMA,
+    PANED_SCHEMA,
     BOX_SCHEMA,
     SCROLLED_WINDOW_SCHEMA,
     FRAME_SCHEMA,

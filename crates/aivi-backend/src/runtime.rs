@@ -102,6 +102,10 @@ pub enum RuntimeValue {
     Bytes(Box<[u8]>),
     Tuple(Vec<RuntimeValue>),
     List(Vec<RuntimeValue>),
+    // TODO: RuntimeValue map uses Vec<RuntimeMapEntry> with O(n) lookup. BTreeMap requires Ord
+    // on RuntimeValue — blocked on implementing total ordering across all RuntimeValue variants
+    // (including recursive types like Map, Set, Tuple, and Callable). Until total ordering is
+    // defined, Vec with linear scan is the only safe representation.
     Map(Vec<RuntimeMapEntry>),
     Set(Vec<RuntimeValue>),
     Record(Vec<RuntimeRecordField>),

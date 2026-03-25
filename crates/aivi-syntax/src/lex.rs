@@ -3,6 +3,8 @@ use aivi_base::{Diagnostic, DiagnosticCode, SourceFile, Span};
 const UNEXPECTED_CHARACTER: DiagnosticCode = DiagnosticCode::new("syntax", "unexpected-character");
 const UNTERMINATED_STRING: DiagnosticCode = DiagnosticCode::new("syntax", "unterminated-string");
 const UNTERMINATED_REGEX: DiagnosticCode = DiagnosticCode::new("syntax", "unterminated-regex");
+const INVALID_ESCAPE_SEQUENCE: DiagnosticCode =
+    DiagnosticCode::new("syntax", "invalid-escape-sequence");
 
 /// Token kinds required for the Milestone 1 surface grammar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -284,7 +286,8 @@ fn lex_range(source: &SourceFile, range: std::ops::Range<usize>) -> LexedModule 
 
         if bytes[cursor..range.end].starts_with(b"rx\"") {
             let start = cursor;
-            let (end, terminated) = scan_quoted_body(text, bytes, cursor + 2, range.end);
+            let (end, terminated) =
+                scan_quoted_body(text, bytes, cursor + 2, range.end, source, &mut diagnostics);
             cursor = end;
             tokens.push(Token::new(
                 TokenKind::RegexLiteral,
@@ -391,7 +394,8 @@ fn lex_range(source: &SourceFile, range: std::ops::Range<usize>) -> LexedModule 
 
         if character == '"' {
             let start = cursor;
-            let (end, terminated) = scan_quoted_body(text, bytes, cursor, range.end);
+            let (end, terminated) =
+                scan_quoted_body(text, bytes, cursor, range.end, source, &mut diagnostics);
             cursor = end;
             tokens.push(Token::new(
                 TokenKind::StringLiteral,
@@ -528,7 +532,14 @@ fn starts_identifier_continue(text: &str, cursor: usize, end: usize) -> bool {
         .unwrap_or(false)
 }
 
-fn scan_quoted_body(text: &str, bytes: &[u8], start: usize, end: usize) -> (usize, bool) {
+fn scan_quoted_body(
+    text: &str,
+    bytes: &[u8],
+    start: usize,
+    end: usize,
+    source: &SourceFile,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> (usize, bool) {
     let mut cursor = start;
     let mut terminated = false;
 
@@ -544,12 +555,29 @@ fn scan_quoted_body(text: &str, bytes: &[u8], start: usize, end: usize) -> (usiz
             .expect("quoted scan must stay on a UTF-8 boundary");
         match next {
             '\\' => {
+                let escape_start = cursor;
                 cursor += 1;
                 if cursor < end {
                     let escaped = text[cursor..]
                         .chars()
                         .next()
                         .expect("escaped codepoint must stay on a UTF-8 boundary");
+                    match escaped {
+                        'n' | 'r' | 't' | '\\' | '"' | '\'' | '0' => {}
+                        other => {
+                            let escape_end = cursor + escaped.len_utf8();
+                            diagnostics.push(
+                                Diagnostic::error(format!(
+                                    "invalid escape sequence `\\{other}` in string literal"
+                                ))
+                                .with_code(INVALID_ESCAPE_SEQUENCE)
+                                .with_primary_label(
+                                    source.source_span(escape_start..escape_end),
+                                    "this escape sequence is not valid",
+                                ),
+                            );
+                        }
+                    }
                     cursor += escaped.len_utf8();
                 }
             }

@@ -21,7 +21,7 @@ pub async fn completion(
     let cursor = analysis.source.lsp_position_to_offset(LspPosition {
         line: lsp_pos.line,
         character: lsp_pos.character,
-    });
+    })?;
 
     // Walk inward to the tightest symbol at the cursor position.
     let sym = analysis.tightest_symbol_at_offset(cursor)?;

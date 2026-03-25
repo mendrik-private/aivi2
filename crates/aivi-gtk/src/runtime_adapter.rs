@@ -243,6 +243,11 @@ impl<'a> WidgetRuntimeAssemblyBuilder<'a> {
                 graph_builder,
                 errors,
             )),
+            PlanNodeKind::Group(group) => RuntimePlanNodeKind::Group(RuntimeGroupNode {
+                widget: group.widget.clone(),
+                group: group.group.clone(),
+                children: adapt_child_ops(&group.children, plan_to_owner),
+            }),
             PlanNodeKind::Show(show) => RuntimePlanNodeKind::Show(self.adapt_show(
                 plan_id,
                 node,
@@ -306,6 +311,10 @@ impl<'a> WidgetRuntimeAssemblyBuilder<'a> {
                 }
                 PropertyPlan::Setter(setter) => {
                     validate_attribute_site(plan_id, stable_id, &setter.site, errors);
+                    // TODO: Input handles use a global counter. This means widget A's input 0
+                    // and widget B's input 0 have the same numeric ID, which could cause aliasing
+                    // bugs in the executor. Input handles should be scoped per owner.
+                    // See CODE_REVIEW.md §10 (aivi-gtk runtime_adapter.rs Fix #3).
                     let input = graph_builder
                         .add_input(runtime_setter_name(stable_id, setter), Some(owner))
                         .expect("runtime owner handles were validated before setter allocation");
@@ -559,6 +568,7 @@ pub struct RuntimePlanNode {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RuntimePlanNodeKind {
     Widget(RuntimeWidgetNode),
+    Group(RuntimeGroupNode),
     Show(RuntimeShowNode),
     Each(RuntimeEachNode),
     Empty(RuntimeEmptyNode),
@@ -573,6 +583,13 @@ pub struct RuntimeWidgetNode {
     pub widget: NamePath,
     pub properties: Box<[RuntimePropertyBinding]>,
     pub event_hooks: Box<[RuntimeEventBinding]>,
+    pub children: Box<[RuntimeChildOp]>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeGroupNode {
+    pub widget: NamePath,
+    pub group: Name,
     pub children: Box<[RuntimeChildOp]>,
 }
 
@@ -838,6 +855,11 @@ fn push_children(node: &PlanNode, parent: PlanNodeId, stack: &mut Vec<TraversalE
                 push_child(child.child());
             }
         }
+        PlanNodeKind::Group(group) => {
+            for child in group.children.iter().rev().copied() {
+                push_child(child.child());
+            }
+        }
         PlanNodeKind::Show(show) => {
             for child in show.children.iter().rev().copied() {
                 push_child(child.child());
@@ -956,6 +978,7 @@ fn runtime_stable_name(stable_id: StableNodeId) -> String {
 fn runtime_tag_label(tag: PlanNodeTag) -> &'static str {
     match tag {
         PlanNodeTag::Widget => "widget",
+        PlanNodeTag::Group => "group",
         PlanNodeTag::Show => "show",
         PlanNodeTag::Each => "each",
         PlanNodeTag::Empty => "empty",

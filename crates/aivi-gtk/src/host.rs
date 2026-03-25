@@ -14,7 +14,7 @@ use gtk::{
 };
 
 use crate::{
-    GtkBoolPropertySetter, GtkChildMountRoute, GtkConcreteWidgetKind, GtkDefaultChildGroup,
+    GtkBoolPropertySetter, GtkChildGroupDescriptor, GtkChildMountRoute, GtkConcreteWidgetKind,
     GtkEventRoute, GtkEventRouteId, GtkEventSignal, GtkF64PropertySetter, GtkI64PropertySetter,
     GtkPropertyDescriptor, GtkPropertySetter, GtkRuntimeHost, GtkTextOrI64PropertySetter,
     GtkTextPropertySetter, GtkWidgetSchema, RuntimeSetterBinding, StaticPropertyPlan,
@@ -169,31 +169,56 @@ impl<V> GtkConcreteHost<V>
 where
     V: GtkHostValue,
 {
+    fn assert_gtk_main_thread() {
+        debug_assert!(
+            gtk::is_initialized_main_thread(),
+            "GtkConcreteHost methods must be called from the GTK main thread. \
+             GTK is not thread-safe."
+        );
+    }
+
     pub fn set_event_notifier(&mut self, notifier: Option<Rc<dyn Fn()>>) {
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
         self.event_notifier = notifier;
     }
 
     pub fn widget(&self, handle: &GtkConcreteWidget) -> Option<gtk::Widget> {
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
         self.widgets
             .get(&handle.0)
             .map(|mounted| mounted.widget.clone())
     }
 
     pub fn child_handles(&self, handle: &GtkConcreteWidget) -> Option<Vec<GtkConcreteWidget>> {
-        self.widgets
-            .get(&handle.0)
-            .map(|mounted| mounted.children.clone())
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
+        self.widgets.get(&handle.0).map(|mounted| {
+            mounted
+                .schema
+                .child_groups
+                .iter()
+                .flat_map(|group| {
+                    mounted
+                        .child_groups
+                        .get(group.name)
+                        .into_iter()
+                        .flat_map(|children| children.iter().cloned())
+                })
+                .collect()
+        })
     }
 
     pub fn drain_events(&mut self) -> Vec<GtkQueuedEvent<V>> {
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
         self.queued_events.drain()
     }
 
     pub fn drain_window_key_events(&mut self) -> Vec<GtkQueuedWindowKeyEvent> {
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
         self.queued_window_keys.drain()
     }
 
     pub fn present_root_windows(&self) {
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
         for mounted in self.widgets.values() {
             if mounted.schema.is_window_root() && mounted.widget.parent().is_none() {
                 let window = mounted
@@ -284,25 +309,32 @@ where
     fn mounted_snapshot(
         &self,
         handle: &GtkConcreteWidget,
-    ) -> Result<
-        (
-            &'static GtkWidgetSchema,
-            gtk::Widget,
-            Vec<GtkConcreteWidget>,
-        ),
-        GtkConcreteHostError,
-    > {
+    ) -> Result<(&'static GtkWidgetSchema, gtk::Widget), GtkConcreteHostError> {
         let mounted =
             self.widgets
                 .get(&handle.0)
                 .ok_or_else(|| GtkConcreteHostError::UnknownWidget {
                     widget: handle.clone(),
                 })?;
-        Ok((
-            mounted.schema,
-            mounted.widget.clone(),
-            mounted.children.clone(),
-        ))
+        Ok((mounted.schema, mounted.widget.clone()))
+    }
+
+    fn group_children_snapshot(
+        &self,
+        handle: &GtkConcreteWidget,
+        group: &'static GtkChildGroupDescriptor,
+    ) -> Result<Vec<GtkConcreteWidget>, GtkConcreteHostError> {
+        let mounted =
+            self.widgets
+                .get(&handle.0)
+                .ok_or_else(|| GtkConcreteHostError::UnknownWidget {
+                    widget: handle.clone(),
+                })?;
+        Ok(mounted
+            .child_groups
+            .get(group.name)
+            .cloned()
+            .expect("mounted widgets should track all schema child groups"))
     }
 
     fn widget_object(
@@ -317,9 +349,10 @@ where
             })
     }
 
-    fn update_children(
+    fn update_group_children(
         &mut self,
         handle: &GtkConcreteWidget,
+        group: &'static GtkChildGroupDescriptor,
         children: Vec<GtkConcreteWidget>,
     ) -> Result<(), GtkConcreteHostError> {
         let mounted =
@@ -328,7 +361,10 @@ where
                 .ok_or_else(|| GtkConcreteHostError::UnknownWidget {
                     widget: handle.clone(),
                 })?;
-        mounted.children = children;
+        mounted
+            .child_groups
+            .insert(group.name, children)
+            .expect("mounted widgets should track all schema child groups");
         Ok(())
     }
 
@@ -690,21 +726,53 @@ where
         }
     }
 
-    fn child_mount_route(
+    fn repack_header_bar_children(
         &self,
-        parent: &GtkConcreteWidget,
-        schema: &'static GtkWidgetSchema,
-        operation: &'static str,
-    ) -> Result<GtkChildMountRoute, GtkConcreteHostError> {
-        match schema.default_child_group() {
-            GtkDefaultChildGroup::One(group) => Ok(group.mount),
-            GtkDefaultChildGroup::None | GtkDefaultChildGroup::Ambiguous => {
-                Err(GtkConcreteHostError::UnsupportedParentOperation {
-                    parent: parent.clone(),
-                    widget: schema.markup_name.into(),
-                    operation: operation.into(),
-                })
+        parent_widget: &gtk::Widget,
+        route: GtkChildMountRoute,
+        previous: &[gtk::Widget],
+        next: &[gtk::Widget],
+    ) {
+        let header_bar = parent_widget
+            .clone()
+            .downcast::<gtk::HeaderBar>()
+            .expect("header bar widget should downcast");
+        for child in previous {
+            header_bar.remove(child);
+        }
+        for child in next {
+            match route {
+                GtkChildMountRoute::HeaderBarStart => header_bar.pack_start(child),
+                GtkChildMountRoute::HeaderBarEnd => header_bar.pack_end(child),
+                _ => unreachable!("header bar repack requires a header bar sequence route"),
             }
+        }
+    }
+
+    fn replace_sequence_children(
+        &self,
+        parent_widget: &gtk::Widget,
+        route: GtkChildMountRoute,
+        previous: &[gtk::Widget],
+        next: &[gtk::Widget],
+    ) {
+        match route {
+            GtkChildMountRoute::HeaderBarStart | GtkChildMountRoute::HeaderBarEnd => {
+                self.repack_header_bar_children(parent_widget, route, previous, next);
+            }
+            GtkChildMountRoute::BoxChildren => {
+                let box_widget = parent_widget
+                    .clone()
+                    .downcast::<gtk::Box>()
+                    .expect("box widget should downcast");
+                for child in previous {
+                    box_widget.remove(child);
+                }
+                for child in next {
+                    box_widget.append(child);
+                }
+            }
+            _ => unreachable!("replace_sequence_children requires a sequence child group"),
         }
     }
 
@@ -728,6 +796,20 @@ where
                     .downcast::<gtk::HeaderBar>()
                     .expect("header bar widget should downcast")
                     .set_title_widget(child);
+            }
+            GtkChildMountRoute::PanedStart => {
+                parent_widget
+                    .clone()
+                    .downcast::<gtk::Paned>()
+                    .expect("paned widget should downcast")
+                    .set_start_child(child);
+            }
+            GtkChildMountRoute::PanedEnd => {
+                parent_widget
+                    .clone()
+                    .downcast::<gtk::Paned>()
+                    .expect("paned widget should downcast")
+                    .set_end_child(child);
             }
             GtkChildMountRoute::ScrolledWindowContent => {
                 parent_widget
@@ -757,8 +839,10 @@ where
                     .expect("revealer widget should downcast")
                     .set_child(child);
             }
-            GtkChildMountRoute::BoxChildren => {
-                unreachable!("box children are handled by append/reorder APIs")
+            GtkChildMountRoute::HeaderBarStart
+            | GtkChildMountRoute::HeaderBarEnd
+            | GtkChildMountRoute::BoxChildren => {
+                unreachable!("sequence child groups are handled by explicit sequence APIs")
             }
         }
     }
@@ -777,6 +861,7 @@ where
         _instance: &crate::GtkNodeInstance,
         widget: &NamePath,
     ) -> Result<Self::Widget, Self::Error> {
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
         let handle = GtkConcreteWidget(self.next_widget);
         self.next_widget = self
             .next_widget
@@ -788,7 +873,11 @@ where
             MountedWidget {
                 schema,
                 widget,
-                children: Vec::new(),
+                child_groups: schema
+                    .child_groups
+                    .iter()
+                    .map(|group| (group.name, Vec::new()))
+                    .collect(),
             },
         );
         Ok(handle)
@@ -799,7 +888,8 @@ where
         widget: &Self::Widget,
         property: &StaticPropertyPlan,
     ) -> Result<(), Self::Error> {
-        let (schema, widget, _) = self.mounted_snapshot(widget)?;
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
+        let (schema, widget) = self.mounted_snapshot(widget)?;
         let descriptor = self.lookup_property(schema, property.name.text())?;
         match &property.value {
             StaticPropertyValue::ImplicitTrue => {
@@ -823,7 +913,8 @@ where
         binding: &RuntimeSetterBinding,
         value: &V,
     ) -> Result<(), Self::Error> {
-        let (schema, widget, _) = self.mounted_snapshot(widget)?;
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
+        let (schema, widget) = self.mounted_snapshot(widget)?;
         let descriptor = self.lookup_property(schema, binding.name.text())?;
         self.with_blocked_widget_events(&widget, || match descriptor.setter {
             GtkPropertySetter::Bool(_) => {
@@ -887,7 +978,8 @@ where
         widget: &Self::Widget,
         route: &GtkEventRoute,
     ) -> Result<Self::EventHandle, Self::Error> {
-        let (schema, widget, _) = self.mounted_snapshot(widget)?;
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
+        let (schema, widget) = self.mounted_snapshot(widget)?;
         let handle = GtkConcreteEventHandle(self.next_event);
         self.next_event = self
             .next_event
@@ -998,6 +1090,7 @@ where
         _widget: &Self::Widget,
         event: &Self::EventHandle,
     ) -> Result<(), Self::Error> {
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
         let mounted = self.events.remove(&event.0).ok_or_else(|| {
             GtkConcreteHostError::UnknownEventHandle {
                 event: event.clone(),
@@ -1010,10 +1103,13 @@ where
     fn insert_children(
         &mut self,
         parent: &Self::Widget,
+        group: &'static GtkChildGroupDescriptor,
         index: usize,
         children: &[Self::Widget],
     ) -> Result<(), Self::Error> {
-        let (schema, parent_widget, current_children) = self.mounted_snapshot(parent)?;
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
+        let (schema, parent_widget) = self.mounted_snapshot(parent)?;
+        let current_children = self.group_children_snapshot(parent, group)?;
         if index > current_children.len() {
             return Err(GtkConcreteHostError::ChildIndexOutOfRange {
                 parent: parent.clone(),
@@ -1026,13 +1122,8 @@ where
             .map(|child| self.widget_object(child))
             .collect::<Result<Vec<_>, _>>()?;
         let mut next_children = current_children.clone();
-        match self.child_mount_route(parent, schema, "insert_children")? {
-            route @ (GtkChildMountRoute::WindowContent
-            | GtkChildMountRoute::HeaderBarTitleWidget
-            | GtkChildMountRoute::ScrolledWindowContent
-            | GtkChildMountRoute::FrameChild
-            | GtkChildMountRoute::ViewportChild
-            | GtkChildMountRoute::RevealerChild) => {
+        match group.container {
+            crate::GtkChildContainerKind::Single => {
                 if current_children.len() + children.len() > 1 || index != 0 {
                     return Err(GtkConcreteHostError::UnsupportedParentOperation {
                         parent: parent.clone(),
@@ -1047,37 +1138,39 @@ where
                         operation: "insert_children".into(),
                     }
                 })?;
-                self.set_single_child(&parent_widget, route, Some(child));
+                self.set_single_child(&parent_widget, group.mount, Some(child));
                 next_children.splice(index..index, children.iter().cloned());
             }
-            GtkChildMountRoute::BoxChildren => {
-                let box_widget = parent_widget
-                    .clone()
-                    .downcast::<gtk::Box>()
-                    .expect("box widget should downcast");
-                let mut insertion_index = index;
-                for (child_handle, child_widget) in children.iter().zip(child_widgets.iter()) {
-                    let sibling = if insertion_index == 0 {
-                        None
-                    } else {
-                        Some(self.widget_object(&next_children[insertion_index - 1])?)
-                    };
-                    box_widget.insert_child_after(child_widget, sibling.as_ref());
-                    next_children.insert(insertion_index, child_handle.clone());
-                    insertion_index += 1;
-                }
+            crate::GtkChildContainerKind::Sequence => {
+                next_children.splice(index..index, children.iter().cloned());
+                let next_widgets = next_children
+                    .iter()
+                    .map(|child| self.widget_object(child))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.replace_sequence_children(
+                    &parent_widget,
+                    group.mount,
+                    &current_children
+                        .iter()
+                        .map(|child| self.widget_object(child))
+                        .collect::<Result<Vec<_>, _>>()?,
+                    &next_widgets,
+                );
             }
         }
-        self.update_children(parent, next_children)
+        self.update_group_children(parent, group, next_children)
     }
 
     fn remove_children(
         &mut self,
         parent: &Self::Widget,
+        group: &'static GtkChildGroupDescriptor,
         index: usize,
         children: &[Self::Widget],
     ) -> Result<(), Self::Error> {
-        let (schema, parent_widget, current_children) = self.mounted_snapshot(parent)?;
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
+        let (schema, parent_widget) = self.mounted_snapshot(parent)?;
+        let current_children = self.group_children_snapshot(parent, group)?;
         if index + children.len() > current_children.len() {
             return Err(GtkConcreteHostError::ChildIndexOutOfRange {
                 parent: parent.clone(),
@@ -1095,39 +1188,35 @@ where
             .map(|child| self.widget_object(child))
             .collect::<Result<Vec<_>, _>>()?;
         let mut next_children = current_children.clone();
-        match self.child_mount_route(parent, schema, "remove_children")? {
-            route @ (GtkChildMountRoute::WindowContent
-            | GtkChildMountRoute::HeaderBarTitleWidget
-            | GtkChildMountRoute::ScrolledWindowContent
-            | GtkChildMountRoute::FrameChild
-            | GtkChildMountRoute::ViewportChild
-            | GtkChildMountRoute::RevealerChild) => {
-                self.set_single_child(&parent_widget, route, None);
+        match group.container {
+            crate::GtkChildContainerKind::Single => {
+                self.set_single_child(&parent_widget, group.mount, None);
                 next_children.clear();
             }
-            GtkChildMountRoute::BoxChildren => {
-                let box_widget = parent_widget
-                    .clone()
-                    .downcast::<gtk::Box>()
-                    .expect("box widget should downcast");
-                for child in &child_widgets {
-                    box_widget.remove(child);
-                }
+            crate::GtkChildContainerKind::Sequence => {
                 next_children.drain(index..index + children.len());
+                let next_widgets = next_children
+                    .iter()
+                    .map(|child| self.widget_object(child))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.replace_sequence_children(&parent_widget, group.mount, &child_widgets, &next_widgets);
             }
         }
-        self.update_children(parent, next_children)
+        self.update_group_children(parent, group, next_children)
     }
 
     fn move_children(
         &mut self,
         parent: &Self::Widget,
+        group: &'static GtkChildGroupDescriptor,
         from: usize,
         count: usize,
         to: usize,
         children: &[Self::Widget],
     ) -> Result<(), Self::Error> {
-        let (schema, parent_widget, current_children) = self.mounted_snapshot(parent)?;
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
+        let (schema, parent_widget) = self.mounted_snapshot(parent)?;
+        let current_children = self.group_children_snapshot(parent, group)?;
         if from + count > current_children.len()
             || to > current_children.len().saturating_sub(count)
         {
@@ -1142,48 +1231,29 @@ where
                 parent: parent.clone(),
             });
         }
-        match self.child_mount_route(parent, schema, "move_children")? {
-            GtkChildMountRoute::BoxChildren => {
-                let box_widget = parent_widget
-                    .clone()
-                    .downcast::<gtk::Box>()
-                    .expect("box widget should downcast");
-                // Build the desired child order in a single linear pass:
-                // drain the moved slice then splice it at the target position.
-                // `Vec::splice` is O(n) in the children count; iterating over
-                // `moved` for GTK reorder calls is O(count).  The previous
-                // per-element `Vec::insert` loop was O(count × n) (M3).
+        match group.container {
+            crate::GtkChildContainerKind::Sequence => {
                 let mut next_children = current_children.clone();
                 let moved: Vec<_> = next_children.drain(from..from + count).collect();
                 next_children.splice(to..to, moved.iter().cloned());
-                for (offset, child) in moved.iter().enumerate() {
-                    let target_index = to + offset;
-                    let child_widget = self.widget_object(child)?;
-                    let sibling = if target_index == 0 {
-                        None
-                    } else {
-                        Some(self.widget_object(&next_children[target_index - 1])?)
-                    };
-                    box_widget.reorder_child_after(&child_widget, sibling.as_ref());
-                }
-                self.update_children(parent, next_children)
+                let previous_widgets = current_children
+                    .iter()
+                    .map(|child| self.widget_object(child))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let next_widgets = next_children
+                    .iter()
+                    .map(|child| self.widget_object(child))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.replace_sequence_children(
+                    &parent_widget,
+                    group.mount,
+                    &previous_widgets,
+                    &next_widgets,
+                );
+                self.update_group_children(parent, group, next_children)
             }
-            GtkChildMountRoute::WindowContent
-            | GtkChildMountRoute::HeaderBarTitleWidget
-            | GtkChildMountRoute::ScrolledWindowContent
-            | GtkChildMountRoute::FrameChild
-            | GtkChildMountRoute::ViewportChild
-            | GtkChildMountRoute::RevealerChild
-                if from == 0 && count == 1 && to == 0 =>
-            {
-                Ok(())
-            }
-            GtkChildMountRoute::WindowContent
-            | GtkChildMountRoute::HeaderBarTitleWidget
-            | GtkChildMountRoute::ScrolledWindowContent
-            | GtkChildMountRoute::FrameChild
-            | GtkChildMountRoute::ViewportChild
-            | GtkChildMountRoute::RevealerChild => {
+            crate::GtkChildContainerKind::Single if from == 0 && count == 1 && to == 0 => Ok(()),
+            crate::GtkChildContainerKind::Single => {
                 Err(GtkConcreteHostError::UnsupportedParentOperation {
                     parent: parent.clone(),
                     widget: schema.markup_name.into(),
@@ -1198,12 +1268,14 @@ where
         widget: &Self::Widget,
         visible: bool,
     ) -> Result<(), Self::Error> {
-        let (_, widget, _) = self.mounted_snapshot(widget)?;
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
+        let (_, widget) = self.mounted_snapshot(widget)?;
         widget.set_visible(visible);
         Ok(())
     }
 
     fn release_widget(&mut self, widget: Self::Widget) -> Result<(), Self::Error> {
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
         let mounted = self
             .widgets
             .remove(&widget.0)
@@ -1232,7 +1304,7 @@ where
 struct MountedWidget {
     schema: &'static GtkWidgetSchema,
     widget: gtk::Widget,
-    children: Vec<GtkConcreteWidget>,
+    child_groups: BTreeMap<&'static str, Vec<GtkConcreteWidget>>,
 }
 
 struct MountedEvent {

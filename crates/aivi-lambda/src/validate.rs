@@ -46,6 +46,15 @@ impl std::fmt::Display for ValidationErrors {
 
 impl std::error::Error for ValidationErrors {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClosureMetadataField {
+    Owner,
+    Kind,
+    Root,
+    ParameterCount,
+    AmbientSubject,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ValidationError {
     InvalidCoreModule(core::ValidationError),
@@ -92,6 +101,7 @@ pub enum ValidationError {
     },
     ClosureMetadataMismatch {
         closure: ClosureId,
+        field: ClosureMetadataField,
     },
     MissingClosureCapture {
         closure: ClosureId,
@@ -179,9 +189,9 @@ impl std::fmt::Display for ValidationError {
                 "typed-lambda closure {closure} captures binding #{} more than once",
                 binding.as_raw()
             ),
-            Self::ClosureMetadataMismatch { closure } => write!(
+            Self::ClosureMetadataMismatch { closure, field } => write!(
                 f,
-                "typed-lambda closure {closure} does not match the typed-core site that owns it"
+                "typed-lambda closure {closure} does not match the typed-core site that owns it (field: {field:?})"
             ),
             Self::MissingClosureCapture { closure, binding } => write!(
                 f,
@@ -516,14 +526,34 @@ fn validate_expected_closure(
         });
         return;
     };
-    if closure.owner != expected_owner
-        || closure.kind != expected_kind
-        || closure.root != expected_root
-        || closure.parameters != expected_parameters
-        || closure.ambient_subject.as_ref() != expected_subject
-    {
+    if closure.owner != expected_owner {
         errors.push(ValidationError::ClosureMetadataMismatch {
             closure: closure_id,
+            field: ClosureMetadataField::Owner,
+        });
+    }
+    if closure.kind != expected_kind {
+        errors.push(ValidationError::ClosureMetadataMismatch {
+            closure: closure_id,
+            field: ClosureMetadataField::Kind,
+        });
+    }
+    if closure.root != expected_root {
+        errors.push(ValidationError::ClosureMetadataMismatch {
+            closure: closure_id,
+            field: ClosureMetadataField::Root,
+        });
+    }
+    if closure.parameters != expected_parameters {
+        errors.push(ValidationError::ClosureMetadataMismatch {
+            closure: closure_id,
+            field: ClosureMetadataField::ParameterCount,
+        });
+    }
+    if closure.ambient_subject.as_ref() != expected_subject {
+        errors.push(ValidationError::ClosureMetadataMismatch {
+            closure: closure_id,
+            field: ClosureMetadataField::AmbientSubject,
         });
     }
 }
@@ -534,9 +564,17 @@ fn validate_closure(
     closure: &crate::Closure,
     errors: &mut Vec<ValidationError>,
 ) {
-    if !module.items().contains(closure.owner) || !module.exprs().contains(closure.root) {
+    if !module.items().contains(closure.owner) {
         errors.push(ValidationError::ClosureMetadataMismatch {
             closure: closure_id,
+            field: ClosureMetadataField::Owner,
+        });
+        return;
+    }
+    if !module.exprs().contains(closure.root) {
+        errors.push(ValidationError::ClosureMetadataMismatch {
+            closure: closure_id,
+            field: ClosureMetadataField::Root,
         });
         return;
     }

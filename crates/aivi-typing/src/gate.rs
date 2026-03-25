@@ -60,6 +60,11 @@ impl GatePlan {
 pub struct GatePlanner;
 
 impl GatePlanner {
+    // TODO: Nested gate semantics not defined.
+    // A gate predicate that contains another gate expression (e.g., expr |> (inner |> ?|>))
+    // has no plan representation here. The current `GatePlan` is single-stage.
+    // HIR gate_elaboration.rs must detect and block nested gates explicitly.
+    // See CODE_REVIEW.md §5 (gate_elaboration.rs problem #6).
     pub const fn plan(carrier: GateCarrier) -> GatePlan {
         GatePlan::for_carrier(carrier)
     }

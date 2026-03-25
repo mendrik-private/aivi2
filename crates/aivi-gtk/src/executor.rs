@@ -4,9 +4,9 @@ use aivi_runtime::InputHandle;
 
 use crate::{
     GtkBridgeExecutionError, GtkBridgeGraph, GtkBridgeNodeKind, GtkBridgeNodeRef, GtkChildGroup,
-    GtkChildGroupEdit, GtkCollectionKey, GtkEachEdit, GtkRepeatedChildEdit,
-    GtkRepeatedChildIdentity, GtkShowState, PlanNodeTag, RuntimeEventBinding,
-    RuntimePropertyBinding, RuntimeSetterBinding, StaticPropertyPlan,
+    GtkChildGroupDescriptor, GtkChildGroupEdit, GtkCollectionKey, GtkEachEdit,
+    GtkRepeatedChildEdit, GtkRepeatedChildIdentity, GtkShowState, PlanNodeTag,
+    RuntimeEventBinding, RuntimePropertyBinding, RuntimeSetterBinding, StaticPropertyPlan,
 };
 
 /// Execute one lowered GTK bridge graph through an explicit host boundary.
@@ -56,6 +56,7 @@ pub trait GtkRuntimeHost<V> {
     fn insert_children(
         &mut self,
         parent: &Self::Widget,
+        group: &'static GtkChildGroupDescriptor,
         index: usize,
         children: &[Self::Widget],
     ) -> Result<(), Self::Error>;
@@ -63,6 +64,7 @@ pub trait GtkRuntimeHost<V> {
     fn remove_children(
         &mut self,
         parent: &Self::Widget,
+        group: &'static GtkChildGroupDescriptor,
         index: usize,
         children: &[Self::Widget],
     ) -> Result<(), Self::Error>;
@@ -70,6 +72,7 @@ pub trait GtkRuntimeHost<V> {
     fn move_children(
         &mut self,
         parent: &Self::Widget,
+        group: &'static GtkChildGroupDescriptor,
         from: usize,
         count: usize,
         to: usize,
@@ -221,6 +224,9 @@ pub enum GtkExecutorError<E> {
         parent: GtkNodeInstance,
         child: GtkNodeInstance,
     },
+    MissingWidgetMountTarget {
+        instance: GtkNodeInstance,
+    },
     UnknownSetterInput {
         input: InputHandle,
     },
@@ -279,6 +285,10 @@ impl<E: fmt::Display> fmt::Display for GtkExecutorError<E> {
             Self::ChildMissing { parent, child } => write!(
                 f,
                 "GTK executor parent {parent} does not contain child {child}"
+            ),
+            Self::MissingWidgetMountTarget { instance } => write!(
+                f,
+                "GTK executor instance {instance} does not resolve to a GTK widget child group target"
             ),
             Self::UnknownSetterInput { input } => write!(
                 f,
@@ -521,6 +531,9 @@ where
             .map_err(GtkEventDispatchError::Sink)
     }
 
+    // NOTE: No transaction semantics. If this update partially succeeds and then
+    // fails, the executor is left in an inconsistent state with no rollback.
+    // TODO: Wrap multi-step widget updates in a transaction that rolls back on error.
     pub fn update_show(
         &mut self,
         instance: &GtkNodeInstance,
@@ -551,6 +564,9 @@ where
         Ok(())
     }
 
+    // NOTE: No transaction semantics. If this update partially succeeds and then
+    // fails, the executor is left in an inconsistent state with no rollback.
+    // TODO: Wrap multi-step widget updates in a transaction that rolls back on error.
     pub fn update_match(
         &mut self,
         instance: &GtkNodeInstance,
@@ -770,6 +786,9 @@ where
             if child_count == 0 {
                 return Ok(());
             }
+            // TODO: Orphaned children bug — when this Show node unmounts, descendants in
+            // Each-loop groups remain in self.instances. They should be recursively removed.
+            // See CODE_REVIEW.md §10 (aivi-gtk executor.rs Fix #4).
             self.detach_existing_child_block(context, 0, child_count)?;
             return Ok(());
         }
@@ -778,6 +797,9 @@ where
         let Some(index) = self.find_child_index_opt(context, &child)? else {
             return Ok(());
         };
+        // TODO: Orphaned children bug — when this Show node unmounts, descendants in
+        // Each-loop groups remain in self.instances. They should be recursively removed.
+        // See CODE_REVIEW.md §10 (aivi-gtk executor.rs Fix #4).
         self.detach_existing_child_block(context, index, 1)?;
         match &mut self.instance_state_mut(context)?.kind {
             MountedNodeKind::Match(match_state)
@@ -1067,6 +1089,12 @@ where
                     }),
                 })
             }
+            GtkBridgeNodeKind::Group(_) => Ok(MountedNode {
+                parent: None,
+                children: Vec::new(),
+                root_widgets: Vec::new(),
+                kind: MountedNodeKind::Structural,
+            }),
             GtkBridgeNodeKind::Show(_) => Ok(MountedNode {
                 parent: None,
                 children: Vec::new(),
@@ -1144,12 +1172,12 @@ where
         let local_offset =
             self.root_widget_offset(&self.instance_state(parent)?.children, index)?;
         let block_widgets = self.instance_root_widgets(&child)?;
-        if let Some(container) = self.widget_container_ancestor(parent)? {
+        if let Some(target) = self.widget_mount_target(parent)? {
             if !block_widgets.is_empty() {
-                let abs_index = self.absolute_offset_in_ancestor(parent, local_offset)?;
-                let widget = self.widget_handle(&container)?.clone();
+                let abs_index = self.offset_within_mount_target(&target, local_offset)?;
+                let widget = self.widget_handle(&target.widget)?.clone();
                 self.host
-                    .insert_children(&widget, abs_index, &block_widgets)
+                    .insert_children(&widget, target.group, abs_index, &block_widgets)
                     .map_err(GtkExecutorError::Host)?;
             }
         }
@@ -1183,12 +1211,12 @@ where
             (child_count, removed, block_widgets, local_offset)
         };
         debug_assert!(start <= child_count);
-        if let Some(container) = self.widget_container_ancestor(parent)? {
+        if let Some(target) = self.widget_mount_target(parent)? {
             if !block_widgets.is_empty() {
-                let abs_index = self.absolute_offset_in_ancestor(parent, local_offset)?;
-                let widget = self.widget_handle(&container)?.clone();
+                let abs_index = self.offset_within_mount_target(&target, local_offset)?;
+                let widget = self.widget_handle(&target.widget)?.clone();
                 self.host
-                    .remove_children(&widget, abs_index, &block_widgets)
+                    .remove_children(&widget, target.group, abs_index, &block_widgets)
                     .map_err(GtkExecutorError::Host)?;
             }
         }
@@ -1232,14 +1260,15 @@ where
             (child_count, block_widgets, local_from, local_to)
         };
         debug_assert!(start <= child_count);
-        if let Some(container) = self.widget_container_ancestor(parent)? {
+        if let Some(target) = self.widget_mount_target(parent)? {
             if !block_widgets.is_empty() && local_from != local_to {
-                let abs_from = self.absolute_offset_in_ancestor(parent, local_from)?;
-                let abs_to = self.absolute_offset_in_ancestor(parent, local_to)?;
-                let widget = self.widget_handle(&container)?.clone();
+                let abs_from = self.offset_within_mount_target(&target, local_from)?;
+                let abs_to = self.offset_within_mount_target(&target, local_to)?;
+                let widget = self.widget_handle(&target.widget)?.clone();
                 self.host
                     .move_children(
                         &widget,
+                        target.group,
                         abs_from,
                         block_widgets.len(),
                         abs_to,
@@ -1345,44 +1374,58 @@ where
         Ok(())
     }
 
-    fn widget_container_ancestor(
+    fn widget_mount_target(
         &self,
         start: &GtkNodeInstance,
-    ) -> Result<Option<GtkNodeInstance>, GtkExecutorError<H::Error>> {
+    ) -> Result<Option<WidgetMountTarget>, GtkExecutorError<H::Error>> {
         let mut current = Some(start.clone());
+        let mut explicit_group = None;
         while let Some(instance) = current {
             let state = self.instance_state(&instance)?;
-            if matches!(state.kind, MountedNodeKind::Widget(_)) {
-                return Ok(Some(instance));
+            match &self.bridge_node(instance.node)?.kind {
+                GtkBridgeNodeKind::Group(group) => {
+                    explicit_group = Some(group.descriptor);
+                }
+                GtkBridgeNodeKind::Widget(widget) => {
+                    let Some(group) = explicit_group.or(widget.default_group_descriptor) else {
+                        return Err(GtkExecutorError::MissingWidgetMountTarget {
+                            instance: start.clone(),
+                        });
+                    };
+                    return Ok(Some(WidgetMountTarget {
+                        widget: instance,
+                        anchor: start.clone(),
+                        group,
+                    }));
+                }
+                _ => {}
             }
             current = state.parent.clone();
         }
         Ok(None)
     }
 
-    fn absolute_offset_in_ancestor(
+    fn offset_within_mount_target(
         &self,
-        start: &GtkNodeInstance,
+        target: &WidgetMountTarget,
         local_offset: usize,
     ) -> Result<usize, GtkExecutorError<H::Error>> {
-        let mut current = start.clone();
+        let mut current = target.anchor.clone();
         let mut offset = local_offset;
-        loop {
+        while current != target.widget {
             let state = self.instance_state(&current)?;
-            if matches!(state.kind, MountedNodeKind::Widget(_)) {
-                return Ok(offset);
-            }
             let parent = state
                 .parent
                 .clone()
                 .ok_or(GtkExecutorError::MissingInstance {
-                    instance: start.clone(),
+                    instance: target.anchor.clone(),
                 })?;
             let sibling_index = self.find_child_index(&parent, &current)?;
             offset +=
                 self.root_widget_offset(&self.instance_state(&parent)?.children, sibling_index)?;
             current = parent;
         }
+        Ok(offset)
     }
 
     fn next_event_route_id(&mut self) -> GtkEventRouteId {
@@ -1575,6 +1618,13 @@ struct MountedEachItem {
 }
 
 #[derive(Clone, Debug)]
+struct WidgetMountTarget {
+    widget: GtkNodeInstance,
+    anchor: GtkNodeInstance,
+    group: &'static GtkChildGroupDescriptor,
+}
+
+#[derive(Clone, Debug)]
 struct MountFrame {
     instance: GtkNodeInstance,
     phase: MountPhase,
@@ -1638,6 +1688,7 @@ fn collect_setter_sites(graph: &GtkBridgeGraph) -> BTreeMap<InputHandle, GtkSett
 fn fixed_children(kind: &GtkBridgeNodeKind) -> Vec<GtkBridgeNodeRef> {
     match kind {
         GtkBridgeNodeKind::Widget(widget) => widget.default_children.roots.to_vec(),
+        GtkBridgeNodeKind::Group(group) => group.body.roots.to_vec(),
         GtkBridgeNodeKind::Show(_) => Vec::new(),
         GtkBridgeNodeKind::Each(_) => Vec::new(),
         GtkBridgeNodeKind::Empty(empty) => empty.body.roots.to_vec(),

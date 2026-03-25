@@ -46,6 +46,13 @@ pub(crate) fn capture_free_bindings(
             | ExprKind::Decimal(_)
             | ExprKind::BigInt(_)
             | ExprKind::SuffixedInteger(_)
+            // NOTE: If this closure's body contains a reference to the item that owns it
+            // (i.e., the item calls itself), that reference appears here as a captured
+            // variable rather than a self-reference. This means truly self-recursive
+            // closures are not representable: the closure would appear to capture itself,
+            // which is unsound. Self-recursive functions must be expressed as non-closure
+            // items. This limitation is intentional for the current IR design but is not
+            // validated — a self-recursive closure will produce incorrect capture metadata.
             | ExprKind::Reference(Reference::Item(_))
             | ExprKind::Reference(Reference::HirItem(_))
             | ExprKind::Reference(Reference::SumConstructor(_))

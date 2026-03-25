@@ -32,4 +32,4 @@ pub use module::{
     Capture, Closure, ClosureKind, GateStage, Item, Module, NonSourceWakeup, Pipe, PipeRecurrence,
     RecurrenceStage, Stage, StageKind,
 };
-pub use validate::{ValidationError, ValidationErrors, validate_module};
+pub use validate::{ClosureMetadataField, ValidationError, ValidationErrors, validate_module};

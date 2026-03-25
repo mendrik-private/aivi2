@@ -589,7 +589,9 @@ impl<'a> TypeChecker<'a> {
                 operator,
                 left_actual,
                 right_actual,
-            ) {
+            )
+            .unwrap_or(None)
+            {
                 let checkpoint = self.diagnostics.len();
                 let left_ok = self.check_expr(left, env, Some(left_actual), value_stack);
                 let right_ok = self.check_expr(right, env, Some(right_actual), value_stack);
@@ -1806,6 +1808,11 @@ impl<'a> TypeChecker<'a> {
         for constraint in constraints {
             match constraint.class() {
                 ConstraintClass::Eq => {
+                    // TODO: Eq constraints are collected here but never solved.
+                    // Solving Eq constraints requires a proper unification algorithm (Hindley-Milner
+                    // style). This is deferred to a future milestone. Currently, Eq instances are
+                    // resolved structurally by aivi-typing::eq, not via constraint propagation.
+                    // Programs that require Eq constraint inference may produce incorrect results.
                     if let Err(reason) = self.require_eq(constraint.subject(), &mut Vec::new()) {
                         self.diagnostics.push(
                             Diagnostic::error(format!(

@@ -79,7 +79,7 @@ impl Formatter {
             Item::Use(item) => lines.extend(self.format_use_item(item)),
             Item::Export(item) => lines.extend(self.format_export_item(item)),
             Item::Error(_) => {
-                unreachable!("formatter requires a parsed module without error items")
+                lines.push("// <error: could not format this item>".to_owned());
             }
         }
 
@@ -1157,7 +1157,7 @@ impl Formatter {
     fn format_pipe_stage_line(&self, stage: &PipeStage) -> String {
         match &stage.kind {
             PipeStageKind::Case(_) => {
-                unreachable!("case stages are formatted in contiguous groups")
+                todo!("format PipeStageKind::Case as a standalone stage line")
             }
             PipeStageKind::Transform { expr } => self.format_aligned_pipe_stage("|>", expr),
             PipeStageKind::Gate { expr } => self.format_aligned_pipe_stage("?|>", expr),
@@ -1178,7 +1178,7 @@ impl Formatter {
             .iter()
             .map(|stage| match &stage.kind {
                 PipeStageKind::Case(arm) => self.format_pattern_inline(&arm.pattern, 0),
-                _ => unreachable!("case groups only contain case stages"),
+                _ => "// <error: unformattable node>".to_owned(),
             })
             .collect();
         let width = patterns
@@ -1198,7 +1198,7 @@ impl Formatter {
                         self.format_expr_inline(&arm.body, 0)
                     )
                 }
-                _ => unreachable!("case groups only contain case stages"),
+                _ => "// <error: unformattable node>".to_owned(),
             })
             .collect()
     }
@@ -1257,7 +1257,7 @@ impl Formatter {
     }
 
     fn format_markup_open_tag(&self, node: &MarkupNode, self_closing: bool) -> String {
-        let mut rendered = format!("<{}", node.name.text);
+        let mut rendered = format!("<{}", self.format_qualified_name(&node.name));
         for attribute in &node.attributes {
             rendered.push(' ');
             rendered.push_str(&self.format_markup_attribute(attribute));
@@ -1272,7 +1272,7 @@ impl Formatter {
 
     fn format_markup_close_tag(&self, node: &MarkupNode) -> String {
         let name = node.close_name.as_ref().unwrap_or(&node.name);
-        format!("</{}>", name.text)
+        format!("</{}>", self.format_qualified_name(name))
     }
 
     fn format_markup_attribute(&self, attribute: &MarkupAttribute) -> String {

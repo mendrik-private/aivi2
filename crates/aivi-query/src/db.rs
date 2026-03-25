@@ -76,7 +76,6 @@ impl FileDeps {
 
     /// Remove all dependency/reverse-dependency edges for a file that is
     /// being dropped.
-    #[allow(dead_code)]
     fn remove_file(&mut self, id: u32) {
         self.set_deps(id, FxHashSet::default());
         self.rdeps.remove(&id);
@@ -86,18 +85,21 @@ impl FileDeps {
     /// indirectly) import `changed`.  These files must have their HIR caches
     /// invalidated when `changed` is modified.
     fn transitive_rdeps(&self, changed: u32) -> FxHashSet<u32> {
+        let mut result = FxHashSet::default();
+        let mut worklist = vec![changed];
         let mut visited = FxHashSet::default();
-        let mut queue = vec![changed];
-        while let Some(current) = queue.pop() {
-            if let Some(set) = self.rdeps.get(&current) {
-                for &rdep in set {
-                    if visited.insert(rdep) {
-                        queue.push(rdep);
-                    }
+        while let Some(file) = worklist.pop() {
+            if !visited.insert(file) {
+                continue; // already processed — prevents infinite loop on cycles
+            }
+            if let Some(deps) = self.rdeps.get(&file) {
+                for &dep in deps {
+                    result.insert(dep);
+                    worklist.push(dep);
                 }
             }
         }
-        visited
+        result
     }
 }
 
@@ -174,9 +176,13 @@ impl RootDatabase {
             .insert(id, SourceInput::new(file, path.clone(), text, 0));
         state.paths.insert(path, file);
         // A newly discovered file can satisfy previously missing imports or
-        // introduce new competing workspace modules, so all cached HIR results
-        // must be recomputed against the new workspace shape.
-        state.hir.clear();
+        // introduce new competing workspace modules, so all HIR caches for
+        // the new file and its transitive reverse dependents must be invalidated.
+        let affected = state.file_deps.transitive_rdeps(file.id);
+        state.hir.remove(&file.id);
+        for f in &affected {
+            state.hir.remove(f);
+        }
         file
     }
 
@@ -335,6 +341,18 @@ impl RootDatabase {
             },
         );
         Some(computed)
+    }
+
+    /// Remove a file from the database, clearing all its cached state and
+    /// dependency edges.  Callers must ensure no other live `SourceFile`
+    /// handles refer to the removed id after this call.
+    pub fn remove_file(&self, file: SourceFile) {
+        let mut state = self.state.write();
+        state.files.remove(&file.id);
+        state.paths.retain(|_, v| v.id != file.id);
+        state.parsed.remove(&file.id);
+        state.hir.remove(&file.id);
+        state.file_deps.remove_file(file.id);
     }
 
     /// Register the set of files that `importer` directly depends on.

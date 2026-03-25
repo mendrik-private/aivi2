@@ -20,9 +20,11 @@ pub fn change_document(state: &ServerState, uri: &Url, text: String) {
     }
 }
 
-/// Remove a document from tracking (it remains in the DB but we forget the handle).
+/// Remove a document from tracking and from the database.
 pub fn close_document(state: &ServerState, uri: &Url) {
-    state.files.remove(uri);
+    if let Some((_, file)) = state.files.remove(uri) {
+        state.db.remove_file(file);
+    }
 }
 
 fn uri_to_path(uri: &Url) -> PathBuf {

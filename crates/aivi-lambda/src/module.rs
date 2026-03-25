@@ -378,6 +378,17 @@ pub struct Closure {
     pub owner: core::ItemId,
     pub span: SourceSpan,
     pub kind: ClosureKind,
+    /// The implicit subject type for this closure, corresponding to `_` in pipe
+    /// expressions.
+    ///
+    /// When `Some(ty)`, `AmbientSubject` references in the closure body are valid
+    /// and refer to a value of type `ty` provided by the pipe runtime.
+    ///
+    /// When `None`, the closure has no implicit subject. Any `AmbientSubject`
+    /// references in the closure body are invalid and indicate a lowering bug.
+    /// This is currently not validated at construction time — it is the caller's
+    /// responsibility to ensure `AmbientSubject` is not used in closures where
+    /// this field is `None`.
     pub ambient_subject: Option<core::Type>,
     pub parameters: Vec<core::ItemParameter>,
     pub captures: Vec<CaptureId>,

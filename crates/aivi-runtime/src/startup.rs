@@ -28,6 +28,10 @@ pub fn link_backend_runtime(
     core: &core::Module,
     backend: Arc<BackendProgram>,
 ) -> Result<BackendLinkedRuntime, BackendRuntimeLinkErrors> {
+    // Ensure we are running on the GTK main thread.
+    // GTK operations are not thread-safe and must run on the main thread.
+    // TODO: Assert GTK main thread here. Use gtk::is_initialized_main_thread()
+    // once GTK is initialized before this call site.
     let runtime = assembly
         .instantiate_runtime_with_value_store::<RuntimeValue, _>(MovingRuntimeValueStore::default())
         .map_err(|error| {

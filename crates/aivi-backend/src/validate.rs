@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{collections::HashMap, fmt};
 
 use crate::{
     CallingConvention, DecodePlanId, DecodeStepId, EnvSlotId, InlineSubjectId, ItemId,
@@ -236,6 +236,9 @@ pub enum ValidationError {
         expr: KernelExprId,
         expected: LayoutId,
         found: LayoutId,
+    },
+    ItemCyclicDependency {
+        cycle: Vec<ItemId>,
     },
 }
 
@@ -495,6 +498,10 @@ impl fmt::Display for ValidationError {
                 f,
                 "kernel {kernel} expression {expr} expected layout{expected} for its subject, found layout{found}"
             ),
+            Self::ItemCyclicDependency { cycle } => {
+                let ids: Vec<String> = cycle.iter().map(|id| format!("{id}")).collect();
+                write!(f, "circular dependency between items: {}", ids.join(" -> "))
+            }
         }
     }
 }
@@ -725,6 +732,8 @@ pub fn validate_program(program: &Program) -> Result<(), ValidationErrors> {
         validate_kernel(program, kernel_id, kernel, &mut errors);
     }
 
+    validate_no_item_dep_cycles(program, &mut errors);
+
     if errors.is_empty() {
         Ok(())
     } else {
@@ -809,6 +818,10 @@ fn validate_pipeline(
                     stage.result_layout,
                     errors,
                 );
+                // TODO: validate gate predicate layout is Bool — needs layout lookup from kernel context.
+                // GateStage::Ordinary does not carry a separate predicate kernel; the Bool
+                // constraint is enforced by the type system upstream. A dedicated predicate
+                // kernel ID would be required here to check `is_bool_layout` at the backend level.
             }
             StageKind::Gate(GateStage::SignalFilter {
                 payload_layout,
@@ -1428,5 +1441,83 @@ fn push_decode_steps(
 ) {
     for step in steps {
         push_decode_step(decode_id, *step, decode, errors);
+    }
+}
+
+/// Validate that there are no circular dependencies between global items.
+///
+/// A cycle in the item dependency graph (item A transitively depends on itself) means that
+/// runtime evaluation would loop forever. This function builds a dependency map from the
+/// `global_items` lists of all kernels owned by each item, then performs a DFS with
+/// white/gray/black coloring to detect back-edges.
+fn validate_no_item_dep_cycles(program: &Program, errors: &mut Vec<ValidationError>) {
+    // Build item -> deps map: for each item, collect all items referenced in any kernel it owns.
+    let mut deps: HashMap<ItemId, Vec<ItemId>> = HashMap::new();
+    for (item_id, _item) in program.items().iter() {
+        deps.entry(item_id).or_default();
+    }
+    for (_kernel_id, kernel) in program.kernels().iter() {
+        let owner = kernel.origin.item;
+        let entry = deps.entry(owner).or_default();
+        for &dep in &kernel.global_items {
+            if dep != owner && !entry.contains(&dep) {
+                entry.push(dep);
+            }
+        }
+    }
+
+    // DFS with white(0)/gray(1)/black(2) coloring to find cycles.
+    // color: 0 = unvisited, 1 = in stack (gray), 2 = done (black)
+    let mut color: HashMap<ItemId, u8> = HashMap::with_capacity(deps.len());
+    let mut path: Vec<ItemId> = Vec::new();
+
+    let all_items: Vec<ItemId> = deps.keys().copied().collect();
+    'outer: for start in all_items {
+        if *color.get(&start).unwrap_or(&0) == 0 {
+            // Iterative DFS using an explicit stack of (item, dep_index).
+            // We mark a node gray (1) when we first visit it, and black (2) when we finish it.
+            color.insert(start, 1);
+            path.push(start);
+            let mut stack: Vec<(ItemId, usize)> = vec![(start, 0)];
+            loop {
+                let (node, idx) = match stack.last().copied() {
+                    Some(top) => top,
+                    None => break,
+                };
+                let neighbors: Vec<ItemId> = deps
+                    .get(&node)
+                    .cloned()
+                    .unwrap_or_default();
+                if idx < neighbors.len() {
+                    // Advance the index on the stack top before touching stack structure.
+                    stack.last_mut().unwrap().1 += 1;
+                    let neighbor = neighbors[idx];
+                    let neighbor_color = *color.get(&neighbor).unwrap_or(&0);
+                    if neighbor_color == 1 {
+                        // Back-edge found: extract cycle from path.
+                        let cycle_start =
+                            path.iter().position(|&n| n == neighbor).unwrap_or(0);
+                        let mut cycle = path[cycle_start..].to_vec();
+                        cycle.push(neighbor);
+                        errors.push(ValidationError::ItemCyclicDependency { cycle });
+                        // Mark all gray nodes on path as black to avoid duplicate reports.
+                        for &n in &path {
+                            color.insert(n, 2);
+                        }
+                        stack.clear();
+                        path.clear();
+                        continue 'outer;
+                    } else if neighbor_color == 0 {
+                        color.insert(neighbor, 1);
+                        path.push(neighbor);
+                        stack.push((neighbor, 0));
+                    }
+                } else {
+                    color.insert(node, 2);
+                    path.pop();
+                    stack.pop();
+                }
+            }
+        }
     }
 }

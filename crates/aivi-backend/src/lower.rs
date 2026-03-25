@@ -1180,6 +1180,10 @@ impl<'a> ProgramLowerer<'a> {
             }
         }
 
+        // TODO: cycle detection needed — items collected into `globals` here could form a cycle
+        // (e.g. item A depends on B which depends on A). Each kernel collects its own
+        // `global_items` independently; a cross-kernel dependency graph is not assembled here.
+        // See `validate_no_item_dep_cycles()` in validate.rs for the validation-pass check.
         Ok(KernelContract {
             uses_input_subject,
             environment,

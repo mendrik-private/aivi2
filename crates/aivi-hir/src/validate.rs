@@ -105,6 +105,7 @@ impl Validator<'_> {
         self.validate_control_nodes();
         self.validate_clusters();
         self.validate_items();
+        self.validate_signal_cycles();
         self.validate_type_kinds();
         self.validate_instance_items();
         self.validate_source_contract_types();
@@ -311,6 +312,7 @@ impl Validator<'_> {
                             *argument,
                         );
                     }
+                    // TODO: constructor arity validation requires resolved type info — deferred to type checking
                 }
                 PatternKind::UnresolvedName(reference) => {
                     self.check_term_reference(reference);
@@ -924,6 +926,109 @@ impl Validator<'_> {
                             }
                         },
                     );
+                }
+            }
+        }
+    }
+
+    fn validate_signal_cycles(&mut self) {
+        // Collect all signal items and their declared dependency edges.
+        let mut signal_deps: HashMap<ItemId, Vec<ItemId>> = HashMap::new();
+        let mut signal_names: HashMap<ItemId, String> = HashMap::new();
+        for (item_id, item) in self.module.items().iter() {
+            if let Item::Signal(signal) = item {
+                signal_deps.insert(item_id, signal.signal_dependencies.clone());
+                signal_names.insert(item_id, signal.name.text().to_owned());
+            }
+        }
+
+        // DFS cycle detection: for each unvisited signal, walk the dependency
+        // graph and report any back-edge (cycle).
+        let mut visited: HashSet<ItemId> = HashSet::new();
+        let signal_ids: Vec<ItemId> = signal_deps.keys().copied().collect();
+        for start in signal_ids {
+            if visited.contains(&start) {
+                continue;
+            }
+            // path holds the current DFS stack for cycle reconstruction.
+            let mut path: Vec<ItemId> = Vec::new();
+            let mut on_stack: HashSet<ItemId> = HashSet::new();
+            let mut stack: Vec<(ItemId, usize)> = vec![(start, 0)];
+            while !stack.is_empty() {
+                let (node, dep_index) = *stack.last().unwrap();
+                if dep_index == 0 {
+                    // First time visiting this node in this DFS path.
+                    if visited.contains(&node) {
+                        stack.pop();
+                        continue;
+                    }
+                    on_stack.insert(node);
+                    path.push(node);
+                }
+                let deps = signal_deps.get(&node).map(|v| v.as_slice()).unwrap_or(&[]);
+                if dep_index < deps.len() {
+                    let dep = deps[dep_index];
+                    stack.last_mut().unwrap().1 = dep_index + 1;
+                    if on_stack.contains(&dep) {
+                        // Found a cycle — reconstruct the cycle path from the DFS path.
+                        let cycle_start = path
+                            .iter()
+                            .position(|&id| id == dep)
+                            .unwrap_or(0);
+                        let cycle_names: Vec<String> = path[cycle_start..]
+                            .iter()
+                            .map(|id| {
+                                signal_names
+                                    .get(id)
+                                    .cloned()
+                                    .unwrap_or_else(|| "<unknown>".to_owned())
+                            })
+                            .collect();
+                        let cycle_path = format!(
+                            "{} -> {}",
+                            cycle_names.join(" -> "),
+                            cycle_names[0]
+                        );
+                        let offending_name = signal_names
+                            .get(&dep)
+                            .cloned()
+                            .unwrap_or_else(|| "<unknown>".to_owned());
+                        // Report on the span of the signal where the cycle was detected.
+                        let dep_span = self.module.items().get(dep).and_then(|item| {
+                            if let Item::Signal(signal_item) = item {
+                                Some(signal_item.header.span)
+                            } else {
+                                None
+                            }
+                        });
+                        if let Some(span) = dep_span {
+                            self.diagnostics.push(
+                                Diagnostic::error(format!(
+                                    "signal '{offending_name}' has a circular dependency: {cycle_path}"
+                                ))
+                                .with_code(code("circular-signal-dependency"))
+                                .with_label(DiagnosticLabel::primary(
+                                    span,
+                                    "this signal is part of a circular dependency chain",
+                                )),
+                            );
+                        }
+                        // Skip further DFS from this branch to avoid duplicate reports.
+                        stack.pop();
+                        path.pop();
+                        on_stack.remove(&node);
+                        visited.insert(node);
+                        continue;
+                    }
+                    if !visited.contains(&dep) && signal_deps.contains_key(&dep) {
+                        stack.push((dep, 0));
+                    }
+                } else {
+                    // All dependencies of this node have been explored.
+                    stack.pop();
+                    path.pop();
+                    on_stack.remove(&node);
+                    visited.insert(node);
                 }
             }
         }
@@ -10705,6 +10810,8 @@ impl<'a> GateTypeContext<'a> {
                 info.merge(right_info);
                 info.ty = if let (Some(left), Some(right)) = (left_ty.as_ref(), right_ty.as_ref()) {
                     select_domain_binary_operator(self.module, self, operator, left, right)
+                        .ok()
+                        .flatten()
                         .map(|matched| matched.result_type)
                 } else {
                     None

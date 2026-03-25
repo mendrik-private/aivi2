@@ -597,6 +597,12 @@ impl EqDeriver {
             match frame {
                 Frame::Enter(ty) => match types.node(ty) {
                     TypeNode::Primitive(scalar) => match scalar {
+                        // Bytes does not derive Eq in AIVI v1.
+                        // Rationale: equality on byte sequences has ambiguous semantics (value equality
+                        // vs. identity equality) and byte-level Eq is not part of the v1 language spec.
+                        // If byte equality is needed in a future version, this restriction must be
+                        // lifted and an Eq instance defined for the Bytes primitive.
+                        // See: AIVI_RFC.md §types / Bytes
                         PrimitiveType::Bytes => {
                             return Err(EqDerivationError {
                                 head,

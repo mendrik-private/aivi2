@@ -176,6 +176,7 @@ impl Diagnostic {
                         .end()
                         .as_usize()
                         .saturating_sub(label_span.start().as_usize());
+                    // TODO: caret width uses byte positions; multi-byte UTF-8 characters (emoji, CJK) produce misaligned carets. Use unicode-width crate for correct column width.
                     let caret_width = if label_span.is_empty() {
                         1
                     } else {
@@ -203,7 +204,7 @@ impl Diagnostic {
                 let location = file.line_column(label.span.span().start());
                 let _ = writeln!(
                     rendered,
-                    "  = {}:{}:{}: {}",
+                    "  note: {}:{}:{}: {}",
                     file.path().display(),
                     location.line,
                     location.column,

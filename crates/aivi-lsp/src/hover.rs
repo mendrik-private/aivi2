@@ -16,7 +16,7 @@ pub async fn hover(params: HoverParams, state: Arc<ServerState>) -> Option<Hover
     let cursor = analysis.source.lsp_position_to_offset(LspPosition {
         line: lsp_pos.line,
         character: lsp_pos.character,
-    });
+    })?;
     let sym = analysis.tightest_symbol_at_offset(cursor)?;
 
     let kind_label = match sym.kind {

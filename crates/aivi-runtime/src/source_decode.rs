@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use aivi_backend::{RuntimeFloat, RuntimeRecordField, RuntimeSumValue, RuntimeValue};
+use aivi_backend::{
+    RuntimeBigInt, RuntimeDecimal, RuntimeFloat, RuntimeRecordField, RuntimeSumValue, RuntimeValue,
+};
 use aivi_hir::{DecodeProgramStep, SourceDecodeProgram};
 use aivi_typing::DecodeExtraFieldPolicy;
 use serde_json::Value as JsonValue;
@@ -71,22 +73,10 @@ pub fn validate_supported_program(
                 | aivi_typing::PrimitiveType::Bool
                 | aivi_typing::PrimitiveType::Int
                 | aivi_typing::PrimitiveType::Float
+                | aivi_typing::PrimitiveType::Decimal
+                | aivi_typing::PrimitiveType::BigInt
+                | aivi_typing::PrimitiveType::Bytes
                 | aivi_typing::PrimitiveType::Text => {}
-                aivi_typing::PrimitiveType::Decimal => {
-                    return Err(SourceDecodeProgramSupportError::UnsupportedScalar {
-                        scalar: "Decimal",
-                    });
-                }
-                aivi_typing::PrimitiveType::BigInt => {
-                    return Err(SourceDecodeProgramSupportError::UnsupportedScalar {
-                        scalar: "BigInt",
-                    });
-                }
-                aivi_typing::PrimitiveType::Bytes => {
-                    return Err(SourceDecodeProgramSupportError::UnsupportedScalar {
-                        scalar: "Bytes",
-                    });
-                }
             },
             DecodeProgramStep::Domain { surface, .. } => {
                 return Err(SourceDecodeProgramSupportError::UnsupportedDomain {
@@ -113,6 +103,18 @@ pub enum SourceDecodeError {
     UnsupportedNumber {
         value: Box<str>,
     },
+    InvalidScalarLiteral {
+        scalar: &'static str,
+        value: Box<str>,
+    },
+    InvalidBytesElementKind {
+        index: usize,
+        found: &'static str,
+    },
+    InvalidByteValue {
+        index: usize,
+        value: i64,
+    },
     TypeMismatch {
         expected: &'static str,
         found: &'static str,
@@ -138,6 +140,9 @@ pub enum SourceDecodeError {
         variant: Box<str>,
     },
     UnsupportedProgram(SourceDecodeProgramSupportError),
+    MaxDepthExceeded {
+        max: u32,
+    },
 }
 
 impl std::fmt::Display for SourceDecodeError {
@@ -148,6 +153,24 @@ impl std::fmt::Display for SourceDecodeError {
                 write!(
                     f,
                     "source payload number `{value}` does not fit the current Int/Float runtime slice"
+                )
+            }
+            Self::InvalidScalarLiteral { scalar, value } => {
+                write!(
+                    f,
+                    "source payload `{value}` is not a valid {scalar} literal for the current runtime decode contract"
+                )
+            }
+            Self::InvalidBytesElementKind { index, found } => {
+                write!(
+                    f,
+                    "source payload byte array element {index} must be an integer octet, found {found}"
+                )
+            }
+            Self::InvalidByteValue { index, value } => {
+                write!(
+                    f,
+                    "source payload byte array element {index} must be between 0 and 255, found {value}"
                 )
             }
             Self::TypeMismatch { expected, found } => {
@@ -192,6 +215,12 @@ impl std::fmt::Display for SourceDecodeError {
                 )
             }
             Self::UnsupportedProgram(error) => error.fmt(f),
+            Self::MaxDepthExceeded { max } => {
+                write!(
+                    f,
+                    "source payload decode depth exceeded the maximum of {max} levels"
+                )
+            }
         }
     }
 }
@@ -207,12 +236,14 @@ pub fn parse_json_text(text: &str) -> Result<ExternalSourceValue, SourceDecodeEr
     external_from_json(value)
 }
 
+const MAX_DECODE_DEPTH: u32 = 512;
+
 pub fn decode_external(
     program: &SourceDecodeProgram,
     value: &ExternalSourceValue,
 ) -> Result<RuntimeValue, SourceDecodeError> {
     validate_supported_program(program).map_err(SourceDecodeError::UnsupportedProgram)?;
-    decode_step(program, program.root_step(), value)
+    decode_step(program, program.root_step(), value, 0)
 }
 
 pub fn encode_runtime_json(value: &RuntimeValue) -> Result<String, Box<str>> {
@@ -227,8 +258,20 @@ fn external_from_json(value: JsonValue) -> Result<ExternalSourceValue, SourceDec
         JsonValue::Number(number) => {
             if let Some(value) = number.as_i64() {
                 Ok(ExternalSourceValue::Int(value))
-            } else if let Some(value) = number.as_f64().and_then(RuntimeFloat::new) {
-                Ok(ExternalSourceValue::Float(value))
+            } else if let Some(f) = number.as_f64() {
+                // PRECISION NOTE: JSON numbers beyond 2^53 (9007199254740992) cannot be
+                // represented exactly as f64. Values exceeding this are silently truncated.
+                // Use BigInt literals in AIVI source code for large integers.
+                if f.abs() > 9_007_199_254_740_992.0_f64 {
+                    return Err(SourceDecodeError::UnsupportedNumber {
+                        value: number.to_string().into_boxed_str(),
+                    });
+                }
+                RuntimeFloat::new(f)
+                    .map(ExternalSourceValue::Float)
+                    .ok_or_else(|| SourceDecodeError::UnsupportedNumber {
+                        value: number.to_string().into_boxed_str(),
+                    })
             } else {
                 Err(SourceDecodeError::UnsupportedNumber {
                     value: number.to_string().into_boxed_str(),
@@ -273,12 +316,8 @@ fn runtime_to_json(value: &RuntimeValue) -> Result<JsonValue, Box<str>> {
         RuntimeValue::Float(value) => serde_json::Number::from_f64(value.to_f64())
             .map(JsonValue::Number)
             .ok_or_else(|| "runtime JSON encoding rejected a non-finite Float value".into()),
-        RuntimeValue::Decimal(_) => {
-            Err("runtime JSON encoding does not support Decimal values yet".into())
-        }
-        RuntimeValue::BigInt(_) => {
-            Err("runtime JSON encoding does not support BigInt values yet".into())
-        }
+        RuntimeValue::Decimal(value) => Ok(JsonValue::String(value.to_string())),
+        RuntimeValue::BigInt(value) => Ok(JsonValue::String(value.to_string())),
         RuntimeValue::Text(value) => Ok(JsonValue::String(value.as_ref().to_owned())),
         RuntimeValue::Tuple(values) | RuntimeValue::List(values) | RuntimeValue::Set(values) => {
             values
@@ -348,9 +387,11 @@ fn runtime_to_json(value: &RuntimeValue) -> Result<JsonValue, Box<str>> {
         RuntimeValue::Callable(_) => {
             Err("runtime JSON encoding does not support callable values".into())
         }
-        RuntimeValue::Bytes(_) => {
-            Err("runtime JSON encoding does not support Bytes values yet".into())
-        }
+        RuntimeValue::Bytes(bytes) => Ok(JsonValue::Array(
+            bytes.iter()
+                .map(|byte| JsonValue::Number(serde_json::Number::from(*byte)))
+                .collect(),
+        )),
         RuntimeValue::Task(_) => Err("runtime JSON encoding does not support Task values".into()),
     }
 }
@@ -364,11 +405,56 @@ fn tagged_runtime_json(tag: &str, payload: Option<&RuntimeValue>) -> Result<Json
     Ok(JsonValue::Object(object))
 }
 
+fn decode_literal_scalar<T>(
+    value: &ExternalSourceValue,
+    scalar: &'static str,
+    expected: &'static str,
+    parse: impl FnOnce(&str) -> Option<T>,
+    build: impl FnOnce(T) -> RuntimeValue,
+) -> Result<RuntimeValue, SourceDecodeError> {
+    let ExternalSourceValue::Text(value) = value else {
+        return Err(type_mismatch(expected, value));
+    };
+    parse(value.as_ref())
+        .map(build)
+        .ok_or_else(|| SourceDecodeError::InvalidScalarLiteral {
+            scalar,
+            value: value.clone(),
+        })
+}
+
+fn decode_bytes_scalar(value: &ExternalSourceValue) -> Result<RuntimeValue, SourceDecodeError> {
+    let ExternalSourceValue::List(values) = value else {
+        return Err(type_mismatch("byte array", value));
+    };
+    let mut bytes = Vec::with_capacity(values.len());
+    for (index, value) in values.iter().enumerate() {
+        let ExternalSourceValue::Int(value) = value else {
+            return Err(SourceDecodeError::InvalidBytesElementKind {
+                index,
+                found: value_kind(value),
+            });
+        };
+        let Ok(byte) = u8::try_from(*value) else {
+            return Err(SourceDecodeError::InvalidByteValue {
+                index,
+                value: *value,
+            });
+        };
+        bytes.push(byte);
+    }
+    Ok(RuntimeValue::Bytes(bytes.into_boxed_slice()))
+}
+
 fn decode_step(
     program: &SourceDecodeProgram,
     step: &DecodeProgramStep,
     value: &ExternalSourceValue,
+    depth: u32,
 ) -> Result<RuntimeValue, SourceDecodeError> {
+    if depth >= MAX_DECODE_DEPTH {
+        return Err(SourceDecodeError::MaxDepthExceeded { max: MAX_DECODE_DEPTH });
+    }
     match step {
         DecodeProgramStep::Scalar { scalar } => match scalar {
             aivi_typing::PrimitiveType::Unit => match value {
@@ -395,15 +481,21 @@ fn decode_step(
                 ExternalSourceValue::Text(value) => Ok(RuntimeValue::Text(value.clone())),
                 other => Err(type_mismatch("text", other)),
             },
-            aivi_typing::PrimitiveType::Decimal => Err(SourceDecodeError::UnsupportedProgram(
-                SourceDecodeProgramSupportError::UnsupportedScalar { scalar: "Decimal" },
-            )),
-            aivi_typing::PrimitiveType::BigInt => Err(SourceDecodeError::UnsupportedProgram(
-                SourceDecodeProgramSupportError::UnsupportedScalar { scalar: "BigInt" },
-            )),
-            aivi_typing::PrimitiveType::Bytes => Err(SourceDecodeError::UnsupportedProgram(
-                SourceDecodeProgramSupportError::UnsupportedScalar { scalar: "Bytes" },
-            )),
+            aivi_typing::PrimitiveType::Decimal => decode_literal_scalar(
+                value,
+                "Decimal",
+                "decimal literal string",
+                RuntimeDecimal::parse_literal,
+                RuntimeValue::Decimal,
+            ),
+            aivi_typing::PrimitiveType::BigInt => decode_literal_scalar(
+                value,
+                "BigInt",
+                "bigint literal string",
+                RuntimeBigInt::parse_literal,
+                RuntimeValue::BigInt,
+            ),
+            aivi_typing::PrimitiveType::Bytes => decode_bytes_scalar(value),
         },
         DecodeProgramStep::Tuple { elements } => {
             let ExternalSourceValue::List(values) = value else {
@@ -418,7 +510,7 @@ fn decode_step(
             let decoded = elements
                 .iter()
                 .zip(values.iter())
-                .map(|(element, value)| decode_step(program, program.step(*element), value))
+                .map(|(element, value)| decode_step(program, program.step(*element), value, depth + 1))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(RuntimeValue::Tuple(decoded))
         }
@@ -438,7 +530,7 @@ fn decode_step(
                 };
                 decoded.push(RuntimeRecordField {
                     label: field.name.as_str().into(),
-                    value: decode_step(program, program.step(field.step), value)?,
+                    value: decode_step(program, program.step(field.step), value, depth + 1)?,
                 });
             }
             if *extra_fields == DecodeExtraFieldPolicy::Reject {
@@ -493,7 +585,7 @@ fn decode_step(
                     });
                 }
                 (Some(payload_step), Some(payload)) => {
-                    let decoded = decode_step(program, program.step(payload_step), payload)?;
+                    let decoded = decode_step(program, program.step(payload_step), payload, depth + 1)?;
                     match program.step(payload_step) {
                         DecodeProgramStep::Tuple { .. } => match decoded {
                             RuntimeValue::Tuple(fields) => fields,
@@ -521,7 +613,7 @@ fn decode_step(
             };
             let decoded = values
                 .iter()
-                .map(|value| decode_step(program, program.step(*element), value))
+                .map(|value| decode_step(program, program.step(*element), value, depth + 1))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(RuntimeValue::List(decoded))
         }
@@ -544,6 +636,7 @@ fn decode_step(
                     program,
                     program.step(*element),
                     payload,
+                    depth + 1,
                 )?)))
             }
             other => Err(type_mismatch("option variant", other)),
@@ -562,6 +655,7 @@ fn decode_step(
                     program,
                     program.step(*value_step),
                     payload,
+                    depth + 1,
                 )?)))
             }
             ExternalSourceValue::Variant { name, payload } if name.as_ref() == "Err" => {
@@ -574,6 +668,7 @@ fn decode_step(
                     program,
                     program.step(*error),
                     payload,
+                    depth + 1,
                 )?)))
             }
             other => Err(type_mismatch("result variant", other)),
@@ -592,6 +687,7 @@ fn decode_step(
                     program,
                     program.step(*value_step),
                     payload,
+                    depth + 1,
                 )?)))
             }
             ExternalSourceValue::Variant { name, payload } if name.as_ref() == "Invalid" => {
@@ -604,6 +700,7 @@ fn decode_step(
                     program,
                     program.step(*error),
                     payload,
+                    depth + 1,
                 )?)))
             }
             other => Err(type_mismatch("validation variant", other)),
@@ -634,11 +731,11 @@ fn value_kind(value: &ExternalSourceValue) -> &'static str {
 #[cfg(test)]
 mod tests {
     use aivi_base::SourceDatabase;
-    use aivi_backend::{RuntimeFloat, RuntimeValue};
+    use aivi_backend::{RuntimeBigInt, RuntimeDecimal, RuntimeFloat, RuntimeValue};
     use aivi_hir::{Item, SourceDecodeProgramOutcome, generate_source_decode_programs, lower_module};
     use aivi_syntax::parse_module;
 
-    use super::{decode_external, encode_runtime_json, parse_json_text};
+    use super::{SourceDecodeError, decode_external, encode_runtime_json, parse_json_text};
 
     fn lower_text(path: &str, text: &str) -> aivi_hir::LoweringResult {
         let mut sources = SourceDatabase::new();
@@ -720,5 +817,134 @@ sig temperature : Signal Float
         ))
         .expect("float runtime values should encode into JSON");
         assert_eq!(encoded, "1.5");
+    }
+
+    #[test]
+    fn decodes_decimal_and_bigint_source_payloads_from_json_strings() {
+        let decimal_program = decode_program(
+            "source-decode-decimal.aivi",
+            r#"
+@source custom.feed
+sig price : Signal Decimal
+"#,
+            "price",
+        );
+        let decimal = decode_external(
+            &decimal_program,
+            &parse_json_text(r#""19.25d""#).expect("decimal JSON string should parse"),
+        )
+        .expect("decimal JSON string should decode");
+        assert_eq!(
+            decimal,
+            RuntimeValue::Decimal(
+                RuntimeDecimal::parse_literal("19.25d")
+                    .expect("decimal literal should parse into the runtime type"),
+            )
+        );
+
+        let bigint_program = decode_program(
+            "source-decode-bigint.aivi",
+            r#"
+@source custom.feed
+sig count : Signal BigInt
+"#,
+            "count",
+        );
+        let bigint = decode_external(
+            &bigint_program,
+            &parse_json_text(r#""123456789012345678901234567890n""#)
+                .expect("bigint JSON string should parse"),
+        )
+        .expect("bigint JSON string should decode");
+        assert_eq!(
+            bigint,
+            RuntimeValue::BigInt(
+                RuntimeBigInt::parse_literal("123456789012345678901234567890n")
+                    .expect("bigint literal should parse into the runtime type"),
+            )
+        );
+    }
+
+    #[test]
+    fn decodes_bytes_source_payloads_from_json_octet_arrays() {
+        let program = decode_program(
+            "source-decode-bytes.aivi",
+            r#"
+@source custom.feed
+sig bytes : Signal Bytes
+"#,
+            "bytes",
+        );
+
+        let decoded = decode_external(
+            &program,
+            &parse_json_text("[104, 105, 33]").expect("byte-array JSON should parse"),
+        )
+        .expect("byte-array JSON should decode");
+        assert_eq!(decoded, RuntimeValue::Bytes(Box::new([104, 105, 33])));
+    }
+
+    #[test]
+    fn encodes_decimal_bigint_and_bytes_runtime_values_into_json() {
+        let decimal = encode_runtime_json(&RuntimeValue::Decimal(
+            RuntimeDecimal::parse_literal("19.25d").expect("decimal literal should parse"),
+        ))
+        .expect("decimal runtime values should encode into JSON");
+        assert_eq!(decimal, r#""19.25d""#);
+
+        let bigint = encode_runtime_json(&RuntimeValue::BigInt(
+            RuntimeBigInt::parse_literal("123n").expect("bigint literal should parse"),
+        ))
+        .expect("bigint runtime values should encode into JSON");
+        assert_eq!(bigint, r#""123n""#);
+
+        let bytes = encode_runtime_json(&RuntimeValue::Bytes(Box::new([104, 105, 33])))
+            .expect("byte runtime values should encode into JSON");
+        assert_eq!(bytes, "[104,105,33]");
+    }
+
+    #[test]
+    fn rejects_invalid_decimal_and_bytes_source_payload_shapes_explicitly() {
+        let decimal_program = decode_program(
+            "source-decode-invalid-decimal.aivi",
+            r#"
+@source custom.feed
+sig price : Signal Decimal
+"#,
+            "price",
+        );
+        let decimal_error = decode_external(
+            &decimal_program,
+            &parse_json_text(r#""19.25""#).expect("invalid decimal JSON string should still parse"),
+        )
+        .expect_err("missing decimal suffix should be rejected explicitly");
+        assert_eq!(
+            decimal_error,
+            SourceDecodeError::InvalidScalarLiteral {
+                scalar: "Decimal",
+                value: "19.25".into(),
+            }
+        );
+
+        let bytes_program = decode_program(
+            "source-decode-invalid-bytes.aivi",
+            r#"
+@source custom.feed
+sig bytes : Signal Bytes
+"#,
+            "bytes",
+        );
+        let bytes_error = decode_external(
+            &bytes_program,
+            &parse_json_text("[256]").expect("out-of-range byte array should still parse"),
+        )
+        .expect_err("byte values above 255 should be rejected explicitly");
+        assert_eq!(
+            bytes_error,
+            SourceDecodeError::InvalidByteValue {
+                index: 0,
+                value: 256,
+            }
+        );
     }
 }

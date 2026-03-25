@@ -602,6 +602,10 @@ fn elaborate_gate_stage(
         }
         GateResultKind::PreservedSignalSubject => {
             let result_type = typing.apply_gate_plan(plan, subject);
+            // INVARIANT: gate predicates must evaluate to Bool.
+            // TODO: validate that the runtime expression tree produces a Bool-typed result.
+            // Currently this is assumed but not checked — a non-Bool predicate will cause
+            // incorrect codegen in aivi-backend/validate.rs.
             let runtime_predicate =
                 match lower_gate_pipe_body_runtime_expr(module, predicate, env, subject, typing) {
                     Ok(predicate) => predicate,
@@ -1360,7 +1364,9 @@ fn check_domain_operator_and_schedule(
     let (Some(left_ty), Some(right_ty)) = (left_ty.as_ref(), right_ty.as_ref()) else {
         return Ok(false);
     };
-    let Some(matched) = select_domain_binary_operator(module, typing, operator, left_ty, right_ty)
+    let Some(matched) =
+        select_domain_binary_operator(module, typing, operator, left_ty, right_ty)
+            .unwrap_or(None)
     else {
         return Ok(false);
     };

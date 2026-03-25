@@ -164,6 +164,12 @@ pub enum LoweringError {
         reason: &'static str,
     },
     Validation(ValidationError),
+    /// An internal arena lookup failed after an allocation or mapping that was
+    /// expected to guarantee the ID is valid.  This indicates a lowering bug
+    /// rather than a user-visible error.
+    UnexpectedElaborationState {
+        description: &'static str,
+    },
 }
 
 impl std::fmt::Display for LoweringError {
@@ -283,6 +289,10 @@ impl std::fmt::Display for LoweringError {
                 "typed-core lowering cannot synthesize imported binding `{name}` ({import}): {reason}"
             ),
             Self::Validation(error) => write!(f, "typed-core validation failed: {error}"),
+            Self::UnexpectedElaborationState { description } => write!(
+                f,
+                "typed-core lowering encountered an unexpected elaboration state: {description}"
+            ),
         }
     }
 }
@@ -1064,17 +1074,20 @@ impl<'a> ModuleLowerer<'a> {
                     })?;
                 stage_ids.push(stage_id);
             }
-            self.module
-                .pipes_mut()
-                .get_mut(pipe_id)
-                .expect("pipe just allocated")
-                .stages = stage_ids;
-            self.module
-                .items_mut()
-                .get_mut(builder.owner)
-                .expect("pipe owner should exist")
-                .pipes
-                .push(pipe_id);
+            let Some(pipe) = self.module.pipes_mut().get_mut(pipe_id) else {
+                self.errors.push(LoweringError::UnexpectedElaborationState {
+                    description: "pipe arena lookup failed immediately after allocation",
+                });
+                continue;
+            };
+            pipe.stages = stage_ids;
+            let Some(item) = self.module.items_mut().get_mut(builder.owner) else {
+                self.errors.push(LoweringError::UnexpectedElaborationState {
+                    description: "pipe owner item not found in module during pipe finalization",
+                });
+                continue;
+            };
+            item.pipes.push(pipe_id);
         }
         Ok(())
     }
@@ -1249,11 +1262,13 @@ impl<'a> ModuleLowerer<'a> {
                         LoweringErrors::new(vec![arena_overflow("decode-programs", overflow)])
                     })?;
             self.decode_by_owner.insert(owner, decode_id);
-            self.module
-                .sources_mut()
-                .get_mut(source_id)
-                .expect("source should exist when attaching decode")
-                .decode = Some(decode_id);
+            let Some(source) = self.module.sources_mut().get_mut(source_id) else {
+                self.errors.push(LoweringError::UnexpectedElaborationState {
+                    description: "source arena lookup failed when attaching decode program",
+                });
+                continue;
+            };
+            source.decode = Some(decode_id);
         }
         Ok(())
     }

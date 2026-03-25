@@ -377,14 +377,26 @@ impl<'a> Lowerer<'a> {
     }
 
     fn store_item(&mut self, item: Item, ambient: bool) {
+        let span = item.span();
         if ambient {
-            self.module
-                .push_ambient_item(item)
-                .expect("HIR ambient item arena should not overflow during lowering");
-        } else {
-            self.module
-                .push_item(item)
-                .expect("HIR item arena should not overflow during lowering");
+            if self.module.push_ambient_item(item).is_err() {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "compiler limit: arena overflow — module is too large to compile",
+                    )
+                    .with_code(code("arena-overflow"))
+                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
+                );
+                return;
+            }
+        } else if self.module.push_item(item).is_err() {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    "compiler limit: arena overflow — module is too large to compile",
+                )
+                .with_code(code("arena-overflow"))
+                .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
+            );
         }
     }
 
@@ -443,9 +455,16 @@ impl<'a> Lowerer<'a> {
 
     fn lower_value_item(&mut self, item: &syn::NamedItem) -> ValueItem {
         if !item.type_parameters.is_empty() {
-            self.emit_error(
-                item.base.span,
-                "generic `val` declarations are not preserved in Milestone 2 HIR yet",
+            let type_param_span = item
+                .type_parameters
+                .first()
+                .unwrap()
+                .span
+                .join(item.type_parameters.last().unwrap().span)
+                .unwrap_or(item.base.span);
+            self.emit_warning(
+                type_param_span,
+                "generic value declarations are not yet supported and will be ignored",
                 code("unsupported-generic-value"),
             );
         }
@@ -477,9 +496,16 @@ impl<'a> Lowerer<'a> {
 
     fn lower_function_item(&mut self, item: &syn::NamedItem) -> FunctionItem {
         if !item.type_parameters.is_empty() {
-            self.emit_error(
-                item.base.span,
-                "generic `fun` declarations are not preserved in Milestone 2 HIR yet",
+            let type_param_span = item
+                .type_parameters
+                .first()
+                .unwrap()
+                .span
+                .join(item.type_parameters.last().unwrap().span)
+                .unwrap_or(item.base.span);
+            self.emit_warning(
+                type_param_span,
+                "generic function declarations are not yet supported and will be ignored",
                 code("unsupported-generic-function"),
             );
         }
@@ -525,9 +551,16 @@ impl<'a> Lowerer<'a> {
 
     fn lower_signal_item(&mut self, item: &syn::NamedItem) -> SignalItem {
         if !item.type_parameters.is_empty() {
-            self.emit_error(
-                item.base.span,
-                "generic `sig` declarations are not preserved in Milestone 2 HIR yet",
+            let type_param_span = item
+                .type_parameters
+                .first()
+                .unwrap()
+                .span
+                .join(item.type_parameters.last().unwrap().span)
+                .unwrap_or(item.base.span);
+            self.emit_warning(
+                type_param_span,
+                "generic signal declarations are not yet supported and will be ignored",
                 code("unsupported-generic-signal"),
             );
         }
@@ -2507,28 +2540,32 @@ impl<'a> Lowerer<'a> {
         node: &syn::MarkupNode,
         placement: MarkupPlacement,
     ) -> LoweredMarkup {
-        match node.name.text.as_str() {
-            "show" => {
+        let tag_name = match node.name.segments.as_slice() {
+            [segment] => Some(segment.text.as_str()),
+            _ => None,
+        };
+        match tag_name {
+            Some("show") => {
                 let control = ControlNode::Show(self.lower_show_control(node));
                 LoweredMarkup::Renderable(self.wrap_control(control))
             }
-            "each" => {
+            Some("each") => {
                 let control = ControlNode::Each(self.lower_each_control(node));
                 LoweredMarkup::Renderable(self.wrap_control(control))
             }
-            "match" => {
+            Some("match") => {
                 let control = ControlNode::Match(self.lower_match_control(node));
                 LoweredMarkup::Renderable(self.wrap_control(control))
             }
-            "fragment" => {
+            Some("fragment") => {
                 let control = ControlNode::Fragment(self.lower_fragment_control(node));
                 LoweredMarkup::Renderable(self.wrap_control(control))
             }
-            "with" => {
+            Some("with") => {
                 let control = ControlNode::With(self.lower_with_control(node));
                 LoweredMarkup::Renderable(self.wrap_control(control))
             }
-            "empty" => {
+            Some("empty") => {
                 let control = ControlNode::Empty(self.lower_empty_control(node));
                 let control = self.alloc_control(control);
                 match placement {
@@ -2540,7 +2577,7 @@ impl<'a> Lowerer<'a> {
                     )),
                 }
             }
-            "case" => {
+            Some("case") => {
                 let control = ControlNode::Case(self.lower_case_control(node));
                 let control = self.alloc_control(control);
                 match placement {
@@ -2590,11 +2627,22 @@ impl<'a> Lowerer<'a> {
                 self.renderable_markup(lowered, child.span, "ordinary markup element")
             })
             .collect();
-        let name = self.make_path(&[self.make_name(&node.name.text, node.name.span)]);
-        let close_name = node
-            .close_name
-            .as_ref()
-            .map(|close_name| self.make_path(&[self.make_name(&close_name.text, close_name.span)]));
+        let name_segments = node
+            .name
+            .segments
+            .iter()
+            .map(|segment| self.make_name(&segment.text, segment.span))
+            .collect::<Vec<_>>();
+        let name = self.make_path(&name_segments);
+        let close_name = node.close_name.as_ref().map(|close_name| {
+            self.make_path(
+                &close_name
+                    .segments
+                    .iter()
+                    .map(|segment| self.make_name(&segment.text, segment.span))
+                    .collect::<Vec<_>>(),
+            )
+        });
         self.alloc_markup_node(MarkupNode {
             span: node.span,
             kind: MarkupNodeKind::Element(MarkupElement {
@@ -3947,6 +3995,18 @@ impl<'a> Lowerer<'a> {
             .expect("resolved item id should still exist") = resolved;
     }
 
+    /// Computes signal dependency metadata by walking expression trees.
+    ///
+    /// # Architecture Note
+    /// This is a semantic analysis pass currently embedded in the structural lowering
+    /// phase. It should be extracted into a dedicated elaboration pass that runs
+    /// after HIR validation is complete, when all names are resolved and signal
+    /// items are fully validated. Running it here means it operates on partially-
+    /// resolved HIR, which makes dependency tracking overapproximate (both branches
+    /// of an `if` expression are always marked as dependencies regardless of
+    /// which branch is actually reachable).
+    ///
+    /// TODO: Move to `elaborate_signal_deps()` elaboration pass.
     fn populate_signal_metadata(&mut self, namespaces: &Namespaces) {
         let item_ids = self
             .module
@@ -5434,40 +5494,119 @@ impl<'a> Lowerer<'a> {
         );
     }
 
+    fn emit_warning(
+        &mut self,
+        span: SourceSpan,
+        message: impl Into<String>,
+        warning_code: DiagnosticCode,
+    ) {
+        self.diagnostics.push(
+            Diagnostic::warning(message)
+                .with_code(warning_code)
+                .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
+        );
+    }
+
     fn alloc_expr(&mut self, expr: Expr) -> ExprId {
-        self.module
-            .alloc_expr(expr)
-            .expect("HIR expr arena should not overflow during lowering")
+        let span = expr.span;
+        match self.module.alloc_expr(expr) {
+            Ok(id) => id,
+            Err(_) => {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "compiler limit: arena overflow — module is too large to compile",
+                    )
+                    .with_code(code("arena-overflow"))
+                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
+                );
+                ExprId::from_raw(0)
+            }
+        }
     }
 
     fn alloc_pattern(&mut self, pattern: Pattern) -> PatternId {
-        self.module
-            .alloc_pattern(pattern)
-            .expect("HIR pattern arena should not overflow during lowering")
+        let span = pattern.span;
+        match self.module.alloc_pattern(pattern) {
+            Ok(id) => id,
+            Err(_) => {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "compiler limit: arena overflow — module is too large to compile",
+                    )
+                    .with_code(code("arena-overflow"))
+                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
+                );
+                PatternId::from_raw(0)
+            }
+        }
     }
 
     fn alloc_type(&mut self, ty: TypeNode) -> TypeId {
-        self.module
-            .alloc_type(ty)
-            .expect("HIR type arena should not overflow during lowering")
+        let span = ty.span;
+        match self.module.alloc_type(ty) {
+            Ok(id) => id,
+            Err(_) => {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "compiler limit: arena overflow — module is too large to compile",
+                    )
+                    .with_code(code("arena-overflow"))
+                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
+                );
+                TypeId::from_raw(0)
+            }
+        }
     }
 
     fn alloc_decorator(&mut self, decorator: Decorator) -> DecoratorId {
-        self.module
-            .alloc_decorator(decorator)
-            .expect("HIR decorator arena should not overflow during lowering")
+        let span = decorator.span;
+        match self.module.alloc_decorator(decorator) {
+            Ok(id) => id,
+            Err(_) => {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "compiler limit: arena overflow — module is too large to compile",
+                    )
+                    .with_code(code("arena-overflow"))
+                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
+                );
+                DecoratorId::from_raw(0)
+            }
+        }
     }
 
     fn alloc_markup_node(&mut self, node: MarkupNode) -> MarkupNodeId {
-        self.module
-            .alloc_markup_node(node)
-            .expect("HIR markup arena should not overflow during lowering")
+        let span = node.span;
+        match self.module.alloc_markup_node(node) {
+            Ok(id) => id,
+            Err(_) => {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "compiler limit: arena overflow — module is too large to compile",
+                    )
+                    .with_code(code("arena-overflow"))
+                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
+                );
+                MarkupNodeId::from_raw(0)
+            }
+        }
     }
 
     fn alloc_control(&mut self, control: ControlNode) -> ControlNodeId {
-        self.module
-            .alloc_control_node(control)
-            .expect("HIR control arena should not overflow during lowering")
+        let span = control.span();
+        match self.module.alloc_control_node(control) {
+            Ok(id) => id,
+            Err(_) => {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "compiler limit: arena overflow — module is too large to compile",
+                    )
+                    .with_code(code("arena-overflow"))
+                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
+                );
+                ControlNodeId::from_raw(0)
+            }
+        }
     }
 
     fn wrap_control(&mut self, control: ControlNode) -> MarkupNodeId {
@@ -5480,27 +5619,71 @@ impl<'a> Lowerer<'a> {
     }
 
     fn alloc_cluster(&mut self, cluster: ApplicativeCluster) -> crate::ClusterId {
-        self.module
-            .alloc_cluster(cluster)
-            .expect("HIR cluster arena should not overflow during lowering")
+        let span = cluster.span;
+        match self.module.alloc_cluster(cluster) {
+            Ok(id) => id,
+            Err(_) => {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "compiler limit: arena overflow — module is too large to compile",
+                    )
+                    .with_code(code("arena-overflow"))
+                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
+                );
+                crate::ClusterId::from_raw(0)
+            }
+        }
     }
 
     fn alloc_binding(&mut self, binding: Binding) -> BindingId {
-        self.module
-            .alloc_binding(binding)
-            .expect("HIR binding arena should not overflow during lowering")
+        let span = binding.span;
+        match self.module.alloc_binding(binding) {
+            Ok(id) => id,
+            Err(_) => {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "compiler limit: arena overflow — module is too large to compile",
+                    )
+                    .with_code(code("arena-overflow"))
+                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
+                );
+                BindingId::from_raw(0)
+            }
+        }
     }
 
     fn alloc_type_parameter(&mut self, parameter: TypeParameter) -> TypeParameterId {
-        self.module
-            .alloc_type_parameter(parameter)
-            .expect("HIR type parameter arena should not overflow during lowering")
+        let span = parameter.span;
+        match self.module.alloc_type_parameter(parameter) {
+            Ok(id) => id,
+            Err(_) => {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "compiler limit: arena overflow — module is too large to compile",
+                    )
+                    .with_code(code("arena-overflow"))
+                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
+                );
+                TypeParameterId::from_raw(0)
+            }
+        }
     }
 
     fn alloc_import(&mut self, import: ImportBinding) -> ImportId {
-        self.module
-            .alloc_import(import)
-            .expect("HIR import arena should not overflow during lowering")
+        let span = import.span;
+        match self.module.alloc_import(import) {
+            Ok(id) => id,
+            Err(_) => {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "compiler limit: arena overflow — module is too large to compile",
+                    )
+                    .with_code(code("arena-overflow"))
+                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
+                );
+                ImportId::from_raw(0)
+            }
+        }
     }
 }
 

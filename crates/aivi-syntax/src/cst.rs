@@ -414,10 +414,10 @@ pub struct MarkupAttribute {
 /// Markup/widget node skeleton preserved by the syntax layer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MarkupNode {
-    pub name: Identifier,
+    pub name: QualifiedName,
     pub attributes: Vec<MarkupAttribute>,
     pub children: Vec<MarkupNode>,
-    pub close_name: Option<Identifier>,
+    pub close_name: Option<QualifiedName>,
     pub self_closing: bool,
     pub span: SourceSpan,
 }

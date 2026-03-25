@@ -126,6 +126,10 @@ impl SourceSpan {
         self.span
     }
 
+    /// Merge two source spans into a single span covering both.
+    ///
+    /// Returns `None` if the spans belong to different files. This is intentional;
+    /// callers needing cross-file spans should handle `None` explicitly.
     pub fn join(self, other: Self) -> Option<Self> {
         (self.file == other.file).then_some(Self::new(self.file, self.span.join(other.span)))
     }
@@ -270,8 +274,14 @@ impl SourceFile {
     }
 
     /// Convert an LSP position (0-based, UTF-16 character offset) to a byte offset.
-    pub fn lsp_position_to_offset(&self, pos: LspPosition) -> ByteIndex {
-        let line_idx = (pos.line as usize).min(self.line_starts.len().saturating_sub(1));
+    ///
+    /// Returns `None` if `pos.line` is out of range, or if `pos.character` exceeds
+    /// the number of UTF-16 code units on the specified line.
+    pub fn lsp_position_to_offset(&self, pos: LspPosition) -> Option<ByteIndex> {
+        let line_idx = pos.line as usize;
+        if line_idx >= self.line_starts.len() {
+            return None;
+        }
         let line_start = self.line_starts[line_idx].as_usize();
         let line_end = self
             .line_starts
@@ -280,8 +290,8 @@ impl SourceFile {
             .unwrap_or_else(|| ByteIndex::new(self.text.len() as u32))
             .as_usize();
         let line_text = &self.text[line_start..line_end];
-        let byte_offset = utf16_to_byte_offset(line_text, pos.character as usize);
-        ByteIndex::new((line_start + byte_offset) as u32)
+        let byte_offset = utf16_to_byte_offset(line_text, pos.character as usize)?;
+        Some(ByteIndex::new((line_start + byte_offset) as u32))
     }
 
     /// Convert a span to an LSP range.
@@ -357,21 +367,27 @@ fn utf16_len(s: &str) -> usize {
 }
 
 /// Convert a UTF-16 code unit offset within a line to a byte offset.
-fn utf16_to_byte_offset(line: &str, utf16_chars: usize) -> usize {
+///
+/// Returns `None` if `utf16_chars` exceeds the number of UTF-16 code units in the line.
+fn utf16_to_byte_offset(line: &str, utf16_chars: usize) -> Option<usize> {
     let mut remaining = utf16_chars;
     let mut byte_offset = 0;
     for c in line.chars() {
         if remaining == 0 {
-            break;
+            return Some(byte_offset);
         }
         let width = if (c as u32) > 0xFFFF { 2 } else { 1 };
         if remaining < width {
-            break;
+            return None;
         }
         remaining -= width;
         byte_offset += c.len_utf8();
     }
-    byte_offset
+    if remaining == 0 {
+        Some(byte_offset)
+    } else {
+        None
+    }
 }
 
 fn compute_line_starts(text: &str) -> Arc<[ByteIndex]> {
@@ -391,6 +407,7 @@ fn trim_line_end(text: &str, start: usize, end: usize) -> usize {
     if trimmed > start && bytes[trimmed - 1] == b'\n' {
         trimmed -= 1;
     }
+    // Removes \r from \r\n sequences and also handles lone \r (old Mac line endings).
     if trimmed > start && bytes[trimmed - 1] == b'\r' {
         trimmed -= 1;
     }

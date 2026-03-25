@@ -189,6 +189,16 @@ pub enum SchedulerAccessError {
     OwnerInactive { owner: OwnerHandle },
 }
 
+/// # Thread Safety
+///
+/// `Scheduler` is NOT thread-safe. The internal queue (`self.queue`) is a
+/// plain `VecDeque` with no synchronization. Worker threads publish via
+/// `mpsc::Sender<SchedulerMessage>` (which IS thread-safe), but the scheduler
+/// itself MUST be driven from a single thread (the GTK main thread).
+///
+/// Do NOT call `tick()` or queue-mutation methods from multiple threads.
+/// The `WorkerPublicationSender` returned by `worker_sender()` is safe to
+/// clone and use from any thread.
 pub struct Scheduler<V, S = InlineCommittedValueStore<V>>
 where
     S: CommittedValueStore<V>,

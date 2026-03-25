@@ -124,9 +124,15 @@ fn run_fmt(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String>
 }
 
 fn take_path(mut args: impl Iterator<Item = OsString>) -> Result<PathBuf, String> {
-    args.next()
+    let path = args
+        .next()
         .map(PathBuf::from)
-        .ok_or_else(|| "expected a path argument".to_owned())
+        .ok_or_else(|| "expected a path argument".to_owned())?;
+    if !path.exists() {
+        eprintln!("error: file not found: {}", path.display());
+        std::process::exit(2);
+    }
+    Ok(path)
 }
 
 fn run_compile(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
@@ -134,6 +140,10 @@ fn run_compile(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Str
         .next()
         .map(PathBuf::from)
         .ok_or_else(|| "expected a path argument after `compile`".to_owned())?;
+    if !path.exists() {
+        eprintln!("error: file not found: {}", path.display());
+        std::process::exit(2);
+    }
     let mut output = None;
 
     while let Some(argument) = args.next() {
@@ -162,6 +172,10 @@ fn run_build(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Strin
         .next()
         .map(PathBuf::from)
         .ok_or_else(|| "expected a path argument after `build`".to_owned())?;
+    if !path.exists() {
+        eprintln!("error: file not found: {}", path.display());
+        std::process::exit(2);
+    }
     let mut output = None;
     let mut requested_view = None;
 
@@ -198,6 +212,13 @@ fn run_build(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Strin
 
     let output = output
         .ok_or_else(|| "expected `-o`/`--output <directory>` for `build`".to_owned())?;
+    if let Some(view) = &requested_view {
+        let segments: Vec<&str> = view.split('.').collect();
+        if let Err(e) = validate_module_path(&segments) {
+            eprintln!("error: {e}");
+            std::process::exit(2);
+        }
+    }
     build_markup_bundle(&path, &output, requested_view.as_deref())
 }
 
@@ -206,6 +227,10 @@ fn run_markup(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Stri
         .next()
         .map(PathBuf::from)
         .ok_or_else(|| "expected a path argument after `run`".to_owned())?;
+    if !path.exists() {
+        eprintln!("error: file not found: {}", path.display());
+        std::process::exit(2);
+    }
     let mut requested_view = None;
 
     while let Some(argument) = args.next() {
@@ -228,7 +253,23 @@ fn run_markup(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Stri
         ));
     }
 
+    if let Some(view) = &requested_view {
+        let segments: Vec<&str> = view.split('.').collect();
+        if let Err(e) = validate_module_path(&segments) {
+            eprintln!("error: {e}");
+            std::process::exit(2);
+        }
+    }
     run_markup_file(&path, requested_view.as_deref())
+}
+
+fn validate_module_path(path: &[&str]) -> Result<(), String> {
+    for segment in path {
+        if *segment == ".." || *segment == "." || segment.contains('/') || segment.contains('\\') {
+            return Err(format!("invalid module path segment: '{}'", segment));
+        }
+    }
+    Ok(())
 }
 
 fn load_source(path: &Path) -> Result<(SourceDatabase, FileId), String> {
@@ -2625,6 +2666,26 @@ fn build_markup_bundle(
         "build packages the current AIVI runtime, bundled stdlib, and reachable workspace sources into a runnable bundle directory."
     );
     Ok(ExitCode::SUCCESS)
+}
+
+#[allow(dead_code)]
+struct TempFile(std::path::PathBuf);
+
+#[allow(dead_code)]
+impl TempFile {
+    fn new(path: impl Into<std::path::PathBuf>) -> Self {
+        Self(path.into())
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 fn write_run_bundle(

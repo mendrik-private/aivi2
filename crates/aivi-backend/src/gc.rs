@@ -76,6 +76,24 @@ impl RuntimeGcHandle {
 /// values. Each live scheduler slot holds one stable root handle; collections clone reachable
 /// values into a fresh space and rewrite root slots, proving relocation without yet widening
 /// evaluator-temporary or codegen stack-map contracts.
+///
+/// # Thread Safety
+///
+/// `MovingRuntimeValueStore` is NOT thread-safe. All methods MUST be called
+/// from a single thread. There are no internal synchronization primitives.
+///
+/// Specifically:
+/// - `root_slot_mut()` has no locking — concurrent calls corrupt slot state
+/// - `collect()` relocates values without write barriers — concurrent reads
+///   of from-space values during collection will see stale data
+/// - `allocate()` is not atomic
+///
+/// The scheduler in `aivi-runtime` must ensure that GC operations are
+/// serialized with respect to all value reads and writes.
+// NOT Send — MovingRuntimeValueStore must not be transferred across thread boundaries.
+// NOT Sync — MovingRuntimeValueStore must not be shared across thread boundaries.
+// impl !Send for MovingRuntimeValueStore {}
+// impl !Sync for MovingRuntimeValueStore {}
 #[derive(Default)]
 pub struct MovingRuntimeValueStore {
     from_space: RuntimeGcSpace,

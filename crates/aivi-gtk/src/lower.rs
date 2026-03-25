@@ -12,7 +12,7 @@ use crate::plan::{
     SetterTeardown, SetterUpdateStrategy, ShowMountPolicy, ShowNode, StableNodeId,
     StaticPropertyPlan, StaticPropertyValue, WidgetNode, WidgetPlan, WithNode,
 };
-use crate::schema::lookup_widget_event;
+use crate::schema::{lookup_widget_event, lookup_widget_schema};
 
 /// Lowering options for the first GTK bridge slice.
 ///
@@ -78,6 +78,10 @@ pub enum LoweringError {
         branch: ControlNodeId,
     },
     InvalidPlan(crate::plan::PlanValidationError),
+    UnknownWidget {
+        name: String,
+        span: aivi_base::SourceSpan,
+    },
 }
 
 impl fmt::Display for LoweringError {
@@ -108,6 +112,9 @@ impl fmt::Display for LoweringError {
                 "lowered parent {parent:?} references control branch {branch:?} that was not lowered"
             ),
             Self::InvalidPlan(error) => write!(f, "lowered widget plan is invalid: {error}"),
+            Self::UnknownWidget { name, .. } => {
+                write!(f, "widget `{name}` is not known to the GTK schema registry")
+            }
         }
     }
 }
@@ -352,6 +359,13 @@ impl<'module> Lowering<'module> {
         element: &aivi_hir::MarkupElement,
     ) -> Result<PlanNodeId, LoweringError> {
         let stable_id = StableNodeId::Markup(id);
+        let widget_name_str = crate::schema::widget_leaf_name(&element.name).to_string();
+        if lookup_widget_schema(&element.name).is_none() {
+            return Err(LoweringError::UnknownWidget {
+                name: widget_name_str,
+                span,
+            });
+        }
         let children = self.child_ops_from_markup(stable_id, &element.children)?;
         let (properties, event_hooks) =
             self.lower_attributes(stable_id, &element.name, &element.attributes)?;

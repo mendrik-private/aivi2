@@ -12,13 +12,21 @@ pub(crate) struct DomainBinaryOperatorMatch {
     pub(crate) result_type: GateType,
 }
 
+/// Errors that can arise when selecting a domain binary operator.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum DomainOperatorBlocker {
+    /// Both the left and right operand types define the operator, making
+    /// selection ambiguous.
+    AmbiguousMatch,
+}
+
 pub(crate) fn select_domain_binary_operator(
     module: &Module,
     typing: &mut GateTypeContext<'_>,
     operator: BinaryOperator,
     left: &GateType,
     right: &GateType,
-) -> Option<DomainBinaryOperatorMatch> {
+) -> Result<Option<DomainBinaryOperatorMatch>, DomainOperatorBlocker> {
     if !matches!(
         operator,
         BinaryOperator::Add
@@ -29,7 +37,7 @@ pub(crate) fn select_domain_binary_operator(
             | BinaryOperator::GreaterThan
             | BinaryOperator::LessThan
     ) {
-        return None;
+        return Ok(None);
     }
     let mut matches = Vec::new();
     if let Some(result) = match_domain_binary_operator(module, typing, left, left, right, operator)
@@ -43,11 +51,11 @@ pub(crate) fn select_domain_binary_operator(
             matches.push(result);
         }
     }
-    (matches.len() == 1).then(|| {
-        matches
-            .pop()
-            .expect("exactly one domain operator match should be present")
-    })
+    match matches.len() {
+        0 => Ok(None),
+        1 => Ok(matches.pop()),
+        _ => Err(DomainOperatorBlocker::AmbiguousMatch),
+    }
 }
 
 fn match_domain_binary_operator(
@@ -188,6 +196,7 @@ mod tests {
             .ty
             .expect("right operand should infer");
         select_domain_binary_operator(module, &mut typing, operator, &left_ty, &right_ty)
+            .expect("ambiguous domain operator: both left and right operand types define this operator")
             .expect("expected domain operator match")
     }
 

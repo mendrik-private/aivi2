@@ -33,10 +33,17 @@ impl Backend {
 
     async fn publish_diagnostics_for_uri(&self, uri: tower_lsp::lsp_types::Url) {
         let maybe_file = self.state.files.get(&uri).map(|file| *file);
-        let Some(file) = maybe_file else { return };
+        let Some(file) = maybe_file else {
+            tracing::error!(
+                "Failed to publish diagnostics for {}: file not tracked in server state",
+                uri
+            );
+            return;
+        };
 
         let lsp_diags = crate::diagnostics::collect_lsp_diagnostics(&self.state.db, file, &uri);
-        self.client.publish_diagnostics(uri, lsp_diags, None).await;
+        self.client.publish_diagnostics(uri.clone(), lsp_diags, None).await;
+        tracing::debug!("Published diagnostics for {}", uri);
     }
 }
 

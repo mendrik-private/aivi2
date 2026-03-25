@@ -248,6 +248,11 @@ pub enum DecodePathSegment {
 pub struct DecodePlanner;
 
 impl DecodePlanner {
+    // SAFETY NOTE: This planner assumes the type graph is acyclic.
+    // If the type store ever supports recursive (mu) types, this function will
+    // infinite-loop. When recursive type support is added, a visited-set must
+    // be threaded through the traversal to detect and break cycles.
+    // See CODE_REVIEW.md §3 (decode.rs problem #9).
     pub fn plan(
         types: &TypeStore,
         subject: TypeId,

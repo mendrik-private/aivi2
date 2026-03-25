@@ -372,7 +372,7 @@ impl RecurrenceWakeupPlanner {
         ))
     }
 
-    pub const fn plan_source(
+    pub fn plan_source(
         context: SourceRecurrenceWakeupContext,
     ) -> Result<RecurrenceWakeupPlan, RecurrenceWakeupError> {
         if let Some(cause) = provider_intrinsic_wakeup_cause(context.provider()) {
@@ -407,6 +407,9 @@ impl RecurrenceWakeupPlanner {
                 },
             ));
         }
+        // NOTE: We detect that reactive inputs exist but do not record WHICH fields
+        // are reactive. Runtime phases must re-examine the source to determine
+        // wakeup granularity. This is an intentional approximation for v1.
         if context.has_reactive_inputs() {
             return Ok(RecurrenceWakeupPlan::from_evidence(
                 RecurrenceWakeupEvidence::BuiltinSource {
@@ -449,11 +452,17 @@ pub const fn builtin_source_option_wakeup_cause(
     }
 }
 
-const fn provider_intrinsic_wakeup_cause(
+fn provider_intrinsic_wakeup_cause(
     provider: BuiltinSourceProvider,
 ) -> Option<BuiltinSourceWakeupCause> {
     match provider.contract().intrinsic_wakeup() {
         Some(SourceContractIntrinsicWakeup::Timer) => Some(BuiltinSourceWakeupCause::ProviderTimer),
+        // NOTE: Information loss — ProviderDefinedTrigger is an opaque category.
+        // The recurrence planner records THAT the source uses a provider-defined trigger
+        // but does NOT record WHAT that trigger is. Runtime elaboration phases must
+        // re-query the source contract to understand the trigger semantics.
+        // This means the recurrence plan partially undoes the work of source contract
+        // resolution. A future refactor should carry explicit trigger metadata here.
         Some(SourceContractIntrinsicWakeup::ProviderDefinedTrigger) => {
             Some(BuiltinSourceWakeupCause::ProviderDefinedTrigger)
         }
