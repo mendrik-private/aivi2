@@ -12,7 +12,11 @@ use std::{
     rc::Rc,
     sync::{Arc, mpsc as sync_mpsc},
     thread::{self, JoinHandle},
+    time::{SystemTime, UNIX_EPOCH},
 };
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 use aivi_backend::{
     DetachedRuntimeValue, ItemId as BackendItemId, KernelEvaluator, Program as BackendProgram,
@@ -74,6 +78,10 @@ fn run() -> Result<ExitCode, String> {
 
     if first == OsString::from("compile") {
         return run_compile(args);
+    }
+
+    if first == OsString::from("build") {
+        return run_build(args);
     }
 
     if first == OsString::from("run") {
@@ -147,6 +155,50 @@ fn run_compile(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Str
     }
 
     compile_file(&path, output.as_deref())
+}
+
+fn run_build(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
+    let path = args
+        .next()
+        .map(PathBuf::from)
+        .ok_or_else(|| "expected a path argument after `build`".to_owned())?;
+    let mut output = None;
+    let mut requested_view = None;
+
+    while let Some(argument) = args.next() {
+        if argument == OsString::from("-o") || argument == OsString::from("--output") {
+            let bundle = args
+                .next()
+                .map(PathBuf::from)
+                .ok_or_else(|| "expected a path after `-o`/`--output` for `build`".to_owned())?;
+            if output.replace(bundle).is_some() {
+                return Err("build output path was provided more than once".to_owned());
+            }
+            continue;
+        }
+
+        if argument == OsString::from("--view") {
+            let view = args
+                .next()
+                .ok_or_else(|| "expected a value name after `--view` for `build`".to_owned())?;
+            if requested_view
+                .replace(view.to_string_lossy().into_owned())
+                .is_some()
+            {
+                return Err("build view name was provided more than once".to_owned());
+            }
+            continue;
+        }
+
+        return Err(format!(
+            "unexpected build argument `{}`",
+            argument.to_string_lossy()
+        ));
+    }
+
+    let output = output
+        .ok_or_else(|| "expected `-o`/`--output <directory>` for `build`".to_owned())?;
+    build_markup_bundle(&path, &output, requested_view.as_deref())
 }
 
 fn run_markup(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
@@ -286,6 +338,12 @@ impl GtkHostValue for RunHostValue {
 
     fn from_bool(v: bool) -> Self {
         Self(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Bool(v)))
+    }
+
+    fn from_text(v: &str) -> Self {
+        Self(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Text(
+            v.to_owned().into(),
+        )))
     }
 
     fn as_bool(&self) -> Option<bool> {
@@ -1138,6 +1196,7 @@ fn signal_accepts_event_payload(
     match payload {
         GtkConcreteEventPayload::Unit => type_is_builtin(module, payload_ty, BuiltinType::Unit),
         GtkConcreteEventPayload::Bool => type_is_builtin(module, payload_ty, BuiltinType::Bool),
+        GtkConcreteEventPayload::Text => type_is_builtin(module, payload_ty, BuiltinType::Text),
     }
 }
 
@@ -2513,6 +2572,301 @@ fn compile_file(path: &Path, output: Option<&Path>) -> Result<ExitCode, String> 
     Ok(ExitCode::SUCCESS)
 }
 
+#[derive(Debug)]
+struct BuildBundleSummary {
+    launcher_path: PathBuf,
+    runtime_path: PathBuf,
+    workspace_file_count: usize,
+}
+
+fn build_markup_bundle(
+    path: &Path,
+    output: &Path,
+    requested_view: Option<&str>,
+) -> Result<ExitCode, String> {
+    let snapshot = WorkspaceHirSnapshot::load(path)?;
+    let syntax_failed = workspace_syntax_failed(&snapshot, |sources, diagnostics| {
+        print_diagnostics(sources, diagnostics.iter())
+    });
+    if syntax_failed {
+        return Ok(ExitCode::FAILURE);
+    }
+
+    let (hir_lowering_failed, hir_validation_failed) = workspace_hir_failed(
+        &snapshot,
+        |sources, diagnostics| print_diagnostics(sources, diagnostics.iter()),
+        |sources, diagnostics| print_diagnostics(sources, diagnostics.iter()),
+    );
+    if hir_lowering_failed || hir_validation_failed {
+        return Ok(ExitCode::FAILURE);
+    }
+
+    let lowered = snapshot.entry_hir();
+    let artifact = match prepare_run_artifact(&snapshot.sources, lowered.module(), requested_view) {
+        Ok(artifact) => artifact,
+        Err(message) => {
+            eprintln!("{message}");
+            return Ok(ExitCode::FAILURE);
+        }
+    };
+
+    let summary = write_run_bundle(&snapshot, path, output, artifact.view_name.as_ref())?;
+    println!("build bundle passed: {}", path.display());
+    println!("  view: {}", artifact.view_name);
+    println!(
+        "  workspace closure: {} file{}",
+        summary.workspace_file_count,
+        plural_suffix(summary.workspace_file_count)
+    );
+    println!("  launcher: {}", summary.launcher_path.display());
+    println!("  runtime: {}", summary.runtime_path.display());
+    println!("  bundle: {}", output.display());
+    println!(
+        "build packages the current AIVI runtime, bundled stdlib, and reachable workspace sources into a runnable bundle directory."
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn write_run_bundle(
+    snapshot: &WorkspaceHirSnapshot,
+    entry_path: &Path,
+    output: &Path,
+    view_name: &str,
+) -> Result<BuildBundleSummary, String> {
+    if output.exists() {
+        return Err(format!(
+            "build output {} already exists; choose a fresh directory",
+            output.display()
+        ));
+    }
+    if let Some(parent) = output.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+
+    let staging = build_staging_dir(output)?;
+    fs::create_dir_all(&staging)
+        .map_err(|error| format!("failed to create {}: {error}", staging.display()))?;
+
+    let result = (|| {
+        let workspace_root = discover_workspace_root(entry_path);
+        let entry_relative = entry_path.strip_prefix(&workspace_root).map_err(|_| {
+            format!(
+                "failed to place {} under discovered workspace root {}",
+                entry_path.display(),
+                workspace_root.display()
+            )
+        })?;
+        let stdlib_root = discover_bundled_stdlib_root()?;
+
+        let runtime_path = staging.join("aivi");
+        let current_exe = env::current_exe()
+            .map_err(|error| format!("failed to locate current AIVI executable: {error}"))?;
+        copy_file_with_permissions(&current_exe, &runtime_path)?;
+        ensure_executable(&runtime_path)?;
+
+        copy_dir_all(&stdlib_root, &staging.join("stdlib"))?;
+        let workspace_file_count = copy_workspace_bundle_sources(
+            snapshot,
+            &workspace_root,
+            &stdlib_root,
+            &staging.join("app"),
+        )?;
+
+        let launcher_path = staging.join("run");
+        write_bundle_launcher(&launcher_path, entry_relative, view_name)?;
+
+        Ok(BuildBundleSummary {
+            launcher_path,
+            runtime_path,
+            workspace_file_count,
+        })
+    })();
+
+    match result {
+        Ok(mut summary) => {
+            fs::rename(&staging, output).map_err(|error| {
+                format!(
+                    "failed to move build bundle into {}: {error}",
+                    output.display()
+                )
+            })?;
+            summary.launcher_path = output.join("run");
+            summary.runtime_path = output.join("aivi");
+            Ok(summary)
+        }
+        Err(error) => {
+            let _ = fs::remove_dir_all(&staging);
+            Err(error)
+        }
+    }
+}
+
+fn build_staging_dir(output: &Path) -> Result<PathBuf, String> {
+    let parent = output.parent().unwrap_or_else(|| Path::new("."));
+    let name = output
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_else(|| "bundle".into());
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("system clock error while creating build directory: {error}"))?
+        .as_nanos();
+    Ok(parent.join(format!(
+        ".{name}.tmp-{}-{unique}",
+        std::process::id()
+    )))
+}
+
+fn discover_workspace_root(path: &Path) -> PathBuf {
+    let start = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    for ancestor in start.ancestors() {
+        if ancestor.join("aivi.toml").is_file() {
+            return ancestor.to_path_buf();
+        }
+    }
+    start.to_path_buf()
+}
+
+fn discover_bundled_stdlib_root() -> Result<PathBuf, String> {
+    let mut candidates = vec![PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib")];
+    if let Ok(executable) = env::current_exe()
+        && let Some(parent) = executable.parent()
+    {
+        candidates.push(parent.join("stdlib"));
+        candidates.push(parent.join("../stdlib"));
+    }
+
+    for candidate in candidates {
+        if candidate.join("aivi.toml").is_file() {
+            return Ok(fs::canonicalize(&candidate).unwrap_or(candidate));
+        }
+    }
+
+    Err(
+        "failed to locate the bundled stdlib; expected `stdlib/aivi.toml` next to the AIVI executable or workspace checkout"
+            .to_owned(),
+    )
+}
+
+fn copy_workspace_bundle_sources(
+    snapshot: &WorkspaceHirSnapshot,
+    workspace_root: &Path,
+    stdlib_root: &Path,
+    output: &Path,
+) -> Result<usize, String> {
+    fs::create_dir_all(output)
+        .map_err(|error| format!("failed to create {}: {error}", output.display()))?;
+
+    let manifest = workspace_root.join("aivi.toml");
+    if manifest.is_file() {
+        copy_file_with_permissions(&manifest, &output.join("aivi.toml"))?;
+    }
+
+    let mut copied = 0;
+    for file in &snapshot.files {
+        let source_path = file.path(&snapshot.frontend.db);
+        if let Ok(relative) = source_path.strip_prefix(workspace_root) {
+            copy_file_with_permissions(&source_path, &output.join(relative))?;
+            copied += 1;
+            continue;
+        }
+        if source_path.strip_prefix(stdlib_root).is_ok() {
+            continue;
+        }
+        return Err(format!(
+            "build currently supports workspace source files plus bundled stdlib only; `{}` was loaded from outside both roots",
+            source_path.display()
+        ));
+    }
+    Ok(copied)
+}
+
+fn write_bundle_launcher(path: &Path, entry_relative: &Path, view_name: &str) -> Result<(), String> {
+    let entry = shell_single_quote(&entry_relative.to_string_lossy());
+    let view = shell_single_quote(view_name);
+    let script = format!(
+        "#!/bin/sh\nset -eu\nSCRIPT_DIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\nENTRY_REL={entry}\nVIEW_NAME={view}\nexec \"$SCRIPT_DIR/aivi\" run \"$SCRIPT_DIR/app/$ENTRY_REL\" --view \"$VIEW_NAME\"\n"
+    );
+    fs::write(path, script).map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+    ensure_executable(path)
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn copy_dir_all(source: &Path, destination: &Path) -> Result<(), String> {
+    fs::create_dir_all(destination)
+        .map_err(|error| format!("failed to create {}: {error}", destination.display()))?;
+    for entry in fs::read_dir(source)
+        .map_err(|error| format!("failed to read {}: {error}", source.display()))?
+    {
+        let entry = entry.map_err(|error| {
+            format!("failed to iterate directory {}: {error}", source.display())
+        })?;
+        let file_type = entry.file_type().map_err(|error| {
+            format!(
+                "failed to read entry type for {}: {error}",
+                entry.path().display()
+            )
+        })?;
+        let destination_path = destination.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_all(&entry.path(), &destination_path)?;
+        } else if file_type.is_file() {
+            copy_file_with_permissions(&entry.path(), &destination_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_file_with_permissions(source: &Path, destination: &Path) -> Result<(), String> {
+    if let Some(parent) = destination.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+    fs::copy(source, destination).map_err(|error| {
+        format!(
+            "failed to copy {} to {}: {error}",
+            source.display(),
+            destination.display()
+        )
+    })?;
+    let permissions = fs::metadata(source)
+        .map_err(|error| format!("failed to stat {}: {error}", source.display()))?
+        .permissions();
+    fs::set_permissions(destination, permissions).map_err(|error| {
+        format!(
+            "failed to apply permissions to {}: {error}",
+            destination.display()
+        )
+    })?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn ensure_executable(path: &Path) -> Result<(), String> {
+    let mut permissions = fs::metadata(path)
+        .map_err(|error| format!("failed to stat {}: {error}", path.display()))?
+        .permissions();
+    permissions.set_mode(permissions.mode() | 0o755);
+    fs::set_permissions(path, permissions)
+        .map_err(|error| format!("failed to mark {} executable: {error}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn ensure_executable(_path: &Path) -> Result<(), String> {
+    Ok(())
+}
+
 fn print_diagnostics<'a>(
     sources: &SourceDatabase,
     diagnostics: impl IntoIterator<Item = &'a Diagnostic>,
@@ -2702,10 +3056,10 @@ fn run_lsp(_args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
 
 fn print_usage() {
     eprintln!(
-        "usage:\n  aivi <path>\n  aivi check <path>\n  aivi compile <path> [-o <object>]\n  aivi run <path> [--view <name>]\n  aivi lex <path>\n  aivi fmt <path>\n  aivi fmt --stdin\n  aivi fmt --check [path...]\n  aivi lsp"
+        "usage:\n  aivi <path>\n  aivi check <path>\n  aivi compile <path> [-o <object>]\n  aivi build <path> -o <bundle> [--view <name>]\n  aivi run <path> [--view <name>]\n  aivi lex <path>\n  aivi fmt <path>\n  aivi fmt --stdin\n  aivi fmt --check [path...]\n  aivi lsp"
     );
     eprintln!(
-        "commands:\n  check    Lex, parse, lower, and validate a module through HIR\n  compile  Lower through typed core, typed lambda, backend, and Cranelift codegen\n  run      Launch the current live GTK runtime path\n  lex      Dump the lossless token stream\n  fmt      Canonically format the supported surface subset\n  lsp      Start the language server"
+        "commands:\n  check    Lex, parse, lower, and validate a module through HIR\n  compile  Lower through typed core, typed lambda, backend, and Cranelift codegen\n  build    Package a runnable bundle directory around the live GTK/runtime path\n  run      Launch the current live GTK runtime path\n  lex      Dump the lossless token stream\n  fmt      Canonically format the supported surface subset\n  lsp      Start the language server"
     );
     eprintln!(
         "milestone-2 surface items: {:?}",
@@ -3296,6 +3650,105 @@ val view =
     }
 
     #[test]
+    fn prepare_run_accepts_entry_change_text_events() {
+        let artifact = prepare_run_from_text(
+            "entry-change-events.aivi",
+            r#"
+sig changed : Signal Text
+
+val query = "Draft"
+val view =
+    <Window title="Host">
+        <Entry text={query} onChange={changed} />
+    </Window>
+"#,
+            None,
+        )
+        .expect("entry text change events should validate and prepare for run");
+        let entry = artifact
+            .bridge
+            .nodes()
+            .iter()
+            .find_map(|node| match &node.kind {
+                GtkBridgeNodeKind::Widget(widget)
+                    if widget.widget.segments().last().text() == "Entry" =>
+                {
+                    Some(widget)
+                }
+                _ => None,
+            })
+            .expect("bridge should keep the entry widget");
+        assert_eq!(entry.event_hooks.len(), 1);
+        let handler = entry.event_hooks[0].handler;
+        assert!(artifact.event_handlers.contains_key(&handler));
+    }
+
+    #[test]
+    fn prepare_run_accepts_additional_common_widgets_and_switch_toggle_events() {
+        let artifact = prepare_run_from_text(
+            "additional-widget-catalog.aivi",
+            r#"
+sig toggled : Signal Bool
+
+val showButtons = False
+val isEnabled = True
+val view =
+    <Window title="Host">
+        <Viewport>
+            <Frame label="Controls">
+                <Box>
+                    <HeaderBar showTitleButtons={showButtons}>
+                        <Label text="Profile" />
+                    </HeaderBar>
+                    <Separator orientation="Horizontal" />
+                    <Switch active={isEnabled} onToggle={toggled} />
+                </Box>
+            </Frame>
+        </Viewport>
+    </Window>
+"#,
+            None,
+        )
+        .expect("additional common widgets should validate and prepare for run");
+        let widget_names = artifact
+            .bridge
+            .nodes()
+            .iter()
+            .filter_map(|node| match &node.kind {
+                GtkBridgeNodeKind::Widget(widget) => {
+                    Some(widget.widget.segments().last().text().to_owned())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(widget_names.iter().any(|name| name == "Viewport"));
+        assert!(widget_names.iter().any(|name| name == "Frame"));
+        assert!(widget_names.iter().any(|name| name == "HeaderBar"));
+        assert!(widget_names.iter().any(|name| name == "Separator"));
+        assert!(widget_names.iter().any(|name| name == "Switch"));
+
+        let switch = artifact
+            .bridge
+            .nodes()
+            .iter()
+            .find_map(|node| match &node.kind {
+                GtkBridgeNodeKind::Widget(widget)
+                    if widget.widget.segments().last().text() == "Switch" =>
+                {
+                    Some(widget)
+                }
+                _ => None,
+            })
+            .expect("bridge should keep the switch widget");
+        let handler = switch
+            .event_hooks
+            .first()
+            .expect("switch should keep one toggle event hook")
+            .handler;
+        assert!(artifact.event_handlers.contains_key(&handler));
+    }
+
+    #[test]
     fn prepare_run_rejects_non_window_root_widgets() {
         let error = prepare_run_from_text(
             "button-root.aivi",
@@ -3317,13 +3770,13 @@ val view =
             r#"
 val view =
     <Window title="Host">
-        <HeaderBar />
+        <Paned />
     </Window>
 "#,
             None,
         )
         .expect_err("widgets outside the schema catalog should be rejected before launch");
-        assert!(error.contains("does not support GTK widget `HeaderBar`"));
+        assert!(error.contains("does not support GTK widget `Paned`"));
     }
 
     #[test]

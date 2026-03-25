@@ -3277,6 +3277,25 @@ sig tick : Signal Unit
             .apply_actions(&[crate::LinkedSourceLifecycleAction::Suspend { instance }])
             .expect("provider manager should drop suspended timer state");
 
+        let quiet_deadline = Instant::now() + Duration::from_millis(200);
+        loop {
+            thread::sleep(Duration::from_millis(12));
+            let outcome = linked
+                .tick()
+                .expect("runtime tick should stay quiet after timer cancellation");
+            assert!(
+                outcome.committed().is_empty(),
+                "suspended timers should not commit further values"
+            );
+            if outcome.dropped_publications().is_empty() {
+                break;
+            }
+            assert!(
+                Instant::now() < quiet_deadline,
+                "suspended timers should stop publishing after draining any in-flight delivery"
+            );
+        }
+
         for _ in 0..5 {
             thread::sleep(Duration::from_millis(12));
             let outcome = linked

@@ -104,7 +104,7 @@
 100. **GTK execution in explicit host/executor layer:** `aivi-gtk` allocates widgets, routes events, executes transitions through dedicated executor. Driven from bridge graph.
 101. **LSP via revision-keyed query database:** `aivi-query` owns cached source/parse/HIR/diagnostic/symbol/format queries. `aivi-lsp` consumes read-only.
 102. **Imported source-option constructor checks use cataloged metadata:** Supported only when import catalog has closed variant/field surface. Uncataloged = explicit deferred.
-103. **CLI stops at honest compile boundary:** `aivi compile`: syntax → HIR → core → lambda → backend → Cranelift. Missing runtime/link boundary reported explicitly.
+103. **CLI keeps compile honest and packages runnable bundles separately:** `aivi compile`: syntax → HIR → core → lambda → backend → Cranelift. Runnable packaging lives under `aivi build`, which bundles the current runtime, stdlib, and reachable workspace sources instead of pretending `compile` already emits a native app.
 104. **GLib scheduler on main-context; worker wakeups cross-thread:** `GlibSchedulerDriver` on owned `glib::MainContext`. Workers publish + request wakeup only. Narrow shared-state wrapper for GLib `Send` requirement.
 105. **Backend runtime values from item-body kernels + signal snapshots:** Item/function bodies → dedicated `item-body` kernels. `KernelEvaluator`/`RuntimeValue`. Explicit global signal snapshots. Inline pipes and domain-member execution deferred.
 106. **Runtime startup linking in `aivi-runtime`:** Links HIR runtime bindings to backend items/source kernels via typed-core item origins. Owns fallible derived-signal evaluator. Source config as runtime-facing handoff.

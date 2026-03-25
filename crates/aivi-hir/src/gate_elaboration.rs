@@ -730,14 +730,26 @@ fn lower_function_pipe_body_runtime_expr(
                 kind: GateRuntimeExprKind::Reference(GateRuntimeReference::ClassMember(dispatch)),
             }
         } else {
-            lower_gate_runtime_expr_with_purity(
+            match lower_gate_runtime_expr_with_purity(
                 module,
                 plan.callee_expr,
                 env,
                 Some(ambient),
                 typing,
                 purity,
-            )?
+            ) {
+                Ok(lowered) => lowered,
+                Err(GateElaborationBlocker::UnknownRuntimeExprType { .. }) => GateRuntimeExpr {
+                    span: module.exprs()[plan.callee_expr].span,
+                    ty: callee_ty.clone(),
+                    kind: GateRuntimeExprKind::Reference(runtime_reference_for_name(
+                        module,
+                        module.exprs()[plan.callee_expr].span,
+                        reference,
+                    )?),
+                },
+                Err(other) => return Err(other),
+            }
         }
     } else {
         lower_gate_runtime_expr_with_purity(

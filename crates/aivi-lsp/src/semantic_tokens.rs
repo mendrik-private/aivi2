@@ -63,6 +63,7 @@ fn token_type_index(kind: TokenKind) -> Option<u32> {
         | TokenKind::Equals
         | TokenKind::EqualEqual
         | TokenKind::BangEqual
+        | TokenKind::Ellipsis
         | TokenKind::Arrow
         | TokenKind::ThinArrow
         | TokenKind::PipeTransform

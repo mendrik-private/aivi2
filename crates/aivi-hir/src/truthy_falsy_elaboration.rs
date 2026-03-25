@@ -508,7 +508,7 @@ mod tests {
         let report = elaborate_truthy_falsy(lowered.module());
         assert_eq!(
             report.stages().len(),
-            5,
+            6,
             "expected every valid truthy/falsy pair to elaborate"
         );
 
@@ -584,6 +584,21 @@ mod tests {
                 assert_eq!(plan.result_type, GateType::Primitive(BuiltinType::Text));
             }
             other => panic!("expected planned result truthy/falsy pair, found {other:?}"),
+        }
+
+        let nested = report
+            .stages()
+            .iter()
+            .find(|stage| item_name(lowered.module(), stage.owner) == "nestedRendered")
+            .expect("expected nestedRendered truthy/falsy pair");
+        match &nested.outcome {
+            TruthyFalsyStageOutcome::Planned(plan) => {
+                assert_eq!(plan.input_subject, GateType::Primitive(BuiltinType::Bool));
+                assert_eq!(plan.truthy.constructor, BuiltinTerm::True);
+                assert_eq!(plan.falsy.constructor, BuiltinTerm::False);
+                assert_eq!(plan.result_type, GateType::Primitive(BuiltinType::Text));
+            }
+            other => panic!("expected planned nested bool truthy/falsy pair, found {other:?}"),
         }
 
         let summary = report

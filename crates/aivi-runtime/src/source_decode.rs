@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use aivi_backend::{RuntimeRecordField, RuntimeSumValue, RuntimeValue};
+use aivi_backend::{RuntimeFloat, RuntimeRecordField, RuntimeSumValue, RuntimeValue};
 use aivi_hir::{DecodeProgramStep, SourceDecodeProgram};
 use aivi_typing::DecodeExtraFieldPolicy;
 use serde_json::Value as JsonValue;
@@ -10,6 +10,7 @@ pub enum ExternalSourceValue {
     Unit,
     Bool(bool),
     Int(i64),
+    Float(RuntimeFloat),
     Text(Box<str>),
     List(Vec<ExternalSourceValue>),
     Record(BTreeMap<Box<str>, ExternalSourceValue>),
@@ -69,12 +70,8 @@ pub fn validate_supported_program(
                 aivi_typing::PrimitiveType::Unit
                 | aivi_typing::PrimitiveType::Bool
                 | aivi_typing::PrimitiveType::Int
+                | aivi_typing::PrimitiveType::Float
                 | aivi_typing::PrimitiveType::Text => {}
-                aivi_typing::PrimitiveType::Float => {
-                    return Err(SourceDecodeProgramSupportError::UnsupportedScalar {
-                        scalar: "Float",
-                    });
-                }
                 aivi_typing::PrimitiveType::Decimal => {
                     return Err(SourceDecodeProgramSupportError::UnsupportedScalar {
                         scalar: "Decimal",
@@ -150,7 +147,7 @@ impl std::fmt::Display for SourceDecodeError {
             Self::UnsupportedNumber { value } => {
                 write!(
                     f,
-                    "source payload number `{value}` does not fit the current Int-only runtime"
+                    "source payload number `{value}` does not fit the current Int/Float runtime slice"
                 )
             }
             Self::TypeMismatch { expected, found } => {
@@ -228,12 +225,15 @@ fn external_from_json(value: JsonValue) -> Result<ExternalSourceValue, SourceDec
         JsonValue::Null => Ok(ExternalSourceValue::Unit),
         JsonValue::Bool(value) => Ok(ExternalSourceValue::Bool(value)),
         JsonValue::Number(number) => {
-            number
-                .as_i64()
-                .map(ExternalSourceValue::Int)
-                .ok_or_else(|| SourceDecodeError::UnsupportedNumber {
+            if let Some(value) = number.as_i64() {
+                Ok(ExternalSourceValue::Int(value))
+            } else if let Some(value) = number.as_f64().and_then(RuntimeFloat::new) {
+                Ok(ExternalSourceValue::Float(value))
+            } else {
+                Err(SourceDecodeError::UnsupportedNumber {
                     value: number.to_string().into_boxed_str(),
                 })
+            }
         }
         JsonValue::String(value) => Ok(ExternalSourceValue::Text(value.into_boxed_str())),
         JsonValue::Array(values) => values
@@ -270,9 +270,9 @@ fn runtime_to_json(value: &RuntimeValue) -> Result<JsonValue, Box<str>> {
         RuntimeValue::Unit => Ok(JsonValue::Null),
         RuntimeValue::Bool(value) => Ok(JsonValue::Bool(*value)),
         RuntimeValue::Int(value) => Ok(JsonValue::Number((*value).into())),
-        RuntimeValue::Float(_) => {
-            Err("runtime JSON encoding does not support Float values yet".into())
-        }
+        RuntimeValue::Float(value) => serde_json::Number::from_f64(value.to_f64())
+            .map(JsonValue::Number)
+            .ok_or_else(|| "runtime JSON encoding rejected a non-finite Float value".into()),
         RuntimeValue::Decimal(_) => {
             Err("runtime JSON encoding does not support Decimal values yet".into())
         }
@@ -383,13 +383,18 @@ fn decode_step(
                 ExternalSourceValue::Int(value) => Ok(RuntimeValue::Int(*value)),
                 other => Err(type_mismatch("integer", other)),
             },
+            aivi_typing::PrimitiveType::Float => match value {
+                ExternalSourceValue::Int(value) => Ok(RuntimeValue::Float(
+                    RuntimeFloat::new(*value as f64)
+                        .expect("all i64 values should map to finite f64 values"),
+                )),
+                ExternalSourceValue::Float(value) => Ok(RuntimeValue::Float(*value)),
+                other => Err(type_mismatch("float", other)),
+            },
             aivi_typing::PrimitiveType::Text => match value {
                 ExternalSourceValue::Text(value) => Ok(RuntimeValue::Text(value.clone())),
                 other => Err(type_mismatch("text", other)),
             },
-            aivi_typing::PrimitiveType::Float => Err(SourceDecodeError::UnsupportedProgram(
-                SourceDecodeProgramSupportError::UnsupportedScalar { scalar: "Float" },
-            )),
             aivi_typing::PrimitiveType::Decimal => Err(SourceDecodeError::UnsupportedProgram(
                 SourceDecodeProgramSupportError::UnsupportedScalar { scalar: "Decimal" },
             )),
@@ -618,9 +623,102 @@ fn value_kind(value: &ExternalSourceValue) -> &'static str {
         ExternalSourceValue::Unit => "unit",
         ExternalSourceValue::Bool(_) => "bool",
         ExternalSourceValue::Int(_) => "integer",
+        ExternalSourceValue::Float(_) => "float",
         ExternalSourceValue::Text(_) => "text",
         ExternalSourceValue::List(_) => "list",
         ExternalSourceValue::Record(_) => "record",
         ExternalSourceValue::Variant { .. } => "variant",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use aivi_base::SourceDatabase;
+    use aivi_backend::{RuntimeFloat, RuntimeValue};
+    use aivi_hir::{Item, SourceDecodeProgramOutcome, generate_source_decode_programs, lower_module};
+    use aivi_syntax::parse_module;
+
+    use super::{decode_external, encode_runtime_json, parse_json_text};
+
+    fn lower_text(path: &str, text: &str) -> aivi_hir::LoweringResult {
+        let mut sources = SourceDatabase::new();
+        let file_id = sources.add_file(path, text);
+        let parsed = parse_module(&sources[file_id]);
+        assert!(
+            !parsed.has_errors(),
+            "fixture {path} should parse before HIR lowering: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+        lower_module(&parsed.module)
+    }
+
+    fn item_name(module: &aivi_hir::Module, item_id: aivi_hir::ItemId) -> &str {
+        match &module.items()[item_id] {
+            Item::Type(item) => item.name.text(),
+            Item::Value(item) => item.name.text(),
+            Item::Function(item) => item.name.text(),
+            Item::Signal(item) => item.name.text(),
+            Item::Class(item) => item.name.text(),
+            Item::Domain(item) => item.name.text(),
+            Item::SourceProviderContract(_)
+            | Item::Instance(_)
+            | Item::Use(_)
+            | Item::Export(_) => "<anonymous>",
+        }
+    }
+
+    fn decode_program(path: &str, text: &str, signal_name: &str) -> aivi_hir::SourceDecodeProgram {
+        let lowered = lower_text(path, text);
+        assert!(
+            !lowered.has_errors(),
+            "decode fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+        let report = generate_source_decode_programs(lowered.module());
+        let node = report
+            .nodes()
+            .iter()
+            .find(|node| item_name(lowered.module(), node.owner) == signal_name)
+            .unwrap_or_else(|| panic!("expected decode program for {signal_name}"));
+        match &node.outcome {
+            SourceDecodeProgramOutcome::Planned(program) => program.clone(),
+            other => panic!("expected planned decode program, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decodes_float_source_payloads_from_json_numbers() {
+        let program = decode_program(
+            "source-decode-float.aivi",
+            r#"
+@source custom.feed
+sig temperature : Signal Float
+"#,
+            "temperature",
+        );
+
+        let float = decode_external(&program, &parse_json_text("1.5").expect("float JSON should parse"))
+            .expect("float JSON should decode");
+        assert_eq!(
+            float,
+            RuntimeValue::Float(RuntimeFloat::new(1.5).expect("finite float should construct"))
+        );
+
+        let promoted_int =
+            decode_external(&program, &parse_json_text("1").expect("integer JSON should parse"))
+                .expect("integer JSON should promote into Float when the signal expects Float");
+        assert_eq!(
+            promoted_int,
+            RuntimeValue::Float(RuntimeFloat::new(1.0).expect("finite float should construct"))
+        );
+    }
+
+    #[test]
+    fn encodes_float_runtime_values_into_json_numbers() {
+        let encoded = encode_runtime_json(&RuntimeValue::Float(
+            RuntimeFloat::new(1.5).expect("finite float should construct"),
+        ))
+        .expect("float runtime values should encode into JSON");
+        assert_eq!(encoded, "1.5");
     }
 }

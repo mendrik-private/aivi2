@@ -2289,9 +2289,29 @@ Pipeline: source → CST → HIR → typed core → lambda → backend → Crane
 
 If `-o` / `--output` is omitted, no output file is written but the pipeline is validated. Exits 0 on success, 1 on compilation errors.
 
-`aivi compile` stops at the honest compile boundary. Runtime startup, final linking, and executable launch are separate work.
+`aivi compile` stops at the honest compile boundary. Use `aivi build` when you want a runnable bundle directory; `compile` remains the object-code surface.
 
-### 26.3 `aivi run <path> [--view <name>]`
+### 26.3 `aivi build <path> -o <output> [--view <name>]`
+
+```
+aivi build src/app.aivi -o build/app
+aivi build src/app.aivi -o dist/users --view mainWindow
+```
+
+`aivi build` validates the same runnable surface as `aivi run`, then writes a bundle directory containing:
+
+- a copied `aivi` runtime executable
+- a bundled stdlib workspace
+- the reachable workspace source closure plus `aivi.toml` when present
+- a `run` launcher script pinned to the selected view
+
+Run the packaged application via `./run` inside the emitted bundle directory.
+
+The bundle is self-contained at the AIVI layer, but it still depends on the target system GTK stack. It is a runnable directory bundle, not yet a single native executable.
+
+Exits 0 on success, 1 on validation/build errors.
+
+### 26.4 `aivi run <path> [--view <name>]`
 
 ```
 aivi run src/app.aivi
@@ -2309,9 +2329,11 @@ The selected root must be a `Window`. The CLI does not auto-wrap arbitrary widge
 
 `aivi run` links the compiled runtime stack, evaluates the selected view fragments against committed runtime snapshots, re-evaluates after each meaningful committed tick, and applies GTK updates through the bridge executor.
 
+The current cataloged widget/runtime slice includes `Window`, `HeaderBar`, `Box`, `ScrolledWindow`, `Frame`, `Viewport`, `Label`, `Button`, `Entry`, `Switch`, `CheckButton`, `ToggleButton`, `Image`, `Spinner`, `ProgressBar`, `Revealer`, and `Separator`. `Entry.onChange` publishes `Text`, `Switch.onToggle` publishes `Bool`, and JSON-backed source payloads may decode `Float` values directly.
+
 Exits 0 on clean application close, 1 on startup/compilation error.
 
-### 26.4 `aivi fmt [--stdin | --check] [<path>...]`
+### 26.5 `aivi fmt [--stdin | --check] [<path>...]`
 
 ```
 aivi fmt src/app.aivi             # format to stdout
@@ -2321,7 +2343,7 @@ aivi fmt --check src/a.aivi src/b.aivi   # verify formatting; exit 1 if any diff
 
 The formatter is canonical: single deterministic output for any valid source. Formatting is part of the language contract (§22).
 
-### 26.5 `aivi lex <path>`
+### 26.6 `aivi lex <path>`
 
 ```
 aivi lex src/app.aivi
@@ -2329,7 +2351,7 @@ aivi lex src/app.aivi
 
 Tokenizes and prints the token stream. Useful for debugging lexer behavior, regex literal handling, or suffix literal resolution.
 
-### 26.6 `aivi lsp`
+### 26.7 `aivi lsp`
 
 ```
 aivi lsp
@@ -2337,7 +2359,7 @@ aivi lsp
 
 Starts the AIVI Language Server on stdin/stdout using the Language Server Protocol. Editor integrations launch this subprocess and communicate over stdio. See §27 for supported capabilities.
 
-### 26.7 `aivi db migrate`
+### 26.8 `aivi db migrate`
 
 ```
 aivi db migrate
@@ -2345,7 +2367,7 @@ aivi db migrate
 
 Diffs current record types against the last applied migration state and writes a new SQL file under `db/migrations/` with a timestamp-prefixed filename. The generated file is ordinary SQL intended for review and commit.
 
-### 26.8 `aivi db apply`
+### 26.9 `aivi db apply`
 
 ```
 aivi db apply

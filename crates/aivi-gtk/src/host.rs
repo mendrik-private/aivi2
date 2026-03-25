@@ -29,6 +29,11 @@ pub trait GtkHostValue: Clone + 'static {
         Self::unit()
     }
 
+    fn from_text(v: &str) -> Self {
+        let _ = v;
+        Self::unit()
+    }
+
     fn as_bool(&self) -> Option<bool> {
         None
     }
@@ -245,11 +250,17 @@ where
                 window.add_controller(controller);
                 window.upcast::<gtk::Widget>()
             }
+            GtkConcreteWidgetKind::HeaderBar => gtk::HeaderBar::new().upcast::<gtk::Widget>(),
             GtkConcreteWidgetKind::Box => {
                 gtk::Box::new(Orientation::Vertical, 0).upcast::<gtk::Widget>()
             }
             GtkConcreteWidgetKind::ScrolledWindow => {
                 gtk::ScrolledWindow::new().upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::Frame => gtk::Frame::new(None).upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::Viewport => {
+                gtk::Viewport::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>)
+                    .upcast::<gtk::Widget>()
             }
             GtkConcreteWidgetKind::Label => gtk::Label::new(None).upcast::<gtk::Widget>(),
             GtkConcreteWidgetKind::Button => gtk::Button::new().upcast::<gtk::Widget>(),
@@ -263,6 +274,9 @@ where
             GtkConcreteWidgetKind::Spinner => gtk::Spinner::new().upcast::<gtk::Widget>(),
             GtkConcreteWidgetKind::ProgressBar => gtk::ProgressBar::new().upcast::<gtk::Widget>(),
             GtkConcreteWidgetKind::Revealer => gtk::Revealer::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::Separator => {
+                gtk::Separator::new(Orientation::Horizontal).upcast::<gtk::Widget>()
+            }
         };
         Ok((schema, widget))
     }
@@ -344,6 +358,27 @@ where
         }
     }
 
+    fn with_blocked_widget_events<T>(
+        &self,
+        widget: &gtk::Widget,
+        f: impl FnOnce() -> Result<T, GtkConcreteHostError>,
+    ) -> Result<T, GtkConcreteHostError> {
+        let signals = self
+            .events
+            .values()
+            .filter(|mounted| mounted.widget.as_ptr() == widget.as_ptr())
+            .map(|mounted| &mounted.signal)
+            .collect::<Vec<_>>();
+        for signal in signals.iter().copied() {
+            widget.block_signal(signal);
+        }
+        let result = f();
+        for signal in signals.iter().rev().copied() {
+            widget.unblock_signal(signal);
+        }
+        result
+    }
+
     fn apply_bool_property(
         &self,
         widget: &gtk::Widget,
@@ -358,6 +393,13 @@ where
             }
             GtkPropertySetter::Bool(GtkBoolPropertySetter::Hexpand) => widget.set_hexpand(value),
             GtkPropertySetter::Bool(GtkBoolPropertySetter::Vexpand) => widget.set_vexpand(value),
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::HeaderBarShowTitleButtons) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::HeaderBar>()
+                    .expect("header bar widget should downcast")
+                    .set_show_title_buttons(value);
+            }
             GtkPropertySetter::Bool(GtkBoolPropertySetter::EntryEditable) => {
                 widget
                     .clone()
@@ -430,6 +472,13 @@ where
                     .expect("window widget should downcast")
                     .set_title(Some(value));
             }
+            GtkPropertySetter::Text(GtkTextPropertySetter::FrameLabel) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Frame>()
+                    .expect("frame widget should downcast")
+                    .set_label(Some(value));
+            }
             GtkPropertySetter::Text(GtkTextPropertySetter::LabelText) => {
                 widget
                     .clone()
@@ -459,6 +508,16 @@ where
                     .clone()
                     .downcast::<gtk::Box>()
                     .expect("box widget should downcast")
+                    .set_orientation(orientation);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::SeparatorOrientation) => {
+                let orientation = parse_orientation(value).ok_or_else(|| {
+                    self.invalid_property_value(schema, property, "Vertical or Horizontal")
+                })?;
+                widget
+                    .clone()
+                    .downcast::<gtk::Separator>()
+                    .expect("separator widget should downcast")
                     .set_orientation(orientation);
             }
             GtkPropertySetter::Text(GtkTextPropertySetter::EntryText) => {
@@ -663,11 +722,32 @@ where
                     .expect("window widget should downcast")
                     .set_child(child);
             }
+            GtkChildMountRoute::HeaderBarTitleWidget => {
+                parent_widget
+                    .clone()
+                    .downcast::<gtk::HeaderBar>()
+                    .expect("header bar widget should downcast")
+                    .set_title_widget(child);
+            }
             GtkChildMountRoute::ScrolledWindowContent => {
                 parent_widget
                     .clone()
                     .downcast::<gtk::ScrolledWindow>()
                     .expect("scrolled window widget should downcast")
+                    .set_child(child);
+            }
+            GtkChildMountRoute::FrameChild => {
+                parent_widget
+                    .clone()
+                    .downcast::<gtk::Frame>()
+                    .expect("frame widget should downcast")
+                    .set_child(child);
+            }
+            GtkChildMountRoute::ViewportChild => {
+                parent_widget
+                    .clone()
+                    .downcast::<gtk::Viewport>()
+                    .expect("viewport widget should downcast")
                     .set_child(child);
             }
             GtkChildMountRoute::RevealerChild => {
@@ -745,7 +825,7 @@ where
     ) -> Result<(), Self::Error> {
         let (schema, widget, _) = self.mounted_snapshot(widget)?;
         let descriptor = self.lookup_property(schema, binding.name.text())?;
-        match descriptor.setter {
+        self.with_blocked_widget_events(&widget, || match descriptor.setter {
             GtkPropertySetter::Bool(_) => {
                 let value = value.as_bool().ok_or_else(|| {
                     self.invalid_property_value(
@@ -799,7 +879,7 @@ where
                 })?;
                 self.apply_f64_property(&widget, schema, descriptor, value)
             }
-        }
+        })
     }
 
     fn connect_event(
@@ -836,6 +916,20 @@ where
                         notifier();
                     }
                 }),
+            GtkEventSignal::EntryChanged => widget
+                .clone()
+                .downcast::<gtk::Entry>()
+                .expect("entry widget should downcast")
+                .connect_changed(move |entry| {
+                    let text = entry.text();
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_text(text.as_str()),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                }),
             GtkEventSignal::EntryActivated => widget
                 .clone()
                 .downcast::<gtk::Entry>()
@@ -844,6 +938,19 @@ where
                     queue.push(GtkQueuedEvent {
                         route: route_id,
                         value: V::unit(),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::SwitchToggled => widget
+                .clone()
+                .downcast::<gtk::Switch>()
+                .expect("switch widget should downcast")
+                .connect_active_notify(move |switch| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_bool(switch.is_active()),
                     });
                     if let Some(notifier) = &notifier {
                         notifier();
@@ -921,7 +1028,10 @@ where
         let mut next_children = current_children.clone();
         match self.child_mount_route(parent, schema, "insert_children")? {
             route @ (GtkChildMountRoute::WindowContent
+            | GtkChildMountRoute::HeaderBarTitleWidget
             | GtkChildMountRoute::ScrolledWindowContent
+            | GtkChildMountRoute::FrameChild
+            | GtkChildMountRoute::ViewportChild
             | GtkChildMountRoute::RevealerChild) => {
                 if current_children.len() + children.len() > 1 || index != 0 {
                     return Err(GtkConcreteHostError::UnsupportedParentOperation {
@@ -987,7 +1097,10 @@ where
         let mut next_children = current_children.clone();
         match self.child_mount_route(parent, schema, "remove_children")? {
             route @ (GtkChildMountRoute::WindowContent
+            | GtkChildMountRoute::HeaderBarTitleWidget
             | GtkChildMountRoute::ScrolledWindowContent
+            | GtkChildMountRoute::FrameChild
+            | GtkChildMountRoute::ViewportChild
             | GtkChildMountRoute::RevealerChild) => {
                 self.set_single_child(&parent_widget, route, None);
                 next_children.clear();
@@ -1056,14 +1169,20 @@ where
                 self.update_children(parent, next_children)
             }
             GtkChildMountRoute::WindowContent
+            | GtkChildMountRoute::HeaderBarTitleWidget
             | GtkChildMountRoute::ScrolledWindowContent
+            | GtkChildMountRoute::FrameChild
+            | GtkChildMountRoute::ViewportChild
             | GtkChildMountRoute::RevealerChild
                 if from == 0 && count == 1 && to == 0 =>
             {
                 Ok(())
             }
             GtkChildMountRoute::WindowContent
+            | GtkChildMountRoute::HeaderBarTitleWidget
             | GtkChildMountRoute::ScrolledWindowContent
+            | GtkChildMountRoute::FrameChild
+            | GtkChildMountRoute::ViewportChild
             | GtkChildMountRoute::RevealerChild => {
                 Err(GtkConcreteHostError::UnsupportedParentOperation {
                     parent: parent.clone(),
@@ -1309,6 +1428,10 @@ mod tests {
 
         fn from_bool(v: bool) -> Self {
             Self::Bool(v)
+        }
+
+        fn from_text(v: &str) -> Self {
+            Self::Text(v.to_owned())
         }
 
         fn as_bool(&self) -> Option<bool> {
@@ -1608,6 +1731,215 @@ val view =
             assert_eq!(queued.len(), 1);
             assert_eq!(queued[0].route, routes[0].id);
             assert_eq!(queued[0].value, TestValue::Unit);
+        });
+    }
+
+    #[test]
+    fn concrete_host_blocks_programmatic_entry_updates_and_captures_entry_changes() {
+        gtk::test_synced(|| {
+            let graph = lower_graph(
+                "gtk-host-entry-change.aivi",
+                r#"
+val query = "Runtime query"
+sig changed : Signal Text
+
+val view =
+    <Window title="Host">
+        <Entry text={query} onChange={changed} />
+    </Window>
+"#,
+            );
+            let text_input = find_widget_input(&graph, "Entry", "text");
+            let mut executor = GtkRuntimeExecutor::new_with_values(
+                graph,
+                GtkConcreteHost::<TestValue>::default(),
+                [(text_input, TestValue::Text("Runtime query".to_string()))],
+            )
+            .expect("concrete GTK host should mount an entry change handler");
+
+            let routes = executor.event_routes();
+            assert_eq!(routes.len(), 1);
+            let entry_handle = executor
+                .widget_handle(&routes[0].instance)
+                .expect("event route should point at the mounted entry")
+                .clone();
+            let entry = executor
+                .host()
+                .widget(&entry_handle)
+                .expect("entry handle should resolve")
+                .downcast::<gtk::Entry>()
+                .expect("root child should be an entry");
+            assert_eq!(entry.text().as_str(), "Runtime query");
+
+            executor
+                .set_property_for_instance(
+                    &routes[0].instance,
+                    text_input,
+                    TestValue::Text("Server query".to_string()),
+                )
+                .expect("programmatic entry updates should still apply");
+            assert_eq!(entry.text().as_str(), "Server query");
+            assert!(
+                executor.host_mut().drain_events().is_empty(),
+                "programmatic entry text updates should not re-emit onChange"
+            );
+
+            entry.set_text("Typed query");
+            let queued = executor.host_mut().drain_events();
+            assert!(
+                !queued.is_empty(),
+                "entry changes should publish at least one onChange event"
+            );
+            assert!(queued.iter().all(|event| event.route == routes[0].id));
+            assert_eq!(
+                queued.last().expect("entry changes should queue one latest event").value,
+                TestValue::Text("Typed query".to_string())
+            );
+        });
+    }
+
+    #[test]
+    fn concrete_host_mounts_additional_common_widgets_and_captures_switch_toggles() {
+        gtk::test_synced(|| {
+            let graph = lower_graph(
+                "gtk-host-additional-widgets.aivi",
+                r#"
+val showButtons = False
+val isEnabled = True
+val toggled = True
+val view =
+    <Window title="Host">
+        <Viewport>
+            <Frame label="Controls">
+                <Box>
+                    <HeaderBar showTitleButtons={showButtons}>
+                        <Label text="Profile" />
+                    </HeaderBar>
+                    <Separator orientation="Horizontal" />
+                    <Switch active={isEnabled} onToggle={toggled} />
+                </Box>
+            </Frame>
+        </Viewport>
+    </Window>
+"#,
+            );
+            let show_title_buttons_input =
+                find_widget_input(&graph, "HeaderBar", "showTitleButtons");
+            let active_input = find_widget_input(&graph, "Switch", "active");
+            let mut executor = GtkRuntimeExecutor::new_with_values(
+                graph,
+                GtkConcreteHost::<TestValue>::default(),
+                [
+                    (show_title_buttons_input, TestValue::Bool(false)),
+                    (active_input, TestValue::Bool(true)),
+                ],
+            )
+            .expect("concrete GTK host should mount the additional widget slice");
+
+            let root = executor
+                .root_widgets()
+                .expect("root widget should exist")
+                .into_iter()
+                .next()
+                .expect("window root should exist");
+            let window = executor
+                .host()
+                .widget(&root)
+                .expect("window handle should resolve")
+                .downcast::<gtk::Window>()
+                .expect("root should be a GTK window");
+            let viewport = window
+                .child()
+                .expect("window should host the viewport child")
+                .downcast::<gtk::Viewport>()
+                .expect("window child should be a viewport");
+            let frame = viewport
+                .child()
+                .expect("viewport should host the frame child")
+                .downcast::<gtk::Frame>()
+                .expect("viewport child should be a frame");
+            assert_eq!(frame.label().as_deref(), Some("Controls"));
+
+            let window_children = executor
+                .host()
+                .child_handles(&root)
+                .expect("window child order should be tracked");
+            let viewport_handle = window_children
+                .first()
+                .expect("window should contain the viewport child")
+                .clone();
+            let frame_handle = executor
+                .host()
+                .child_handles(&viewport_handle)
+                .expect("viewport child order should be tracked")
+                .first()
+                .expect("viewport should contain the frame child")
+                .clone();
+            let box_handle = executor
+                .host()
+                .child_handles(&frame_handle)
+                .expect("frame child order should be tracked")
+                .first()
+                .expect("frame should contain the box child")
+                .clone();
+            let child_handles = executor
+                .host()
+                .child_handles(&box_handle)
+                .expect("box child order should be tracked");
+            assert_eq!(child_handles.len(), 3);
+
+            let header_bar = executor
+                .host()
+                .widget(&child_handles[0])
+                .expect("header bar handle should resolve")
+                .downcast::<gtk::HeaderBar>()
+                .expect("first box child should be a header bar");
+            assert!(!header_bar.property::<bool>("show-title-buttons"));
+            let title_widget = header_bar
+                .title_widget()
+                .expect("header bar should keep the title widget child")
+                .downcast::<gtk::Label>()
+                .expect("header bar title widget should be a label");
+            assert_eq!(title_widget.text().as_str(), "Profile");
+
+            let separator = executor
+                .host()
+                .widget(&child_handles[1])
+                .expect("separator handle should resolve")
+                .downcast::<gtk::Separator>()
+                .expect("second box child should be a separator");
+            assert_eq!(separator.orientation(), Orientation::Horizontal);
+
+            let switch = executor
+                .host()
+                .widget(&child_handles[2])
+                .expect("switch handle should resolve")
+                .downcast::<gtk::Switch>()
+                .expect("third box child should be a switch");
+            assert!(switch.is_active());
+
+            let routes = executor.event_routes();
+            assert_eq!(routes.len(), 1);
+            let switch_handle = executor
+                .widget_handle(&routes[0].instance)
+                .expect("event route should point at the mounted switch")
+                .clone();
+            assert_eq!(switch_handle, child_handles[2]);
+
+            executor
+                .set_property_for_instance(&routes[0].instance, active_input, TestValue::Bool(false))
+                .expect("programmatic switch updates should still apply");
+            assert!(!switch.is_active());
+            assert!(
+                executor.host_mut().drain_events().is_empty(),
+                "programmatic switch updates should not re-emit onToggle"
+            );
+
+            switch.set_active(true);
+            let queued = executor.host_mut().drain_events();
+            assert_eq!(queued.len(), 1);
+            assert_eq!(queued[0].route, routes[0].id);
+            assert_eq!(queued[0].value, TestValue::Bool(true));
         });
     }
 

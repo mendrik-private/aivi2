@@ -4,6 +4,7 @@ use aivi_hir::NamePath;
 pub enum GtkConcreteEventPayload {
     Unit,
     Bool,
+    Text,
 }
 
 impl GtkConcreteEventPayload {
@@ -11,6 +12,7 @@ impl GtkConcreteEventPayload {
         match self {
             Self::Unit => "Unit",
             Self::Bool => "Bool",
+            Self::Text => "Text",
         }
     }
 
@@ -18,6 +20,7 @@ impl GtkConcreteEventPayload {
         match self {
             Self::Unit => "`Signal Unit`",
             Self::Bool => "`Signal Bool`",
+            Self::Text => "`Signal Text`",
         }
     }
 }
@@ -25,8 +28,11 @@ impl GtkConcreteEventPayload {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GtkConcreteWidgetKind {
     Window,
+    HeaderBar,
     Box,
     ScrolledWindow,
+    Frame,
+    Viewport,
     Label,
     Button,
     Entry,
@@ -37,14 +43,18 @@ pub enum GtkConcreteWidgetKind {
     Spinner,
     ProgressBar,
     Revealer,
+    Separator,
 }
 
 impl GtkConcreteWidgetKind {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Window => "Window",
+            Self::HeaderBar => "HeaderBar",
             Self::Box => "Box",
             Self::ScrolledWindow => "ScrolledWindow",
+            Self::Frame => "Frame",
+            Self::Viewport => "Viewport",
             Self::Label => "Label",
             Self::Button => "Button",
             Self::Entry => "Entry",
@@ -55,6 +65,7 @@ impl GtkConcreteWidgetKind {
             Self::Spinner => "Spinner",
             Self::ProgressBar => "ProgressBar",
             Self::Revealer => "Revealer",
+            Self::Separator => "Separator",
         }
     }
 }
@@ -104,6 +115,7 @@ pub enum GtkBoolPropertySetter {
     Sensitive,
     Hexpand,
     Vexpand,
+    HeaderBarShowTitleButtons,
     EntryEditable,
     SwitchActive,
     CheckButtonActive,
@@ -115,10 +127,12 @@ pub enum GtkBoolPropertySetter {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GtkTextPropertySetter {
     WindowTitle,
+    FrameLabel,
     LabelText,
     LabelLabel,
     ButtonLabel,
     BoxOrientation,
+    SeparatorOrientation,
     EntryText,
     EntryPlaceholderText,
     CheckButtonLabel,
@@ -158,7 +172,9 @@ impl GtkPropertySetter {
     pub const fn host_value_label(self) -> &'static str {
         match self {
             Self::Bool(_) => "Bool",
-            Self::Text(GtkTextPropertySetter::BoxOrientation) => {
+            Self::Text(
+                GtkTextPropertySetter::BoxOrientation | GtkTextPropertySetter::SeparatorOrientation,
+            ) => {
                 "text naming a valid Orientation value"
             }
             Self::Text(_) => "Text",
@@ -179,7 +195,9 @@ pub struct GtkPropertyDescriptor {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GtkEventSignal {
     ButtonClicked,
+    EntryChanged,
     EntryActivated,
+    SwitchToggled,
     CheckButtonToggled,
     ToggleButtonToggled,
 }
@@ -209,8 +227,11 @@ impl GtkChildContainerKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GtkChildMountRoute {
     WindowContent,
+    HeaderBarTitleWidget,
     BoxChildren,
     ScrolledWindowContent,
+    FrameChild,
+    ViewportChild,
     RevealerChild,
 }
 
@@ -313,6 +334,12 @@ const WINDOW_TITLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
     setter: GtkPropertySetter::Text(GtkTextPropertySetter::WindowTitle),
 };
 
+const HEADER_BAR_SHOW_TITLE_BUTTONS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "showTitleButtons",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::HeaderBarShowTitleButtons),
+};
+
 const BOX_ORIENTATION_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
     name: "orientation",
     value_shape: GtkPropertyValueShape::Enum(ORIENTATION_VALUE_SHAPE),
@@ -341,6 +368,12 @@ const ENTRY_EDITABLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
     name: "editable",
     value_shape: GtkPropertyValueShape::Bool,
     setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::EntryEditable),
+};
+
+const FRAME_LABEL_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "label",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::FrameLabel),
 };
 
 const LABEL_TEXT_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
@@ -373,16 +406,36 @@ const ENTRY_ACTIVATE_EVENT: GtkEventDescriptor = GtkEventDescriptor {
     signal: GtkEventSignal::EntryActivated,
 };
 
+const ENTRY_CHANGE_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onChange",
+    payload: GtkConcreteEventPayload::Text,
+    signal: GtkEventSignal::EntryChanged,
+};
+
 const SWITCH_ACTIVE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
     name: "active",
     value_shape: GtkPropertyValueShape::Bool,
     setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::SwitchActive),
 };
 
+const SWITCH_TOGGLE_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onToggle",
+    payload: GtkConcreteEventPayload::Bool,
+    signal: GtkEventSignal::SwitchToggled,
+};
+
 const WINDOW_CONTENT_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
     name: "content",
     container: GtkChildContainerKind::Single,
     mount: GtkChildMountRoute::WindowContent,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const HEADER_BAR_TITLE_WIDGET_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "titleWidget",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::HeaderBarTitleWidget,
     min_children: 0,
     max_children: Some(1),
 };
@@ -403,6 +456,22 @@ const SCROLLED_WINDOW_CONTENT_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGro
     max_children: Some(1),
 };
 
+const FRAME_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "child",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::FrameChild,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const VIEWPORT_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "child",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::ViewportChild,
+    min_children: 0,
+    max_children: Some(1),
+};
+
 const WINDOW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     markup_name: "Window",
     kind: GtkConcreteWidgetKind::Window,
@@ -416,6 +485,21 @@ const WINDOW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     ],
     events: &[],
     child_groups: &[WINDOW_CONTENT_CHILD_GROUP],
+};
+
+const HEADER_BAR_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "HeaderBar",
+    kind: GtkConcreteWidgetKind::HeaderBar,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        HEADER_BAR_SHOW_TITLE_BUTTONS_PROPERTY,
+    ],
+    events: &[],
+    child_groups: &[HEADER_BAR_TITLE_WIDGET_CHILD_GROUP],
 };
 
 const BOX_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
@@ -446,6 +530,30 @@ const SCROLLED_WINDOW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     ],
     events: &[],
     child_groups: &[SCROLLED_WINDOW_CONTENT_CHILD_GROUP],
+};
+
+const FRAME_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Frame",
+    kind: GtkConcreteWidgetKind::Frame,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        FRAME_LABEL_PROPERTY,
+    ],
+    events: &[],
+    child_groups: &[FRAME_CHILD_GROUP],
+};
+
+const VIEWPORT_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Viewport",
+    kind: GtkConcreteWidgetKind::Viewport,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[VISIBLE_PROPERTY, SENSITIVE_PROPERTY, HEXPAND_PROPERTY, VEXPAND_PROPERTY],
+    events: &[],
+    child_groups: &[VIEWPORT_CHILD_GROUP],
 };
 
 const LABEL_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
@@ -492,7 +600,7 @@ const ENTRY_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         ENTRY_PLACEHOLDER_TEXT_PROPERTY,
         ENTRY_EDITABLE_PROPERTY,
     ],
-    events: &[ENTRY_ACTIVATE_EVENT],
+    events: &[ENTRY_CHANGE_EVENT, ENTRY_ACTIVATE_EVENT],
     child_groups: &[],
 };
 
@@ -507,7 +615,7 @@ const SWITCH_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         VEXPAND_PROPERTY,
         SWITCH_ACTIVE_PROPERTY,
     ],
-    events: &[],
+    events: &[SWITCH_TOGGLE_EVENT],
     child_groups: &[],
 };
 
@@ -702,10 +810,34 @@ const REVEALER_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     child_groups: &[REVEALER_CHILD_GROUP],
 };
 
+const SEPARATOR_ORIENTATION_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "orientation",
+    value_shape: GtkPropertyValueShape::Enum(ORIENTATION_VALUE_SHAPE),
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::SeparatorOrientation),
+};
+
+const SEPARATOR_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Separator",
+    kind: GtkConcreteWidgetKind::Separator,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        SEPARATOR_ORIENTATION_PROPERTY,
+    ],
+    events: &[],
+    child_groups: &[],
+};
+
 const GTK_WIDGET_SCHEMAS: &[GtkWidgetSchema] = &[
     WINDOW_SCHEMA,
+    HEADER_BAR_SCHEMA,
     BOX_SCHEMA,
     SCROLLED_WINDOW_SCHEMA,
+    FRAME_SCHEMA,
+    VIEWPORT_SCHEMA,
     LABEL_SCHEMA,
     BUTTON_SCHEMA,
     ENTRY_SCHEMA,
@@ -716,6 +848,7 @@ const GTK_WIDGET_SCHEMAS: &[GtkWidgetSchema] = &[
     SPINNER_SCHEMA,
     PROGRESS_BAR_SCHEMA,
     REVEALER_SCHEMA,
+    SEPARATOR_SCHEMA,
 ];
 
 pub fn supported_widget_schemas() -> &'static [GtkWidgetSchema] {
@@ -770,6 +903,7 @@ mod tests {
 
     use super::{
         GtkChildContainerKind, GtkConcreteEventPayload, GtkDefaultChildGroup,
+        ORIENTATION_VALUE_SHAPE,
         GtkPropertyValueShape, lookup_widget_event, lookup_widget_property, lookup_widget_schema,
         lookup_widget_schema_by_name, supported_widget_schemas,
     };
@@ -797,8 +931,11 @@ mod tests {
             names,
             [
                 "Window",
+                "HeaderBar",
                 "Box",
                 "ScrolledWindow",
+                "Frame",
+                "Viewport",
                 "Label",
                 "Button",
                 "Entry",
@@ -809,6 +946,7 @@ mod tests {
                 "Spinner",
                 "ProgressBar",
                 "Revealer",
+                "Separator",
             ]
         );
     }
@@ -826,6 +964,8 @@ mod tests {
         let entry = path(&["Entry"]);
         let label = path(&["Label"]);
         let switch = path(&["Switch"]);
+        let header_bar = path(&["HeaderBar"]);
+        let separator = path(&["Separator"]);
         let property = lookup_widget_property(&button, "label")
             .expect("Button.label should be part of the catalog");
         assert_eq!(property.value_shape, GtkPropertyValueShape::Text);
@@ -835,6 +975,13 @@ mod tests {
         assert!(lookup_widget_property(&entry, "placeholderText").is_some());
         assert!(lookup_widget_property(&entry, "label").is_none());
         assert!(lookup_widget_property(&switch, "active").is_some());
+        assert!(lookup_widget_property(&header_bar, "showTitleButtons").is_some());
+        assert_eq!(
+            lookup_widget_property(&separator, "orientation")
+                .expect("Separator.orientation should be part of the catalog")
+                .value_shape,
+            GtkPropertyValueShape::Enum(ORIENTATION_VALUE_SHAPE)
+        );
         assert!(lookup_widget_property(&switch, "text").is_none());
     }
 
@@ -842,12 +989,19 @@ mod tests {
     fn event_descriptors_are_exact_and_case_sensitive() {
         let button = path(&["Button"]);
         let entry = path(&["Entry"]);
+        let switch = path(&["Switch"]);
         let event =
             lookup_widget_event(&button, "onClick").expect("Button.onClick should be in catalog");
         assert_eq!(event.payload, GtkConcreteEventPayload::Unit);
+        let event = lookup_widget_event(&entry, "onChange")
+            .expect("Entry.onChange should be part of the catalog");
+        assert_eq!(event.payload, GtkConcreteEventPayload::Text);
         let event = lookup_widget_event(&entry, "onActivate")
             .expect("Entry.onActivate should be part of the catalog");
         assert_eq!(event.payload, GtkConcreteEventPayload::Unit);
+        let event =
+            lookup_widget_event(&switch, "onToggle").expect("Switch.onToggle should be in catalog");
+        assert_eq!(event.payload, GtkConcreteEventPayload::Bool);
         assert!(lookup_widget_event(&button, "onclick").is_none());
         assert!(lookup_widget_event(&entry, "onactivate").is_none());
         assert!(lookup_widget_event(&path(&["Label"]), "onClick").is_none());
@@ -878,5 +1032,26 @@ mod tests {
 
         let button = lookup_widget_schema_by_name("Button").expect("Button schema should exist");
         assert_eq!(button.default_child_group(), GtkDefaultChildGroup::None);
+
+        let frame = lookup_widget_schema_by_name("Frame").expect("Frame schema should exist");
+        assert!(matches!(
+            frame.default_child_group(),
+            GtkDefaultChildGroup::One(group)
+                if group.name == "child"
+                    && group.container == GtkChildContainerKind::Single
+                    && group.accepts_child_count(1)
+                    && !group.accepts_child_count(2)
+        ));
+
+        let header_bar =
+            lookup_widget_schema_by_name("HeaderBar").expect("HeaderBar schema should exist");
+        assert!(matches!(
+            header_bar.default_child_group(),
+            GtkDefaultChildGroup::One(group)
+                if group.name == "titleWidget"
+                    && group.container == GtkChildContainerKind::Single
+                    && group.accepts_child_count(1)
+                    && !group.accepts_child_count(2)
+        ));
     }
 }

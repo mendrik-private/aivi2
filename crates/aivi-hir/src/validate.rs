@@ -11185,10 +11185,20 @@ impl<'a> GateTypeContext<'a> {
             let Item::Function(function) = &self.module.items()[*item_id] else {
                 return None;
             };
-            if function.parameters.len() != explicit_arguments.len() + 1
-                || function.annotation.is_none()
-            {
+            if function.parameters.len() != explicit_arguments.len() + 1 {
                 return None;
+            }
+            if function.annotation.is_none()
+                || function.parameters.iter().any(|parameter| parameter.annotation.is_none())
+            {
+                return self.match_pipe_unannotated_function_signature(
+                    callee_expr,
+                    &explicit_arguments,
+                    function,
+                    env,
+                    ambient,
+                    expected_result,
+                );
             }
 
             let mut bindings = PolyTypeBindings::new();
@@ -11378,6 +11388,93 @@ impl<'a> GateTypeContext<'a> {
             return None;
         }
         matches.pop()
+    }
+
+    fn match_pipe_unannotated_function_signature(
+        &mut self,
+        callee_expr: ExprId,
+        explicit_arguments: &[ExprId],
+        function: &crate::hir::FunctionItem,
+        env: &GateExprEnv,
+        ambient: &GateType,
+        expected_result: Option<&GateType>,
+    ) -> Option<PipeFunctionSignatureMatch> {
+        let mut bindings = PolyTypeBindings::new();
+        let mut signal_payload_arguments = Vec::with_capacity(explicit_arguments.len());
+        let mut explicit_argument_types = Vec::with_capacity(explicit_arguments.len());
+
+        for (argument, parameter) in explicit_arguments.iter().zip(function.parameters.iter()) {
+            let argument_info = self.infer_expr(*argument, env, Some(ambient));
+            let argument_ty = argument_info.actual_gate_type().or(argument_info.ty);
+            if let Some(annotation) = parameter.annotation {
+                if let Some(argument_ty) = argument_ty.as_ref() {
+                    let reads_signal_payload = self.match_pipe_argument_parameter_annotation(
+                        annotation,
+                        argument_ty,
+                        &mut bindings,
+                    )?;
+                    signal_payload_arguments.push(reads_signal_payload);
+                } else {
+                    signal_payload_arguments.push(false);
+                }
+            } else {
+                signal_payload_arguments.push(false);
+            }
+            explicit_argument_types.push(argument_ty);
+        }
+
+        let ambient_parameter = function
+            .parameters
+            .last()
+            .expect("checked pipe arity above");
+        if let Some(annotation) = ambient_parameter.annotation {
+            self.match_function_parameter_annotation(annotation, ambient, &mut bindings)?;
+        }
+
+        if let Some(result_annotation) = function.annotation
+            && let Some(expected) = expected_result
+        {
+            self.match_function_parameter_annotation(result_annotation, expected, &mut bindings)?;
+        }
+
+        let mut parameter_types = Vec::with_capacity(function.parameters.len());
+        for (index, parameter) in function.parameters.iter().enumerate() {
+            let parameter_ty = if let Some(annotation) = parameter.annotation {
+                self.instantiate_function_parameter_annotation(annotation, &bindings)?
+            } else if index < explicit_argument_types.len() {
+                explicit_argument_types[index].clone()?
+            } else {
+                ambient.clone()
+            };
+            parameter_types.push(parameter_ty);
+        }
+
+        let mut function_env = GateExprEnv::default();
+        for (parameter, parameter_ty) in function.parameters.iter().zip(parameter_types.iter()) {
+            function_env
+                .locals
+                .insert(parameter.binding, parameter_ty.clone());
+        }
+
+        let result_type = if let Some(result_annotation) = function.annotation {
+            self.instantiate_function_parameter_annotation(result_annotation, &bindings)?
+        } else {
+            let body_info = self.infer_expr(function.body, &function_env, None);
+            body_info.actual_gate_type().or(body_info.ty)?
+        };
+        if let Some(expected) = expected_result
+            && !result_type.same_shape(expected)
+        {
+            return None;
+        }
+
+        Some(PipeFunctionSignatureMatch {
+            callee_expr,
+            explicit_arguments: explicit_arguments.to_vec(),
+            signal_payload_arguments,
+            parameter_types,
+            result_type,
+        })
     }
 
     fn infer_polymorphic_function_apply_expr(

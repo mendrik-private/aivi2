@@ -2047,12 +2047,12 @@ val answer = 42
         let lowered = lower_text(
             "runtime-startup-manual-task-error.aivi",
             r#"
-val compare = [1] == [1]
+val total = 1.0 + 2.0
 "#,
         );
-        let mut linked = manual_task_linked_runtime(&lowered, "compare");
+        let mut linked = manual_task_linked_runtime(&lowered, "total");
         let binding = linked
-            .task_by_owner(item_id(lowered.hir.module(), "compare"))
+            .task_by_owner(item_id(lowered.hir.module(), "total"))
             .expect("manual task binding should exist")
             .clone();
 

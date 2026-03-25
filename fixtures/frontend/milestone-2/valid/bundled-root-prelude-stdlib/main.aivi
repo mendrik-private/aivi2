@@ -100,17 +100,10 @@ val labels: Text =
         "Grace"
     ]
 
-val orderedCount: Ordering =
-    compare 1 2
-
-val combinedLabel: Text =
-    append "Ada" " Lovelace"
-
-val emptyLabels: Text =
-    empty
-
-val mappedOk: Result Text Int =
-    bimap punctuate addOne (Ok 1)
+val orderedCount: Ordering = compare 1 2
+val combinedLabel: Text = append "Ada" " Lovelace"
+val emptyLabels: Text = empty
+val mappedOk: Result Text Int = bimap punctuate addOne (Ok 1)
 
 val traversedCounts: Option (List Int) =
     traverse keepSmall [
