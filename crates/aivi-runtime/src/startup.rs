@@ -5,6 +5,8 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+use glib::MainContext;
+
 use aivi_backend::{
     DetachedRuntimeValue, EvaluationError, GateStage as BackendGateStage,
     ItemId as BackendItemId, ItemKind as BackendItemKind, KernelEvaluator, KernelId,
@@ -154,6 +156,14 @@ impl BackendLinkedRuntime {
     }
 
     pub fn tick(&mut self) -> Result<TickOutcome, BackendRuntimeError> {
+        // Assert that we are running on the GLib/GTK main thread. The scheduler's internal
+        // `VecDeque` queue is not protected by a lock, so ticking from a background thread would
+        // race with publications from worker threads and corrupt the scheduler state.
+        assert!(
+            MainContext::default().is_owner(),
+            "BackendLinkedRuntime::tick must be called from the GLib main thread; \
+             use GlibLinkedRuntime to drive the runtime from worker or async contexts"
+        );
         let committed = self.committed_signal_snapshots()?;
         let runtime_committed = materialize_detached_globals(&committed);
         let mut evaluator = LinkedDerivedEvaluator {
