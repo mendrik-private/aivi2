@@ -284,12 +284,20 @@ impl GtkHostValue for RunHostValue {
         Self(DetachedRuntimeValue::unit())
     }
 
+    fn from_bool(v: bool) -> Self {
+        Self(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Bool(v)))
+    }
+
     fn as_bool(&self) -> Option<bool> {
         strip_signal_runtime_value(self.0.to_runtime()).as_bool()
     }
 
     fn as_i64(&self) -> Option<i64> {
         strip_signal_runtime_value(self.0.to_runtime()).as_i64()
+    }
+
+    fn as_f64(&self) -> Option<f64> {
+        strip_signal_runtime_value(self.0.to_runtime()).as_float()
     }
 
     fn as_text(&self) -> Option<&str> {
@@ -1129,6 +1137,7 @@ fn signal_accepts_event_payload(
     };
     match payload {
         GtkConcreteEventPayload::Unit => type_is_builtin(module, payload_ty, BuiltinType::Unit),
+        GtkConcreteEventPayload::Bool => type_is_builtin(module, payload_ty, BuiltinType::Bool),
     }
 }
 
@@ -3308,13 +3317,13 @@ val view =
             r#"
 val view =
     <Window title="Host">
-        <ToggleButton />
+        <HeaderBar />
     </Window>
 "#,
             None,
         )
         .expect_err("widgets outside the schema catalog should be rejected before launch");
-        assert!(error.contains("does not support GTK widget `ToggleButton`"));
+        assert!(error.contains("does not support GTK widget `HeaderBar`"));
     }
 
     #[test]

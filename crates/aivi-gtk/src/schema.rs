@@ -3,18 +3,21 @@ use aivi_hir::NamePath;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GtkConcreteEventPayload {
     Unit,
+    Bool,
 }
 
 impl GtkConcreteEventPayload {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Unit => "Unit",
+            Self::Bool => "Bool",
         }
     }
 
     pub const fn required_signal_type_label(self) -> &'static str {
         match self {
             Self::Unit => "`Signal Unit`",
+            Self::Bool => "`Signal Bool`",
         }
     }
 }
@@ -28,6 +31,12 @@ pub enum GtkConcreteWidgetKind {
     Button,
     Entry,
     Switch,
+    CheckButton,
+    ToggleButton,
+    Image,
+    Spinner,
+    ProgressBar,
+    Revealer,
 }
 
 impl GtkConcreteWidgetKind {
@@ -40,6 +49,12 @@ impl GtkConcreteWidgetKind {
             Self::Button => "Button",
             Self::Entry => "Entry",
             Self::Switch => "Switch",
+            Self::CheckButton => "CheckButton",
+            Self::ToggleButton => "ToggleButton",
+            Self::Image => "Image",
+            Self::Spinner => "Spinner",
+            Self::ProgressBar => "ProgressBar",
+            Self::Revealer => "Revealer",
         }
     }
 }
@@ -67,6 +82,7 @@ pub enum GtkPropertyValueShape {
     Bool,
     Text,
     I64,
+    F64,
     Enum(GtkEnumValueShape),
 }
 
@@ -76,6 +92,7 @@ impl GtkPropertyValueShape {
             Self::Bool => "Bool",
             Self::Text => "Text",
             Self::I64 => "Int",
+            Self::F64 => "Float",
             Self::Enum(shape) => shape.name,
         }
     }
@@ -89,6 +106,10 @@ pub enum GtkBoolPropertySetter {
     Vexpand,
     EntryEditable,
     SwitchActive,
+    CheckButtonActive,
+    ToggleButtonActive,
+    SpinnerSpinning,
+    RevealerRevealed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -100,6 +121,12 @@ pub enum GtkTextPropertySetter {
     BoxOrientation,
     EntryText,
     EntryPlaceholderText,
+    CheckButtonLabel,
+    ToggleButtonLabel,
+    ImageIconName,
+    ImageResourcePath,
+    ProgressBarText,
+    RevealerTransitionType,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -108,10 +135,23 @@ pub enum GtkTextOrI64PropertySetter {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GtkI64PropertySetter {
+    ImagePixelSize,
+    RevealerTransitionDuration,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GtkF64PropertySetter {
+    ProgressBarFraction,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GtkPropertySetter {
     Bool(GtkBoolPropertySetter),
     Text(GtkTextPropertySetter),
     TextOrI64(GtkTextOrI64PropertySetter),
+    I64(GtkI64PropertySetter),
+    F64(GtkF64PropertySetter),
 }
 
 impl GtkPropertySetter {
@@ -123,6 +163,8 @@ impl GtkPropertySetter {
             }
             Self::Text(_) => "Text",
             Self::TextOrI64(_) => "Int or integer text",
+            Self::I64(_) => "Int",
+            Self::F64(_) => "Float",
         }
     }
 }
@@ -138,6 +180,8 @@ pub struct GtkPropertyDescriptor {
 pub enum GtkEventSignal {
     ButtonClicked,
     EntryActivated,
+    CheckButtonToggled,
+    ToggleButtonToggled,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -167,6 +211,7 @@ pub enum GtkChildMountRoute {
     WindowContent,
     BoxChildren,
     ScrolledWindowContent,
+    RevealerChild,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -466,6 +511,197 @@ const SWITCH_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     child_groups: &[],
 };
 
+const CHECK_BUTTON_LABEL_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "label",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::CheckButtonLabel),
+};
+
+const CHECK_BUTTON_ACTIVE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "active",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::CheckButtonActive),
+};
+
+const CHECK_BUTTON_TOGGLE_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onToggle",
+    payload: GtkConcreteEventPayload::Bool,
+    signal: GtkEventSignal::CheckButtonToggled,
+};
+
+const CHECK_BUTTON_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "CheckButton",
+    kind: GtkConcreteWidgetKind::CheckButton,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        CHECK_BUTTON_LABEL_PROPERTY,
+        CHECK_BUTTON_ACTIVE_PROPERTY,
+    ],
+    events: &[CHECK_BUTTON_TOGGLE_EVENT],
+    child_groups: &[],
+};
+
+const TOGGLE_BUTTON_LABEL_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "label",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::ToggleButtonLabel),
+};
+
+const TOGGLE_BUTTON_ACTIVE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "active",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::ToggleButtonActive),
+};
+
+const TOGGLE_BUTTON_TOGGLE_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onToggle",
+    payload: GtkConcreteEventPayload::Bool,
+    signal: GtkEventSignal::ToggleButtonToggled,
+};
+
+const TOGGLE_BUTTON_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "ToggleButton",
+    kind: GtkConcreteWidgetKind::ToggleButton,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        TOGGLE_BUTTON_LABEL_PROPERTY,
+        TOGGLE_BUTTON_ACTIVE_PROPERTY,
+    ],
+    events: &[TOGGLE_BUTTON_TOGGLE_EVENT],
+    child_groups: &[],
+};
+
+const IMAGE_ICON_NAME_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "iconName",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::ImageIconName),
+};
+
+const IMAGE_RESOURCE_PATH_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "resourcePath",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::ImageResourcePath),
+};
+
+const IMAGE_PIXEL_SIZE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "pixelSize",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::ImagePixelSize),
+};
+
+const IMAGE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Image",
+    kind: GtkConcreteWidgetKind::Image,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        IMAGE_ICON_NAME_PROPERTY,
+        IMAGE_RESOURCE_PATH_PROPERTY,
+        IMAGE_PIXEL_SIZE_PROPERTY,
+    ],
+    events: &[],
+    child_groups: &[],
+};
+
+const SPINNER_SPINNING_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "spinning",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::SpinnerSpinning),
+};
+
+const SPINNER_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Spinner",
+    kind: GtkConcreteWidgetKind::Spinner,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        SPINNER_SPINNING_PROPERTY,
+    ],
+    events: &[],
+    child_groups: &[],
+};
+
+const PROGRESS_BAR_FRACTION_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "fraction",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::ProgressBarFraction),
+};
+
+const PROGRESS_BAR_TEXT_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "text",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::ProgressBarText),
+};
+
+const PROGRESS_BAR_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "ProgressBar",
+    kind: GtkConcreteWidgetKind::ProgressBar,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        PROGRESS_BAR_FRACTION_PROPERTY,
+        PROGRESS_BAR_TEXT_PROPERTY,
+    ],
+    events: &[],
+    child_groups: &[],
+};
+
+const REVEALER_REVEALED_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "revealed",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::RevealerRevealed),
+};
+
+const REVEALER_TRANSITION_TYPE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "transitionType",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::RevealerTransitionType),
+};
+
+const REVEALER_TRANSITION_DURATION_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "transitionDuration",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::RevealerTransitionDuration),
+};
+
+const REVEALER_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "child",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::RevealerChild,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const REVEALER_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Revealer",
+    kind: GtkConcreteWidgetKind::Revealer,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        REVEALER_REVEALED_PROPERTY,
+        REVEALER_TRANSITION_TYPE_PROPERTY,
+        REVEALER_TRANSITION_DURATION_PROPERTY,
+    ],
+    events: &[],
+    child_groups: &[REVEALER_CHILD_GROUP],
+};
+
 const GTK_WIDGET_SCHEMAS: &[GtkWidgetSchema] = &[
     WINDOW_SCHEMA,
     BOX_SCHEMA,
@@ -474,6 +710,12 @@ const GTK_WIDGET_SCHEMAS: &[GtkWidgetSchema] = &[
     BUTTON_SCHEMA,
     ENTRY_SCHEMA,
     SWITCH_SCHEMA,
+    CHECK_BUTTON_SCHEMA,
+    TOGGLE_BUTTON_SCHEMA,
+    IMAGE_SCHEMA,
+    SPINNER_SCHEMA,
+    PROGRESS_BAR_SCHEMA,
+    REVEALER_SCHEMA,
 ];
 
 pub fn supported_widget_schemas() -> &'static [GtkWidgetSchema] {
@@ -561,6 +803,12 @@ mod tests {
                 "Button",
                 "Entry",
                 "Switch",
+                "CheckButton",
+                "ToggleButton",
+                "Image",
+                "Spinner",
+                "ProgressBar",
+                "Revealer",
             ]
         );
     }

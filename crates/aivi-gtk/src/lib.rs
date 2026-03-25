@@ -37,9 +37,10 @@ pub use runtime_adapter::{
 pub use schema::{
     GtkBoolPropertySetter, GtkChildContainerKind, GtkChildGroupDescriptor, GtkChildMountRoute,
     GtkConcreteEventPayload, GtkConcreteWidgetKind, GtkDefaultChildGroup, GtkEnumValueShape,
-    GtkEventDescriptor, GtkEventSignal, GtkPropertyDescriptor, GtkPropertySetter,
-    GtkPropertyValueShape, GtkTextOrI64PropertySetter, GtkTextPropertySetter, GtkWidgetRootKind,
-    GtkWidgetSchema, concrete_event_payload, concrete_supports_property, concrete_widget_is_window,
-    lookup_widget_event, lookup_widget_property, lookup_widget_schema,
-    lookup_widget_schema_by_name, supported_widget_schemas,
+    GtkEventDescriptor, GtkEventSignal, GtkF64PropertySetter, GtkI64PropertySetter,
+    GtkPropertyDescriptor, GtkPropertySetter, GtkPropertyValueShape, GtkTextOrI64PropertySetter,
+    GtkTextPropertySetter, GtkWidgetRootKind, GtkWidgetSchema, concrete_event_payload,
+    concrete_supports_property, concrete_widget_is_window, lookup_widget_event,
+    lookup_widget_property, lookup_widget_schema, lookup_widget_schema_by_name,
+    supported_widget_schemas,
 };

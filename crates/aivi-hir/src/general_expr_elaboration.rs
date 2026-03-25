@@ -377,6 +377,45 @@ fn signal_pipe_body_candidate(pipe: &PipeExpr) -> bool {
     })
 }
 
+/// For a signal pipe that ends with a Gate on a Signal type (a signal filter), the Gate
+/// stage itself is scheduler-owned, but any preceding Transform stages can be compiled
+/// as the item body kernel.  This function extracts those pre-gate stages and returns
+/// them as a partial `GeneralExprItemElaboration` so the body kernel computes the value
+/// that the gate predicate receives as its ambient input subject.
+///
+/// Returns `None` when the gate is the first stage (no transforms to extract) or when
+/// the expression is not a qualifying pipe.
+fn pre_gate_transform_body(
+    owner: ItemId,
+    body_expr: ExprId,
+    expr: GateRuntimeExpr,
+) -> Option<GeneralExprItemElaboration> {
+    let GateRuntimeExprKind::Pipe(pipe) = expr.kind else {
+        return None;
+    };
+    let gate_idx = pipe.stages.iter().position(|stage| {
+        matches!(stage.kind, GateRuntimePipeStageKind::Gate { .. }) && stage.input_subject.is_signal()
+    })?;
+    if gate_idx == 0 {
+        return None;
+    }
+    let pre_gate_stages: Vec<GateRuntimePipeStage> = pipe.stages[..gate_idx].to_vec();
+    let body_ty = pre_gate_stages.last()?.result_subject.clone();
+    Some(GeneralExprItemElaboration {
+        owner,
+        body_expr,
+        parameters: Vec::new(),
+        outcome: GeneralExprOutcome::Lowered(GateRuntimeExpr {
+            span: expr.span,
+            ty: body_ty,
+            kind: GateRuntimeExprKind::Pipe(GateRuntimePipeExpr {
+                head: pipe.head,
+                stages: pre_gate_stages,
+            }),
+        }),
+    })
+}
+
 fn signal_pipe_body_runtime_supported(expr: &GateRuntimeExpr) -> bool {
     let GateRuntimeExprKind::Pipe(pipe) = &expr.kind else {
         return true;
@@ -726,7 +765,7 @@ impl<'a> GeneralExprElaborator<'a> {
                     outcome: GeneralExprOutcome::Lowered(lowered_body),
                 })
             }
-            Ok(_) => None,
+            Ok(lowered_body) => pre_gate_transform_body(owner, body, lowered_body),
             Err(blockers) if pipe_candidate => Some(GeneralExprItemElaboration {
                 owner,
                 body_expr: body,

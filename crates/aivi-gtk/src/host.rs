@@ -15,19 +15,29 @@ use gtk::{
 
 use crate::{
     GtkBoolPropertySetter, GtkChildMountRoute, GtkConcreteWidgetKind, GtkDefaultChildGroup,
-    GtkEventRoute, GtkEventRouteId, GtkEventSignal, GtkPropertyDescriptor, GtkPropertySetter,
-    GtkRuntimeHost, GtkTextOrI64PropertySetter, GtkTextPropertySetter, GtkWidgetSchema,
-    RuntimeSetterBinding, StaticPropertyPlan, StaticPropertyValue, lookup_widget_schema,
+    GtkEventRoute, GtkEventRouteId, GtkEventSignal, GtkF64PropertySetter, GtkI64PropertySetter,
+    GtkPropertyDescriptor, GtkPropertySetter, GtkRuntimeHost, GtkTextOrI64PropertySetter,
+    GtkTextPropertySetter, GtkWidgetSchema, RuntimeSetterBinding, StaticPropertyPlan,
+    StaticPropertyValue, lookup_widget_schema,
 };
 
 pub trait GtkHostValue: Clone + 'static {
     fn unit() -> Self;
+
+    fn from_bool(v: bool) -> Self {
+        let _ = v;
+        Self::unit()
+    }
 
     fn as_bool(&self) -> Option<bool> {
         None
     }
 
     fn as_i64(&self) -> Option<i64> {
+        None
+    }
+
+    fn as_f64(&self) -> Option<f64> {
         None
     }
 
@@ -245,6 +255,14 @@ where
             GtkConcreteWidgetKind::Button => gtk::Button::new().upcast::<gtk::Widget>(),
             GtkConcreteWidgetKind::Entry => gtk::Entry::new().upcast::<gtk::Widget>(),
             GtkConcreteWidgetKind::Switch => gtk::Switch::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::CheckButton => gtk::CheckButton::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::ToggleButton => {
+                gtk::ToggleButton::new().upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::Image => gtk::Image::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::Spinner => gtk::Spinner::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::ProgressBar => gtk::ProgressBar::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::Revealer => gtk::Revealer::new().upcast::<gtk::Widget>(),
         };
         Ok((schema, widget))
     }
@@ -354,6 +372,38 @@ where
                     .expect("switch widget should downcast")
                     .set_active(value);
             }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::CheckButtonActive) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::CheckButton>()
+                    .expect("check button widget should downcast")
+                    .set_active(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::ToggleButtonActive) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::ToggleButton>()
+                    .expect("toggle button widget should downcast")
+                    .set_active(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::SpinnerSpinning) => {
+                let spinner = widget
+                    .clone()
+                    .downcast::<gtk::Spinner>()
+                    .expect("spinner widget should downcast");
+                if value {
+                    spinner.start();
+                } else {
+                    spinner.stop();
+                }
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::RevealerRevealed) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Revealer>()
+                    .expect("revealer widget should downcast")
+                    .set_reveal_child(value);
+            }
             _ => {
                 return Err(self.invalid_property_value(
                     schema,
@@ -425,6 +475,68 @@ where
                     .expect("entry widget should downcast")
                     .set_placeholder_text(Some(value));
             }
+            GtkPropertySetter::Text(GtkTextPropertySetter::CheckButtonLabel) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::CheckButton>()
+                    .expect("check button widget should downcast")
+                    .set_label(Some(value));
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::ToggleButtonLabel) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::ToggleButton>()
+                    .expect("toggle button widget should downcast")
+                    .set_label(value);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::ImageIconName) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Image>()
+                    .expect("image widget should downcast")
+                    .set_icon_name(Some(value));
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::ImageResourcePath) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Image>()
+                    .expect("image widget should downcast")
+                    .set_resource(Some(value));
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::ProgressBarText) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::ProgressBar>()
+                    .expect("progress bar widget should downcast")
+                    .set_text(Some(value));
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::RevealerTransitionType) => {
+                use gtk::RevealerTransitionType;
+                let transition = match value {
+                    "None" => RevealerTransitionType::None,
+                    "Crossfade" => RevealerTransitionType::Crossfade,
+                    "SlideRight" => RevealerTransitionType::SlideRight,
+                    "SlideLeft" => RevealerTransitionType::SlideLeft,
+                    "SlideUp" => RevealerTransitionType::SlideUp,
+                    "SlideDown" => RevealerTransitionType::SlideDown,
+                    "SwingRight" => RevealerTransitionType::SwingRight,
+                    "SwingLeft" => RevealerTransitionType::SwingLeft,
+                    "SwingUp" => RevealerTransitionType::SwingUp,
+                    "SwingDown" => RevealerTransitionType::SwingDown,
+                    _ => {
+                        return Err(self.invalid_property_value(
+                            schema,
+                            property,
+                            "valid Revealer transition type name",
+                        ));
+                    }
+                };
+                widget
+                    .clone()
+                    .downcast::<gtk::Revealer>()
+                    .expect("revealer widget should downcast")
+                    .set_transition_type(transition);
+            }
             GtkPropertySetter::TextOrI64(GtkTextOrI64PropertySetter::BoxSpacing) => {
                 let spacing = value.parse::<i32>().map_err(|_| {
                     self.invalid_property_value(schema, property, "signed 32-bit integer text")
@@ -463,6 +575,52 @@ where
                     .downcast::<gtk::Box>()
                     .expect("box widget should downcast")
                     .set_spacing(spacing);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::ImagePixelSize) => {
+                let size = i32::try_from(value).map_err(|_| {
+                    self.invalid_property_value(schema, property, "signed 32-bit integer")
+                })?;
+                widget
+                    .clone()
+                    .downcast::<gtk::Image>()
+                    .expect("image widget should downcast")
+                    .set_pixel_size(size);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::RevealerTransitionDuration) => {
+                let duration = u32::try_from(value).map_err(|_| {
+                    self.invalid_property_value(schema, property, "non-negative 32-bit integer")
+                })?;
+                widget
+                    .clone()
+                    .downcast::<gtk::Revealer>()
+                    .expect("revealer widget should downcast")
+                    .set_transition_duration(duration);
+                Ok(())
+            }
+            _ => Err(self.invalid_property_value(
+                schema,
+                property,
+                property.setter.host_value_label(),
+            )),
+        }
+    }
+
+    fn apply_f64_property(
+        &self,
+        widget: &gtk::Widget,
+        schema: &'static GtkWidgetSchema,
+        property: &GtkPropertyDescriptor,
+        value: f64,
+    ) -> Result<(), GtkConcreteHostError> {
+        match property.setter {
+            GtkPropertySetter::F64(GtkF64PropertySetter::ProgressBarFraction) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::ProgressBar>()
+                    .expect("progress bar widget should downcast")
+                    .set_fraction(value.clamp(0.0, 1.0));
                 Ok(())
             }
             _ => Err(self.invalid_property_value(
@@ -510,6 +668,13 @@ where
                     .clone()
                     .downcast::<gtk::ScrolledWindow>()
                     .expect("scrolled window widget should downcast")
+                    .set_child(child);
+            }
+            GtkChildMountRoute::RevealerChild => {
+                parent_widget
+                    .clone()
+                    .downcast::<gtk::Revealer>()
+                    .expect("revealer widget should downcast")
                     .set_child(child);
             }
             GtkChildMountRoute::BoxChildren => {
@@ -614,6 +779,26 @@ where
                     ))
                 }
             }
+            GtkPropertySetter::I64(_) => {
+                let value = value.as_i64().ok_or_else(|| {
+                    self.invalid_property_value(
+                        schema,
+                        descriptor,
+                        descriptor.setter.host_value_label(),
+                    )
+                })?;
+                self.apply_i64_property(&widget, schema, descriptor, value)
+            }
+            GtkPropertySetter::F64(_) => {
+                let value = value.as_f64().ok_or_else(|| {
+                    self.invalid_property_value(
+                        schema,
+                        descriptor,
+                        descriptor.setter.host_value_label(),
+                    )
+                })?;
+                self.apply_f64_property(&widget, schema, descriptor, value)
+            }
         }
     }
 
@@ -659,6 +844,32 @@ where
                     queue.push(GtkQueuedEvent {
                         route: route_id,
                         value: V::unit(),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::CheckButtonToggled => widget
+                .clone()
+                .downcast::<gtk::CheckButton>()
+                .expect("check button widget should downcast")
+                .connect_toggled(move |btn| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_bool(btn.is_active()),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::ToggleButtonToggled => widget
+                .clone()
+                .downcast::<gtk::ToggleButton>()
+                .expect("toggle button widget should downcast")
+                .connect_toggled(move |btn| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_bool(btn.is_active()),
                     });
                     if let Some(notifier) = &notifier {
                         notifier();
@@ -710,7 +921,8 @@ where
         let mut next_children = current_children.clone();
         match self.child_mount_route(parent, schema, "insert_children")? {
             route @ (GtkChildMountRoute::WindowContent
-            | GtkChildMountRoute::ScrolledWindowContent) => {
+            | GtkChildMountRoute::ScrolledWindowContent
+            | GtkChildMountRoute::RevealerChild) => {
                 if current_children.len() + children.len() > 1 || index != 0 {
                     return Err(GtkConcreteHostError::UnsupportedParentOperation {
                         parent: parent.clone(),
@@ -775,7 +987,8 @@ where
         let mut next_children = current_children.clone();
         match self.child_mount_route(parent, schema, "remove_children")? {
             route @ (GtkChildMountRoute::WindowContent
-            | GtkChildMountRoute::ScrolledWindowContent) => {
+            | GtkChildMountRoute::ScrolledWindowContent
+            | GtkChildMountRoute::RevealerChild) => {
                 self.set_single_child(&parent_widget, route, None);
                 next_children.clear();
             }
@@ -842,12 +1055,16 @@ where
                 }
                 self.update_children(parent, next_children)
             }
-            GtkChildMountRoute::WindowContent | GtkChildMountRoute::ScrolledWindowContent
+            GtkChildMountRoute::WindowContent
+            | GtkChildMountRoute::ScrolledWindowContent
+            | GtkChildMountRoute::RevealerChild
                 if from == 0 && count == 1 && to == 0 =>
             {
                 Ok(())
             }
-            GtkChildMountRoute::WindowContent | GtkChildMountRoute::ScrolledWindowContent => {
+            GtkChildMountRoute::WindowContent
+            | GtkChildMountRoute::ScrolledWindowContent
+            | GtkChildMountRoute::RevealerChild => {
                 Err(GtkConcreteHostError::UnsupportedParentOperation {
                     parent: parent.clone(),
                     widget: schema.markup_name.into(),
@@ -1088,6 +1305,10 @@ mod tests {
     impl GtkHostValue for TestValue {
         fn unit() -> Self {
             Self::Unit
+        }
+
+        fn from_bool(v: bool) -> Self {
+            Self::Bool(v)
         }
 
         fn as_bool(&self) -> Option<bool> {

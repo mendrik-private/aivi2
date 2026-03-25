@@ -1,4 +1,4 @@
-val bundledSupportSentinel:Text = "bundled-stdlib"
+val bundledSupportSentinel: Text = "bundled-stdlib"
 
 type BundledSupportToken = Text
 

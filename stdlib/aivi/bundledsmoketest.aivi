@@ -3,7 +3,7 @@ use aivi.bundledsmokesupport (
     BundledSupportToken
 )
 
-val bundledSentinel:Text = bundledSupportSentinel
+val bundledSentinel: Text = bundledSupportSentinel
 
 type BundledToken = BundledSupportToken
 

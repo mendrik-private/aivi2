@@ -6,9 +6,10 @@ use std::{
 };
 
 use aivi_backend::{
-    DetachedRuntimeValue, EvaluationError, ItemId as BackendItemId, ItemKind as BackendItemKind,
-    KernelEvaluator, KernelId, MovingRuntimeValueStore, Program as BackendProgram, RuntimeValue,
-    SourceId as BackendSourceId, StageKind as BackendStageKind,
+    DetachedRuntimeValue, EvaluationError, GateStage as BackendGateStage,
+    ItemId as BackendItemId, ItemKind as BackendItemKind, KernelEvaluator, KernelId,
+    MovingRuntimeValueStore, PipelineId as BackendPipelineId, Program as BackendProgram,
+    RuntimeValue, SourceId as BackendSourceId, StageKind as BackendStageKind,
 };
 use aivi_core as core;
 use aivi_hir as hir;
@@ -442,6 +443,8 @@ pub struct LinkedDerivedSignal {
     pub signal: DerivedHandle,
     pub backend_item: BackendItemId,
     pub dependency_items: Box<[BackendItemId]>,
+    /// Backend pipeline IDs that must be applied to the body result in order.
+    pub pipeline_ids: Box<[BackendPipelineId]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1185,14 +1188,49 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
         }
 
         let mut evaluator = KernelEvaluator::new(self.backend);
-        evaluator
+        let value = evaluator
             .evaluate_item(binding.backend_item, &globals)
-            .map(Some)
             .map_err(|error| BackendRuntimeError::EvaluateDerivedSignal {
                 signal,
                 item: binding.item,
                 error,
-            })
+            })?;
+
+        // Apply pipeline stages in order.
+        for &pipeline_id in binding.pipeline_ids.iter() {
+            let pipeline = &self.backend.pipelines()[pipeline_id];
+            for stage in &pipeline.stages {
+                match &stage.kind {
+                    BackendStageKind::Gate(BackendGateStage::SignalFilter {
+                        predicate,
+                        emits_negative_update,
+                        ..
+                    }) => {
+                        let pred = evaluator
+                            .evaluate_kernel(*predicate, Some(&value), &[], &globals)
+                            .map_err(|error| BackendRuntimeError::EvaluateDerivedSignal {
+                                signal,
+                                item: binding.item,
+                                error,
+                            })?;
+                        // Suppress the update when the predicate is false and no
+                        // negative update is expected by downstream consumers.
+                        if matches!(pred, RuntimeValue::Bool(false)) && !emits_negative_update {
+                            return Ok(None);
+                        }
+                    }
+                    BackendStageKind::TruthyFalsy(_) => {
+                        // Carrier metadata only; the body kernel already computed
+                        // the branch result, so we pass the value through unchanged.
+                    }
+                    _ => unreachable!(
+                        "unsupported pipeline stage kind should have been blocked during linking"
+                    ),
+                }
+            }
+        }
+
+        Ok(Some(value))
     }
 }
 
@@ -1519,6 +1557,7 @@ impl<'a> LinkBuilder<'a> {
                     signal: derived,
                     backend_item,
                     dependency_items: info.dependencies.clone().into_boxed_slice(),
+                    pipeline_ids: item.pipelines.iter().copied().collect::<Vec<_>>().into_boxed_slice(),
                 },
             );
         }
@@ -1577,11 +1616,19 @@ impl<'a> LinkBuilder<'a> {
         item.body.is_some()
             && item.pipelines.iter().copied().all(|pipeline_id| {
                 let pipeline = &self.backend.pipelines()[pipeline_id];
+                // Recurrence pipelines require scheduler wakeup infrastructure
+                // that is not yet wired; keep them as an explicit boundary.
                 pipeline.recurrence.is_none()
-                    && pipeline
-                        .stages
-                        .iter()
-                        .all(|stage| matches!(stage.kind, BackendStageKind::TruthyFalsy(_)))
+                    && pipeline.stages.iter().all(|stage| {
+                        matches!(
+                            stage.kind,
+                            // TruthyFalsy carrier metadata: body kernel already handles
+                            // the branching computation.
+                            BackendStageKind::TruthyFalsy(_)
+                                // SignalFilter gates: predicate kernel is executable.
+                                | BackendStageKind::Gate(BackendGateStage::SignalFilter { .. })
+                        )
+                    })
             })
     }
 }
@@ -2411,7 +2458,7 @@ sig label : Signal Text =
     }
 
     #[test]
-    fn linked_runtime_still_blocks_signal_filter_gate_pipelines() {
+    fn linked_runtime_executes_signal_filter_gate_pipelines() {
         let lowered = lower_text(
             "runtime-startup-direct-signal-gate.aivi",
             r#"
@@ -2436,20 +2483,32 @@ sig activeUsers : Signal User =
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
             .expect("runtime assembly should build");
-        let errors = match link_backend_runtime(
+        let mut linked = link_backend_runtime(
             assembly,
             &lowered.core,
             std::sync::Arc::new(lowered.backend.clone()),
-        ) {
-            Ok(_) => panic!("signal filter pipelines should remain an explicit runtime boundary"),
-            Err(errors) => errors,
-        };
-        let active_users = item_id(lowered.hir.module(), "activeUsers");
-        assert!(errors.errors().iter().any(|error| matches!(
-            error,
-            BackendRuntimeLinkError::SignalPipelinesNotYetLinked { item, count }
-                if *item == active_users && *count == 1
-        )));
+        )
+        .expect("signal filter gate pipelines should now link successfully");
+
+        let outcome = linked
+            .tick_with_source_lifecycle()
+            .expect("linked runtime tick should succeed");
+
+        let active_users_signal = linked
+            .assembly()
+            .signal(item_id(lowered.hir.module(), "activeUsers"))
+            .expect("activeUsers signal binding should exist")
+            .signal();
+
+        assert!(
+            linked
+                .runtime()
+                .current_value(active_users_signal)
+                .unwrap()
+                .is_some(),
+            "activeUsers should commit a value because user.active is True"
+        );
+        assert!(outcome.source_actions().is_empty());
     }
 
     #[test]

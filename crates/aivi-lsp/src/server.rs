@@ -8,10 +8,11 @@ use tower_lsp::{
         DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
         DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
         Hover, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-        InitializedParams, MessageType, OneOf, SemanticTokensFullOptions, SemanticTokensOptions,
-        SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
-        ServerCapabilities, SymbolInformation, TextDocumentSyncCapability, TextDocumentSyncKind,
-        TextDocumentSyncOptions, TextEdit, WorkDoneProgressOptions, WorkspaceSymbolParams,
+        InitializedParams, Location, MessageType, OneOf, SemanticTokensFullOptions,
+        SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+        SemanticTokensServerCapabilities, ServerCapabilities, SymbolInformation, SymbolKind,
+        TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit,
+        WorkDoneProgressOptions, WorkspaceSymbolParams,
     },
 };
 
@@ -65,8 +66,8 @@ impl LanguageServer for Backend {
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
                         SemanticTokensOptions {
                             work_done_progress_options: WorkDoneProgressOptions::default(),
-                            legend: tower_lsp::lsp_types::SemanticTokensLegend {
-                                token_types: Vec::new(),
+                            legend: SemanticTokensLegend {
+                                token_types: crate::semantic_tokens::TOKEN_TYPES.to_vec(),
                                 token_modifiers: Vec::new(),
                             },
                             range: None,
@@ -142,7 +143,7 @@ impl LanguageServer for Backend {
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        Ok(crate::completion::completion(params).await)
+        Ok(crate::completion::completion(params, Arc::clone(&self.state)).await)
     }
 
     async fn goto_definition(
@@ -154,15 +155,88 @@ impl LanguageServer for Backend {
 
     async fn symbol(
         &self,
-        _params: WorkspaceSymbolParams,
+        params: WorkspaceSymbolParams,
     ) -> Result<Option<Vec<SymbolInformation>>> {
-        Ok(Some(Vec::new()))
+        let query = params.query.to_ascii_lowercase();
+        let mut results: Vec<SymbolInformation> = Vec::new();
+
+        for entry in self.state.files.iter() {
+            let (uri, file) = (entry.key().clone(), *entry.value());
+            let analysis = crate::analysis::FileAnalysis::load(&self.state.db, file);
+            let source = analysis.source.as_ref();
+
+            let mut stack: Vec<&aivi_hir::LspSymbol> = analysis.symbols.iter().collect();
+            while let Some(sym) = stack.pop() {
+                if query.is_empty() || sym.name.to_ascii_lowercase().contains(&query) {
+                    let range = source.span_to_lsp_range(sym.span.span());
+                    let lsp_range = tower_lsp::lsp_types::Range {
+                        start: tower_lsp::lsp_types::Position {
+                            line: range.start.line,
+                            character: range.start.character,
+                        },
+                        end: tower_lsp::lsp_types::Position {
+                            line: range.end.line,
+                            character: range.end.character,
+                        },
+                    };
+                    #[allow(deprecated)]
+                    results.push(SymbolInformation {
+                        name: sym.name.clone(),
+                        kind: aivi_lsp_kind_to_symbol_kind(sym.kind),
+                        tags: None,
+                        deprecated: None,
+                        location: Location {
+                            uri: uri.clone(),
+                            range: lsp_range,
+                        },
+                        container_name: None,
+                    });
+                }
+                stack.extend(sym.children.iter());
+            }
+        }
+
+        Ok(Some(results))
     }
 
     async fn semantic_tokens_full(
         &self,
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
-        Ok(crate::semantic_tokens::semantic_tokens_full(params).await)
+        Ok(
+            crate::semantic_tokens::semantic_tokens_full(params, Arc::clone(&self.state))
+                .await,
+        )
+    }
+}
+
+fn aivi_lsp_kind_to_symbol_kind(kind: aivi_hir::LspSymbolKind) -> SymbolKind {
+    match kind {
+        aivi_hir::LspSymbolKind::File => SymbolKind::FILE,
+        aivi_hir::LspSymbolKind::Module => SymbolKind::MODULE,
+        aivi_hir::LspSymbolKind::Namespace => SymbolKind::NAMESPACE,
+        aivi_hir::LspSymbolKind::Package => SymbolKind::PACKAGE,
+        aivi_hir::LspSymbolKind::Class => SymbolKind::CLASS,
+        aivi_hir::LspSymbolKind::Method => SymbolKind::METHOD,
+        aivi_hir::LspSymbolKind::Property => SymbolKind::PROPERTY,
+        aivi_hir::LspSymbolKind::Field => SymbolKind::FIELD,
+        aivi_hir::LspSymbolKind::Constructor => SymbolKind::CONSTRUCTOR,
+        aivi_hir::LspSymbolKind::Enum => SymbolKind::ENUM,
+        aivi_hir::LspSymbolKind::Interface => SymbolKind::INTERFACE,
+        aivi_hir::LspSymbolKind::Function => SymbolKind::FUNCTION,
+        aivi_hir::LspSymbolKind::Variable => SymbolKind::VARIABLE,
+        aivi_hir::LspSymbolKind::Constant => SymbolKind::CONSTANT,
+        aivi_hir::LspSymbolKind::String => SymbolKind::STRING,
+        aivi_hir::LspSymbolKind::Number => SymbolKind::NUMBER,
+        aivi_hir::LspSymbolKind::Boolean => SymbolKind::BOOLEAN,
+        aivi_hir::LspSymbolKind::Array => SymbolKind::ARRAY,
+        aivi_hir::LspSymbolKind::Object => SymbolKind::OBJECT,
+        aivi_hir::LspSymbolKind::Key => SymbolKind::KEY,
+        aivi_hir::LspSymbolKind::Null => SymbolKind::NULL,
+        aivi_hir::LspSymbolKind::EnumMember => SymbolKind::ENUM_MEMBER,
+        aivi_hir::LspSymbolKind::Struct => SymbolKind::STRUCT,
+        aivi_hir::LspSymbolKind::Event => SymbolKind::EVENT,
+        aivi_hir::LspSymbolKind::Operator => SymbolKind::OPERATOR,
+        aivi_hir::LspSymbolKind::TypeParameter => SymbolKind::TYPE_PARAMETER,
     }
 }
