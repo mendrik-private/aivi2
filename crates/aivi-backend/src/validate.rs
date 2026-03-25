@@ -1258,7 +1258,7 @@ fn validate_kernel(
                         }),
                     }
                     match &stage.kind {
-                        InlinePipeStageKind::Transform { expr }
+                        InlinePipeStageKind::Transform { expr, .. }
                         | InlinePipeStageKind::Tap { expr } => {
                             push_expr(kernel_id, *expr, kernel, &mut work, errors)
                         }
@@ -1266,12 +1266,10 @@ fn validate_kernel(
                             push_expr(kernel_id, *predicate, kernel, &mut work, errors);
                             if let Some(pred_expr) = kernel.exprs().get(*predicate) {
                                 if !is_bool_layout(program, pred_expr.layout) {
-                                    errors.push(
-                                        ValidationError::InlinePipeGatePredicateNotBool {
-                                            kernel: kernel_id,
-                                            expr: *predicate,
-                                        },
-                                    );
+                                    errors.push(ValidationError::InlinePipeGatePredicateNotBool {
+                                        kernel: kernel_id,
+                                        expr: *predicate,
+                                    });
                                 }
                             }
                         }
@@ -1504,10 +1502,7 @@ fn validate_no_item_dep_cycles(program: &Program, errors: &mut Vec<ValidationErr
                     Some(top) => top,
                     None => break,
                 };
-                let neighbors: Vec<ItemId> = deps
-                    .get(&node)
-                    .cloned()
-                    .unwrap_or_default();
+                let neighbors: Vec<ItemId> = deps.get(&node).cloned().unwrap_or_default();
                 if idx < neighbors.len() {
                     // Advance the index on the stack top before touching stack structure.
                     stack.last_mut().unwrap().1 += 1;
@@ -1515,8 +1510,7 @@ fn validate_no_item_dep_cycles(program: &Program, errors: &mut Vec<ValidationErr
                     let neighbor_color = *color.get(&neighbor).unwrap_or(&0);
                     if neighbor_color == 1 {
                         // Back-edge found: extract cycle from path.
-                        let cycle_start =
-                            path.iter().position(|&n| n == neighbor).unwrap_or(0);
+                        let cycle_start = path.iter().position(|&n| n == neighbor).unwrap_or(0);
                         let mut cycle = path[cycle_start..].to_vec();
                         cycle.push(neighbor);
                         errors.push(ValidationError::ItemCyclicDependency { cycle });

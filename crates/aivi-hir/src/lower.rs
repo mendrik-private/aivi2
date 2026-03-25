@@ -165,62 +165,64 @@ type __AiviListTailState A = {
     items: List A
 }
 
-fun __aivi_option_getOrElse:A #fallback:A #value:(Option A) =>
+fun __aivi_option_getOrElse:A fallback:A value:(Option A) =>
     value
      ||> Some item => item
      ||> None      => fallback
 
-fun __aivi_list_keepSome:(Option A) #item:A =>
+fun __aivi_list_keepSome:(Option A) item:A =>
     Some item
 
-fun __aivi_list_keepFirst:(Option A) #found:(Option A) #item:A =>
+fun __aivi_list_keepFirst:(Option A) found:(Option A) item:A =>
     found
      T|> __aivi_list_keepSome
      F|> Some item
 
-fun __aivi_list_lengthStep:Int #total:Int #item:A =>
+fun __aivi_list_lengthStep:Int total:Int item:A =>
     total + 1
 
-fun __aivi_list_length:Int #items:(List A) =>
+fun __aivi_list_length:Int items:(List A) =>
     items
      |> reduce __aivi_list_lengthStep 0
 
-fun __aivi_list_head:(Option A) #items:(List A) =>
+fun __aivi_list_head:(Option A) items:(List A) =>
     items
      |> reduce __aivi_list_keepFirst None
 
-fun __aivi_list_tailState:(__AiviListTailState A) #items:(List A) #item:A #seenFirst:Bool =>
+fun __aivi_list_tailState:(__AiviListTailState A) items:(List A) item:A seenFirst:Bool =>
     seenFirst
      T|> { seenFirst: True, items: append items [item] }
      F|> { seenFirst: True, items: [] }
 
-fun __aivi_list_tailStep:(__AiviListTailState A) #state:(__AiviListTailState A) #item:A =>
+fun __aivi_list_tailStep:(__AiviListTailState A) state:(__AiviListTailState A) item:A =>
     state
      ||> { seenFirst, items } => __aivi_list_tailState items item seenFirst
 
-fun __aivi_list_tailItems:(Option (List A)) #items:(List A) #seenFirst:Bool =>
+fun __aivi_list_tailItems:(Option (List A)) items:(List A) seenFirst:Bool =>
     seenFirst
      T|> Some items
      F|> None
 
-fun __aivi_list_tailFromState:(Option (List A)) #state:(__AiviListTailState A) =>
+fun __aivi_list_tailFromState:(Option (List A)) state:(__AiviListTailState A) =>
     state
      ||> { seenFirst, items } => __aivi_list_tailItems items seenFirst
 
-fun __aivi_list_tail:(Option (List A)) #items:(List A) =>
+fun __aivi_list_tail:(Option (List A)) items:(List A) =>
     items
      |> reduce __aivi_list_tailStep { seenFirst: False, items: [] }
      |> __aivi_list_tailFromState
 
-fun __aivi_list_anyStep:Bool #predicate:(A -> Bool) #found:Bool #item:A =>
+fun __aivi_list_anyStep:Bool predicate:(A -> Bool) found:Bool item:A =>
     found
      T|> True
      F|> predicate item
 
-fun __aivi_list_any:Bool #predicate:(A -> Bool) #items:(List A) =>
+fun __aivi_list_any:Bool predicate:(A -> Bool) items:(List A) =>
     items
      |> reduce (__aivi_list_anyStep predicate) False
 "#;
+
+const MAX_COMPILE_TIME_RANGE_ELEMENTS: u64 = 4096;
 
 struct Lowerer<'a> {
     module: Module,
@@ -1552,6 +1554,13 @@ impl<'a> Lowerer<'a> {
                 })
             }
             syn::ExprKind::List(elements) => {
+                if let [syn::Expr {
+                    kind: syn::ExprKind::Range { start, end },
+                    ..
+                }] = elements.as_slice()
+                {
+                    return self.lower_integer_range_expr(expr.span, start, end);
+                }
                 let elements = elements
                     .iter()
                     .map(|element| self.lower_expr(element))
@@ -1585,6 +1594,10 @@ impl<'a> Lowerer<'a> {
                     kind: ExprKind::Record(record),
                 })
             }
+            syn::ExprKind::SubjectPlaceholder => self.alloc_expr(Expr {
+                span: expr.span,
+                kind: ExprKind::AmbientSubject,
+            }),
             syn::ExprKind::AmbientProjection(path) => {
                 let path = self.lower_projection_path(path);
                 self.alloc_expr(Expr {
@@ -1594,6 +1607,9 @@ impl<'a> Lowerer<'a> {
                         path,
                     },
                 })
+            }
+            syn::ExprKind::Range { start, end } => {
+                self.lower_integer_range_expr(expr.span, start, end)
             }
             syn::ExprKind::Projection { base, path } => {
                 let base = self.lower_expr(base);
@@ -1668,6 +1684,70 @@ impl<'a> Lowerer<'a> {
                 })
             }
         }
+    }
+
+    fn lower_integer_range_expr(
+        &mut self,
+        span: SourceSpan,
+        start: &syn::Expr,
+        end: &syn::Expr,
+    ) -> ExprId {
+        let Some(start) = self.parse_compile_time_range_bound(start) else {
+            self.emit_error(
+                span,
+                "range bounds must be plain `Int` literals in this surface revision",
+                code("invalid-range-bounds"),
+            );
+            return self.placeholder_expr(span);
+        };
+        let Some(end) = self.parse_compile_time_range_bound(end) else {
+            self.emit_error(
+                span,
+                "range bounds must be plain `Int` literals in this surface revision",
+                code("invalid-range-bounds"),
+            );
+            return self.placeholder_expr(span);
+        };
+
+        let element_count = start.abs_diff(end).saturating_add(1);
+        if element_count > MAX_COMPILE_TIME_RANGE_ELEMENTS {
+            self.emit_error(
+                span,
+                format!(
+                    "range expands to {element_count} elements, which exceeds the compile-time limit of {MAX_COMPILE_TIME_RANGE_ELEMENTS}"
+                ),
+                code("range-too-large"),
+            );
+            return self.placeholder_expr(span);
+        }
+
+        let step = if start <= end { 1 } else { -1 };
+        let mut current = start;
+        let mut elements = Vec::with_capacity(element_count as usize);
+        loop {
+            elements.push(self.alloc_expr(Expr {
+                span,
+                kind: ExprKind::Integer(IntegerLiteral {
+                    raw: current.to_string().into_boxed_str(),
+                }),
+            }));
+            if current == end {
+                break;
+            }
+            current += step;
+        }
+
+        self.alloc_expr(Expr {
+            span,
+            kind: ExprKind::List(elements),
+        })
+    }
+
+    fn parse_compile_time_range_bound(&self, expr: &syn::Expr) -> Option<i64> {
+        let syn::ExprKind::Integer(integer) = &expr.kind else {
+            return None;
+        };
+        integer.raw.parse::<i64>().ok()
     }
 
     fn lower_text_literal(&mut self, text: &syn::TextLiteral) -> TextLiteral {
@@ -3529,6 +3609,7 @@ impl<'a> Lowerer<'a> {
                     | ExprKind::Decimal(_)
                     | ExprKind::BigInt(_)
                     | ExprKind::SuffixedInteger(_)
+                    | ExprKind::AmbientSubject
                     | ExprKind::Regex(_) => {}
                     ExprKind::Text(text) => {
                         for segment in text.segments.iter().rev() {
@@ -4172,6 +4253,7 @@ impl<'a> Lowerer<'a> {
                         | ExprKind::Decimal(_)
                         | ExprKind::BigInt(_)
                         | ExprKind::SuffixedInteger(_)
+                        | ExprKind::AmbientSubject
                         | ExprKind::Regex(_) => {}
                         ExprKind::Text(text) => {
                             for segment in &text.segments {
@@ -4445,6 +4527,7 @@ impl<'a> Lowerer<'a> {
             | ExprKind::Float(_)
             | ExprKind::Decimal(_)
             | ExprKind::BigInt(_)
+            | ExprKind::AmbientSubject
             | ExprKind::Regex(_) => expr,
             ExprKind::Text(text) => {
                 self.resolve_text_literal(&text, namespaces, env);
@@ -5978,6 +6061,7 @@ fn surface_exprs_equal(left: &syn::Expr, right: &syn::Expr) -> bool {
                         }
                 })
         }
+        (syn::ExprKind::SubjectPlaceholder, syn::ExprKind::SubjectPlaceholder) => true,
         (syn::ExprKind::AmbientProjection(left), syn::ExprKind::AmbientProjection(right)) => {
             left.fields.len() == right.fields.len()
                 && left
@@ -5985,6 +6069,18 @@ fn surface_exprs_equal(left: &syn::Expr, right: &syn::Expr) -> bool {
                     .iter()
                     .zip(&right.fields)
                     .all(|(left, right)| left.text == right.text)
+        }
+        (
+            syn::ExprKind::Range {
+                start: left_start,
+                end: left_end,
+            },
+            syn::ExprKind::Range {
+                start: right_start,
+                end: right_end,
+            },
+        ) => {
+            surface_exprs_equal(left_start, right_start) && surface_exprs_equal(left_end, right_end)
         }
         (
             syn::ExprKind::Projection {
@@ -6546,7 +6642,7 @@ val answer:Int = 42
 domain Retry over Int
     literal x : Int -> Retry
 
-fun step #value =>
+fun step value =>
     value
 
 @source http.get "/users" with {
@@ -7046,7 +7142,7 @@ domain Duration over Int
 domain Retry over Int
     literal x : Int -> Retry
 
-fun step #value =>
+fun step value =>
     value
 
 @recur.timer
@@ -7748,7 +7844,7 @@ sig updates : Signal Int
     fn does_not_double_report_followup_recurrence_starts() {
         let lowered = lower_text(
             "duplicate-recurrence-starts.aivi",
-            "fun step #value => value\nval broken = 0 @|> step @|> step <|@ step\n",
+            "fun step value => value\nval broken = 0 @|> step @|> step <|@ step\n",
         );
         assert!(
             lowered.has_errors(),
@@ -7784,9 +7880,9 @@ sig updates : Signal Int
     fn exposes_trailing_recurrence_suffix_views() {
         let lowered = lower_text(
             "recurrence-suffix-view.aivi",
-            "fun keep #value => value\n\
-             fun start #value => value\n\
-             fun step #value => value\n\
+            "fun keep value => value\n\
+             fun start value => value\n\
+             fun step value => value\n\
              sig retried = 0 |> keep | keep @|> start <|@ step <|@ step\n",
         );
         assert!(
@@ -7845,7 +7941,7 @@ sig updates : Signal Int
             "domain Duration over Int\n\
              \tliteral s : Int -> Duration\n\
              type Cursor = { hasNext: Bool }\n\
-             fun keep:Cursor #cursor:Cursor => cursor\n\
+             fun keep:Cursor cursor:Cursor => cursor\n\
              val seed:Cursor = { hasNext: True }\n\
              @recur.timer 1s\n\
              sig cursor : Signal Cursor =\n\
@@ -7881,8 +7977,8 @@ sig updates : Signal Int
         let lowered = lower_text(
             "fanout-filter-before-join.aivi",
             "type User = { email: Text }\n\
-             fun keepText:Bool #email:Text => True\n\
-             fun joinEmails:Text #items:List Text => \"joined\"\n\
+             fun keepText:Bool email:Text => True\n\
+             fun joinEmails:Text items:List Text => \"joined\"\n\
              val users:List User = [{ email: \"ada@example.com\" }]\n\
              val joinedEmails:Text =\n\
               users\n\

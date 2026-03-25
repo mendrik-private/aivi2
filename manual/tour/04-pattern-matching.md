@@ -40,7 +40,7 @@ This is the key advantage over `switch` statements: you cannot accidentally forg
 type Color = Red | Green | Blue
 
 // Compile error: Blue is not covered
-fun colorName:Text #color:Color =>
+fun colorName:Text color:Color =>
     color
      ||> Red   => "red"
      ||> Green => "green"

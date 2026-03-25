@@ -264,14 +264,14 @@ When a function is generic but requires a class capability, declare it with
 `with`:
 
 ```aivi
-fun equals:Bool with Eq A #left:A #right:A =>
+fun equals:Bool with Eq A left:A right:A =>
     left == right
 ```
 
 Multiple constraints are separated by commas:
 
 ```aivi
-fun resetThenAppend:A with Monoid A, Semigroup A #value:A =>
+fun resetThenAppend:A with Monoid A, Semigroup A value:A =>
     append empty value
 ```
 

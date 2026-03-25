@@ -1,20 +1,20 @@
-fun chooseMin:A #compare:(A -> A -> Bool) #best:A #candidate:A =>
+fun chooseMin:A compare:(A -> A -> Bool) best:A candidate:A =>
     compare candidate best
      T|> candidate
      F|> best
 
-fun chooseMax:A #compare:(A -> A -> Bool) #best:A #candidate:A =>
+fun chooseMax:A compare:(A -> A -> Bool) best:A candidate:A =>
     compare best candidate
      T|> candidate
      F|> best
 
-fun min:A #compare:(A -> A -> Bool) #left:A #right:A =>
+fun min:A compare:(A -> A -> Bool) left:A right:A =>
     chooseMin compare left right
 
-fun max:A #compare:(A -> A -> Bool) #left:A #right:A =>
+fun max:A compare:(A -> A -> Bool) left:A right:A =>
     chooseMax compare left right
 
-fun minOf:A #compare:(A -> A -> Bool) #first:A #rest:(List A) =>
+fun minOf:A compare:(A -> A -> Bool) first:A rest:(List A) =>
     rest
      |> reduce (chooseMin compare) first
 

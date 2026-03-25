@@ -26,9 +26,10 @@ use crate::{
         DomainMemberResolution, ExportResolution, ExprKind, ImportBindingMetadata,
         ImportBindingResolution, ImportValueType, Item, LiteralSuffixResolution,
         MarkupAttributeValue, MarkupNodeKind, Module, Name, NamePath, PatternKind, PipeStage,
-        PipeStageKind, RecurrenceWakeupDecoratorKind, ResolutionState, SignalItem, SourceDecorator,
-        SourceMetadata, SourceProviderRef, TermReference, TermResolution, TextLiteral, TextSegment,
-        TypeItemBody, TypeKind, TypeReference, TypeResolution,
+        PipeStageKind, PipeTransformMode, RecurrenceWakeupDecoratorKind, ResolutionState,
+        SignalItem, SourceDecorator, SourceMetadata, SourceProviderRef, TermReference,
+        TermResolution, TextLiteral, TextSegment, TypeItemBody, TypeKind, TypeReference,
+        TypeResolution,
     },
     ids::{
         BindingId, ClusterId, ControlNodeId, DecoratorId, ExprId, ImportId, ItemId, MarkupNodeId,
@@ -363,6 +364,7 @@ impl Validator<'_> {
                         self.require_expr(field.span, "record field", "field value", field.value);
                     }
                 }
+                ExprKind::AmbientSubject => {}
                 ExprKind::Projection { base, path } => {
                     if let crate::hir::ProjectionBase::Expr(base) = base {
                         self.require_expr(expr.span, "expression", "projection base", *base);
@@ -972,10 +974,7 @@ impl Validator<'_> {
                     stack.last_mut().unwrap().1 = dep_index + 1;
                     if on_stack.contains(&dep) {
                         // Found a cycle — reconstruct the cycle path from the DFS path.
-                        let cycle_start = path
-                            .iter()
-                            .position(|&id| id == dep)
-                            .unwrap_or(0);
+                        let cycle_start = path.iter().position(|&id| id == dep).unwrap_or(0);
                         let cycle_names: Vec<String> = path[cycle_start..]
                             .iter()
                             .map(|id| {
@@ -985,11 +984,8 @@ impl Validator<'_> {
                                     .unwrap_or_else(|| "<unknown>".to_owned())
                             })
                             .collect();
-                        let cycle_path = format!(
-                            "{} -> {}",
-                            cycle_names.join(" -> "),
-                            cycle_names[0]
-                        );
+                        let cycle_path =
+                            format!("{} -> {}", cycle_names.join(" -> "), cycle_names[0]);
                         let offending_name = signal_names
                             .get(&dep)
                             .cloned()
@@ -4191,6 +4187,7 @@ impl Validator<'_> {
                         | ExprKind::Decimal(_)
                         | ExprKind::BigInt(_)
                         | ExprKind::SuffixedInteger(_)
+                        | ExprKind::AmbientSubject
                         | ExprKind::Regex(_) => {}
                         ExprKind::Text(text) => {
                             for segment in text.segments.into_iter().rev() {
@@ -5761,6 +5758,18 @@ impl Validator<'_> {
                     )),
                 );
             }
+            GateIssue::AmbientSubjectOutsidePipe { span } => {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "`.` is only available when a pipe stage provides an ambient subject",
+                    )
+                    .with_code(code("ambient-subject-outside-pipe"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "use `.` inside a pipe stage or bind the value to a name first",
+                    )),
+                );
+            }
             GateIssue::InvalidProjection {
                 span,
                 path,
@@ -5941,6 +5950,18 @@ impl Validator<'_> {
                     .with_label(DiagnosticLabel::primary(
                         span,
                         "make this staged branch expression accept the current payload",
+                    )),
+                );
+            }
+            GateIssue::AmbientSubjectOutsidePipe { span } => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "{branch_name} branch cannot use `.` because this branch has no matched payload subject"
+                    ))
+                    .with_code(code("ambient-subject-outside-pipe"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "use a literal or named value here, or switch to `||>` for an explicit pattern",
                     )),
                 );
             }
@@ -6137,6 +6158,25 @@ impl Validator<'_> {
                         span,
                         "make this staged expression accept the current fan-out subject",
                     )),
+                );
+            }
+            (context, GateIssue::AmbientSubjectOutsidePipe { span }) => {
+                let (subject, label) = match context {
+                    FanoutIssueContext::MapElement => (
+                        "fan-out body",
+                        "use `.` only where each mapped element is the current ambient subject",
+                    ),
+                    FanoutIssueContext::JoinCollection => (
+                        "fan-in body",
+                        "use `.` only where the joined collection is the current ambient subject",
+                    ),
+                };
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "{subject} cannot use `.` without an ambient pipe subject"
+                    ))
+                    .with_code(code("ambient-subject-outside-pipe"))
+                    .with_label(DiagnosticLabel::primary(span, label)),
                 );
             }
             (
@@ -7804,6 +7844,12 @@ impl GateExprInfo {
     }
 }
 
+#[derive(Clone, Debug)]
+struct PipeBodyInference {
+    info: GateExprInfo,
+    transform_mode: PipeTransformMode,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PipeFunctionSignatureMatch {
     pub(crate) callee_expr: ExprId,
@@ -7820,6 +7866,9 @@ pub(crate) enum GateIssue {
         stage: &'static str,
         expected: String,
         actual: String,
+    },
+    AmbientSubjectOutsidePipe {
+        span: SourceSpan,
     },
     InvalidProjection {
         span: SourceSpan,
@@ -10888,6 +10937,16 @@ impl<'a> GateTypeContext<'a> {
                 }
                 info
             }
+            ExprKind::AmbientSubject => {
+                let mut info = GateExprInfo::default();
+                if let Some(ambient) = ambient.cloned() {
+                    info.ty = Some(ambient);
+                } else {
+                    info.issues
+                        .push(GateIssue::AmbientSubjectOutsidePipe { span: expr.span });
+                }
+                info
+            }
             ExprKind::Apply { callee, arguments } => {
                 if let ExprKind::Name(reference) = &self.module.exprs()[callee].kind {
                     if let Some(info) = self
@@ -11455,7 +11514,10 @@ impl<'a> GateTypeContext<'a> {
                 return None;
             }
             if function.annotation.is_none()
-                || function.parameters.iter().any(|parameter| parameter.annotation.is_none())
+                || function
+                    .parameters
+                    .iter()
+                    .any(|parameter| parameter.annotation.is_none())
             {
                 return self.match_pipe_unannotated_function_signature(
                     callee_expr,
@@ -11839,20 +11901,22 @@ impl<'a> GateTypeContext<'a> {
         Some(info)
     }
 
-    pub(crate) fn infer_pipe_body(
+    fn infer_pipe_body_inference(
         &mut self,
         expr_id: ExprId,
         env: &GateExprEnv,
         subject: &GateType,
-    ) -> GateExprInfo {
+    ) -> PipeBodyInference {
         let ambient = subject.gate_payload().clone();
         let mut info = self.infer_expr(expr_id, env, Some(&ambient));
+        let mut transform_mode = PipeTransformMode::Replace;
         if let Some(function_body) = self.infer_function_pipe_body(expr_id, env, &ambient, None) {
             info = function_body;
-        }
-        if let Some(GateType::Arrow { parameter, result }) = info.ty.clone() {
+            transform_mode = PipeTransformMode::Apply;
+        } else if let Some(GateType::Arrow { parameter, result }) = info.ty.clone() {
             if parameter.same_shape(&ambient) {
                 info.ty = Some(*result);
+                transform_mode = PipeTransformMode::Apply;
             } else {
                 info.issues.push(GateIssue::InvalidPipeStageInput {
                     span: self.module.exprs()[expr_id].span,
@@ -11863,7 +11927,20 @@ impl<'a> GateTypeContext<'a> {
                 info.ty = None;
             }
         }
-        self.finalize_expr_info(info)
+        PipeBodyInference {
+            info,
+            transform_mode,
+        }
+    }
+
+    pub(crate) fn infer_pipe_body(
+        &mut self,
+        expr_id: ExprId,
+        env: &GateExprEnv,
+        subject: &GateType,
+    ) -> GateExprInfo {
+        let inference = self.infer_pipe_body_inference(expr_id, env, subject);
+        self.finalize_expr_info(inference.info)
     }
 
     fn infer_tap_stage_info(
@@ -12063,13 +12140,26 @@ impl<'a> GateTypeContext<'a> {
         self.infer_transform_stage_info(expr_id, env, subject).ty
     }
 
+    pub(crate) fn infer_transform_stage_mode(
+        &mut self,
+        expr_id: ExprId,
+        env: &GateExprEnv,
+        subject: &GateType,
+    ) -> PipeTransformMode {
+        self.infer_pipe_body_inference(expr_id, env, subject)
+            .transform_mode
+    }
+
     fn infer_transform_stage_info(
         &mut self,
         expr_id: ExprId,
         env: &GateExprEnv,
         subject: &GateType,
     ) -> GateExprInfo {
-        let mut info = self.infer_pipe_body(expr_id, env, subject);
+        let PipeBodyInference {
+            mut info,
+            transform_mode: _,
+        } = self.infer_pipe_body_inference(expr_id, env, subject);
         info.ty = info.ty.map(|body_ty| match subject {
             GateType::Signal(_) => GateType::Signal(Box::new(body_ty)),
             _ => body_ty,
@@ -13703,6 +13793,7 @@ pub(crate) fn walk_expr_tree(
                     | ExprKind::Decimal(_)
                     | ExprKind::BigInt(_)
                     | ExprKind::SuffixedInteger(_)
+                    | ExprKind::AmbientSubject
                     | ExprKind::Regex(_) => {}
                     ExprKind::Text(text) => {
                         for segment in text.segments.into_iter().rev() {
@@ -14758,7 +14849,7 @@ val resultLabel =
   | Pending
   | Failed Text
 
-fun statusLabel:Text #status:Status =>
+fun statusLabel:Text status:Status =>
     status
      ||> Paid => "paid"
 "#,
@@ -14789,22 +14880,22 @@ fun statusLabel:Text #status:Status =>
     fn case_exhaustiveness_accepts_builtin_case_pairs() {
         let report = validate_resolved_text(
             "builtin_exhaustive_cases.aivi",
-            r#"fun boolLabel:Text #ready:Bool =>
+            r#"fun boolLabel:Text ready:Bool =>
     ready
      ||> True => "ready"
      ||> False => "waiting"
 
-fun maybeLabel:Text #maybeUser:(Option Text) =>
+fun maybeLabel:Text maybeUser:(Option Text) =>
     maybeUser
      ||> Some name => name
      ||> None => "login"
 
-fun resultLabel:Text #status:(Result Text Text) =>
+fun resultLabel:Text status:(Result Text Text) =>
     status
      ||> Ok body => body
      ||> Err message => message
 
-fun validationLabel:Text #status:(Validation Text Text) =>
+fun validationLabel:Text status:(Validation Text Text) =>
     status
      ||> Valid body => body
      ||> Invalid message => message
@@ -15164,7 +15255,7 @@ val screenView =
         let mut sources = SourceDatabase::new();
         let file_id = sources.add_file(
             "source-option-concrete-application.aivi",
-            "fun keep:Option Int #value:Option Int => value\n\
+            "fun keep:Option Int value:Option Int => value\n\
              val chosen = keep None\n",
         );
         let parsed = parse_module(&sources[file_id]);

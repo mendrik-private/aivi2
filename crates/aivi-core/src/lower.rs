@@ -9,26 +9,26 @@ use aivi_hir::{
     GateRuntimeTextLiteral, GateRuntimeTextSegment, GateRuntimeTruthyFalsyBranch, GateStageOutcome,
     GeneralExprInstanceMemberElaboration, GeneralExprOutcome, GeneralExprParameter,
     ImportBindingMetadata, ImportId, ImportValueType, Item as HirItem, ItemId as HirItemId,
-    PatternId as HirPatternId, RecurrenceNodeOutcome, ResolvedClassMemberDispatch,
-    SourceDecodeProgram, SourceDecodeProgramOutcome, SourceLifecycleNodeOutcome,
-    TruthyFalsyStageOutcome, TypeBinding, TypeConstructorHead, elaborate_fanouts, elaborate_gates,
-    elaborate_general_expressions, elaborate_recurrences, elaborate_source_lifecycles,
-    elaborate_truthy_falsy, generate_source_decode_programs,
+    PatternId as HirPatternId, PipeTransformMode, RecurrenceNodeOutcome,
+    ResolvedClassMemberDispatch, SourceDecodeProgram, SourceDecodeProgramOutcome,
+    SourceLifecycleNodeOutcome, TruthyFalsyStageOutcome, TypeBinding, TypeConstructorHead,
+    elaborate_fanouts, elaborate_gates, elaborate_general_expressions, elaborate_recurrences,
+    elaborate_source_lifecycles, elaborate_truthy_falsy, generate_source_decode_programs,
 };
 
 use crate::{
     Arena, ArenaOverflow, BuiltinAppendCarrier, BuiltinApplicativeCarrier, BuiltinApplyCarrier,
     BuiltinBifunctorCarrier, BuiltinClassMemberIntrinsic, BuiltinFilterableCarrier,
-    BuiltinFoldableCarrier, BuiltinFunctorCarrier, BuiltinOrdSubject,
-    BuiltinTraversableCarrier, DecodeField, DecodeProgram, DecodeProgramId, DecodeStep,
-    DecodeStepId, DomainDecodeSurface, DomainDecodeSurfaceKind, Expr, ExprId, FanoutFilter,
-    FanoutJoin, FanoutStage, GateStage, Item, ItemId, ItemKind, ItemParameter, MapEntry, Module,
-    NonSourceWakeup, Pattern, PatternBinding, PatternConstructor, PatternKind, Pipe, PipeCaseArm,
-    PipeExpr, PipeOrigin, PipeRecurrence, PipeStage, PipeTruthyFalsyBranch, PipeTruthyFalsyStage,
-    ProjectionBase, RecordExprField, RecordPatternField, RecurrenceGuard, RecurrenceStage,
-    Reference, SignalInfo, SourceArgumentValue, SourceId, SourceInstanceId, SourceNode,
-    SourceOptionBinding, SourceOptionValue, Stage, StageKind, TextLiteral, TextSegment,
-    TruthyFalsyBranch, TruthyFalsyStage, Type,
+    BuiltinFoldableCarrier, BuiltinFunctorCarrier, BuiltinOrdSubject, BuiltinTraversableCarrier,
+    DecodeField, DecodeProgram, DecodeProgramId, DecodeStep, DecodeStepId, DomainDecodeSurface,
+    DomainDecodeSurfaceKind, Expr, ExprId, FanoutFilter, FanoutJoin, FanoutStage, GateStage, Item,
+    ItemId, ItemKind, ItemParameter, MapEntry, Module, NonSourceWakeup, Pattern, PatternBinding,
+    PatternConstructor, PatternKind, Pipe, PipeCaseArm, PipeExpr, PipeOrigin, PipeRecurrence,
+    PipeStage, PipeTruthyFalsyBranch, PipeTruthyFalsyStage, ProjectionBase, RecordExprField,
+    RecordPatternField, RecurrenceGuard, RecurrenceStage, Reference, SignalInfo,
+    SourceArgumentValue, SourceId, SourceInstanceId, SourceNode, SourceOptionBinding,
+    SourceOptionValue, Stage, StageKind, TextLiteral, TextSegment, TruthyFalsyBranch,
+    TruthyFalsyStage, Type,
     expr::ExprKind,
     validate::{ValidationError, validate_module},
 };
@@ -290,7 +290,10 @@ impl std::fmt::Display for LoweringError {
             ),
             Self::Validation(error) => write!(f, "typed-core validation failed: {error}"),
             Self::InternalInvariantViolated { message } => {
-                write!(f, "typed-core lowering internal invariant violated: {message}")
+                write!(
+                    f,
+                    "typed-core lowering internal invariant violated: {message}"
+                )
             }
         }
     }
@@ -1088,20 +1091,18 @@ impl<'a> ModuleLowerer<'a> {
             match self.module.pipes_mut().get_mut(pipe_id) {
                 Some(pipe) => pipe.stages = stage_ids,
                 None => {
-                    self.errors
-                        .push(LoweringError::InternalInvariantViolated {
-                            message: "pipe arena did not retain the ID returned by alloc",
-                        });
+                    self.errors.push(LoweringError::InternalInvariantViolated {
+                        message: "pipe arena did not retain the ID returned by alloc",
+                    });
                     continue;
                 }
             }
             match self.module.items_mut().get_mut(builder.owner) {
                 Some(item) => item.pipes.push(pipe_id),
                 None => {
-                    self.errors
-                        .push(LoweringError::InternalInvariantViolated {
-                            message: "pipe owner item was not found in the item arena after seeding",
-                        });
+                    self.errors.push(LoweringError::InternalInvariantViolated {
+                        message: "pipe owner item was not found in the item arena after seeding",
+                    });
                     continue;
                 }
             }
@@ -1282,10 +1283,10 @@ impl<'a> ModuleLowerer<'a> {
             match self.module.sources_mut().get_mut(source_id) {
                 Some(source) => source.decode = Some(decode_id),
                 None => {
-                    self.errors
-                        .push(LoweringError::InternalInvariantViolated {
-                            message: "source arena did not retain the ID retrieved from source_by_owner",
-                        });
+                    self.errors.push(LoweringError::InternalInvariantViolated {
+                        message:
+                            "source arena did not retain the ID retrieved from source_by_owner",
+                    });
                     continue;
                 }
             }
@@ -1616,7 +1617,7 @@ impl<'a> ModuleLowerer<'a> {
                     ));
                 };
                 BuiltinClassMemberIntrinsic::Bimap(carrier)
-            },
+            }
             ("Applicative", "pure", TypeBinding::Constructor(binding)) => match binding.head() {
                 TypeConstructorHead::Builtin(aivi_hir::BuiltinType::List) => {
                     BuiltinClassMemberIntrinsic::Pure(BuiltinApplicativeCarrier::List)
@@ -1696,7 +1697,7 @@ impl<'a> ModuleLowerer<'a> {
                     traversable,
                     applicative,
                 }
-            },
+            }
             ("Filterable", "filterMap", TypeBinding::Constructor(binding)) => {
                 let Some(carrier) = self.builtin_filterable_carrier(binding.head()) else {
                     return Err(unsupported(
@@ -1704,7 +1705,7 @@ impl<'a> ModuleLowerer<'a> {
                     ));
                 };
                 BuiltinClassMemberIntrinsic::FilterMap(carrier)
-            },
+            }
             ("Ord", "compare", _) => {
                 let ordering_item =
                     self.ordering_item_from_gate_type(expr_ty).ok_or_else(|| {
@@ -2373,7 +2374,7 @@ impl<'a> ModuleLowerer<'a> {
                             });
                             for stage in pipe.stages.iter().rev() {
                                 match &stage.kind {
-                                    GateRuntimePipeStageKind::Transform { expr }
+                                    GateRuntimePipeStageKind::Transform { expr, .. }
                                     | GateRuntimePipeStageKind::Tap { expr } => {
                                         tasks.push(Task::Visit(expr));
                                     }
@@ -2587,9 +2588,9 @@ impl<'a> ModuleLowerer<'a> {
                                 input_subject: stage.input_subject,
                                 result_subject: stage.result_subject,
                                 kind: match stage.kind {
-                                    PipeStageKindSpec::Transform => {
+                                    PipeStageKindSpec::Transform { mode } => {
                                         let expr = children[0];
-                                        crate::expr::PipeStageKind::Transform { expr }
+                                        crate::expr::PipeStageKind::Transform { mode, expr }
                                     }
                                     PipeStageKindSpec::Tap => {
                                         let expr = children[0];
@@ -2839,7 +2840,9 @@ fn pipe_stage_specs(pipe: &GateRuntimePipeExpr) -> Vec<PipeStageSpec> {
             input_subject: Type::lower(&stage.input_subject),
             result_subject: Type::lower(&stage.result_subject),
             kind: match &stage.kind {
-                GateRuntimePipeStageKind::Transform { .. } => PipeStageKindSpec::Transform,
+                GateRuntimePipeStageKind::Transform { mode, .. } => {
+                    PipeStageKindSpec::Transform { mode: *mode }
+                }
                 GateRuntimePipeStageKind::Tap { .. } => PipeStageKindSpec::Tap,
                 GateRuntimePipeStageKind::Gate {
                     emits_negative_update,
@@ -2890,7 +2893,9 @@ impl PipeStageSpec {
 
 #[derive(Clone)]
 enum PipeStageKindSpec {
-    Transform,
+    Transform {
+        mode: PipeTransformMode,
+    },
     Tap,
     Gate {
         emits_negative_update: bool,
@@ -2907,7 +2912,7 @@ enum PipeStageKindSpec {
 impl PipeStageKindSpec {
     fn child_expr_count(&self) -> usize {
         match self {
-            Self::Transform | Self::Tap | Self::Gate { .. } => 1,
+            Self::Transform { .. } | Self::Tap | Self::Gate { .. } => 1,
             Self::Case { arms } => arms.len(),
             Self::TruthyFalsy { .. } => 2,
         }
@@ -3308,7 +3313,7 @@ fn referenced_hir_dependencies(root: &GateRuntimeExpr) -> HirDependencies {
                 work.push(&pipe.head);
                 for stage in pipe.stages.iter().rev() {
                     match &stage.kind {
-                        GateRuntimePipeStageKind::Transform { expr }
+                        GateRuntimePipeStageKind::Transform { expr, .. }
                         | GateRuntimePipeStageKind::Tap { expr }
                         | GateRuntimePipeStageKind::Gate {
                             predicate: expr, ..
@@ -3341,7 +3346,8 @@ fn referenced_hir_dependencies(root: &GateRuntimeExpr) -> HirDependencies {
 mod tests {
     use std::{fs, path::PathBuf};
 
-    use aivi_base::SourceDatabase;
+    use aivi_base::{FileId, SourceDatabase, SourceSpan};
+    use aivi_hir::{BuiltinType, PipeTransformMode};
     use aivi_syntax::parse_module;
 
     use super::{LoweringError, RuntimeFragmentSpec, lower_module, lower_runtime_fragment};
@@ -3378,6 +3384,48 @@ mod tests {
         lower_text(path, &text)
     }
 
+    fn unit_span() -> SourceSpan {
+        SourceSpan::default()
+    }
+
+    fn test_name(text: &str) -> aivi_hir::Name {
+        aivi_hir::Name::new(text, unit_span()).expect("test name should stay valid")
+    }
+
+    fn test_path(text: &str) -> aivi_hir::NamePath {
+        aivi_hir::NamePath::from_vec(vec![test_name(text)]).expect("single-segment path")
+    }
+
+    fn builtin_type(module: &mut aivi_hir::Module, builtin: BuiltinType) -> aivi_hir::TypeId {
+        let builtin_name = match builtin {
+            BuiltinType::Int => "Int",
+            BuiltinType::Float => "Float",
+            BuiltinType::Decimal => "Decimal",
+            BuiltinType::BigInt => "BigInt",
+            BuiltinType::Bool => "Bool",
+            BuiltinType::Text => "Text",
+            BuiltinType::Unit => "Unit",
+            BuiltinType::Bytes => "Bytes",
+            BuiltinType::List => "List",
+            BuiltinType::Map => "Map",
+            BuiltinType::Set => "Set",
+            BuiltinType::Option => "Option",
+            BuiltinType::Result => "Result",
+            BuiltinType::Validation => "Validation",
+            BuiltinType::Signal => "Signal",
+            BuiltinType::Task => "Task",
+        };
+        module
+            .alloc_type(aivi_hir::TypeNode {
+                span: unit_span(),
+                kind: aivi_hir::TypeKind::Name(aivi_hir::TypeReference::resolved(
+                    test_path(builtin_name),
+                    aivi_hir::TypeResolution::Builtin(builtin),
+                )),
+            })
+            .expect("builtin type allocation should fit")
+    }
+
     #[test]
     fn lowers_pipe_and_source_fixtures_into_core_ir() {
         let lowered = lower_fixture("milestone-2/valid/pipe-gate-carriers/main.aivi");
@@ -3409,6 +3457,148 @@ mod tests {
             pretty.contains("gate"),
             "pretty dump should mention gate stages: {pretty}"
         );
+    }
+
+    #[test]
+    fn lowers_transform_stage_modes_into_core_pipe_nodes() {
+        let mut module = aivi_hir::Module::new(FileId::new(0));
+        let int_type = builtin_type(&mut module, BuiltinType::Int);
+        let text_type = builtin_type(&mut module, BuiltinType::Text);
+        let binding = module
+            .alloc_binding(aivi_hir::Binding {
+                span: unit_span(),
+                name: test_name("value"),
+                kind: aivi_hir::BindingKind::FunctionParameter,
+            })
+            .expect("binding allocation should fit");
+        let local_expr = module
+            .alloc_expr(aivi_hir::Expr {
+                span: unit_span(),
+                kind: aivi_hir::ExprKind::Name(aivi_hir::TermReference::resolved(
+                    test_path("value"),
+                    aivi_hir::TermResolution::Local(binding),
+                )),
+            })
+            .expect("local expression allocation should fit");
+        let add_one = module
+            .push_item(aivi_hir::Item::Function(aivi_hir::FunctionItem {
+                header: aivi_hir::ItemHeader {
+                    span: unit_span(),
+                    decorators: Vec::new(),
+                },
+                name: test_name("addOne"),
+                type_parameters: Vec::new(),
+                context: Vec::new(),
+                parameters: vec![aivi_hir::FunctionParameter {
+                    span: unit_span(),
+                    binding,
+                    annotation: Some(int_type),
+                }],
+                annotation: Some(int_type),
+                body: local_expr,
+            }))
+            .expect("function allocation should fit");
+        let head = module
+            .alloc_expr(aivi_hir::Expr {
+                span: unit_span(),
+                kind: aivi_hir::ExprKind::Integer(aivi_hir::IntegerLiteral { raw: "1".into() }),
+            })
+            .expect("head allocation should fit");
+        let callable_expr = module
+            .alloc_expr(aivi_hir::Expr {
+                span: unit_span(),
+                kind: aivi_hir::ExprKind::Name(aivi_hir::TermReference::resolved(
+                    test_path("addOne"),
+                    aivi_hir::TermResolution::Item(add_one),
+                )),
+            })
+            .expect("callable expression allocation should fit");
+        let replacement_expr = module
+            .alloc_expr(aivi_hir::Expr {
+                span: unit_span(),
+                kind: aivi_hir::ExprKind::Text(aivi_hir::TextLiteral {
+                    segments: vec![aivi_hir::TextSegment::Text(aivi_hir::TextFragment {
+                        raw: "done".into(),
+                        span: unit_span(),
+                    })],
+                }),
+            })
+            .expect("replacement expression allocation should fit");
+        let pipe = module
+            .alloc_expr(aivi_hir::Expr {
+                span: unit_span(),
+                kind: aivi_hir::ExprKind::Pipe(aivi_hir::PipeExpr {
+                    head,
+                    stages: aivi_hir::NonEmpty::new(
+                        aivi_hir::PipeStage {
+                            span: unit_span(),
+                            kind: aivi_hir::PipeStageKind::Transform {
+                                expr: callable_expr,
+                            },
+                        },
+                        vec![aivi_hir::PipeStage {
+                            span: unit_span(),
+                            kind: aivi_hir::PipeStageKind::Transform {
+                                expr: replacement_expr,
+                            },
+                        }],
+                    ),
+                }),
+            })
+            .expect("pipe allocation should fit");
+        let _final_label = module
+            .push_item(aivi_hir::Item::Value(aivi_hir::ValueItem {
+                header: aivi_hir::ItemHeader {
+                    span: unit_span(),
+                    decorators: Vec::new(),
+                },
+                name: test_name("finalLabel"),
+                annotation: Some(text_type),
+                body: pipe,
+            }))
+            .expect("value allocation should fit");
+
+        let core = lower_module(&module).expect("typed-core lowering should succeed");
+        validate_module(&core).expect("lowered core module should validate");
+
+        let final_label = core
+            .items()
+            .iter()
+            .find(|(_, item)| item.name.as_ref() == "finalLabel")
+            .map(|(id, _)| id)
+            .expect("expected finalLabel value item");
+        let body = core.items()[final_label]
+            .body
+            .expect("finalLabel should carry a lowered body");
+        let crate::ExprKind::Pipe(pipe) = &core.exprs()[body].kind else {
+            panic!("finalLabel should lower to a pipe expression");
+        };
+        assert_eq!(pipe.stages.len(), 2);
+        let crate::PipeStageKind::Transform {
+            mode: first_mode,
+            expr: first_expr,
+        } = &pipe.stages[0].kind
+        else {
+            panic!("first stage should remain a transform");
+        };
+        assert_eq!(*first_mode, PipeTransformMode::Apply);
+        assert!(matches!(
+            core.exprs()[*first_expr].kind,
+            crate::ExprKind::Apply { .. }
+        ));
+
+        let crate::PipeStageKind::Transform {
+            mode: second_mode,
+            expr: second_expr,
+        } = &pipe.stages[1].kind
+        else {
+            panic!("second stage should remain a transform");
+        };
+        assert_eq!(*second_mode, PipeTransformMode::Replace);
+        assert!(matches!(
+            core.exprs()[*second_expr].kind,
+            crate::ExprKind::Text(_)
+        ));
     }
 
     #[test]
@@ -3510,7 +3700,7 @@ sig users : Signal Int
             r#"
 val answer = 42
 
-fun add:Int #x:Int #y:Int =>
+fun add:Int x:Int y:Int =>
     x + y
 "#,
         );
@@ -3610,7 +3800,7 @@ domain Duration over Int
 domain Retry over Int
     literal x : Int -> Retry
 
-fun step:Int #value:Int =>
+fun step:Int value:Int =>
     value
 
 @recur.timer 5s
@@ -3661,7 +3851,7 @@ type Cursor = {
     hasNext: Bool
 }
 
-fun keep:Cursor #cursor:Cursor =>
+fun keep:Cursor cursor:Cursor =>
     cursor
 
 val seed:Cursor = { hasNext: True }
@@ -3800,10 +3990,10 @@ val combined:Blob =
         let lowered = lower_text(
             "typed-core-foldable-reduce.aivi",
             r#"
-fun add:Int #acc:Int #value:Int =>
+fun add:Int acc:Int value:Int =>
     acc + value
 
-fun joinStep:Text #acc:Text #value:Text =>
+fun joinStep:Text acc:Text value:Text =>
     append acc value
 
 val joined:Text =
@@ -3846,15 +4036,15 @@ val total:Int =
         let lowered = lower_text(
             "typed-core-extended-typeclasses.aivi",
             r#"
-fun addOne:Int #value:Int =>
+fun addOne:Int value:Int =>
     value + 1
 
-fun keepSmall:(Option Int) #value:Int =>
+fun keepSmall:(Option Int) value:Int =>
     value < 3
      T|> Some value
      F|> None
 
-fun punctuate:Text #value:Text =>
+fun punctuate:Text value:Text =>
     append value "!"
 
 val okOne:Result Text Int =
@@ -4064,7 +4254,7 @@ domain Duration over Int
 domain Retry over Int
     literal x : Int -> Retry
 
-fun step:Int #value:Int =>
+fun step:Int value:Int =>
     value
 
 @recur.timer 5s

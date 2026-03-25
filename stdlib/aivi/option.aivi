@@ -1,48 +1,48 @@
-fun keepSome:(Option A) #item:A =>
+fun keepSome:(Option A) item:A =>
     Some item
 
-fun singleton:(List A) #item:A =>
+fun singleton:(List A) item:A =>
     [item]
 
-fun okValue:(Result E A) #item:A =>
+fun okValue:(Result E A) item:A =>
     Ok item
 
-fun isSome:Bool #value:(Option A) =>
+fun isSome:Bool value:(Option A) =>
     value
      T|> True
      F|> False
 
-fun isNone:Bool #value:(Option A) =>
+fun isNone:Bool value:(Option A) =>
     value
      F|> True
      T|> False
 
-fun getOrElse:A #fallback:A #value:(Option A) =>
+fun getOrElse:A fallback:A value:(Option A) =>
     value
      ||> Some item => item
      ||> None      => fallback
 
-fun orElse:(Option A) #fallback:(Option A) #value:(Option A) =>
+fun orElse:(Option A) fallback:(Option A) value:(Option A) =>
     value
      T|> keepSome
      F|> fallback
 
-fun flatMap:(Option B) #next:(A -> Option B) #value:(Option A) =>
+fun flatMap:(Option B) next:(A -> Option B) value:(Option A) =>
     value
      T|> next
      F|> None
 
-fun flatten:(Option A) #value:(Option (Option A)) =>
+fun flatten:(Option A) value:(Option (Option A)) =>
     value
      ||> Some nested => nested
      ||> None        => None
 
-fun toList:(List A) #value:(Option A) =>
+fun toList:(List A) value:(Option A) =>
     value
      T|> singleton
      F|> []
 
-fun toResult:(Result E A) #error:E #value:(Option A) =>
+fun toResult:(Result E A) error:E value:(Option A) =>
     value
      T|> okValue
      F|> Err error

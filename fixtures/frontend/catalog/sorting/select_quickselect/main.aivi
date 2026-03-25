@@ -18,43 +18,43 @@ type QuickselectSummary = {
     note: Text
 }
 
-fun lowerThan:Bool #pivot:Int #value:Int =>
+fun lowerThan:Bool pivot:Int value:Int =>
     value < pivot
 
-fun equalTo:Bool #pivot:Int #value:Int =>
+fun equalTo:Bool pivot:Int value:Int =>
     value == pivot
 
-fun classifyRest:Buckets #lower:(List Int) #pivot:Int #rest:(List Int) =>
+fun classifyRest:Buckets lower:(List Int) pivot:Int rest:(List Int) =>
     rest
      |> partition (equalTo pivot)
      ||> { matched: equal, unmatched: higher } => { lower, equal, higher }
 
-fun classify:Buckets #pivot:Int #items:(List Int) =>
+fun classify:Buckets pivot:Int items:(List Int) =>
     items
      |> partition (lowerThan pivot)
      ||> { matched: lower, unmatched: rest } => classifyRest lower pivot rest
 
-fun withFallback:Int #fallback:Int #value:(Option Int) =>
+fun withFallback:Int fallback:Int value:(Option Int) =>
     value
      ||> Some found => found
      ||> None       => fallback
 
-fun isMissing:Bool #value:(Option Int) =>
+fun isMissing:Bool value:(Option Int) =>
     value
      ||> None   => True
      ||> Some _ => False
 
-fun chooseUpper:(Option Int) #rank:Int #lower:(List Int) #equal:(List Int) #higher:(List Int) =>
+fun chooseUpper:(Option Int) rank:Int lower:(List Int) equal:(List Int) higher:(List Int) =>
     rank > length lower + length equal - 1
      T|> quickselect (rank - length lower - length equal) higher
      F|> head equal
 
-fun chooseRank:(Option Int) #rank:Int #lower:(List Int) #equal:(List Int) #higher:(List Int) =>
+fun chooseRank:(Option Int) rank:Int lower:(List Int) equal:(List Int) higher:(List Int) =>
     rank < length lower
      T|> quickselect rank lower
      F|> chooseUpper rank lower equal higher
 
-fun quickselect:(Option Int) #rank:Int #items:(List Int) =>
+fun quickselect:(Option Int) rank:Int items:(List Int) =>
     head items
      ||> None       => None
      ||> Some pivot => (items |> classify pivot ||> { lower, equal, higher } => chooseRank rank lower equal higher)

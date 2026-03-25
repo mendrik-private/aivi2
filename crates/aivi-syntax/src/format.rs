@@ -14,14 +14,15 @@ const INLINE_LIMIT: usize = 32;
 const TYPE_VARIANT_INDENT: usize = 2;
 
 const EXPR_PIPE_PREC: u8 = 0;
-const EXPR_OR_PREC: u8 = 1;
-const EXPR_AND_PREC: u8 = 2;
-const EXPR_COMPARE_PREC: u8 = 3;
-const EXPR_ADD_PREC: u8 = 4;
-const EXPR_MUL_PREC: u8 = 5;
-const EXPR_APPLY_PREC: u8 = 6;
-const EXPR_PROJECTION_PREC: u8 = 7;
-const EXPR_PREFIX_PREC: u8 = 8;
+const EXPR_RANGE_PREC: u8 = 1;
+const EXPR_OR_PREC: u8 = 2;
+const EXPR_AND_PREC: u8 = 3;
+const EXPR_COMPARE_PREC: u8 = 4;
+const EXPR_ADD_PREC: u8 = 5;
+const EXPR_MUL_PREC: u8 = 6;
+const EXPR_APPLY_PREC: u8 = 7;
+const EXPR_PROJECTION_PREC: u8 = 8;
+const EXPR_PREFIX_PREC: u8 = 9;
 const TYPE_ARROW_PREC: u8 = 0;
 const TYPE_APPLY_PREC: u8 = 1;
 const PATTERN_APPLY_PREC: u8 = 1;
@@ -507,7 +508,7 @@ impl Formatter {
     }
 
     fn format_function_param(&self, parameter: &FunctionParam) -> String {
-        let mut rendered = format!("#{}", self.item_name(&parameter.name));
+        let mut rendered = self.item_name(&parameter.name).to_owned();
         if let Some(annotation) = &parameter.annotation {
             rendered.push(':');
             rendered.push_str(&self.format_type_inline(annotation, 0));
@@ -770,7 +771,17 @@ impl Formatter {
             ExprKind::Map(map) => self.format_map_inline(map),
             ExprKind::Set(elements) => self.format_set_inline(elements),
             ExprKind::Record(record) => self.format_record_inline(record),
+            ExprKind::SubjectPlaceholder => ".".to_owned(),
             ExprKind::AmbientProjection(path) => self.format_projection_path(path),
+            ExprKind::Range { start, end } => wrap_if_needed(
+                format!(
+                    "{}..{}",
+                    self.format_expr_inline(start, EXPR_RANGE_PREC + 1),
+                    self.format_expr_inline(end, EXPR_RANGE_PREC + 1)
+                ),
+                EXPR_RANGE_PREC,
+                parent_prec,
+            ),
             ExprKind::Projection { base, path } => wrap_if_needed(
                 format!(
                     "{}{}",
@@ -1469,6 +1480,9 @@ impl Formatter {
             ExprKind::Set(elements) => !elements.is_empty(),
             ExprKind::Record(record) => !record.fields.is_empty(),
             ExprKind::Pipe(_) | ExprKind::Markup(_) => true,
+            ExprKind::Range { start, end } => {
+                self.expr_can_break(start) || self.expr_can_break(end)
+            }
             ExprKind::Apply {
                 callee: _,
                 arguments,
@@ -1659,7 +1673,7 @@ mod tests {
                 "  &|> documentBody\n",
                 "  |> Pair\n",
                 "\n",
-                "fun label:Text #state:SaveState =>\n",
+                "fun label:Text state:SaveState =>\n",
                 "    state\n",
                 "     ||> Saved         => \"saved\"\n",
                 "     ||> Dirty message => \"dirty {message}\"\n",
@@ -1673,7 +1687,7 @@ mod tests {
         assert_eq!(
             formatted,
             concat!(
-                "fun formatCount:Text #count:Int =>\n",
+                "fun formatCount:Text count:Int =>\n",
                 "    \"{count} unread\"\n",
                 "\n",
                 "val count = 3\n",
@@ -1700,7 +1714,7 @@ mod tests {
                 "class Eq A\n",
                 "    (==): A -> A -> Bool\n",
                 "\n",
-                "fun equivalent:Bool #left:Int #right:Int =>\n",
+                "fun equivalent:Bool left:Int right:Int =>\n",
                 "    left + 1 == right - 1 and left != right\n",
             )
         );
@@ -1861,17 +1875,33 @@ val view =
     #[test]
     fn formatter_aligns_match_arms_and_top_level_spacing() {
         let formatted = format_text(
-            "type Status=Idle|Failed Text\nfun label:Text #status:Status =>\nstatus||>Idle=>\"idle\"||>Failed reason=>\"failed {reason}\"\n",
+            "type Status=Idle|Failed Text\nfun label:Text status:Status =>\nstatus||>Idle=>\"idle\"||>Failed reason=>\"failed {reason}\"\n",
         );
         assert_eq!(
             formatted,
             concat!(
                 "type Status = Idle | Failed Text\n",
                 "\n",
-                "fun label:Text #status:Status =>\n",
+                "fun label:Text status:Status =>\n",
                 "    status\n",
                 "     ||> Idle          => \"idle\"\n",
                 "     ||> Failed reason => \"failed {reason}\"\n",
+            )
+        );
+    }
+
+    #[test]
+    fn formatter_preserves_subject_placeholders_ranges_and_discard_params() {
+        let formatted =
+            format_text("fun ignore:Int _=>.\nval projection=.email\nval values=[1..10]\n");
+        assert_eq!(
+            formatted,
+            concat!(
+                "fun ignore:Int _ =>\n",
+                "    .\n",
+                "\n",
+                "val projection = .email\n",
+                "val values = [1..10]\n",
             )
         );
     }

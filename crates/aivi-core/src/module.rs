@@ -807,7 +807,7 @@ fn format_expr(module: &Module, expr_id: ExprId, f: &mut fmt::Formatter<'_>) -> 
             format_expr(module, pipe.head, f)?;
             for stage in &pipe.stages {
                 match &stage.kind {
-                    crate::expr::PipeStageKind::Transform { expr } => {
+                    crate::expr::PipeStageKind::Transform { expr, .. } => {
                         f.write_str(" |> ")?;
                         format_expr(module, *expr, f)?;
                     }

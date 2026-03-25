@@ -1,0 +1,11 @@
+type User = {
+    email: Text
+}
+
+fun displayEmail:Text user:User =>
+    .email
+
+val current = .
+val projection = .email
+val span = 1..10
+val values = [1..10]

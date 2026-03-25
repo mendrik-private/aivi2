@@ -483,6 +483,7 @@ fn blocker_for_map_issue(issue: GateIssue) -> FanoutElaborationBlocker {
             FanoutElaborationBlocker::MapUnknownField { path, subject }
         }
         GateIssue::AmbiguousDomainMember { .. }
+        | GateIssue::AmbientSubjectOutsidePipe { .. }
         | GateIssue::AmbiguousDomainOperator { .. }
         | GateIssue::InvalidPipeStageInput { .. }
         | GateIssue::UnsupportedApplicativeClusterMember { .. }
@@ -501,6 +502,7 @@ fn blocker_for_join_issue(issue: GateIssue) -> FanoutElaborationBlocker {
             FanoutElaborationBlocker::JoinUnknownField { path, subject }
         }
         GateIssue::AmbiguousDomainMember { .. }
+        | GateIssue::AmbientSubjectOutsidePipe { .. }
         | GateIssue::AmbiguousDomainOperator { .. }
         | GateIssue::InvalidPipeStageInput { .. }
         | GateIssue::UnsupportedApplicativeClusterMember { .. }
@@ -519,6 +521,7 @@ fn fanout_filter_issue_blocker(issue: GateIssue, span: SourceSpan) -> FanoutFilt
             FanoutFilterBlocker::UnknownField { path, subject }
         }
         GateIssue::AmbiguousDomainMember { .. }
+        | GateIssue::AmbientSubjectOutsidePipe { .. }
         | GateIssue::AmbiguousDomainOperator { .. }
         | GateIssue::InvalidPipeStageInput { .. }
         | GateIssue::UnsupportedApplicativeClusterMember { .. }
@@ -760,10 +763,10 @@ type User = {
     email: Text
 }
 
-fun keepText:Bool #email:Text =>
+fun keepText:Bool email:Text =>
     True
 
-fun joinEmails:Text #items:List Text =>
+fun joinEmails:Text items:List Text =>
     "joined"
 
 val users:List User = [

@@ -34,51 +34,51 @@ val emptyPlan: Plan = {
     picked: []
 }
 
-fun choosePlan:Plan #left:Plan #right:Plan =>
+fun choosePlan:Plan left:Plan right:Plan =>
     right.total > left.total
      T|> right
      F|> left
 
-fun selectCell:(Option Cell) #target:Int #cell:Cell =>
+fun selectCell:(Option Cell) target:Int cell:Cell =>
     cell.capacity == target
      T|> Some cell
      F|> None
 
-fun planAt:Plan #capacity:Int #row:(List Cell) =>
+fun planAt:Plan capacity:Int row:(List Cell) =>
     row
      |> findMap (selectCell capacity)
      ||> Some cell => cell.plan
      ||> None      => emptyPlan
 
-fun extendPlan:Plan #item:KnapsackItem #base:Plan =>
+fun extendPlan:Plan item:KnapsackItem base:Plan =>
     base
      ||> { total, picked } => { total: total + item.value, picked: append picked [item.label] }
 
-fun includePlan:Plan #item:KnapsackItem #previous:(List Cell) #capacity:Int =>
+fun includePlan:Plan item:KnapsackItem previous:(List Cell) capacity:Int =>
     capacity < item.weight
      T|> emptyPlan
      F|> extendPlan item (planAt (capacity - item.weight) previous)
 
-fun nextCell:Cell #item:KnapsackItem #previous:(List Cell) #capacity:Int =>
+fun nextCell:Cell item:KnapsackItem previous:(List Cell) capacity:Int =>
     {
         capacity,
         plan: choosePlan (planAt capacity previous) (includePlan item previous capacity)
     }
 
-fun appendBuilt:(List B) #build:(A -> B) #items:(List B) #value:A =>
+fun appendBuilt:(List B) build:(A -> B) items:(List B) value:A =>
     append items [build value]
 
-fun stepRow:(List Cell) #capacities:(List Int) #previous:(List Cell) #item:KnapsackItem =>
+fun stepRow:(List Cell) capacities:(List Int) previous:(List Cell) item:KnapsackItem =>
     capacities
      |> reduce (appendBuilt (nextCell item previous)) []
 
-fun baseCell:Cell #capacity:Int =>
+fun baseCell:Cell capacity:Int =>
     {
         capacity,
         plan: emptyPlan
     }
 
-fun pickedLabel:Text #plan:Plan =>
+fun pickedLabel:Text plan:Plan =>
     isEmpty plan.picked
      T|> "none"
      F|> join " + " plan.picked

@@ -1,7 +1,7 @@
-fun greetUser:Text #name:Text =>
+fun greetUser:Text name:Text =>
     "hello {name}"
 
-fun joinLabels:Text #left:Text #right:Text =>
+fun joinLabels:Text left:Text right:Text =>
     "{left} / {right}"
 
 val defaultRole: Text = "owner"

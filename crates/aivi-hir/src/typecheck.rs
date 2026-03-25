@@ -912,6 +912,7 @@ impl<'a> TypeChecker<'a> {
             ExprKind::Projection { base, path } => {
                 self.check_projection_expr(expr_id, &base, &path, env, expected, value_stack)
             }
+            ExprKind::AmbientSubject => None,
             ExprKind::Integer(_)
             | ExprKind::Float(_)
             | ExprKind::Decimal(_)
@@ -1640,6 +1641,16 @@ impl<'a> TypeChecker<'a> {
                 ))
                 .with_code(code("unknown-projection-field"))
                 .with_primary_label(*span, "this projection refers to a missing record field"),
+                GateIssue::AmbientSubjectOutsidePipe { span } => {
+                    Diagnostic::error(
+                        "`.` is only available when a pipe stage provides an ambient subject",
+                    )
+                    .with_code(code("ambient-subject-outside-pipe"))
+                    .with_primary_label(
+                        *span,
+                        "use `.` inside a pipe stage or bind the value to a name first",
+                    )
+                }
                 GateIssue::AmbiguousDomainMember {
                     span,
                     name,
@@ -2380,14 +2391,11 @@ impl<'a> TypeChecker<'a> {
                         BuiltinType::Validation,
                     ],
                 ),
-                "Filterable" => self.matches_builtin_head(
-                    binding,
-                    &[BuiltinType::List, BuiltinType::Option],
-                ),
-                "Bifunctor" => self.matches_builtin_head(
-                    binding,
-                    &[BuiltinType::Result, BuiltinType::Validation],
-                ),
+                "Filterable" => {
+                    self.matches_builtin_head(binding, &[BuiltinType::List, BuiltinType::Option])
+                }
+                "Bifunctor" => self
+                    .matches_builtin_head(binding, &[BuiltinType::Result, BuiltinType::Validation]),
                 _ => false,
             },
         }
@@ -2695,10 +2703,10 @@ fn alloc_builtin_default_expr(
 
 #[cfg(test)]
 mod tests {
-    use aivi_base::{DiagnosticCode, SourceDatabase};
+    use aivi_base::{DiagnosticCode, FileId, SourceDatabase, SourceSpan};
     use aivi_syntax::parse_module;
 
-    use crate::{Item, RecordFieldSurface, lower_module};
+    use crate::{BuiltinType, Item, PipeTransformMode, RecordFieldSurface, lower_module};
 
     use super::*;
 
@@ -2736,6 +2744,105 @@ mod tests {
             lowered.diagnostics()
         );
         lowered.module().clone()
+    }
+
+    fn unit_span() -> SourceSpan {
+        SourceSpan::default()
+    }
+
+    fn test_name(text: &str) -> crate::Name {
+        crate::Name::new(text, unit_span()).expect("test name should stay valid")
+    }
+
+    fn test_path(text: &str) -> crate::NamePath {
+        crate::NamePath::from_vec(vec![test_name(text)]).expect("single-segment path")
+    }
+
+    fn builtin_type(module: &mut Module, builtin: BuiltinType) -> crate::TypeId {
+        let builtin_name = match builtin {
+            BuiltinType::Int => "Int",
+            BuiltinType::Float => "Float",
+            BuiltinType::Decimal => "Decimal",
+            BuiltinType::BigInt => "BigInt",
+            BuiltinType::Bool => "Bool",
+            BuiltinType::Text => "Text",
+            BuiltinType::Unit => "Unit",
+            BuiltinType::Bytes => "Bytes",
+            BuiltinType::List => "List",
+            BuiltinType::Map => "Map",
+            BuiltinType::Set => "Set",
+            BuiltinType::Option => "Option",
+            BuiltinType::Result => "Result",
+            BuiltinType::Validation => "Validation",
+            BuiltinType::Signal => "Signal",
+            BuiltinType::Task => "Task",
+        };
+        module
+            .alloc_type(crate::TypeNode {
+                span: unit_span(),
+                kind: crate::TypeKind::Name(crate::TypeReference::resolved(
+                    test_path(builtin_name),
+                    crate::TypeResolution::Builtin(builtin),
+                )),
+            })
+            .expect("builtin type allocation should fit")
+    }
+
+    fn type_parameter(module: &mut Module, text: &str) -> crate::TypeParameterId {
+        module
+            .alloc_type_parameter(crate::TypeParameter {
+                span: unit_span(),
+                name: test_name(text),
+            })
+            .expect("type parameter allocation should fit")
+    }
+
+    fn type_parameter_type(
+        module: &mut Module,
+        parameter: crate::TypeParameterId,
+        text: &str,
+    ) -> crate::TypeId {
+        module
+            .alloc_type(crate::TypeNode {
+                span: unit_span(),
+                kind: crate::TypeKind::Name(crate::TypeReference::resolved(
+                    test_path(text),
+                    crate::TypeResolution::TypeParameter(parameter),
+                )),
+            })
+            .expect("type parameter reference allocation should fit")
+    }
+
+    fn applied_type(
+        module: &mut Module,
+        callee: crate::TypeId,
+        argument: crate::TypeId,
+    ) -> crate::TypeId {
+        module
+            .alloc_type(crate::TypeNode {
+                span: unit_span(),
+                kind: crate::TypeKind::Apply {
+                    callee,
+                    arguments: crate::NonEmpty::new(argument, Vec::new()),
+                },
+            })
+            .expect("applied type allocation should fit")
+    }
+
+    fn builtin_term_expr(
+        module: &mut Module,
+        builtin: crate::BuiltinTerm,
+        text: &str,
+    ) -> crate::ExprId {
+        module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Name(crate::TermReference::resolved(
+                    test_path(text),
+                    crate::TermResolution::Builtin(builtin),
+                )),
+            })
+            .expect("builtin term allocation should fit")
     }
 
     #[test]
@@ -2860,11 +2967,11 @@ mod tests {
             "class Eq A\n\
              \x20\x20\x20\x20(==) : A -> A -> Bool\n\
              type Blob = Blob Bytes\n\
-             fun blobEquals:Bool #left:Blob #right:Blob =>\n\
+             fun blobEquals:Bool left:Blob right:Blob =>\n\
              \x20\x20\x20\x20True\n\
              instance Eq Blob\n\
              \x20\x20\x20\x20(==) left right = blobEquals left right\n\
-             fun compare:Bool #left:Blob #right:Blob =>\n\
+             fun compare:Bool left:Blob right:Blob =>\n\
              \x20\x20\x20\x20left == right\n",
         );
         assert!(
@@ -2929,7 +3036,7 @@ mod tests {
     fn typecheck_accepts_prelude_functor_map_calls() {
         let report = typecheck_text(
             "prelude-map-call.aivi",
-            "fun increment:Int #value:Int => value + 1\n\
+            "fun increment:Int value:Int => value + 1\n\
              val mapped:Option Int = map increment (Some 1)\n",
         );
         assert!(
@@ -2943,7 +3050,7 @@ mod tests {
     fn typecheck_accepts_prelude_foldable_reduce_calls() {
         let report = typecheck_text(
             "prelude-reduce-call.aivi",
-            "fun add:Int #acc:Int #value:Int => acc + value\n\
+            "fun add:Int acc:Int value:Int => acc + value\n\
              val joined:Text = reduce append empty [\"hel\", \"lo\"]\n\
              val total:Int = reduce add 10 (Some 2)\n",
         );
@@ -2971,7 +3078,7 @@ mod tests {
     fn typecheck_accepts_function_signature_constraints_at_call_sites() {
         let report = typecheck_text(
             "function-signature-constraints.aivi",
-            "fun same:Eq A => Bool #value:A => True\n\
+            "fun same:Eq A => Bool value:A => True\n\
              val sameText:Bool = same \"Ada\"\n",
         );
         assert!(
@@ -3025,7 +3132,7 @@ mod tests {
     fn typecheck_accepts_unannotated_function_name_from_expected_arrow() {
         let report = typecheck_text(
             "function-name-expected-arrow.aivi",
-            "fun keep #value => value\n\
+            "fun keep value => value\n\
              val chosen:(Option Int -> Option Int) = keep\n",
         );
         assert!(
@@ -3039,7 +3146,7 @@ mod tests {
     fn typecheck_accepts_unannotated_function_application_from_expected_result() {
         let report = typecheck_text(
             "function-application-expected-result.aivi",
-            "fun keepNone #value:Option Int => None\n\
+            "fun keepNone value:Option Int => None\n\
              val result:Option Int = keepNone None\n",
         );
         assert!(
@@ -3053,7 +3160,7 @@ mod tests {
     fn typecheck_accepts_function_application_with_expected_builtin_hole_argument() {
         let report = typecheck_text(
             "function-application-expected-hole.aivi",
-            "fun keep:Option Int #value:Option Int => value\n\
+            "fun keep:Option Int value:Option Int => value\n\
              val result:Option Int = keep None\n",
         );
         assert!(
@@ -3067,7 +3174,7 @@ mod tests {
     fn typecheck_reports_function_application_result_mismatch() {
         let report = typecheck_text(
             "function-application-result-mismatch.aivi",
-            "fun keep:Option Int #value:Option Int => value\n\
+            "fun keep:Option Int value:Option Int => value\n\
              val result:Option Text = keep None\n",
         );
         assert!(
@@ -3305,7 +3412,7 @@ val resultLabel:Result Text Text =
     fn typecheck_accepts_applied_calls_in_case_branches() {
         let report = typecheck_text(
             "applied-call-case-branches.aivi",
-            r#"fun addOne:Int #n:Int => n + 1
+            r#"fun addOne:Int n:Int => n + 1
 val value:Int =
     0
      ||> 0 => addOne 0
@@ -3323,7 +3430,7 @@ val value:Int =
     fn typecheck_accepts_applied_calls_in_truthy_falsy_branches() {
         let report = typecheck_text(
             "applied-call-truthy-falsy-branches.aivi",
-            r#"fun addOne:Int #n:Int => n + 1
+            r#"fun addOne:Int n:Int => n + 1
 val value:Int =
     True
      T|> addOne 0
@@ -3345,8 +3452,8 @@ val value:Int =
     n: Int,
     items: List A
 }
-fun remaining:Int #acc:(TakeAcc A) => acc.n
-fun items:(List A) #acc:(TakeAcc A) => acc.items
+fun remaining:Int acc:(TakeAcc A) => acc.n
+fun items:(List A) acc:(TakeAcc A) => acc.items
 "#,
         );
         assert!(
@@ -3358,12 +3465,152 @@ fun items:(List A) #acc:(TakeAcc A) => acc.items
 
     #[test]
     fn typecheck_accepts_polymorphic_pipe_transforms() {
-        let report = typecheck_text(
-            "polymorphic-pipe-transforms.aivi",
-            "fun wrap:(Option A) #value:A => Some value\n\
-             val maybeNumber:Option Int = 1 |> wrap\n\
-             val maybeLabel:Option Text = \"Ada\" |> wrap\n",
-        );
+        let mut module = Module::new(FileId::new(0));
+        let option_type = builtin_type(&mut module, BuiltinType::Option);
+        let int_type = builtin_type(&mut module, BuiltinType::Int);
+        let text_type = builtin_type(&mut module, BuiltinType::Text);
+        let parameter = type_parameter(&mut module, "A");
+        let a_type = type_parameter_type(&mut module, parameter, "A");
+        let option_a_type = applied_type(&mut module, option_type, a_type);
+        let binding = module
+            .alloc_binding(crate::Binding {
+                span: unit_span(),
+                name: test_name("value"),
+                kind: crate::BindingKind::FunctionParameter,
+            })
+            .expect("binding allocation should fit");
+        let local_expr = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Name(crate::TermReference::resolved(
+                    test_path("value"),
+                    crate::TermResolution::Local(binding),
+                )),
+            })
+            .expect("local expression allocation should fit");
+        let some_expr = builtin_term_expr(&mut module, crate::BuiltinTerm::Some, "Some");
+        let wrap_body = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Apply {
+                    callee: some_expr,
+                    arguments: crate::NonEmpty::new(local_expr, Vec::new()),
+                },
+            })
+            .expect("wrap body allocation should fit");
+        let wrap = module
+            .push_item(crate::Item::Function(crate::FunctionItem {
+                header: crate::ItemHeader {
+                    span: unit_span(),
+                    decorators: Vec::new(),
+                },
+                name: test_name("wrap"),
+                type_parameters: vec![parameter],
+                context: Vec::new(),
+                parameters: vec![crate::FunctionParameter {
+                    span: unit_span(),
+                    binding,
+                    annotation: Some(a_type),
+                }],
+                annotation: Some(option_a_type),
+                body: wrap_body,
+            }))
+            .expect("function allocation should fit");
+        let wrap_ref_number = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Name(crate::TermReference::resolved(
+                    test_path("wrap"),
+                    crate::TermResolution::Item(wrap),
+                )),
+            })
+            .expect("wrap reference allocation should fit");
+        let maybe_number_head = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Integer(crate::IntegerLiteral { raw: "1".into() }),
+            })
+            .expect("integer allocation should fit");
+        let maybe_number_body = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Pipe(crate::PipeExpr {
+                    head: maybe_number_head,
+                    stages: crate::NonEmpty::new(
+                        crate::PipeStage {
+                            span: unit_span(),
+                            kind: crate::PipeStageKind::Transform {
+                                expr: wrap_ref_number,
+                            },
+                        },
+                        Vec::new(),
+                    ),
+                }),
+            })
+            .expect("pipe allocation should fit");
+        let option_int_type = applied_type(&mut module, option_type, int_type);
+        let _maybe_number = module
+            .push_item(crate::Item::Value(crate::ValueItem {
+                header: crate::ItemHeader {
+                    span: unit_span(),
+                    decorators: Vec::new(),
+                },
+                name: test_name("maybeNumber"),
+                annotation: Some(option_int_type),
+                body: maybe_number_body,
+            }))
+            .expect("value allocation should fit");
+        let wrap_ref_label = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Name(crate::TermReference::resolved(
+                    test_path("wrap"),
+                    crate::TermResolution::Item(wrap),
+                )),
+            })
+            .expect("wrap reference allocation should fit");
+        let maybe_label_head = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Text(crate::TextLiteral {
+                    segments: vec![crate::TextSegment::Text(crate::TextFragment {
+                        raw: "Ada".into(),
+                        span: unit_span(),
+                    })],
+                }),
+            })
+            .expect("text allocation should fit");
+        let maybe_label_body = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Pipe(crate::PipeExpr {
+                    head: maybe_label_head,
+                    stages: crate::NonEmpty::new(
+                        crate::PipeStage {
+                            span: unit_span(),
+                            kind: crate::PipeStageKind::Transform {
+                                expr: wrap_ref_label,
+                            },
+                        },
+                        Vec::new(),
+                    ),
+                }),
+            })
+            .expect("pipe allocation should fit");
+        let option_text_type = applied_type(&mut module, option_type, text_type);
+        let _maybe_label = module
+            .push_item(crate::Item::Value(crate::ValueItem {
+                header: crate::ItemHeader {
+                    span: unit_span(),
+                    decorators: Vec::new(),
+                },
+                name: test_name("maybeLabel"),
+                annotation: Some(option_text_type),
+                body: maybe_label_body,
+            }))
+            .expect("value allocation should fit");
+
+        let report = typecheck_module(&module);
         assert!(
             report.is_ok(),
             "expected polymorphic pipe transforms to typecheck, got diagnostics: {:?}",
@@ -3372,13 +3619,218 @@ fun items:(List A) #acc:(TakeAcc A) => acc.items
     }
 
     #[test]
-    fn typecheck_accepts_polymorphic_function_application() {
-        let report = typecheck_text(
-            "polymorphic-function-application.aivi",
-            "fun wrap:(Option A) #value:A => Some value\n\
-             val maybeNumber:Option Int = wrap 1\n\
-             val maybeLabel:Option Text = wrap \"Ada\"\n",
+    fn typecheck_infers_callable_and_replacement_pipe_transforms() {
+        let mut module = Module::new(FileId::new(0));
+        let int_type = builtin_type(&mut module, BuiltinType::Int);
+        let binding = module
+            .alloc_binding(crate::Binding {
+                span: unit_span(),
+                name: test_name("value"),
+                kind: crate::BindingKind::FunctionParameter,
+            })
+            .expect("binding allocation should fit");
+        let local_expr = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Name(crate::TermReference::resolved(
+                    test_path("value"),
+                    crate::TermResolution::Local(binding),
+                )),
+            })
+            .expect("local expression allocation should fit");
+        let add_one = module
+            .push_item(crate::Item::Function(crate::FunctionItem {
+                header: crate::ItemHeader {
+                    span: unit_span(),
+                    decorators: Vec::new(),
+                },
+                name: test_name("addOne"),
+                type_parameters: Vec::new(),
+                context: Vec::new(),
+                parameters: vec![crate::FunctionParameter {
+                    span: unit_span(),
+                    binding,
+                    annotation: Some(int_type),
+                }],
+                annotation: Some(int_type),
+                body: local_expr,
+            }))
+            .expect("function allocation should fit");
+        let callable_expr = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Name(crate::TermReference::resolved(
+                    test_path("addOne"),
+                    crate::TermResolution::Item(add_one),
+                )),
+            })
+            .expect("callable expression allocation should fit");
+        let replacement_expr = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Text(crate::TextLiteral {
+                    segments: vec![crate::TextSegment::Text(crate::TextFragment {
+                        raw: "done".into(),
+                        span: unit_span(),
+                    })],
+                }),
+            })
+            .expect("replacement expression allocation should fit");
+
+        let mut typing = GateTypeContext::new(&module);
+        let env = GateExprEnv::default();
+        let subject = GateType::Primitive(BuiltinType::Int);
+
+        assert_eq!(
+            typing.infer_transform_stage_mode(callable_expr, &env, &subject),
+            PipeTransformMode::Apply
         );
+        assert_eq!(
+            typing.infer_transform_stage(callable_expr, &env, &subject),
+            Some(GateType::Primitive(BuiltinType::Int))
+        );
+        assert_eq!(
+            typing.infer_transform_stage_mode(replacement_expr, &env, &subject),
+            PipeTransformMode::Replace
+        );
+        assert_eq!(
+            typing.infer_transform_stage(replacement_expr, &env, &subject),
+            Some(GateType::Primitive(BuiltinType::Text))
+        );
+    }
+
+    #[test]
+    fn typecheck_accepts_polymorphic_function_application() {
+        let mut module = Module::new(FileId::new(0));
+        let option_type = builtin_type(&mut module, BuiltinType::Option);
+        let int_type = builtin_type(&mut module, BuiltinType::Int);
+        let text_type = builtin_type(&mut module, BuiltinType::Text);
+        let parameter = type_parameter(&mut module, "A");
+        let a_type = type_parameter_type(&mut module, parameter, "A");
+        let option_a_type = applied_type(&mut module, option_type, a_type);
+        let binding = module
+            .alloc_binding(crate::Binding {
+                span: unit_span(),
+                name: test_name("value"),
+                kind: crate::BindingKind::FunctionParameter,
+            })
+            .expect("binding allocation should fit");
+        let local_expr = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Name(crate::TermReference::resolved(
+                    test_path("value"),
+                    crate::TermResolution::Local(binding),
+                )),
+            })
+            .expect("local expression allocation should fit");
+        let some_expr = builtin_term_expr(&mut module, crate::BuiltinTerm::Some, "Some");
+        let wrap_body = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Apply {
+                    callee: some_expr,
+                    arguments: crate::NonEmpty::new(local_expr, Vec::new()),
+                },
+            })
+            .expect("wrap body allocation should fit");
+        let wrap = module
+            .push_item(crate::Item::Function(crate::FunctionItem {
+                header: crate::ItemHeader {
+                    span: unit_span(),
+                    decorators: Vec::new(),
+                },
+                name: test_name("wrap"),
+                type_parameters: vec![parameter],
+                context: Vec::new(),
+                parameters: vec![crate::FunctionParameter {
+                    span: unit_span(),
+                    binding,
+                    annotation: Some(a_type),
+                }],
+                annotation: Some(option_a_type),
+                body: wrap_body,
+            }))
+            .expect("function allocation should fit");
+        let wrap_ref_number = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Name(crate::TermReference::resolved(
+                    test_path("wrap"),
+                    crate::TermResolution::Item(wrap),
+                )),
+            })
+            .expect("wrap reference allocation should fit");
+        let number_argument = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Integer(crate::IntegerLiteral { raw: "1".into() }),
+            })
+            .expect("integer allocation should fit");
+        let maybe_number_body = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Apply {
+                    callee: wrap_ref_number,
+                    arguments: crate::NonEmpty::new(number_argument, Vec::new()),
+                },
+            })
+            .expect("application allocation should fit");
+        let option_int_type = applied_type(&mut module, option_type, int_type);
+        let _maybe_number = module
+            .push_item(crate::Item::Value(crate::ValueItem {
+                header: crate::ItemHeader {
+                    span: unit_span(),
+                    decorators: Vec::new(),
+                },
+                name: test_name("maybeNumber"),
+                annotation: Some(option_int_type),
+                body: maybe_number_body,
+            }))
+            .expect("value allocation should fit");
+        let wrap_ref_label = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Name(crate::TermReference::resolved(
+                    test_path("wrap"),
+                    crate::TermResolution::Item(wrap),
+                )),
+            })
+            .expect("wrap reference allocation should fit");
+        let label_argument = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Text(crate::TextLiteral {
+                    segments: vec![crate::TextSegment::Text(crate::TextFragment {
+                        raw: "Ada".into(),
+                        span: unit_span(),
+                    })],
+                }),
+            })
+            .expect("text allocation should fit");
+        let maybe_label_body = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Apply {
+                    callee: wrap_ref_label,
+                    arguments: crate::NonEmpty::new(label_argument, Vec::new()),
+                },
+            })
+            .expect("application allocation should fit");
+        let option_text_type = applied_type(&mut module, option_type, text_type);
+        let _maybe_label = module
+            .push_item(crate::Item::Value(crate::ValueItem {
+                header: crate::ItemHeader {
+                    span: unit_span(),
+                    decorators: Vec::new(),
+                },
+                name: test_name("maybeLabel"),
+                annotation: Some(option_text_type),
+                body: maybe_label_body,
+            }))
+            .expect("value allocation should fit");
+
+        let report = typecheck_module(&module);
         assert!(
             report.is_ok(),
             "expected polymorphic function application to typecheck, got diagnostics: {:?}",
@@ -3390,7 +3842,7 @@ fun items:(List A) #acc:(TakeAcc A) => acc.items
     fn typecheck_accepts_expected_polymorphic_ambient_helper_application() {
         let report = typecheck_text(
             "expected-polymorphic-ambient-helper-application.aivi",
-            "fun even:Bool #value:Int => value == 2 or value == 4\n\
+            "fun even:Bool value:Int => value == 2 or value == 4\n\
              val maybeName:Option Text = Some \"Ada\"\n\
              val numbers:List Int = [1, 2, 3, 4]\n\
              val chosenName:Text = __aivi_option_getOrElse \"guest\" maybeName\n\
@@ -3409,7 +3861,7 @@ fun items:(List A) #acc:(TakeAcc A) => acc.items
     fn typecheck_reports_invalid_pipe_stage_input_for_transforms() {
         let report = typecheck_text(
             "invalid-pipe-stage-transform.aivi",
-            "fun describe:Text #value:Int => \"count\"\n\
+            "fun describe:Text value:Int => \"count\"\n\
              val broken:Text = \"Ada\" |> describe\n",
         );
         assert!(
@@ -3425,7 +3877,7 @@ fun items:(List A) #acc:(TakeAcc A) => acc.items
     fn typecheck_reports_invalid_pipe_stage_input_for_taps() {
         let report = typecheck_text(
             "invalid-pipe-stage-tap.aivi",
-            "fun describe:Text #value:Int => \"count\"\n\
+            "fun describe:Text value:Int => \"count\"\n\
              val broken:Text = \"Ada\" | describe\n",
         );
         assert!(

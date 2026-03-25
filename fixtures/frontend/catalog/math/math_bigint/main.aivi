@@ -8,16 +8,16 @@ type BigIntSummary = {
     factorCount: Int
 }
 
-fun addBigInt:BigInt #total:BigInt #value:BigInt =>
+fun addBigInt:BigInt total:BigInt value:BigInt =>
     total + value
 
-fun multiplyBigInt:BigInt #product:BigInt #value:BigInt =>
+fun multiplyBigInt:BigInt product:BigInt value:BigInt =>
     product * value
 
-fun sumBigInts:BigInt #values:(List BigInt) =>
+fun sumBigInts:BigInt values:(List BigInt) =>
     reduce addBigInt 0n values
 
-fun productBigInts:BigInt #values:(List BigInt) =>
+fun productBigInts:BigInt values:(List BigInt) =>
     reduce multiplyBigInt 1n values
 
 val archiveChunks: List BigInt = [

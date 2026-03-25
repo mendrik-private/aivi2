@@ -686,7 +686,7 @@ pub fn validate_module(module: &Module) -> Result<(), ValidationErrors> {
                         });
                     }
                     match &stage.kind {
-                        PipeStageKind::Transform { expr } | PipeStageKind::Tap { expr } => {
+                        PipeStageKind::Transform { expr, .. } | PipeStageKind::Tap { expr } => {
                             push_expr(module, *expr, &mut work, &mut errors);
                             if let PipeStageKind::Transform { .. } = &stage.kind {
                                 let expected = inline_pipe_body_result_type(

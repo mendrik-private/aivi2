@@ -81,7 +81,10 @@ val screenView =
 
     let runtime_path = bundle_path.join("aivi");
     let runtime_metadata = fs::metadata(&runtime_path).expect("bundle should copy the runtime");
-    assert!(runtime_metadata.len() > 0, "copied runtime should not be empty");
+    assert!(
+        runtime_metadata.len() > 0,
+        "copied runtime should not be empty"
+    );
 
     let launcher_path = bundle_path.join("run");
     let launcher = fs::read_to_string(&launcher_path).expect("bundle should write a launcher");

@@ -1242,7 +1242,7 @@ mod tests {
 domain Duration over Int
     literal s : Int -> Duration
 
-fun keep #value =>
+fun keep value =>
     value
 
 sig apiHost = "https://api.example.com"
@@ -1372,7 +1372,7 @@ sig retried : Signal Int =
 domain Retry over Int
     literal x : Int -> Retry
 
-fun keep #value =>
+fun keep value =>
     value
 
 @recur.backoff 3x
@@ -1419,7 +1419,7 @@ val retried : Task Int Int =
         let lowered = lower_text(
             "runtime-hir-adapter-source-body.aivi",
             r#"
-fun step #value =>
+fun step value =>
     value
 
 sig enabled = True

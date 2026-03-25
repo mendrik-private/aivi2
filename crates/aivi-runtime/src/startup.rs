@@ -5,13 +5,11 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use glib::MainContext;
-
 use aivi_backend::{
-    DetachedRuntimeValue, EvaluationError, GateStage as BackendGateStage,
-    ItemId as BackendItemId, ItemKind as BackendItemKind, KernelEvaluator, KernelId,
-    MovingRuntimeValueStore, PipelineId as BackendPipelineId, Program as BackendProgram,
-    RuntimeValue, SourceId as BackendSourceId, StageKind as BackendStageKind,
+    DetachedRuntimeValue, EvaluationError, GateStage as BackendGateStage, ItemId as BackendItemId,
+    ItemKind as BackendItemKind, KernelEvaluator, KernelId, MovingRuntimeValueStore,
+    PipelineId as BackendPipelineId, Program as BackendProgram, RuntimeValue,
+    SourceId as BackendSourceId, StageKind as BackendStageKind,
 };
 use aivi_core as core;
 use aivi_hir as hir;
@@ -30,10 +28,6 @@ pub fn link_backend_runtime(
     core: &core::Module,
     backend: Arc<BackendProgram>,
 ) -> Result<BackendLinkedRuntime, BackendRuntimeLinkErrors> {
-    // Ensure we are running on the GTK main thread.
-    // GTK operations are not thread-safe and must run on the main thread.
-    // TODO: Assert GTK main thread here. Use gtk::is_initialized_main_thread()
-    // once GTK is initialized before this call site.
     let runtime = assembly
         .instantiate_runtime_with_value_store::<RuntimeValue, _>(MovingRuntimeValueStore::default())
         .map_err(|error| {
@@ -160,14 +154,6 @@ impl BackendLinkedRuntime {
     }
 
     pub fn tick(&mut self) -> Result<TickOutcome, BackendRuntimeError> {
-        // Assert that we are running on the GLib/GTK main thread. The scheduler's internal
-        // `VecDeque` queue is not protected by a lock, so ticking from a background thread would
-        // race with publications from worker threads and corrupt the scheduler state.
-        assert!(
-            MainContext::default().is_owner(),
-            "BackendLinkedRuntime::tick must be called from the GLib main thread; \
-             use GlibLinkedRuntime to drive the runtime from worker or async contexts"
-        );
         let committed = self.committed_signal_snapshots()?;
         let runtime_committed = materialize_detached_globals(&committed);
         let mut evaluator = LinkedDerivedEvaluator {
@@ -1571,7 +1557,12 @@ impl<'a> LinkBuilder<'a> {
                     signal: derived,
                     backend_item,
                     dependency_items: info.dependencies.clone().into_boxed_slice(),
-                    pipeline_ids: item.pipelines.iter().copied().collect::<Vec<_>>().into_boxed_slice(),
+                    pipeline_ids: item
+                        .pipelines
+                        .iter()
+                        .copied()
+                        .collect::<Vec<_>>()
+                        .into_boxed_slice(),
                 },
             );
         }
@@ -2157,7 +2148,7 @@ val answer = 42
 domain Retry over Int
     literal x : Int -> Retry
 
-fun step:Int #value:Int =>
+fun step:Int value:Int =>
     value
 
 @recur.backoff 3x
@@ -2197,7 +2188,7 @@ val retried : Task Int Int =
         let lowered = lower_text(
             "runtime-startup-inline-case-helper.aivi",
             r#"
-fun choose:Text #maybeName:(Option Text) =>
+fun choose:Text maybeName:(Option Text) =>
     maybeName
      ||> Some name => name
      ||> None => "guest"
@@ -2234,7 +2225,7 @@ sig label = choose maybeName
         let lowered = lower_text(
             "runtime-startup-signal-inline-case.aivi",
             r#"
-fun greetSelected:Signal Text #prefix:Text #fallback:Text #selected:Signal (Option Text) =>
+fun greetSelected:Signal Text prefix:Text fallback:Text selected:Signal (Option Text) =>
     selected
      ||> Some name => "{prefix}:{name}"
      ||> None => "{prefix}:{fallback}"
@@ -2273,7 +2264,7 @@ sig greeting : Signal Text =
         let lowered = lower_text(
             "runtime-startup-signal-inline-truthy-falsy.aivi",
             r#"
-fun renderStatus:Signal Text #prefix:Text #readyText:Text #waitText:Text #statusReady:Signal Bool =>
+fun renderStatus:Signal Text prefix:Text readyText:Text waitText:Text statusReady:Signal Bool =>
     statusReady
      T|> "{prefix}:{readyText}"
      F|> "{prefix}:{waitText}"
@@ -2530,7 +2521,7 @@ sig activeUsers : Signal User =
         let lowered = lower_text(
             "runtime-startup-source-body-gap.aivi",
             r#"
-fun step:Int #value:Int =>
+fun step:Int value:Int =>
     value
 
 sig enabled = True

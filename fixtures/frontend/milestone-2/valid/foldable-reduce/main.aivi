@@ -1,4 +1,4 @@
-fun add:Int #acc:Int #value:Int =>
+fun add:Int acc:Int value:Int =>
     acc + value
 
 val maybeInput:Option Int =

@@ -1329,14 +1329,18 @@ impl<'a> KernelEvaluator<'a> {
             let mut stage_subjects = inline_subjects.to_vec();
             stage_subjects[stage.subject.index()] = Some(current.clone());
             let result = match &stage.kind {
-                InlinePipeStageKind::Transform { expr } => self.evaluate_expr(
-                    kernel_id,
-                    *expr,
-                    input_subject,
-                    environment,
-                    &stage_subjects,
-                    globals,
-                )?,
+                InlinePipeStageKind::Transform { mode, expr } => match mode {
+                    aivi_hir::PipeTransformMode::Apply | aivi_hir::PipeTransformMode::Replace => {
+                        self.evaluate_expr(
+                            kernel_id,
+                            *expr,
+                            input_subject,
+                            environment,
+                            &stage_subjects,
+                            globals,
+                        )?
+                    }
+                },
                 InlinePipeStageKind::Tap { expr } => {
                     let _ = self.evaluate_expr(
                         kernel_id,
@@ -1983,9 +1987,11 @@ impl<'a> KernelEvaluator<'a> {
                 RuntimeValue::Decimal(left),
                 RuntimeValue::Decimal(right),
             ) => left.cmp(&right),
-            (BuiltinOrdSubject::BigInt, RuntimeValue::BigInt(left), RuntimeValue::BigInt(right)) => {
-                left.cmp(&right)
-            }
+            (
+                BuiltinOrdSubject::BigInt,
+                RuntimeValue::BigInt(left),
+                RuntimeValue::BigInt(right),
+            ) => left.cmp(&right),
             (BuiltinOrdSubject::Bool, RuntimeValue::Bool(left), RuntimeValue::Bool(right)) => {
                 left.cmp(&right)
             }
@@ -2158,18 +2164,20 @@ impl<'a> KernelEvaluator<'a> {
                 }),
             },
             BuiltinBifunctorCarrier::Validation => match strip_signal(subject) {
-                RuntimeValue::ValidationInvalid(error) => Ok(RuntimeValue::ValidationInvalid(
+                RuntimeValue::ValidationInvalid(error) => {
+                    Ok(RuntimeValue::ValidationInvalid(Box::new(
+                        self.apply_callable(kernel_id, expr, left_function, vec![*error], globals)?,
+                    )))
+                }
+                RuntimeValue::ValidationValid(value) => Ok(RuntimeValue::ValidationValid(
                     Box::new(self.apply_callable(
                         kernel_id,
                         expr,
-                        left_function,
-                        vec![*error],
+                        right_function,
+                        vec![*value],
                         globals,
                     )?),
                 )),
-                RuntimeValue::ValidationValid(value) => Ok(RuntimeValue::ValidationValid(Box::new(
-                    self.apply_callable(kernel_id, expr, right_function, vec![*value], globals)?,
-                ))),
                 _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
                     kernel: kernel_id,
                     expr,
@@ -2866,9 +2874,9 @@ fn wrap_option_in_applicative(
         },
         BuiltinApplicativeCarrier::Option => match strip_signal(mapped) {
             RuntimeValue::OptionNone => Ok(RuntimeValue::OptionNone),
-            RuntimeValue::OptionSome(value) => {
-                Ok(RuntimeValue::OptionSome(Box::new(RuntimeValue::OptionSome(value))))
-            }
+            RuntimeValue::OptionSome(value) => Ok(RuntimeValue::OptionSome(Box::new(
+                RuntimeValue::OptionSome(value),
+            ))),
             _ => Err("traverse expected the mapped value to stay in the target applicative"),
         },
         BuiltinApplicativeCarrier::Result => match strip_signal(mapped) {
@@ -2886,9 +2894,9 @@ fn wrap_option_in_applicative(
             _ => Err("traverse expected the mapped value to stay in the target applicative"),
         },
         BuiltinApplicativeCarrier::Signal => match mapped {
-            RuntimeValue::Signal(value) => {
-                Ok(RuntimeValue::Signal(Box::new(RuntimeValue::OptionSome(value))))
-            }
+            RuntimeValue::Signal(value) => Ok(RuntimeValue::Signal(Box::new(
+                RuntimeValue::OptionSome(value),
+            ))),
             _ => Err("traverse expected the mapped value to stay in the target applicative"),
         },
     }
@@ -2910,16 +2918,16 @@ fn wrap_result_ok_in_applicative(
         },
         BuiltinApplicativeCarrier::Option => match strip_signal(mapped) {
             RuntimeValue::OptionNone => Ok(RuntimeValue::OptionNone),
-            RuntimeValue::OptionSome(value) => {
-                Ok(RuntimeValue::OptionSome(Box::new(RuntimeValue::ResultOk(value))))
-            }
+            RuntimeValue::OptionSome(value) => Ok(RuntimeValue::OptionSome(Box::new(
+                RuntimeValue::ResultOk(value),
+            ))),
             _ => Err("traverse expected the mapped value to stay in the target applicative"),
         },
         BuiltinApplicativeCarrier::Result => match strip_signal(mapped) {
             RuntimeValue::ResultErr(error) => Ok(RuntimeValue::ResultErr(error)),
-            RuntimeValue::ResultOk(value) => {
-                Ok(RuntimeValue::ResultOk(Box::new(RuntimeValue::ResultOk(value))))
-            }
+            RuntimeValue::ResultOk(value) => Ok(RuntimeValue::ResultOk(Box::new(
+                RuntimeValue::ResultOk(value),
+            ))),
             _ => Err("traverse expected the mapped value to stay in the target applicative"),
         },
         BuiltinApplicativeCarrier::Validation => match strip_signal(mapped) {
@@ -2930,9 +2938,9 @@ fn wrap_result_ok_in_applicative(
             _ => Err("traverse expected the mapped value to stay in the target applicative"),
         },
         BuiltinApplicativeCarrier::Signal => match mapped {
-            RuntimeValue::Signal(value) => {
-                Ok(RuntimeValue::Signal(Box::new(RuntimeValue::ResultOk(value))))
-            }
+            RuntimeValue::Signal(value) => Ok(RuntimeValue::Signal(Box::new(
+                RuntimeValue::ResultOk(value),
+            ))),
             _ => Err("traverse expected the mapped value to stay in the target applicative"),
         },
     }
@@ -2991,7 +2999,9 @@ fn sequence_traverse_results(
             let mut accumulated = vec![Vec::new()];
             for value in mapped {
                 let RuntimeValue::List(values) = strip_signal(value) else {
-                    return Err("traverse expected the mapped value to stay in the target applicative");
+                    return Err(
+                        "traverse expected the mapped value to stay in the target applicative",
+                    );
                 };
                 let mut next = Vec::new();
                 for prefix in &accumulated {
@@ -3020,7 +3030,9 @@ fn sequence_traverse_results(
                     }
                 }
             }
-            Ok(RuntimeValue::OptionSome(Box::new(RuntimeValue::List(collected))))
+            Ok(RuntimeValue::OptionSome(Box::new(RuntimeValue::List(
+                collected,
+            ))))
         }
         BuiltinApplicativeCarrier::Result => {
             let mut collected = Vec::with_capacity(mapped.len());
@@ -3035,7 +3047,9 @@ fn sequence_traverse_results(
                     }
                 }
             }
-            Ok(RuntimeValue::ResultOk(Box::new(RuntimeValue::List(collected))))
+            Ok(RuntimeValue::ResultOk(Box::new(RuntimeValue::List(
+                collected,
+            ))))
         }
         BuiltinApplicativeCarrier::Validation => {
             let mut collected = Vec::with_capacity(mapped.len());
@@ -3079,7 +3093,9 @@ fn sequence_traverse_results(
                     }
                 }
             }
-            Ok(RuntimeValue::Signal(Box::new(RuntimeValue::List(collected))))
+            Ok(RuntimeValue::Signal(Box::new(RuntimeValue::List(
+                collected,
+            ))))
         }
     }
 }

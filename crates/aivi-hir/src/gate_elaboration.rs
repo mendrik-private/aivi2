@@ -6,8 +6,8 @@ use aivi_typing::{GatePlanner, GateResultKind};
 use crate::{
     BigIntLiteral, BinaryOperator, BindingId, BuiltinTerm, DecimalLiteral, DomainMemberHandle,
     ExprId, ExprKind, FloatLiteral, IntegerLiteral, IntrinsicValue, Item, ItemId, Module, Name,
-    NamePath, PatternId, PipeExpr, PipeStageKind, ProjectionBase, SuffixedIntegerLiteral,
-    TermResolution, TextFragment, TextSegment, UnaryOperator,
+    NamePath, PatternId, PipeExpr, PipeStageKind, PipeTransformMode, ProjectionBase,
+    SuffixedIntegerLiteral, TermResolution, TextFragment, TextSegment, UnaryOperator,
     domain_operator_elaboration::select_domain_binary_operator,
     typecheck::resolve_class_member_dispatch,
     validate::{
@@ -298,6 +298,7 @@ pub struct GateRuntimeTruthyFalsyBranch {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GateRuntimePipeStageKind {
     Transform {
+        mode: PipeTransformMode,
         expr: GateRuntimeExpr,
     },
     Tap {
@@ -1022,6 +1023,13 @@ fn lower_gate_runtime_expr_with_purity(
                             kind: GateRuntimeExprKind::SuffixedInteger(literal),
                         });
                     }
+                    ExprKind::AmbientSubject => {
+                        results.push(GateRuntimeExpr {
+                            span: expr.span,
+                            ty,
+                            kind: GateRuntimeExprKind::AmbientSubject,
+                        });
+                    }
                     // --- Text: bounded interpolation segments (not a source of deep nesting) ---
                     ExprKind::Text(text) => {
                         let lowered = lower_runtime_text_literal(
@@ -1365,8 +1373,7 @@ fn check_domain_operator_and_schedule(
         return Ok(false);
     };
     let Some(matched) =
-        select_domain_binary_operator(module, typing, operator, left_ty, right_ty)
-            .unwrap_or(None)
+        select_domain_binary_operator(module, typing, operator, left_ty, right_ty).unwrap_or(None)
     else {
         return Ok(false);
     };
@@ -1428,6 +1435,7 @@ fn lower_runtime_pipe_expr(
         let input_subject = current.clone();
         let (kind, result_subject) = match &stage.kind {
             PipeStageKind::Transform { expr } => {
+                let mode = typing.infer_transform_stage_mode(*expr, env, &current);
                 let body = lower_gate_pipe_body_runtime_expr_with_purity(
                     module, *expr, env, &current, typing, purity,
                 )?;
@@ -1435,7 +1443,7 @@ fn lower_runtime_pipe_expr(
                     .infer_transform_stage(*expr, env, &current)
                     .ok_or(GateElaborationBlocker::UnknownRuntimeExprType { span: stage.span })?;
                 (
-                    GateRuntimePipeStageKind::Transform { expr: body },
+                    GateRuntimePipeStageKind::Transform { mode, expr: body },
                     result_subject,
                 )
             }
@@ -1604,6 +1612,7 @@ fn blocker_for_issue(issue: GateIssue) -> GateElaborationBlocker {
             GateElaborationBlocker::UnknownField { path, subject }
         }
         GateIssue::AmbiguousDomainMember { span, .. }
+        | GateIssue::AmbientSubjectOutsidePipe { span, .. }
         | GateIssue::AmbiguousDomainOperator { span, .. }
         | GateIssue::InvalidPipeStageInput { span, .. }
         | GateIssue::UnsupportedApplicativeClusterMember { span, .. }
@@ -1765,7 +1774,7 @@ type User = {
     age: Int
 }
 
-fun isEligible:Bool #user:User =>
+fun isEligible:Bool user:User =>
     .active and .age > 18
 
 sig users:Signal User = { active: True, age: 21 }
@@ -1996,7 +2005,7 @@ type User = {
     email: Text
 }
 
-fun joinEmails:Text #items:List Text =>
+fun joinEmails:Text items:List Text =>
     "joined"
 
 val users:List User = [
@@ -2048,10 +2057,10 @@ type User = {
     email: Text
 }
 
-fun keepText:Bool #email:Text =>
+fun keepText:Bool email:Text =>
     True
 
-fun joinEmails:Text #items:List Text =>
+fun joinEmails:Text items:List Text =>
     "joined"
 
 val users:List User = [
@@ -2094,7 +2103,7 @@ type Cursor = {
     hasNext: Bool
 }
 
-fun keep:Cursor #cursor:Cursor =>
+fun keep:Cursor cursor:Cursor =>
     cursor
 
 val seed:Cursor = { hasNext: True }

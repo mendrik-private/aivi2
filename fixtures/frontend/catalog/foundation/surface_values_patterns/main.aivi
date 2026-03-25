@@ -22,23 +22,23 @@ type SurfaceSummary = {
     failedLoad: Text
 }
 
-fun displayName:Text #profile:Profile =>
+fun displayName:Text profile:Profile =>
     profile
      ||> { nickname: Some alias } => alias
      ||> { name, nickname: None } => name
 
-fun roleLabel:Text #role:Role =>
+fun roleLabel:Text role:Role =>
     role
      ||> Admin  => "admin"
      ||> Member => "member"
      ||> Guest  => "guest"
 
-fun readyLabel:Text #ready:Bool =>
+fun readyLabel:Text ready:Bool =>
     ready
      T|> "ready"
      F|> "waiting"
 
-fun loadLabel:Text #state:LoadState =>
+fun loadLabel:Text state:LoadState =>
     state
      ||> NotAsked       => "idle"
      ||> Loaded profile => displayName profile

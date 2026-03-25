@@ -6,7 +6,7 @@ use std::{
 use aivi_base::SourceSpan;
 use aivi_core::{self as core, Arena, ArenaOverflow};
 use aivi_hir::{
-    BinaryOperator as HirBinaryOperator, BuiltinTerm as HirBuiltinTerm,
+    BinaryOperator as HirBinaryOperator, BuiltinTerm as HirBuiltinTerm, PipeTransformMode,
     UnaryOperator as HirUnaryOperator,
 };
 use aivi_lambda::{self as lambda};
@@ -330,7 +330,7 @@ impl<'a> ProgramLowerer<'a> {
                         work.push(pipe.head);
                         for stage in &pipe.stages {
                             match &stage.kind {
-                                core::PipeStageKind::Transform { expr }
+                                core::PipeStageKind::Transform { expr, .. }
                                 | core::PipeStageKind::Tap { expr } => work.push(*expr),
                                 core::PipeStageKind::Gate { predicate, .. } => {
                                     work.push(*predicate);
@@ -383,9 +383,11 @@ impl<'a> ProgramLowerer<'a> {
                                 self.item_map.get(&node).copied().unwrap_or(
                                     // Use a safe sentinel; require_item would have failed
                                     // earlier for a truly unknown item.
-                                    self.item_map.values().copied().next().unwrap_or(
-                                        ItemId::from_raw(0),
-                                    ),
+                                    self.item_map
+                                        .values()
+                                        .copied()
+                                        .next()
+                                        .unwrap_or(ItemId::from_raw(0)),
                                 )
                             });
                             return Err(LoweringError::GlobalItemCycle { item });
@@ -1306,7 +1308,7 @@ impl<'a> ProgramLowerer<'a> {
                 core::ExprKind::Pipe(pipe) => {
                     for stage in pipe.stages.iter().rev() {
                         match &stage.kind {
-                            core::PipeStageKind::Transform { expr }
+                            core::PipeStageKind::Transform { expr, .. }
                             | core::PipeStageKind::Tap { expr } => {
                                 work.push((*expr, SubjectKind::Inline));
                             }
@@ -1431,7 +1433,9 @@ impl<'a> ProgramLowerer<'a> {
 
         #[derive(Clone)]
         enum InlinePipeStageBuild {
-            Transform,
+            Transform {
+                mode: PipeTransformMode,
+            },
             Tap,
             Gate {
                 emits_negative_update: bool,
@@ -1448,7 +1452,7 @@ impl<'a> ProgramLowerer<'a> {
         impl InlinePipeStageSpec {
             fn child_count(&self) -> usize {
                 match &self.kind {
-                    InlinePipeStageBuild::Transform
+                    InlinePipeStageBuild::Transform { .. }
                     | InlinePipeStageBuild::Tap
                     | InlinePipeStageBuild::Gate { .. } => 1,
                     InlinePipeStageBuild::Case { arms } => arms.len(),
@@ -1780,13 +1784,13 @@ impl<'a> ProgramLowerer<'a> {
                                     layout: input_layout,
                                 });
                                 let kind = match &stage.kind {
-                                    core::PipeStageKind::Transform { expr } => {
+                                    core::PipeStageKind::Transform { mode, expr } => {
                                         children.push(PipeChildSpec {
                                             expr: *expr,
                                             subject: child_subject,
                                             locals: locals.clone(),
                                         });
-                                        InlinePipeStageBuild::Transform
+                                        InlinePipeStageBuild::Transform { mode: *mode }
                                     }
                                     core::PipeStageKind::Tap { expr } => {
                                         children.push(PipeChildSpec {
@@ -2102,9 +2106,9 @@ impl<'a> ProgramLowerer<'a> {
                             input_layout: stage.input_layout,
                             result_layout: stage.result_layout,
                             kind: match stage.kind {
-                                InlinePipeStageBuild::Transform => {
+                                InlinePipeStageBuild::Transform { mode } => {
                                     let expr = iter.next().expect("pipe stage child should exist");
-                                    InlinePipeStageKind::Transform { expr }
+                                    InlinePipeStageKind::Transform { mode, expr }
                                 }
                                 InlinePipeStageBuild::Tap => {
                                     let expr = iter.next().expect("pipe stage child should exist");
@@ -2939,9 +2943,7 @@ fn map_builtin_traversable_carrier(
         core::BuiltinTraversableCarrier::List => BackendBuiltinTraversableCarrier::List,
         core::BuiltinTraversableCarrier::Option => BackendBuiltinTraversableCarrier::Option,
         core::BuiltinTraversableCarrier::Result => BackendBuiltinTraversableCarrier::Result,
-        core::BuiltinTraversableCarrier::Validation => {
-            BackendBuiltinTraversableCarrier::Validation
-        }
+        core::BuiltinTraversableCarrier::Validation => BackendBuiltinTraversableCarrier::Validation,
     }
 }
 

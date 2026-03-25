@@ -29,10 +29,10 @@ type LuCatalog = {
     coverage: Text
 }
 
-fun matrix2:Matrix2 #a11:Int #a12:Int #a21:Int #a22:Int =>
+fun matrix2:Matrix2 a11:Int a12:Int a21:Int a22:Int =>
     { a11, a12, a21, a22 }
 
-fun multiply2:Matrix2 #left:Matrix2 #right:Matrix2 =>
+fun multiply2:Matrix2 left:Matrix2 right:Matrix2 =>
     {
         a11: left.a11 * right.a11 + left.a12 * right.a21,
         a12: left.a11 * right.a12 + left.a12 * right.a22,
@@ -40,25 +40,25 @@ fun multiply2:Matrix2 #left:Matrix2 #right:Matrix2 =>
         a22: left.a21 * right.a12 + left.a22 * right.a22
     }
 
-fun schurComplement:Int #matrix:Matrix2 #lowerLeft:Int =>
+fun schurComplement:Int matrix:Matrix2 lowerLeft:Int =>
     matrix.a22 - lowerLeft * matrix.a12
 
-fun exactLu:(Result Text LuFactors) #matrix:Matrix2 #lowerLeft:Int =>
+fun exactLu:(Result Text LuFactors) matrix:Matrix2 lowerLeft:Int =>
     schurComplement matrix lowerLeft == 0
      T|> Err "singular"
      F|> Ok { lower: matrix2 1 0 lowerLeft 1, upper: matrix2 matrix.a11 matrix.a12 0 (schurComplement matrix lowerLeft), determinant: matrix.a11 * schurComplement matrix lowerLeft }
 
-fun nonzeroPivotLu:(Result Text LuFactors) #matrix:Matrix2 =>
+fun nonzeroPivotLu:(Result Text LuFactors) matrix:Matrix2 =>
     matrix.a21 % matrix.a11 != 0
      T|> Err "fractional-lower-factor"
      F|> exactLu matrix (matrix.a21 / matrix.a11)
 
-fun lu2:(Result Text LuFactors) #matrix:Matrix2 =>
+fun lu2:(Result Text LuFactors) matrix:Matrix2 =>
     matrix.a11 == 0
      T|> Err "zero-pivot"
      F|> nonzeroPivotLu matrix
 
-fun summarizeLu:(Result Text LuSummary) #label:Text #matrix:Matrix2 =>
+fun summarizeLu:(Result Text LuSummary) label:Text matrix:Matrix2 =>
     lu2 matrix
      ||> Ok factors => Ok { label, pivot: factors.upper.a11, lowerLeft: factors.lower.a21, schur: factors.upper.a22, determinant: factors.determinant, reconstructionOk: multiply2 factors.lower factors.upper == matrix }
      ||> Err reason => Err "{label}:{reason}"

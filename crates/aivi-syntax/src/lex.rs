@@ -31,6 +31,7 @@ pub enum TokenKind {
     EqualEqual,
     BangEqual,
     Ellipsis,
+    DotDot,
     Dot,
     Comma,
     Plus,
@@ -287,7 +288,7 @@ fn lex_range(source: &SourceFile, range: std::ops::Range<usize>) -> LexedModule 
         if bytes[cursor..range.end].starts_with(b"rx\"") {
             let start = cursor;
             let (end, terminated, invalid_escapes) =
-                scan_quoted_body(text, bytes, cursor + 2, range.end);
+                scan_quoted_body(text, bytes, cursor + 2, range.end, EscapeMode::Regex);
             cursor = end;
             tokens.push(Token::new(
                 TokenKind::RegexLiteral,
@@ -413,7 +414,7 @@ fn lex_range(source: &SourceFile, range: std::ops::Range<usize>) -> LexedModule 
         if character == '"' {
             let start = cursor;
             let (end, terminated, invalid_escapes) =
-                scan_quoted_body(text, bytes, cursor, range.end);
+                scan_quoted_body(text, bytes, cursor, range.end, EscapeMode::String);
             cursor = end;
             tokens.push(Token::new(
                 TokenKind::StringLiteral,
@@ -504,7 +505,7 @@ fn lex_range(source: &SourceFile, range: std::ops::Range<usize>) -> LexedModule 
 }
 
 fn match_compound(bytes: &[u8], cursor: usize, end: usize) -> Option<(TokenKind, usize)> {
-    const PATTERNS: [(&[u8], TokenKind); 16] = [
+    const PATTERNS: [(&[u8], TokenKind); 17] = [
         (b"<|@", TokenKind::PipeRecurStep),
         (b"<|*", TokenKind::PipeFanIn),
         (b"</", TokenKind::CloseTagStart),
@@ -517,6 +518,7 @@ fn match_compound(bytes: &[u8], cursor: usize, end: usize) -> Option<(TokenKind,
         (b"T|>", TokenKind::TruthyBranch),
         (b"F|>", TokenKind::FalsyBranch),
         (b"...", TokenKind::Ellipsis),
+        (b"..", TokenKind::DotDot),
         (b"->", TokenKind::ThinArrow),
         (b"!=", TokenKind::BangEqual),
         (b"==", TokenKind::EqualEqual),
@@ -568,15 +570,22 @@ fn starts_identifier_continue(text: &str, cursor: usize, end: usize) -> bool {
         .unwrap_or(false)
 }
 
-/// Scans a quoted string body starting at `start` (which must point at the
-/// opening `"`).  Returns `(end_cursor, terminated, invalid_escape_offsets)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EscapeMode {
+    String,
+    Regex,
+}
+
+/// Scans a quoted body starting at `start` (which must point at the opening
+/// `"`). Returns `(end_cursor, terminated, invalid_escape_offsets)`.
 /// `invalid_escape_offsets` contains the byte offset of each `\` that begins
-/// an unrecognised escape sequence.
+/// an unrecognised escape sequence for the selected `escape_mode`.
 fn scan_quoted_body(
     text: &str,
     bytes: &[u8],
     start: usize,
     end: usize,
+    escape_mode: EscapeMode,
 ) -> (usize, bool, Vec<usize>) {
     let mut cursor = start;
     let mut terminated = false;
@@ -603,6 +612,9 @@ fn scan_quoted_body(
                         .expect("escaped codepoint must stay on a UTF-8 boundary");
                     match escaped {
                         'n' | 't' | 'r' | '\\' | '"' | '\'' | '0' => {
+                            cursor += 1;
+                        }
+                        '{' | '}' if escape_mode == EscapeMode::String => {
                             cursor += 1;
                         }
                         'u' => {
@@ -636,10 +648,14 @@ fn scan_quoted_body(
                             }
                         }
                         _ => {
-                            // Unrecognised escape — record position, skip the
-                            // character so we don't stall the lexer.
-                            invalid_escapes.push(backslash_pos);
-                            cursor += escaped.len_utf8();
+                            if escape_mode == EscapeMode::Regex {
+                                cursor += escaped.len_utf8();
+                            } else {
+                                // Unrecognised escape — record position, skip
+                                // the character so we don't stall the lexer.
+                                invalid_escapes.push(backslash_pos);
+                                cursor += escaped.len_utf8();
+                            }
                         }
                     }
                 }

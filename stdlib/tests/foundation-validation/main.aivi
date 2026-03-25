@@ -111,7 +111,7 @@ val numsHead: Option Int = head numbers
 val numsTail: Option (List Int) = tail numbers
 val numsLast: Option Int = last numbers
 
-fun smaller:Bool #left:Int #right:Int =>
+fun smaller:Bool left:Int right:Int =>
     left < right
 
 val smallestNumber: Int = min smaller 4 2
@@ -124,12 +124,12 @@ val smallestFromMany: Int =
         2
     ]
 
-fun positive:Bool #n:Int =>
+fun positive:Bool n:Int =>
     n > 0
 
 val foundPositive: Option Int = find positive numbers
 
-fun even:Bool #n:Int =>
+fun even:Bool n:Int =>
     n == 2
 
 val split: (Partition Int) = partition even numbers
@@ -165,7 +165,7 @@ val ageErr: Bool = isErr errAge
 val ageValue: Int = withDefault 0 okAge
 val ageOption: Option Int = toOption okAge
 
-fun prefixErr:Text #msg:Text =>
+fun prefixErr:Text msg:Text =>
     "error:{msg}"
 
 val prefixedErr: Result Text Int = mapErr prefixErr errAge

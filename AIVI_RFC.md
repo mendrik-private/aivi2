@@ -220,7 +220,7 @@ class Eq A
 
 val answer = 42
 
-fun add:Int #x:Int #y:Int =>
+fun add:Int x:Int y:Int =>
     x + y
 
 sig counter = 0

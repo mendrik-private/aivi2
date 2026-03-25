@@ -2,7 +2,7 @@ use aivi_base::SourceSpan;
 use aivi_hir::{
     BigIntLiteral, BinaryOperator, BindingId as HirBindingId, BuiltinTerm, DecimalLiteral,
     DomainMemberHandle, FloatLiteral, IntegerLiteral, IntrinsicValue, ItemId as HirItemId,
-    SuffixedIntegerLiteral, SumConstructorHandle, UnaryOperator,
+    PipeTransformMode, SuffixedIntegerLiteral, SumConstructorHandle, UnaryOperator,
 };
 
 use crate::{ids::ExprId, ty::Type};
@@ -269,6 +269,7 @@ pub struct PipeTruthyFalsyBranch {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PipeStageKind {
     Transform {
+        mode: PipeTransformMode,
         expr: ExprId,
     },
     Tap {

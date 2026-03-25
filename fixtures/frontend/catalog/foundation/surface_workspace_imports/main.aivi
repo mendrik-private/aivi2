@@ -11,7 +11,7 @@ type WorkspaceSummary = {
     banner: Text
 }
 
-fun readyLabel:Text #ready:Bool =>
+fun readyLabel:Text ready:Bool =>
     ready
      T|> "ready"
      F|> "waiting"

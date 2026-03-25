@@ -99,14 +99,12 @@ impl BuiltinSourceProvider {
             Self::MailboxSubscribe => {
                 SourceContract::new(self, socket_options(), MAILBOX_RECURRENCE, STREAM_LIFECYCLE)
             }
-            Self::ProcessSpawn => {
-                SourceContract::new(
-                    self,
-                    process_options(),
-                    PROCESS_RECURRENCE,
-                    STREAM_LIFECYCLE,
-                )
-            }
+            Self::ProcessSpawn => SourceContract::new(
+                self,
+                process_options(),
+                PROCESS_RECURRENCE,
+                STREAM_LIFECYCLE,
+            ),
             Self::WindowKeyDown => {
                 SourceContract::new(self, &WINDOW_OPTIONS, WINDOW_RECURRENCE, STREAM_LIFECYCLE)
             }
@@ -315,7 +313,7 @@ pub enum SourceContractType {
     Atom(SourceTypeAtom),
     List(Box<SourceContractType>),
     Map {
-        key: SourceTypeAtom,  // keys remain atoms (no nested key types)
+        key: SourceTypeAtom, // keys remain atoms (no nested key types)
         value: Box<SourceContractType>,
     },
     /// A reactive signal type whose payload is a full `SourceContractType`, enabling nested
@@ -354,7 +352,10 @@ impl SourceContractType {
     }
 
     pub fn map(key: SourceTypeAtom, value: SourceTypeAtom) -> Self {
-        Self::Map { key, value: Box::new(SourceContractType::Atom(value)) }
+        Self::Map {
+            key,
+            value: Box::new(SourceContractType::Atom(value)),
+        }
     }
 
     pub fn signal(payload: impl Into<SourceContractType>) -> Self {
@@ -367,8 +368,7 @@ impl SourceContractType {
             Self::List(element) => apply_unary_kind_constructor("List", element, store),
             Self::Map { key, value } => apply_binary_kind_constructor("Map", key, value, store),
             Self::Signal(payload) => {
-                let constructor =
-                    store.add_constructor("Signal".to_owned(), Kind::constructor(1));
+                let constructor = store.add_constructor("Signal".to_owned(), Kind::constructor(1));
                 let callee = store.constructor_expr(constructor);
                 let argument = payload.to_kind_expr(store);
                 store.apply_expr(callee, argument)
@@ -661,10 +661,7 @@ static PROCESS_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::
 fn process_options() -> &'static [SourceOptionContract] {
     PROCESS_OPTIONS_STORAGE.get_or_init(|| {
         vec![
-            SourceOptionContract::new(
-                "cwd",
-                SourceContractType::nominal(SourceNominalType::Path),
-            ),
+            SourceOptionContract::new("cwd", SourceContractType::nominal(SourceNominalType::Path)),
             SourceOptionContract::new(
                 "env",
                 SourceContractType::map(

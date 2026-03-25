@@ -924,6 +924,7 @@ pub enum ExprKind {
     Map(MapExpr),
     Set(Vec<ExprId>),
     Record(RecordExpr),
+    AmbientSubject,
     Projection {
         base: ProjectionBase,
         path: NamePath,
@@ -994,6 +995,15 @@ pub struct PipeExpr {
 pub struct PipeStage {
     pub span: SourceSpan,
     pub kind: PipeStageKind,
+}
+
+/// Typed runtime semantics for one `|>` transform stage after elaboration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PipeTransformMode {
+    /// Evaluate the stage as a callable transform over the current subject.
+    Apply,
+    /// Evaluate the stage as a value and replace the current subject with it.
+    Replace,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

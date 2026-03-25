@@ -576,6 +576,7 @@ fn recurrence_guard_issue_blocker(
             RecurrenceRuntimeStageBlocker::UnknownField { path, subject }
         }
         GateIssue::AmbiguousDomainMember { .. }
+        | GateIssue::AmbientSubjectOutsidePipe { .. }
         | GateIssue::AmbiguousDomainOperator { .. }
         | GateIssue::InvalidPipeStageInput { .. }
         | GateIssue::UnsupportedApplicativeClusterMember { .. }
@@ -997,7 +998,7 @@ mod tests {
         let lowered = lower_text(
             "recurrence_active_when_wakeup.aivi",
             r#"
-fun step #value =>
+fun step value =>
     value
 
 sig enabled = True
@@ -1048,7 +1049,7 @@ type Cursor = {
     hasNext: Bool
 }
 
-fun keep:Cursor #cursor:Cursor =>
+fun keep:Cursor cursor:Cursor =>
     cursor
 
 val seed:Cursor = { hasNext: True }
@@ -1121,10 +1122,10 @@ sig cursor : Signal Cursor =
 domain Duration over Int
     literal s : Int -> Duration
 
-fun keep #value:Int =>
+fun keep value:Int =>
     value
 
-fun asText #value:Int =>
+fun asText value:Int =>
     "oops"
 
 @recur.timer 5s
@@ -1168,12 +1169,12 @@ sig broken : Signal Int =
 domain Duration over Int
     literal s : Int -> Duration
 
-fun advance:Int #pressed:Bool #value:Int =>
+fun advance:Int pressed:Bool value:Int =>
     pressed
      T|> value + 1
      F|> value
 
-fun belowLimit:Bool #value:Int =>
+fun belowLimit:Bool value:Int =>
     value < 10
 
 sig ready : Signal Bool = True

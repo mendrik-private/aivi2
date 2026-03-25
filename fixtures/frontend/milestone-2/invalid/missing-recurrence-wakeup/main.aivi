@@ -1,4 +1,4 @@
-fun step #value =>
+fun step value =>
     value
 
 sig broken : Signal Int =

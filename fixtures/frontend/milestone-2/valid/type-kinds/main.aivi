@@ -30,10 +30,10 @@ domain Tags over Set Text
 
 type ResourceText = (ResourceId Text)
 
-fun keepHeaders:Map Text Text #headers:Map Text Text =>
+fun keepHeaders:Map Text Text headers:Map Text Text =>
     headers
 
-fun keepTags:Set Text #tags:Set Text =>
+fun keepTags:Set Text tags:Set Text =>
     tags
 
 val defaultNickname : Option Text = None

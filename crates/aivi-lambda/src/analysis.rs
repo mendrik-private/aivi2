@@ -135,7 +135,7 @@ pub(crate) fn capture_free_bindings(
             ExprKind::Pipe(pipe) => {
                 for stage in pipe.stages.iter().rev() {
                     match &stage.kind {
-                        PipeStageKind::Transform { expr }
+                        PipeStageKind::Transform { expr, .. }
                         | PipeStageKind::Tap { expr }
                         | PipeStageKind::Gate {
                             predicate: expr, ..

@@ -8,7 +8,7 @@ use aivi.network (
 type PrimaryRequest = (Request Text)
 type ProviderChannel = (Channel Text Text)
 
-fun joinProviders:Text #left:Text #right:Text =>
+fun joinProviders:Text left:Text right:Text =>
     "{left}/{right}"
 
 val primaryProvider = http

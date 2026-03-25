@@ -1,6 +1,6 @@
 type Status = Idle | Busy
 
-fun statusLabel:Text #status:Status =>
+fun statusLabel:Text status:Status =>
     status
      ||> Idle => "Idle"
      ||> Busy => "Busy"

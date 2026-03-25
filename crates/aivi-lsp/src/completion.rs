@@ -32,20 +32,19 @@ pub async fn completion(
     // If the tightest symbol is a record/struct/namespace, offer its children
     // as field or member completions.
     let child_completions = match sym.kind {
-        LspSymbolKind::Struct | LspSymbolKind::Namespace | LspSymbolKind::Class => {
-            sym.children
-                .iter()
-                .map(|child| {
-                    let kind = lsp_symbol_kind_to_completion_kind(child.kind);
-                    CompletionItem {
-                        label: child.name.clone(),
-                        kind: Some(kind),
-                        detail: child.detail.clone(),
-                        ..Default::default()
-                    }
-                })
-                .collect::<Vec<_>>()
-        }
+        LspSymbolKind::Struct | LspSymbolKind::Namespace | LspSymbolKind::Class => sym
+            .children
+            .iter()
+            .map(|child| {
+                let kind = lsp_symbol_kind_to_completion_kind(child.kind);
+                CompletionItem {
+                    label: child.name.clone(),
+                    kind: Some(kind),
+                    detail: child.detail.clone(),
+                    ..Default::default()
+                }
+            })
+            .collect::<Vec<_>>(),
         // For any other symbol, offer the symbol's children (e.g. function parameters,
         // enum members) as candidates.
         _ => sym

@@ -2,7 +2,7 @@ use std::fmt;
 
 use aivi_base::SourceSpan;
 use aivi_core::Arena;
-use aivi_hir::{DomainMemberHandle, IntrinsicValue, SumConstructorHandle};
+use aivi_hir::{DomainMemberHandle, IntrinsicValue, PipeTransformMode, SumConstructorHandle};
 
 use crate::{
     EnvSlotId, InlineSubjectId, ItemId, KernelExprId, LayoutId, PipelineId, SourceId,
@@ -524,6 +524,7 @@ pub struct InlinePipeStage {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InlinePipeStageKind {
     Transform {
+        mode: PipeTransformMode,
         expr: KernelExprId,
     },
     Tap {

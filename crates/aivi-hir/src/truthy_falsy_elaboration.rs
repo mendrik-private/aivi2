@@ -430,6 +430,7 @@ fn blocker_for_branch_issue(
             }
         }
         GateIssue::AmbiguousDomainMember { .. }
+        | GateIssue::AmbientSubjectOutsidePipe { .. }
         | GateIssue::AmbiguousDomainOperator { .. }
         | GateIssue::InvalidPipeStageInput { .. }
         | GateIssue::UnsupportedApplicativeClusterMember { .. }

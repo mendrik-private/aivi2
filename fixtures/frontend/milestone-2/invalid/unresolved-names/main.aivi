@@ -1,4 +1,4 @@
-fun statusLabel:Text #status:Text =>
+fun statusLabel:Text status:Text =>
     status
 
 val main =

@@ -1,59 +1,59 @@
-fun keepOk:(Result E A) #item:A =>
+fun keepOk:(Result E A) item:A =>
     Ok item
 
-fun keepErr:(Result E A) #error:E =>
+fun keepErr:(Result E A) error:E =>
     Err error
 
-fun mapError:(Result E2 A) #transform:(E1 -> E2) #error:E1 =>
+fun mapError:(Result E2 A) transform:(E1 -> E2) error:E1 =>
     Err (transform error)
 
-fun keepSome:(Option A) #item:A =>
+fun keepSome:(Option A) item:A =>
     Some item
 
-fun singleton:(List A) #item:A =>
+fun singleton:(List A) item:A =>
     [item]
 
-fun isOk:Bool #value:(Result E A) =>
+fun isOk:Bool value:(Result E A) =>
     value
      T|> True
      F|> False
 
-fun isErr:Bool #value:(Result E A) =>
+fun isErr:Bool value:(Result E A) =>
     value
      F|> True
      T|> False
 
-fun mapErr:(Result E2 A) #transform:(E1 -> E2) #value:(Result E1 A) =>
+fun mapErr:(Result E2 A) transform:(E1 -> E2) value:(Result E1 A) =>
     value
      T|> keepOk
      F|> mapError transform
 
-fun withDefault:A #fallback:A #value:(Result E A) =>
+fun withDefault:A fallback:A value:(Result E A) =>
     value
      ||> Ok item   => item
      ||> Err error => fallback
 
-fun orElse:(Result E A) #fallback:(Result E A) #value:(Result E A) =>
+fun orElse:(Result E A) fallback:(Result E A) value:(Result E A) =>
     value
      T|> keepOk
      F|> fallback
 
-fun flatMap:(Result E B) #next:(A -> Result E B) #value:(Result E A) =>
+fun flatMap:(Result E B) next:(A -> Result E B) value:(Result E A) =>
     value
      T|> next
      F|> keepErr
 
-fun flatten:(Result E A) #value:(Result E (Result E A)) =>
+fun flatten:(Result E A) value:(Result E (Result E A)) =>
     value
      ||> Ok nested => nested
      ||> Err error => Err error
 
-fun toOption:(Option A) #value:(Result E A) =>
+fun toOption:(Option A) value:(Result E A) =>
     value
      T|> keepSome
      F|> None
 
-fun toList:(List A) #value:(Result E A) =>
+fun toList:(List A) value:(Result E A) =>
     value
      T|> singleton
      F|> []

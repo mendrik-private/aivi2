@@ -1,21 +1,22 @@
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use aivi_backend::{
-    BuiltinAppendCarrier, BuiltinApplicativeCarrier, BuiltinApplyCarrier,
-    BuiltinBifunctorCarrier, BuiltinClassMemberIntrinsic, BuiltinFilterableCarrier,
-    BuiltinFoldableCarrier, BuiltinFunctorCarrier, BuiltinOrdSubject,
-    BuiltinTraversableCarrier, CodegenError, DecodeStepKind, DomainDecodeSurfaceKind,
-    EvaluationError, GateStage as BackendGateStage, InlinePipeConstructor,
-    InlinePipePatternKind, InlinePipeStageKind, ItemKind as BackendItemKind, KernelEvaluator,
-    KernelExprKind, LayoutKind, LoweringError, NonSourceWakeupCause, RecurrenceTarget,
-    RuntimeBigInt, RuntimeDecimal, RuntimeFloat, RuntimeSumValue, RuntimeValue, SourceProvider,
-    StageKind as BackendStageKind, ValidationError, compile_program,
+    BuiltinAppendCarrier, BuiltinApplicativeCarrier, BuiltinApplyCarrier, BuiltinBifunctorCarrier,
+    BuiltinClassMemberIntrinsic, BuiltinFilterableCarrier, BuiltinFoldableCarrier,
+    BuiltinFunctorCarrier, BuiltinOrdSubject, BuiltinTraversableCarrier, CodegenError,
+    DecodeStepKind, DomainDecodeSurfaceKind, EvaluationError, GateStage as BackendGateStage,
+    InlinePipeConstructor, InlinePipePatternKind, InlinePipeStageKind, ItemKind as BackendItemKind,
+    KernelEvaluator, KernelExprKind, LayoutKind, LoweringError, NonSourceWakeupCause,
+    RecurrenceTarget, RuntimeBigInt, RuntimeDecimal, RuntimeFloat, RuntimeSumValue, RuntimeValue,
+    SourceProvider, StageKind as BackendStageKind, ValidationError, compile_program,
     lower_module as lower_backend_module, validate_program,
 };
 use aivi_base::{SourceDatabase, SourceSpan};
 use aivi_core::{
     Expr as CoreExpr, ExprKind as CoreExprKind, GateStage as CoreGateStage, Item as CoreItem,
-    ItemKind as CoreItemKind, Module as CoreModule, Pipe as CorePipe, PipeOrigin as CorePipeOrigin,
+    ItemKind as CoreItemKind, ItemParameter as CoreItemParameter, Module as CoreModule,
+    Pipe as CorePipe, PipeExpr as CoreInlinePipeExpr, PipeOrigin as CorePipeOrigin,
+    PipeStage as CoreInlinePipeStage, PipeStageKind as CoreInlinePipeStageKind,
     ProjectionBase as CoreProjectionBase, RecordField as CoreRecordField,
     Reference as CoreReference, Stage as CoreStage, StageKind as CoreStageKind, Type as CoreType,
     lower_module as lower_core_module, validate_module as validate_core_module,
@@ -23,7 +24,7 @@ use aivi_core::{
 use aivi_hir::{
     BigIntLiteral, BinaryOperator as HirBinaryOperator, BindingId as HirBindingId,
     BuiltinTerm as HirBuiltinTerm, BuiltinType, DecimalLiteral, ExprId as HirExprId, FloatLiteral,
-    IntegerLiteral, ItemId as HirItemId,
+    IntegerLiteral, ItemId as HirItemId, PipeTransformMode,
 };
 use aivi_lambda::{lower_module as lower_lambda_module, validate_module as validate_lambda_module};
 use aivi_query::RootDatabase;
@@ -282,6 +283,52 @@ fn evaluates_multiplicative_builtin_arithmetic_with_precedence() {
 }
 
 #[test]
+fn evaluates_surface_subject_placeholders_and_integer_ranges() {
+    let backend = lower_text(
+        "backend-surface-subject-and-ranges.aivi",
+        r#"val ambientFinal:Int =
+    1
+     |> 2
+     |> 4
+     |> .
+
+val span:List Int = 1..3
+val bracketed:List Int = [1..3]
+"#,
+    );
+
+    let mut evaluator = KernelEvaluator::new(&backend);
+    let globals = BTreeMap::new();
+
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "ambientFinal"), &globals)
+            .expect("ambient subject placeholder should evaluate"),
+        RuntimeValue::Int(4)
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "span"), &globals)
+            .expect("range expression should evaluate"),
+        RuntimeValue::List(vec![
+            RuntimeValue::Int(1),
+            RuntimeValue::Int(2),
+            RuntimeValue::Int(3),
+        ])
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "bracketed"), &globals)
+            .expect("bracketed range expression should evaluate"),
+        RuntimeValue::List(vec![
+            RuntimeValue::Int(1),
+            RuntimeValue::Int(2),
+            RuntimeValue::Int(3),
+        ])
+    );
+}
+
+#[test]
 fn division_by_zero_reports_backend_evaluation_error() {
     let backend = lower_text("backend-division-by-zero.aivi", "val broken:Int = 1 / 0\n");
 
@@ -385,7 +432,7 @@ fn lowers_item_body_kernels_into_backend_items() {
     let backend = lower_text(
         "backend-item-bodies.aivi",
         r#"
-fun addOne:Int #value:Int =>
+fun addOne:Int value:Int =>
     value + 1
 
 val answer =
@@ -421,7 +468,7 @@ sig refresh = 0
 sig enabled = True
 sig pollInterval = 5
 
-fun addOne:Int #value:Int =>
+fun addOne:Int value:Int =>
     value + 1
 
 val answer =
@@ -509,7 +556,7 @@ fn runtime_evaluates_builtin_overloaded_class_members() {
     let backend = lower_text(
         "backend-builtin-class-members.aivi",
         r#"
-fun increment:Int #value:Int => value + 1
+fun increment:Int value:Int => value + 1
 
 val joined:Text =
     append "hel" "lo"
@@ -624,10 +671,10 @@ fn runtime_evaluates_builtin_foldable_reduce_members() {
     let backend = lower_text(
         "backend-foldable-reduce.aivi",
         r#"
-fun add:Int #acc:Int #value:Int =>
+fun add:Int acc:Int value:Int =>
     acc + value
 
-fun joinStep:Text #acc:Text #value:Text =>
+fun joinStep:Text acc:Text value:Text =>
     append acc value
 
 val maybeInput:Option Int =
@@ -757,15 +804,15 @@ fn runtime_evaluates_extended_builtin_typeclass_members() {
     let backend = lower_text(
         "backend-extended-typeclass-members.aivi",
         r#"
-fun addOne:Int #value:Int =>
+fun addOne:Int value:Int =>
     value + 1
 
-fun keepSmall:(Option Int) #value:Int =>
+fun keepSmall:(Option Int) value:Int =>
     value < 3
      T|> Some value
      F|> None
 
-fun punctuate:Text #value:Text =>
+fun punctuate:Text value:Text =>
     append value "!"
 
 val okOne:Result Text Int =
@@ -1002,7 +1049,7 @@ fn runtime_evaluates_validation_apply_through_backend_runtime() {
         r#"
 type Pair = Pair Text Text
 
-fun pair:Pair #left:Text #right:Text =>
+fun pair:Pair left:Text right:Text =>
     Pair left right
 
 val first:Validation Text Text =
@@ -1065,7 +1112,7 @@ use shared.types (
     Envelope
 )
 
-fun increment:Int #value:Int =>
+fun increment:Int value:Int =>
     value + 1
 
 val lifted:Envelope (Option Int) =
@@ -1115,7 +1162,7 @@ instance Semigroup Blob
     append left right =
         left
 
-fun combine:Blob #left:Blob #right:Blob =>
+fun combine:Blob left:Blob right:Blob =>
     append left right
 
 val combined:Blob =
@@ -1139,13 +1186,527 @@ val combined:Blob =
 }
 
 #[test]
+fn evaluates_inline_pipe_transforms_with_apply_and_replace_modes() {
+    let span = SourceSpan::default();
+    let int_type = CoreType::Primitive(BuiltinType::Int);
+    let text_type = CoreType::Primitive(BuiltinType::Text);
+    let add_one_type = CoreType::Arrow {
+        parameter: Box::new(int_type.clone()),
+        result: Box::new(int_type.clone()),
+    };
+    let mut core = CoreModule::new();
+    let add_one_binding = HirBindingId::from_raw(0);
+    let add_one = core
+        .items_mut()
+        .alloc(CoreItem {
+            origin: HirItemId::from_raw(0),
+            span,
+            name: "addOne".into(),
+            kind: CoreItemKind::Function,
+            parameters: vec![CoreItemParameter {
+                binding: add_one_binding,
+                span,
+                name: "value".into(),
+                ty: int_type.clone(),
+            }],
+            body: None,
+            pipes: Vec::new(),
+        })
+        .expect("function allocation should fit");
+    let add_one_local = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: int_type.clone(),
+            kind: CoreExprKind::Reference(CoreReference::Local(add_one_binding)),
+        })
+        .expect("local reference allocation should fit");
+    let add_one_one = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: int_type.clone(),
+            kind: CoreExprKind::Integer(IntegerLiteral { raw: "1".into() }),
+        })
+        .expect("integer allocation should fit");
+    let add_one_body = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: int_type.clone(),
+            kind: CoreExprKind::Binary {
+                left: add_one_local,
+                operator: HirBinaryOperator::Add,
+                right: add_one_one,
+            },
+        })
+        .expect("function body allocation should fit");
+    core.items_mut()
+        .get_mut(add_one)
+        .expect("function item should exist")
+        .body = Some(add_one_body);
+
+    let replaced = core
+        .items_mut()
+        .alloc(CoreItem {
+            origin: HirItemId::from_raw(1),
+            span,
+            name: "replaced".into(),
+            kind: CoreItemKind::Value,
+            parameters: Vec::new(),
+            body: None,
+            pipes: Vec::new(),
+        })
+        .expect("value allocation should fit");
+    let replaced_head = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: int_type.clone(),
+            kind: CoreExprKind::Integer(IntegerLiteral { raw: "1".into() }),
+        })
+        .expect("head allocation should fit");
+    let replaced_two = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: int_type.clone(),
+            kind: CoreExprKind::Integer(IntegerLiteral { raw: "2".into() }),
+        })
+        .expect("replacement allocation should fit");
+    let replaced_four = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: int_type.clone(),
+            kind: CoreExprKind::Integer(IntegerLiteral { raw: "4".into() }),
+        })
+        .expect("replacement allocation should fit");
+    let replaced_body = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: int_type.clone(),
+            kind: CoreExprKind::Pipe(CoreInlinePipeExpr {
+                head: replaced_head,
+                stages: vec![
+                    CoreInlinePipeStage {
+                        span,
+                        input_subject: int_type.clone(),
+                        result_subject: int_type.clone(),
+                        kind: CoreInlinePipeStageKind::Transform {
+                            mode: PipeTransformMode::Replace,
+                            expr: replaced_two,
+                        },
+                    },
+                    CoreInlinePipeStage {
+                        span,
+                        input_subject: int_type.clone(),
+                        result_subject: int_type.clone(),
+                        kind: CoreInlinePipeStageKind::Transform {
+                            mode: PipeTransformMode::Replace,
+                            expr: replaced_four,
+                        },
+                    },
+                ],
+            }),
+        })
+        .expect("pipe body allocation should fit");
+    core.items_mut()
+        .get_mut(replaced)
+        .expect("replaced item should exist")
+        .body = Some(replaced_body);
+
+    let called = core
+        .items_mut()
+        .alloc(CoreItem {
+            origin: HirItemId::from_raw(2),
+            span,
+            name: "called".into(),
+            kind: CoreItemKind::Value,
+            parameters: Vec::new(),
+            body: None,
+            pipes: Vec::new(),
+        })
+        .expect("value allocation should fit");
+    let called_head = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: int_type.clone(),
+            kind: CoreExprKind::Integer(IntegerLiteral { raw: "1".into() }),
+        })
+        .expect("head allocation should fit");
+    let called_callee = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: add_one_type.clone(),
+            kind: CoreExprKind::Reference(CoreReference::Item(add_one)),
+        })
+        .expect("callee allocation should fit");
+    let called_subject = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: int_type.clone(),
+            kind: CoreExprKind::AmbientSubject,
+        })
+        .expect("ambient subject allocation should fit");
+    let called_apply = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: int_type.clone(),
+            kind: CoreExprKind::Apply {
+                callee: called_callee,
+                arguments: vec![called_subject],
+            },
+        })
+        .expect("apply allocation should fit");
+    let called_body = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: int_type.clone(),
+            kind: CoreExprKind::Pipe(CoreInlinePipeExpr {
+                head: called_head,
+                stages: vec![CoreInlinePipeStage {
+                    span,
+                    input_subject: int_type.clone(),
+                    result_subject: int_type.clone(),
+                    kind: CoreInlinePipeStageKind::Transform {
+                        mode: PipeTransformMode::Apply,
+                        expr: called_apply,
+                    },
+                }],
+            }),
+        })
+        .expect("pipe body allocation should fit");
+    core.items_mut()
+        .get_mut(called)
+        .expect("called item should exist")
+        .body = Some(called_body);
+
+    let final_label = core
+        .items_mut()
+        .alloc(CoreItem {
+            origin: HirItemId::from_raw(3),
+            span,
+            name: "finalLabel".into(),
+            kind: CoreItemKind::Value,
+            parameters: Vec::new(),
+            body: None,
+            pipes: Vec::new(),
+        })
+        .expect("value allocation should fit");
+    let final_head = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: int_type.clone(),
+            kind: CoreExprKind::Integer(IntegerLiteral { raw: "1".into() }),
+        })
+        .expect("head allocation should fit");
+    let final_callee = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: add_one_type.clone(),
+            kind: CoreExprKind::Reference(CoreReference::Item(add_one)),
+        })
+        .expect("callee allocation should fit");
+    let final_subject = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: int_type.clone(),
+            kind: CoreExprKind::AmbientSubject,
+        })
+        .expect("ambient subject allocation should fit");
+    let final_apply = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: int_type.clone(),
+            kind: CoreExprKind::Apply {
+                callee: final_callee,
+                arguments: vec![final_subject],
+            },
+        })
+        .expect("apply allocation should fit");
+    let final_text = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: text_type.clone(),
+            kind: CoreExprKind::Text(aivi_core::TextLiteral {
+                segments: vec![aivi_core::TextSegment::Fragment {
+                    raw: "done".into(),
+                    span,
+                }],
+            }),
+        })
+        .expect("text allocation should fit");
+    let final_body = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: text_type.clone(),
+            kind: CoreExprKind::Pipe(CoreInlinePipeExpr {
+                head: final_head,
+                stages: vec![
+                    CoreInlinePipeStage {
+                        span,
+                        input_subject: int_type.clone(),
+                        result_subject: int_type.clone(),
+                        kind: CoreInlinePipeStageKind::Transform {
+                            mode: PipeTransformMode::Apply,
+                            expr: final_apply,
+                        },
+                    },
+                    CoreInlinePipeStage {
+                        span,
+                        input_subject: int_type.clone(),
+                        result_subject: text_type.clone(),
+                        kind: CoreInlinePipeStageKind::Transform {
+                            mode: PipeTransformMode::Replace,
+                            expr: final_text,
+                        },
+                    },
+                ],
+            }),
+        })
+        .expect("pipe body allocation should fit");
+    core.items_mut()
+        .get_mut(final_label)
+        .expect("finalLabel item should exist")
+        .body = Some(final_body);
+
+    validate_core_module(&core).expect("manual core module should validate");
+    let lambda = lower_lambda_module(&core).expect("typed lambda lowering should succeed");
+    validate_lambda_module(&lambda).expect("typed lambda should validate");
+    let backend = lower_backend_module(&lambda).expect("backend lowering should succeed");
+    validate_program(&backend).expect("backend program should validate");
+
+    let replaced = find_item(&backend, "replaced");
+    let called = find_item(&backend, "called");
+    let final_label = find_item(&backend, "finalLabel");
+
+    let replaced_kernel = &backend.kernels()[backend.items()[replaced]
+        .body
+        .expect("replaced should carry a body")];
+    let KernelExprKind::Pipe(replaced_pipe) = &replaced_kernel.exprs()[replaced_kernel.root].kind
+    else {
+        panic!("replaced should lower to a pipe expression");
+    };
+    assert_eq!(replaced_pipe.stages.len(), 2);
+    assert!(matches!(
+        &replaced_pipe.stages[0].kind,
+        InlinePipeStageKind::Transform {
+            mode: PipeTransformMode::Replace,
+            ..
+        }
+    ));
+    assert!(matches!(
+        &replaced_pipe.stages[1].kind,
+        InlinePipeStageKind::Transform {
+            mode: PipeTransformMode::Replace,
+            ..
+        }
+    ));
+
+    let called_kernel = &backend.kernels()[backend.items()[called]
+        .body
+        .expect("called should carry a body")];
+    let KernelExprKind::Pipe(called_pipe) = &called_kernel.exprs()[called_kernel.root].kind else {
+        panic!("called should lower to a pipe expression");
+    };
+    assert_eq!(called_pipe.stages.len(), 1);
+    assert!(matches!(
+        &called_pipe.stages[0].kind,
+        InlinePipeStageKind::Transform {
+            mode: PipeTransformMode::Apply,
+            ..
+        }
+    ));
+
+    let final_label_kernel = &backend.kernels()[backend.items()[final_label]
+        .body
+        .expect("finalLabel should carry a body")];
+    let KernelExprKind::Pipe(final_label_pipe) =
+        &final_label_kernel.exprs()[final_label_kernel.root].kind
+    else {
+        panic!("finalLabel should lower to a pipe expression");
+    };
+    assert_eq!(final_label_pipe.stages.len(), 2);
+    assert!(matches!(
+        &final_label_pipe.stages[0].kind,
+        InlinePipeStageKind::Transform {
+            mode: PipeTransformMode::Apply,
+            ..
+        }
+    ));
+    assert!(matches!(
+        &final_label_pipe.stages[1].kind,
+        InlinePipeStageKind::Transform {
+            mode: PipeTransformMode::Replace,
+            ..
+        }
+    ));
+
+    let mut evaluator = KernelEvaluator::new(&backend);
+    let globals = BTreeMap::new();
+    assert_eq!(
+        evaluator
+            .evaluate_item(replaced, &globals)
+            .expect("replacement transforms should evaluate"),
+        RuntimeValue::Int(4)
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(called, &globals)
+            .expect("callable transform should evaluate"),
+        RuntimeValue::Int(2)
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(final_label, &globals)
+            .expect("mixed transform modes should evaluate"),
+        RuntimeValue::Text("done".into())
+    );
+}
+
+#[test]
+fn evaluates_replacement_transform_stage_with_ambient_subject_value() {
+    let span = SourceSpan::default();
+    let mut core = CoreModule::new();
+    let item = core
+        .items_mut()
+        .alloc(CoreItem {
+            origin: HirItemId::from_raw(0),
+            span,
+            name: "ambientFinal".into(),
+            kind: CoreItemKind::Value,
+            parameters: Vec::new(),
+            body: None,
+            pipes: Vec::new(),
+        })
+        .expect("item allocation should fit");
+
+    let one = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: CoreType::Primitive(BuiltinType::Int),
+            kind: CoreExprKind::Integer(IntegerLiteral { raw: "1".into() }),
+        })
+        .expect("head allocation should fit");
+    let two = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: CoreType::Primitive(BuiltinType::Int),
+            kind: CoreExprKind::Integer(IntegerLiteral { raw: "2".into() }),
+        })
+        .expect("replacement allocation should fit");
+    let four = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: CoreType::Primitive(BuiltinType::Int),
+            kind: CoreExprKind::Integer(IntegerLiteral { raw: "4".into() }),
+        })
+        .expect("replacement allocation should fit");
+    let ambient = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: CoreType::Primitive(BuiltinType::Int),
+            kind: CoreExprKind::AmbientSubject,
+        })
+        .expect("ambient subject allocation should fit");
+    let body = core
+        .exprs_mut()
+        .alloc(CoreExpr {
+            span,
+            ty: CoreType::Primitive(BuiltinType::Int),
+            kind: CoreExprKind::Pipe(CoreInlinePipeExpr {
+                head: one,
+                stages: vec![
+                    CoreInlinePipeStage {
+                        span,
+                        input_subject: CoreType::Primitive(BuiltinType::Int),
+                        result_subject: CoreType::Primitive(BuiltinType::Int),
+                        kind: CoreInlinePipeStageKind::Transform {
+                            mode: PipeTransformMode::Replace,
+                            expr: two,
+                        },
+                    },
+                    CoreInlinePipeStage {
+                        span,
+                        input_subject: CoreType::Primitive(BuiltinType::Int),
+                        result_subject: CoreType::Primitive(BuiltinType::Int),
+                        kind: CoreInlinePipeStageKind::Transform {
+                            mode: PipeTransformMode::Replace,
+                            expr: four,
+                        },
+                    },
+                    CoreInlinePipeStage {
+                        span,
+                        input_subject: CoreType::Primitive(BuiltinType::Int),
+                        result_subject: CoreType::Primitive(BuiltinType::Int),
+                        kind: CoreInlinePipeStageKind::Transform {
+                            mode: PipeTransformMode::Replace,
+                            expr: ambient,
+                        },
+                    },
+                ],
+            }),
+        })
+        .expect("pipe body allocation should fit");
+    core.items_mut()
+        .get_mut(item)
+        .expect("item should exist")
+        .body = Some(body);
+
+    validate_core_module(&core).expect("manual core module should validate");
+    let lambda = lower_lambda_module(&core).expect("typed lambda lowering should succeed");
+    validate_lambda_module(&lambda).expect("typed lambda should validate");
+    let backend = lower_backend_module(&lambda).expect("backend lowering should succeed");
+    validate_program(&backend).expect("backend program should validate");
+
+    let kernel = &backend.kernels()[backend.items()[find_item(&backend, "ambientFinal")]
+        .body
+        .expect("ambientFinal should carry a body")];
+    let KernelExprKind::Pipe(pipe) = &kernel.exprs()[kernel.root].kind else {
+        panic!("ambientFinal should lower to a pipe expression");
+    };
+    assert!(matches!(
+        &pipe.stages[2].kind,
+        InlinePipeStageKind::Transform {
+            mode: PipeTransformMode::Replace,
+            ..
+        }
+    ));
+
+    let mut evaluator = KernelEvaluator::new(&backend);
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "ambientFinal"), &BTreeMap::new())
+            .expect("ambient replacement transform should evaluate"),
+        RuntimeValue::Int(4)
+    );
+}
+
+#[test]
 fn evaluates_inline_case_pipe_with_pattern_binding_and_parameter_capture() {
     let backend = lower_text(
         "backend-inline-case-captures.aivi",
         r#"
 val fallback = "guest"
 
-fun greet:Text #prefix:Text #maybeUser:(Option Text) =>
+fun greet:Text prefix:Text maybeUser:(Option Text) =>
     maybeUser
      ||> Some name => "{prefix}:{name}"
      ||> None => "{prefix}:{fallback}"
@@ -1204,7 +1765,7 @@ fn evaluates_signal_carried_inline_case_pipes_with_committed_snapshots_and_captu
     let backend = lower_text(
         "backend-signal-inline-case-captures.aivi",
         r#"
-fun greetSelected:Signal Text #prefix:Text #fallback:Text =>
+fun greetSelected:Signal Text prefix:Text fallback:Text =>
     selectedUser
      ||> Some name => "{prefix}:{name}"
      ||> None => "{prefix}:{fallback}"
@@ -1249,7 +1810,7 @@ fn evaluates_signal_carried_inline_truthy_falsy_pipes_with_committed_snapshots()
     let backend = lower_text(
         "backend-signal-inline-truthy-falsy.aivi",
         r#"
-fun renderStatus:Signal Text #prefix:Text #readyText:Text #waitText:Text =>
+fun renderStatus:Signal Text prefix:Text readyText:Text waitText:Text =>
     ready
      T|> "{prefix}:{readyText}"
      F|> "{prefix}:{waitText}"
@@ -1299,7 +1860,7 @@ type Status =
 
 sig current : Signal Status
 
-fun render:Text #status:Status =>
+fun render:Text status:Status =>
     status
      ||> Idle => "idle"
      ||> Ready name => name
@@ -1384,7 +1945,7 @@ domain Duration over Int
 domain Retry over Int
     literal x : Int -> Retry
 
-fun step:Int #value:Int =>
+fun step:Int value:Int =>
     value
 
 @recur.timer 5s
@@ -2008,4 +2569,3 @@ sig slowWindows : Signal Window =
             if detail.contains("record projection, pointer-niche Option carriers")
     )));
 }
-

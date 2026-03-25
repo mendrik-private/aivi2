@@ -30,10 +30,10 @@ type CollectionSummary = {
     note: Text
 }
 
-fun add:Int #total:Int #value:Int =>
+fun add:Int total:Int value:Int =>
     total + value
 
-fun even:Bool #value:Int =>
+fun even:Bool value:Int =>
     value == 2 or value == 4
 
 val numbers: List Int = [

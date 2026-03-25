@@ -5,33 +5,33 @@ type Screen =
 
 val current: Screen = Loading
 
-fun boolLabel:Text #ready:Bool =>
+fun boolLabel:Text ready:Bool =>
     ready
      ||> True  => "ready"
      ||> False => "waiting"
 
-fun maybeLabel:Text #maybeUser:(Option Text) =>
+fun maybeLabel:Text maybeUser:(Option Text) =>
     maybeUser
      ||> Some name => name
      ||> None      => "login"
 
-fun resultLabel:Text #status:(Result Text Text) =>
+fun resultLabel:Text status:(Result Text Text) =>
     status
      ||> Ok body     => body
      ||> Err message => message
 
-fun validationLabel:Text #status:(Validation Text Text) =>
+fun validationLabel:Text status:(Validation Text Text) =>
     status
      ||> Valid body      => body
      ||> Invalid message => message
 
-fun screenLabel:Text #screen:Screen =>
+fun screenLabel:Text screen:Screen =>
     screen
      ||> Loading       => "loading"
      ||> Ready title   => title
      ||> Failed reason => reason
 
-fun nestedScreenLabel:Text #screen:Screen =>
+fun nestedScreenLabel:Text screen:Screen =>
     screen
      ||> Loading       => "loading"
      ||> Ready title   => (title == "Inbox" T|> "priority" F|> title)

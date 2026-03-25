@@ -394,7 +394,8 @@ fn pre_gate_transform_body(
         return None;
     };
     let gate_idx = pipe.stages.iter().position(|stage| {
-        matches!(stage.kind, GateRuntimePipeStageKind::Gate { .. }) && stage.input_subject.is_signal()
+        matches!(stage.kind, GateRuntimePipeStageKind::Gate { .. })
+            && stage.input_subject.is_signal()
     })?;
     if gate_idx == 0 {
         return None;
@@ -1113,6 +1114,7 @@ impl<'a> GeneralExprElaborator<'a> {
                         .collect::<Result<_, Vec<_>>>()?,
                 )
             }
+            ExprKind::AmbientSubject => GateRuntimeExprKind::AmbientSubject,
             ExprKind::Projection { base, path } => {
                 let base = match base {
                     ProjectionBase::Ambient => GateRuntimeProjectionBase::AmbientSubject,
@@ -1264,6 +1266,7 @@ impl<'a> GeneralExprElaborator<'a> {
             let stage = stages[stage_index];
             match &stage.kind {
                 PipeStageKind::Transform { expr } => {
+                    let mode = self.typing.infer_transform_stage_mode(*expr, env, &current);
                     let result_subject = self
                         .typing
                         .infer_transform_stage(*expr, env, &current)
@@ -1283,7 +1286,7 @@ impl<'a> GeneralExprElaborator<'a> {
                         span: stage.span,
                         input_subject: current.gate_payload().clone(),
                         result_subject: result_subject.clone(),
-                        kind: GateRuntimePipeStageKind::Transform { expr: body },
+                        kind: GateRuntimePipeStageKind::Transform { mode, expr: body },
                     });
                     current = result_subject;
                     stage_index += 1;
@@ -1802,7 +1805,8 @@ impl<'a> GeneralExprElaborator<'a> {
                     expected,
                     actual,
                 },
-                GateIssue::InvalidPipeStageInput { span, .. }
+                GateIssue::AmbientSubjectOutsidePipe { span }
+                | GateIssue::InvalidPipeStageInput { span, .. }
                 | GateIssue::UnsupportedApplicativeClusterMember { span, .. }
                 | GateIssue::ApplicativeClusterMismatch { span, .. }
                 | GateIssue::InvalidClusterFinalizer { span, .. } => {
@@ -2217,7 +2221,7 @@ impl From<GateElaborationBlocker> for GeneralExprBlocker {
 mod tests {
     use std::{fs, path::PathBuf};
 
-    use aivi_base::SourceDatabase;
+    use aivi_base::{FileId, SourceDatabase, SourceSpan};
     use aivi_syntax::parse_module;
 
     use super::{
@@ -2225,6 +2229,7 @@ mod tests {
         GeneralExprOutcome, Item, elaborate_general_expressions,
     };
     use crate::{
+        BuiltinType, PipeTransformMode,
         typecheck::resolve_class_member_dispatch,
         validate::{GateExprEnv, GateTypeContext},
     };
@@ -2263,6 +2268,48 @@ mod tests {
         lower_text(path, &text)
     }
 
+    fn unit_span() -> SourceSpan {
+        SourceSpan::default()
+    }
+
+    fn test_name(text: &str) -> crate::Name {
+        crate::Name::new(text, unit_span()).expect("test name should stay valid")
+    }
+
+    fn test_path(text: &str) -> crate::NamePath {
+        crate::NamePath::from_vec(vec![test_name(text)]).expect("single-segment path")
+    }
+
+    fn builtin_type(module: &mut crate::Module, builtin: BuiltinType) -> crate::TypeId {
+        let builtin_name = match builtin {
+            BuiltinType::Int => "Int",
+            BuiltinType::Float => "Float",
+            BuiltinType::Decimal => "Decimal",
+            BuiltinType::BigInt => "BigInt",
+            BuiltinType::Bool => "Bool",
+            BuiltinType::Text => "Text",
+            BuiltinType::Unit => "Unit",
+            BuiltinType::Bytes => "Bytes",
+            BuiltinType::List => "List",
+            BuiltinType::Map => "Map",
+            BuiltinType::Set => "Set",
+            BuiltinType::Option => "Option",
+            BuiltinType::Result => "Result",
+            BuiltinType::Validation => "Validation",
+            BuiltinType::Signal => "Signal",
+            BuiltinType::Task => "Task",
+        };
+        module
+            .alloc_type(crate::TypeNode {
+                span: unit_span(),
+                kind: crate::TypeKind::Name(crate::TypeReference::resolved(
+                    test_path(builtin_name),
+                    crate::TypeResolution::Builtin(builtin),
+                )),
+            })
+            .expect("builtin type allocation should fit")
+    }
+
     #[test]
     fn elaborates_function_case_bodies() {
         let lowered = lower_fixture("milestone-1/valid/patterns/pattern_matching.aivi");
@@ -2286,6 +2333,141 @@ mod tests {
                 other => panic!("expected pipe body, found {other:?}"),
             },
             other => panic!("expected lowered function body, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn elaborates_pipe_transform_modes_for_callable_and_replacement_stages() {
+        let mut module = crate::Module::new(FileId::new(0));
+        let int_type = builtin_type(&mut module, BuiltinType::Int);
+        let text_type = builtin_type(&mut module, BuiltinType::Text);
+        let binding = module
+            .alloc_binding(crate::Binding {
+                span: unit_span(),
+                name: test_name("value"),
+                kind: crate::BindingKind::FunctionParameter,
+            })
+            .expect("binding allocation should fit");
+        let local_expr = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Name(crate::TermReference::resolved(
+                    test_path("value"),
+                    crate::TermResolution::Local(binding),
+                )),
+            })
+            .expect("local expression allocation should fit");
+        let add_one = module
+            .push_item(crate::Item::Function(crate::FunctionItem {
+                header: crate::ItemHeader {
+                    span: unit_span(),
+                    decorators: Vec::new(),
+                },
+                name: test_name("addOne"),
+                type_parameters: Vec::new(),
+                context: Vec::new(),
+                parameters: vec![crate::FunctionParameter {
+                    span: unit_span(),
+                    binding,
+                    annotation: Some(int_type),
+                }],
+                annotation: Some(int_type),
+                body: local_expr,
+            }))
+            .expect("function allocation should fit");
+        let head = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Integer(crate::IntegerLiteral { raw: "1".into() }),
+            })
+            .expect("head allocation should fit");
+        let callable_expr = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Name(crate::TermReference::resolved(
+                    test_path("addOne"),
+                    crate::TermResolution::Item(add_one),
+                )),
+            })
+            .expect("callable expression allocation should fit");
+        let replacement_expr = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Text(crate::TextLiteral {
+                    segments: vec![crate::TextSegment::Text(crate::TextFragment {
+                        raw: "done".into(),
+                        span: unit_span(),
+                    })],
+                }),
+            })
+            .expect("replacement expression allocation should fit");
+        let pipe = module
+            .alloc_expr(crate::Expr {
+                span: unit_span(),
+                kind: crate::ExprKind::Pipe(crate::PipeExpr {
+                    head,
+                    stages: crate::NonEmpty::new(
+                        crate::PipeStage {
+                            span: unit_span(),
+                            kind: crate::PipeStageKind::Transform {
+                                expr: callable_expr,
+                            },
+                        },
+                        vec![crate::PipeStage {
+                            span: unit_span(),
+                            kind: crate::PipeStageKind::Transform {
+                                expr: replacement_expr,
+                            },
+                        }],
+                    ),
+                }),
+            })
+            .expect("pipe allocation should fit");
+        let final_label = module
+            .push_item(crate::Item::Value(crate::ValueItem {
+                header: crate::ItemHeader {
+                    span: unit_span(),
+                    decorators: Vec::new(),
+                },
+                name: test_name("finalLabel"),
+                annotation: Some(text_type),
+                body: pipe,
+            }))
+            .expect("value allocation should fit");
+
+        let report = elaborate_general_expressions(&module);
+        let final_label = report
+            .items()
+            .iter()
+            .find(|item| item.owner == final_label)
+            .expect("expected finalLabel elaboration");
+        match &final_label.outcome {
+            GeneralExprOutcome::Lowered(expr) => match &expr.kind {
+                GateRuntimeExprKind::Pipe(pipe) => {
+                    assert_eq!(pipe.stages.len(), 2);
+                    let GateRuntimePipeStageKind::Transform {
+                        mode: first_mode,
+                        expr: first_expr,
+                    } = &pipe.stages[0].kind
+                    else {
+                        panic!("expected callable transform stage first");
+                    };
+                    assert_eq!(*first_mode, PipeTransformMode::Apply);
+                    assert!(matches!(first_expr.kind, GateRuntimeExprKind::Apply { .. }));
+
+                    let GateRuntimePipeStageKind::Transform {
+                        mode: second_mode,
+                        expr: second_expr,
+                    } = &pipe.stages[1].kind
+                    else {
+                        panic!("expected replacement transform stage second");
+                    };
+                    assert_eq!(*second_mode, PipeTransformMode::Replace);
+                    assert!(matches!(second_expr.kind, GateRuntimeExprKind::Text(_)));
+                }
+                other => panic!("expected pipe body, found {other:?}"),
+            },
+            other => panic!("expected lowered value body, found {other:?}"),
         }
     }
 
@@ -2322,7 +2504,7 @@ mod tests {
     fn elaborates_truthy_falsy_branches_from_expected_result_types() {
         let lowered = lower_text(
             "expected-truthy-falsy-branches.aivi",
-            "fun choose:(List Int) #flag:Bool =>\n\
+            "fun choose:(List Int) flag:Bool =>\n\
                 flag\n\
                  T|> []\n\
                  F|> [1]\n",
@@ -2438,10 +2620,10 @@ mod tests {
     fn blocks_map_pipe_stages_in_general_expr_bodies() {
         let lowered = lower_text(
             "general-expr-blocked-map-stage.aivi",
-            "fun identity:Int #value:Int =>\n\
+            "fun identity:Int value:Int =>\n\
              value\n\
              \n\
-             fun duplicate:List Int #values:List Int =>\n\
+             fun duplicate:List Int values:List Int =>\n\
              values\n\
               *|> identity\n",
         );
@@ -2532,7 +2714,7 @@ instance Semigroup Blob
         let lowered = lower_text(
             "general-expr-generic-append.aivi",
             r#"
-fun appendOne:(List A) #items:(List A) #item:A =>
+fun appendOne:(List A) items:(List A) item:A =>
     append items [item]
 "#,
         );
@@ -2599,10 +2781,10 @@ fun appendOne:(List A) #items:(List A) #item:A =>
         let lowered = lower_text(
             "general-expr-generic-reduce.aivi",
             r#"
-fun lengthStep:Int #total:Int #item:A =>
+fun lengthStep:Int total:Int item:A =>
     total + 1
 
-fun length:Int #items:(List A) =>
+fun length:Int items:(List A) =>
     items
      |> reduce lengthStep 0
 "#,
@@ -2699,12 +2881,12 @@ type TakeAcc A = {
     items: List A
 }
 
-fun takeStep:(TakeAcc A) #acc:(TakeAcc A) #item:A =>
+fun takeStep:(TakeAcc A) acc:(TakeAcc A) item:A =>
     acc.n > 0
      T|> { n: acc.n - 1, items: append acc.items [item] }
      F|> acc
 
-fun take:(List A) #n:Int #xs:(List A) =>
+fun take:(List A) n:Int xs:(List A) =>
     xs
      |> reduce takeStep { n, items: [] }
      |> .items
@@ -2796,12 +2978,12 @@ fun take:(List A) #n:Int #xs:(List A) =>
         let lowered = lower_text(
             "general-expr-generic-reduce-option-init.aivi",
             r#"
-fun keepFirst:(Option A) #found:(Option A) #item:A =>
+fun keepFirst:(Option A) found:(Option A) item:A =>
     found
      T|> found
      F|> Some item
 
-fun head:(Option A) #items:(List A) =>
+fun head:(Option A) items:(List A) =>
     items
      |> reduce keepFirst None
 "#,
@@ -2891,12 +3073,12 @@ fun head:(Option A) #items:(List A) =>
         let lowered = lower_text(
             "general-expr-generic-reduce-partial-step.aivi",
             r#"
-fun anyStep:Bool #predicate:(A -> Bool) #found:Bool #item:A =>
+fun anyStep:Bool predicate:(A -> Bool) found:Bool item:A =>
     found
      T|> True
      F|> predicate item
 
-fun any:Bool #predicate:(A -> Bool) #items:(List A) =>
+fun any:Bool predicate:(A -> Bool) items:(List A) =>
     items
      |> reduce (anyStep predicate) False
 "#,

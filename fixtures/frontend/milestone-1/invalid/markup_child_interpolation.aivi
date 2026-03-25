@@ -1,0 +1,2 @@
+val brokenView =
+    <Label>{current}</Label>

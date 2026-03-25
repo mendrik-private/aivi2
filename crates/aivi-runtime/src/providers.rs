@@ -1843,7 +1843,11 @@ fn execute_http_cycle(
     }
 }
 
-fn spawn_fs_read_worker(port: DetachedRuntimePublicationPort, plan: FsReadPlan, stop: Arc<AtomicBool>) {
+fn spawn_fs_read_worker(
+    port: DetachedRuntimePublicationPort,
+    plan: FsReadPlan,
+    stop: Arc<AtomicBool>,
+) {
     thread::spawn(move || {
         if stop.load(Ordering::Acquire) {
             return;
@@ -1881,7 +1885,11 @@ fn spawn_fs_read_worker(port: DetachedRuntimePublicationPort, plan: FsReadPlan, 
     });
 }
 
-fn spawn_fs_watch_worker(port: DetachedRuntimePublicationPort, plan: FsWatchPlan, stop: Arc<AtomicBool>) {
+fn spawn_fs_watch_worker(
+    port: DetachedRuntimePublicationPort,
+    plan: FsWatchPlan,
+    stop: Arc<AtomicBool>,
+) {
     thread::spawn(move || {
         let mut previous = file_signature(&plan.path);
         while !stop.load(Ordering::Acquire) && !port.is_cancelled() {
@@ -1916,7 +1924,11 @@ fn spawn_fs_watch_worker(port: DetachedRuntimePublicationPort, plan: FsWatchPlan
     });
 }
 
-fn spawn_socket_worker(port: DetachedRuntimePublicationPort, plan: SocketPlan, stop: Arc<AtomicBool>) {
+fn spawn_socket_worker(
+    port: DetachedRuntimePublicationPort,
+    plan: SocketPlan,
+    stop: Arc<AtomicBool>,
+) {
     thread::spawn(move || {
         loop {
             if stop.load(Ordering::Acquire) || port.is_cancelled() {
@@ -1983,7 +1995,10 @@ fn spawn_socket_worker(port: DetachedRuntimePublicationPort, plan: SocketPlan, s
                     }
                 }
             }
-            if !plan.reconnect || stop.load(Ordering::Acquire) || sleep_with_cancellation(Duration::from_millis(100), &port) {
+            if !plan.reconnect
+                || stop.load(Ordering::Acquire)
+                || sleep_with_cancellation(Duration::from_millis(100), &port)
+            {
                 return;
             }
         }
@@ -2035,7 +2050,11 @@ fn spawn_mailbox_worker(
     });
 }
 
-fn spawn_process_worker(port: DetachedRuntimePublicationPort, plan: ProcessPlan, stop: Arc<AtomicBool>) {
+fn spawn_process_worker(
+    port: DetachedRuntimePublicationPort,
+    plan: ProcessPlan,
+    stop: Arc<AtomicBool>,
+) {
     thread::spawn(move || {
         if stop.load(Ordering::Acquire) {
             return;

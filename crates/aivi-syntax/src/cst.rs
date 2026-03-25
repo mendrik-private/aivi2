@@ -373,7 +373,12 @@ pub enum ExprKind {
     Map(MapExpr),
     Set(Vec<Expr>),
     Record(RecordExpr),
+    SubjectPlaceholder,
     AmbientProjection(ProjectionPath),
+    Range {
+        start: Box<Expr>,
+        end: Box<Expr>,
+    },
     Projection {
         base: Box<Expr>,
         path: ProjectionPath,
@@ -539,7 +544,6 @@ pub struct ItemBase {
 /// Function parameter preserved by the syntax layer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FunctionParam {
-    pub hash_span: SourceSpan,
     pub name: Option<Identifier>,
     pub annotation: Option<TypeExpr>,
     pub span: SourceSpan,

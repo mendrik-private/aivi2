@@ -3,7 +3,7 @@ type User = {
     email: Text
 }
 
-fun formatUser:Text #user:User =>
+fun formatUser:Text user:User =>
     user
      ||> { name, email } => "{name} <{email}>"
 

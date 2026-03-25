@@ -7,8 +7,8 @@ val directHeaders : Map Text Text =
 val directTags : Set Text =
     Set ["news", "featured"]
 
-fun keepHeaders : Map Text Text #headers : Map Text Text =>
+fun keepHeaders : Map Text Text headers : Map Text Text =>
     headers
 
-fun keepTags : Set Text #tags : Set Text =>
+fun keepTags : Set Text tags : Set Text =>
     tags

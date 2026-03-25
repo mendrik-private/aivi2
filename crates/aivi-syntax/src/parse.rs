@@ -61,10 +61,13 @@ const MISMATCHED_MARKUP_CLOSE: DiagnosticCode =
     DiagnosticCode::new("syntax", "mismatched-markup-close");
 const UNTERMINATED_MARKUP_NODE: DiagnosticCode =
     DiagnosticCode::new("syntax", "unterminated-markup-node");
+const INVALID_MARKUP_CHILD_CONTENT: DiagnosticCode =
+    DiagnosticCode::new("syntax", "invalid-markup-child-content");
 const INVALID_TEXT_INTERPOLATION: DiagnosticCode =
     DiagnosticCode::new("syntax", "invalid-text-interpolation");
 const UNTERMINATED_TEXT_INTERPOLATION: DiagnosticCode =
     DiagnosticCode::new("syntax", "unterminated-text-interpolation");
+const INVALID_DISCARD_EXPR: DiagnosticCode = DiagnosticCode::new("syntax", "invalid-discard-expr");
 const PARSE_DEPTH_EXCEEDED: DiagnosticCode = DiagnosticCode::new("syntax", "parse-depth-exceeded");
 
 const MAX_PARSE_DEPTH: usize = 256;
@@ -527,9 +530,9 @@ impl<'a> Parser<'a> {
         let mut cursor = keyword_index + 1;
         let name =
             self.parse_named_item_name(keyword_index, &mut cursor, end, "function declaration");
-        let (constraints, annotation) = self.parse_optional_signature_annotation(&mut cursor, end);
+        let (constraints, annotation) = self.parse_function_signature_annotation(&mut cursor, end);
         let mut parameters = Vec::new();
-        while self.peek_kind(cursor, end) == Some(TokenKind::Hash) {
+        while self.starts_function_param(cursor, end) {
             let Some(parameter) = self.parse_function_param(&mut cursor, end) else {
                 break;
             };
@@ -1376,6 +1379,25 @@ impl<'a> Parser<'a> {
         self.parse_constrained_type(cursor, end)
     }
 
+    fn parse_function_signature_annotation(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+    ) -> (Vec<TypeExpr>, Option<TypeExpr>) {
+        if self.peek_kind(*cursor, end) != Some(TokenKind::Colon) {
+            return (Vec::new(), None);
+        }
+        let Some(body_arrow) = self.find_last_same_line_arrow(*cursor, end) else {
+            return self.parse_optional_signature_annotation(cursor, end);
+        };
+        for split in self.function_signature_split_candidates(*cursor, body_arrow) {
+            if self.probe_function_signature(split, *cursor, body_arrow) {
+                return self.parse_optional_signature_annotation(cursor, split);
+            }
+        }
+        self.parse_optional_signature_annotation(cursor, body_arrow)
+    }
+
     fn parse_constrained_type(
         &mut self,
         cursor: &mut usize,
@@ -1471,14 +1493,23 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_function_param(&mut self, cursor: &mut usize, end: usize) -> Option<FunctionParam> {
-        let hash_index = self.consume_kind(cursor, end, TokenKind::Hash)?;
-        let name = self.parse_identifier(cursor, end);
-        let annotation = self.parse_optional_type_annotation(cursor, end);
+        let name_index = self.peek_nontrivia(*cursor, end)?;
+        if self.tokens[name_index].kind() != TokenKind::Identifier {
+            return None;
+        }
+        *cursor = name_index + 1;
+        let identifier = self.identifier_from_token(name_index);
+        let name = (identifier.text != "_").then_some(identifier);
+        let annotation_end = if self.peek_kind(*cursor, end) == Some(TokenKind::Colon) {
+            self.parameter_annotation_end(*cursor, end)
+        } else {
+            end
+        };
+        let annotation = self.parse_optional_type_annotation(cursor, annotation_end);
         Some(FunctionParam {
-            hash_span: self.source_span_of_token(hash_index),
             name,
             annotation,
-            span: self.source_span_for_range(hash_index, *cursor),
+            span: self.source_span_for_range(name_index, *cursor),
         })
     }
 
@@ -1710,7 +1741,7 @@ impl<'a> Parser<'a> {
         let mut head = if self.peek_kind(*cursor, end) == Some(TokenKind::PipeApply) {
             None
         } else {
-            Some(Box::new(self.parse_binary_expr(
+            Some(Box::new(self.parse_range_expr(
                 cursor,
                 end,
                 stop.with_pipe_stage(),
@@ -1730,7 +1761,7 @@ impl<'a> Parser<'a> {
             *cursor = index + 1;
             let stage_kind = match kind {
                 TokenKind::PipeTransform => {
-                    let expr = self.parse_binary_expr(cursor, end, stop.with_pipe_stage())?;
+                    let expr = self.parse_range_expr(cursor, end, stop.with_pipe_stage())?;
                     if cluster_active {
                         cluster_active = false;
                         PipeStageKind::ClusterFinalizer { expr }
@@ -1740,7 +1771,7 @@ impl<'a> Parser<'a> {
                 }
                 TokenKind::PipeGate => {
                     cluster_active = false;
-                    let expr = self.parse_binary_expr(cursor, end, stop.with_pipe_stage())?;
+                    let expr = self.parse_range_expr(cursor, end, stop.with_pipe_stage())?;
                     PipeStageKind::Gate { expr }
                 }
                 TokenKind::PipeCase => {
@@ -1749,42 +1780,42 @@ impl<'a> Parser<'a> {
                 }
                 TokenKind::PipeMap => {
                     cluster_active = false;
-                    let expr = self.parse_binary_expr(cursor, end, stop.with_pipe_stage())?;
+                    let expr = self.parse_range_expr(cursor, end, stop.with_pipe_stage())?;
                     PipeStageKind::Map { expr }
                 }
                 TokenKind::PipeApply => {
-                    let expr = self.parse_binary_expr(cursor, end, stop.with_pipe_stage())?;
+                    let expr = self.parse_range_expr(cursor, end, stop.with_pipe_stage())?;
                     cluster_active = true;
                     PipeStageKind::Apply { expr }
                 }
                 TokenKind::PipeRecurStart => {
                     cluster_active = false;
-                    let expr = self.parse_binary_expr(cursor, end, stop.with_pipe_stage())?;
+                    let expr = self.parse_range_expr(cursor, end, stop.with_pipe_stage())?;
                     PipeStageKind::RecurStart { expr }
                 }
                 TokenKind::PipeRecurStep => {
                     cluster_active = false;
-                    let expr = self.parse_binary_expr(cursor, end, stop.with_pipe_stage())?;
+                    let expr = self.parse_range_expr(cursor, end, stop.with_pipe_stage())?;
                     PipeStageKind::RecurStep { expr }
                 }
                 TokenKind::PipeTap => {
                     cluster_active = false;
-                    let expr = self.parse_binary_expr(cursor, end, stop.with_pipe_stage())?;
+                    let expr = self.parse_range_expr(cursor, end, stop.with_pipe_stage())?;
                     PipeStageKind::Tap { expr }
                 }
                 TokenKind::PipeFanIn => {
                     cluster_active = false;
-                    let expr = self.parse_binary_expr(cursor, end, stop.with_pipe_stage())?;
+                    let expr = self.parse_range_expr(cursor, end, stop.with_pipe_stage())?;
                     PipeStageKind::FanIn { expr }
                 }
                 TokenKind::TruthyBranch => {
                     cluster_active = false;
-                    let expr = self.parse_binary_expr(cursor, end, stop.with_pipe_stage())?;
+                    let expr = self.parse_range_expr(cursor, end, stop.with_pipe_stage())?;
                     PipeStageKind::Truthy { expr }
                 }
                 TokenKind::FalsyBranch => {
                     cluster_active = false;
-                    let expr = self.parse_binary_expr(cursor, end, stop.with_pipe_stage())?;
+                    let expr = self.parse_range_expr(cursor, end, stop.with_pipe_stage())?;
                     PipeStageKind::Falsy { expr }
                 }
                 _ => break,
@@ -1807,6 +1838,27 @@ impl<'a> Parser<'a> {
                 stages,
                 span,
             }),
+        })
+    }
+
+    fn parse_range_expr(&mut self, cursor: &mut usize, end: usize, stop: ExprStop) -> Option<Expr> {
+        let start = self.parse_binary_expr(cursor, end, stop)?;
+        let Some(index) = self.peek_nontrivia(*cursor, end) else {
+            return Some(start);
+        };
+        if self.expr_should_stop(index, stop) || self.tokens[index].kind() != TokenKind::DotDot {
+            return Some(start);
+        }
+
+        *cursor = index + 1;
+        let end_expr = self.parse_binary_expr(cursor, end, stop)?;
+        let span = self.join_spans(start.span, end_expr.span);
+        Some(Expr {
+            span,
+            kind: ExprKind::Range {
+                start: Box::new(start),
+                end: Box::new(end_expr),
+            },
         })
     }
 
@@ -1942,6 +1994,18 @@ impl<'a> Parser<'a> {
                 }
                 *cursor = index + 1;
                 let name = self.identifier_from_token(index);
+                if name.text == "_" {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "the discard `_` is only valid in binder and pattern positions",
+                        )
+                        .with_code(INVALID_DISCARD_EXPR)
+                        .with_primary_label(
+                            name.span,
+                            "use `.` for the current subject placeholder",
+                        ),
+                    );
+                }
                 Some(Expr {
                     span: name.span,
                     kind: ExprKind::Name(name),
@@ -2101,6 +2165,12 @@ impl<'a> Parser<'a> {
 
     fn parse_ambient_projection(&mut self, cursor: &mut usize, end: usize) -> Option<Expr> {
         let start = self.consume_kind(cursor, end, TokenKind::Dot)?;
+        if self.peek_kind(*cursor, end) != Some(TokenKind::Identifier) {
+            return Some(Expr {
+                span: self.source_span_of_token(start),
+                kind: ExprKind::SubjectPlaceholder,
+            });
+        }
         let mut fields = vec![self.parse_identifier(cursor, end)?];
         while self.consume_kind(cursor, end, TokenKind::Dot).is_some() {
             fields.push(self.parse_identifier(cursor, end)?);
@@ -2383,7 +2453,7 @@ impl<'a> Parser<'a> {
                     children.push(child);
                 }
                 _ => {
-                    *cursor = index + 1;
+                    self.reject_invalid_markup_child_content(cursor, end, &name);
                 }
             }
         }
@@ -2808,6 +2878,136 @@ impl<'a> Parser<'a> {
         )
     }
 
+    fn starts_function_param(&self, start: usize, end: usize) -> bool {
+        self.peek_nontrivia(start, end).is_some_and(|index| {
+            !self.tokens[index].line_start() && self.tokens[index].kind() == TokenKind::Identifier
+        })
+    }
+
+    fn find_last_same_line_arrow(&self, start: usize, end: usize) -> Option<usize> {
+        let mut scan = start;
+        let mut found = None;
+        let mut saw_token = false;
+        while let Some(index) = self.peek_nontrivia(scan, end) {
+            if saw_token && self.tokens[index].line_start() {
+                break;
+            }
+            saw_token = true;
+            if self.tokens[index].kind() == TokenKind::Arrow {
+                found = Some(index);
+            }
+            scan = index + 1;
+        }
+        found
+    }
+
+    fn parameter_annotation_end(&self, start: usize, end: usize) -> usize {
+        let Some(body_arrow) = self.find_last_same_line_arrow(start, end) else {
+            return end;
+        };
+        self.same_line_top_level_typed_param_starts(start, body_arrow)
+            .into_iter()
+            .next()
+            .unwrap_or(body_arrow)
+    }
+
+    fn function_signature_split_candidates(&self, start: usize, body_arrow: usize) -> Vec<usize> {
+        let mut candidates = Vec::new();
+        candidates.extend(self.same_line_top_level_typed_param_starts(start, body_arrow));
+        let last_identifier = self.last_same_line_top_level_identifier(start, body_arrow);
+        if let Some(last_identifier) = last_identifier
+            && !candidates.contains(&last_identifier)
+        {
+            candidates.push(last_identifier);
+        }
+        if !candidates.contains(&body_arrow) {
+            candidates.push(body_arrow);
+        }
+        candidates
+    }
+
+    fn same_line_top_level_typed_param_starts(&self, start: usize, end: usize) -> Vec<usize> {
+        let mut scan = start;
+        let mut saw_token = false;
+        let mut depth = 0usize;
+        let mut starts = Vec::new();
+        while let Some(index) = self.peek_nontrivia(scan, end) {
+            if saw_token && self.tokens[index].line_start() {
+                break;
+            }
+            saw_token = true;
+            match self.tokens[index].kind() {
+                TokenKind::LParen | TokenKind::LBrace | TokenKind::LBracket => depth += 1,
+                TokenKind::RParen | TokenKind::RBrace | TokenKind::RBracket => {
+                    depth = depth.saturating_sub(1)
+                }
+                TokenKind::Identifier
+                    if depth == 0 && self.peek_kind(index + 1, end) == Some(TokenKind::Colon) =>
+                {
+                    starts.push(index);
+                }
+                _ => {}
+            }
+            scan = index + 1;
+        }
+        starts
+    }
+
+    fn last_same_line_top_level_identifier(&self, start: usize, end: usize) -> Option<usize> {
+        let mut scan = start;
+        let mut saw_token = false;
+        let mut depth = 0usize;
+        let mut last = None;
+        while let Some(index) = self.peek_nontrivia(scan, end) {
+            if saw_token && self.tokens[index].line_start() {
+                break;
+            }
+            saw_token = true;
+            match self.tokens[index].kind() {
+                TokenKind::LParen | TokenKind::LBrace | TokenKind::LBracket => depth += 1,
+                TokenKind::RParen | TokenKind::RBrace | TokenKind::RBracket => {
+                    depth = depth.saturating_sub(1)
+                }
+                TokenKind::Identifier if depth == 0 => last = Some(index),
+                _ => {}
+            }
+            scan = index + 1;
+        }
+        last
+    }
+
+    fn probe_function_signature(&self, split: usize, start: usize, body_arrow: usize) -> bool {
+        let mut probe = Parser::new(self.source, self.tokens);
+        probe.depth = self.depth;
+
+        let mut annotation_cursor = start;
+        let (_, annotation) =
+            probe.parse_optional_signature_annotation(&mut annotation_cursor, split);
+        if annotation.is_none()
+            || probe
+                .next_significant_in_range(annotation_cursor, split)
+                .is_some()
+            || !probe.diagnostics.is_empty()
+        {
+            return false;
+        }
+
+        let mut parameter_cursor = split;
+        let parameter_end = body_arrow.saturating_add(1);
+        while probe.starts_function_param(parameter_cursor, body_arrow) {
+            if probe
+                .parse_function_param(&mut parameter_cursor, parameter_end)
+                .is_none()
+            {
+                return false;
+            }
+        }
+        probe
+            .next_significant_in_range(parameter_cursor, body_arrow)
+            .is_none()
+            && probe.diagnostics.is_empty()
+    }
+
     fn starts_pattern(&self, index: usize) -> bool {
         matches!(
             self.tokens[index].kind(),
@@ -2837,6 +3037,36 @@ impl<'a> Parser<'a> {
             kind if kind.is_pipe_operator() => stop.pipe_stage,
             _ => false,
         }
+    }
+
+    fn reject_invalid_markup_child_content(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+        parent: &QualifiedName,
+    ) {
+        let Some(start) = self.peek_nontrivia(*cursor, end) else {
+            return;
+        };
+        let mut next = start + 1;
+        while let Some(index) = self.peek_nontrivia(next, end) {
+            match self.tokens[index].kind() {
+                TokenKind::CloseTagStart | TokenKind::Less => break,
+                _ => next = index + 1,
+            }
+        }
+        self.diagnostics.push(
+            Diagnostic::error(format!(
+                "markup children inside `<{}>` must be provided through attributes",
+                parent.as_dotted()
+            ))
+            .with_code(INVALID_MARKUP_CHILD_CONTENT)
+            .with_primary_label(
+                self.source_span_for_range(start, next),
+                "use an attribute such as `text={...}` instead of child text or interpolation",
+            ),
+        );
+        *cursor = next;
     }
 
     fn pattern_should_stop(&self, index: usize, stop: PatternStop) -> bool {
@@ -3511,6 +3741,7 @@ val same = left == right
 val different = left != right
 val quotient = left / right
 val remainder = left % right
+val range = 1..10
 <Label text={status} />
 </match>
 val datePattern = rx"\d{4}-\d{2}-\d{2}"
@@ -3534,6 +3765,7 @@ val datePattern = rx"\d{4}-\d{2}-\d{2}"
         assert!(kinds.contains(&TokenKind::Star));
         assert!(kinds.contains(&TokenKind::Slash));
         assert!(kinds.contains(&TokenKind::Percent));
+        assert!(kinds.contains(&TokenKind::DotDot));
         assert!(kinds.contains(&TokenKind::PipeTransform));
         assert!(kinds.contains(&TokenKind::PipeGate));
         assert!(kinds.contains(&TokenKind::PipeCase));
@@ -3587,7 +3819,7 @@ sig users : Signal User
 
 type Bool = True | False
 val answer = 42
-fun add:Int #x:Int #y:Int =>
+fun add:Int x:Int y:Int =>
     x + y
 use aivi.network (
     http
@@ -3956,7 +4188,7 @@ export main
             r#"class Eq A
     (==) : A -> A -> Bool
 
-fun same:Bool #left:Blob #right:Blob =>
+fun same:Bool left:Blob right:Blob =>
     True
 
 instance Eq Blob
@@ -4046,7 +4278,7 @@ instance Eq Blob
     map : (A -> B) -> F A -> F B
 class (Functor F, Foldable F) => Traversable F
     traverse : Applicative G => (A -> G B) -> F A -> G (F B)
-fun same:Eq A => Bool #value:A => value == value
+fun same:Eq A => Bool value:A => value == value
 instance Eq A => Eq (Option A)
     (==) left right = True
 "#,
@@ -4338,7 +4570,7 @@ instance Eq A => Eq (Option A)
     #[test]
     fn parser_reports_trailing_tokens_after_expression_body() {
         let (_, parsed) =
-            load("fun prependCells:List Int #head:Int #tail:List Int =>\n    head :: tail\n");
+            load("fun prependCells:List Int head:Int tail:List Int =>\n    head :: tail\n");
 
         assert!(parsed.has_errors());
         assert!(
@@ -4388,7 +4620,10 @@ instance Eq A => Eq (Option A)
 
     #[test]
     fn parser_flags_only_syntax_invalid_fixtures() {
-        for relative in ["invalid/markup_mismatched_close.aivi"] {
+        for relative in [
+            "invalid/markup_mismatched_close.aivi",
+            "invalid/markup_child_interpolation.aivi",
+        ] {
             let parsed = parse_fixture(relative);
             assert!(
                 parsed.has_errors(),
@@ -4455,6 +4690,89 @@ val view =
                 .expect("qualified wrapper should keep its close tag")
                 .as_dotted(),
             "Paned.start"
+        );
+    }
+
+    #[test]
+    fn parser_accepts_subject_placeholders_ranges_and_discard_params() {
+        let (_, parsed) = load(
+            r#"val subject = .
+val projection = .email
+val span = 1..10
+val values = [1..10]
+fun ignore:Int _ =>
+    0
+"#,
+        );
+
+        assert!(
+            !parsed.has_errors(),
+            "expected subject/range surface forms to parse cleanly: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+
+        let Item::Value(subject) = &parsed.module.items[0] else {
+            panic!("expected subject value item");
+        };
+        assert!(matches!(
+            subject.expr_body().map(|expr| &expr.kind),
+            Some(ExprKind::SubjectPlaceholder)
+        ));
+
+        let Item::Value(projection) = &parsed.module.items[1] else {
+            panic!("expected projection value item");
+        };
+        assert!(matches!(
+            projection.expr_body().map(|expr| &expr.kind),
+            Some(ExprKind::AmbientProjection(path))
+                if path.fields.len() == 1 && path.fields[0].text == "email"
+        ));
+
+        let Item::Value(span) = &parsed.module.items[2] else {
+            panic!("expected span value item");
+        };
+        assert!(matches!(
+            span.expr_body().map(|expr| &expr.kind),
+            Some(ExprKind::Range { .. })
+        ));
+
+        let Item::Value(values) = &parsed.module.items[3] else {
+            panic!("expected values item");
+        };
+        assert!(matches!(
+            values.expr_body().map(|expr| &expr.kind),
+            Some(ExprKind::List(elements))
+                if matches!(elements.as_slice(), [Expr { kind: ExprKind::Range { .. }, .. }])
+        ));
+
+        let Item::Function(ignore) = &parsed.module.items[4] else {
+            panic!("expected ignore function item");
+        };
+        assert_eq!(ignore.parameters.len(), 1);
+        assert!(ignore.parameters[0].name.is_none());
+    }
+
+    #[test]
+    fn parser_rejects_discard_exprs_and_markup_child_interpolation() {
+        let (_, parsed) = load(
+            r#"val current = _
+val view =
+    <Label>{current}</Label>
+"#,
+        );
+
+        assert!(parsed.has_errors());
+        assert!(
+            parsed
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code == Some(INVALID_DISCARD_EXPR))
+        );
+        assert!(
+            parsed
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code == Some(INVALID_MARKUP_CHILD_CONTENT))
         );
     }
 }

@@ -70,18 +70,18 @@ val firstName: Option Text =
         "Grace"
     ]
 
-fun smaller:Bool #left:Int #right:Int =>
+fun smaller:Bool left:Int right:Int =>
     left < right
 
-fun keepSmall:(Option Int) #value:Int =>
+fun keepSmall:(Option Int) value:Int =>
     value < 3
      T|> Some value
      F|> None
 
-fun addOne:Int #value:Int =>
+fun addOne:Int value:Int =>
     value + 1
 
-fun punctuate:Text #value:Text =>
+fun punctuate:Text value:Text =>
     append value "!"
 
 val leastCount: Int = min smaller 4 2

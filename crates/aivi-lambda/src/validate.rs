@@ -46,7 +46,6 @@ impl std::fmt::Display for ValidationErrors {
 
 impl std::error::Error for ValidationErrors {}
 
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ValidationError {
     InvalidCoreModule(core::ValidationError),
@@ -150,31 +149,49 @@ pub enum ClosureMetadataMismatch {
     },
     /// A basic structural invariant failed (e.g. the owner item or root expression does not
     /// exist in the module). This is reported when the closure cannot be checked at all.
-    Invalid {
-        closure: ClosureId,
-    },
+    Invalid { closure: ClosureId },
 }
 
 impl std::fmt::Display for ClosureMetadataMismatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Owner { closure, expected, found } => write!(
+            Self::Owner {
+                closure,
+                expected,
+                found,
+            } => write!(
                 f,
                 "typed-lambda closure {closure} owner mismatch: expected item {expected}, found item {found}"
             ),
-            Self::Kind { closure, expected, found } => write!(
+            Self::Kind {
+                closure,
+                expected,
+                found,
+            } => write!(
                 f,
                 "typed-lambda closure {closure} kind mismatch: expected {expected}, found {found}"
             ),
-            Self::Root { closure, expected, found } => write!(
+            Self::Root {
+                closure,
+                expected,
+                found,
+            } => write!(
                 f,
                 "typed-lambda closure {closure} root expression mismatch: expected expr {expected}, found expr {found}"
             ),
-            Self::ParameterCount { closure, expected, found } => write!(
+            Self::ParameterCount {
+                closure,
+                expected,
+                found,
+            } => write!(
                 f,
                 "typed-lambda closure {closure} parameter count mismatch: expected {expected}, found {found}"
             ),
-            Self::AmbientSubject { closure, expected, found } => write!(
+            Self::AmbientSubject {
+                closure,
+                expected,
+                found,
+            } => write!(
                 f,
                 "typed-lambda closure {closure} ambient subject mismatch: expected {expected:?}, found {found:?}"
             ),

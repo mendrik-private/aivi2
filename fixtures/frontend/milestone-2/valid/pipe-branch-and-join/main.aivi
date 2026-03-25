@@ -1,6 +1,6 @@
 type User = { email: Text }
 
-fun collect #items =>
+fun collect items =>
     items
 
 val ready = True

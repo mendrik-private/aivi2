@@ -51,7 +51,7 @@ of the same pipe chain. There are two placements:
 
 ```aivi
 [1 .. 10]
- *|> #i i % 2    // name the incoming element 'i', fan out with i % 2
+ *|> i i % 2    // name the incoming element 'i', fan out with i % 2
  ||> 0 => "even {i}"
  ||> _ => "odd {i}"
 ```
@@ -63,7 +63,7 @@ the new value flowing forward. `i` remains accessible in all stages below.
 
 ```aivi
 uid
- |> fetchUser #result
+ |> fetchUser result
  T|> { user: Some .body, status: result.status }
  F|> { user: None,       status: "failed" }
 ```

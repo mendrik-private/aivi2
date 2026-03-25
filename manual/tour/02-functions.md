@@ -16,26 +16,24 @@ Breaking this down:
 | `fun` | declaration keyword |
 | `add` | function name |
 | `:Int` | **return type** (comes before parameters) |
-| `#x:Int` | labeled parameter named `x` of type `Int` |
-| `#y:Int` | labeled parameter named `y` of type `Int` |
+| `x:Int` | parameter named `x` of type `Int` |
+| `y:Int` | parameter named `y` of type `Int` |
 | `=>` | separates signature from body |
 | `x + y` | function body — any expression |
 
 The return type prefix (`add:Int`) is one of AIVI's deliberate design choices:
 reading left to right, you see the name and return type before the parameters.
 
-## Labeled parameters
+## Parameters
 
-All parameters in AIVI are labeled with `#`. This means you always know what an argument
-represents at the call site:
+Parameters are written directly in the function head:
 
 ```text
 // TODO: add a verified AIVI example here
 ```
 
 Function calls are positional juxtaposition. You pass arguments in the order the parameters
-are declared. The `#` sigil on the parameter declaration signals that this is a labeled
-parameter, which is visible in syntax highlighting — labeled params appear in a distinct colour.
+are declared.
 
 ## Multi-parameter functions
 
@@ -43,7 +41,7 @@ parameter, which is visible in syntax highlighting — labeled params appear in 
 // TODO: add a verified AIVI example here
 ```
 
-Functions can have as many labeled parameters as needed.
+Functions can have as many parameters as needed.
 
 ## Calling functions
 
@@ -75,11 +73,11 @@ The `->` in `(Int -> Int)` is a function type: a function that takes `Int` and r
 
 ## Anonymous functions (lambdas)
 
-Anonymous functions use `#param =>` for single-argument lambdas or `_ op value` for simple operator sections:
+Anonymous functions use `param =>` for single-argument lambdas or `_ op value` for simple operator sections:
 
 ```text
 // single parameter lambda
-val double = #x => x * 2
+val double = x => x * 2
 
 // operator section (implicit argument)
 val add5 = _ + 5
@@ -113,11 +111,11 @@ This means AIVI functions are easy to reason about and easy to test:
 
 ## Summary
 
-- `fun name:ReturnType #param:Type => body`
+- `fun name:ReturnType param:Type => body`
 - Return type comes immediately after the name, before parameters.
 - All parameters are labeled with `#`.
 - Function application is juxtaposition; parentheses group subexpressions.
-- Lambdas: `#param => body` or `_ op value` for operator sections.
+- Lambdas: `param => body` or `_ op value` for operator sections.
 - Functions are pure — no side effects.
 
 [Next: Pipes →](/tour/03-pipes)

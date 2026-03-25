@@ -20,40 +20,40 @@ type QueueSummary = {
     note: Text
 }
 
-fun earlier:Bool #left:Entry #right:Entry =>
+fun earlier:Bool left:Entry right:Entry =>
     left.priority < right.priority or left.priority == right.priority
 
-fun mergeNodes:Heap #leftEntry:Entry #leftChildren:(List Heap) #rightEntry:Entry #rightChildren:(List Heap) =>
+fun mergeNodes:Heap leftEntry:Entry leftChildren:(List Heap) rightEntry:Entry rightChildren:(List Heap) =>
     earlier leftEntry rightEntry
      T|> Node leftEntry (append [Node rightEntry rightChildren] leftChildren)
      F|> Node rightEntry (append [Node leftEntry leftChildren] rightChildren)
 
-fun merge:Heap #left:Heap #right:Heap =>
+fun merge:Heap left:Heap right:Heap =>
     (left, right)
      ||> (Empty, other)                                               => other
      ||> (other, Empty)                                               => other
      ||> (Node leftEntry leftChildren, Node rightEntry rightChildren) => mergeNodes leftEntry leftChildren rightEntry rightChildren
 
-fun mergePairs:Heap #children:(List Heap) =>
+fun mergePairs:Heap children:(List Heap) =>
     children
      ||> []                            => Empty
      ||> [first]                       => first
      ||> [first, second, ...remaining] => merge (merge first second) (mergePairs remaining)
 
-fun insert:Heap #heap:Heap #entry:Entry =>
+fun insert:Heap heap:Heap entry:Entry =>
     merge heap (Node entry [])
 
-fun pop:Pop #heap:Heap =>
+fun pop:Pop heap:Heap =>
     heap
      ||> Empty               => { entry: None, rest: Empty }
      ||> Node entry children => { entry: Some entry, rest: mergePairs children }
 
-fun labelOf:Text #value:(Option Entry) =>
+fun labelOf:Text value:(Option Entry) =>
     value
      ||> Some entry => entry.label
      ||> None       => "empty"
 
-fun isEmptyEntry:Bool #value:(Option Entry) =>
+fun isEmptyEntry:Bool value:(Option Entry) =>
     value
      ||> None   => True
      ||> Some _ => False

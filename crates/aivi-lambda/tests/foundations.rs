@@ -117,7 +117,7 @@ fn lowers_value_and_function_bodies_into_item_closures() {
         r#"
 val answer = 42
 
-fun add:Int #x:Int #y:Int =>
+fun add:Int x:Int y:Int =>
     x + y
 "#,
     );

@@ -12,7 +12,7 @@ sig draft =
  &|> documentBody
     |> Pair
 
-fun label:Text #state:SaveState =>
+fun label:Text state:SaveState =>
   state
     ||> Saved => "saved"
    ||> Dirty message => "dirty {message}"

@@ -5,12 +5,12 @@ type Summary = {
     count: Int
 }
 
-fun listLength:Int #values:(List Int) =>
+fun listLength:Int values:(List Int) =>
     values
      ||> []             => 0
      ||> [_head, ...xs] => 1 + listLength xs
 
-fun prefixScore:Int #values:(List Int) =>
+fun prefixScore:Int values:(List Int) =>
     values
      ||> []                       => 0
      ||> [first]                  => first

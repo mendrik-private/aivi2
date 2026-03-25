@@ -30,52 +30,52 @@ use aivi.text (
     isEmpty as textIsEmpty
 )
 
-fun getOrElse:A #fallback:A #value:(Option A) =>
+fun getOrElse:A fallback:A value:(Option A) =>
     optionGetOrElse fallback value
 
-fun withDefault:A #fallback:A #value:(Result E A) =>
+fun withDefault:A fallback:A value:(Result E A) =>
     resultWithDefault fallback value
 
-fun length:Int #items:(List A) =>
+fun length:Int items:(List A) =>
     listLength items
 
-fun head:(Option A) #items:(List A) =>
+fun head:(Option A) items:(List A) =>
     listHead items
 
-fun tailOrEmpty:(List A) #items:(List A) =>
+fun tailOrEmpty:(List A) items:(List A) =>
     listTailOrEmpty items
 
-fun min:A #compare:(A -> A -> Bool) #left:A #right:A =>
+fun min:A compare:(A -> A -> Bool) left:A right:A =>
     orderMin compare left right
 
-fun max:A #compare:(A -> A -> Bool) #left:A #right:A =>
+fun max:A compare:(A -> A -> Bool) left:A right:A =>
     orderMax compare left right
 
-fun minOf:A #compare:(A -> A -> Bool) #first:A #rest:(List A) =>
+fun minOf:A compare:(A -> A -> Bool) first:A rest:(List A) =>
     orderMinOf compare first rest
 
-fun join:Text #separator:Text #parts:(List Text) =>
+fun join:Text separator:Text parts:(List Text) =>
     textJoin separator parts
 
-fun concat:Text #parts:(List Text) =>
+fun concat:Text parts:(List Text) =>
     textConcat parts
 
-fun isEmpty:Bool #items:(List A) =>
+fun isEmpty:Bool items:(List A) =>
     listIsEmpty items
 
-fun nonEmpty:Bool #items:(List A) =>
+fun nonEmpty:Bool items:(List A) =>
     listNonEmpty items
 
-fun isSome:Bool #value:(Option A) =>
+fun isSome:Bool value:(Option A) =>
     optionIsSome value
 
-fun isNone:Bool #value:(Option A) =>
+fun isNone:Bool value:(Option A) =>
     optionIsNone value
 
-fun isOk:Bool #value:(Result E A) =>
+fun isOk:Bool value:(Result E A) =>
     resultIsOk value
 
-fun isErr:Bool #value:(Result E A) =>
+fun isErr:Bool value:(Result E A) =>
     resultIsErr value
 
 export (Int, Float, Decimal, BigInt, Bool, Text, Unit, Ordering, List, Option, Result, Validation, Signal, Task, Eq, Default, Functor, Ord, Semigroup, Monoid, Bifunctor, Traversable, Filterable, Applicative, Monad, Foldable, getOrElse, withDefault, length, head, tailOrEmpty, min, max, minOf, join, concat, isEmpty, nonEmpty, isSome, isNone, isOk, isErr)

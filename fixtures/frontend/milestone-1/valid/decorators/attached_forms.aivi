@@ -3,7 +3,7 @@ type Banner = Banner Text
 
 @memoized
 @display
-fun bannerText:Text #banner:Banner =>
+fun bannerText:Text banner:Banner =>
     banner
      ||> Banner text => text
 
