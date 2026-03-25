@@ -1194,12 +1194,21 @@ where
                 next_children.clear();
             }
             crate::GtkChildContainerKind::Sequence => {
+                let previous_widgets = current_children
+                    .iter()
+                    .map(|child| self.widget_object(child))
+                    .collect::<Result<Vec<_>, _>>()?;
                 next_children.drain(index..index + children.len());
                 let next_widgets = next_children
                     .iter()
                     .map(|child| self.widget_object(child))
                     .collect::<Result<Vec<_>, _>>()?;
-                self.replace_sequence_children(&parent_widget, group.mount, &child_widgets, &next_widgets);
+                self.replace_sequence_children(
+                    &parent_widget,
+                    group.mount,
+                    &previous_widgets,
+                    &next_widgets,
+                );
             }
         }
         self.update_group_children(parent, group, next_children)
