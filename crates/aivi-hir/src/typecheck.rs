@@ -1707,6 +1707,19 @@ impl<'a> TypeChecker<'a> {
                     *span,
                     "this branch produces a different type than earlier branches in the same case split",
                 ),
+                GateIssue::AmbiguousDomainOperator {
+                    span,
+                    operator,
+                    candidates,
+                } => Diagnostic::error(format!(
+                    "binary operator `{operator}` is ambiguous: multiple domain implementations match"
+                ))
+                .with_code(code("ambiguous-domain-operator"))
+                .with_primary_label(
+                    *span,
+                    "add a type annotation on one operand to disambiguate which domain operator to use",
+                )
+                .with_note(format!("candidates: {}", candidates.join(", "))),
             };
             self.diagnostics.push(diagnostic);
         }

@@ -576,6 +576,7 @@ fn recurrence_guard_issue_blocker(
             RecurrenceRuntimeStageBlocker::UnknownField { path, subject }
         }
         GateIssue::AmbiguousDomainMember { .. }
+        | GateIssue::AmbiguousDomainOperator { .. }
         | GateIssue::InvalidPipeStageInput { .. }
         | GateIssue::UnsupportedApplicativeClusterMember { .. }
         | GateIssue::ApplicativeClusterMismatch { .. }
