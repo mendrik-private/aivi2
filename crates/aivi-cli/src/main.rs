@@ -652,7 +652,99 @@ fn run_hydration_worker_loop(
     }
 }
 
+/// RAII wrapper that deletes a temporary file on drop.
+///
+/// This ensures temporary files are cleaned up even when the program exits
+/// early due to an error or a panic.
+#[allow(dead_code)]
+struct TempFile(PathBuf);
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+/// RAII wrapper that removes a temporary directory (and all its contents) on
+/// drop.
+///
+/// Used to guard staging directories created by `write_run_bundle` so that
+/// a partial build directory is never left behind when the process exits
+/// early due to an error or a panic.
+struct TempDir(Option<PathBuf>);
+
+impl TempDir {
+    fn new(path: PathBuf) -> Self {
+        Self(Some(path))
+    }
+
+    /// Consume the guard without deleting the directory.
+    ///
+    /// Call this once the directory has been successfully renamed/moved into
+    /// its final location so the drop implementation does not try to remove it
+    /// from the old path.
+    fn defuse(&mut self) {
+        self.0 = None;
+    }
+
+    fn path(&self) -> &Path {
+        self.0.as_deref().expect("TempDir has already been defused")
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            let _ = fs::remove_dir_all(path);
+        }
+    }
+}
+
+/// Assert that `path` exists on disk and is readable.
+///
+/// Returns an error message suitable for printing to stderr when the file is
+/// absent, saving callers from getting a less-informative I/O error later in
+/// the pipeline.
+fn require_file_exists(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Err(format!(
+            "error: input file does not exist: {}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Validate that a module/path component does not contain path-traversal
+/// sequences (`..`) or absolute path components.
+///
+/// User-supplied names are occasionally forwarded into file-system paths (e.g.
+/// as part of bundle output directory names).  Rejecting traversal components
+/// up front prevents an attacker from escaping the intended output root.
+fn validate_module_name(name: &str) -> Result<(), String> {
+    // Reject empty names.
+    if name.is_empty() {
+        return Err("error: module name must not be empty".to_owned());
+    }
+    // Reject absolute paths supplied as a module name.
+    if Path::new(name).is_absolute() {
+        return Err(format!(
+            "error: module name `{name}` must not be an absolute path"
+        ));
+    }
+    // Reject path traversal components anywhere in the name.
+    for component in Path::new(name).components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err(format!(
+                "error: module name `{name}` must not contain `..` path traversal components"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn check_file(path: &Path) -> Result<ExitCode, String> {
+    require_file_exists(path)?;
     let snapshot = WorkspaceHirSnapshot::load(path)?;
     let syntax_failed = workspace_syntax_failed(&snapshot, |sources, diagnostics| {
         print_diagnostics(sources, diagnostics.iter())
@@ -683,6 +775,10 @@ fn check_file(path: &Path) -> Result<ExitCode, String> {
 }
 
 fn run_markup_file(path: &Path, requested_view: Option<&str>) -> Result<ExitCode, String> {
+    require_file_exists(path)?;
+    if let Some(view) = requested_view {
+        validate_module_name(view)?;
+    }
     let snapshot = WorkspaceHirSnapshot::load(path)?;
     let syntax_failed = workspace_syntax_failed(&snapshot, |sources, diagnostics| {
         print_diagnostics(sources, diagnostics.iter())
@@ -2525,6 +2621,7 @@ fn text_literal_static_text(text: &aivi_hir::TextLiteral) -> Option<String> {
 }
 
 fn compile_file(path: &Path, output: Option<&Path>) -> Result<ExitCode, String> {
+    require_file_exists(path)?;
     let snapshot = WorkspaceHirSnapshot::load(path)?;
     let syntax_failed = workspace_syntax_failed(&snapshot, |sources, diagnostics| {
         print_stage_diagnostics(CompileStage::Syntax, sources, diagnostics.iter())
@@ -2679,6 +2776,10 @@ fn build_markup_bundle(
     output: &Path,
     requested_view: Option<&str>,
 ) -> Result<ExitCode, String> {
+    require_file_exists(path)?;
+    if let Some(view) = requested_view {
+        validate_module_name(view)?;
+    }
     let snapshot = WorkspaceHirSnapshot::load(path)?;
     let syntax_failed = workspace_syntax_failed(&snapshot, |sources, diagnostics| {
         print_diagnostics(sources, diagnostics.iter())
@@ -2761,11 +2862,15 @@ fn write_run_bundle(
             .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
     }
 
-    let staging = build_staging_dir(output)?;
-    fs::create_dir_all(&staging)
-        .map_err(|error| format!("failed to create {}: {error}", staging.display()))?;
+    let staging_path = build_staging_dir(output)?;
+    fs::create_dir_all(&staging_path)
+        .map_err(|error| format!("failed to create {}: {error}", staging_path.display()))?;
+    // Guard the staging directory with RAII so it is removed on early exit or
+    // panic, preventing stale partial-build directories from accumulating.
+    let mut staging_guard = TempDir::new(staging_path);
 
     let result = (|| {
+        let staging = staging_guard.path();
         let workspace_root = discover_workspace_root(entry_path);
         let entry_relative = entry_path.strip_prefix(&workspace_root).map_err(|_| {
             format!(
@@ -2802,18 +2907,21 @@ fn write_run_bundle(
 
     match result {
         Ok(mut summary) => {
-            fs::rename(&staging, output).map_err(|error| {
+            fs::rename(staging_guard.path(), output).map_err(|error| {
                 format!(
                     "failed to move build bundle into {}: {error}",
                     output.display()
                 )
             })?;
+            // The staging directory has been moved; defuse the guard so it
+            // does not try to delete the directory from the old path.
+            staging_guard.defuse();
             summary.launcher_path = output.join("run");
             summary.runtime_path = output.join("aivi");
             Ok(summary)
         }
         Err(error) => {
-            let _ = fs::remove_dir_all(&staging);
+            // staging_guard will be dropped here, cleaning up the directory.
             Err(error)
         }
     }
@@ -3077,6 +3185,7 @@ impl CompileStage {
 }
 
 fn lex_file(path: &Path) -> Result<ExitCode, String> {
+    require_file_exists(path)?;
     let (sources, file_id) = load_source(path)?;
     let file = &sources[file_id];
     let lexed = lex_module(file);
@@ -3111,6 +3220,7 @@ fn lex_file(path: &Path) -> Result<ExitCode, String> {
 }
 
 fn format_file(path: &Path) -> Result<ExitCode, String> {
+    require_file_exists(path)?;
     let (sources, file_id) = load_source(path)?;
     let file = &sources[file_id];
     let parsed = parse_module(file);

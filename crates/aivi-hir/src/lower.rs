@@ -380,23 +380,10 @@ impl<'a> Lowerer<'a> {
         let span = item.span();
         if ambient {
             if self.module.push_ambient_item(item).is_err() {
-                self.diagnostics.push(
-                    Diagnostic::error(
-                        "compiler limit: arena overflow — module is too large to compile",
-                    )
-                    .with_code(code("arena-overflow"))
-                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
-                );
-                return;
+                self.emit_arena_overflow("HIR ambient item arena");
             }
         } else if self.module.push_item(item).is_err() {
-            self.diagnostics.push(
-                Diagnostic::error(
-                    "compiler limit: arena overflow — module is too large to compile",
-                )
-                .with_code(code("arena-overflow"))
-                .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
-            );
+            self.emit_arena_overflow("HIR item arena");
         }
     }
 
@@ -496,16 +483,9 @@ impl<'a> Lowerer<'a> {
 
     fn lower_function_item(&mut self, item: &syn::NamedItem) -> FunctionItem {
         if !item.type_parameters.is_empty() {
-            let type_param_span = item
-                .type_parameters
-                .first()
-                .unwrap()
-                .span
-                .join(item.type_parameters.last().unwrap().span)
-                .unwrap_or(item.base.span);
             self.emit_warning(
-                type_param_span,
-                "generic function declarations are not yet supported and will be ignored",
+                item.base.span,
+                "generic function type parameters are not yet supported and will be ignored",
                 code("unsupported-generic-function"),
             );
         }
@@ -3995,18 +3975,14 @@ impl<'a> Lowerer<'a> {
             .expect("resolved item id should still exist") = resolved;
     }
 
-    /// Computes signal dependency metadata by walking expression trees.
+    /// Populates signal dependency and source metadata for all signal items in the module.
     ///
-    /// # Architecture Note
-    /// This is a semantic analysis pass currently embedded in the structural lowering
-    /// phase. It should be extracted into a dedicated elaboration pass that runs
-    /// after HIR validation is complete, when all names are resolved and signal
-    /// items are fully validated. Running it here means it operates on partially-
-    /// resolved HIR, which makes dependency tracking overapproximate (both branches
-    /// of an `if` expression are always marked as dependencies regardless of
-    /// which branch is actually reachable).
+    /// # Note
     ///
-    /// TODO: Move to `elaborate_signal_deps()` elaboration pass.
+    /// This function conflates structural lowering with semantic analysis: it both walks the
+    /// HIR structure to collect signal dependencies and interprets decorator payloads to derive
+    /// source metadata. These concerns should be separated in a future refactor, with semantic
+    /// analysis moved to a dedicated post-lowering pass.
     fn populate_signal_metadata(&mut self, namespaces: &Namespaces) {
         let item_ids = self
             .module
@@ -5507,106 +5483,58 @@ impl<'a> Lowerer<'a> {
         );
     }
 
+    fn emit_arena_overflow(&mut self, arena_name: &str) {
+        self.diagnostics.push(
+            Diagnostic::error(format!(
+                "program too large: arena capacity exceeded ({})",
+                arena_name
+            ))
+            .with_code(code("arena-overflow")),
+        );
+    }
+
     fn alloc_expr(&mut self, expr: Expr) -> ExprId {
-        let span = expr.span;
-        match self.module.alloc_expr(expr) {
-            Ok(id) => id,
-            Err(_) => {
-                self.diagnostics.push(
-                    Diagnostic::error(
-                        "compiler limit: arena overflow — module is too large to compile",
-                    )
-                    .with_code(code("arena-overflow"))
-                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
-                );
-                ExprId::from_raw(0)
-            }
-        }
+        self.module.alloc_expr(expr).unwrap_or_else(|_| {
+            self.emit_arena_overflow("HIR expr arena");
+            std::process::exit(1);
+        })
     }
 
     fn alloc_pattern(&mut self, pattern: Pattern) -> PatternId {
-        let span = pattern.span;
-        match self.module.alloc_pattern(pattern) {
-            Ok(id) => id,
-            Err(_) => {
-                self.diagnostics.push(
-                    Diagnostic::error(
-                        "compiler limit: arena overflow — module is too large to compile",
-                    )
-                    .with_code(code("arena-overflow"))
-                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
-                );
-                PatternId::from_raw(0)
-            }
-        }
+        self.module.alloc_pattern(pattern).unwrap_or_else(|_| {
+            self.emit_arena_overflow("HIR pattern arena");
+            std::process::exit(1);
+        })
     }
 
     fn alloc_type(&mut self, ty: TypeNode) -> TypeId {
-        let span = ty.span;
-        match self.module.alloc_type(ty) {
-            Ok(id) => id,
-            Err(_) => {
-                self.diagnostics.push(
-                    Diagnostic::error(
-                        "compiler limit: arena overflow — module is too large to compile",
-                    )
-                    .with_code(code("arena-overflow"))
-                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
-                );
-                TypeId::from_raw(0)
-            }
-        }
+        self.module.alloc_type(ty).unwrap_or_else(|_| {
+            self.emit_arena_overflow("HIR type arena");
+            std::process::exit(1);
+        })
     }
 
     fn alloc_decorator(&mut self, decorator: Decorator) -> DecoratorId {
-        let span = decorator.span;
-        match self.module.alloc_decorator(decorator) {
-            Ok(id) => id,
-            Err(_) => {
-                self.diagnostics.push(
-                    Diagnostic::error(
-                        "compiler limit: arena overflow — module is too large to compile",
-                    )
-                    .with_code(code("arena-overflow"))
-                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
-                );
-                DecoratorId::from_raw(0)
-            }
-        }
+        self.module.alloc_decorator(decorator).unwrap_or_else(|_| {
+            self.emit_arena_overflow("HIR decorator arena");
+            std::process::exit(1);
+        })
     }
 
     fn alloc_markup_node(&mut self, node: MarkupNode) -> MarkupNodeId {
-        let span = node.span;
-        match self.module.alloc_markup_node(node) {
-            Ok(id) => id,
-            Err(_) => {
-                self.diagnostics.push(
-                    Diagnostic::error(
-                        "compiler limit: arena overflow — module is too large to compile",
-                    )
-                    .with_code(code("arena-overflow"))
-                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
-                );
-                MarkupNodeId::from_raw(0)
-            }
-        }
+        self.module.alloc_markup_node(node).unwrap_or_else(|_| {
+            self.emit_arena_overflow("HIR markup arena");
+            std::process::exit(1);
+        })
     }
 
     fn alloc_control(&mut self, control: ControlNode) -> ControlNodeId {
-        let span = control.span();
-        match self.module.alloc_control_node(control) {
-            Ok(id) => id,
-            Err(_) => {
-                self.diagnostics.push(
-                    Diagnostic::error(
-                        "compiler limit: arena overflow — module is too large to compile",
-                    )
-                    .with_code(code("arena-overflow"))
-                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
-                );
-                ControlNodeId::from_raw(0)
-            }
-        }
+        self.module
+            .alloc_control_node(control)
+            .unwrap_or_else(|_| {
+                self.emit_arena_overflow("HIR control arena");
+                std::process::exit(1);
+            })
     }
 
     fn wrap_control(&mut self, control: ControlNode) -> MarkupNodeId {
@@ -5619,71 +5547,33 @@ impl<'a> Lowerer<'a> {
     }
 
     fn alloc_cluster(&mut self, cluster: ApplicativeCluster) -> crate::ClusterId {
-        let span = cluster.span;
-        match self.module.alloc_cluster(cluster) {
-            Ok(id) => id,
-            Err(_) => {
-                self.diagnostics.push(
-                    Diagnostic::error(
-                        "compiler limit: arena overflow — module is too large to compile",
-                    )
-                    .with_code(code("arena-overflow"))
-                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
-                );
-                crate::ClusterId::from_raw(0)
-            }
-        }
+        self.module.alloc_cluster(cluster).unwrap_or_else(|_| {
+            self.emit_arena_overflow("HIR cluster arena");
+            std::process::exit(1);
+        })
     }
 
     fn alloc_binding(&mut self, binding: Binding) -> BindingId {
-        let span = binding.span;
-        match self.module.alloc_binding(binding) {
-            Ok(id) => id,
-            Err(_) => {
-                self.diagnostics.push(
-                    Diagnostic::error(
-                        "compiler limit: arena overflow — module is too large to compile",
-                    )
-                    .with_code(code("arena-overflow"))
-                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
-                );
-                BindingId::from_raw(0)
-            }
-        }
+        self.module.alloc_binding(binding).unwrap_or_else(|_| {
+            self.emit_arena_overflow("HIR binding arena");
+            std::process::exit(1);
+        })
     }
 
     fn alloc_type_parameter(&mut self, parameter: TypeParameter) -> TypeParameterId {
-        let span = parameter.span;
-        match self.module.alloc_type_parameter(parameter) {
-            Ok(id) => id,
-            Err(_) => {
-                self.diagnostics.push(
-                    Diagnostic::error(
-                        "compiler limit: arena overflow — module is too large to compile",
-                    )
-                    .with_code(code("arena-overflow"))
-                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
-                );
-                TypeParameterId::from_raw(0)
-            }
-        }
+        self.module
+            .alloc_type_parameter(parameter)
+            .unwrap_or_else(|_| {
+                self.emit_arena_overflow("HIR type parameter arena");
+                std::process::exit(1);
+            })
     }
 
     fn alloc_import(&mut self, import: ImportBinding) -> ImportId {
-        let span = import.span;
-        match self.module.alloc_import(import) {
-            Ok(id) => id,
-            Err(_) => {
-                self.diagnostics.push(
-                    Diagnostic::error(
-                        "compiler limit: arena overflow — module is too large to compile",
-                    )
-                    .with_code(code("arena-overflow"))
-                    .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
-                );
-                ImportId::from_raw(0)
-            }
-        }
+        self.module.alloc_import(import).unwrap_or_else(|_| {
+            self.emit_arena_overflow("HIR import arena");
+            std::process::exit(1);
+        })
     }
 }
 

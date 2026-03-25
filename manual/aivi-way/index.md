@@ -8,7 +8,7 @@ that experienced AIVI programmers reach for.
 
 Every AIVI program follows the same shape:
 
-```
+```aivi
 source events → signals → pure transformations → markup
 ```
 
@@ -23,7 +23,7 @@ The runtime wires all of this together. Your code is a pure description of the r
 
 In most UI frameworks, you mutate state in response to events:
 
-```text
+```javascript
 // typical imperative approach (pseudo-code)
 button.on('click', () => {
   this.count += 1
@@ -33,7 +33,7 @@ button.on('click', () => {
 
 In AIVI, you declare the relationships once:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -44,7 +44,7 @@ In AIVI, you declare the relationships once:
 The rule of thumb: if a value can change, it is a signal. If it is derived from a signal,
 it is also a signal. If it is constant, it is a `val`.
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 

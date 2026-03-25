@@ -6,10 +6,10 @@ structure, not just equality.
 
 ## The match pipe `||>`
 
-`||>` is the case pipe. It takes a value on the left and a pattern `=>` body arm on the right.
+`||>` is the match pipe. It takes a value on the left and a pattern `=>` body arm on the right.
 Multiple arms are written as successive `||>` lines:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -21,7 +21,7 @@ The body of the first matching arm is evaluated and returned.
 
 The most common use is matching on sum type variants:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -36,7 +36,7 @@ a compile error until you handle the new case.
 
 This is the key advantage over `switch` statements: you cannot accidentally forget a case.
 
-```text
+```aivi
 type Color = Red | Green | Blue
 
 // Compile error: Blue is not covered
@@ -50,7 +50,7 @@ fun colorName:Text #color:Color =>
 
 When you want a catch-all, use `_`:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -60,7 +60,7 @@ When you want a catch-all, use `_`:
 
 You can match on integer and text literals directly:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -68,13 +68,13 @@ You can match on integer and text literals directly:
 
 You can destructure a record in a pattern arm, binding its fields to names:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
 Record patterns work similarly:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -84,7 +84,7 @@ Here `{ score }` matches any `Game` record and binds the `score` field.
 
 When a variant carries data, the pattern binds the inner values:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -95,7 +95,7 @@ When a variant carries data, the pattern binds the inner values:
 Patterns can be nested. In the snake game, the step logic matches on a record extracted
 from a record:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -107,11 +107,11 @@ without needing intermediate `let` bindings.
 Use `||>` when matching on a general sum type or literal. Use `T|>` / `F|>` when the
 value is already a `Bool` and you want a two-branch conditional:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 

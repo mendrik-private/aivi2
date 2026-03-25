@@ -9,7 +9,7 @@ Think of it like a spreadsheet cell: when a cell it depends on changes, it updat
 
 ## Declaring a signal
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -17,7 +17,7 @@ This declares a signal named `count` that holds an `Int`. Its initial value is `
 
 A signal that derives from another signal uses `|>`:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -28,7 +28,7 @@ dependency.
 
 Any pipe chain that starts with a signal produces a new signal:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -40,7 +40,7 @@ identically on signals.
 The recurrence pattern is how a signal accumulates state over time.
 The shape is always: **seed → enter → guards → step**.
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -53,7 +53,7 @@ Reading this:
 
 ## Example: direction signal in Snake
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -62,7 +62,7 @@ the next direction from the current one.
 
 ## Example: game state signal
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -74,7 +74,7 @@ Every 160 ms the timer fires. `stepGame` runs with the current `direction`, prod
 A `?|>` between `@|>` and `<|@` acts as a guard. If the predicate is false, the current
 iteration is skipped:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -91,11 +91,6 @@ can drive a recurrence.
 
 ## Derived signals vs recurrent signals
 
-| Form | Meaning |
-|---|---|
-| `sig x = someSignal \|> f` | Derives from another signal; no local state |
-| `sig x = init @\|> step src <\|@ step src` | Accumulates state over time |
-
 A derived signal has no memory — it is a pure transformation.
 A recurrent signal has memory — it folds over a stream of events.
 
@@ -103,8 +98,11 @@ A recurrent signal has memory — it folds over a stream of events.
 
 - `sig name : Signal T = initialValue` declares a time-varying value.
 - Derived signals use `|>` chains; they recompute automatically.
-- Recurrent signals: `seed @|> source` enters the loop; `?|>` guards are optional; `<|@ step` updates the state on each wakeup.
 - Signals form a dependency graph maintained by the runtime.
 - You never write to a signal; you only declare how it is computed.
+- `@|>` enters the recurrent loop: seed on the left, driver (cursor or source) on the right.
+- `<|@` advances the loop: applies the step function to the current state, returning the next state.
+- `?|>` between `@|>` and `<|@` acts as a guard, skipping the step when false.
+- Recurrent signals have memory (they fold over events); derived signals do not.
 
 [Next: Sources →](/tour/06-sources)

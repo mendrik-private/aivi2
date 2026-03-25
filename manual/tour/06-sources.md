@@ -7,7 +7,7 @@ Sources are attached to signals using the `@source` decorator.
 
 ## The @source decorator
 
-```text
+```aivi
 @source window.keyDown with {
     repeat: False,
     focusOnly: True
@@ -32,18 +32,19 @@ You never subscribe or unsubscribe manually.
 
 `@recur.timer` drives a recurrent signal at a fixed interval:
 
-```text
+```aivi
 @recur.timer 160ms
 sig game : Signal Game =
     initialGame
-     @|> stepGame boardSize direction
+     @|> timer
+     ?|> timer.hasNext
      <|@ stepGame boardSize direction
 ```
 
 The interval uses the `Duration` domain literal (`ms`, `sec`, `min`). On every tick the
 recurrence step runs, producing the next accumulated state.
 
-Options on the accompanying `@source timer.every N with { ... }` block:
+Options for `@source timer.every N` (the expanded form of `@recur.timer`):
 
 | Option | Type | Meaning |
 |---|---|---|
@@ -55,7 +56,7 @@ Options on the accompanying `@source timer.every N with { ... }` block:
 `@recur.backoff` drives a `Task E A` recurrence that retries on failure with exponential
 back-off:
 
-```text
+```aivi
 @recur.backoff 3x
 val fetched : Task HttpError User =
     initialState
@@ -67,7 +68,7 @@ The retry count uses the `Retry` domain literal (`x`).
 
 ## `window.keyDown` — keyboard events
 
-```text
+```aivi
 @source window.keyDown with {
     repeat: False,
     focusOnly: True
@@ -80,7 +81,7 @@ Emits a `Key` value on every key press. `repeat: False` suppresses held-key repe
 
 ## `http.get` / `http.post` — HTTP requests
 
-```text
+```aivi
 @source http.get "{apiHost}/users" with {
     headers: authHeaders,
     decode: Strict,
@@ -96,7 +97,7 @@ or `Permissive`). `retry` and `timeout` use domain literals from `aivi.http`.
 
 ## `fs.watch` — filesystem events
 
-```text
+```aivi
 @source fs.watch "/tmp/demo.txt" with {
     events: [Created, Changed, Deleted]
 }
@@ -108,7 +109,7 @@ Import `FsEvent` and its constructors from `aivi.fs`.
 
 ## `process.spawn` — subprocess output
 
-```text
+```aivi
 @source process.spawn "rg" ["TODO", "."] with {
     stdout: Lines,
     stderr: Ignore

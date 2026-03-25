@@ -1,8 +1,16 @@
 use std::fmt;
+use std::sync::OnceLock;
 
 use crate::{Kind, KindExprId, KindStore, PrimitiveType};
 
 /// Closed compiler-known built-in `@source` provider variants from RFC §14.1.2.
+///
+/// # Known limitation — closed enum
+///
+/// This is a closed, exhaustive enum. Every built-in provider the compiler recognises must be
+/// listed here. There is no runtime extension point: adding a new built-in provider requires
+/// modifying this enum, its `ALL` constant, the `parse` and `key` methods, and the `contract`
+/// method. It is **not** extensible without a code change.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum BuiltinSourceProvider {
     HttpGet,
@@ -65,37 +73,42 @@ impl BuiltinSourceProvider {
     pub fn contract(self) -> SourceContract {
         match self {
             Self::HttpGet => {
-                SourceContract::new(self, &*HTTP_OPTIONS, HTTP_RECURRENCE, HTTP_LIFECYCLE)
+                SourceContract::new(self, http_options(), HTTP_RECURRENCE, HTTP_LIFECYCLE)
             }
             Self::HttpPost => {
-                SourceContract::new(self, &*HTTP_OPTIONS, HTTP_RECURRENCE, HTTP_LIFECYCLE)
+                SourceContract::new(self, http_options(), HTTP_RECURRENCE, HTTP_LIFECYCLE)
             }
             Self::TimerEvery => {
-                SourceContract::new(self, &*TIMER_OPTIONS, TIMER_RECURRENCE, TIMER_LIFECYCLE)
+                SourceContract::new(self, timer_options(), TIMER_RECURRENCE, TIMER_LIFECYCLE)
             }
             Self::TimerAfter => {
-                SourceContract::new(self, &*TIMER_OPTIONS, TIMER_RECURRENCE, TIMER_LIFECYCLE)
+                SourceContract::new(self, timer_options(), TIMER_RECURRENCE, TIMER_LIFECYCLE)
             }
             Self::FsWatch => SourceContract::new(
                 self,
-                &*FS_WATCH_OPTIONS,
+                &FS_WATCH_OPTIONS,
                 FS_WATCH_RECURRENCE,
                 STREAM_LIFECYCLE,
             ),
             Self::FsRead => {
-                SourceContract::new(self, &*FS_READ_OPTIONS, FS_READ_RECURRENCE, HTTP_LIFECYCLE)
+                SourceContract::new(self, fs_read_options(), FS_READ_RECURRENCE, HTTP_LIFECYCLE)
             }
             Self::SocketConnect => {
-                SourceContract::new(self, &*SOCKET_OPTIONS, SOCKET_RECURRENCE, STREAM_LIFECYCLE)
+                SourceContract::new(self, socket_options(), SOCKET_RECURRENCE, STREAM_LIFECYCLE)
             }
             Self::MailboxSubscribe => {
-                SourceContract::new(self, &*SOCKET_OPTIONS, MAILBOX_RECURRENCE, STREAM_LIFECYCLE)
+                SourceContract::new(self, socket_options(), MAILBOX_RECURRENCE, STREAM_LIFECYCLE)
             }
             Self::ProcessSpawn => {
-                SourceContract::new(self, &*PROCESS_OPTIONS, PROCESS_RECURRENCE, STREAM_LIFECYCLE)
+                SourceContract::new(
+                    self,
+                    process_options(),
+                    PROCESS_RECURRENCE,
+                    STREAM_LIFECYCLE,
+                )
             }
             Self::WindowKeyDown => {
-                SourceContract::new(self, &*WINDOW_OPTIONS, WINDOW_RECURRENCE, STREAM_LIFECYCLE)
+                SourceContract::new(self, &WINDOW_OPTIONS, WINDOW_RECURRENCE, STREAM_LIFECYCLE)
             }
         }
     }
@@ -166,7 +179,7 @@ impl SourceOptionContract {
         Self { name, ty }
     }
 
-    pub fn name(&self) -> &'static str {
+    pub const fn name(&self) -> &'static str {
         self.name
     }
 
@@ -240,6 +253,16 @@ pub enum SourceCancellationPolicy {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum SourceContractIntrinsicWakeup {
     Timer,
+    /// Indicates that the provider fires on its own internal trigger (e.g. an incoming stream
+    /// event or OS-level notification) without a compiler-visible option slot.
+    ///
+    /// # Information loss on conversion
+    ///
+    /// When a source contract is lowered to this variant, the specific trigger mechanism from the
+    /// original contract representation is discarded. For example, `FsWatch`, `SocketConnect`,
+    /// `MailboxSubscribe`, `ProcessSpawn`, and `WindowKeyDown` all collapse to this single
+    /// variant, making round-tripping from `ProviderDefinedTrigger` back to the original
+    /// provider identity impossible without the surrounding `SourceContract` context.
     ProviderDefinedTrigger,
 }
 
@@ -282,6 +305,11 @@ pub enum SourceOptionWakeupCause {
 /// This is intentionally narrower than user-written HIR type expressions. It records only the
 /// closed RFC option shapes the compiler knows today without pretending ordinary expression typing
 /// or runtime/provider lowering already exists.
+///
+/// The `Signal` variant holds a `Box<SourceContractType>` (rather than a flat `SourceTypeAtom`)
+/// so that it can represent nested type expressions such as `Signal<List<Int>>`. This makes the
+/// type self-referential and therefore non-`Copy`; use `.clone()` where a copy was previously
+/// implicit.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum SourceContractType {
     Atom(SourceTypeAtom),
@@ -290,6 +318,9 @@ pub enum SourceContractType {
         key: SourceTypeAtom,  // keys remain atoms (no nested key types)
         value: Box<SourceContractType>,
     },
+    /// A reactive signal type whose payload is a full `SourceContractType`, enabling nested
+    /// forms like `Signal<List<Int>>` that the former flat `SourceTypeAtom` payload could not
+    /// represent.
     Signal(Box<SourceContractType>),
 }
 
@@ -326,34 +357,54 @@ impl SourceContractType {
         Self::Map { key, value: Box::new(SourceContractType::Atom(value)) }
     }
 
-    pub fn signal(payload: SourceTypeAtom) -> Self {
-        Self::Signal(Box::new(SourceContractType::Atom(payload)))
+    pub fn signal(payload: impl Into<SourceContractType>) -> Self {
+        Self::Signal(Box::new(payload.into()))
     }
 
     pub fn to_kind_expr(self, store: &mut KindStore) -> KindExprId {
         match self {
             Self::Atom(atom) => atom.to_kind_expr(store),
-            Self::List(element) => {
-                let constructor = store.add_constructor("List".to_owned(), Kind::constructor(1));
-                let callee = store.constructor_expr(constructor);
-                let argument = element.to_kind_expr(store);
-                store.apply_expr(callee, argument)
-            }
-            Self::Map { key, value } => {
-                let constructor = store.add_constructor("Map".to_owned(), Kind::constructor(2));
-                let callee = store.constructor_expr(constructor);
-                let left = key.to_kind_expr(store);
-                let applied_left = store.apply_expr(callee, left);
-                let right = value.to_kind_expr(store);
-                store.apply_expr(applied_left, right)
-            }
+            Self::List(element) => apply_unary_kind_constructor("List", element, store),
+            Self::Map { key, value } => apply_binary_kind_constructor("Map", key, value, store),
             Self::Signal(payload) => {
-                let constructor = store.add_constructor("Signal".to_owned(), Kind::constructor(1));
+                let constructor =
+                    store.add_constructor("Signal".to_owned(), Kind::constructor(1));
                 let callee = store.constructor_expr(constructor);
                 let argument = payload.to_kind_expr(store);
                 store.apply_expr(callee, argument)
             }
         }
+    }
+}
+
+fn apply_unary_kind_constructor(
+    name: &str,
+    element: Box<SourceContractType>,
+    store: &mut KindStore,
+) -> KindExprId {
+    let constructor = store.add_constructor(name.to_owned(), Kind::constructor(1));
+    let callee = store.constructor_expr(constructor);
+    let argument = element.to_kind_expr(store);
+    store.apply_expr(callee, argument)
+}
+
+fn apply_binary_kind_constructor(
+    name: &str,
+    key: SourceTypeAtom,
+    value: Box<SourceContractType>,
+    store: &mut KindStore,
+) -> KindExprId {
+    let constructor = store.add_constructor(name.to_owned(), Kind::constructor(2));
+    let callee = store.constructor_expr(constructor);
+    let left = key.to_kind_expr(store);
+    let applied_left = store.apply_expr(callee, left);
+    let right = value.to_kind_expr(store);
+    store.apply_expr(applied_left, right)
+}
+
+impl From<SourceTypeAtom> for SourceContractType {
+    fn from(atom: SourceTypeAtom) -> Self {
+        Self::Atom(atom)
     }
 }
 
@@ -463,8 +514,12 @@ impl fmt::Display for SourceTypeParameter {
     }
 }
 
-static HTTP_OPTIONS: std::sync::LazyLock<Vec<SourceOptionContract>> =
-    std::sync::LazyLock::new(|| {
+// HTTP_OPTIONS contains Signal variants and therefore cannot be a `const` array (Box::new is
+// not usable in const context). It is initialised exactly once via OnceLock.
+static HTTP_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
+
+fn http_options() -> &'static [SourceOptionContract] {
+    HTTP_OPTIONS_STORAGE.get_or_init(|| {
         vec![
             SourceOptionContract::new(
                 "headers",
@@ -509,7 +564,8 @@ static HTTP_OPTIONS: std::sync::LazyLock<Vec<SourceOptionContract>> =
                 SourceContractType::signal(SourceTypeAtom::primitive(PrimitiveType::Bool)),
             ),
         ]
-    });
+    })
+}
 
 const HTTP_WAKEUP_OPTIONS: [SourceOptionWakeupContract; 3] = [
     SourceOptionWakeupContract::new("retry", SourceOptionWakeupCause::RetryPolicy),
@@ -517,8 +573,10 @@ const HTTP_WAKEUP_OPTIONS: [SourceOptionWakeupContract; 3] = [
     SourceOptionWakeupContract::new("refreshEvery", SourceOptionWakeupCause::PollingPolicy),
 ];
 
-static TIMER_OPTIONS: std::sync::LazyLock<Vec<SourceOptionContract>> =
-    std::sync::LazyLock::new(|| {
+static TIMER_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
+
+fn timer_options() -> &'static [SourceOptionContract] {
+    TIMER_OPTIONS_STORAGE.get_or_init(|| {
         vec![
             SourceOptionContract::new("immediate", SourceContractType::bool()),
             SourceOptionContract::new(
@@ -531,21 +589,21 @@ static TIMER_OPTIONS: std::sync::LazyLock<Vec<SourceOptionContract>> =
                 SourceContractType::signal(SourceTypeAtom::primitive(PrimitiveType::Bool)),
             ),
         ]
-    });
+    })
+}
 
-static FS_WATCH_OPTIONS: std::sync::LazyLock<Vec<SourceOptionContract>> =
-    std::sync::LazyLock::new(|| {
-        vec![
-            SourceOptionContract::new(
-                "events",
-                SourceContractType::list(SourceTypeAtom::nominal(SourceNominalType::FsWatchEvent)),
-            ),
-            SourceOptionContract::new("recursive", SourceContractType::bool()),
-        ]
-    });
+static FS_WATCH_OPTIONS: [SourceOptionContract; 2] = [
+    SourceOptionContract::new(
+        "events",
+        SourceContractType::list(SourceTypeAtom::nominal(SourceNominalType::FsWatchEvent)),
+    ),
+    SourceOptionContract::new("recursive", SourceContractType::bool()),
+];
 
-static FS_READ_OPTIONS: std::sync::LazyLock<Vec<SourceOptionContract>> =
-    std::sync::LazyLock::new(|| {
+static FS_READ_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
+
+fn fs_read_options() -> &'static [SourceOptionContract] {
+    FS_READ_OPTIONS_STORAGE.get_or_init(|| {
         vec![
             SourceOptionContract::new(
                 "decode",
@@ -561,15 +619,18 @@ static FS_READ_OPTIONS: std::sync::LazyLock<Vec<SourceOptionContract>> =
             ),
             SourceOptionContract::new("readOnStart", SourceContractType::bool()),
         ]
-    });
+    })
+}
 
 const FS_READ_WAKEUP_OPTIONS: [SourceOptionWakeupContract; 1] = [SourceOptionWakeupContract::new(
     "reloadOn",
     SourceOptionWakeupCause::TriggerSignal,
 )];
 
-static SOCKET_OPTIONS: std::sync::LazyLock<Vec<SourceOptionContract>> =
-    std::sync::LazyLock::new(|| {
+static SOCKET_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
+
+fn socket_options() -> &'static [SourceOptionContract] {
+    SOCKET_OPTIONS_STORAGE.get_or_init(|| {
         vec![
             SourceOptionContract::new(
                 "decode",
@@ -586,10 +647,13 @@ static SOCKET_OPTIONS: std::sync::LazyLock<Vec<SourceOptionContract>> =
                 SourceContractType::signal(SourceTypeAtom::primitive(PrimitiveType::Bool)),
             ),
         ]
-    });
+    })
+}
 
-static PROCESS_OPTIONS: std::sync::LazyLock<Vec<SourceOptionContract>> =
-    std::sync::LazyLock::new(|| {
+static PROCESS_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
+
+fn process_options() -> &'static [SourceOptionContract] {
+    PROCESS_OPTIONS_STORAGE.get_or_init(|| {
         vec![
             SourceOptionContract::new(
                 "cwd",
@@ -615,21 +679,19 @@ static PROCESS_OPTIONS: std::sync::LazyLock<Vec<SourceOptionContract>> =
                 SourceContractType::signal(SourceTypeAtom::parameter(SourceTypeParameter::A)),
             ),
         ]
-    });
+    })
+}
 
 const PROCESS_WAKEUP_OPTIONS: [SourceOptionWakeupContract; 1] = [SourceOptionWakeupContract::new(
     "restartOn",
     SourceOptionWakeupCause::TriggerSignal,
 )];
 
-static WINDOW_OPTIONS: std::sync::LazyLock<Vec<SourceOptionContract>> =
-    std::sync::LazyLock::new(|| {
-        vec![
-            SourceOptionContract::new("capture", SourceContractType::bool()),
-            SourceOptionContract::new("repeat", SourceContractType::bool()),
-            SourceOptionContract::new("focusOnly", SourceContractType::bool()),
-        ]
-    });
+static WINDOW_OPTIONS: [SourceOptionContract; 3] = [
+    SourceOptionContract::new("capture", SourceContractType::bool()),
+    SourceOptionContract::new("repeat", SourceContractType::bool()),
+    SourceOptionContract::new("focusOnly", SourceContractType::bool()),
+];
 
 const HTTP_RECURRENCE: SourceRecurrenceContract =
     SourceRecurrenceContract::new(None, &HTTP_WAKEUP_OPTIONS);

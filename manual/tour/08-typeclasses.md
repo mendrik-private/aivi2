@@ -9,7 +9,7 @@ Those laws still matter, but the compiler is not required to prove them for you.
 
 ## Declaring a class
 
-```text
+```aivi
 class Eq A
     (==) : A -> A -> Bool
     (!=) : A -> A -> Bool
@@ -20,7 +20,7 @@ Any type that implements `Eq` must provide those members.
 
 ## Writing an instance
 
-```text
+```aivi
 instance Eq Color
 ```
 
@@ -46,7 +46,7 @@ The root `aivi` prelude now exports these type-class names directly:
 
 It also exports the ordering type used by `Ord`:
 
-```text
+```aivi
 type Ordering = Less | Equal | Greater
 ```
 
@@ -54,7 +54,7 @@ type Ordering = Less | Equal | Greater
 
 ### `Eq` — structural equality
 
-```text
+```aivi
 class Eq A
     (==) : A -> A -> Bool
     (!=) : A -> A -> Bool
@@ -66,7 +66,7 @@ fields also support equality.
 
 ### `Default` — a fallback value
 
-```text
+```aivi
 class Default A
     default : A
 ```
@@ -80,7 +80,7 @@ Today, resolved-HIR default synthesis supports:
 
 ### `Ord` — total ordering
 
-```text
+```aivi
 class Eq A => Ord A
     compare : A -> A -> Ordering
 ```
@@ -100,7 +100,7 @@ The result is one of `Less`, `Equal`, or `Greater`.
 
 ### `Semigroup` — associative combination
 
-```text
+```aivi
 class Semigroup A
     append : A -> A -> A
 ```
@@ -113,7 +113,7 @@ The current compiler-backed builtin instances are:
 
 ### `Monoid` — combination with an identity
 
-```text
+```aivi
 class Semigroup A => Monoid A
     empty : A
 ```
@@ -126,7 +126,7 @@ The current compiler-backed builtin instances are:
 
 ### `Functor` — mapping over one-parameter contexts
 
-```text
+```aivi
 class Functor F
     map : (A -> B) -> F A -> F B
 ```
@@ -144,7 +144,7 @@ The current compiler-backed `map` lowering supports:
 
 ### `Bifunctor` — mapping both sides of a two-parameter context
 
-```text
+```aivi
 class Bifunctor F
     bimap : (A -> C) -> (B -> D) -> F A B -> F C D
 ```
@@ -160,7 +160,7 @@ The current compiler-backed `bimap` lowering supports:
 
 The ambient hierarchy models applicative behavior in two steps:
 
-```text
+```aivi
 class Apply F
     apply : F (A -> B) -> F A -> F B
 
@@ -180,11 +180,11 @@ The current compiler-backed `pure` and `apply` lowering supports:
 - `Signal`
 
 For `Validation`, applicative accumulation currently expects `Invalid` payloads
-shaped like `NonEmpty` or `NonEmptyList`.
+shaped like `NonEmpty`.
 
 ### `Foldable` — reducing a structure to a value
 
-```text
+```aivi
 class Foldable F
     reduce : (B -> A -> B) -> B -> F A -> B
 ```
@@ -200,7 +200,7 @@ The current compiler-backed `reduce` lowering supports:
 
 ### `Traversable` — traversing with an applicative effect
 
-```text
+```aivi
 class (Functor T, Foldable T) => Traversable T
     traverse : Applicative G => (A -> G B) -> T A -> G (T B)
 ```
@@ -225,7 +225,7 @@ and rebuilding into these applicative results:
 
 ### `Filterable` — map and discard in one pass
 
-```text
+```aivi
 class Functor F => Filterable F
     filterMap : (A -> Option B) -> F A -> F B
 ```
@@ -245,7 +245,7 @@ The current compiler-backed `filterMap` lowering supports:
 
 The ambient hierarchy models monadic sequencing like this:
 
-```text
+```aivi
 class Apply M => Chain M
     chain : (A -> M B) -> M A -> M B
 
@@ -263,14 +263,14 @@ the higher-level abstraction you can constrain against.
 When a function is generic but requires a class capability, declare it with
 `with`:
 
-```text
+```aivi
 fun equals:Bool with Eq A #left:A #right:A =>
     left == right
 ```
 
 Multiple constraints are separated by commas:
 
-```text
+```aivi
 fun resetThenAppend:A with Monoid A, Semigroup A #value:A =>
     append empty value
 ```
@@ -280,7 +280,7 @@ fun resetThenAppend:A with Monoid A, Semigroup A #value:A =>
 `Functor`, `Filterable`, `Foldable`, `Traversable`, `Applicative`, and `Monad`
 range over type constructors rather than ordinary values.
 
-```text
+```aivi
 class Functor F
     map : (A -> B) -> F A -> F B
 ```
@@ -290,7 +290,7 @@ Here `F` stands for a one-argument constructor such as `List`, `Option`,
 
 `Bifunctor` is similar, but its carrier takes two type arguments:
 
-```text
+```aivi
 class Bifunctor F
     bimap : (A -> C) -> (B -> D) -> F A B -> F C D
 ```

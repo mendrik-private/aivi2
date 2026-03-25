@@ -29,14 +29,15 @@ pub fn collect_lsp_diagnostics(
     analysis
         .diagnostics
         .iter()
-        .map(|diagnostic| convert_diagnostic(diagnostic, analysis.source.as_ref(), uri))
+        .map(|diagnostic| convert_diagnostic(diagnostic, analysis.source.as_ref(), db, uri))
         .collect()
 }
 
 fn convert_diagnostic(
     d: &Diagnostic,
     source_file: &aivi_base::SourceFile,
-    uri: &Url,
+    db: &aivi_query::RootDatabase,
+    file_uri: &Url,
 ) -> lsp::Diagnostic {
     let severity = match d.severity {
         Severity::Error => DiagnosticSeverity::ERROR,
@@ -67,19 +68,39 @@ fn convert_diagnostic(
 
     let code = d.code.map(|c| NumberOrString::String(c.to_string()));
 
+    // Convert secondary labels to LSP DiagnosticRelatedInformation entries so
+    // editors can navigate to additional context spans referenced by the
+    // diagnostic (e.g. a previous definition site).
     let related_information: Vec<DiagnosticRelatedInformation> = d
         .labels
         .iter()
-        .filter(|l| l.style != LabelStyle::Primary)
+        .filter(|l| l.style == LabelStyle::Secondary)
         .filter_map(|label| {
-            if label.span.file() != source_file.id() {
-                return None;
-            }
-            let lsp_r = source_file.span_to_lsp_range(label.span.span());
+            let label_file_id = label.span.file();
+            // Prefer looking up the URI from the database so cross-file
+            // secondary labels resolve to the correct document URI.  Fall back
+            // to the current file's URI when the file cannot be located.
+            let matched_file = db
+                .files()
+                .into_iter()
+                .find(|qf| qf.source(db).id() == label_file_id);
+
+            let label_uri = matched_file
+                .as_ref()
+                .and_then(|qf| Url::from_file_path(qf.path(db)).ok())
+                .unwrap_or_else(|| file_uri.clone());
+
+            // Resolve the label's source file to compute the LSP range.
+            let label_source = matched_file
+                .map(|qf| qf.source(db))
+                .unwrap_or_else(|| std::sync::Arc::new(source_file.clone()));
+
+            let lsp_r = label_source.span_to_lsp_range(label.span.span());
+            let label_range = lsp_range(lsp_r);
             Some(DiagnosticRelatedInformation {
                 location: Location {
-                    uri: uri.clone(),
-                    range: lsp_range(lsp_r),
+                    uri: label_uri,
+                    range: label_range,
                 },
                 message: label.message.clone(),
             })

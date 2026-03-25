@@ -786,9 +786,12 @@ where
             if child_count == 0 {
                 return Ok(());
             }
-            // TODO: Orphaned children bug — when this Show node unmounts, descendants in
-            // Each-loop groups remain in self.instances. They should be recursively removed.
-            // See CODE_REVIEW.md §10 (aivi-gtk executor.rs Fix #4).
+            // Detach the immediate children of `context`.  `detach_existing_child_block`
+            // calls `teardown_subtrees` on the removed roots, which then recurses
+            // depth-first through every descendant (children before their parent).
+            // This ensures all nested Show/Each/Match instances and their widget
+            // handles are cleaned up — not just the immediate children — preventing
+            // orphaned widget instances from accumulating in `self.instances`.
             self.detach_existing_child_block(context, 0, child_count)?;
             return Ok(());
         }
@@ -797,9 +800,9 @@ where
         let Some(index) = self.find_child_index_opt(context, &child)? else {
             return Ok(());
         };
-        // TODO: Orphaned children bug — when this Show node unmounts, descendants in
-        // Each-loop groups remain in self.instances. They should be recursively removed.
-        // See CODE_REVIEW.md §10 (aivi-gtk executor.rs Fix #4).
+        // As above: `detach_existing_child_block` → `teardown_subtrees` performs
+        // the recursive depth-first descent so all descendants of `child` are
+        // torn down before `child` itself is removed.
         self.detach_existing_child_block(context, index, 1)?;
         match &mut self.instance_state_mut(context)?.kind {
             MountedNodeKind::Match(match_state)
@@ -1294,6 +1297,18 @@ where
         &mut self,
         roots: Vec<GtkNodeInstance>,
     ) -> Result<(), GtkExecutorError<H::Error>> {
+        // Recursive depth-first teardown via an explicit stack.
+        //
+        // Each node is visited twice:
+        //   1. First pass (visited=false): push the node for post-order processing
+        //      and enqueue all of its children for first-pass visits.
+        //   2. Second pass (visited=true): all descendants have already been torn
+        //      down (children before parent), so it is now safe to remove this
+        //      node's own resources.
+        //
+        // This guarantees that every descendant — however deeply nested across
+        // Show, Each, Match, and Fragment boundaries — is cleaned up before its
+        // ancestor, preventing orphaned widget instances in `self.instances`.
         let mut stack = roots
             .into_iter()
             .map(|instance| TeardownFrame {
@@ -1325,11 +1340,15 @@ where
                 }
                 continue;
             }
+            // Collect children before the second visit so that the mutable borrow
+            // needed for `instance_state` does not overlap with the stack push.
             let children = self.instance_state(&frame.instance)?.children.clone();
             stack.push(TeardownFrame {
                 instance: frame.instance,
                 visited: true,
             });
+            // Push children in reverse so the leftmost child is processed first
+            // (stack is LIFO), preserving left-to-right depth-first order.
             for child in children.into_iter().rev() {
                 stack.push(TeardownFrame {
                     instance: child,

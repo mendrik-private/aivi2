@@ -378,19 +378,32 @@ pub struct Closure {
     pub owner: core::ItemId,
     pub span: SourceSpan,
     pub kind: ClosureKind,
-    /// The implicit subject type for this closure, corresponding to `_` in pipe
-    /// expressions.
+    /// The type of the "ambient subject" pre-bound for expressions inside this closure, if any.
     ///
-    /// When `Some(ty)`, `AmbientSubject` references in the closure body are valid
-    /// and refer to a value of type `ty` provided by the pipe runtime.
+    /// - `Some(ty)` for gate and recurrence-stage closures: the stage's `input_subject` type is
+    ///   implicitly in scope and can be referenced via `ExprKind::AmbientSubject` without naming
+    ///   a binding. This is set during lowering from the owning stage's `input_subject` field.
+    ///   The module-level construct that sets this is a pipe stage (gate, signal-filter, or
+    ///   recurrence start/step).
     ///
-    /// When `None`, the closure has no implicit subject. Any `AmbientSubject`
-    /// references in the closure body are invalid and indicate a lowering bug.
-    /// This is currently not validated at construction time — it is the caller's
-    /// responsibility to ensure `AmbientSubject` is not used in closures where
-    /// this field is `None`.
+    /// - `None` for `ItemBody` and `RecurrenceWakeupWitness` closures: these closures have no
+    ///   implicit ambient type; all values in scope must be explicit item parameters or captures.
+    ///
+    /// Invariant: if `ambient_subject` is `Some`, the closure body must not reference
+    /// `ExprKind::AmbientSubject` with a type that differs from the recorded type.
     pub ambient_subject: Option<core::Type>,
     pub parameters: Vec<core::ItemParameter>,
+    /// The set of captured bindings from enclosing scopes.
+    ///
+    /// # Self-recursive closures
+    ///
+    /// Self-recursive closures are not currently supported. The capture analysis
+    /// (`capture_free_bindings`) walks the body expression and collects free bindings, but the
+    /// closure itself has not been given a binding ID by the time that analysis runs. A
+    /// self-recursive call would therefore appear as an unbound free reference and be rejected
+    /// with an error. Supporting self-recursion would require either:
+    ///   1. assigning the closure a stable name/binding before the body is analyzed, or
+    ///   2. a separate fixed-point pass that patches the closure after the fact.
     pub captures: Vec<CaptureId>,
     pub root: core::ExprId,
 }

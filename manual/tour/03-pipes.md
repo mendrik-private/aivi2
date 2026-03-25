@@ -7,7 +7,7 @@ The idea is borrowed from Unix: data flows from left to right through a sequence
 
 `|>` takes the value on its left and passes it as the first argument to the function on its right.
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -16,14 +16,14 @@ instead of inside-out.
 
 Compare these two forms of the same computation:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
 When you pass partial arguments before the piped value, `|>` inserts the left-hand value
 as the **last** argument:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -31,14 +31,14 @@ as the **last** argument:
 
 A common pattern is projecting a field from a record:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
 The `.field` syntax is a shorthand for `#r => r.field`.
 It composes naturally in pipes:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -49,7 +49,7 @@ of the same pipe chain. There are two placements:
 
 **Before the expression** — names the incoming subject:
 
-```text
+```aivi
 [1 .. 10]
  *|> #i i % 2    // name the incoming element 'i', fan out with i % 2
  ||> 0 => "even {i}"
@@ -61,7 +61,7 @@ the new value flowing forward. `i` remains accessible in all stages below.
 
 **After the expression** — names the result:
 
-```text
+```aivi
 uid
  |> fetchUser #result
  T|> { user: Some .body, status: result.status }
@@ -82,7 +82,7 @@ You cannot write `_.field`; write `.field` instead.
 
 Pipes chain arbitrarily. Each `|>` is one step in the computation:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -90,13 +90,13 @@ Pipes chain arbitrarily. Each `|>` is one step in the computation:
 
 Consider a computation with five steps. With nested calls, you must read inside-out:
 
-```text
+```aivi
 step5 (step4 (step3 (step2 (step1 input))))
 ```
 
 With pipes:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -109,14 +109,14 @@ Each step is on its own line. Inserting, removing, or reordering steps is straig
 If the condition is false, the value is **suppressed** — nothing flows downstream.
 Inside a `*|>` fan-out, suppression means the item is **dropped from the result list**.
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
 `validInput` only has a value when `rawInput` is non-empty.
 This is useful for validation: downstream signals only fire when the gate is open.
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -125,13 +125,13 @@ This is useful for validation: downstream signals only fire when the gate is ope
 `T|>` and `F|>` are conditional path selectors. Given a `Bool` on the left, they pass
 a value (not the condition) depending on whether it is `True` or `False`:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
 `T|>` and `F|>` are usually used in pairs. They are the AIVI alternative to `if`/`else`:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -143,13 +143,13 @@ Otherwise it is `candidate`.
 `T|>` and `F|>` also work with `Option` and `Result`. The `T|>` branch receives the **inner
 value** unwrapped; the `F|>` branch receives the error or absence:
 
-```text
+```aivi
 opt
   T|> "Hello {_}"      // same as: opt ||> Some x => "Hello {x}"
   F|> "Goodbye"        // same as:     ||> None   => "Goodbye"
 ```
 
-```text
+```aivi
 res
   T|> doFun _          // same as: res ||> Ok  x => doFun x
   F|> log _            //          res ||> Err e => log e
@@ -161,27 +161,27 @@ success or failure path.
 
 On signals, `T|>` / `F|>` runs pointwise over the committed snapshot for the currently supported
 carrier slice: `Signal Bool`, `Signal (Option A)`, `Signal (Result E A)`, and
-`Signal (Validation E A)`. The branch result stays a signal. Signal-filter `?|>` remains a
+`Signal (Validation E A)`. The branch result stays a signal. The gate pipe `?|>` on signals remains a
 separate scheduler-owned pipeline slice.
 
 ## The map pipe `*|>`
 
 `*|>` applies a function to every element of a `List`, producing a new `List`:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
 It is the pipe equivalent of `map`. The `*` reads as "for each":
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
 A `?|>` inside a `*|>` fan-out **skips the item** — it acts as a filter rather than a
 gate on a signal. Items for which the predicate is false are dropped from the result list:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -192,7 +192,7 @@ This combines map and filter in a single pipeline without a separate `filter` ca
 `<|*` closes a `*|>` fan-out by collecting the results back into a single value using a
 reducer function. Together, `*|>` and `<|*` express a map–reduce in a straight pipeline:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -203,7 +203,7 @@ The reducer receives the accumulated value and each element in turn.
 `@|>` enters the recurrent loop. The seed value sits on its left; the driver (source or
 cursor) sits on its right:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -215,14 +215,14 @@ each event.
 `<|@` is the step function of the recurrence. It receives the current accumulated state and
 returns the next state:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
 Guards (`?|>`) may appear between `@|>` and `<|@` to suppress a step entirely when a
 condition is false:
 
-```text
+```aivi
 initial
  @|> cursor
  ?|> cursor.hasNext
@@ -234,7 +234,7 @@ initial
 `&|>` zips two signals together, applying a signal of functions to a signal of values
 pointwise. It is the signal equivalent of `<*>` in applicative functors:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 

@@ -6,7 +6,7 @@ There is no `async`/`await`, no `.then()`, no `Promise`.
 
 ## The pattern
 
-```
+```aivi
 @source http.get → Signal (Result HttpError Data) → ||> Ok/Err → markup
 ```
 
@@ -19,7 +19,7 @@ There is no `async`/`await`, no `.then()`, no `Promise`.
 
 Fetching a user profile:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -27,13 +27,13 @@ Fetching a user profile:
 
 When you want an explicit `Loading` state, model it in the signal that consumes the HTTP result:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
 ## Retrying on error
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -44,7 +44,7 @@ Passing `refreshOn: retryClicked` tells the source to re-fetch when `retryClicke
 When a second request depends on the result of a first, start by extracting the `Ok` value into
 its own signal:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -55,7 +55,7 @@ A later source can depend on `userId` the same way other sources depend on ordin
 
 In callback-based code, each step nests inside the previous one:
 
-```
+```javascript
 // typical callback hell (pseudo-code)
 fetchUser(id, (err, user) => {
   if (err) { showError(err); return }
@@ -68,7 +68,7 @@ fetchUser(id, (err, user) => {
 
 In AIVI, the dependency is declared, not nested:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -78,6 +78,6 @@ Each step is a separate named signal. No nesting, no error routing, no lifecycle
 
 - `@source http.get "url"` produces a `Signal (Result HttpError T)`.
 - Map the result through `||>` arms for `Ok` and `Err`.
-- Use `LoadState A` or similar to represent `Loading` / `Loaded` / `Failed`.
+- Define `type LoadState A = Loading | Loaded A | Failed Text` to represent `Loading` / `Loaded` / `Failed` states.
 - Extract `Ok` values into their own signals before wiring dependent work.
 - Retry by passing a click signal to `refreshOn` in the source options.

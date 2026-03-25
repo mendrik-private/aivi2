@@ -10,7 +10,7 @@ is a derived signal.
 
 Declare a signal for each form field, driven by an `@source input.changed` event:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -23,7 +23,7 @@ A validated signal only has a value when the field is valid.
 
 The gate predicate must be a named function — not a lambda:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -35,11 +35,11 @@ also have no value.
 
 ## Combining fields into a form signal
 
-`&|>` is the applicative pipe — it combines independent signals under one applicative carrier.
+`&|>` is the apply pipe — it combines independent signals under one applicative carrier.
 `Signal` is applicative, not monadic: `&|>` does **not** bind the unwrapped value into a lambda.
 Instead, stack the signals with `&|>` and then apply a pure constructor function:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -48,7 +48,7 @@ The constructor receives the unwrapped `Text` values from each validated signal 
 
 ## Enabling the submit button
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -57,7 +57,7 @@ so the button enables itself the moment both fields pass validation.
 
 ## Wiring submission
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -66,7 +66,7 @@ submit button.
 
 ## Full example
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 

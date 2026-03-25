@@ -351,6 +351,13 @@ where
                 self.validate_owner(*owner)?;
             }
         }
+        // NOTE: `self.queue` is a plain `VecDeque` with no interior locking.
+        // This method takes `&mut self`, so Rust's borrow checker enforces exclusive access.
+        // The scheduler is intentionally single-threaded: all queue mutations and `tick` calls
+        // must happen on the same owning thread (typically the GLib/GTK main thread when used
+        // with `GlibSchedulerDriver`). Worker threads must never call this method directly;
+        // they communicate via `WorkerPublicationSender` which uses a separate `mpsc` channel
+        // drained by `drain_worker_publications` at the start of each `tick`.
         self.queue.push_back(message);
         Ok(())
     }
@@ -558,6 +565,9 @@ where
     }
 
     fn drain_worker_publications(&mut self) {
+        // NOTE: Must only be called from the scheduler's owning thread (see `queue_message`).
+        // The `mpsc::Receiver` is not `Sync`, so this is enforced by the type system as long as
+        // `Scheduler` is not shared across threads without wrapping in a `Mutex`.
         while let Ok(publication) = self.worker_publication_rx.try_recv() {
             self.queue.push_back(SchedulerMessage::Publish(publication));
         }

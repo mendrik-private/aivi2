@@ -9,6 +9,7 @@ This page will be the full reference once modules stabilize.
 |---|---|
 | `aivi.list` | `length` `head` `tail` `last` `zip` `any` `all` `count` `find` `findMap` `partition` `isEmpty` `nonEmpty` `Partition` |
 | `aivi.option` | `isSome` `isNone` `getOrElse` `orElse` `flatMap` `flatten` `toList` `toResult` |
+| `aivi.result` | `withDefault` `mapOk` `mapErr` `toOption` `fromOption` |
 | `aivi.text` | `join` `concat` `surround` `isEmpty` `nonEmpty` |
 | `aivi.defaults` | `Option` (enables record-field defaults for `Option` fields) |
 
@@ -16,13 +17,13 @@ Built-in (no import needed): `Option` `Some` `None` `Result` `Ok` `Err` `True` `
 
 ## Importing modules
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
 `use` brings specific names into scope.
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 

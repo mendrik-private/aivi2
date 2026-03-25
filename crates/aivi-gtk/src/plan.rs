@@ -37,7 +37,13 @@ pub enum StableNodeId {
     Control(ControlNodeId),
 }
 
-const MAX_PLAN_NESTING_DEPTH: usize = 128;
+/// Maximum nesting depth for a widget plan.
+///
+/// Plans deeper than this limit are rejected by `WidgetPlan::validate` with a
+/// `PlanValidationError::PlanDepthExceeded` error.  The limit guards against
+/// pathological inputs (intentional or otherwise) that would cause the
+/// iterative plan traversal to consume unbounded stack or heap space.
+pub const MAX_PLAN_DEPTH: usize = 64;
 
 /// Full lowered widget/control graph rooted at one markup expression.
 ///
@@ -161,9 +167,10 @@ impl WidgetPlan {
         node_id: PlanNodeId,
         depth: usize,
     ) -> Result<(), PlanValidationError> {
-        if depth > MAX_PLAN_NESTING_DEPTH {
-            return Err(PlanValidationError::NestingTooDeep {
-                max: MAX_PLAN_NESTING_DEPTH,
+        if depth > MAX_PLAN_DEPTH {
+            return Err(PlanValidationError::PlanDepthExceeded {
+                node: node_id,
+                depth,
             });
         }
         let Some(node) = self.node(node_id) else {
@@ -491,8 +498,23 @@ pub enum PlanValidationError {
         first: PlanNodeId,
         duplicate: PlanNodeId,
     },
-    NestingTooDeep {
-        max: usize,
+    /// The plan tree exceeds the maximum allowed nesting depth (`MAX_PLAN_DEPTH`).
+    ///
+    /// Deeply nested plans risk stack overflow during recursive processing in later
+    /// compiler stages.  The depth limit is enforced here so that all callers see
+    /// a clean validation error rather than an unexpected stack overflow.
+    PlanDepthExceeded {
+        node: PlanNodeId,
+        depth: usize,
+    },
+    /// A `<case>` node appears outside a `<match>` node.
+    ///
+    /// `<case>` nodes are only valid as direct children of a `<match>` node.
+    /// If a `<case>` node appears anywhere else in the plan tree it is a lowering
+    /// bug: the plan is malformed and must be rejected rather than silently
+    /// misinterpreted at runtime.
+    CaseOutsideMatch {
+        node: PlanNodeId,
     },
 }
 
@@ -529,9 +551,15 @@ impl fmt::Display for PlanValidationError {
                 f,
                 "stable node identity {stable_id:?} appears at both {first} and {duplicate}"
             ),
-            Self::NestingTooDeep { max } => write!(
+            Self::PlanDepthExceeded { node, depth } => write!(
                 f,
-                "widget plan nesting depth exceeds the maximum of {max}"
+                "widget plan node {node} exceeds the maximum nesting depth of {MAX_PLAN_DEPTH} \
+                 (actual depth: {depth})"
+            ),
+            Self::CaseOutsideMatch { node } => write!(
+                f,
+                "widget plan node {node} is a <case> node but does not appear as a direct child \
+                 of any <match> node; <case> nodes are only valid inside <match>"
             ),
         }
     }

@@ -35,7 +35,7 @@ impl Backend {
         let maybe_file = self.state.files.get(&uri).map(|file| *file);
         let Some(file) = maybe_file else {
             tracing::error!(
-                "Failed to publish diagnostics for {}: file not tracked in server state",
+                "publish_diagnostics_for_uri: URI {} is not tracked; diagnostics will not be published",
                 uri
             );
             return;

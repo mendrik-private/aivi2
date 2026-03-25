@@ -6,7 +6,7 @@ There is no `any`, no `object`, no `null`.
 
 ## `val` — a named constant
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -16,7 +16,7 @@ a value does not change. If something needs to change over time, that is a `sig`
 
 You can annotate the type explicitly:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -31,7 +31,7 @@ AIVI has two flavours of `type`: **sum types** and **product types**.
 A sum type lists all possible values (variants). If you have used TypeScript unions or Rust enums,
 this is the same idea — but exhaustive and closed.
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -42,13 +42,13 @@ You can write `Up` or `GameOver` directly; they are ordinary values.
 
 Variants can carry data:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
 `Option` and `Result` are **parametric types** — the type variables are filled in at use sites:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -58,7 +58,7 @@ The type variable is always lowercase; type names and constructors are uppercase
 
 AIVI has no `null`, `nil`, or `undefined`. The absence of a value is always explicit:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -70,19 +70,19 @@ impossible by construction.
 A product type groups multiple values into one shape. Use a constructor product for positional
 data and a record when fields are naturally named:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
 Create a value by calling the constructor or listing named fields:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
 Access named fields with dot projection:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -91,7 +91,7 @@ Access named fields with dot projection:
 
 Records are immutable — you cannot update a field in place. Instead, create a new record:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -99,7 +99,7 @@ Records are immutable — you cannot update a field in place. Instead, create a 
 
 Real programs combine both. Here is a snapshot from the Snake demo:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -112,9 +112,16 @@ Real programs combine both. Here is a snapshot from the Snake demo:
 |---|---|---|
 | `Int` | Signed integer | `42`, `-7` |
 | `Float` | Floating-point | `3.14` |
+| `Decimal` | Arbitrary-precision decimal | `3.14` |
+| `BigInt` | Arbitrary-precision integer | `999` |
 | `Bool` | `True` or `False` | `True` |
 | `Text` | UTF-8 string | `"hello"` |
 | `List A` | Homogeneous list | `[1, 2, 3]` |
+| `Option A` | Present (`Some A`) or absent (`None`) | `Some 42`, `None` |
+| `Result E A` | Success (`Ok A`) or failure (`Err E`) | `Ok 42`, `Err "oops"` |
+| `Validation E A` | Accumulating errors (`Valid A` or `Invalid E`) | `Valid 42` |
+| `Task E A` | Async computation that may fail | declared with `@source` |
+| `Signal T` | Time-varying value | `sig count : Signal Int` |
 
 `Bool` is a regular sum type under the hood: `type Bool = True | False`.
 The operators `and`, `or`, and `not` work on it.

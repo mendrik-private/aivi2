@@ -46,14 +46,6 @@ impl std::fmt::Display for ValidationErrors {
 
 impl std::error::Error for ValidationErrors {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ClosureMetadataField {
-    Owner,
-    Kind,
-    Root,
-    ParameterCount,
-    AmbientSubject,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ValidationError {
@@ -99,10 +91,7 @@ pub enum ValidationError {
         closure: ClosureId,
         binding: BindingId,
     },
-    ClosureMetadataMismatch {
-        closure: ClosureId,
-        field: ClosureMetadataField,
-    },
+    ClosureMetadataMismatch(ClosureMetadataMismatch),
     MissingClosureCapture {
         closure: ClosureId,
         binding: BindingId,
@@ -124,6 +113,80 @@ pub enum ValidationError {
         current: core::Type,
     },
 }
+
+/// Sub-variant of [`ValidationError::ClosureMetadataMismatch`] indicating which metadata field
+/// on a closure does not match the typed-core site that owns it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ClosureMetadataMismatch {
+    /// The `owner` item ID recorded on the closure does not match the expected owner.
+    Owner {
+        closure: ClosureId,
+        expected: core::ItemId,
+        found: core::ItemId,
+    },
+    /// The `kind` of the closure does not match the expected kind for this site.
+    Kind {
+        closure: ClosureId,
+        expected: crate::ClosureKind,
+        found: crate::ClosureKind,
+    },
+    /// The `root` expression ID does not match the expected root for this site.
+    Root {
+        closure: ClosureId,
+        expected: core::ExprId,
+        found: core::ExprId,
+    },
+    /// The number of parameters does not match the expected count.
+    ParameterCount {
+        closure: ClosureId,
+        expected: usize,
+        found: usize,
+    },
+    /// The `ambient_subject` type does not match the expected subject for this site.
+    AmbientSubject {
+        closure: ClosureId,
+        expected: Option<core::Type>,
+        found: Option<core::Type>,
+    },
+    /// A basic structural invariant failed (e.g. the owner item or root expression does not
+    /// exist in the module). This is reported when the closure cannot be checked at all.
+    Invalid {
+        closure: ClosureId,
+    },
+}
+
+impl std::fmt::Display for ClosureMetadataMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Owner { closure, expected, found } => write!(
+                f,
+                "typed-lambda closure {closure} owner mismatch: expected item {expected}, found item {found}"
+            ),
+            Self::Kind { closure, expected, found } => write!(
+                f,
+                "typed-lambda closure {closure} kind mismatch: expected {expected}, found {found}"
+            ),
+            Self::Root { closure, expected, found } => write!(
+                f,
+                "typed-lambda closure {closure} root expression mismatch: expected expr {expected}, found expr {found}"
+            ),
+            Self::ParameterCount { closure, expected, found } => write!(
+                f,
+                "typed-lambda closure {closure} parameter count mismatch: expected {expected}, found {found}"
+            ),
+            Self::AmbientSubject { closure, expected, found } => write!(
+                f,
+                "typed-lambda closure {closure} ambient subject mismatch: expected {expected:?}, found {found:?}"
+            ),
+            Self::Invalid { closure } => write!(
+                f,
+                "typed-lambda closure {closure} refers to an owner or root that does not exist in the module"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ClosureMetadataMismatch {}
 
 impl std::fmt::Display for ValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -189,10 +252,7 @@ impl std::fmt::Display for ValidationError {
                 "typed-lambda closure {closure} captures binding #{} more than once",
                 binding.as_raw()
             ),
-            Self::ClosureMetadataMismatch { closure, field } => write!(
-                f,
-                "typed-lambda closure {closure} does not match the typed-core site that owns it (field: {field:?})"
-            ),
+            Self::ClosureMetadataMismatch(mismatch) => write!(f, "{mismatch}"),
             Self::MissingClosureCapture { closure, binding } => write!(
                 f,
                 "typed-lambda closure {closure} is missing explicit capture metadata for binding #{}",
@@ -527,34 +587,49 @@ fn validate_expected_closure(
         return;
     };
     if closure.owner != expected_owner {
-        errors.push(ValidationError::ClosureMetadataMismatch {
-            closure: closure_id,
-            field: ClosureMetadataField::Owner,
-        });
+        errors.push(ValidationError::ClosureMetadataMismatch(
+            ClosureMetadataMismatch::Owner {
+                closure: closure_id,
+                expected: expected_owner,
+                found: closure.owner,
+            },
+        ));
     }
     if closure.kind != expected_kind {
-        errors.push(ValidationError::ClosureMetadataMismatch {
-            closure: closure_id,
-            field: ClosureMetadataField::Kind,
-        });
+        errors.push(ValidationError::ClosureMetadataMismatch(
+            ClosureMetadataMismatch::Kind {
+                closure: closure_id,
+                expected: expected_kind,
+                found: closure.kind,
+            },
+        ));
     }
     if closure.root != expected_root {
-        errors.push(ValidationError::ClosureMetadataMismatch {
-            closure: closure_id,
-            field: ClosureMetadataField::Root,
-        });
+        errors.push(ValidationError::ClosureMetadataMismatch(
+            ClosureMetadataMismatch::Root {
+                closure: closure_id,
+                expected: expected_root,
+                found: closure.root,
+            },
+        ));
     }
-    if closure.parameters != expected_parameters {
-        errors.push(ValidationError::ClosureMetadataMismatch {
-            closure: closure_id,
-            field: ClosureMetadataField::ParameterCount,
-        });
+    if closure.parameters.len() != expected_parameters.len() {
+        errors.push(ValidationError::ClosureMetadataMismatch(
+            ClosureMetadataMismatch::ParameterCount {
+                closure: closure_id,
+                expected: expected_parameters.len(),
+                found: closure.parameters.len(),
+            },
+        ));
     }
     if closure.ambient_subject.as_ref() != expected_subject {
-        errors.push(ValidationError::ClosureMetadataMismatch {
-            closure: closure_id,
-            field: ClosureMetadataField::AmbientSubject,
-        });
+        errors.push(ValidationError::ClosureMetadataMismatch(
+            ClosureMetadataMismatch::AmbientSubject {
+                closure: closure_id,
+                expected: expected_subject.cloned(),
+                found: closure.ambient_subject.clone(),
+            },
+        ));
     }
 }
 
@@ -564,18 +639,12 @@ fn validate_closure(
     closure: &crate::Closure,
     errors: &mut Vec<ValidationError>,
 ) {
-    if !module.items().contains(closure.owner) {
-        errors.push(ValidationError::ClosureMetadataMismatch {
-            closure: closure_id,
-            field: ClosureMetadataField::Owner,
-        });
-        return;
-    }
-    if !module.exprs().contains(closure.root) {
-        errors.push(ValidationError::ClosureMetadataMismatch {
-            closure: closure_id,
-            field: ClosureMetadataField::Root,
-        });
+    if !module.items().contains(closure.owner) || !module.exprs().contains(closure.root) {
+        errors.push(ValidationError::ClosureMetadataMismatch(
+            ClosureMetadataMismatch::Invalid {
+                closure: closure_id,
+            },
+        ));
         return;
     }
 

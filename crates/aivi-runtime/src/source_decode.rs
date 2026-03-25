@@ -140,9 +140,6 @@ pub enum SourceDecodeError {
         variant: Box<str>,
     },
     UnsupportedProgram(SourceDecodeProgramSupportError),
-    MaxDepthExceeded {
-        max: u32,
-    },
 }
 
 impl std::fmt::Display for SourceDecodeError {
@@ -215,12 +212,6 @@ impl std::fmt::Display for SourceDecodeError {
                 )
             }
             Self::UnsupportedProgram(error) => error.fmt(f),
-            Self::MaxDepthExceeded { max } => {
-                write!(
-                    f,
-                    "source payload decode depth exceeded the maximum of {max} levels"
-                )
-            }
         }
     }
 }
@@ -236,7 +227,10 @@ pub fn parse_json_text(text: &str) -> Result<ExternalSourceValue, SourceDecodeEr
     external_from_json(value)
 }
 
-const MAX_DECODE_DEPTH: u32 = 512;
+/// Maximum recursion depth for `decode_step`. JSON structures nested beyond this limit are
+/// rejected with an error rather than recursed into, preventing stack overflow on adversarial or
+/// deeply nested input.
+const MAX_DECODE_DEPTH: usize = 512;
 
 pub fn decode_external(
     program: &SourceDecodeProgram,
@@ -258,20 +252,12 @@ fn external_from_json(value: JsonValue) -> Result<ExternalSourceValue, SourceDec
         JsonValue::Number(number) => {
             if let Some(value) = number.as_i64() {
                 Ok(ExternalSourceValue::Int(value))
-            } else if let Some(f) = number.as_f64() {
-                // PRECISION NOTE: JSON numbers beyond 2^53 (9007199254740992) cannot be
-                // represented exactly as f64. Values exceeding this are silently truncated.
-                // Use BigInt literals in AIVI source code for large integers.
-                if f.abs() > 9_007_199_254_740_992.0_f64 {
-                    return Err(SourceDecodeError::UnsupportedNumber {
-                        value: number.to_string().into_boxed_str(),
-                    });
-                }
-                RuntimeFloat::new(f)
-                    .map(ExternalSourceValue::Float)
-                    .ok_or_else(|| SourceDecodeError::UnsupportedNumber {
-                        value: number.to_string().into_boxed_str(),
-                    })
+            } else if let Some(value) = number.as_f64().and_then(RuntimeFloat::new) {
+                // NOTE: JSON numbers that do not fit in i64 are decoded as f64.
+                // Integers larger than 2^53 will be silently truncated because f64 cannot
+                // represent all integers in that range exactly. A future improvement would
+                // be to detect such values and use a big-integer or decimal type instead.
+                Ok(ExternalSourceValue::Float(value))
             } else {
                 Err(SourceDecodeError::UnsupportedNumber {
                     value: number.to_string().into_boxed_str(),
@@ -450,10 +436,13 @@ fn decode_step(
     program: &SourceDecodeProgram,
     step: &DecodeProgramStep,
     value: &ExternalSourceValue,
-    depth: u32,
+    depth: usize,
 ) -> Result<RuntimeValue, SourceDecodeError> {
-    if depth >= MAX_DECODE_DEPTH {
-        return Err(SourceDecodeError::MaxDepthExceeded { max: MAX_DECODE_DEPTH });
+    if depth > MAX_DECODE_DEPTH {
+        return Err(SourceDecodeError::TypeMismatch {
+            expected: "value within nesting depth limit",
+            found: "structure nested too deeply (> 512 levels)",
+        });
     }
     match step {
         DecodeProgramStep::Scalar { scalar } => match scalar {

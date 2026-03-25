@@ -7,7 +7,7 @@ that you handle them. Nothing can go wrong silently.
 
 ## Result E A: the error type
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -18,7 +18,7 @@ Every operation that can fail returns `Result`.
 
 Use `\|\|>` to branch on `Ok` vs `Err`:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -29,7 +29,7 @@ The compiler ensures you handle both cases. You cannot accidentally ignore an er
 A common pattern is a sequence of operations where each step can fail.
 Use `||>` to branch on `Ok` and `Err` at each step:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -38,13 +38,13 @@ Use `||>` to branch on `Ok` and `Err` at each step:
 When a signal holds a `Result`, downstream signals can propagate the `Ok` value or branch
 on the `Err`:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
 ## Showing errors in markup
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -52,7 +52,7 @@ on the `Err`:
 
 `Option A` handles absence (not failure):
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -76,13 +76,13 @@ The return type tells you whether the operation can fail before you even read th
 
 To fall back to a default value when a result is an error:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
 Or inline in a pipe:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 
@@ -90,7 +90,7 @@ Or inline in a pipe:
 
 When validating a list of items, derive a count of the valid values with a named predicate:
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 

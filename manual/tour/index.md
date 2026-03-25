@@ -24,7 +24,7 @@ Each chapter builds on the previous one. Read them in order on your first pass.
 Before diving into the details, here is a small but complete AIVI program.
 The tour will dissect each piece.
 
-```text
+```aivi
 // TODO: add a verified AIVI example here
 ```
 

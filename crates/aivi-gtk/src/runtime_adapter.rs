@@ -311,10 +311,20 @@ impl<'a> WidgetRuntimeAssemblyBuilder<'a> {
                 }
                 PropertyPlan::Setter(setter) => {
                     validate_attribute_site(plan_id, stable_id, &setter.site, errors);
-                    // TODO: Input handles use a global counter. This means widget A's input 0
-                    // and widget B's input 0 have the same numeric ID, which could cause aliasing
-                    // bugs in the executor. Input handles should be scoped per owner.
-                    // See CODE_REVIEW.md §10 (aivi-gtk runtime_adapter.rs Fix #3).
+                    // CAUTION: `InputHandle` values are assigned from a sequential counter
+                    // that is local to `SignalGraphBuilder`.  Each call to
+                    // `assemble_widget_runtime` creates a fresh builder, so handles start at
+                    // 0 in every assembly.  This means handles from different assemblies
+                    // (i.e. different `WidgetRuntimeAssembly` owners) can alias: handle 3
+                    // in assembly A refers to a completely different input than handle 3 in
+                    // assembly B.
+                    //
+                    // TODO: Scope handles per-owner, either by using a (owner_id, local_id)
+                    // pair as the handle representation, or by ensuring that all handles
+                    // allocated during a session are drawn from a single monotonically
+                    // increasing counter that is never reset between assemblies.  This would
+                    // make cross-assembly handle comparisons a hard error rather than a
+                    // silent aliasing hazard.
                     let input = graph_builder
                         .add_input(runtime_setter_name(stable_id, setter), Some(owner))
                         .expect("runtime owner handles were validated before setter allocation");
