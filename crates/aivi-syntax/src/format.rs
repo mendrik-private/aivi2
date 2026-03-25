@@ -1707,6 +1707,31 @@ mod tests {
     }
 
     #[test]
+    fn formatter_preserves_qualified_markup_tag_names() {
+        let formatted = format_text(
+            r#"
+val view =
+    <Window>
+        <Paned.start>
+            <Label />
+        </Paned.start>
+    </Window>
+"#,
+        );
+        assert_eq!(
+            formatted,
+            concat!(
+                "val view =\n",
+                "    <Window>\n",
+                "        <Paned.start>\n",
+                "            <Label />\n",
+                "        </Paned.start>\n",
+                "    </Window>\n",
+            )
+        );
+    }
+
+    #[test]
     fn formatter_normalizes_domain_layout_fixture() {
         let formatted = format_fixture("valid/formatting/domain_layout.aivi");
         assert_eq!(

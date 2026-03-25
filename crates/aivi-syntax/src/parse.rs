@@ -4386,4 +4386,46 @@ instance Eq A => Eq (Option A)
             );
         }
     }
+
+    #[test]
+    fn parser_preserves_qualified_markup_tag_names() {
+        let (_, parsed) = load(
+            r#"
+val view =
+    <Window>
+        <Paned.start>
+            <Label />
+        </Paned.start>
+    </Window>
+"#,
+        );
+        assert!(
+            !parsed.has_errors(),
+            "qualified markup names should parse cleanly: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+        let Item::Value(view) = &parsed.module.items()[0] else {
+            panic!("expected the test item to be a value declaration");
+        };
+        let ExprKind::Markup(root) = &view
+            .expr_body()
+            .expect("test value should carry a markup expression body")
+            .kind
+        else {
+            panic!("expected the test value body to be markup");
+        };
+        let paned_start = root
+            .children
+            .first()
+            .expect("window markup should contain the qualified child-group wrapper");
+        assert_eq!(paned_start.name.as_dotted(), "Paned.start");
+        assert_eq!(
+            paned_start
+                .close_name
+                .as_ref()
+                .expect("qualified wrapper should keep its close tag")
+                .as_dotted(),
+            "Paned.start"
+        );
+    }
 }
