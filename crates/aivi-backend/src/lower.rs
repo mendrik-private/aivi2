@@ -602,6 +602,12 @@ impl<'a> ProgramLowerer<'a> {
         pipeline_id: PipelineId,
         recurrence: &lambda::PipeRecurrence,
     ) -> Result<Recurrence, LoweringError> {
+        let seed = self.lower_kernel(
+            KernelOriginKind::RecurrenceSeed {
+                pipeline: pipeline_id,
+            },
+            recurrence.seed,
+        )?;
         let start = self.lower_recurrence_stage(
             KernelOriginKind::RecurrenceStart {
                 pipeline: pipeline_id,
@@ -638,6 +644,7 @@ impl<'a> ProgramLowerer<'a> {
         Ok(Recurrence {
             target: map_recurrence_target(recurrence.target.target()),
             wakeup_kind: map_recurrence_wakeup_kind(recurrence.wakeup.kind()),
+            seed,
             start,
             steps,
             non_source_wakeup,

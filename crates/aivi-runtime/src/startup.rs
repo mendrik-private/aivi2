@@ -44,6 +44,7 @@ pub fn link_backend_runtime(
         signal_items_by_handle: linked.signal_items_by_handle,
         runtime_signal_by_item: linked.runtime_signal_by_item,
         derived_signals: linked.derived_signals,
+        linked_recurrence_signals: linked.linked_recurrence_signals,
         source_bindings: linked.source_bindings,
         task_bindings: linked.task_bindings,
     })
@@ -62,6 +63,7 @@ pub struct BackendLinkedRuntime {
     signal_items_by_handle: BTreeMap<SignalHandle, BackendItemId>,
     runtime_signal_by_item: BTreeMap<BackendItemId, SignalHandle>,
     derived_signals: BTreeMap<DerivedHandle, LinkedDerivedSignal>,
+    linked_recurrence_signals: BTreeMap<DerivedHandle, LinkedRecurrenceSignal>,
     source_bindings: BTreeMap<SourceInstanceId, LinkedSourceBinding>,
     task_bindings: BTreeMap<TaskInstanceId, LinkedTaskBinding>,
 }
@@ -159,6 +161,7 @@ impl BackendLinkedRuntime {
         let mut evaluator = LinkedDerivedEvaluator {
             backend: self.backend.as_ref(),
             derived_signals: &self.derived_signals,
+            linked_recurrence_signals: &self.linked_recurrence_signals,
             committed_signals: &runtime_committed,
         };
         self.runtime.try_tick(&mut evaluator)
@@ -444,6 +447,18 @@ pub struct LinkedDerivedSignal {
     pub backend_item: BackendItemId,
     pub dependency_items: Box<[BackendItemId]>,
     /// Backend pipeline IDs that must be applied to the body result in order.
+    pub pipeline_ids: Box<[BackendPipelineId]>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkedRecurrenceSignal {
+    pub item: hir::ItemId,
+    pub signal: DerivedHandle,
+    pub backend_item: BackendItemId,
+    pub source_input: InputHandle,
+    pub seed_kernel: KernelId,
+    pub step_kernels: Box<[KernelId]>,
+    pub dependency_items: Box<[BackendItemId]>,
     pub pipeline_ids: Box<[BackendPipelineId]>,
 }
 
@@ -1003,6 +1018,11 @@ pub enum BackendRuntimeError {
         item: hir::ItemId,
         error: EvaluationError,
     },
+    EvaluateRecurrenceSignal {
+        signal: DerivedHandle,
+        item: hir::ItemId,
+        error: EvaluationError,
+    },
     EvaluateSourceArgument {
         instance: SourceInstanceId,
         index: usize,
@@ -1123,6 +1143,15 @@ impl fmt::Display for BackendRuntimeError {
                 "failed to evaluate derived signal {:?} for item {item}: {error}",
                 signal
             ),
+            Self::EvaluateRecurrenceSignal {
+                signal,
+                item,
+                error,
+            } => write!(
+                f,
+                "failed to evaluate recurrence signal {:?} for item {item}: {error}",
+                signal
+            ),
             Self::EvaluateSourceArgument {
                 instance,
                 index,
@@ -1156,6 +1185,7 @@ impl std::error::Error for BackendRuntimeError {}
 struct LinkedDerivedEvaluator<'a> {
     backend: &'a BackendProgram,
     derived_signals: &'a BTreeMap<DerivedHandle, LinkedDerivedSignal>,
+    linked_recurrence_signals: &'a BTreeMap<DerivedHandle, LinkedRecurrenceSignal>,
     committed_signals: &'a BTreeMap<BackendItemId, RuntimeValue>,
 }
 
@@ -1167,6 +1197,11 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
         signal: DerivedHandle,
         inputs: DependencyValues<'_, RuntimeValue>,
     ) -> Result<Option<RuntimeValue>, Self::Error> {
+        // Check recurrence signals first.
+        if let Some(binding) = self.linked_recurrence_signals.get(&signal) {
+            return self.try_evaluate_recurrence(signal, binding, inputs);
+        }
+
         let binding = self
             .derived_signals
             .get(&signal)
@@ -1234,10 +1269,69 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
     }
 }
 
+impl LinkedDerivedEvaluator<'_> {
+    fn try_evaluate_recurrence(
+        &self,
+        signal: DerivedHandle,
+        binding: &LinkedRecurrenceSignal,
+        inputs: DependencyValues<'_, RuntimeValue>,
+    ) -> Result<Option<RuntimeValue>, BackendRuntimeError> {
+        let dep_count = binding.dependency_items.len();
+
+        let mut globals = self.committed_signals.clone();
+        for (index, &dep_item) in binding.dependency_items.iter().enumerate() {
+            if let Some(value) = inputs.value(index) {
+                globals.insert(dep_item, RuntimeValue::Signal(Box::new(value.clone())));
+            }
+        }
+
+        // The source input is added as the last dependency (after signal deps).
+        let source_fired = inputs.value(dep_count).is_some();
+
+        let previous = self.committed_signals.get(&binding.backend_item).cloned();
+
+        let mut evaluator = KernelEvaluator::new(self.backend);
+
+        if previous.is_none() {
+            // First tick: evaluate the seed kernel (no input subject).
+            let seed_value = evaluator
+                .evaluate_kernel(binding.seed_kernel, None, &[], &globals)
+                .map_err(|error| BackendRuntimeError::EvaluateRecurrenceSignal {
+                    signal,
+                    item: binding.item,
+                    error,
+                })?;
+            return Ok(Some(seed_value));
+        }
+
+        if !source_fired {
+            // No source firing and already have a value: no update.
+            return Ok(None);
+        }
+
+        // Source fired: evaluate step kernel with previous value as subject.
+        let prev_value = previous.unwrap();
+        let actual_prev = match &prev_value {
+            RuntimeValue::Signal(inner) => inner.as_ref(),
+            other => other,
+        };
+        let result = evaluator
+            .evaluate_kernel(binding.step_kernels[0], Some(actual_prev), &[], &globals)
+            .map_err(|error| BackendRuntimeError::EvaluateRecurrenceSignal {
+                signal,
+                item: binding.item,
+                error,
+            })?;
+
+        Ok(Some(result))
+    }
+}
+
 struct LinkArtifacts {
     signal_items_by_handle: BTreeMap<SignalHandle, BackendItemId>,
     runtime_signal_by_item: BTreeMap<BackendItemId, SignalHandle>,
     derived_signals: BTreeMap<DerivedHandle, LinkedDerivedSignal>,
+    linked_recurrence_signals: BTreeMap<DerivedHandle, LinkedRecurrenceSignal>,
     source_bindings: BTreeMap<SourceInstanceId, LinkedSourceBinding>,
     task_bindings: BTreeMap<TaskInstanceId, LinkedTaskBinding>,
 }
@@ -1253,6 +1347,7 @@ struct LinkBuilder<'a> {
     signal_items_by_handle: BTreeMap<SignalHandle, BackendItemId>,
     runtime_signal_by_item: BTreeMap<BackendItemId, SignalHandle>,
     derived_signals: BTreeMap<DerivedHandle, LinkedDerivedSignal>,
+    linked_recurrence_signals: BTreeMap<DerivedHandle, LinkedRecurrenceSignal>,
     source_bindings: BTreeMap<SourceInstanceId, LinkedSourceBinding>,
     task_bindings: BTreeMap<TaskInstanceId, LinkedTaskBinding>,
 }
@@ -1274,6 +1369,7 @@ impl<'a> LinkBuilder<'a> {
             signal_items_by_handle: BTreeMap::new(),
             runtime_signal_by_item: BTreeMap::new(),
             derived_signals: BTreeMap::new(),
+            linked_recurrence_signals: BTreeMap::new(),
             source_bindings: BTreeMap::new(),
             task_bindings: BTreeMap::new(),
         }
@@ -1290,6 +1386,7 @@ impl<'a> LinkBuilder<'a> {
                 signal_items_by_handle: std::mem::take(&mut self.signal_items_by_handle),
                 runtime_signal_by_item: std::mem::take(&mut self.runtime_signal_by_item),
                 derived_signals: std::mem::take(&mut self.derived_signals),
+                linked_recurrence_signals: std::mem::take(&mut self.linked_recurrence_signals),
                 source_bindings: std::mem::take(&mut self.source_bindings),
                 task_bindings: std::mem::take(&mut self.task_bindings),
             })
@@ -1485,10 +1582,58 @@ impl<'a> LinkBuilder<'a> {
                     .push(BackendRuntimeLinkError::MissingBackendItem { item: binding.item });
                 continue;
             };
-            if binding.source_input.is_some() {
-                self.errors.push(
-                    BackendRuntimeLinkError::SourceBackedBodySignalNotYetLinked {
+            if let Some(source_input) = binding.source_input {
+                let item = &self.backend.items()[backend_item];
+                let BackendItemKind::Signal(_) = &item.kind else {
+                    self.errors.push(BackendRuntimeLinkError::BackendItemNotSignal {
                         item: binding.item,
+                        backend_item,
+                    });
+                    continue;
+                };
+
+                // Find the pipeline with a recurrence.
+                let pipeline_id = item.pipelines.iter().copied().find(|&pid| {
+                    self.backend.pipelines()[pid].recurrence.is_some()
+                });
+                let Some(pipeline_id) = pipeline_id else {
+                    self.errors.push(BackendRuntimeLinkError::SourceBackedBodySignalNotYetLinked {
+                        item: binding.item,
+                    });
+                    continue;
+                };
+
+                let pipeline = &self.backend.pipelines()[pipeline_id];
+                let recurrence = pipeline.recurrence.as_ref().unwrap();
+
+                let seed_kernel = recurrence.seed;
+                let mut step_kernels = Vec::with_capacity(1 + recurrence.steps.len());
+                step_kernels.push(recurrence.start.kernel);
+                step_kernels.extend(recurrence.steps.iter().map(|s| s.kernel));
+                let step_kernels = step_kernels.into_boxed_slice();
+
+                let all_kernels: Vec<KernelId> = std::iter::once(seed_kernel)
+                    .chain(step_kernels.iter().copied())
+                    .collect();
+                let dependency_items =
+                    self.collect_recurrence_signal_items(binding.item, &all_kernels);
+
+                self.linked_recurrence_signals.insert(
+                    derived,
+                    LinkedRecurrenceSignal {
+                        item: binding.item,
+                        signal: derived,
+                        backend_item,
+                        source_input,
+                        seed_kernel,
+                        step_kernels,
+                        dependency_items,
+                        pipeline_ids: item
+                            .pipelines
+                            .iter()
+                            .copied()
+                            .collect::<Vec<_>>()
+                            .into_boxed_slice(),
                     },
                 );
                 continue;
@@ -1579,6 +1724,41 @@ impl<'a> LinkBuilder<'a> {
         self.errors
             .push(BackendRuntimeLinkError::MissingRuntimeSignalDependency { owner, dependency });
         None
+    }
+
+    fn collect_recurrence_signal_items(
+        &mut self,
+        owner: hir::ItemId,
+        kernels: &[KernelId],
+    ) -> Box<[BackendItemId]> {
+        let mut required = BTreeSet::new();
+        let mut kernel_queue = kernels.to_vec();
+        let mut visited_items = BTreeSet::new();
+        while let Some(kernel_id) = kernel_queue.pop() {
+            let kernel = &self.backend.kernels()[kernel_id];
+            for &item_id in &kernel.global_items {
+                if !visited_items.insert(item_id) {
+                    continue;
+                }
+                let item = &self.backend.items()[item_id];
+                match item.kind {
+                    BackendItemKind::Signal(_) => {
+                        required.insert(item_id);
+                    }
+                    _ => {
+                        if let Some(body) = item.body {
+                            kernel_queue.push(body);
+                        } else {
+                            self.errors.push(BackendRuntimeLinkError::MissingItemBodyForGlobal {
+                                owner,
+                                item: item_id,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        required.into_iter().collect::<Vec<_>>().into_boxed_slice()
     }
 
     fn collect_required_signal_items(

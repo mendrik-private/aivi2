@@ -1,14 +1,5 @@
 use aivi.defaults (Option)
 
-use aivi.list (
-    any
-    head
-    tail
-    length
-)
-
-use aivi.option (getOrElse)
-
 type Key = Key Text
 
 type Direction =
@@ -65,6 +56,10 @@ val boardSize:BoardSize = {
     height: 10
 }
 
+val boardColumnIndices:(List Int) = [0..11]
+
+val boardRowIndices:(List Int) = [0..9]
+
 val maxLength:Int = 6
 
 val initialGame:Game = {
@@ -79,27 +74,54 @@ val initialGame:Game = {
     seed: 2463534242
 }
 
-type TakeAcc A = {
+type PixelTakeAcc = {
     n: Int,
-    items: List A
+    items: List Pixel
 }
 
-fun takeStep:(TakeAcc A) #acc:(TakeAcc A) #item:A =>
+type PixelHeadState = {
+    found: Bool,
+    value: Pixel
+}
+
+type BodyCheckState = {
+    skippedHead: Bool,
+    found: Bool
+}
+
+fun takePixelStep:PixelTakeAcc acc:PixelTakeAcc item:Pixel =>
     acc.n > 0
      T|> { n: acc.n - 1, items: append acc.items [item] }
      F|> acc
 
-fun take:(List A) #n:Int #xs:(List A) =>
+fun takePixels:(List Pixel) n:Int xs:(List Pixel) =>
     xs
-     |> reduce takeStep { n, items: [] }
+     |> reduce takePixelStep { n, items: [] }
      |> .items
 
-fun range:(List Int) #from:Int #to:Int =>
-    from == to
-     T|> []
-     F|> append [from] (range (from + 1) to)
+fun pixelHeadStep:PixelHeadState state:PixelHeadState item:Pixel =>
+    state.found
+     T|> state
+     F|> { found: True, value: item }
 
-fun arrowKey:(Option Direction) #key:Key =>
+fun pixelLengthStep:Int total:Int item:Pixel =>
+    total + 1
+
+fun bodyCheckItem:BodyCheckState target:Pixel skippedHead:Bool item:Pixel =>
+    skippedHead
+     T|> { skippedHead: True, found: pixelIs target item }
+     F|> { skippedHead: True, found: False }
+
+fun bodyCheckStep:BodyCheckState target:Pixel state:BodyCheckState item:Pixel =>
+    state.found
+     T|> state
+     F|> bodyCheckItem target state.skippedHead item
+
+fun pixelLength:Int snake:(List Pixel) =>
+    snake
+     |> reduce pixelLengthStep 0
+
+fun arrowKey:(Option Direction) key:Key =>
     key
      ||> Key "ArrowUp"    => Some Up
      ||> Key "ArrowDown"  => Some Down
@@ -107,116 +129,115 @@ fun arrowKey:(Option Direction) #key:Key =>
      ||> Key "ArrowRight" => Some Right
      ||> _                => None
 
-fun isOpposite:Bool #a:Direction #b:Direction =>
+fun isOpposite:Bool a:Direction b:Direction =>
     b
      ||> Up    => a == Down
      ||> Down  => a == Up
      ||> Left  => a == Right
      ||> Right => a == Left
 
-fun guardDirection:Direction #candidate:Direction #current:Direction =>
+fun guardDirection:Direction candidate:Direction current:Direction =>
     isOpposite candidate current
      T|> current
      F|> candidate
 
-fun filterDirection:Direction #current:Direction #opt:(Option Direction) =>
+fun filterDirection:Direction current:Direction opt:(Option Direction) =>
     opt
      ||> Some dir => guardDirection dir current
      ||> None     => current
 
-fun updateDirection:Direction #key:Key #current:Direction =>
+fun updateDirection:Direction key:Key current:Direction =>
     arrowKey key
      |> filterDirection current
 
-fun moveHead:Pixel #dx:Int #dy:Int #p:Pixel =>
+fun moveHead:Pixel dx:Int dy:Int p:Pixel =>
     p
      ||> Pixel px py => Pixel (px + dx) (py + dy)
 
-fun moveUp:Pixel #p:Pixel =>
+fun moveUp:Pixel p:Pixel =>
     p
      |> moveHead 0 (0 - 1)
 
-fun moveDown:Pixel #p:Pixel =>
+fun moveDown:Pixel p:Pixel =>
     p
      |> moveHead 0 1
 
-fun moveLeft:Pixel #p:Pixel =>
+fun moveLeft:Pixel p:Pixel =>
     p
      |> moveHead (0 - 1) 0
 
-fun moveRight:Pixel #p:Pixel =>
+fun moveRight:Pixel p:Pixel =>
     p
      |> moveHead 1 0
 
-fun nextHead:Pixel #direction:Direction #head:Pixel =>
+fun nextHead:Pixel direction:Direction head:Pixel =>
     direction
      ||> Up    => moveUp head
      ||> Down  => moveDown head
      ||> Left  => moveLeft head
      ||> Right => moveRight head
 
-fun nextSeed:Int #seed:Int =>
+fun nextSeed:Int seed:Int =>
     (seed * 1103515245 + 12345) % 2147483648
 
-fun spawnAt:Pixel #size:BoardSize #seed:Int =>
+fun spawnAt:Pixel size:BoardSize seed:Int =>
     Pixel (seed % (size.width - 2) + 1) (nextSeed seed % (size.height - 2) + 1)
 
-fun snakeHead:Pixel #snake:(List Pixel) =>
+fun snakeHead:Pixel snake:(List Pixel) =>
     snake
-     |> head
-     |> getOrElse (Pixel 0 0)
+     |> reduce pixelHeadStep { found: False, value: Pixel 0 0 }
+     |> .value
 
-fun movedHead:Pixel #direction:Direction #snake:(List Pixel) =>
+fun movedHead:Pixel direction:Direction snake:(List Pixel) =>
     nextHead direction (snakeHead snake)
 
-fun pixelIs:Bool #target:Pixel #p:Pixel =>
+fun pixelIs:Bool target:Pixel p:Pixel =>
     p == target
 
-fun occupiesBody:Bool #snake:(List Pixel) #p:Pixel =>
+fun occupiesBody:Bool snake:(List Pixel) p:Pixel =>
     snake
-     |> tail
-     |> getOrElse []
-     |> any (pixelIs p)
+     |> reduce (bodyCheckStep p) { skippedHead: False, found: False }
+     |> .found
 
-fun willEat:Bool #direction:Direction #food:Pixel #snake:(List Pixel) =>
+fun willEat:Bool direction:Direction food:Pixel snake:(List Pixel) =>
     movedHead direction snake == food
 
-fun growSnake:(List Pixel) #direction:Direction #snake:(List Pixel) =>
+fun growSnake:(List Pixel) direction:Direction snake:(List Pixel) =>
     append [movedHead direction snake] snake
-     |> take maxLength
+     |> takePixels maxLength
 
-fun moveSnake:(List Pixel) #direction:Direction #snake:(List Pixel) =>
+fun moveSnake:(List Pixel) direction:Direction snake:(List Pixel) =>
     append [movedHead direction snake] snake
-     |> take (length snake)
+     |> takePixels (pixelLength snake)
 
-fun advanceSnake:(List Pixel) #direction:Direction #ate:Bool #snake:(List Pixel) =>
+fun advanceSnake:(List Pixel) direction:Direction ate:Bool snake:(List Pixel) =>
     ate
      T|> growSnake direction snake
      F|> moveSnake direction snake
 
-fun hitsWall:Bool #size:BoardSize #p:Pixel =>
+fun hitsWall:Bool size:BoardSize p:Pixel =>
     p
      ||> Pixel px py => px < 0 or px > size.width - 1 or py < 0 or py > size.height - 1
 
-fun hasCollision:Bool #size:BoardSize #direction:Direction #game:Game =>
+fun hasCollision:Bool size:BoardSize direction:Direction game:Game =>
     hitsWall size (movedHead direction game.snake) or occupiesBody game.snake (movedHead direction game.snake)
 
-fun nextStatusFor:Status #size:BoardSize #direction:Direction #game:Game =>
+fun nextStatusFor:Status size:BoardSize direction:Direction game:Game =>
     hasCollision size direction game
      T|> GameOver
      F|> Running
 
-fun nextScore:Int #ate:Bool #score:Int =>
+fun nextScore:Int ate:Bool score:Int =>
     ate
      T|> score + 1
      F|> score
 
-fun nextFood:Pixel #ate:Bool #food:Pixel #size:BoardSize #seed:Int =>
+fun nextFood:Pixel ate:Bool food:Pixel size:BoardSize seed:Int =>
     ate
      T|> spawnAt size seed
      F|> food
 
-fun applyStep:Game #size:BoardSize #direction:Direction #game:Game #ate:Bool =>
+fun applyStep:Game size:BoardSize direction:Direction game:Game ate:Bool =>
     {
         snake: advanceSnake direction ate game.snake,
         food: nextFood ate game.food size (nextSeed game.seed),
@@ -225,73 +246,79 @@ fun applyStep:Game #size:BoardSize #direction:Direction #game:Game #ate:Bool =>
         seed: nextSeed game.seed
     }
 
-fun stepRunning:Game #size:BoardSize #direction:Direction #game:Game =>
+fun stepRunning:Game size:BoardSize direction:Direction game:Game =>
     willEat direction game.food game.snake
      |> applyStep size direction game
 
-fun stepGame:Game #size:BoardSize #direction:Direction #game:Game =>
+fun stepGame:Game size:BoardSize direction:Direction game:Game =>
     game.status
      ||> GameOver => game
      ||> Running  => stepRunning size direction game
 
-fun cellFoodOrEmpty:CellKind #game:Game #pos:Pixel =>
+fun cellFoodOrEmpty:CellKind game:Game pos:Pixel =>
     pos == game.food
      T|> Food
      F|> Empty
 
-fun cellBodyOrContent:CellKind #game:Game #pos:Pixel =>
+fun cellBodyOrContent:CellKind game:Game pos:Pixel =>
     occupiesBody game.snake pos
      T|> SnakeBody
      F|> cellFoodOrEmpty game pos
 
-fun cellAt:CellKind #game:Game #pos:Pixel =>
+fun cellAt:CellKind game:Game pos:Pixel =>
     pos == snakeHead game.snake
      T|> SnakeHead
      F|> cellBodyOrContent game pos
 
-fun makeCell:BoardCell #game:Game #row:Int #col:Int =>
+fun makeCell:BoardCell game:Game row:Int col:Int =>
     {
         id: col,
         kind: cellAt game (Pixel col row)
     }
 
-fun rowCells:(List BoardCell) #size:BoardSize #game:Game #row:Int =>
-    range 0 size.width
-     *|> makeCell game row
+fun buildRowCellsStep:(List BoardCell) game:Game row:Int acc:(List BoardCell) col:Int =>
+    append acc [makeCell game row col]
 
-fun makeRow:BoardRow #size:BoardSize #game:Game #row:Int =>
+fun rowCells:(List BoardCell) size:BoardSize game:Game row:Int =>
+    boardColumnIndices
+     |> reduce (buildRowCellsStep game row) []
+
+fun makeRow:BoardRow size:BoardSize game:Game row:Int =>
     {
         id: row,
         cells: rowCells size game row
     }
 
-fun buildBoardRows:(List BoardRow) #size:BoardSize #game:Game =>
-    range 0 size.height
-     *|> makeRow size game
+fun buildBoardRowsStep:(List BoardRow) size:BoardSize game:Game acc:(List BoardRow) row:Int =>
+    append acc [makeRow size game row]
 
-fun toBoard:GameBoard #size:BoardSize #game:Game =>
+fun buildBoardRows:(List BoardRow) size:BoardSize game:Game =>
+    boardRowIndices
+     |> reduce (buildBoardRowsStep size game) []
+
+fun toBoard:GameBoard size:BoardSize game:Game =>
     {
         width: size.width,
         height: size.height,
         rows: buildBoardRows size game
     }
 
-fun cellGlyph:Text #kind:CellKind =>
+fun cellGlyph:Text kind:CellKind =>
     kind
      ||> SnakeHead => "@"
      ||> SnakeBody => "o"
      ||> Food      => "*"
      ||> Empty     => "."
 
-fun scoreLineFor:Text #game:Game =>
+fun scoreLineFor:Text game:Game =>
     "Score: {game.score}"
 
-fun statusLineFor:Text #game:Game =>
+fun statusLineFor:Text game:Game =>
     game.status
      ||> Running  => "Running"
      ||> GameOver => "Game Over"
 
-fun directionLabel:Text #direction:Direction =>
+fun directionLabel:Text direction:Direction =>
     direction
      ||> Up    => "Up"
      ||> Down  => "Down"

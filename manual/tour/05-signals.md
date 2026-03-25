@@ -38,7 +38,7 @@ identically on signals.
 ## Recurrence: `@|>` and `<|@`
 
 The recurrence pattern is how a signal accumulates state over time.
-The shape is always: **seed → enter → guards → step**.
+The shape is always: **seed → start → guards → step**.
 
 ```aivi
 // TODO: add a verified AIVI example here
@@ -47,9 +47,12 @@ The shape is always: **seed → enter → guards → step**.
 Reading this:
 
 - `initial` — the seed value before any events arrive.
-- `@|> cursor` — enter the recurrence driven by `cursor` (the source that wakes the loop).
-- `?|> cursor.hasNext` — an optional guard; the step is skipped when the predicate is false.
-- `<|@ cursor.next` — the step function: receives the current state, returns the next state.
+- `@|> start` — the first recurrence stage.
+- `?|> predicate` — an optional guard; the step is skipped when the predicate is false.
+- `<|@ step` — a recurrence step stage: receives the current state, returns the next state.
+
+Wakeups come from the attached `@source` / `@recur.*` decorator rather than from the
+expressions on the right of `@|>` / `<|@`.
 
 ## Example: direction signal in Snake
 
@@ -57,8 +60,8 @@ Reading this:
 // TODO: add a verified AIVI example here
 ```
 
-`Right` is the seed. On each `keyDown` event, `<|@ updateDirection keyDown` computes
-the next direction from the current one.
+`Right` is the seed. The `window.keyDown` source supplies the wakeups; the recurrent body
+uses `updateDirection keyDown` as both the start stage and the step stage.
 
 ## Example: game state signal
 
@@ -66,8 +69,8 @@ the next direction from the current one.
 // TODO: add a verified AIVI example here
 ```
 
-Every 160 ms the timer fires. `stepGame` runs with the current `direction`, producing the next
-`game` state. The entire game loop is two lines.
+Every 160 ms the timer fires. The timer decorator provides the wakeups, and the recurrent body
+uses `stepGame boardSize direction` to produce the next `game` state.
 
 ## Recurrence guards
 
@@ -100,8 +103,8 @@ A recurrent signal has memory — it folds over a stream of events.
 - Derived signals use `|>` chains; they recompute automatically.
 - Signals form a dependency graph maintained by the runtime.
 - You never write to a signal; you only declare how it is computed.
-- `@|>` enters the recurrent loop: seed on the left, driver (cursor or source) on the right.
-- `<|@` advances the loop: applies the step function to the current state, returning the next state.
+- `@|>` starts a recurrent suffix: seed on the left, start stage on the right.
+- `<|@` advances the loop: each step stage consumes the current state and returns the next state.
 - `?|>` between `@|>` and `<|@` acts as a guard, skipping the step when false.
 - Recurrent signals have memory (they fold over events); derived signals do not.
 

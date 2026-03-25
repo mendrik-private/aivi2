@@ -103,6 +103,7 @@ pub struct RecurrenceNonSourceWakeupBinding {
 pub struct RecurrenceNodePlan {
     pub target: RecurrencePlan,
     pub wakeup: RecurrenceWakeupPlan,
+    pub seed: RecurrenceRuntimeExpr,
     pub start: RecurrenceStagePlan,
     pub guards: Vec<RecurrenceGuardPlan>,
     pub steps: Vec<RecurrenceStagePlan>,
@@ -140,6 +141,7 @@ pub enum RecurrenceElaborationBlocker {
         blocker: RecurrenceRuntimeStageBlocker,
     },
     NonSourceWakeupWitness(RecurrenceRuntimeStageBlocker),
+    SeedExpressionBlocked(RecurrenceRuntimeStageBlocker),
     StepChainDoesNotClose {
         expected: GateType,
         found: GateType,
@@ -515,10 +517,23 @@ fn elaborate_recurrence_pipe(
         | None => None,
     };
 
+    // Elaborate the pipe head as the seed expression (no ambient subject).
+    let seed_result = lower_gate_runtime_expr(module, pipe.head, env, None, typing);
+    let seed = match seed_result {
+        Ok(expr) => Some(expr),
+        Err(blocker) => {
+            blockers.push(RecurrenceElaborationBlocker::SeedExpressionBlocked(
+                recurrence_runtime_stage_blocker(blocker),
+            ));
+            None
+        }
+    };
+
     if blockers.is_empty() {
         RecurrenceNodeOutcome::Planned(RecurrenceNodePlan {
             target: target.expect("planned recurrence nodes should have a target"),
             wakeup: wakeup.expect("planned recurrence nodes should have a wakeup"),
+            seed: seed.expect("planned recurrence nodes should have a seed"),
             start: start_plan.expect("planned recurrence nodes should have a start stage"),
             guards: guard_plans,
             steps: step_plans,

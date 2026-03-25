@@ -3350,6 +3350,12 @@ mod tests {
             .join(path)
     }
 
+    fn repo_path(path: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(path)
+    }
+
     struct TempDir {
         path: PathBuf,
     }
@@ -3419,6 +3425,39 @@ mod tests {
         requested_view: Option<&str>,
     ) -> Result<super::RunArtifact, String> {
         let snapshot = WorkspaceHirSnapshot::load(&root.path().join(entry_relative))?;
+        assert!(
+            !super::workspace_syntax_failed(&snapshot, |_, diagnostics| diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.severity == aivi_base::Severity::Error)),
+            "workspace fixture should parse cleanly"
+        );
+        let (hir_failed, validation_failed) = super::workspace_hir_failed(
+            &snapshot,
+            |_, diagnostics| {
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.severity == aivi_base::Severity::Error)
+            },
+            |_, diagnostics| {
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.severity == aivi_base::Severity::Error)
+            },
+        );
+        assert!(!hir_failed, "workspace fixture should lower cleanly");
+        assert!(
+            !validation_failed,
+            "workspace fixture should validate cleanly"
+        );
+        let lowered = snapshot.entry_hir();
+        prepare_run_artifact(&snapshot.sources, lowered.module(), requested_view)
+    }
+
+    fn prepare_run_from_path(
+        path: &Path,
+        requested_view: Option<&str>,
+    ) -> Result<super::RunArtifact, String> {
+        let snapshot = WorkspaceHirSnapshot::load(path)?;
         assert!(
             !super::workspace_syntax_failed(&snapshot, |_, diagnostics| diagnostics
                 .iter()
@@ -3571,6 +3610,18 @@ export (Greeting, Farewell)
         let artifact = prepare_run_from_workspace(&workspace, "main.aivi", None)
             .expect("workspace run preparation should resolve imported types");
         assert_eq!(artifact.view_name.as_ref(), "view");
+    }
+
+    #[test]
+    fn prepare_run_accepts_snake_demo() {
+        let artifact = prepare_run_from_path(&repo_path("demos/snake.aivi"), None)
+            .expect("snake demo should prepare for run");
+        assert_eq!(artifact.view_name.as_ref(), "main");
+        let root = artifact.bridge.root_node();
+        let GtkBridgeNodeKind::Widget(widget) = &root.kind else {
+            panic!("expected a root widget, found {:?}", root.kind.tag());
+        };
+        assert_eq!(widget.widget.segments().last().text(), "Window");
     }
 
     #[test]

@@ -1018,9 +1018,17 @@ impl<'a> ModuleLowerer<'a> {
                         }
                         None => None,
                     };
+                    let seed_expr = match self.lower_runtime_expr(node.owner, &plan.seed) {
+                        Ok(expr) => expr,
+                        Err(error) => {
+                            self.errors.push(error);
+                            continue;
+                        }
+                    };
                     PipeRecurrence {
                         target: plan.target,
                         wakeup: plan.wakeup,
+                        seed_expr,
                         start,
                         guards,
                         steps,
@@ -3048,6 +3056,12 @@ impl<'a> RuntimeFragmentLowerer<'a> {
 
     fn ensure_hir_item_lowered(&mut self, owner: HirItemId) {
         if self.lowered.contains(&owner) || self.lowering.contains(&owner) {
+            return;
+        }
+        if matches!(self.lowerer.hir.items().get(owner), Some(HirItem::Signal(_))) {
+            if self.seed_hir_item(owner).is_some() {
+                self.lowered.insert(owner);
+            }
             return;
         }
         let Some(report) = self.report_by_owner.get(&owner).cloned() else {

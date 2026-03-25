@@ -318,6 +318,9 @@ pub enum KernelOriginKind {
     RecurrenceWakeupWitness {
         pipeline: PipelineId,
     },
+    RecurrenceSeed {
+        pipeline: PipelineId,
+    },
     SourceArgument {
         source: SourceId,
         index: usize,
@@ -355,6 +358,7 @@ impl fmt::Display for KernelOriginKind {
             Self::RecurrenceWakeupWitness { pipeline } => {
                 write!(f, "recurrence-witness pipeline{pipeline}")
             }
+            Self::RecurrenceSeed { pipeline } => write!(f, "recurrence-seed pipeline{pipeline}"),
             Self::SourceArgument { source, index } => {
                 write!(f, "source-argument source{source}[{index}]")
             }

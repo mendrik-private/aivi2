@@ -200,20 +200,20 @@ The reducer receives the accumulated value and each element in turn.
 
 ## The recur-start pipe `@|>`
 
-`@|>` enters the recurrent loop. The seed value sits on its left; the driver (source or
-cursor) sits on its right:
+`@|>` begins a recurrent pipe suffix. The seed value sits on its left; the recurrence
+**start stage** sits on its right:
 
 ```aivi
 // TODO: add a verified AIVI example here
 ```
 
-The seed is the accumulated state before any events arrive. The driver wakes the loop on
-each event.
+The seed is the accumulated state before any events arrive. Wakeups come from the attached
+`@source` / `@recur.*` decorator, not from the expression on the right of `@|>`.
 
 ## The recur-step pipe `<|@`
 
-`<|@` is the step function of the recurrence. It receives the current accumulated state and
-returns the next state:
+`<|@` adds a recurrence step stage. It receives the current accumulated state and returns the
+next state:
 
 ```aivi
 // TODO: add a verified AIVI example here
@@ -224,9 +224,9 @@ condition is false:
 
 ```aivi
 initial
- @|> cursor
- ?|> cursor.hasNext
- <|@ cursor.next
+ @|> prepare
+ ?|> .ready
+ <|@ advance
 ```
 
 ## The apply pipe `&|>`
@@ -271,8 +271,8 @@ independent signals into one derived value without explicit `zip` calls.
 - `_` is the ambient value; `.field` is ambient projection (not `_.field`).
 - `*|>` maps a function over every element of a list.
 - `<|*` collects a `*|>` fan-out back into a single value with a reducer.
-- `seed @|> driver` enters the recurrence loop driven by a source or cursor.
-- `<|@` is the step function; `?|>` between `@|>` and `<|@` skips the iteration when false.
+- `seed @|> start` begins a recurrent suffix; wakeups come from the attached `@source` or `@recur.*` decorator.
+- `<|@` adds one or more step stages; `?|>` between `@|>` and `<|@` skips the iteration when false.
 - `&|>` zips a signal of functions with a signal of values pointwise.
 
 [Next: Pattern Matching →](/tour/04-pattern-matching)

@@ -215,6 +215,11 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                 continue;
             }
 
+            // For source-backed derived signals, also depend on the source input signal.
+            if let Some(source_input) = binding.source_input {
+                resolved.push(source_input.as_signal());
+            }
+
             if let Err(err) = graph_builder.define_derived(*derived, resolved.iter().copied()) {
                 errors.push(HirRuntimeAdapterError::GraphBuild(err));
                 continue;

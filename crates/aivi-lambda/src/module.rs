@@ -351,6 +351,7 @@ pub enum GateStage {
 pub struct PipeRecurrence {
     pub target: aivi_typing::RecurrencePlan,
     pub wakeup: aivi_typing::RecurrenceWakeupPlan,
+    pub seed: ClosureId,
     pub start: RecurrenceStage,
     pub steps: Vec<RecurrenceStage>,
     pub non_source_wakeup: Option<NonSourceWakeup>,
@@ -414,6 +415,7 @@ pub enum ClosureKind {
     GateTrue,
     GateFalse,
     SignalFilterPredicate,
+    RecurrenceSeed,
     RecurrenceStart,
     RecurrenceStep,
     RecurrenceWakeupWitness,
@@ -426,6 +428,7 @@ impl fmt::Display for ClosureKind {
             Self::GateTrue => f.write_str("gate-true"),
             Self::GateFalse => f.write_str("gate-false"),
             Self::SignalFilterPredicate => f.write_str("signal-filter-predicate"),
+            Self::RecurrenceSeed => f.write_str("recurrence-seed"),
             Self::RecurrenceStart => f.write_str("recurrence-start"),
             Self::RecurrenceStep => f.write_str("recurrence-step"),
             Self::RecurrenceWakeupWitness => f.write_str("recurrence-wakeup-witness"),

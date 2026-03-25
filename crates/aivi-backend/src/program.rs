@@ -235,6 +235,7 @@ impl fmt::Display for Program {
                         "    recurrence target={} wakeup={}",
                         recurrence.target, recurrence.wakeup_kind
                     )?;
+                    writeln!(f, "    recurrence-seed kernel{}", recurrence.seed)?;
                     writeln!(
                         f,
                         "      start[{}] = kernel{}",
@@ -526,6 +527,7 @@ impl fmt::Display for RecurrenceWakeupKind {
 pub struct Recurrence {
     pub target: RecurrenceTarget,
     pub wakeup_kind: RecurrenceWakeupKind,
+    pub seed: KernelId,
     pub start: RecurrenceStage,
     pub steps: Vec<RecurrenceStage>,
     pub non_source_wakeup: Option<NonSourceWakeup>,

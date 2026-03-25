@@ -297,6 +297,16 @@ impl<'a> ModuleLowerer<'a> {
         for (pipe_id, pipe) in self.core.pipes().iter() {
             let runtime_names = parameter_name_map(&self.core.items()[pipe.owner].parameters);
             let recurrence = pipe.recurrence.as_ref().and_then(|recurrence| {
+                let seed = self.lower_closure(
+                    pipe.owner,
+                    pipe.origin.span,
+                    ClosureKind::RecurrenceSeed,
+                    None,
+                    Vec::new(),
+                    recurrence.seed_expr,
+                    true,
+                    &runtime_names,
+                )?;
                 let start = self.lower_recurrence_stage(
                     pipe.owner,
                     &runtime_names,
@@ -332,6 +342,7 @@ impl<'a> ModuleLowerer<'a> {
                 Some(PipeRecurrence {
                     target: recurrence.target.clone(),
                     wakeup: recurrence.wakeup.clone(),
+                    seed,
                     start,
                     steps,
                     non_source_wakeup,

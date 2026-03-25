@@ -473,6 +473,7 @@ pub struct FanoutJoin {
 pub struct PipeRecurrence {
     pub target: RecurrencePlan,
     pub wakeup: RecurrenceWakeupPlan,
+    pub seed_expr: ExprId,
     pub start: RecurrenceStage,
     pub guards: Vec<RecurrenceGuard>,
     pub steps: Vec<RecurrenceStage>,

@@ -36,13 +36,12 @@ You never subscribe or unsubscribe manually.
 @recur.timer 160ms
 sig game : Signal Game =
     initialGame
-     @|> timer
-     ?|> timer.hasNext
+     @|> stepGame boardSize direction
      <|@ stepGame boardSize direction
 ```
 
-The interval uses the `Duration` domain literal (`ms`, `sec`, `min`). On every tick the
-recurrence step runs, producing the next accumulated state.
+The interval uses the `Duration` domain literal (`ms`, `sec`, `min`). The decorator provides
+the timer wakeups; on each tick the recurrent stages run and produce the next accumulated state.
 
 Options for `@source timer.every N` (the expanded form of `@recur.timer`):
 
