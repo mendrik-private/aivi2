@@ -30,6 +30,16 @@ pub struct RuntimeMapEntry {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeSumValue {
+    /// The HIR item that defines this sum type.
+    ///
+    /// # Staleness after recompilation
+    ///
+    /// This `HirItemId` is assigned at decode/evaluation time and refers to the item identity in
+    /// the HIR layer at that moment. After any recompilation that changes HIR structure — for
+    /// example, adding, removing, or reordering type definitions — the numeric `HirItemId` may
+    /// point at a different item or become invalid entirely. Runtime sum values that were produced
+    /// before such a recompile must be re-decoded against the new HIR before they are used in any
+    /// context that dispatches on `item` (e.g. structural equality, variant dispatch, serialization).
     pub item: HirItemId,
     pub type_name: Box<str>,
     pub variant_name: Box<str>,
@@ -102,10 +112,11 @@ pub enum RuntimeValue {
     Bytes(Box<[u8]>),
     Tuple(Vec<RuntimeValue>),
     List(Vec<RuntimeValue>),
-    // TODO: RuntimeValue map uses Vec<RuntimeMapEntry> with O(n) lookup. BTreeMap requires Ord
-    // on RuntimeValue — blocked on implementing total ordering across all RuntimeValue variants
-    // (including recursive types like Map, Set, Tuple, and Callable). Until total ordering is
-    // defined, Vec with linear scan is the only safe representation.
+    // TODO: upgrade to BTreeMap for O(log n) lookup instead of O(n) linear scan.
+    // This is blocked on `RuntimeValue` not implementing `Ord`: `RuntimeValue::Float` wraps
+    // `RuntimeFloat(f64)`, and `f64` does not implement `Ord` because of NaN. Until a total
+    // ordering is defined for all runtime value variants (e.g. by canonicalising NaN or
+    // excluding float keys), the map representation must remain a `Vec`.
     Map(Vec<RuntimeMapEntry>),
     Set(Vec<RuntimeValue>),
     Record(Vec<RuntimeRecordField>),

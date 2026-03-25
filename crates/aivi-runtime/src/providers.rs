@@ -1774,7 +1774,7 @@ fn spawn_http_worker(port: DetachedRuntimePublicationPort, plan: HttpPlan, stop:
             let Some(value) = execute_http_cycle(&plan, &port) else {
                 return;
             };
-            if stop_flag.load(Ordering::Relaxed) {
+            if stop.load(Ordering::Acquire) {
                 return;
             }
             if port
@@ -1851,7 +1851,7 @@ fn spawn_fs_read_worker(port: DetachedRuntimePublicationPort, plan: FsReadPlan, 
         if sleep_with_cancellation(plan.debounce, &port) {
             return;
         }
-        if stop_flag.load(Ordering::Relaxed) {
+        if stop.load(Ordering::Acquire) {
             return;
         }
         let result = match fs::read_to_string(&plan.path) {
