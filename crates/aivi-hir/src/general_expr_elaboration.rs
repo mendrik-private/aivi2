@@ -394,7 +394,8 @@ fn pre_gate_transform_body(
         return None;
     };
     let gate_idx = pipe.stages.iter().position(|stage| {
-        matches!(stage.kind, GateRuntimePipeStageKind::Gate { .. }) && stage.input_subject.is_signal()
+        matches!(stage.kind, GateRuntimePipeStageKind::Gate { .. })
+            && stage.input_subject.is_signal()
     })?;
     if gate_idx == 0 {
         return None;
@@ -1427,10 +1428,36 @@ impl<'a> GeneralExprElaborator<'a> {
         let branch_subject = subject.gate_payload().clone();
         let branch_expected = self.inline_pipe_stage_result_body_type(subject, expected);
         for stage in stages {
-            let PipeStageKind::Case { pattern, body } = &stage.kind else {
+            let PipeStageKind::Case {
+                pattern,
+                guard,
+                body,
+            } = &stage.kind
+            else {
                 continue;
             };
             let branch_env = self.case_branch_env(env, *pattern, &branch_subject);
+            let lowered_guard = if let Some(guard) = guard {
+                let guard = match self.lower_body_expr(
+                    *guard,
+                    &branch_env,
+                    Some(&branch_subject),
+                    Some(&GateType::Primitive(crate::BuiltinType::Bool)),
+                ) {
+                    Ok(guard) => guard,
+                    Err(errors) => {
+                        blockers.extend(errors);
+                        continue;
+                    }
+                };
+                if !guard.ty.is_bool() {
+                    blockers.push(GeneralExprBlocker::UnknownExprType { span: guard.span });
+                    continue;
+                }
+                Some(guard)
+            } else {
+                None
+            };
             let lowered_body = match self.lower_body_expr(
                 *body,
                 &branch_env,
@@ -1458,6 +1485,7 @@ impl<'a> GeneralExprElaborator<'a> {
             arms.push(GateRuntimeCaseArm {
                 span: stage.span,
                 pattern: *pattern,
+                guard: lowered_guard,
                 body: lowered_body,
             });
         }
@@ -1802,6 +1830,9 @@ impl<'a> GeneralExprElaborator<'a> {
                     expected,
                     actual,
                 },
+                GateIssue::CaseGuardNotBool { span, .. } => {
+                    GeneralExprBlocker::UnknownExprType { span }
+                }
                 GateIssue::InvalidPipeStageInput { span, .. }
                 | GateIssue::UnsupportedApplicativeClusterMember { span, .. }
                 | GateIssue::ApplicativeClusterMismatch { span, .. }
@@ -2311,6 +2342,37 @@ mod tests {
                         assert_eq!(falsy.constructor, crate::BuiltinTerm::False);
                     }
                     other => panic!("expected truthy/falsy pipe stage, found {other:?}"),
+                },
+                other => panic!("expected pipe body, found {other:?}"),
+            },
+            other => panic!("expected lowered function body, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn elaborates_guarded_case_arms_into_runtime_cases() {
+        let lowered = lower_fixture("milestone-2/valid/pipe-case-guards/main.aivi");
+        assert!(
+            !lowered.has_errors(),
+            "guarded case fixture should lower to HIR: {:?}",
+            lowered.diagnostics()
+        );
+        let report = elaborate_general_expressions(lowered.module());
+        let classify = report
+            .items()
+            .iter()
+            .find(|item| item_name(lowered.module(), item.owner) == Some("classify"))
+            .expect("expected classify elaboration");
+        match &classify.outcome {
+            GeneralExprOutcome::Lowered(expr) => match &expr.kind {
+                GateRuntimeExprKind::Pipe(pipe) => match &pipe.stages[0].kind {
+                    GateRuntimePipeStageKind::Case { arms } => {
+                        assert_eq!(arms.len(), 3);
+                        assert!(arms[0].guard.is_some());
+                        assert!(arms[1].guard.is_none());
+                        assert!(arms[2].guard.is_none());
+                    }
+                    other => panic!("expected case pipe stage, found {other:?}"),
                 },
                 other => panic!("expected pipe body, found {other:?}"),
             },

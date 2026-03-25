@@ -144,7 +144,10 @@ pub(crate) fn capture_free_bindings(
                             for arm in arms.iter().rev() {
                                 let mut arm_scope = scope.clone();
                                 extend_scope_with_pattern(&mut arm_scope, &arm.pattern);
-                                work.push((arm.body, arm_scope));
+                                work.push((arm.body, arm_scope.clone()));
+                                if let Some(guard) = arm.guard {
+                                    work.push((guard, arm_scope));
+                                }
                             }
                         }
                         PipeStageKind::TruthyFalsy(pair) => {

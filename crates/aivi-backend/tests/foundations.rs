@@ -1,15 +1,14 @@
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use aivi_backend::{
-    BuiltinAppendCarrier, BuiltinApplicativeCarrier, BuiltinApplyCarrier,
-    BuiltinBifunctorCarrier, BuiltinClassMemberIntrinsic, BuiltinFilterableCarrier,
-    BuiltinFoldableCarrier, BuiltinFunctorCarrier, BuiltinOrdSubject,
-    BuiltinTraversableCarrier, CodegenError, DecodeStepKind, DomainDecodeSurfaceKind,
-    EvaluationError, GateStage as BackendGateStage, InlinePipeConstructor,
-    InlinePipePatternKind, InlinePipeStageKind, ItemKind as BackendItemKind, KernelEvaluator,
-    KernelExprKind, LayoutKind, LoweringError, NonSourceWakeupCause, RecurrenceTarget,
-    RuntimeBigInt, RuntimeDecimal, RuntimeFloat, RuntimeSumValue, RuntimeValue, SourceProvider,
-    StageKind as BackendStageKind, ValidationError, compile_program,
+    BuiltinAppendCarrier, BuiltinApplicativeCarrier, BuiltinApplyCarrier, BuiltinBifunctorCarrier,
+    BuiltinClassMemberIntrinsic, BuiltinFilterableCarrier, BuiltinFoldableCarrier,
+    BuiltinFunctorCarrier, BuiltinOrdSubject, BuiltinTraversableCarrier, CodegenError,
+    DecodeStepKind, DomainDecodeSurfaceKind, EvaluationError, GateStage as BackendGateStage,
+    InlinePipeConstructor, InlinePipePatternKind, InlinePipeStageKind, ItemKind as BackendItemKind,
+    KernelEvaluator, KernelExprKind, LayoutKind, LoweringError, NonSourceWakeupCause,
+    RecurrenceTarget, RuntimeBigInt, RuntimeDecimal, RuntimeFloat, RuntimeSumValue, RuntimeValue,
+    SourceProvider, StageKind as BackendStageKind, ValidationError, compile_program,
     lower_module as lower_backend_module, validate_program,
 };
 use aivi_base::{SourceDatabase, SourceSpan};
@@ -1374,6 +1373,49 @@ val failedLabel =
 }
 
 #[test]
+fn evaluates_guarded_case_arms_in_inline_pipes() {
+    let backend = lower_fixture("milestone-2/valid/pipe-case-guards/main.aivi");
+    let classify = find_item(&backend, "classify");
+    let classify_kernel = backend.items()[classify]
+        .body
+        .expect("classify should lower to a backend body");
+    let classify_root = backend.kernels()[classify_kernel].root;
+    let KernelExprKind::Pipe(classify_pipe) =
+        &backend.kernels()[classify_kernel].exprs()[classify_root].kind
+    else {
+        panic!("classify should lower to a pipe expression");
+    };
+    let InlinePipeStageKind::Case { arms } = &classify_pipe.stages[0].kind else {
+        panic!("classify should lower to an inline case stage");
+    };
+    assert_eq!(arms.len(), 3);
+    assert!(arms[0].guard.is_some());
+    assert!(arms[1].guard.is_none());
+    assert!(arms[2].guard.is_none());
+
+    let mut evaluator = KernelEvaluator::new(&backend);
+    let globals = BTreeMap::new();
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "largeLabel"), &globals)
+            .expect("guarded Some branch should evaluate"),
+        RuntimeValue::Text("large".into())
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "smallLabel"), &globals)
+            .expect("unguarded Some fallback should evaluate"),
+        RuntimeValue::Text("small 5".into())
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "emptyLabel"), &globals)
+            .expect("None branch should evaluate"),
+        RuntimeValue::Text("empty".into())
+    );
+}
+
+#[test]
 fn lowers_recurrence_targets_and_witnesses() {
     let backend = lower_text(
         "backend-recurrence.aivi",
@@ -2008,4 +2050,3 @@ sig slowWindows : Signal Window =
             if detail.contains("record projection, pointer-niche Option carriers")
     )));
 }
-

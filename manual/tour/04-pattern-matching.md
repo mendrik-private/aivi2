@@ -10,12 +10,27 @@ structure, not just equality.
 Multiple arms are written as successive `||>` lines:
 
 ```aivi
-// TODO: add a verified AIVI example here
+fun describe:Text #value:Option Int =>
+    value
+     ||> Some count when count > 10 => "large"
+     ||> Some count                 => "small {count}"
+     ||> None                       => "empty"
 ```
 
 Each arm is: `||> pattern => expression`.
+You can also add an optional guard after the pattern: `||> pattern when condition => expression`.
 The value (`direction`) is matched top-to-bottom against each pattern.
-The body of the first matching arm is evaluated and returned.
+The body of the first arm whose pattern matches and whose guard (if present) evaluates to `True`
+is evaluated and returned.
+
+Pattern bindings are in scope for the guard:
+
+```aivi
+value
+ ||> Some count when count > 10 => "large"
+ ||> Some count                 => "small {count}"
+ ||> None                       => "empty"
+```
 
 ## Matching on constructors
 
@@ -33,6 +48,9 @@ The same constructor syntax works for your own same-module sum types and for bui
 Pattern matching in AIVI is **exhaustive**: the compiler rejects any match that does not
 cover all variants. If you add a new variant to a sum type, every match on that type becomes
 a compile error until you handle the new case.
+
+Guarded arms do not count as exhaustive coverage by themselves. If a guarded arm can fall
+through when its condition is `False`, you still need an unguarded fallback arm for that shape.
 
 This is the key advantage over `switch` statements: you cannot accidentally forget a case.
 
@@ -118,6 +136,7 @@ value is already a `Bool` and you want a two-branch conditional:
 ## Summary
 
 - `||>` is the match pipe. Each arm is `||> pattern => body`.
+- Guards use `||> pattern when condition => body`.
 - Matching is exhaustive — every variant must be covered.
 - `_` is the wildcard that matches anything.
 - Patterns can destructure records and data-carrying constructors.

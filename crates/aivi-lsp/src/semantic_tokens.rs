@@ -47,10 +47,9 @@ fn token_type_index(kind: TokenKind) -> Option<u32> {
 
         // Literals
         TokenKind::StringLiteral | TokenKind::RegexLiteral => Some(IDX_STRING),
-        TokenKind::Integer
-        | TokenKind::Float
-        | TokenKind::Decimal
-        | TokenKind::BigInt => Some(IDX_NUMBER),
+        TokenKind::Integer | TokenKind::Float | TokenKind::Decimal | TokenKind::BigInt => {
+            Some(IDX_NUMBER)
+        }
 
         // Operators and punctuation
         TokenKind::Plus
@@ -123,7 +122,10 @@ pub async fn semantic_tokens_full(
         let lsp_range = source.span_to_lsp_range(token.span());
         let token_line = lsp_range.start.line;
         let token_char = lsp_range.start.character;
-        let token_len = lsp_range.end.character.saturating_sub(lsp_range.start.character);
+        let token_len = lsp_range
+            .end
+            .character
+            .saturating_sub(lsp_range.start.character);
 
         // Multi-line tokens (e.g. block comments): skip — the LSP spec
         // requires single-line tokens in the full-tokens response.

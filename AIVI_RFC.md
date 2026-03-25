@@ -798,6 +798,15 @@ status
  ||> Pending => "pending"
 ```
 
+Guards refine a case arm after structural matching:
+
+```aivi
+maybeCount
+ ||> Some count when count > 10 => "large"
+ ||> Some count                 => "small"
+ ||> None                       => "empty"
+```
+
 List patterns are structural and ordered. They match a left-to-right prefix and may bind the
 remaining suffix as another list:
 
@@ -812,6 +821,9 @@ Rules:
 
 - `...rest` is list-only and must be the final segment in the pattern
 - fixed positions bind at the element type; `...rest` binds at the full `List A` type
+- `when` guards are evaluated only after the arm pattern matches, with that arm's bindings in scope
+- guarded arms remain refutable for exhaustiveness; keep an unguarded fallback when guard-false
+  inputs must still be handled
 - the current rollout does not add dedicated list exhaustiveness reasoning; use `_` when an
   explicit catch-all is required
 

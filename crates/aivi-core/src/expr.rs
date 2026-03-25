@@ -248,6 +248,7 @@ pub struct PipeStage {
 pub struct PipeCaseArm {
     pub span: SourceSpan,
     pub pattern: Pattern,
+    pub guard: Option<ExprId>,
     pub body: ExprId,
 }
 

@@ -824,9 +824,19 @@ fn format_expr(module: &Module, expr_id: ExprId, f: &mut fmt::Formatter<'_>) -> 
                         f.write_str("]")?;
                     }
                     crate::expr::PipeStageKind::Case { arms } => {
-                        for PipeCaseArm { pattern, body, .. } in arms {
+                        for PipeCaseArm {
+                            pattern,
+                            guard,
+                            body,
+                            ..
+                        } in arms
+                        {
                             f.write_str(" ||> ")?;
                             format_pattern(pattern, f)?;
+                            if let Some(guard) = guard {
+                                f.write_str(" when ")?;
+                                format_expr(module, *guard, f)?;
+                            }
                             f.write_str(" => ")?;
                             format_expr(module, *body, f)?;
                         }

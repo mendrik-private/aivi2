@@ -409,13 +409,25 @@ impl Validator<'_> {
                                     *expr,
                                 );
                             }
-                            PipeStageKind::Case { pattern, body } => {
+                            PipeStageKind::Case {
+                                pattern,
+                                guard,
+                                body,
+                            } => {
                                 self.require_pattern(
                                     stage.span,
                                     "pipe stage",
                                     "case pattern",
                                     *pattern,
                                 );
+                                if let Some(guard) = guard {
+                                    self.require_expr(
+                                        stage.span,
+                                        "pipe stage",
+                                        "case guard",
+                                        *guard,
+                                    );
+                                }
                                 self.require_expr(stage.span, "pipe stage", "case body", *body);
                             }
                         }
@@ -972,10 +984,7 @@ impl Validator<'_> {
                     stack.last_mut().unwrap().1 = dep_index + 1;
                     if on_stack.contains(&dep) {
                         // Found a cycle — reconstruct the cycle path from the DFS path.
-                        let cycle_start = path
-                            .iter()
-                            .position(|&id| id == dep)
-                            .unwrap_or(0);
+                        let cycle_start = path.iter().position(|&id| id == dep).unwrap_or(0);
                         let cycle_names: Vec<String> = path[cycle_start..]
                             .iter()
                             .map(|id| {
@@ -985,11 +994,8 @@ impl Validator<'_> {
                                     .unwrap_or_else(|| "<unknown>".to_owned())
                             })
                             .collect();
-                        let cycle_path = format!(
-                            "{} -> {}",
-                            cycle_names.join(" -> "),
-                            cycle_names[0]
-                        );
+                        let cycle_path =
+                            format!("{} -> {}", cycle_names.join(" -> "), cycle_names[0]);
                         let offending_name = signal_names
                             .get(&dep)
                             .cloned()
@@ -4378,21 +4384,31 @@ impl Validator<'_> {
                                                 typing,
                                             );
                                             for case_stage in case_stages.iter().rev() {
-                                                let PipeStageKind::Case { pattern, body } =
-                                                    &case_stage.kind
+                                                let PipeStageKind::Case {
+                                                    pattern,
+                                                    guard,
+                                                    body,
+                                                } = &case_stage.kind
                                                 else {
                                                     continue;
                                                 };
+                                                let branch_env = self.case_branch_env(
+                                                    &env, *pattern, &subject, typing,
+                                                );
                                                 work.push(CaseExhaustivenessWork::Expr {
                                                     expr: *body,
-                                                    env: self.case_branch_env(
-                                                        &env, *pattern, &subject, typing,
-                                                    ),
+                                                    env: branch_env.clone(),
                                                 });
+                                                if let Some(guard) = guard {
+                                                    work.push(CaseExhaustivenessWork::Expr {
+                                                        expr: *guard,
+                                                        env: branch_env,
+                                                    });
+                                                }
                                             }
                                         } else {
                                             for case_stage in case_stages.iter().rev() {
-                                                let PipeStageKind::Case { body, .. } =
+                                                let PipeStageKind::Case { guard, body, .. } =
                                                     &case_stage.kind
                                                 else {
                                                     continue;
@@ -4401,6 +4417,12 @@ impl Validator<'_> {
                                                     expr: *body,
                                                     env: env.clone(),
                                                 });
+                                                if let Some(guard) = guard {
+                                                    work.push(CaseExhaustivenessWork::Expr {
+                                                        expr: *guard,
+                                                        env: env.clone(),
+                                                    });
+                                                }
                                             }
                                         }
                                         current = None;
@@ -4621,9 +4643,12 @@ impl Validator<'_> {
         let mut covered = HashSet::new();
         let mut has_catch_all = false;
         for stage in case_stages {
-            let PipeStageKind::Case { pattern, .. } = &stage.kind else {
+            let PipeStageKind::Case { pattern, guard, .. } = &stage.kind else {
                 continue;
             };
+            if guard.is_some() {
+                continue;
+            }
             match typing.case_pattern_coverage(*pattern, &shape) {
                 CasePatternCoverage::CatchAll => {
                     has_catch_all = true;
@@ -5875,6 +5900,16 @@ impl Validator<'_> {
                     )),
                 );
             }
+            GateIssue::CaseGuardNotBool { span, found } => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!("case guard must produce `Bool`, found `{found}`"))
+                        .with_code(code("case-guard-not-bool"))
+                        .with_label(DiagnosticLabel::primary(
+                            span,
+                            "use a `Bool` expression to guard this case arm",
+                        )),
+                );
+            }
             GateIssue::AmbiguousDomainOperator {
                 span,
                 operator,
@@ -6066,6 +6101,16 @@ impl Validator<'_> {
                         span,
                         "make every branch in this nested case split produce the same type",
                     )),
+                );
+            }
+            GateIssue::CaseGuardNotBool { span, found } => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!("case guard must produce `Bool`, found `{found}`"))
+                        .with_code(code("case-guard-not-bool"))
+                        .with_label(DiagnosticLabel::primary(
+                            span,
+                            "use a `Bool` expression to guard this case arm",
+                        )),
                 );
             }
             GateIssue::AmbiguousDomainOperator {
@@ -6347,6 +6392,22 @@ impl Validator<'_> {
                     .with_label(DiagnosticLabel::primary(
                         span,
                         "make every branch in this nested case split produce the same type",
+                    )),
+                );
+            }
+            (context, GateIssue::CaseGuardNotBool { span, found }) => {
+                let subject = match context {
+                    FanoutIssueContext::MapElement => "fan-out body",
+                    FanoutIssueContext::JoinCollection => "fan-in body",
+                };
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "{subject} contains a case guard that produces `{found}` instead of `Bool`"
+                    ))
+                    .with_code(code("case-guard-not-bool"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "use a `Bool` expression to guard this case arm",
                     )),
                 );
             }
@@ -7854,6 +7915,10 @@ pub(crate) enum GateIssue {
         span: SourceSpan,
         expected: String,
         actual: String,
+    },
+    CaseGuardNotBool {
+        span: SourceSpan,
+        found: String,
     },
     /// Two or more domain operator implementations match the given binary expression.
     /// The caller must emit this issue as a diagnostic and treat the operator result type
@@ -11455,7 +11520,10 @@ impl<'a> GateTypeContext<'a> {
                 return None;
             }
             if function.annotation.is_none()
-                || function.parameters.iter().any(|parameter| parameter.annotation.is_none())
+                || function
+                    .parameters
+                    .iter()
+                    .any(|parameter| parameter.annotation.is_none())
             {
                 return self.match_pipe_unannotated_function_signature(
                     callee_expr,
@@ -12146,13 +12214,31 @@ impl<'a> GateTypeContext<'a> {
         let mut branch_result = None::<SourceOptionActualType>;
         let branch_subject = subject.gate_payload().clone();
         for stage in case_stages {
-            let PipeStageKind::Case { pattern, body } = &stage.kind else {
+            let PipeStageKind::Case {
+                pattern,
+                guard,
+                body,
+            } = &stage.kind
+            else {
                 continue;
             };
             let mut branch_env = env.clone();
             branch_env
                 .locals
                 .extend(self.case_pattern_bindings(*pattern, &branch_subject).locals);
+            if let Some(guard) = guard {
+                let guard_info = self.infer_pipe_body(*guard, &branch_env, &branch_subject);
+                let guard_ty = guard_info.actual();
+                info.merge(guard_info);
+                if let Some(guard_ty) = guard_ty {
+                    if !guard_ty.is_bool() {
+                        info.issues.push(GateIssue::CaseGuardNotBool {
+                            span: self.module.exprs()[*guard].span,
+                            found: guard_ty.to_string(),
+                        });
+                    }
+                }
+            }
             let branch = self.infer_pipe_body(*body, &branch_env, &branch_subject);
             let branch_ty = branch.actual();
             info.merge(branch);
@@ -12960,6 +13046,10 @@ impl SourceOptionExpectedType {
 }
 
 impl SourceOptionActualType {
+    fn is_bool(&self) -> bool {
+        matches!(self, Self::Primitive(BuiltinType::Bool))
+    }
+
     fn is_signal(&self) -> bool {
         matches!(self, Self::Signal(_))
     }
@@ -13810,11 +13900,17 @@ pub(crate) fn walk_expr_tree(
                                         is_root: false,
                                     });
                                 }
-                                PipeStageKind::Case { body, .. } => {
+                                PipeStageKind::Case { guard, body, .. } => {
                                     work.push(ExprWalkWork::Expr {
                                         expr: *body,
                                         is_root: false,
                                     });
+                                    if let Some(guard) = guard {
+                                        work.push(ExprWalkWork::Expr {
+                                            expr: *guard,
+                                            is_root: false,
+                                        });
+                                    }
                                 }
                             }
                         }

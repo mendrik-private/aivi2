@@ -1,0 +1,9 @@
+fun classify:Text #value:Option Int =>
+    value
+     ||> Some x when x > 10 => "large"
+     ||> Some x => "small {x}"
+     ||> None => "empty"
+
+val largeLabel = classify (Some 42)
+val smallLabel = classify (Some 5)
+val emptyLabel = classify None

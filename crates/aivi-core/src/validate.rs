@@ -193,6 +193,11 @@ pub enum ValidationError {
         expected: crate::ty::Type,
         found: crate::ty::Type,
     },
+    InlinePipeCaseGuardNotBool {
+        expr: ExprId,
+        stage_index: usize,
+        arm_index: usize,
+    },
     InlinePipeTruthyFalsyResultMismatch {
         expr: ExprId,
         stage_index: usize,
@@ -399,6 +404,14 @@ impl fmt::Display for ValidationError {
             } => write!(
                 f,
                 "inline pipe expression {expr} case stage {stage_index} arm {arm_index} produces `{found}` but expected `{expected}`"
+            ),
+            Self::InlinePipeCaseGuardNotBool {
+                expr,
+                stage_index,
+                arm_index,
+            } => write!(
+                f,
+                "inline pipe expression {expr} case stage {stage_index} arm {arm_index} guard does not carry a Bool predicate"
             ),
             Self::InlinePipeTruthyFalsyResultMismatch {
                 expr,
@@ -732,6 +745,16 @@ pub fn validate_module(module: &Module) -> Result<(), ValidationErrors> {
                             }
                             let expected = case_arm_result_type(&stage.result_subject);
                             for (arm_index, arm) in arms.iter().enumerate() {
+                                if let Some(guard) = arm.guard {
+                                    push_expr(module, guard, &mut work, &mut errors);
+                                    if !module.exprs()[guard].ty.is_bool() {
+                                        errors.push(ValidationError::InlinePipeCaseGuardNotBool {
+                                            expr: expr_id,
+                                            stage_index,
+                                            arm_index,
+                                        });
+                                    }
+                                }
                                 push_expr(module, arm.body, &mut work, &mut errors);
                                 validate_pattern(&arm.pattern, module, &mut work, &mut errors);
                                 if module.exprs()[arm.body].ty != expected {

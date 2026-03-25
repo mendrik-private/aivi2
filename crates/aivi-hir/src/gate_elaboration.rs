@@ -283,6 +283,7 @@ pub struct GateRuntimePipeStage {
 pub struct GateRuntimeCaseArm {
     pub span: SourceSpan,
     pub pattern: PatternId,
+    pub guard: Option<GateRuntimeExpr>,
     pub body: GateRuntimeExpr,
 }
 
@@ -1365,8 +1366,7 @@ fn check_domain_operator_and_schedule(
         return Ok(false);
     };
     let Some(matched) =
-        select_domain_binary_operator(module, typing, operator, left_ty, right_ty)
-            .unwrap_or(None)
+        select_domain_binary_operator(module, typing, operator, left_ty, right_ty).unwrap_or(None)
     else {
         return Ok(false);
     };
@@ -1609,6 +1609,7 @@ fn blocker_for_issue(issue: GateIssue) -> GateElaborationBlocker {
         | GateIssue::UnsupportedApplicativeClusterMember { span, .. }
         | GateIssue::ApplicativeClusterMismatch { span, .. }
         | GateIssue::InvalidClusterFinalizer { span, .. }
+        | GateIssue::CaseGuardNotBool { span, .. }
         | GateIssue::CaseBranchTypeMismatch { span, .. } => {
             GateElaborationBlocker::UnknownRuntimeExprType { span }
         }

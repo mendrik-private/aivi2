@@ -998,17 +998,41 @@ pub struct PipeStage {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PipeStageKind {
-    Transform { expr: ExprId },
-    Gate { expr: ExprId },
-    Case { pattern: PatternId, body: ExprId },
-    Map { expr: ExprId },
-    Apply { expr: ExprId },
-    Tap { expr: ExprId },
-    FanIn { expr: ExprId },
-    Truthy { expr: ExprId },
-    Falsy { expr: ExprId },
-    RecurStart { expr: ExprId },
-    RecurStep { expr: ExprId },
+    Transform {
+        expr: ExprId,
+    },
+    Gate {
+        expr: ExprId,
+    },
+    Case {
+        pattern: PatternId,
+        guard: Option<ExprId>,
+        body: ExprId,
+    },
+    Map {
+        expr: ExprId,
+    },
+    Apply {
+        expr: ExprId,
+    },
+    Tap {
+        expr: ExprId,
+    },
+    FanIn {
+        expr: ExprId,
+    },
+    Truthy {
+        expr: ExprId,
+    },
+    Falsy {
+        expr: ExprId,
+    },
+    RecurStart {
+        expr: ExprId,
+    },
+    RecurStep {
+        expr: ExprId,
+    },
 }
 
 /// Presentation-free structural view of one fan-out segment inside a pipe.

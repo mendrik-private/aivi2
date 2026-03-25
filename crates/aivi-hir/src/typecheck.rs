@@ -1707,6 +1707,11 @@ impl<'a> TypeChecker<'a> {
                     *span,
                     "this branch produces a different type than earlier branches in the same case split",
                 ),
+                GateIssue::CaseGuardNotBool { span, found } => Diagnostic::error(format!(
+                    "case guard must produce `Bool`, found `{found}`"
+                ))
+                .with_code(code("case-guard-not-bool"))
+                .with_primary_label(*span, "use a `Bool` expression to guard this case arm"),
                 GateIssue::AmbiguousDomainOperator {
                     span,
                     operator,
@@ -2380,14 +2385,11 @@ impl<'a> TypeChecker<'a> {
                         BuiltinType::Validation,
                     ],
                 ),
-                "Filterable" => self.matches_builtin_head(
-                    binding,
-                    &[BuiltinType::List, BuiltinType::Option],
-                ),
-                "Bifunctor" => self.matches_builtin_head(
-                    binding,
-                    &[BuiltinType::Result, BuiltinType::Validation],
-                ),
+                "Filterable" => {
+                    self.matches_builtin_head(binding, &[BuiltinType::List, BuiltinType::Option])
+                }
+                "Bifunctor" => self
+                    .matches_builtin_head(binding, &[BuiltinType::Result, BuiltinType::Validation]),
                 _ => false,
             },
         }

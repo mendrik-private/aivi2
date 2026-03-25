@@ -42,7 +42,9 @@ impl Backend {
         };
 
         let lsp_diags = crate::diagnostics::collect_lsp_diagnostics(&self.state.db, file, &uri);
-        self.client.publish_diagnostics(uri.clone(), lsp_diags, None).await;
+        self.client
+            .publish_diagnostics(uri.clone(), lsp_diags, None)
+            .await;
         tracing::debug!("Published diagnostics for {}", uri);
     }
 }
@@ -131,7 +133,9 @@ impl LanguageServer for Backend {
             };
             let lsp_diags =
                 crate::diagnostics::collect_lsp_diagnostics(&state_clone.db, file, &uri_clone);
-            client_clone.publish_diagnostics(uri_clone.clone(), lsp_diags, None).await;
+            client_clone
+                .publish_diagnostics(uri_clone.clone(), lsp_diags, None)
+                .await;
             tracing::debug!("Published diagnostics for {}", uri_clone);
         });
         self.state.pending_diagnostics.insert(uri, handle);
@@ -238,10 +242,7 @@ impl LanguageServer for Backend {
         &self,
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
-        Ok(
-            crate::semantic_tokens::semantic_tokens_full(params, Arc::clone(&self.state))
-                .await,
-        )
+        Ok(crate::semantic_tokens::semantic_tokens_full(params, Arc::clone(&self.state)).await)
     }
 }
 

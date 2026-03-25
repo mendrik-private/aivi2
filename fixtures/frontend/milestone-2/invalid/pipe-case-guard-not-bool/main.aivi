@@ -1,0 +1,5 @@
+fun broken:Text #value:Option Int =>
+    value
+     ||> Some x when x => "bad"
+     ||> Some x => "small {x}"
+     ||> None => "empty"

@@ -19,16 +19,16 @@ use aivi_hir::{
 use crate::{
     Arena, ArenaOverflow, BuiltinAppendCarrier, BuiltinApplicativeCarrier, BuiltinApplyCarrier,
     BuiltinBifunctorCarrier, BuiltinClassMemberIntrinsic, BuiltinFilterableCarrier,
-    BuiltinFoldableCarrier, BuiltinFunctorCarrier, BuiltinOrdSubject,
-    BuiltinTraversableCarrier, DecodeField, DecodeProgram, DecodeProgramId, DecodeStep,
-    DecodeStepId, DomainDecodeSurface, DomainDecodeSurfaceKind, Expr, ExprId, FanoutFilter,
-    FanoutJoin, FanoutStage, GateStage, Item, ItemId, ItemKind, ItemParameter, MapEntry, Module,
-    NonSourceWakeup, Pattern, PatternBinding, PatternConstructor, PatternKind, Pipe, PipeCaseArm,
-    PipeExpr, PipeOrigin, PipeRecurrence, PipeStage, PipeTruthyFalsyBranch, PipeTruthyFalsyStage,
-    ProjectionBase, RecordExprField, RecordPatternField, RecurrenceGuard, RecurrenceStage,
-    Reference, SignalInfo, SourceArgumentValue, SourceId, SourceInstanceId, SourceNode,
-    SourceOptionBinding, SourceOptionValue, Stage, StageKind, TextLiteral, TextSegment,
-    TruthyFalsyBranch, TruthyFalsyStage, Type,
+    BuiltinFoldableCarrier, BuiltinFunctorCarrier, BuiltinOrdSubject, BuiltinTraversableCarrier,
+    DecodeField, DecodeProgram, DecodeProgramId, DecodeStep, DecodeStepId, DomainDecodeSurface,
+    DomainDecodeSurfaceKind, Expr, ExprId, FanoutFilter, FanoutJoin, FanoutStage, GateStage, Item,
+    ItemId, ItemKind, ItemParameter, MapEntry, Module, NonSourceWakeup, Pattern, PatternBinding,
+    PatternConstructor, PatternKind, Pipe, PipeCaseArm, PipeExpr, PipeOrigin, PipeRecurrence,
+    PipeStage, PipeTruthyFalsyBranch, PipeTruthyFalsyStage, ProjectionBase, RecordExprField,
+    RecordPatternField, RecurrenceGuard, RecurrenceStage, Reference, SignalInfo,
+    SourceArgumentValue, SourceId, SourceInstanceId, SourceNode, SourceOptionBinding,
+    SourceOptionValue, Stage, StageKind, TextLiteral, TextSegment, TruthyFalsyBranch,
+    TruthyFalsyStage, Type,
     expr::ExprKind,
     validate::{ValidationError, validate_module},
 };
@@ -290,7 +290,10 @@ impl std::fmt::Display for LoweringError {
             ),
             Self::Validation(error) => write!(f, "typed-core validation failed: {error}"),
             Self::InternalInvariantViolated { message } => {
-                write!(f, "typed-core lowering internal invariant violated: {message}")
+                write!(
+                    f,
+                    "typed-core lowering internal invariant violated: {message}"
+                )
             }
         }
     }
@@ -1088,20 +1091,18 @@ impl<'a> ModuleLowerer<'a> {
             match self.module.pipes_mut().get_mut(pipe_id) {
                 Some(pipe) => pipe.stages = stage_ids,
                 None => {
-                    self.errors
-                        .push(LoweringError::InternalInvariantViolated {
-                            message: "pipe arena did not retain the ID returned by alloc",
-                        });
+                    self.errors.push(LoweringError::InternalInvariantViolated {
+                        message: "pipe arena did not retain the ID returned by alloc",
+                    });
                     continue;
                 }
             }
             match self.module.items_mut().get_mut(builder.owner) {
                 Some(item) => item.pipes.push(pipe_id),
                 None => {
-                    self.errors
-                        .push(LoweringError::InternalInvariantViolated {
-                            message: "pipe owner item was not found in the item arena after seeding",
-                        });
+                    self.errors.push(LoweringError::InternalInvariantViolated {
+                        message: "pipe owner item was not found in the item arena after seeding",
+                    });
                     continue;
                 }
             }
@@ -1616,7 +1617,7 @@ impl<'a> ModuleLowerer<'a> {
                     ));
                 };
                 BuiltinClassMemberIntrinsic::Bimap(carrier)
-            },
+            }
             ("Applicative", "pure", TypeBinding::Constructor(binding)) => match binding.head() {
                 TypeConstructorHead::Builtin(aivi_hir::BuiltinType::List) => {
                     BuiltinClassMemberIntrinsic::Pure(BuiltinApplicativeCarrier::List)
@@ -1696,7 +1697,7 @@ impl<'a> ModuleLowerer<'a> {
                     traversable,
                     applicative,
                 }
-            },
+            }
             ("Filterable", "filterMap", TypeBinding::Constructor(binding)) => {
                 let Some(carrier) = self.builtin_filterable_carrier(binding.head()) else {
                     return Err(unsupported(
@@ -1704,7 +1705,7 @@ impl<'a> ModuleLowerer<'a> {
                     ));
                 };
                 BuiltinClassMemberIntrinsic::FilterMap(carrier)
-            },
+            }
             ("Ord", "compare", _) => {
                 let ordering_item =
                     self.ordering_item_from_gate_type(expr_ty).ok_or_else(|| {
@@ -2383,6 +2384,9 @@ impl<'a> ModuleLowerer<'a> {
                                     GateRuntimePipeStageKind::Case { arms } => {
                                         for arm in arms.iter().rev() {
                                             tasks.push(Task::Visit(&arm.body));
+                                            if let Some(guard) = &arm.guard {
+                                                tasks.push(Task::Visit(guard));
+                                            }
                                         }
                                     }
                                     GateRuntimePipeStageKind::TruthyFalsy { truthy, falsy } => {
@@ -2605,7 +2609,7 @@ impl<'a> ModuleLowerer<'a> {
                                         }
                                     }
                                     PipeStageKindSpec::Case { arms } => {
-                                        let mut bodies = children.into_iter();
+                                        let mut children = children.into_iter();
                                         crate::expr::PipeStageKind::Case {
                                             arms: arms
                                                 .into_iter()
@@ -2615,7 +2619,12 @@ impl<'a> ModuleLowerer<'a> {
                                                         arm.pattern,
                                                         Some(&arm.subject),
                                                     ),
-                                                    body: bodies
+                                                    guard: arm.has_guard.then(|| {
+                                                        children
+                                                            .next()
+                                                            .expect("case arm guard should exist")
+                                                    }),
+                                                    body: children
                                                         .next()
                                                         .expect("case arm body should exist"),
                                                 })
@@ -2854,6 +2863,7 @@ fn pipe_stage_specs(pipe: &GateRuntimePipeExpr) -> Vec<PipeStageSpec> {
                             span: arm.span,
                             pattern: arm.pattern,
                             subject: stage.input_subject.clone(),
+                            has_guard: arm.guard.is_some(),
                         })
                         .collect(),
                 },
@@ -2908,7 +2918,7 @@ impl PipeStageKindSpec {
     fn child_expr_count(&self) -> usize {
         match self {
             Self::Transform | Self::Tap | Self::Gate { .. } => 1,
-            Self::Case { arms } => arms.len(),
+            Self::Case { arms } => arms.iter().map(|arm| 1 + usize::from(arm.has_guard)).sum(),
             Self::TruthyFalsy { .. } => 2,
         }
     }
@@ -2919,6 +2929,7 @@ struct CaseArmSpec {
     span: SourceSpan,
     pattern: HirPatternId,
     subject: aivi_hir::GateType,
+    has_guard: bool,
 }
 
 #[derive(Clone)]
@@ -3316,6 +3327,9 @@ fn referenced_hir_dependencies(root: &GateRuntimeExpr) -> HirDependencies {
                         GateRuntimePipeStageKind::Case { arms } => {
                             for arm in arms.iter().rev() {
                                 work.push(&arm.body);
+                                if let Some(guard) = &arm.guard {
+                                    work.push(guard);
+                                }
                             }
                         }
                         GateRuntimePipeStageKind::TruthyFalsy { truthy, falsy } => {
@@ -3597,6 +3611,37 @@ fun add:Int #x:Int #y:Int =>
             branch_pipe.stages[0].kind,
             crate::PipeStageKind::TruthyFalsy(_)
         ));
+    }
+
+    #[test]
+    fn lowers_guarded_case_pipe_bodies() {
+        let lowered = lower_fixture("milestone-2/valid/pipe-case-guards/main.aivi");
+        assert!(
+            !lowered.has_errors(),
+            "guarded case fixture should lower cleanly before typed-core lowering: {:?}",
+            lowered.diagnostics()
+        );
+
+        let core = lower_module(lowered.module()).expect("typed-core lowering should succeed");
+        let classify = core
+            .items()
+            .iter()
+            .find(|(_, item)| item.name.as_ref() == "classify")
+            .map(|(id, _)| id)
+            .expect("expected classify function item");
+        let classify_body = core.items()[classify]
+            .body
+            .expect("classify should carry a lowered body");
+        let crate::ExprKind::Pipe(pipe) = &core.exprs()[classify_body].kind else {
+            panic!("classify should lower to a pipe expression");
+        };
+        let crate::PipeStageKind::Case { arms } = &pipe.stages[0].kind else {
+            panic!("classify should lower to a case pipe stage");
+        };
+        assert_eq!(arms.len(), 3);
+        assert!(arms[0].guard.is_some());
+        assert!(arms[1].guard.is_none());
+        assert!(arms[2].guard.is_none());
     }
 
     #[test]

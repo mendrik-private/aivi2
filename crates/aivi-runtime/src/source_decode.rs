@@ -374,7 +374,8 @@ fn runtime_to_json(value: &RuntimeValue) -> Result<JsonValue, Box<str>> {
             Err("runtime JSON encoding does not support callable values".into())
         }
         RuntimeValue::Bytes(bytes) => Ok(JsonValue::Array(
-            bytes.iter()
+            bytes
+                .iter()
                 .map(|byte| JsonValue::Number(serde_json::Number::from(*byte)))
                 .collect(),
         )),
@@ -499,7 +500,9 @@ fn decode_step(
             let decoded = elements
                 .iter()
                 .zip(values.iter())
-                .map(|(element, value)| decode_step(program, program.step(*element), value, depth + 1))
+                .map(|(element, value)| {
+                    decode_step(program, program.step(*element), value, depth + 1)
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(RuntimeValue::Tuple(decoded))
         }
@@ -574,7 +577,8 @@ fn decode_step(
                     });
                 }
                 (Some(payload_step), Some(payload)) => {
-                    let decoded = decode_step(program, program.step(payload_step), payload, depth + 1)?;
+                    let decoded =
+                        decode_step(program, program.step(payload_step), payload, depth + 1)?;
                     match program.step(payload_step) {
                         DecodeProgramStep::Tuple { .. } => match decoded {
                             RuntimeValue::Tuple(fields) => fields,
@@ -719,9 +723,11 @@ fn value_kind(value: &ExternalSourceValue) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use aivi_base::SourceDatabase;
     use aivi_backend::{RuntimeBigInt, RuntimeDecimal, RuntimeFloat, RuntimeValue};
-    use aivi_hir::{Item, SourceDecodeProgramOutcome, generate_source_decode_programs, lower_module};
+    use aivi_base::SourceDatabase;
+    use aivi_hir::{
+        Item, SourceDecodeProgramOutcome, generate_source_decode_programs, lower_module,
+    };
     use aivi_syntax::parse_module;
 
     use super::{SourceDecodeError, decode_external, encode_runtime_json, parse_json_text};
@@ -783,16 +789,21 @@ sig temperature : Signal Float
             "temperature",
         );
 
-        let float = decode_external(&program, &parse_json_text("1.5").expect("float JSON should parse"))
-            .expect("float JSON should decode");
+        let float = decode_external(
+            &program,
+            &parse_json_text("1.5").expect("float JSON should parse"),
+        )
+        .expect("float JSON should decode");
         assert_eq!(
             float,
             RuntimeValue::Float(RuntimeFloat::new(1.5).expect("finite float should construct"))
         );
 
-        let promoted_int =
-            decode_external(&program, &parse_json_text("1").expect("integer JSON should parse"))
-                .expect("integer JSON should promote into Float when the signal expects Float");
+        let promoted_int = decode_external(
+            &program,
+            &parse_json_text("1").expect("integer JSON should parse"),
+        )
+        .expect("integer JSON should promote into Float when the signal expects Float");
         assert_eq!(
             promoted_int,
             RuntimeValue::Float(RuntimeFloat::new(1.0).expect("finite float should construct"))

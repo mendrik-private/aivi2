@@ -546,6 +546,7 @@ pub enum InlinePipeStageKind {
 pub struct InlinePipeCaseArm {
     pub span: SourceSpan,
     pub pattern: InlinePipePattern,
+    pub guard: Option<KernelExprId>,
     pub body: KernelExprId,
 }
 

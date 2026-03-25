@@ -488,6 +488,7 @@ fn blocker_for_map_issue(issue: GateIssue) -> FanoutElaborationBlocker {
         | GateIssue::UnsupportedApplicativeClusterMember { .. }
         | GateIssue::ApplicativeClusterMismatch { .. }
         | GateIssue::InvalidClusterFinalizer { .. }
+        | GateIssue::CaseGuardNotBool { .. }
         | GateIssue::CaseBranchTypeMismatch { .. } => FanoutElaborationBlocker::UnknownMapBodyType,
     }
 }
@@ -506,6 +507,7 @@ fn blocker_for_join_issue(issue: GateIssue) -> FanoutElaborationBlocker {
         | GateIssue::UnsupportedApplicativeClusterMember { .. }
         | GateIssue::ApplicativeClusterMismatch { .. }
         | GateIssue::InvalidClusterFinalizer { .. }
+        | GateIssue::CaseGuardNotBool { .. }
         | GateIssue::CaseBranchTypeMismatch { .. } => FanoutElaborationBlocker::UnknownJoinBodyType,
     }
 }
@@ -524,6 +526,7 @@ fn fanout_filter_issue_blocker(issue: GateIssue, span: SourceSpan) -> FanoutFilt
         | GateIssue::UnsupportedApplicativeClusterMember { .. }
         | GateIssue::ApplicativeClusterMismatch { .. }
         | GateIssue::InvalidClusterFinalizer { .. }
+        | GateIssue::CaseGuardNotBool { .. }
         | GateIssue::CaseBranchTypeMismatch { .. } => FanoutFilterBlocker::UnknownExprType { span },
     }
 }

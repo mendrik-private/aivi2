@@ -2452,11 +2452,17 @@ impl<'a> Parser<'a> {
         outer_stop: ExprStop,
     ) -> Option<PipeCaseArm> {
         let start = *cursor;
-        let pattern = self.parse_pattern(cursor, end, PatternStop::arrow_context())?;
+        let pattern = self.parse_pattern(cursor, end, PatternStop::pipe_case_context())?;
+        let guard = if self.consume_identifier_text(cursor, end, "when").is_some() {
+            Some(self.parse_expr(cursor, end, ExprStop::arrow_context())?)
+        } else {
+            None
+        };
         let _ = self.consume_kind(cursor, end, TokenKind::Arrow)?;
         let body = self.parse_expr(cursor, end, outer_stop.with_pipe_stage())?;
         Some(PipeCaseArm {
             pattern,
+            guard,
             body,
             span: self.source_span_for_range(start, *cursor),
         })
@@ -2840,6 +2846,9 @@ impl<'a> Parser<'a> {
     }
 
     fn pattern_should_stop(&self, index: usize, stop: PatternStop) -> bool {
+        if stop.guard_when && self.is_identifier_text(index, "when") {
+            return true;
+        }
         match self.tokens[index].kind() {
             TokenKind::Comma => stop.comma,
             TokenKind::RParen => stop.rparen,
@@ -3357,6 +3366,13 @@ impl ExprStop {
         self
     }
 
+    fn arrow_context() -> Self {
+        Self {
+            arrow: true,
+            ..Self::default()
+        }
+    }
+
     fn paren_context() -> Self {
         Self {
             comma: true,
@@ -3396,12 +3412,14 @@ struct PatternStop {
     rbrace: bool,
     rbracket: bool,
     arrow: bool,
+    guard_when: bool,
 }
 
 impl PatternStop {
-    fn arrow_context() -> Self {
+    fn pipe_case_context() -> Self {
         Self {
             arrow: true,
+            guard_when: true,
             ..Self::default()
         }
     }
@@ -4132,6 +4150,53 @@ instance Eq A => Eq (Option A)
             }
             other => panic!("expected provider contract item, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parser_parses_guarded_pipe_case_arms() {
+        let (_, parsed) = load(
+            r#"fun classify:Text #value:Option Int =>
+    value
+     ||> Some count when count > 10 => "large"
+     ||> Some count => "small {count}"
+     ||> None => "empty"
+"#,
+        );
+
+        assert!(
+            !parsed.has_errors(),
+            "expected guarded case arms to parse cleanly, got diagnostics: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+
+        let Item::Function(function) = &parsed.module.items[0] else {
+            panic!("expected function item");
+        };
+        let Some(Expr {
+            kind: ExprKind::Pipe(pipe),
+            ..
+        }) = function.expr_body()
+        else {
+            panic!("expected classify body to be a pipe expression");
+        };
+        let [first, second, third] = pipe.stages.as_slice() else {
+            panic!("expected three pipe stages");
+        };
+        let PipeStageKind::Case(first_arm) = &first.kind else {
+            panic!("expected first stage to be a case arm");
+        };
+        assert!(first_arm.guard.is_some(), "first arm should carry a guard");
+        let PipeStageKind::Case(second_arm) = &second.kind else {
+            panic!("expected second stage to be a case arm");
+        };
+        assert!(
+            second_arm.guard.is_none(),
+            "fallback arm should be unguarded"
+        );
+        let PipeStageKind::Case(third_arm) = &third.kind else {
+            panic!("expected third stage to be a case arm");
+        };
+        assert!(third_arm.guard.is_none(), "None arm should be unguarded");
     }
 
     #[test]

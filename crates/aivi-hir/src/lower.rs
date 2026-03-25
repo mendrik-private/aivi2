@@ -1845,6 +1845,7 @@ impl<'a> Lowerer<'a> {
             },
             syn::PipeStageKind::Case(arm) => PipeStageKind::Case {
                 pattern: self.lower_pattern(&arm.pattern),
+                guard: arm.guard.as_ref().map(|guard| self.lower_expr(guard)),
                 body: self.lower_expr(&arm.body),
             },
             syn::PipeStageKind::Map { expr } => PipeStageKind::Map {
@@ -3643,11 +3644,17 @@ impl<'a> Lowerer<'a> {
                                         ambient_allowed: true,
                                     });
                                 }
-                                PipeStageKind::Case { body, .. } => {
+                                PipeStageKind::Case { guard, body, .. } => {
                                     work.push(AmbientProjectionWork::Expr {
                                         expr: *body,
                                         ambient_allowed: true,
                                     });
+                                    if let Some(guard) = guard {
+                                        work.push(AmbientProjectionWork::Expr {
+                                            expr: *guard,
+                                            ambient_allowed: true,
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -4235,7 +4242,14 @@ impl<'a> Lowerer<'a> {
                                     | PipeStageKind::RecurStep { expr } => {
                                         work.push(DependencyWork::Expr(*expr))
                                     }
-                                    PipeStageKind::Case { pattern, body } => {
+                                    PipeStageKind::Case {
+                                        pattern,
+                                        guard,
+                                        body,
+                                    } => {
+                                        if let Some(guard) = guard {
+                                            work.push(DependencyWork::Expr(*guard));
+                                        }
                                         work.push(DependencyWork::Expr(*body));
                                         work.push(DependencyWork::Pattern(*pattern));
                                     }
@@ -4578,10 +4592,17 @@ impl<'a> Lowerer<'a> {
                         | PipeStageKind::RecurStep { expr } => {
                             self.resolve_expr(*expr, namespaces, env)
                         }
-                        PipeStageKind::Case { pattern, body } => {
+                        PipeStageKind::Case {
+                            pattern,
+                            guard,
+                            body,
+                        } => {
                             let bindings = self.resolve_pattern(*pattern, namespaces, env);
                             let mut branch_env = env.clone();
                             branch_env.push_term_scope(self.binding_scope(bindings));
+                            if let Some(guard) = guard {
+                                self.resolve_expr(*guard, namespaces, &branch_env);
+                            }
                             self.resolve_expr(*body, namespaces, &branch_env);
                         }
                     }
@@ -6191,6 +6212,7 @@ mod tests {
             "milestone-2/valid/domain-literal-suffixes/main.aivi",
             "milestone-2/valid/type-kinds/main.aivi",
             "milestone-2/valid/pipe-branch-and-join/main.aivi",
+            "milestone-2/valid/pipe-case-guards/main.aivi",
             "milestone-2/valid/pipe-fanout-carriers/main.aivi",
             "milestone-2/valid/pipe-recurrence-suffix/main.aivi",
             "milestone-2/valid/pipe-recurrence-nonsource-wakeup/main.aivi",
@@ -6361,6 +6383,38 @@ val answer:Int = 42
             assert!(
                 !lowered.has_errors(),
                 "expected {path} to lower cleanly before kind validation, got diagnostics: {:?}",
+                lowered.diagnostics()
+            );
+            let report = lowered
+                .module()
+                .validate(ValidationMode::RequireResolvedNames);
+            assert!(
+                report
+                    .diagnostics()
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == Some(super::code(code_name))),
+                "expected {path} to report {code_name}, got diagnostics: {:?}",
+                report.diagnostics()
+            );
+        }
+    }
+
+    #[test]
+    fn resolved_validation_rejects_guarded_case_invalid_fixtures() {
+        for (path, code_name) in [
+            (
+                "milestone-2/invalid/pipe-case-guard-not-bool/main.aivi",
+                "case-guard-not-bool",
+            ),
+            (
+                "milestone-2/invalid/pipe-case-guard-non-exhaustive/main.aivi",
+                "non-exhaustive-case-pattern",
+            ),
+        ] {
+            let lowered = lower_fixture(path);
+            assert!(
+                !lowered.has_errors(),
+                "expected {path} to lower cleanly before guard validation, got diagnostics: {:?}",
                 lowered.diagnostics()
             );
             let report = lowered

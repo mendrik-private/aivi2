@@ -124,6 +124,10 @@ pub enum ValidationError {
         kernel: KernelId,
         expr: KernelExprId,
     },
+    InlinePipeCaseGuardNotBool {
+        kernel: KernelId,
+        expr: KernelExprId,
+    },
     RecurrenceMissingSteps {
         pipeline: PipelineId,
     },
@@ -353,6 +357,12 @@ impl fmt::Display for ValidationError {
                 write!(
                     f,
                     "inline-pipe gate predicate expression {expr} in kernel {kernel} does not return Bool"
+                )
+            }
+            Self::InlinePipeCaseGuardNotBool { kernel, expr } => {
+                write!(
+                    f,
+                    "inline-pipe case guard expression {expr} in kernel {kernel} does not return Bool"
                 )
             }
             Self::RecurrenceMissingSteps { pipeline } => {
@@ -1266,17 +1276,25 @@ fn validate_kernel(
                             push_expr(kernel_id, *predicate, kernel, &mut work, errors);
                             if let Some(pred_expr) = kernel.exprs().get(*predicate) {
                                 if !is_bool_layout(program, pred_expr.layout) {
-                                    errors.push(
-                                        ValidationError::InlinePipeGatePredicateNotBool {
-                                            kernel: kernel_id,
-                                            expr: *predicate,
-                                        },
-                                    );
+                                    errors.push(ValidationError::InlinePipeGatePredicateNotBool {
+                                        kernel: kernel_id,
+                                        expr: *predicate,
+                                    });
                                 }
                             }
                         }
                         InlinePipeStageKind::Case { arms } => {
                             for arm in arms {
+                                if let Some(guard) = arm.guard {
+                                    push_expr(kernel_id, guard, kernel, &mut work, errors);
+                                    let guard_expr = &kernel.exprs()[guard];
+                                    if !is_bool_layout(program, guard_expr.layout) {
+                                        errors.push(ValidationError::InlinePipeCaseGuardNotBool {
+                                            kernel: kernel_id,
+                                            expr: guard,
+                                        });
+                                    }
+                                }
                                 push_expr(kernel_id, arm.body, kernel, &mut work, errors);
                                 validate_inline_pipe_pattern(
                                     kernel_id,
@@ -1504,10 +1522,7 @@ fn validate_no_item_dep_cycles(program: &Program, errors: &mut Vec<ValidationErr
                     Some(top) => top,
                     None => break,
                 };
-                let neighbors: Vec<ItemId> = deps
-                    .get(&node)
-                    .cloned()
-                    .unwrap_or_default();
+                let neighbors: Vec<ItemId> = deps.get(&node).cloned().unwrap_or_default();
                 if idx < neighbors.len() {
                     // Advance the index on the stack top before touching stack structure.
                     stack.last_mut().unwrap().1 += 1;
@@ -1515,8 +1530,7 @@ fn validate_no_item_dep_cycles(program: &Program, errors: &mut Vec<ValidationErr
                     let neighbor_color = *color.get(&neighbor).unwrap_or(&0);
                     if neighbor_color == 1 {
                         // Back-edge found: extract cycle from path.
-                        let cycle_start =
-                            path.iter().position(|&n| n == neighbor).unwrap_or(0);
+                        let cycle_start = path.iter().position(|&n| n == neighbor).unwrap_or(0);
                         let mut cycle = path[cycle_start..].to_vec();
                         cycle.push(neighbor);
                         errors.push(ValidationError::ItemCyclicDependency { cycle });

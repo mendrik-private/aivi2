@@ -383,9 +383,11 @@ impl<'a> ProgramLowerer<'a> {
                                 self.item_map.get(&node).copied().unwrap_or(
                                     // Use a safe sentinel; require_item would have failed
                                     // earlier for a truly unknown item.
-                                    self.item_map.values().copied().next().unwrap_or(
-                                        ItemId::from_raw(0),
-                                    ),
+                                    self.item_map
+                                        .values()
+                                        .copied()
+                                        .next()
+                                        .unwrap_or(ItemId::from_raw(0)),
                                 )
                             });
                             return Err(LoweringError::GlobalItemCycle { item });
@@ -1451,7 +1453,9 @@ impl<'a> ProgramLowerer<'a> {
                     InlinePipeStageBuild::Transform
                     | InlinePipeStageBuild::Tap
                     | InlinePipeStageBuild::Gate { .. } => 1,
-                    InlinePipeStageBuild::Case { arms } => arms.len(),
+                    InlinePipeStageBuild::Case { arms } => {
+                        arms.iter().map(|arm| 1 + usize::from(arm.has_guard)).sum()
+                    }
                     InlinePipeStageBuild::TruthyFalsy { .. } => 2,
                 }
             }
@@ -1819,6 +1823,13 @@ impl<'a> ProgramLowerer<'a> {
                                                 &mut inline_subjects,
                                                 &mut arm_locals,
                                             )?;
+                                            if let Some(guard) = arm.guard {
+                                                children.push(PipeChildSpec {
+                                                    expr: guard,
+                                                    subject: child_subject,
+                                                    locals: arm_locals.clone(),
+                                                });
+                                            }
                                             children.push(PipeChildSpec {
                                                 expr: arm.body,
                                                 subject: child_subject,
@@ -1827,6 +1838,7 @@ impl<'a> ProgramLowerer<'a> {
                                             lowered_arms.push(InlinePipeCaseArmSpec {
                                                 span: arm.span,
                                                 pattern,
+                                                has_guard: arm.guard.is_some(),
                                             });
                                         }
                                         InlinePipeStageBuild::Case { arms: lowered_arms }
@@ -2125,7 +2137,10 @@ impl<'a> ProgramLowerer<'a> {
                                         .map(|arm| InlinePipeCaseArm {
                                             span: arm.span,
                                             pattern: arm.pattern,
-                                            body: iter.next().expect("case arm child should exist"),
+                                            guard: arm.has_guard.then(|| {
+                                                iter.next().expect("case arm guard should exist")
+                                            }),
+                                            body: iter.next().expect("case arm body should exist"),
                                         })
                                         .collect(),
                                 },
@@ -2745,6 +2760,7 @@ impl LocalBindings {
 struct InlinePipeCaseArmSpec {
     span: SourceSpan,
     pattern: InlinePipePattern,
+    has_guard: bool,
 }
 
 #[derive(Clone)]
@@ -2939,9 +2955,7 @@ fn map_builtin_traversable_carrier(
         core::BuiltinTraversableCarrier::List => BackendBuiltinTraversableCarrier::List,
         core::BuiltinTraversableCarrier::Option => BackendBuiltinTraversableCarrier::Option,
         core::BuiltinTraversableCarrier::Result => BackendBuiltinTraversableCarrier::Result,
-        core::BuiltinTraversableCarrier::Validation => {
-            BackendBuiltinTraversableCarrier::Validation
-        }
+        core::BuiltinTraversableCarrier::Validation => BackendBuiltinTraversableCarrier::Validation,
     }
 }
 

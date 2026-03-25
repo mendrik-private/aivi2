@@ -581,6 +581,7 @@ fn recurrence_guard_issue_blocker(
         | GateIssue::UnsupportedApplicativeClusterMember { .. }
         | GateIssue::ApplicativeClusterMismatch { .. }
         | GateIssue::InvalidClusterFinalizer { .. }
+        | GateIssue::CaseGuardNotBool { .. }
         | GateIssue::CaseBranchTypeMismatch { .. } => {
             RecurrenceRuntimeStageBlocker::UnknownExprType { span }
         }

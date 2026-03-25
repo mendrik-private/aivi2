@@ -2,11 +2,11 @@ use crate::cst::{
     BinaryOperator, ClassMember, ClassMemberName, Decorator, DecoratorArguments, DecoratorPayload,
     DomainItem, DomainMember, DomainMemberName, ExportItem, Expr, ExprKind, FunctionParam,
     Identifier, InstanceItem, InstanceMember, Item, MapExpr, MarkupAttribute, MarkupAttributeValue,
-    MarkupNode, Module, NamedItem, Pattern, PatternKind, PipeExpr, PipeStage, PipeStageKind,
-    ProjectionPath, QualifiedName, RecordExpr, RecordField, RecordPatternField, SourceDecorator,
-    SourceProviderContractItem, SourceProviderContractMember, SourceProviderContractSchemaMember,
-    SuffixedIntegerLiteral, TextLiteral, TextSegment, TypeDeclBody, TypeExpr, TypeExprKind,
-    TypeField, TypeVariant, UnaryOperator, UseItem,
+    MarkupNode, Module, NamedItem, Pattern, PatternKind, PipeCaseArm, PipeExpr, PipeStage,
+    PipeStageKind, ProjectionPath, QualifiedName, RecordExpr, RecordField, RecordPatternField,
+    SourceDecorator, SourceProviderContractItem, SourceProviderContractMember,
+    SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextLiteral, TextSegment,
+    TypeDeclBody, TypeExpr, TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseItem,
 };
 
 const INDENT_WIDTH: usize = 4;
@@ -1137,7 +1137,7 @@ impl Formatter {
         match &stage.kind {
             PipeStageKind::Case(arm) => format!(
                 "||> {} => {}",
-                self.format_pattern_inline(&arm.pattern, 0),
+                self.format_pipe_case_arm_head(arm),
                 self.format_expr_inline(&arm.body, 0)
             ),
             PipeStageKind::Transform { expr } => self.format_pipe_expr_stage("|>", expr),
@@ -1174,33 +1174,41 @@ impl Formatter {
     }
 
     fn format_pipe_case_group(&self, stages: &[PipeStage]) -> Vec<String> {
-        let patterns: Vec<_> = stages
+        let heads: Vec<_> = stages
             .iter()
             .map(|stage| match &stage.kind {
-                PipeStageKind::Case(arm) => self.format_pattern_inline(&arm.pattern, 0),
+                PipeStageKind::Case(arm) => self.format_pipe_case_arm_head(arm),
                 _ => "// <error: unformattable node>".to_owned(),
             })
             .collect();
-        let width = patterns
+        let width = heads
             .iter()
-            .map(|pattern| display_width(pattern))
+            .map(|head| display_width(head))
             .max()
             .unwrap_or(0);
 
         stages
             .iter()
-            .zip(patterns)
-            .map(|(stage, pattern)| match &stage.kind {
+            .zip(heads)
+            .map(|(stage, head)| match &stage.kind {
                 PipeStageKind::Case(arm) => {
-                    let padding = spaces(width.saturating_sub(display_width(&pattern)));
+                    let padding = spaces(width.saturating_sub(display_width(&head)));
                     format!(
-                        " ||> {pattern}{padding} => {}",
+                        " ||> {head}{padding} => {}",
                         self.format_expr_inline(&arm.body, 0)
                     )
                 }
                 _ => "// <error: unformattable node>".to_owned(),
             })
             .collect()
+    }
+
+    fn format_pipe_case_arm_head(&self, arm: &PipeCaseArm) -> String {
+        let pattern = self.format_pattern_inline(&arm.pattern, 0);
+        match &arm.guard {
+            Some(guard) => format!("{pattern} when {}", self.format_expr_inline(guard, 0)),
+            None => pattern,
+        }
     }
 
     fn format_pipe_expr_stage(&self, operator: &str, expr: &Expr) -> String {
@@ -1872,6 +1880,25 @@ val view =
                 "    status\n",
                 "     ||> Idle          => \"idle\"\n",
                 "     ||> Failed reason => \"failed {reason}\"\n",
+            )
+        );
+    }
+
+    #[test]
+    fn formatter_aligns_guarded_match_arms() {
+        let formatted = format_text(
+            "type Status=Open|Closed Int\nfun label:Text #status:Status =>\nstatus||>Closed count when count>10=>\"many\"||>Closed count=>\"few {count}\"||>Open=>\"open\"\n",
+        );
+        assert_eq!(
+            formatted,
+            concat!(
+                "type Status = Open | Closed Int\n",
+                "\n",
+                "fun label:Text #status:Status =>\n",
+                "    status\n",
+                "     ||> Closed count when count > 10 => \"many\"\n",
+                "     ||> Closed count                 => \"few {count}\"\n",
+                "     ||> Open                         => \"open\"\n",
             )
         );
     }

@@ -435,6 +435,7 @@ fn blocker_for_branch_issue(
         | GateIssue::UnsupportedApplicativeClusterMember { .. }
         | GateIssue::ApplicativeClusterMismatch { .. }
         | GateIssue::InvalidClusterFinalizer { .. }
+        | GateIssue::CaseGuardNotBool { .. }
         | GateIssue::CaseBranchTypeMismatch { .. } => {
             TruthyFalsyElaborationBlocker::UnknownBranchType { branch }
         }

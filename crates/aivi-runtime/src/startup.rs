@@ -8,10 +8,10 @@ use std::{
 use glib::MainContext;
 
 use aivi_backend::{
-    DetachedRuntimeValue, EvaluationError, GateStage as BackendGateStage,
-    ItemId as BackendItemId, ItemKind as BackendItemKind, KernelEvaluator, KernelId,
-    MovingRuntimeValueStore, PipelineId as BackendPipelineId, Program as BackendProgram,
-    RuntimeValue, SourceId as BackendSourceId, StageKind as BackendStageKind,
+    DetachedRuntimeValue, EvaluationError, GateStage as BackendGateStage, ItemId as BackendItemId,
+    ItemKind as BackendItemKind, KernelEvaluator, KernelId, MovingRuntimeValueStore,
+    PipelineId as BackendPipelineId, Program as BackendProgram, RuntimeValue,
+    SourceId as BackendSourceId, StageKind as BackendStageKind,
 };
 use aivi_core as core;
 use aivi_hir as hir;
@@ -1571,7 +1571,12 @@ impl<'a> LinkBuilder<'a> {
                     signal: derived,
                     backend_item,
                     dependency_items: info.dependencies.clone().into_boxed_slice(),
-                    pipeline_ids: item.pipelines.iter().copied().collect::<Vec<_>>().into_boxed_slice(),
+                    pipeline_ids: item
+                        .pipelines
+                        .iter()
+                        .copied()
+                        .collect::<Vec<_>>()
+                        .into_boxed_slice(),
                 },
             );
         }
