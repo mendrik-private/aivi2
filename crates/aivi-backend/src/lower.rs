@@ -97,6 +97,9 @@ pub enum LoweringError {
     UnresolvedItemReference {
         span: SourceSpan,
     },
+    GlobalItemCycle {
+        item: ItemId,
+    },
     UnsupportedInlinePipeStage {
         span: SourceSpan,
     },
@@ -142,6 +145,10 @@ impl fmt::Display for LoweringError {
             Self::UnresolvedItemReference { .. } => {
                 f.write_str("backend lowering rejects unresolved HIR item references")
             }
+            Self::GlobalItemCycle { item } => write!(
+                f,
+                "backend lowering detected a global item dependency cycle involving item {item}"
+            ),
             Self::UnsupportedInlinePipeStage { .. } => f.write_str(
                 "backend lowering does not yet encode inline case/truthy-falsy pipe stages",
             ),
@@ -214,6 +221,7 @@ impl<'a> ProgramLowerer<'a> {
     fn build(mut self) -> Result<Program, LoweringErrors> {
         self.seed_items().map_err(wrap_one)?;
         self.seed_signal_dependencies().map_err(wrap_one)?;
+        self.check_global_item_cycles().map_err(wrap_one)?;
         self.lower_item_bodies().map_err(wrap_one)?;
         self.lower_pipelines().map_err(wrap_one)?;
         self.lower_sources().map_err(wrap_one)?;
@@ -256,6 +264,147 @@ impl<'a> ProgramLowerer<'a> {
                 })
                 .map_err(|overflow| arena_overflow("items", overflow))?;
             self.item_map.insert(core_id, item_id);
+        }
+        Ok(())
+    }
+
+    /// Checks for cycles in the global item dependency graph using DFS with white/grey/black
+    /// coloring. A grey node encountered during traversal means a back-edge exists — i.e. a cycle.
+    /// Emits a diagnostic error rather than allowing infinite loops or incorrect codegen.
+    fn check_global_item_cycles(&self) -> Result<(), LoweringError> {
+        // Build an adjacency map: for each core item that has a body, collect the set of
+        // other core items directly referenced in its closure expressions.
+        let mut adjacency: HashMap<core::ItemId, Vec<core::ItemId>> = HashMap::new();
+        for (core_id, item) in self.lambda.items().iter() {
+            let Some(body_closure_id) = item.body else {
+                adjacency.entry(core_id).or_default();
+                continue;
+            };
+            let closure = &self.lambda.closures()[body_closure_id];
+            let mut deps: Vec<core::ItemId> = Vec::new();
+            let mut work = vec![closure.root];
+            while let Some(expr_id) = work.pop() {
+                let expr = &self.lambda.exprs()[expr_id];
+                match &expr.kind {
+                    core::ExprKind::Reference(core::Reference::Item(dep)) => {
+                        deps.push(*dep);
+                    }
+                    core::ExprKind::OptionSome { payload } => work.push(*payload),
+                    core::ExprKind::Text(text) => {
+                        for segment in &text.segments {
+                            if let core::TextSegment::Interpolation { expr, .. } = segment {
+                                work.push(*expr);
+                            }
+                        }
+                    }
+                    core::ExprKind::Tuple(elements)
+                    | core::ExprKind::List(elements)
+                    | core::ExprKind::Set(elements) => {
+                        work.extend(elements.iter().copied());
+                    }
+                    core::ExprKind::Map(entries) => {
+                        for entry in entries {
+                            work.push(entry.value);
+                            work.push(entry.key);
+                        }
+                    }
+                    core::ExprKind::Record(fields) => {
+                        for field in fields {
+                            work.push(field.value);
+                        }
+                    }
+                    core::ExprKind::Projection {
+                        base: core::ProjectionBase::Expr(base),
+                        ..
+                    } => work.push(*base),
+                    core::ExprKind::Apply { callee, arguments } => {
+                        work.push(*callee);
+                        work.extend(arguments.iter().copied());
+                    }
+                    core::ExprKind::Unary { expr, .. } => work.push(*expr),
+                    core::ExprKind::Binary { left, right, .. } => {
+                        work.push(*left);
+                        work.push(*right);
+                    }
+                    core::ExprKind::Pipe(pipe) => {
+                        work.push(pipe.head);
+                        for stage in &pipe.stages {
+                            match &stage.kind {
+                                core::PipeStageKind::Transform { expr }
+                                | core::PipeStageKind::Tap { expr } => work.push(*expr),
+                                core::PipeStageKind::Gate { predicate, .. } => {
+                                    work.push(*predicate);
+                                }
+                                core::PipeStageKind::Case { arms } => {
+                                    for arm in arms {
+                                        work.push(arm.body);
+                                    }
+                                }
+                                core::PipeStageKind::TruthyFalsy(pair) => {
+                                    work.push(pair.truthy.body);
+                                    work.push(pair.falsy.body);
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            adjacency.insert(core_id, deps);
+        }
+
+        // DFS cycle detection using three-color marking:
+        //   white (absent) = not yet visited
+        //   grey (true)    = currently on the DFS stack (in-progress)
+        //   black (false)  = fully explored, no cycle through this node
+        let mut color: HashMap<core::ItemId, bool> = HashMap::new();
+        let all_nodes: Vec<core::ItemId> = adjacency.keys().copied().collect();
+        for start in all_nodes {
+            if color.contains_key(&start) {
+                continue;
+            }
+            // Iterative DFS; stack entries are (node, iterator_index, backend_item_id_for_error).
+            let mut stack: Vec<(core::ItemId, usize)> = vec![(start, 0)];
+            color.insert(start, true); // grey
+            while let Some((node, idx)) = stack.last_mut() {
+                let node = *node;
+                let deps = adjacency.get(&node).map(Vec::as_slice).unwrap_or(&[]);
+                if *idx < deps.len() {
+                    let neighbor = deps[*idx];
+                    *idx += 1;
+                    match color.get(&neighbor) {
+                        Some(true) => {
+                            // Back-edge: neighbor is grey (on stack) — cycle detected.
+                            let backend_item = self.item_map.get(&neighbor).copied();
+                            let item = backend_item.unwrap_or_else(|| {
+                                // Fallback to the node currently being processed if the
+                                // neighbor was somehow not mapped (should not happen after
+                                // seed_items, but be defensive).
+                                self.item_map.get(&node).copied().unwrap_or(
+                                    // Use a safe sentinel; require_item would have failed
+                                    // earlier for a truly unknown item.
+                                    self.item_map.values().copied().next().unwrap_or(
+                                        ItemId::from_raw(0),
+                                    ),
+                                )
+                            });
+                            return Err(LoweringError::GlobalItemCycle { item });
+                        }
+                        Some(false) => {
+                            // Black: already fully explored, skip.
+                        }
+                        None => {
+                            // White: push onto stack and mark grey.
+                            color.insert(neighbor, true);
+                            stack.push((neighbor, 0));
+                        }
+                    }
+                } else {
+                    // All neighbours explored; mark black and pop.
+                    color.insert(node, false);
+                    stack.pop();
+                }
+            }
         }
         Ok(())
     }
@@ -2308,6 +2457,16 @@ impl<'a> ProgramLowerer<'a> {
         }
     }
 
+    /// Interns a `Layout` value and returns a stable `LayoutId`.
+    ///
+    /// # Known risk: no consistency checks
+    ///
+    /// The `layout_interner` cache has no consistency checks. If the same `core::Type` is
+    /// lowered to different `Layout` shapes in different contexts — for example because a
+    /// specialization or recompile changes the type structure after the cache was populated —
+    /// the cache will return the stale entry without detecting the mismatch. This can produce
+    /// incorrect layouts that silently corrupt codegen output. Callers that need freshness
+    /// guarantees must create a new `ProgramLowerer` rather than reusing a cached one.
     fn intern_layout(&mut self, layout: Layout) -> Result<LayoutId, LoweringError> {
         if let Some(id) = self.layout_interner.get(&layout).copied() {
             return Ok(id);

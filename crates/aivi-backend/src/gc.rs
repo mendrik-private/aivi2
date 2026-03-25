@@ -76,7 +76,12 @@ impl RuntimeGcHandle {
 /// values. Each live scheduler slot holds one stable root handle; collections clone reachable
 /// values into a fresh space and rewrite root slots, proving relocation without yet widening
 /// evaluator-temporary or codegen stack-map contracts.
-#[derive(Default)]
+///
+/// # Thread safety
+///
+/// `MovingRuntimeValueStore` is deliberately not `Send` or `Sync`. The `PhantomData<*mut ()>`
+/// field below opts out of both auto-traits. The store must only be accessed from the single
+/// thread that owns it. No internal synchronization is provided.
 pub struct MovingRuntimeValueStore {
     from_space: RuntimeGcSpace,
     to_space: RuntimeGcSpace,
@@ -85,6 +90,24 @@ pub struct MovingRuntimeValueStore {
     root_worklist: Vec<RuntimeGcHandle>,
     collections: u64,
     live_roots: usize,
+    /// Opts this type out of `Send` and `Sync`. The GC store must only be accessed from its
+    /// owning thread; there is no internal synchronization on any field.
+    _not_send_sync: PhantomData<*mut ()>,
+}
+
+impl Default for MovingRuntimeValueStore {
+    fn default() -> Self {
+        Self {
+            from_space: RuntimeGcSpace::default(),
+            to_space: RuntimeGcSpace::default(),
+            roots: Vec::new(),
+            free_roots: Vec::new(),
+            root_worklist: Vec::new(),
+            collections: 0,
+            live_roots: 0,
+            _not_send_sync: PhantomData,
+        }
+    }
 }
 
 impl MovingRuntimeValueStore {
@@ -139,6 +162,11 @@ impl MovingRuntimeValueStore {
         slot
     }
 
+    // SAFETY: There is no synchronization on this accessor. `MovingRuntimeValueStore` is neither
+    // `Send` nor `Sync` (see the `_not_send_sync: PhantomData<*mut ()>` field), so the borrow
+    // checker enforces that only one thread can ever hold a reference to the store at a time.
+    // Calling this from multiple threads without external synchronization is undefined behavior
+    // and would allow data races on the root-slot vector.
     fn root_slot_mut(&mut self, handle: RuntimeGcHandle) -> &mut RuntimeGcRootSlot {
         let slot = self
             .roots
@@ -187,6 +215,11 @@ impl CommittedValueStore<RuntimeValue> for MovingRuntimeValueStore {
                 .root_slot(handle)
                 .object
                 .expect("live moving-GC roots must point at an allocated object");
+            // TODO: write barrier — this direct in-place write bypasses any GC write barrier.
+            // A generational or incremental collector requires a write barrier here to record
+            // that the old-generation object at `object` has been overwritten with a potentially
+            // young-generation value. Without introducing barriers at every write site like this
+            // one, neither a generational nor an incremental GC can be added safely.
             self.from_space.values[object.0 as usize] = value;
             return;
         }
