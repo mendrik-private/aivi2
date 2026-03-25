@@ -1360,7 +1360,9 @@ fn check_domain_operator_and_schedule(
     let (Some(left_ty), Some(right_ty)) = (left_ty.as_ref(), right_ty.as_ref()) else {
         return Ok(false);
     };
-    let Some(matched) = select_domain_binary_operator(module, typing, operator, left_ty, right_ty)
+    let Some(matched) =
+        select_domain_binary_operator(module, typing, operator, left_ty, right_ty)
+            .unwrap_or(None)
     else {
         return Ok(false);
     };

@@ -19,7 +19,7 @@ use regex_syntax::{
 
 use crate::{
     arena::{Arena, ArenaId},
-    domain_operator_elaboration::select_domain_binary_operator,
+    domain_operator_elaboration::{binary_operator_text, select_domain_binary_operator},
     hir::{
         ApplicativeSpineHead, BuiltinTerm, BuiltinType, ClassMemberResolution, ControlNode,
         ControlNodeKind, CustomSourceRecurrenceWakeup, DecoratorPayload, DomainMemberKind,
@@ -109,6 +109,7 @@ impl Validator<'_> {
         self.validate_instance_items();
         self.validate_source_contract_types();
         self.validate_expression_types();
+        self.validate_constructor_arity();
         self.validate_pipe_semantics();
     }
 
@@ -1504,8 +1505,65 @@ impl Validator<'_> {
         if self.mode != ValidationMode::RequireResolvedNames {
             return;
         }
+        // TODO(perf): `typecheck_module` re-runs full type inference over the entire module from
+        // scratch on every call. Because `validate_module` is invoked once per gate context
+        // construction (and gate contexts are created for every item being elaborated), this makes
+        // elaboration O(n²) in the number of gates: each new `GateTypeContext` starts with an
+        // empty `item_types` cache and must re-infer every reachable item. Fixing this requires
+        // either sharing a single persistent `GateTypeContext` across all elaboration passes, or
+        // memoising the per-module type-check result and reusing it rather than recomputing it.
         self.diagnostics
             .extend(typecheck_module(self.module).into_diagnostics());
+    }
+
+    /// Checks that every constructor call site (in both patterns and expressions) supplies
+    /// exactly the number of arguments declared by the corresponding variant definition.
+    ///
+    /// Patterns carry all constructor arguments inline, so arity can be verified directly.
+    /// Expression call sites use curried application and are handled by type inference in
+    /// [`validate_expression_types`]; this pass covers any structural mismatches that survive
+    /// before type inference runs (e.g. in `Structural` validation mode).
+    fn validate_constructor_arity(&mut self) {
+        for (_, pattern) in self.module.patterns().iter() {
+            let PatternKind::Constructor { callee, arguments } = &pattern.kind else {
+                continue;
+            };
+            let ResolutionState::Resolved(TermResolution::Item(item_id)) =
+                callee.resolution.as_ref()
+            else {
+                continue;
+            };
+            let Item::Type(type_item) = &self.module.items()[*item_id] else {
+                continue;
+            };
+            let TypeItemBody::Sum(variants) = &type_item.body else {
+                continue;
+            };
+            let variant_name = callee.path.segments().last().text();
+            let Some(variant) = variants.iter().find(|v| v.name.text() == variant_name) else {
+                continue;
+            };
+            let expected = variant.fields.len();
+            let actual = arguments.len();
+            if actual != expected {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "constructor `{}` expects {expected} argument{}, but {actual} {} provided",
+                        callee.path,
+                        if expected == 1 { "" } else { "s" },
+                        if actual == 1 { "was" } else { "were" },
+                    ))
+                    .with_code(code("constructor-arity-mismatch"))
+                    .with_label(DiagnosticLabel::primary(
+                        pattern.span,
+                        format!(
+                            "this pattern supplies {actual} argument{} to a {expected}-field constructor",
+                            if actual == 1 { "" } else { "s" },
+                        ),
+                    )),
+                );
+            }
+        }
     }
 
     fn emit_source_option_value_mismatch(
@@ -4806,6 +4864,10 @@ impl Validator<'_> {
             );
             saw_error = true;
         }
+        // Gate predicates (fan-out filters) must evaluate to `Bool`. This invariant is fundamental
+        // to the gate/filter semantic: the runtime uses the predicate result to decide whether to
+        // forward or discard each fan-out element. Any other result type is a type error that must
+        // be reported here rather than deferred to a later pass.
         if let Some(predicate_ty) = predicate_info.ty {
             if !predicate_ty.is_bool() {
                 self.diagnostics.push(
@@ -5528,6 +5590,11 @@ impl Validator<'_> {
             );
             saw_error = true;
         }
+        // Gate predicates must evaluate to `Bool`. This is a hard semantic invariant: the `?|>`
+        // stage passes each subject element through only when the predicate returns `true`. Any
+        // other result type cannot meaningfully drive the keep/discard decision, so it must be
+        // rejected here. The check is performed against the inferred type rather than delegated
+        // to a downstream pass so that the error is anchored to the predicate expression itself.
         if let Some(predicate_ty) = predicate_info.ty {
             if !predicate_ty.is_bool() {
                 self.diagnostics.push(
@@ -5690,6 +5757,23 @@ impl Validator<'_> {
                         span,
                         "make every branch in this case split produce the same type",
                     )),
+                );
+            }
+            GateIssue::AmbiguousDomainOperator {
+                span,
+                operator,
+                candidates,
+            } => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "binary operator `{operator}` is ambiguous: multiple domain implementations match"
+                    ))
+                    .with_code(code("ambiguous-domain-operator"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "add a type annotation on one operand to disambiguate which domain operator to use",
+                    ))
+                    .with_note(format!("candidates: {}", candidates.join(", "))),
                 );
             }
         }
@@ -7613,6 +7697,14 @@ pub(crate) enum GateIssue {
         span: SourceSpan,
         expected: String,
         actual: String,
+    },
+    /// Two or more domain operator implementations match the given binary expression.
+    /// The caller must emit this issue as a diagnostic and treat the operator result type
+    /// as unknown so downstream checking can continue without cascading false errors.
+    AmbiguousDomainOperator {
+        span: SourceSpan,
+        operator: String,
+        candidates: Vec<String>,
     },
 }
 
@@ -10704,8 +10796,25 @@ impl<'a> GateTypeContext<'a> {
                 let right_ty = right_info.ty.clone();
                 info.merge(right_info);
                 info.ty = if let (Some(left), Some(right)) = (left_ty.as_ref(), right_ty.as_ref()) {
-                    select_domain_binary_operator(self.module, self, operator, left, right)
-                        .map(|matched| matched.result_type)
+                    match select_domain_binary_operator(self.module, self, operator, left, right) {
+                        Ok(maybe_matched) => maybe_matched.map(|matched| matched.result_type),
+                        Err(candidates) => {
+                            // Multiple domain operator implementations match: emit an ambiguity
+                            // diagnostic and leave the result type unknown so downstream checking
+                            // can continue without cascading false errors.
+                            info.issues.push(GateIssue::AmbiguousDomainOperator {
+                                span: expr.span,
+                                operator: binary_operator_text(operator).to_owned(),
+                                candidates: candidates
+                                    .into_iter()
+                                    .map(|c| {
+                                        format!("{}.{}", c.callee.domain_name, c.callee.member_name)
+                                    })
+                                    .collect(),
+                            });
+                            None
+                        }
+                    }
                 } else {
                     None
                 };

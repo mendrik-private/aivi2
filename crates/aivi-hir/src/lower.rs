@@ -3947,6 +3947,24 @@ impl<'a> Lowerer<'a> {
             .expect("resolved item id should still exist") = resolved;
     }
 
+    /// Computes and stores signal dependency graphs and source decorator metadata for every
+    /// `sig` item in the module.
+    ///
+    /// # Phase-conflation note
+    ///
+    /// This function performs semantic analysis (dependency resolution and source metadata
+    /// extraction) inside what is structurally a *lowering* pass. Signal metadata analysis
+    /// really belongs in a dedicated semantic-analysis phase that runs after name resolution
+    /// and before HIR validation, not as a sub-step of the lowering loop.
+    ///
+    /// The current placement couples two distinct concerns: syntactic lowering (building the
+    /// HIR from the parse tree) and semantic analysis (determining what each signal depends on
+    /// and how it is sourced). This makes the lowering phase harder to reason about and prevents
+    /// incremental re-analysis of just the metadata when, e.g., only a decorator argument changes.
+    ///
+    /// TODO: Extract `populate_signal_metadata` (and `compute_signal_metadata`) into a separate
+    /// `analyze_signal_metadata` pass that runs as an explicit stage between name resolution and
+    /// HIR validation.
     fn populate_signal_metadata(&mut self, namespaces: &Namespaces) {
         let item_ids = self
             .module

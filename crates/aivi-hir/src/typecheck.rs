@@ -589,7 +589,9 @@ impl<'a> TypeChecker<'a> {
                 operator,
                 left_actual,
                 right_actual,
-            ) {
+            )
+            .unwrap_or(None)
+            {
                 let checkpoint = self.diagnostics.len();
                 let left_ok = self.check_expr(left, env, Some(left_actual), value_stack);
                 let right_ok = self.check_expr(right, env, Some(right_actual), value_stack);
