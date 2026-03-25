@@ -86,7 +86,7 @@ impl BuiltinSourceProvider {
             }
             Self::FsWatch => SourceContract::new(
                 self,
-                &FS_WATCH_OPTIONS,
+                fs_watch_options(),
                 FS_WATCH_RECURRENCE,
                 STREAM_LIFECYCLE,
             ),
@@ -175,7 +175,7 @@ pub struct SourceOptionContract {
 }
 
 impl SourceOptionContract {
-    pub fn new(name: &'static str, ty: SourceContractType) -> Self {
+    pub const fn new(name: &'static str, ty: SourceContractType) -> Self {
         Self { name, ty }
     }
 
@@ -592,13 +592,19 @@ fn timer_options() -> &'static [SourceOptionContract] {
     })
 }
 
-static FS_WATCH_OPTIONS: [SourceOptionContract; 2] = [
-    SourceOptionContract::new(
-        "events",
-        SourceContractType::list(SourceTypeAtom::nominal(SourceNominalType::FsWatchEvent)),
-    ),
-    SourceOptionContract::new("recursive", SourceContractType::bool()),
-];
+static FS_WATCH_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
+
+fn fs_watch_options() -> &'static [SourceOptionContract] {
+    FS_WATCH_OPTIONS_STORAGE.get_or_init(|| {
+        vec![
+            SourceOptionContract::new(
+                "events",
+                SourceContractType::list(SourceTypeAtom::nominal(SourceNominalType::FsWatchEvent)),
+            ),
+            SourceOptionContract::new("recursive", SourceContractType::bool()),
+        ]
+    })
+}
 
 static FS_READ_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
 
