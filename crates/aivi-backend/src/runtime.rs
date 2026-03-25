@@ -1006,10 +1006,21 @@ impl<'a> KernelEvaluator<'a> {
                             values.push(value);
                         }
                         KernelExprKind::SumConstructor(handle) => {
-                            values.push(RuntimeValue::Callable(RuntimeCallable::SumConstructor {
-                                handle: handle.clone(),
-                                bound_arguments: Vec::new(),
-                            }))
+                            // Zero-arity constructors are already fully applied: emit Sum directly.
+                            let value = if handle.field_count == 0 {
+                                RuntimeValue::Sum(RuntimeSumValue {
+                                    item: handle.item,
+                                    type_name: handle.type_name.clone(),
+                                    variant_name: handle.variant_name.clone(),
+                                    fields: Vec::new(),
+                                })
+                            } else {
+                                RuntimeValue::Callable(RuntimeCallable::SumConstructor {
+                                    handle: handle.clone(),
+                                    bound_arguments: Vec::new(),
+                                })
+                            };
+                            values.push(value)
                         }
                         KernelExprKind::DomainMember(handle) => {
                             values.push(RuntimeValue::Callable(RuntimeCallable::DomainMember {
@@ -1130,20 +1141,22 @@ impl<'a> KernelEvaluator<'a> {
                             }
                         }
                         KernelExprKind::Projection { base, path } => {
+                            // Build tasks LIFO: push BuildProjection first so Visit(inner) is
+                            // processed first, pushing the value that BuildProjection will pop.
                             let base_build = match base {
                                 ProjectionBase::Subject(subject) => {
                                     ProjectionBuild::Subject(*subject)
                                 }
-                                ProjectionBase::Expr(inner) => {
-                                    tasks.push(Task::Visit(*inner));
-                                    ProjectionBuild::Expr
-                                }
+                                ProjectionBase::Expr(_) => ProjectionBuild::Expr,
                             };
                             tasks.push(Task::BuildProjection {
                                 expr: expr_id,
                                 base: base_build,
                                 path: path.clone(),
                             });
+                            if let ProjectionBase::Expr(inner) = base {
+                                tasks.push(Task::Visit(*inner));
+                            }
                         }
                         KernelExprKind::Apply { callee, arguments } => {
                             tasks.push(Task::BuildApply {

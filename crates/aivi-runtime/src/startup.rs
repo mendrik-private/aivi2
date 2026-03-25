@@ -325,12 +325,11 @@ impl BackendLinkedRuntime {
         let mut snapshots = BTreeMap::new();
         for (&signal, &item) in &self.signal_items_by_handle {
             if let Some(value) = self.runtime.current_value(signal)? {
-                snapshots.insert(
-                    item,
-                    DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Signal(Box::new(
-                        value.clone(),
-                    ))),
-                );
+                let public_value = match value {
+                    RuntimeValue::Signal(_) => value.clone(),
+                    other => RuntimeValue::Signal(Box::new(other.clone())),
+                };
+                snapshots.insert(item, DetachedRuntimeValue::from_runtime_owned(public_value));
             }
         }
         Ok(snapshots)
@@ -1346,7 +1345,9 @@ fn evaluate_kernel_coercing_zero_arity(
 ) -> Result<RuntimeValue, EvaluationError> {
     match evaluator.evaluate_kernel(kernel_id, input_subject, &[], globals) {
         Ok(value) => Ok(value),
-        Err(EvaluationError::KernelResultLayoutMismatch { expected, found, .. }) => {
+        Err(EvaluationError::KernelResultLayoutMismatch {
+            expected, found, ..
+        }) => {
             // If the value is a zero-arity sum constructor callable, apply it to get
             // the actual Sum value.
             if let RuntimeValue::Callable(RuntimeCallable::SumConstructor {
@@ -1631,21 +1632,26 @@ impl<'a> LinkBuilder<'a> {
             if let Some(source_input) = binding.source_input {
                 let item = &self.backend.items()[backend_item];
                 let BackendItemKind::Signal(_) = &item.kind else {
-                    self.errors.push(BackendRuntimeLinkError::BackendItemNotSignal {
-                        item: binding.item,
-                        backend_item,
-                    });
+                    self.errors
+                        .push(BackendRuntimeLinkError::BackendItemNotSignal {
+                            item: binding.item,
+                            backend_item,
+                        });
                     continue;
                 };
 
                 // Find the pipeline with a recurrence.
-                let pipeline_id = item.pipelines.iter().copied().find(|&pid| {
-                    self.backend.pipelines()[pid].recurrence.is_some()
-                });
+                let pipeline_id = item
+                    .pipelines
+                    .iter()
+                    .copied()
+                    .find(|&pid| self.backend.pipelines()[pid].recurrence.is_some());
                 let Some(pipeline_id) = pipeline_id else {
-                    self.errors.push(BackendRuntimeLinkError::SourceBackedBodySignalNotYetLinked {
-                        item: binding.item,
-                    });
+                    self.errors.push(
+                        BackendRuntimeLinkError::SourceBackedBodySignalNotYetLinked {
+                            item: binding.item,
+                        },
+                    );
                     continue;
                 };
 
@@ -1795,10 +1801,11 @@ impl<'a> LinkBuilder<'a> {
                         if let Some(body) = item.body {
                             kernel_queue.push(body);
                         } else {
-                            self.errors.push(BackendRuntimeLinkError::MissingItemBodyForGlobal {
-                                owner,
-                                item: item_id,
-                            });
+                            self.errors
+                                .push(BackendRuntimeLinkError::MissingItemBodyForGlobal {
+                                    owner,
+                                    item: item_id,
+                                });
                         }
                     }
                 }

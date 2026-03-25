@@ -1554,10 +1554,12 @@ impl<'a> Lowerer<'a> {
                 })
             }
             syn::ExprKind::List(elements) => {
-                if let [syn::Expr {
-                    kind: syn::ExprKind::Range { start, end },
-                    ..
-                }] = elements.as_slice()
+                if let [
+                    syn::Expr {
+                        kind: syn::ExprKind::Range { start, end },
+                        ..
+                    },
+                ] = elements.as_slice()
                 {
                     return self.lower_integer_range_expr(expr.span, start, end);
                 }

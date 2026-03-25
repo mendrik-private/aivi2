@@ -150,32 +150,15 @@ fun updateDirection:Direction key:Key current:Direction =>
     arrowKey key
      |> filterDirection current
 
-fun moveHead:Pixel dx:Int dy:Int p:Pixel =>
-    p
-     ||> Pixel px py => Pixel (px + dx) (py + dy)
-
-fun moveUp:Pixel p:Pixel =>
-    p
-     |> moveHead 0 (0 - 1)
-
-fun moveDown:Pixel p:Pixel =>
-    p
-     |> moveHead 0 1
-
-fun moveLeft:Pixel p:Pixel =>
-    p
-     |> moveHead (0 - 1) 0
-
-fun moveRight:Pixel p:Pixel =>
-    p
-     |> moveHead 1 0
+fun movePixel:Pixel head:Pixel direction:Direction =>
+    (head, direction)
+     ||> (Pixel px py, Up)    => Pixel px (py - 1)
+     ||> (Pixel px py, Down)  => Pixel px (py + 1)
+     ||> (Pixel px py, Left)  => Pixel (px - 1) py
+     ||> (Pixel px py, Right) => Pixel (px + 1) py
 
 fun nextHead:Pixel direction:Direction head:Pixel =>
-    direction
-     ||> Up    => moveUp head
-     ||> Down  => moveDown head
-     ||> Left  => moveLeft head
-     ||> Right => moveRight head
+    movePixel head direction
 
 fun nextSeed:Int seed:Int =>
     (seed * 1103515245 + 12345) % 2147483648

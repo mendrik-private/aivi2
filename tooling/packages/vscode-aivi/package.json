@@ -10,6 +10,7 @@
   "categories": ["Programming Languages", "Formatters", "Linters"],
   "keywords": ["aivi", "functional", "reactive", "gtk", "linux"],
   "license": "MIT",
+  "icon": "icons/aivi-a.png",
   "main": "./dist/extension.js",
   "activationEvents": [],
   "contributes": {
@@ -47,6 +48,7 @@
     ],
     "configurationDefaults": {
       "[aivi]": {
+        "editor.defaultFormatter": "aivi-lang.vscode-aivi",
         "editor.fontLigatures": true,
         "editor.fontFamily": "'Fira Code', 'Cascadia Code', 'JetBrains Mono', 'Maple Mono', monospace",
         "editor.rulers": [100],

@@ -1,8 +1,6 @@
 use aivi_base::SourceSpan;
 
-use crate::{
-    DomainMemberKind, Item, Module, TypeId, TypeItemBody, TypeKind,
-};
+use crate::{DomainMemberKind, Item, Module, TypeId, TypeItemBody, TypeKind};
 
 /// LSP symbol kinds (mirrors the LSP spec SymbolKind enum).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -129,11 +127,8 @@ fn item_to_lsp_symbol(item: &Item, module: &Module) -> Option<LspSymbol> {
                             let detail = if v.fields.is_empty() {
                                 None
                             } else {
-                                let parts: Vec<_> = v
-                                    .fields
-                                    .iter()
-                                    .map(|&f| format_type(module, f))
-                                    .collect();
+                                let parts: Vec<_> =
+                                    v.fields.iter().map(|&f| format_type(module, f)).collect();
                                 Some(format!("({})", parts.join(", ")))
                             };
                             LspSymbol {
@@ -267,4 +262,3 @@ fn item_to_lsp_symbol(item: &Item, module: &Module) -> Option<LspSymbol> {
         }
     }
 }
-

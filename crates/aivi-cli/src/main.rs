@@ -402,12 +402,9 @@ impl GtkHostValue for RunHostValue {
     }
 
     fn as_text(&self) -> Option<&str> {
-        match self.0.as_runtime() {
+        match strip_signal_runtime_ref(self.0.as_runtime()) {
             RuntimeValue::Text(value) => Some(value.as_ref()),
-            RuntimeValue::Signal(value) => match value.as_ref() {
-                RuntimeValue::Text(value) => Some(value.as_ref()),
-                _ => None,
-            },
+            RuntimeValue::Sum(sum) if sum.fields.is_empty() => Some(sum.variant_name.as_ref()),
             _ => None,
         }
     }
@@ -437,7 +434,14 @@ struct CompiledRunFragment {
     parameters: Vec<GeneralExprParameter>,
     program: BackendProgram,
     item: BackendItemId,
-    required_globals: Vec<BackendItemId>,
+    required_signal_globals: Vec<CompiledRunSignalGlobal>,
+}
+
+#[derive(Clone, Debug)]
+struct CompiledRunSignalGlobal {
+    fragment_item: BackendItemId,
+    runtime_item: BackendItemId,
+    name: Box<str>,
 }
 
 #[derive(Clone, Debug)]
@@ -862,7 +866,16 @@ fn prepare_run_artifact(
         }
         rendered
     })?;
-    let hydration_inputs = compile_run_inputs(sources, module, view_owner, view.body, &bridge)?;
+    let runtime_backend_by_hir = backend_items_by_hir(&lowered.core, lowered.backend.as_ref());
+    let hydration_inputs = compile_run_inputs(
+        sources,
+        module,
+        view_owner,
+        view.body,
+        &bridge,
+        lowered.backend.as_ref(),
+        &runtime_backend_by_hir,
+    )?;
     let event_handlers = resolve_run_event_handlers(module, &bridge, &runtime_assembly, sources)?;
     Ok(RunArtifact {
         view_name: view.name.text().into(),
@@ -1511,6 +1524,8 @@ fn compile_run_inputs(
     view_owner: aivi_hir::ItemId,
     view_body: HirExprId,
     bridge: &GtkBridgeGraph,
+    runtime_backend: &BackendProgram,
+    runtime_backend_by_hir: &BTreeMap<aivi_hir::ItemId, BackendItemId>,
 ) -> Result<BTreeMap<RuntimeInputHandle, CompiledRunInput>, String> {
     let sites = collect_markup_runtime_expr_sites(module, view_body).map_err(|error| {
         format!(
@@ -1522,7 +1537,13 @@ fn compile_run_inputs(
     for (input, spec) in collect_run_input_specs_from_bridge(bridge) {
         let compiled = match spec {
             RunInputSpec::Expr(expr) => CompiledRunInput::Expr(compile_run_expr_fragment(
-                sources, module, view_owner, &sites, expr,
+                sources,
+                module,
+                view_owner,
+                &sites,
+                expr,
+                runtime_backend,
+                runtime_backend_by_hir,
             )?),
             RunInputSpec::Text(text) => {
                 let mut segments = Vec::with_capacity(text.segments.len());
@@ -1538,6 +1559,8 @@ fn compile_run_inputs(
                                 view_owner,
                                 &sites,
                                 interpolation.expr,
+                                runtime_backend,
+                                runtime_backend_by_hir,
                             )?),
                         ),
                     }
@@ -1558,6 +1581,8 @@ fn compile_run_expr_fragment(
     view_owner: aivi_hir::ItemId,
     sites: &aivi_hir::MarkupRuntimeExprSites,
     expr: HirExprId,
+    runtime_backend: &BackendProgram,
+    runtime_backend_by_hir: &BTreeMap<aivi_hir::ItemId, BackendItemId>,
 ) -> Result<CompiledRunFragment, String> {
     let site = sites.get(expr).ok_or_else(|| {
         format!(
@@ -1622,16 +1647,77 @@ fn compile_run_expr_fragment(
                 source_location(sources, site.span)
             )
         })?;
-    let required_globals = backend.items()[item]
+    let required_signal_globals = backend.items()[item]
         .body
         .map(|kernel| backend.kernels()[kernel].global_items.clone())
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .into_iter()
+        .map(|fragment_item| {
+            let fragment_decl = backend.items().get(fragment_item).ok_or_else(|| {
+                format!(
+                    "compiled runtime fragment {} references missing backend item {}",
+                    expr.as_raw(),
+                    fragment_item
+                )
+            })?;
+            let hir_item = core
+                .module
+                .items()
+                .get(fragment_decl.origin)
+                .map(|item| item.origin)
+                .ok_or_else(|| {
+                    format!(
+                        "compiled runtime fragment {} lost core→HIR origin for backend item {}",
+                        expr.as_raw(),
+                        fragment_item
+                    )
+                })?;
+            let Item::Signal(signal) = module.items().get(hir_item).ok_or_else(|| {
+                format!(
+                    "compiled runtime fragment {} references unknown HIR item {}",
+                    expr.as_raw(),
+                    hir_item.as_raw()
+                )
+            })? else {
+                return Ok(None);
+            };
+            let runtime_item = runtime_backend_by_hir.get(&hir_item).copied().ok_or_else(|| {
+                format!(
+                    "runtime fragment {} needs signal `{}` but the live run backend has no matching item",
+                    expr.as_raw(),
+                    signal.name.text()
+                )
+            })?;
+            let runtime_decl = runtime_backend.items().get(runtime_item).ok_or_else(|| {
+                format!(
+                    "live run backend is missing runtime item {} for signal `{}`",
+                    runtime_item,
+                    signal.name.text()
+                )
+            })?;
+            if !matches!(runtime_decl.kind, aivi_backend::ItemKind::Signal(_)) {
+                return Err(format!(
+                    "live run backend item {} for signal `{}` is not a signal",
+                    runtime_item,
+                    signal.name.text()
+                ));
+            }
+            Ok(Some(CompiledRunSignalGlobal {
+                fragment_item,
+                runtime_item,
+                name: signal.name.text().into(),
+            }))
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .collect();
     Ok(CompiledRunFragment {
         expr,
         parameters: site.parameters.clone(),
         program: backend,
         item,
-        required_globals,
+        required_signal_globals,
     })
 }
 
@@ -2419,18 +2505,19 @@ fn evaluate_compiled_run_fragment(
     let item = &fragment.program.items()[fragment.item];
     let mut evaluator = KernelEvaluator::new(&fragment.program);
     let required_globals = fragment
-        .required_globals
+        .required_signal_globals
         .iter()
-        .map(|item| {
+        .map(|dep| {
             globals
-                .get(item)
+                .get(&dep.runtime_item)
                 .cloned()
-                .map(|value| (*item, value))
+                .map(|value| (dep.fragment_item, value))
                 .ok_or_else(|| {
                     format!(
-                        "runtime expression {} requires current signal item {} but no committed snapshot exists",
+                        "runtime expression {} requires current signal `{}` (runtime item {}) but no committed snapshot exists",
                         fragment.expr.as_raw(),
-                        item
+                        dep.name,
+                        dep.runtime_item
                     )
                 })
         })
@@ -2450,6 +2537,27 @@ fn evaluate_compiled_run_fragment(
             .evaluate_kernel(kernel, None, &args, &required_globals)
             .map_err(|error| format!("{error}"))
     }
+}
+
+fn backend_items_by_hir(
+    core: &aivi_core::Module,
+    backend: &BackendProgram,
+) -> BTreeMap<aivi_hir::ItemId, BackendItemId> {
+    let core_to_hir = core
+        .items()
+        .iter()
+        .map(|(core_id, item)| (core_id, item.origin))
+        .collect::<BTreeMap<_, _>>();
+    backend
+        .items()
+        .iter()
+        .filter_map(|(backend_id, item)| {
+            core_to_hir
+                .get(&item.origin)
+                .copied()
+                .map(|hir_id| (hir_id, backend_id))
+        })
+        .collect()
 }
 
 fn evaluate_compiled_run_text(
@@ -2497,6 +2605,13 @@ fn runtime_collection_key(value: RuntimeValue) -> Option<GtkCollectionKey> {
 fn strip_signal_runtime_value(mut value: RuntimeValue) -> RuntimeValue {
     while let RuntimeValue::Signal(inner) = value {
         value = *inner;
+    }
+    value
+}
+
+fn strip_signal_runtime_ref(mut value: &RuntimeValue) -> &RuntimeValue {
+    while let RuntimeValue::Signal(inner) = value {
+        value = inner.as_ref();
     }
     value
 }

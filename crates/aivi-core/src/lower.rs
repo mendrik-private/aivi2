@@ -3058,7 +3058,10 @@ impl<'a> RuntimeFragmentLowerer<'a> {
         if self.lowered.contains(&owner) || self.lowering.contains(&owner) {
             return;
         }
-        if matches!(self.lowerer.hir.items().get(owner), Some(HirItem::Signal(_))) {
+        if matches!(
+            self.lowerer.hir.items().get(owner),
+            Some(HirItem::Signal(_))
+        ) {
             if self.seed_hir_item(owner).is_some() {
                 self.lowered.insert(owner);
             }
