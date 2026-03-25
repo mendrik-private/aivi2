@@ -176,6 +176,10 @@ impl Diagnostic {
                         .end()
                         .as_usize()
                         .saturating_sub(label_span.start().as_usize());
+                    // NOTE: caret width is computed from byte positions (label_span.len() is a
+                    // byte count), not Unicode character widths.  Wide characters (e.g. CJK) or
+                    // multi-byte UTF-8 sequences will cause the caret to be wider or narrower
+                    // than the rendered glyph columns, producing visually misaligned output.
                     let caret_width = if label_span.is_empty() {
                         1
                     } else {
@@ -194,6 +198,9 @@ impl Diagnostic {
             }
         }
 
+        // Render all secondary labels.  Each one is shown with its file location, the
+        // relevant source line, and a `-`-caret beneath the labelled span, followed by
+        // the label message as an indented note line.
         for label in self
             .labels
             .iter()
@@ -203,12 +210,37 @@ impl Diagnostic {
                 let location = file.line_column(label.span.span().start());
                 let _ = writeln!(
                     rendered,
-                    "  = {}:{}:{}: {}",
+                    "  ::: {}:{}:{}",
                     file.path().display(),
                     location.line,
                     location.column,
-                    label.message
                 );
+                let _ = writeln!(rendered, "  |");
+                if let Some(line_text) = file.line_text(location.line - 1) {
+                    let _ = writeln!(rendered, "{:>2} | {}", location.line, line_text);
+                    let label_span = label.span.span();
+                    // NOTE: caret width uses byte length — see the same note on the
+                    // primary caret above regarding potential misalignment for wide chars.
+                    let caret_width = if label_span.is_empty() {
+                        1
+                    } else {
+                        usize::max(1, label_span.len() as usize)
+                    };
+                    let _ = writeln!(
+                        rendered,
+                        "  | {}{}",
+                        " ".repeat(location.column.saturating_sub(1)),
+                        "-".repeat(caret_width)
+                    );
+                    if !label.message.is_empty() {
+                        let _ = writeln!(
+                            rendered,
+                            "  | {}note: {}",
+                            " ".repeat(location.column.saturating_sub(1)),
+                            label.message
+                        );
+                    }
+                }
             }
         }
 
@@ -248,6 +280,11 @@ mod tests {
         assert!(rendered.contains(" --> sample.aivi:1:1"));
         assert!(rendered.contains("sig counter = 0"));
         assert!(rendered.contains("expected a declaration keyword here"));
+        // Secondary labels must be rendered, not silently dropped.
+        assert!(
+            rendered.contains("this binding belongs to the malformed declaration"),
+            "secondary label message missing from rendered output:\n{rendered}"
+        );
         assert!(rendered.contains("parser stayed in the Milestone 1 surface layer"));
     }
 }

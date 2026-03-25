@@ -378,13 +378,11 @@ impl<'a> Lowerer<'a> {
 
     fn store_item(&mut self, item: Item, ambient: bool) {
         if ambient {
-            self.module
-                .push_ambient_item(item)
-                .expect("HIR ambient item arena should not overflow during lowering");
-        } else {
-            self.module
-                .push_item(item)
-                .expect("HIR item arena should not overflow during lowering");
+            if self.module.push_ambient_item(item).is_err() {
+                self.emit_arena_overflow("HIR ambient item arena");
+            }
+        } else if self.module.push_item(item).is_err() {
+            self.emit_arena_overflow("HIR item arena");
         }
     }
 
@@ -477,9 +475,9 @@ impl<'a> Lowerer<'a> {
 
     fn lower_function_item(&mut self, item: &syn::NamedItem) -> FunctionItem {
         if !item.type_parameters.is_empty() {
-            self.emit_error(
+            self.emit_warning(
                 item.base.span,
-                "generic `fun` declarations are not preserved in Milestone 2 HIR yet",
+                "generic function type parameters are not yet supported and will be ignored",
                 code("unsupported-generic-function"),
             );
         }
@@ -5452,40 +5450,71 @@ impl<'a> Lowerer<'a> {
         );
     }
 
+    fn emit_warning(
+        &mut self,
+        span: SourceSpan,
+        message: impl Into<String>,
+        warning_code: DiagnosticCode,
+    ) {
+        self.diagnostics.push(
+            Diagnostic::warning(message)
+                .with_code(warning_code)
+                .with_primary_label(span, "reported during Milestone 2 HIR lowering"),
+        );
+    }
+
+    fn emit_arena_overflow(&mut self, arena_name: &str) {
+        self.diagnostics.push(
+            Diagnostic::error(format!(
+                "program too large: arena capacity exceeded ({})",
+                arena_name
+            ))
+            .with_code(code("arena-overflow")),
+        );
+    }
+
     fn alloc_expr(&mut self, expr: Expr) -> ExprId {
-        self.module
-            .alloc_expr(expr)
-            .expect("HIR expr arena should not overflow during lowering")
+        self.module.alloc_expr(expr).unwrap_or_else(|_| {
+            self.emit_arena_overflow("HIR expr arena");
+            std::process::exit(1);
+        })
     }
 
     fn alloc_pattern(&mut self, pattern: Pattern) -> PatternId {
-        self.module
-            .alloc_pattern(pattern)
-            .expect("HIR pattern arena should not overflow during lowering")
+        self.module.alloc_pattern(pattern).unwrap_or_else(|_| {
+            self.emit_arena_overflow("HIR pattern arena");
+            std::process::exit(1);
+        })
     }
 
     fn alloc_type(&mut self, ty: TypeNode) -> TypeId {
-        self.module
-            .alloc_type(ty)
-            .expect("HIR type arena should not overflow during lowering")
+        self.module.alloc_type(ty).unwrap_or_else(|_| {
+            self.emit_arena_overflow("HIR type arena");
+            std::process::exit(1);
+        })
     }
 
     fn alloc_decorator(&mut self, decorator: Decorator) -> DecoratorId {
-        self.module
-            .alloc_decorator(decorator)
-            .expect("HIR decorator arena should not overflow during lowering")
+        self.module.alloc_decorator(decorator).unwrap_or_else(|_| {
+            self.emit_arena_overflow("HIR decorator arena");
+            std::process::exit(1);
+        })
     }
 
     fn alloc_markup_node(&mut self, node: MarkupNode) -> MarkupNodeId {
-        self.module
-            .alloc_markup_node(node)
-            .expect("HIR markup arena should not overflow during lowering")
+        self.module.alloc_markup_node(node).unwrap_or_else(|_| {
+            self.emit_arena_overflow("HIR markup arena");
+            std::process::exit(1);
+        })
     }
 
     fn alloc_control(&mut self, control: ControlNode) -> ControlNodeId {
         self.module
             .alloc_control_node(control)
-            .expect("HIR control arena should not overflow during lowering")
+            .unwrap_or_else(|_| {
+                self.emit_arena_overflow("HIR control arena");
+                std::process::exit(1);
+            })
     }
 
     fn wrap_control(&mut self, control: ControlNode) -> MarkupNodeId {
@@ -5498,27 +5527,33 @@ impl<'a> Lowerer<'a> {
     }
 
     fn alloc_cluster(&mut self, cluster: ApplicativeCluster) -> crate::ClusterId {
-        self.module
-            .alloc_cluster(cluster)
-            .expect("HIR cluster arena should not overflow during lowering")
+        self.module.alloc_cluster(cluster).unwrap_or_else(|_| {
+            self.emit_arena_overflow("HIR cluster arena");
+            std::process::exit(1);
+        })
     }
 
     fn alloc_binding(&mut self, binding: Binding) -> BindingId {
-        self.module
-            .alloc_binding(binding)
-            .expect("HIR binding arena should not overflow during lowering")
+        self.module.alloc_binding(binding).unwrap_or_else(|_| {
+            self.emit_arena_overflow("HIR binding arena");
+            std::process::exit(1);
+        })
     }
 
     fn alloc_type_parameter(&mut self, parameter: TypeParameter) -> TypeParameterId {
         self.module
             .alloc_type_parameter(parameter)
-            .expect("HIR type parameter arena should not overflow during lowering")
+            .unwrap_or_else(|_| {
+                self.emit_arena_overflow("HIR type parameter arena");
+                std::process::exit(1);
+            })
     }
 
     fn alloc_import(&mut self, import: ImportBinding) -> ImportId {
-        self.module
-            .alloc_import(import)
-            .expect("HIR import arena should not overflow during lowering")
+        self.module.alloc_import(import).unwrap_or_else(|_| {
+            self.emit_arena_overflow("HIR import arena");
+            std::process::exit(1);
+        })
     }
 }
 

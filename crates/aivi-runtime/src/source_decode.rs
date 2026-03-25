@@ -207,12 +207,17 @@ pub fn parse_json_text(text: &str) -> Result<ExternalSourceValue, SourceDecodeEr
     external_from_json(value)
 }
 
+/// Maximum recursion depth for `decode_step`. JSON structures nested beyond this limit are
+/// rejected with an error rather than recursed into, preventing stack overflow on adversarial or
+/// deeply nested input.
+const MAX_DECODE_DEPTH: usize = 512;
+
 pub fn decode_external(
     program: &SourceDecodeProgram,
     value: &ExternalSourceValue,
 ) -> Result<RuntimeValue, SourceDecodeError> {
     validate_supported_program(program).map_err(SourceDecodeError::UnsupportedProgram)?;
-    decode_step(program, program.root_step(), value)
+    decode_step(program, program.root_step(), value, 0)
 }
 
 pub fn encode_runtime_json(value: &RuntimeValue) -> Result<String, Box<str>> {
@@ -228,6 +233,10 @@ fn external_from_json(value: JsonValue) -> Result<ExternalSourceValue, SourceDec
             if let Some(value) = number.as_i64() {
                 Ok(ExternalSourceValue::Int(value))
             } else if let Some(value) = number.as_f64().and_then(RuntimeFloat::new) {
+                // NOTE: JSON numbers that do not fit in i64 are decoded as f64.
+                // Integers larger than 2^53 will be silently truncated because f64 cannot
+                // represent all integers in that range exactly. A future improvement would
+                // be to detect such values and use a big-integer or decimal type instead.
                 Ok(ExternalSourceValue::Float(value))
             } else {
                 Err(SourceDecodeError::UnsupportedNumber {
@@ -368,7 +377,14 @@ fn decode_step(
     program: &SourceDecodeProgram,
     step: &DecodeProgramStep,
     value: &ExternalSourceValue,
+    depth: usize,
 ) -> Result<RuntimeValue, SourceDecodeError> {
+    if depth > MAX_DECODE_DEPTH {
+        return Err(SourceDecodeError::TypeMismatch {
+            expected: "value within nesting depth limit",
+            found: "structure nested too deeply (> 512 levels)",
+        });
+    }
     match step {
         DecodeProgramStep::Scalar { scalar } => match scalar {
             aivi_typing::PrimitiveType::Unit => match value {
@@ -418,7 +434,7 @@ fn decode_step(
             let decoded = elements
                 .iter()
                 .zip(values.iter())
-                .map(|(element, value)| decode_step(program, program.step(*element), value))
+                .map(|(element, value)| decode_step(program, program.step(*element), value, depth + 1))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(RuntimeValue::Tuple(decoded))
         }
@@ -438,7 +454,7 @@ fn decode_step(
                 };
                 decoded.push(RuntimeRecordField {
                     label: field.name.as_str().into(),
-                    value: decode_step(program, program.step(field.step), value)?,
+                    value: decode_step(program, program.step(field.step), value, depth + 1)?,
                 });
             }
             if *extra_fields == DecodeExtraFieldPolicy::Reject {
@@ -493,7 +509,7 @@ fn decode_step(
                     });
                 }
                 (Some(payload_step), Some(payload)) => {
-                    let decoded = decode_step(program, program.step(payload_step), payload)?;
+                    let decoded = decode_step(program, program.step(payload_step), payload, depth + 1)?;
                     match program.step(payload_step) {
                         DecodeProgramStep::Tuple { .. } => match decoded {
                             RuntimeValue::Tuple(fields) => fields,
@@ -521,7 +537,7 @@ fn decode_step(
             };
             let decoded = values
                 .iter()
-                .map(|value| decode_step(program, program.step(*element), value))
+                .map(|value| decode_step(program, program.step(*element), value, depth + 1))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(RuntimeValue::List(decoded))
         }
@@ -544,6 +560,7 @@ fn decode_step(
                     program,
                     program.step(*element),
                     payload,
+                    depth + 1,
                 )?)))
             }
             other => Err(type_mismatch("option variant", other)),
@@ -562,6 +579,7 @@ fn decode_step(
                     program,
                     program.step(*value_step),
                     payload,
+                    depth + 1,
                 )?)))
             }
             ExternalSourceValue::Variant { name, payload } if name.as_ref() == "Err" => {
@@ -574,6 +592,7 @@ fn decode_step(
                     program,
                     program.step(*error),
                     payload,
+                    depth + 1,
                 )?)))
             }
             other => Err(type_mismatch("result variant", other)),
@@ -592,6 +611,7 @@ fn decode_step(
                     program,
                     program.step(*value_step),
                     payload,
+                    depth + 1,
                 )?)))
             }
             ExternalSourceValue::Variant { name, payload } if name.as_ref() == "Invalid" => {
@@ -604,6 +624,7 @@ fn decode_step(
                     program,
                     program.step(*error),
                     payload,
+                    depth + 1,
                 )?)))
             }
             other => Err(type_mismatch("validation variant", other)),

@@ -87,6 +87,15 @@ impl fmt::Display for Span {
 }
 
 /// Stable file identity used across compiler layers.
+///
+/// # Safety invariant
+///
+/// A `FileId` value is only meaningful in the context of the [`SourceDatabase`] (or equivalent
+/// source manager) that created it. `FileId` values **must not** be constructed by hand outside
+/// of the source manager: doing so is *unsound* because an arbitrary raw integer may not
+/// correspond to any registered file, causing out-of-bounds access or silent data corruption
+/// when the id is used to index the source file table. Always obtain `FileId` values through
+/// [`SourceDatabase::add_file`] or the equivalent source-manager API.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FileId(u32);
 
@@ -270,8 +279,22 @@ impl SourceFile {
     }
 
     /// Convert an LSP position (0-based, UTF-16 character offset) to a byte offset.
-    pub fn lsp_position_to_offset(&self, pos: LspPosition) -> ByteIndex {
-        let line_idx = (pos.line as usize).min(self.line_starts.len().saturating_sub(1));
+    ///
+    /// Returns `None` if `pos.line` is beyond the last line of the file, or if
+    /// `pos.character` exceeds the UTF-16 length of the addressed line.  Callers
+    /// that previously relied on silent clamping must be updated to handle the
+    /// `None` case.
+    ///
+    /// # External call sites
+    ///
+    /// TODO: update callers in `aivi-lsp` (completion.rs, definition.rs, hover.rs)
+    /// to handle the new `Option` return value instead of assuming the position is
+    /// always valid.
+    pub fn lsp_position_to_offset(&self, pos: LspPosition) -> Option<ByteIndex> {
+        let line_idx = pos.line as usize;
+        if line_idx >= self.line_starts.len() {
+            return None;
+        }
         let line_start = self.line_starts[line_idx].as_usize();
         let line_end = self
             .line_starts
@@ -280,8 +303,8 @@ impl SourceFile {
             .unwrap_or_else(|| ByteIndex::new(self.text.len() as u32))
             .as_usize();
         let line_text = &self.text[line_start..line_end];
-        let byte_offset = utf16_to_byte_offset(line_text, pos.character as usize);
-        ByteIndex::new((line_start + byte_offset) as u32)
+        let byte_offset = utf16_to_byte_offset(line_text, pos.character as usize)?;
+        Some(ByteIndex::new((line_start + byte_offset) as u32))
     }
 
     /// Convert a span to an LSP range.
@@ -357,21 +380,29 @@ fn utf16_len(s: &str) -> usize {
 }
 
 /// Convert a UTF-16 code unit offset within a line to a byte offset.
-fn utf16_to_byte_offset(line: &str, utf16_chars: usize) -> usize {
+///
+/// Returns `None` if `utf16_chars` exceeds the total UTF-16 length of `line`.
+fn utf16_to_byte_offset(line: &str, utf16_chars: usize) -> Option<usize> {
     let mut remaining = utf16_chars;
     let mut byte_offset = 0;
     for c in line.chars() {
         if remaining == 0 {
-            break;
+            return Some(byte_offset);
         }
         let width = if (c as u32) > 0xFFFF { 2 } else { 1 };
         if remaining < width {
-            break;
+            // The column lands in the middle of a surrogate pair — out of range.
+            return None;
         }
         remaining -= width;
         byte_offset += c.len_utf8();
     }
-    byte_offset
+    // After consuming all characters, remaining must be zero for the position to be valid.
+    if remaining == 0 {
+        Some(byte_offset)
+    } else {
+        None
+    }
 }
 
 fn compute_line_starts(text: &str) -> Arc<[ByteIndex]> {
@@ -388,9 +419,12 @@ fn compute_line_starts(text: &str) -> Arc<[ByteIndex]> {
 fn trim_line_end(text: &str, start: usize, end: usize) -> usize {
     let bytes = text.as_bytes();
     let mut trimmed = end;
+    // Strip a trailing LF first (handles both LF and CRLF line endings).
     if trimmed > start && bytes[trimmed - 1] == b'\n' {
         trimmed -= 1;
     }
+    // Strip a trailing CR — covers CRLF (the LF was already removed above)
+    // as well as bare CR line endings (old Mac-style \r-only files).
     if trimmed > start && bytes[trimmed - 1] == b'\r' {
         trimmed -= 1;
     }

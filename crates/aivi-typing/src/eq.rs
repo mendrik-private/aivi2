@@ -595,8 +595,23 @@ impl EqDeriver {
 
         while let Some(frame) = frames.pop() {
             match frame {
+                // TODO(mu-types): This deriver traverses the TypeStore graph purely by following
+                // TypeId references stored in each TypeNode. If a recursive type (mu-type) is ever
+                // introduced — e.g. a self-referential record or an explicit Mu(TypeId) node — the
+                // loop will revisit the same node indefinitely and either infinite-loop or overflow
+                // the stack. Handling mu-types correctly requires either (a) tracking a visited-set
+                // of TypeIds and failing / short-circuiting on back-edges, or (b) an explicit
+                // Mu/Recurse encoding in TypeNode that the deriver can recognise and treat as
+                // already-derived via an assumed coinductive witness.
                 Frame::Enter(ty) => match types.node(ty) {
                     TypeNode::Primitive(scalar) => match scalar {
+                        // Bytes is excluded from structural Eq derivation because byte sequences
+                        // have no canonical structural equality in the source language: two Bytes
+                        // values wrapping the same content from different allocations are
+                        // indistinguishable at the type level, and the runtime representation may
+                        // use reference semantics or content-addressed handles. Requiring an
+                        // explicit Eq instance (rather than deriving one silently) forces callers
+                        // to pick the comparison semantics they actually need.
                         PrimitiveType::Bytes => {
                             return Err(EqDerivationError {
                                 head,
