@@ -5952,6 +5952,23 @@ impl Validator<'_> {
                     )),
                 );
             }
+            GateIssue::AmbiguousDomainOperator {
+                span,
+                operator,
+                candidates,
+            } => {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "{branch_name} branch: binary operator `{operator}` is ambiguous: multiple domain implementations match"
+                    ))
+                    .with_code(code("ambiguous-domain-operator"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "add a type annotation on one operand to disambiguate which domain operator to use",
+                    ))
+                    .with_note(format!("candidates: {}", candidates.join(", "))),
+                );
+            }
         }
     }
 
@@ -6215,6 +6232,30 @@ impl Validator<'_> {
                         span,
                         "make every branch in this nested case split produce the same type",
                     )),
+                );
+            }
+            (
+                context,
+                GateIssue::AmbiguousDomainOperator {
+                    span,
+                    operator,
+                    candidates,
+                },
+            ) => {
+                let subject = match context {
+                    FanoutIssueContext::MapElement => "fan-out body",
+                    FanoutIssueContext::JoinCollection => "fan-in body",
+                };
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "{subject}: binary operator `{operator}` is ambiguous: multiple domain implementations match"
+                    ))
+                    .with_code(code("ambiguous-domain-operator"))
+                    .with_label(DiagnosticLabel::primary(
+                        span,
+                        "add a type annotation on one operand to disambiguate which domain operator to use",
+                    ))
+                    .with_note(format!("candidates: {}", candidates.join(", "))),
                 );
             }
         }

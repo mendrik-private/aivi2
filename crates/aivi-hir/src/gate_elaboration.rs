@@ -1600,6 +1600,7 @@ fn blocker_for_issue(issue: GateIssue) -> GateElaborationBlocker {
             GateElaborationBlocker::UnknownField { path, subject }
         }
         GateIssue::AmbiguousDomainMember { span, .. }
+        | GateIssue::AmbiguousDomainOperator { span, .. }
         | GateIssue::InvalidPipeStageInput { span, .. }
         | GateIssue::UnsupportedApplicativeClusterMember { span, .. }
         | GateIssue::ApplicativeClusterMismatch { span, .. }

@@ -1811,6 +1811,9 @@ impl<'a> GeneralExprElaborator<'a> {
                         kind: GateRuntimeUnsupportedKind::ApplicativeCluster,
                     }
                 }
+                GateIssue::AmbiguousDomainOperator { span, .. } => {
+                    GeneralExprBlocker::UnknownExprType { span }
+                }
             })
             .collect()
     }

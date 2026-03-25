@@ -89,7 +89,7 @@ impl<'a> SourceContractTypeResolver<'a> {
             }),
             SourceContractType::Signal(payload) => Ok(ResolvedSourceContractType::Apply {
                 callee: ResolvedSourceTypeConstructor::Builtin(BuiltinType::Signal),
-                arguments: vec![self.resolve_atom(payload)?],
+                arguments: vec![self.resolve(*payload)?],
             }),
         }
     }
