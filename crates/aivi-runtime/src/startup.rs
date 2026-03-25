@@ -7,7 +7,7 @@ use std::{
 
 use aivi_backend::{
     DetachedRuntimeValue, EvaluationError, GateStage as BackendGateStage, ItemId as BackendItemId,
-    ItemKind as BackendItemKind, KernelEvaluator, KernelId, MovingRuntimeValueStore,
+    ItemKind as BackendItemKind, KernelEvaluator, KernelId, LayoutKind, MovingRuntimeValueStore,
     PipelineId as BackendPipelineId, Program as BackendProgram, RuntimeCallable, RuntimeSumValue,
     RuntimeValue, SourceId as BackendSourceId, StageKind as BackendStageKind,
 };
@@ -439,12 +439,37 @@ fn materialize_detached_globals(
         .collect()
 }
 
+fn stage_subject_value(
+    backend: &BackendProgram,
+    layout: aivi_backend::LayoutId,
+    value: &RuntimeValue,
+) -> RuntimeValue {
+    match (&backend.layouts()[layout].kind, value) {
+        (LayoutKind::Signal { .. }, RuntimeValue::Signal(_)) => value.clone(),
+        (LayoutKind::Signal { .. }, other) => RuntimeValue::Signal(Box::new(other.clone())),
+        (_, RuntimeValue::Signal(inner)) => inner.as_ref().clone(),
+        _ => value.clone(),
+    }
+}
+
+fn unwrap_signal_layout_result(
+    backend: &BackendProgram,
+    layout: aivi_backend::LayoutId,
+    value: RuntimeValue,
+) -> RuntimeValue {
+    match (&backend.layouts()[layout].kind, value) {
+        (LayoutKind::Signal { .. }, RuntimeValue::Signal(inner)) => *inner,
+        (_, value) => value,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LinkedDerivedSignal {
     pub item: hir::ItemId,
     pub signal: DerivedHandle,
     pub backend_item: BackendItemId,
     pub dependency_items: Box<[BackendItemId]>,
+    pub source_input: Option<InputHandle>,
     /// Backend pipeline IDs that must be applied to the body result in order.
     pub pipeline_ids: Box<[BackendPipelineId]>,
 }
@@ -1205,15 +1230,18 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
             .derived_signals
             .get(&signal)
             .ok_or(BackendRuntimeError::UnknownDerivedSignal { signal })?;
-        if inputs.len() != binding.dependency_items.len() {
+        let expected_inputs =
+            binding.dependency_items.len() + usize::from(binding.source_input.is_some());
+        if inputs.len() != expected_inputs {
             return Err(BackendRuntimeError::DerivedDependencyArityMismatch {
                 signal,
-                expected: binding.dependency_items.len(),
+                expected: expected_inputs,
                 found: inputs.len(),
             });
         }
 
         let mut globals = self.committed_signals.clone();
+        globals.remove(&binding.backend_item);
         for (index, dependency) in binding.dependency_items.iter().copied().enumerate() {
             let Some(value) = inputs.value(index) else {
                 return Ok(None);
@@ -1224,14 +1252,43 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
         let mut evaluator = KernelEvaluator::new(self.backend);
         let value = evaluator
             .evaluate_item(binding.backend_item, &globals)
-            .map_err(|error| BackendRuntimeError::EvaluateDerivedSignal {
-                signal,
-                item: binding.item,
-                error,
-            })?;
+            .map_err(|error| self.derived_eval_error(signal, binding.item, error))?;
 
-        // Apply pipeline stages in order.
-        for &pipeline_id in binding.pipeline_ids.iter() {
+        self.apply_pipelines(
+            signal,
+            binding.item,
+            &binding.pipeline_ids,
+            value,
+            &globals,
+            &mut evaluator,
+        )
+    }
+}
+
+impl LinkedDerivedEvaluator<'_> {
+    fn derived_eval_error(
+        &self,
+        signal: DerivedHandle,
+        item: hir::ItemId,
+        error: EvaluationError,
+    ) -> BackendRuntimeError {
+        BackendRuntimeError::EvaluateDerivedSignal {
+            signal,
+            item,
+            error,
+        }
+    }
+
+    fn apply_pipelines(
+        &self,
+        signal: DerivedHandle,
+        item: hir::ItemId,
+        pipeline_ids: &[BackendPipelineId],
+        mut value: RuntimeValue,
+        globals: &BTreeMap<BackendItemId, RuntimeValue>,
+        evaluator: &mut KernelEvaluator<'_>,
+    ) -> Result<Option<RuntimeValue>, BackendRuntimeError> {
+        for &pipeline_id in pipeline_ids {
             let pipeline = &self.backend.pipelines()[pipeline_id];
             for stage in &pipeline.stages {
                 match &stage.kind {
@@ -1241,14 +1298,8 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
                         ..
                     }) => {
                         let pred = evaluator
-                            .evaluate_kernel(*predicate, Some(&value), &[], &globals)
-                            .map_err(|error| BackendRuntimeError::EvaluateDerivedSignal {
-                                signal,
-                                item: binding.item,
-                                error,
-                            })?;
-                        // Suppress the update when the predicate is false and no
-                        // negative update is expected by downstream consumers.
+                            .evaluate_kernel(*predicate, Some(&value), &[], globals)
+                            .map_err(|error| self.derived_eval_error(signal, item, error))?;
                         if matches!(pred, RuntimeValue::Bool(false)) && !emits_negative_update {
                             return Ok(None);
                         }
@@ -1257,18 +1308,70 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
                         // Carrier metadata only; the body kernel already computed
                         // the branch result, so we pass the value through unchanged.
                     }
+                    BackendStageKind::Fanout(fanout) => {
+                        value = self
+                            .apply_fanout_stage(signal, item, fanout, value, globals, evaluator)?;
+                    }
                     _ => unreachable!(
                         "unsupported pipeline stage kind should have been blocked during linking"
                     ),
                 }
             }
         }
-
         Ok(Some(value))
     }
-}
 
-impl LinkedDerivedEvaluator<'_> {
+    fn apply_fanout_stage(
+        &self,
+        signal: DerivedHandle,
+        item: hir::ItemId,
+        fanout: &aivi_backend::FanoutStage,
+        value: RuntimeValue,
+        globals: &BTreeMap<BackendItemId, RuntimeValue>,
+        evaluator: &mut KernelEvaluator<'_>,
+    ) -> Result<RuntimeValue, BackendRuntimeError> {
+        let current = match value {
+            RuntimeValue::Signal(inner) => *inner,
+            other => other,
+        };
+        let RuntimeValue::List(elements) = current else {
+            return Ok(current);
+        };
+
+        let mut mapped = Vec::with_capacity(elements.len());
+        'elements: for element in elements {
+            let mapped_value = evaluator
+                .evaluate_kernel(fanout.map, Some(&element), &[], globals)
+                .map_err(|error| self.derived_eval_error(signal, item, error))?;
+            for filter in &fanout.filters {
+                let predicate = evaluator
+                    .evaluate_kernel(filter.predicate, Some(&mapped_value), &[], globals)
+                    .map_err(|error| self.derived_eval_error(signal, item, error))?;
+                if !matches!(predicate, RuntimeValue::Bool(true)) {
+                    continue 'elements;
+                }
+            }
+            mapped.push(mapped_value);
+        }
+
+        let mapped_collection = RuntimeValue::List(mapped);
+        match &fanout.join {
+            Some(join) => {
+                let subject =
+                    stage_subject_value(self.backend, join.input_layout, &mapped_collection);
+                let joined = evaluator
+                    .evaluate_kernel(join.kernel, Some(&subject), &[], globals)
+                    .map_err(|error| self.derived_eval_error(signal, item, error))?;
+                Ok(unwrap_signal_layout_result(
+                    self.backend,
+                    join.result_layout,
+                    joined,
+                ))
+            }
+            None => Ok(mapped_collection),
+        }
+    }
+
     fn try_evaluate_recurrence(
         &self,
         signal: DerivedHandle,
@@ -1318,13 +1421,16 @@ impl LinkedDerivedEvaluator<'_> {
             RuntimeValue::Signal(inner) => inner.as_ref(),
             other => other,
         };
-        let result = evaluator
-            .evaluate_kernel(binding.step_kernels[0], Some(actual_prev), &[], &globals)
-            .map_err(|error| BackendRuntimeError::EvaluateRecurrenceSignal {
-                signal,
-                item: binding.item,
-                error,
-            })?;
+        let mut result = actual_prev.clone();
+        for &step_kernel in binding.step_kernels.iter() {
+            result = evaluator
+                .evaluate_kernel(step_kernel, Some(&result), &[], &globals)
+                .map_err(|error| BackendRuntimeError::EvaluateRecurrenceSignal {
+                    signal,
+                    item: binding.item,
+                    error,
+                })?;
+        }
 
         Ok(Some(result))
     }
@@ -1591,6 +1697,10 @@ impl<'a> LinkBuilder<'a> {
                     .push(BackendRuntimeLinkError::MissingBackendItem { item: task.owner });
                 continue;
             };
+            debug_assert!(
+                item.parameters.is_empty(),
+                "runtime task bindings currently originate from parameterless top-level values"
+            );
             let execution = if !item.parameters.is_empty() {
                 LinkedTaskExecutionBinding::Blocked(
                     LinkedTaskExecutionBlocker::UnsupportedParameters {
@@ -1629,68 +1739,6 @@ impl<'a> LinkBuilder<'a> {
                     .push(BackendRuntimeLinkError::MissingBackendItem { item: binding.item });
                 continue;
             };
-            if let Some(source_input) = binding.source_input {
-                let item = &self.backend.items()[backend_item];
-                let BackendItemKind::Signal(_) = &item.kind else {
-                    self.errors
-                        .push(BackendRuntimeLinkError::BackendItemNotSignal {
-                            item: binding.item,
-                            backend_item,
-                        });
-                    continue;
-                };
-
-                // Find the pipeline with a recurrence.
-                let pipeline_id = item
-                    .pipelines
-                    .iter()
-                    .copied()
-                    .find(|&pid| self.backend.pipelines()[pid].recurrence.is_some());
-                let Some(pipeline_id) = pipeline_id else {
-                    self.errors.push(
-                        BackendRuntimeLinkError::SourceBackedBodySignalNotYetLinked {
-                            item: binding.item,
-                        },
-                    );
-                    continue;
-                };
-
-                let pipeline = &self.backend.pipelines()[pipeline_id];
-                let recurrence = pipeline.recurrence.as_ref().unwrap();
-
-                let seed_kernel = recurrence.seed;
-                let mut step_kernels = Vec::with_capacity(1 + recurrence.steps.len());
-                step_kernels.push(recurrence.start.kernel);
-                step_kernels.extend(recurrence.steps.iter().map(|s| s.kernel));
-                let step_kernels = step_kernels.into_boxed_slice();
-
-                let all_kernels: Vec<KernelId> = std::iter::once(seed_kernel)
-                    .chain(step_kernels.iter().copied())
-                    .collect();
-                let dependency_items =
-                    self.collect_recurrence_signal_items(binding.item, &all_kernels);
-
-                self.linked_recurrence_signals.insert(
-                    derived,
-                    LinkedRecurrenceSignal {
-                        item: binding.item,
-                        signal: derived,
-                        backend_item,
-                        source_input,
-                        seed_kernel,
-                        step_kernels,
-                        dependency_items,
-                        pipeline_ids: item
-                            .pipelines
-                            .iter()
-                            .copied()
-                            .collect::<Vec<_>>()
-                            .into_boxed_slice(),
-                    },
-                );
-                continue;
-            }
-
             let item = &self.backend.items()[backend_item];
             let BackendItemKind::Signal(info) = &item.kind else {
                 self.errors
@@ -1700,6 +1748,49 @@ impl<'a> LinkBuilder<'a> {
                     });
                 continue;
             };
+            if let Some(source_input) = binding.source_input {
+                if let Some(pipeline_id) = item
+                    .pipelines
+                    .iter()
+                    .copied()
+                    .find(|&pid| self.backend.pipelines()[pid].recurrence.is_some())
+                {
+                    let pipeline = &self.backend.pipelines()[pipeline_id];
+                    let recurrence = pipeline.recurrence.as_ref().unwrap();
+
+                    let seed_kernel = recurrence.seed;
+                    let mut step_kernels = Vec::with_capacity(1 + recurrence.steps.len());
+                    step_kernels.push(recurrence.start.kernel);
+                    step_kernels.extend(recurrence.steps.iter().map(|s| s.kernel));
+                    let step_kernels = step_kernels.into_boxed_slice();
+
+                    let all_kernels: Vec<KernelId> = std::iter::once(seed_kernel)
+                        .chain(step_kernels.iter().copied())
+                        .collect();
+                    let dependency_items =
+                        self.collect_recurrence_signal_items(binding.item, &all_kernels);
+
+                    self.linked_recurrence_signals.insert(
+                        derived,
+                        LinkedRecurrenceSignal {
+                            item: binding.item,
+                            signal: derived,
+                            backend_item,
+                            source_input,
+                            seed_kernel,
+                            step_kernels,
+                            dependency_items,
+                            pipeline_ids: item
+                                .pipelines
+                                .iter()
+                                .copied()
+                                .collect::<Vec<_>>()
+                                .into_boxed_slice(),
+                        },
+                    );
+                    continue;
+                }
+            }
             if !item.pipelines.is_empty() && !self.supported_body_backed_signal_pipelines(item) {
                 self.errors
                     .push(BackendRuntimeLinkError::SignalPipelinesNotYetLinked {
@@ -1735,14 +1826,17 @@ impl<'a> LinkBuilder<'a> {
                 .filter_map(|dependency| {
                     self.runtime_signal_for_backend_item(binding.item, *dependency)
                 })
-                .collect::<Vec<_>>()
-                .into_boxed_slice();
-            if backend_dependencies.as_ref() != binding.dependencies() {
+                .collect::<Vec<_>>();
+            let mut expected_runtime_dependencies = backend_dependencies.clone();
+            if let Some(source_input) = binding.source_input {
+                expected_runtime_dependencies.push(source_input.as_signal());
+            }
+            if expected_runtime_dependencies.as_slice() != binding.dependencies() {
                 self.errors
                     .push(BackendRuntimeLinkError::SignalDependencyMismatch {
                         item: binding.item,
                         runtime: binding.dependencies().to_vec().into_boxed_slice(),
-                        backend: backend_dependencies,
+                        backend: expected_runtime_dependencies.into_boxed_slice(),
                     });
                 continue;
             }
@@ -1754,6 +1848,7 @@ impl<'a> LinkBuilder<'a> {
                     signal: derived,
                     backend_item,
                     dependency_items: info.dependencies.clone().into_boxed_slice(),
+                    source_input: binding.source_input,
                     pipeline_ids: item
                         .pipelines
                         .iter()
@@ -1860,11 +1955,9 @@ impl<'a> LinkBuilder<'a> {
                     && pipeline.stages.iter().all(|stage| {
                         matches!(
                             stage.kind,
-                            // TruthyFalsy carrier metadata: body kernel already handles
-                            // the branching computation.
                             BackendStageKind::TruthyFalsy(_)
-                                // SignalFilter gates: predicate kernel is executable.
                                 | BackendStageKind::Gate(BackendGateStage::SignalFilter { .. })
+                                | BackendStageKind::Fanout(_)
                         )
                     })
             })
@@ -2748,6 +2841,257 @@ sig activeUsers : Signal User =
             "activeUsers should commit a value because user.active is True"
         );
         assert!(outcome.source_actions().is_empty());
+    }
+
+    #[test]
+    fn linked_runtime_executes_signal_filter_gate_pipelines_without_prefix_body() {
+        let lowered = lower_text(
+            "runtime-startup-direct-signal-gate-head-only.aivi",
+            r#"
+type User = {
+    active: Bool,
+    email: Text
+}
+
+sig users : Signal User = { active: True, email: "ada@example.com" }
+
+sig activeUsers : Signal User =
+    users
+     ?|> .active
+"#,
+        );
+        let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+            .expect("runtime assembly should build");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("head-only signal filter pipelines should now link successfully");
+
+        let outcome = linked
+            .tick_with_source_lifecycle()
+            .expect("linked runtime tick should succeed");
+
+        let active_users_signal = linked
+            .assembly()
+            .signal(item_id(lowered.hir.module(), "activeUsers"))
+            .expect("activeUsers signal binding should exist")
+            .signal();
+
+        assert!(
+            linked
+                .runtime()
+                .current_value(active_users_signal)
+                .unwrap()
+                .is_some(),
+            "activeUsers should commit a value because user.active is True"
+        );
+        assert!(outcome.source_actions().is_empty());
+    }
+
+    #[test]
+    fn linked_runtime_executes_signal_fanout_map_and_join_pipelines() {
+        let lowered = lower_text(
+            "runtime-startup-signal-fanout.aivi",
+            r#"
+type User = {
+    active: Bool,
+    email: Text
+}
+
+fun joinEmails:Text items:List Text =>
+    "joined"
+
+sig liveUsers : Signal (List User) = [
+    { active: True, email: "ada@example.com" }
+]
+
+sig liveEmails : Signal (List Text) =
+    liveUsers
+     *|> .email
+
+sig liveJoinedEmails : Signal Text =
+    liveUsers
+     *|> .email
+     <|* joinEmails
+"#,
+        );
+        let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+            .expect("runtime assembly should build");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("signal fanout pipelines should now link successfully");
+
+        let outcome = linked
+            .tick_with_source_lifecycle()
+            .expect("linked runtime tick should succeed");
+
+        let live_emails_signal = linked
+            .assembly()
+            .signal(item_id(lowered.hir.module(), "liveEmails"))
+            .expect("liveEmails signal binding should exist")
+            .signal();
+        let live_joined_signal = linked
+            .assembly()
+            .signal(item_id(lowered.hir.module(), "liveJoinedEmails"))
+            .expect("liveJoinedEmails signal binding should exist")
+            .signal();
+
+        assert_eq!(
+            linked.runtime().current_value(live_emails_signal).unwrap(),
+            Some(&RuntimeValue::List(vec![RuntimeValue::Text(
+                "ada@example.com".into()
+            )]))
+        );
+        assert_eq!(
+            linked.runtime().current_value(live_joined_signal).unwrap(),
+            Some(&RuntimeValue::Text("joined".into()))
+        );
+        assert!(outcome.source_actions().is_empty());
+    }
+
+    #[test]
+    fn linked_runtime_links_source_backed_body_signals_without_recurrence() {
+        let lowered = lower_text(
+            "runtime-startup-source-body-trigger.aivi",
+            r#"
+provider custom.feed
+    wakeup: providerTrigger
+
+@source custom.feed
+sig status : Signal Text =
+    "ready"
+"#,
+        );
+        let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+            .expect("runtime assembly should build");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("source-backed body signals should now link successfully");
+
+        let first = linked
+            .tick_with_source_lifecycle()
+            .expect("source activation tick should succeed");
+        assert_eq!(first.source_actions().len(), 1);
+        let port = match &first.source_actions()[0] {
+            LinkedSourceLifecycleAction::Activate { port, .. } => port.clone(),
+            _ => panic!("expected source activation"),
+        };
+        let status_signal = linked
+            .assembly()
+            .signal(item_id(lowered.hir.module(), "status"))
+            .expect("status signal binding should exist")
+            .signal();
+        assert_eq!(
+            linked.runtime().current_value(status_signal).unwrap(),
+            Some(&RuntimeValue::Text("ready".into())),
+            "source-backed body signals should commit their body immediately"
+        );
+
+        port.publish(DetachedRuntimeValue::from_runtime_owned(
+            RuntimeValue::Text("ignored".into()),
+        ))
+        .expect("source publication should queue");
+        let second = linked
+            .tick_with_source_lifecycle()
+            .expect("source publication tick should succeed");
+        assert_eq!(
+            linked.runtime().current_value(status_signal).unwrap(),
+            Some(&RuntimeValue::Text("ready".into()))
+        );
+        assert!(second.source_actions().is_empty());
+    }
+
+    #[test]
+    fn linked_runtime_applies_all_source_recurrence_steps() {
+        let lowered = lower_text(
+            "runtime-startup-source-recurrence-steps.aivi",
+            r#"
+fun bump:Int value:Int =>
+    value + 1
+
+provider custom.feed
+    wakeup: providerTrigger
+
+@source custom.feed
+sig counter : Signal Int =
+    0
+     @|> bump
+     <|@ bump
+     <|@ bump
+"#,
+        );
+        let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+            .expect("runtime assembly should build");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("source-backed recurrences should now link successfully");
+
+        let first = linked
+            .tick_with_source_lifecycle()
+            .expect("initial recurrence tick should succeed");
+        assert_eq!(first.source_actions().len(), 1);
+        let port = match &first.source_actions()[0] {
+            LinkedSourceLifecycleAction::Activate { port, .. } => port.clone(),
+            _ => panic!("expected source activation"),
+        };
+        let counter_signal = linked
+            .assembly()
+            .signal(item_id(lowered.hir.module(), "counter"))
+            .expect("counter signal binding should exist")
+            .signal();
+        assert_eq!(
+            linked.runtime().current_value(counter_signal).unwrap(),
+            Some(&RuntimeValue::Int(0))
+        );
+
+        port.publish(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Int(
+            1,
+        )))
+        .expect("source publication should queue");
+        let second = linked
+            .tick_with_source_lifecycle()
+            .expect("recurrence publication tick should succeed");
+        assert_eq!(
+            linked.runtime().current_value(counter_signal).unwrap(),
+            Some(&RuntimeValue::Int(3))
+        );
+        assert!(second.source_actions().is_empty());
+    }
+
+    #[test]
+    fn linked_runtime_task_values_lower_to_zero_parameter_backend_items() {
+        let lowered = lower_text(
+            "runtime-startup-task-parameters-invariant.aivi",
+            r#"
+domain Retry over Int
+    literal x : Int -> Retry
+
+fun keep:Int value:Int =>
+    value
+
+@recur.backoff 3x
+val retried : Task Int Int =
+    0
+     @|> keep
+     <|@ keep
+"#,
+        );
+        let backend_item = backend_item_id(&lowered.backend, "retried");
+        assert!(
+            lowered.backend.items()[backend_item].parameters.is_empty(),
+            "startup-linked tasks currently come from parameterless top-level values"
+        );
     }
 
     #[test]

@@ -151,10 +151,21 @@ impl ActiveProviderState {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct SourceProviderManager {
     active: BTreeMap<SourceInstanceId, ActiveProviderState>,
     mailboxes: Arc<Mutex<MailboxHub>>,
+    thread_handles: Arc<Mutex<BTreeMap<SourceInstanceId, Vec<thread::JoinHandle<()>>>>>,
+}
+
+impl Default for SourceProviderManager {
+    fn default() -> Self {
+        Self {
+            active: BTreeMap::new(),
+            mailboxes: Arc::default(),
+            thread_handles: Arc::new(Mutex::new(BTreeMap::new())),
+        }
+    }
 }
 
 impl SourceProviderManager {
@@ -236,7 +247,8 @@ impl SourceProviderManager {
             RuntimeSourceProvider::Builtin(BuiltinSourceProvider::TimerEvery) => {
                 let plan = TimerPlan::parse(instance, BuiltinSourceProvider::TimerEvery, config)?;
                 let stop = Arc::new(AtomicBool::new(false));
-                spawn_timer_every(port, plan, stop.clone());
+                let handle = spawn_timer_every(port, plan, stop.clone());
+                self.thread_handles.lock().unwrap().entry(instance).or_default().push(handle);
                 ActiveProviderState::Passive {
                     provider: config.provider.clone(),
                     stop,
@@ -245,7 +257,8 @@ impl SourceProviderManager {
             RuntimeSourceProvider::Builtin(BuiltinSourceProvider::TimerAfter) => {
                 let plan = TimerPlan::parse(instance, BuiltinSourceProvider::TimerAfter, config)?;
                 let stop = Arc::new(AtomicBool::new(false));
-                spawn_timer_after(port, plan, stop.clone());
+                let handle = spawn_timer_after(port, plan, stop.clone());
+                self.thread_handles.lock().unwrap().entry(instance).or_default().push(handle);
                 ActiveProviderState::Passive {
                     provider: config.provider.clone(),
                     stop,
@@ -254,7 +267,8 @@ impl SourceProviderManager {
             RuntimeSourceProvider::Builtin(BuiltinSourceProvider::HttpGet) => {
                 let plan = HttpPlan::parse(instance, BuiltinSourceProvider::HttpGet, config)?;
                 let stop = Arc::new(AtomicBool::new(false));
-                spawn_http_worker(port, plan, stop.clone());
+                let handle = spawn_http_worker(port, plan, stop.clone());
+                self.thread_handles.lock().unwrap().entry(instance).or_default().push(handle);
                 ActiveProviderState::Passive {
                     provider: config.provider.clone(),
                     stop,
@@ -263,7 +277,8 @@ impl SourceProviderManager {
             RuntimeSourceProvider::Builtin(BuiltinSourceProvider::HttpPost) => {
                 let plan = HttpPlan::parse(instance, BuiltinSourceProvider::HttpPost, config)?;
                 let stop = Arc::new(AtomicBool::new(false));
-                spawn_http_worker(port, plan, stop.clone());
+                let handle = spawn_http_worker(port, plan, stop.clone());
+                self.thread_handles.lock().unwrap().entry(instance).or_default().push(handle);
                 ActiveProviderState::Passive {
                     provider: config.provider.clone(),
                     stop,
@@ -273,7 +288,8 @@ impl SourceProviderManager {
                 let plan = FsReadPlan::parse(instance, config)?;
                 let stop = Arc::new(AtomicBool::new(false));
                 if action_kind == SourceLifecycleActionKind::Reconfigure || plan.read_on_start {
-                    spawn_fs_read_worker(port, plan, stop.clone());
+                    let handle = spawn_fs_read_worker(port, plan, stop.clone());
+                    self.thread_handles.lock().unwrap().entry(instance).or_default().push(handle);
                 }
                 ActiveProviderState::Passive {
                     provider: config.provider.clone(),
@@ -283,7 +299,8 @@ impl SourceProviderManager {
             RuntimeSourceProvider::Builtin(BuiltinSourceProvider::FsWatch) => {
                 let plan = FsWatchPlan::parse(instance, config)?;
                 let stop = Arc::new(AtomicBool::new(false));
-                spawn_fs_watch_worker(port, plan, stop.clone());
+                let handle = spawn_fs_watch_worker(port, plan, stop.clone());
+                self.thread_handles.lock().unwrap().entry(instance).or_default().push(handle);
                 ActiveProviderState::Passive {
                     provider: config.provider.clone(),
                     stop,
@@ -292,7 +309,8 @@ impl SourceProviderManager {
             RuntimeSourceProvider::Builtin(BuiltinSourceProvider::SocketConnect) => {
                 let plan = SocketPlan::parse(instance, config)?;
                 let stop = Arc::new(AtomicBool::new(false));
-                spawn_socket_worker(port, plan, stop.clone());
+                let handle = spawn_socket_worker(port, plan, stop.clone());
+                self.thread_handles.lock().unwrap().entry(instance).or_default().push(handle);
                 ActiveProviderState::Passive {
                     provider: config.provider.clone(),
                     stop,
@@ -306,7 +324,8 @@ impl SourceProviderManager {
                     .expect("mailbox hub mutex should not be poisoned")
                     .subscribe(&plan.mailbox, plan.buffer);
                 let stop = Arc::new(AtomicBool::new(false));
-                spawn_mailbox_worker(port, plan.clone(), receiver, stop.clone());
+                let handle = spawn_mailbox_worker(port, plan.clone(), receiver, stop.clone());
+                self.thread_handles.lock().unwrap().entry(instance).or_default().push(handle);
                 ActiveProviderState::Mailbox {
                     provider: config.provider.clone(),
                     mailbox: plan.mailbox,
@@ -317,7 +336,8 @@ impl SourceProviderManager {
             RuntimeSourceProvider::Builtin(BuiltinSourceProvider::ProcessSpawn) => {
                 let plan = ProcessPlan::parse(instance, config)?;
                 let stop = Arc::new(AtomicBool::new(false));
-                spawn_process_worker(port, plan, stop.clone());
+                let handle = spawn_process_worker(port, plan, stop.clone());
+                self.thread_handles.lock().unwrap().entry(instance).or_default().push(handle);
                 ActiveProviderState::Passive {
                     provider: config.provider.clone(),
                     stop,
@@ -367,6 +387,14 @@ impl SourceProviderManager {
                     .unsubscribe(mailbox, *subscriber_id);
             }
             ActiveProviderState::Window { .. } => {}
+        }
+        // Join any worker threads associated with this instance.  The stop flag
+        // was already set above so each thread should exit on its next iteration;
+        // we wait here to ensure no thread outlives the provider instance.
+        if let Some(handles) = self.thread_handles.lock().unwrap().remove(&instance) {
+            for handle in handles {
+                let _ = handle.join();
+            }
         }
     }
 }
@@ -1736,7 +1764,7 @@ impl WindowKeyOutputPlan {
     }
 }
 
-fn spawn_timer_every(port: DetachedRuntimePublicationPort, plan: TimerPlan, stop: Arc<AtomicBool>) {
+fn spawn_timer_every(port: DetachedRuntimePublicationPort, plan: TimerPlan, stop: Arc<AtomicBool>) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         if plan.immediate && port.publish(DetachedRuntimeValue::unit()).is_err() {
             return;
@@ -1750,10 +1778,10 @@ fn spawn_timer_every(port: DetachedRuntimePublicationPort, plan: TimerPlan, stop
                 break;
             }
         }
-    });
+    })
 }
 
-fn spawn_timer_after(port: DetachedRuntimePublicationPort, plan: TimerPlan, stop: Arc<AtomicBool>) {
+fn spawn_timer_after(port: DetachedRuntimePublicationPort, plan: TimerPlan, stop: Arc<AtomicBool>) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         if !plan.immediate {
             thread::sleep(plan.delay);
@@ -1762,10 +1790,10 @@ fn spawn_timer_after(port: DetachedRuntimePublicationPort, plan: TimerPlan, stop
             }
         }
         let _ = port.publish(DetachedRuntimeValue::unit());
-    });
+    })
 }
 
-fn spawn_http_worker(port: DetachedRuntimePublicationPort, plan: HttpPlan, stop: Arc<AtomicBool>) {
+fn spawn_http_worker(port: DetachedRuntimePublicationPort, plan: HttpPlan, stop: Arc<AtomicBool>) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         loop {
             if stop.load(Ordering::Acquire) {
@@ -1790,7 +1818,7 @@ fn spawn_http_worker(port: DetachedRuntimePublicationPort, plan: HttpPlan, stop:
                 return;
             }
         }
-    });
+    })
 }
 
 fn execute_http_cycle(
@@ -1847,7 +1875,7 @@ fn spawn_fs_read_worker(
     port: DetachedRuntimePublicationPort,
     plan: FsReadPlan,
     stop: Arc<AtomicBool>,
-) {
+) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         if stop.load(Ordering::Acquire) {
             return;
@@ -1882,14 +1910,14 @@ fn spawn_fs_read_worker(
             }
         };
         let _ = port.publish(DetachedRuntimeValue::from_runtime_owned(result));
-    });
+    })
 }
 
 fn spawn_fs_watch_worker(
     port: DetachedRuntimePublicationPort,
     plan: FsWatchPlan,
     stop: Arc<AtomicBool>,
-) {
+) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut previous = file_signature(&plan.path);
         while !stop.load(Ordering::Acquire) && !port.is_cancelled() {
@@ -1921,14 +1949,14 @@ fn spawn_fs_watch_worker(
                 break;
             }
         }
-    });
+    })
 }
 
 fn spawn_socket_worker(
     port: DetachedRuntimePublicationPort,
     plan: SocketPlan,
     stop: Arc<AtomicBool>,
-) {
+) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         loop {
             if stop.load(Ordering::Acquire) || port.is_cancelled() {
@@ -2002,7 +2030,7 @@ fn spawn_socket_worker(
                 return;
             }
         }
-    });
+    })
 }
 
 fn spawn_mailbox_worker(
@@ -2010,7 +2038,7 @@ fn spawn_mailbox_worker(
     plan: MailboxPlan,
     receiver: mpsc::Receiver<Box<str>>,
     stop: Arc<AtomicBool>,
-) {
+) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         loop {
             if stop.load(Ordering::Acquire) || port.is_cancelled() {
@@ -2047,14 +2075,14 @@ fn spawn_mailbox_worker(
                 }
             }
         }
-    });
+    })
 }
 
 fn spawn_process_worker(
     port: DetachedRuntimePublicationPort,
     plan: ProcessPlan,
     stop: Arc<AtomicBool>,
-) {
+) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         if stop.load(Ordering::Acquire) {
             return;
@@ -2145,7 +2173,7 @@ fn spawn_process_worker(
                 }
             }
         }
-    });
+    })
 }
 
 fn read_process_stream(

@@ -100,7 +100,7 @@ impl fmt::Display for Span {
 pub struct FileId(u32);
 
 impl FileId {
-    pub const fn new(raw: u32) -> Self {
+    pub(crate) const fn new(raw: u32) -> Self {
         Self(raw)
     }
 
@@ -353,6 +353,18 @@ impl SourceDatabase {
 
     pub fn file(&self, id: FileId) -> Option<&SourceFile> {
         self.files.get(id.as_u32() as usize)
+    }
+
+    /// Look up a source file by its raw insertion index.
+    ///
+    /// This is the safe counterpart of indexing with [`FileId`] for callers
+    /// (such as query layers) that manage their own file-id tables in parallel
+    /// and need to retrieve the base-layer source file by position without
+    /// constructing a [`FileId`] directly.
+    ///
+    /// Returns `None` when `index` is out of range.
+    pub fn file_at(&self, index: u32) -> Option<&SourceFile> {
+        self.files.get(index as usize)
     }
 
     pub fn len(&self) -> usize {

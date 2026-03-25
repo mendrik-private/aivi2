@@ -190,11 +190,19 @@ impl fmt::Display for Module {
                                 fanout.mapped_element_type,
                                 fanout.mapped_collection_type
                             )?;
+                            writeln!(f, "      map      = closure{}", fanout.map)?;
+                            for filter in &fanout.filters {
+                                writeln!(
+                                    f,
+                                    "      filter[{}] = closure{}",
+                                    filter.stage_index, filter.runtime
+                                )?;
+                            }
                             if let Some(join) = &fanout.join {
                                 writeln!(
                                     f,
-                                    "      join[{}] {} => {}",
-                                    join.stage_index, join.collection_subject, join.result_type
+                                    "      join[{}] = closure{} => {}",
+                                    join.stage_index, join.runtime, join.result_type
                                 )?;
                             }
                         }
@@ -321,7 +329,7 @@ pub struct Stage {
 pub enum StageKind {
     Gate(GateStage),
     TruthyFalsy(core::TruthyFalsyStage),
-    Fanout(core::FanoutStage),
+    Fanout(FanoutStage),
 }
 
 impl StageKind {
@@ -345,6 +353,37 @@ pub enum GateStage {
         predicate: ClosureId,
         emits_negative_update: bool,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FanoutStage {
+    pub carrier: aivi_typing::FanoutCarrier,
+    pub element_subject: core::Type,
+    pub mapped_element_type: core::Type,
+    pub mapped_collection_type: core::Type,
+    pub map: ClosureId,
+    pub filters: Vec<FanoutFilter>,
+    pub join: Option<FanoutJoin>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FanoutFilter {
+    pub stage_index: usize,
+    pub stage_span: SourceSpan,
+    pub predicate_expr: HirExprId,
+    pub input_subject: core::Type,
+    pub runtime: ClosureId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FanoutJoin {
+    pub stage_index: usize,
+    pub stage_span: SourceSpan,
+    pub origin_expr: HirExprId,
+    pub input_subject: core::Type,
+    pub collection_subject: core::Type,
+    pub runtime: ClosureId,
+    pub result_type: core::Type,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -415,6 +454,9 @@ pub enum ClosureKind {
     GateTrue,
     GateFalse,
     SignalFilterPredicate,
+    FanoutMap,
+    FanoutFilterPredicate,
+    FanoutJoin,
     RecurrenceSeed,
     RecurrenceStart,
     RecurrenceStep,
@@ -428,6 +470,9 @@ impl fmt::Display for ClosureKind {
             Self::GateTrue => f.write_str("gate-true"),
             Self::GateFalse => f.write_str("gate-false"),
             Self::SignalFilterPredicate => f.write_str("signal-filter-predicate"),
+            Self::FanoutMap => f.write_str("fanout-map"),
+            Self::FanoutFilterPredicate => f.write_str("fanout-filter-predicate"),
+            Self::FanoutJoin => f.write_str("fanout-join"),
             Self::RecurrenceSeed => f.write_str("recurrence-seed"),
             Self::RecurrenceStart => f.write_str("recurrence-start"),
             Self::RecurrenceStep => f.write_str("recurrence-step"),

@@ -15,18 +15,16 @@ use crate::{
 #[derive(Clone)]
 pub(crate) struct SourceInput {
     pub(crate) revision: u64,
-    pub(crate) source: Arc<aivi_base::SourceFile>,
+    pub(crate) path: Arc<PathBuf>,
+    pub(crate) text: Arc<str>,
 }
 
 impl SourceInput {
-    fn new(file: SourceFile, path: PathBuf, text: String, revision: u64) -> Self {
+    fn new(_file: SourceFile, path: PathBuf, text: String, revision: u64) -> Self {
         Self {
             revision,
-            source: Arc::new(aivi_base::SourceFile::new(
-                aivi_base::FileId::new(file.id),
-                path,
-                text,
-            )),
+            path: Arc::new(path),
+            text: Arc::from(text.as_str()),
         }
     }
 }
@@ -143,7 +141,7 @@ impl RootDatabase {
                     .files
                     .get_mut(&file.id)
                     .expect("path index must reference a stored source file");
-                if input.source.text() == text {
+                if input.text.as_ref() == text {
                     false
                 } else {
                     let revision = input.revision + 1;
@@ -220,8 +218,8 @@ impl RootDatabase {
                 .get(&id)
                 .expect("sorted file id must refer to a stored input");
             let new_id = sources.add_file(
-                input.source.path().to_path_buf(),
-                input.source.text().to_owned(),
+                input.path.as_ref().clone(),
+                Arc::clone(&input.text),
             );
             debug_assert_eq!(new_id.as_u32(), id);
         }
@@ -235,11 +233,11 @@ impl RootDatabase {
                 .files
                 .get_mut(&file.id)
                 .expect("source file handle must refer to a stored input");
-            if input.source.text() == text {
+            if input.text.as_ref() == text {
                 false
             } else {
                 let revision = input.revision + 1;
-                let path = input.source.path().to_path_buf();
+                let path = input.path.as_ref().clone();
                 *input = SourceInput::new(file, path, text, revision);
                 true
             }
@@ -263,6 +261,19 @@ impl RootDatabase {
             .get(&file.id)
             .cloned()
             .expect("source file handle must refer to a stored input")
+    }
+
+    /// Build an `aivi_base::SourceFile` for the given file handle with the
+    /// correct `FileId` by using `source_database()`.  The returned `Arc` is
+    /// suitable for passing to the parser and storing in cached results.
+    pub(crate) fn make_source_file(&self, file: SourceFile) -> Arc<aivi_base::SourceFile> {
+        let sources = self.source_database();
+        Arc::new(
+            sources
+                .file_at(file.id)
+                .expect("source file handle must refer to a registered file")
+                .clone(),
+        )
     }
 
     pub(crate) fn cached_parsed(

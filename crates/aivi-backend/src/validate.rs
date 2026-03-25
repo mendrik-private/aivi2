@@ -890,6 +890,56 @@ fn validate_pipeline(
                 }
             }
             StageKind::Fanout(fanout) => {
+                validate_kernel_contract(
+                    program,
+                    fanout.map,
+                    Some(fanout.element_layout),
+                    true,
+                    fanout.mapped_element_layout,
+                    errors,
+                );
+                for filter in &fanout.filters {
+                    if let Some(bool_layout) = lookup_bool_layout(program) {
+                        validate_kernel_contract(
+                            program,
+                            filter.predicate,
+                            Some(filter.input_layout),
+                            true,
+                            bool_layout,
+                            errors,
+                        );
+                    } else if let Some(kernel) = program.kernels().get(filter.predicate) {
+                        validate_kernel_contract(
+                            program,
+                            filter.predicate,
+                            Some(filter.input_layout),
+                            true,
+                            kernel.result_layout,
+                            errors,
+                        );
+                    } else {
+                        errors.push(ValidationError::UnknownKernel {
+                            kernel: filter.predicate,
+                        });
+                    }
+                    if let Some(kernel) = program.kernels().get(filter.predicate) {
+                        if !is_bool_layout(program, kernel.result_layout) {
+                            errors.push(ValidationError::SignalFilterPredicateNotBool {
+                                kernel: filter.predicate,
+                            });
+                        }
+                    }
+                }
+                if let Some(join) = &fanout.join {
+                    validate_kernel_contract(
+                        program,
+                        join.kernel,
+                        Some(join.input_layout),
+                        true,
+                        join.kernel_result_layout,
+                        errors,
+                    );
+                }
                 let expected = fanout
                     .join
                     .as_ref()

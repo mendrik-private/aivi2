@@ -1757,6 +1757,15 @@ fn kernel_symbol(program: &Program, kernel_id: KernelId, kernel: &Kernel) -> Str
             KernelOriginKind::SignalFilterPredicate { stage_index, .. } => {
                 format!("signal_filter_s{stage_index}")
             }
+            KernelOriginKind::FanoutMap { stage_index, .. } => {
+                format!("fanout_map_s{stage_index}")
+            }
+            KernelOriginKind::FanoutFilterPredicate { stage_index, .. } => {
+                format!("fanout_filter_s{stage_index}")
+            }
+            KernelOriginKind::FanoutJoin { stage_index, .. } => {
+                format!("fanout_join_s{stage_index}")
+            }
             KernelOriginKind::RecurrenceStart { stage_index, .. } => {
                 format!("recurrence_start_s{stage_index}")
             }

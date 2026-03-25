@@ -902,6 +902,35 @@ impl<'a> ModuleLowerer<'a> {
                     if failed {
                         continue;
                     }
+                    let runtime_map =
+                        match self.lower_runtime_expr(segment.owner, &plan.runtime_map) {
+                            Ok(runtime_map) => runtime_map,
+                            Err(error) => {
+                                self.errors.push(error);
+                                continue;
+                            }
+                        };
+                    let join = if let Some(join) = plan.join {
+                        let runtime_expr =
+                            match self.lower_runtime_expr(segment.owner, &join.runtime_expr) {
+                                Ok(runtime_expr) => runtime_expr,
+                                Err(error) => {
+                                    self.errors.push(error);
+                                    continue;
+                                }
+                            };
+                        Some(FanoutJoin {
+                            stage_index: join.stage_index,
+                            stage_span: join.stage_span,
+                            origin_expr: join.expr,
+                            input_subject: Type::lower(&join.input_subject),
+                            collection_subject: Type::lower(&join.collection_subject),
+                            runtime_expr,
+                            result_type: Type::lower(&join.result_type),
+                        })
+                    } else {
+                        None
+                    };
                     PendingStage::Lowered {
                         span,
                         input_subject: Type::lower(&plan.input_subject),
@@ -911,15 +940,9 @@ impl<'a> ModuleLowerer<'a> {
                             element_subject: Type::lower(&plan.element_subject),
                             mapped_element_type: Type::lower(&plan.mapped_element_type),
                             mapped_collection_type: Type::lower(&plan.mapped_collection_type),
+                            runtime_map,
                             filters,
-                            join: plan.join.map(|join| FanoutJoin {
-                                stage_index: join.stage_index,
-                                stage_span: join.stage_span,
-                                origin_expr: join.expr,
-                                input_subject: Type::lower(&join.input_subject),
-                                collection_subject: Type::lower(&join.collection_subject),
-                                result_type: Type::lower(&join.result_type),
-                            }),
+                            join,
                         }),
                     }
                 }

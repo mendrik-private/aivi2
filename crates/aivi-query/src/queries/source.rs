@@ -52,12 +52,13 @@ pub fn parsed_file(db: &RootDatabase, file: SourceFile) -> Arc<ParsedFileResult>
             return cached;
         }
 
-        let parsed = parse_module(input.source.as_ref());
+        let source = db.make_source_file(file);
+        let parsed = parse_module(source.as_ref());
         let diagnostics =
             Arc::<[Diagnostic]>::from(parsed.all_diagnostics().cloned().collect::<Vec<_>>());
         let computed = Arc::new(ParsedFileResult {
             revision: input.revision,
-            source: input.source,
+            source,
             parsed,
             diagnostics,
         });

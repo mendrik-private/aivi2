@@ -6,9 +6,10 @@ use aivi_backend::{
     BuiltinFunctorCarrier, BuiltinOrdSubject, BuiltinTraversableCarrier, CodegenError,
     DecodeStepKind, DomainDecodeSurfaceKind, EvaluationError, GateStage as BackendGateStage,
     InlinePipeConstructor, InlinePipePatternKind, InlinePipeStageKind, ItemKind as BackendItemKind,
-    KernelEvaluator, KernelExprKind, LayoutKind, LoweringError, NonSourceWakeupCause,
-    RecurrenceTarget, RuntimeBigInt, RuntimeDecimal, RuntimeFloat, RuntimeSumValue, RuntimeValue,
-    SourceProvider, StageKind as BackendStageKind, ValidationError, compile_program,
+    KernelEvaluator, KernelExprKind, KernelOriginKind, LayoutKind, LoweringError,
+    NonSourceWakeupCause, RecurrenceTarget, RuntimeBigInt, RuntimeDecimal, RuntimeFloat,
+    RuntimeRecordField, RuntimeSumValue, RuntimeValue, SourceProvider,
+    StageKind as BackendStageKind, ValidationError, compile_program,
     lower_module as lower_backend_module, validate_program,
 };
 use aivi_base::{SourceDatabase, SourceSpan};
@@ -1993,6 +1994,45 @@ val retried : Task Int Int =
 }
 
 #[test]
+fn retains_signal_fanout_map_and_join_kernels() {
+    let backend = lower_fixture("milestone-2/valid/pipe-fanout-carriers/main.aivi");
+    let live_emails = find_item(&backend, "liveEmails");
+    let live_joined = find_item(&backend, "liveJoinedEmails");
+
+    let live_emails_body = backend.items()[live_emails]
+        .body
+        .expect("signal fanout map should retain a body prefix for startup linking");
+    let live_joined_body = backend.items()[live_joined]
+        .body
+        .expect("signal fanout join should retain a body prefix for startup linking");
+    assert!(matches!(
+        backend.kernels()[live_emails_body].origin.kind,
+        KernelOriginKind::ItemBody { item } if item == live_emails
+    ));
+    assert!(matches!(
+        backend.kernels()[live_joined_body].origin.kind,
+        KernelOriginKind::ItemBody { item } if item == live_joined
+    ));
+
+    let pipeline = &backend.pipelines()[first_pipeline(&backend, live_joined)];
+    let BackendStageKind::Fanout(fanout) = &pipeline.stages[0].kind else {
+        panic!("expected signal fanout stage for liveJoinedEmails");
+    };
+    assert!(matches!(
+        backend.kernels()[fanout.map].origin.kind,
+        KernelOriginKind::FanoutMap { stage_index, .. } if stage_index == 0
+    ));
+    let join = fanout
+        .join
+        .as_ref()
+        .expect("joined fanout should retain a join kernel");
+    assert!(matches!(
+        backend.kernels()[join.kernel].origin.kind,
+        KernelOriginKind::FanoutJoin { stage_index, .. } if stage_index == join.stage_index
+    ));
+}
+
+#[test]
 fn lowers_domain_operators_into_backend_gate_kernels() {
     let backend = lower_text(
         "backend-domain-operators.aivi",
@@ -2069,6 +2109,183 @@ sig slowWindows : Signal Window =
             "expected predicate kernel to lower into an explicit apply tree, found {other:?}"
         ),
     }
+}
+
+#[test]
+fn runtime_evaluates_domain_operator_items_and_structural_equality() {
+    let backend = lower_fixture("milestone-2/valid/domain-operator-usage/main.aivi");
+    let mut evaluator = KernelEvaluator::new(&backend);
+    let globals = BTreeMap::new();
+
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "total"), &globals)
+            .expect("domain operator item should evaluate"),
+        RuntimeValue::SuffixedInteger {
+            raw: "15".into(),
+            suffix: "ms".into(),
+        }
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "raw"), &globals)
+            .expect("domain value projection should evaluate"),
+        RuntimeValue::Int(15)
+    );
+
+    let equality = lower_text(
+        "backend-domain-equality-runtime.aivi",
+        r#"
+domain Duration over Int
+    literal ms : Int -> Duration
+    (+) : Duration -> Duration -> Duration
+
+val same : Bool = 10ms + 5ms == 15ms
+val different : Bool = 10ms + 5ms != 12ms
+"#,
+    );
+    let mut evaluator = KernelEvaluator::new(&equality);
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&equality, "same"), &BTreeMap::new())
+            .expect("domain equality should evaluate"),
+        RuntimeValue::Bool(true)
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&equality, "different"), &BTreeMap::new())
+            .expect("domain inequality should evaluate"),
+        RuntimeValue::Bool(true)
+    );
+
+    let parameterized =
+        lower_fixture("milestone-2/valid/domain-operator-usage-parameterized/main.aivi");
+    let mut evaluator = KernelEvaluator::new(&parameterized);
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&parameterized, "total"), &BTreeMap::new())
+            .expect("parameterized domain operator should evaluate"),
+        RuntimeValue::Int(3)
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&parameterized, "raw"), &BTreeMap::new())
+            .expect("parameterized domain value projection should evaluate"),
+        RuntimeValue::Int(3)
+    );
+}
+
+#[test]
+fn runtime_evaluates_domain_member_resolution_fixture() {
+    let backend = lower_text(
+        "backend-domain-member-resolution-runtime.aivi",
+        r#"
+domain NonEmpty A over List A
+    singleton : A -> NonEmpty A
+    head : NonEmpty A -> A
+    tail : NonEmpty A -> List A
+
+val items : NonEmpty Int = singleton 1
+val first : Int = head items
+val rest : List Int = tail items
+"#,
+    );
+    let mut evaluator = KernelEvaluator::new(&backend);
+    let globals = BTreeMap::new();
+
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "first"), &globals)
+            .expect("list-backed domain members should evaluate"),
+        RuntimeValue::Int(1)
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "rest"), &globals)
+            .expect("tail domain member should evaluate"),
+        RuntimeValue::List(Vec::new())
+    );
+}
+
+#[test]
+fn runtime_evaluates_inline_pipe_domain_member_calls() {
+    let backend = lower_text(
+        "backend-inline-pipe-domain-member-runtime.aivi",
+        r#"
+domain Duration over Int
+    literal ms : Int -> Duration
+    value : Duration -> Int
+
+val raw : Int =
+    10ms
+     |> value
+"#,
+    );
+    let mut evaluator = KernelEvaluator::new(&backend);
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "raw"), &BTreeMap::new())
+            .expect("inline pipe domain member should evaluate"),
+        RuntimeValue::Int(10)
+    );
+}
+
+#[test]
+fn runtime_evaluates_domain_operator_gate_predicates() {
+    let backend = lower_text(
+        "backend-domain-operators-runtime.aivi",
+        r#"
+domain Duration over Int
+    literal ms : Int -> Duration
+    (+) : Duration -> Duration -> Duration
+    (>) : Duration -> Duration -> Bool
+
+type Window = {
+    delay: Duration
+}
+
+sig windows : Signal Window = { delay: 10ms }
+
+sig slowWindows : Signal Window =
+    windows
+     ?|> ((.delay + 5ms) > 12ms)
+"#,
+    );
+    let slow_windows = find_item(&backend, "slowWindows");
+    let pipeline = &backend.pipelines()[first_pipeline(&backend, slow_windows)];
+    let BackendStageKind::Gate(BackendGateStage::SignalFilter { predicate, .. }) =
+        &pipeline.stages[0].kind
+    else {
+        panic!("expected signal-filter gate stage for slowWindows");
+    };
+
+    let subject = RuntimeValue::Record(vec![RuntimeRecordField {
+        label: "delay".into(),
+        value: RuntimeValue::SuffixedInteger {
+            raw: "10".into(),
+            suffix: "ms".into(),
+        },
+    }]);
+    let faster = RuntimeValue::Record(vec![RuntimeRecordField {
+        label: "delay".into(),
+        value: RuntimeValue::SuffixedInteger {
+            raw: "6".into(),
+            suffix: "ms".into(),
+        },
+    }]);
+    let mut evaluator = KernelEvaluator::new(&backend);
+    assert_eq!(
+        evaluator
+            .evaluate_kernel(*predicate, Some(&subject), &[], &BTreeMap::new())
+            .expect("matching duration gate predicate should evaluate"),
+        RuntimeValue::Bool(true)
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_kernel(*predicate, Some(&faster), &[], &BTreeMap::new())
+            .expect("non-matching duration gate predicate should evaluate"),
+        RuntimeValue::Bool(false)
+    );
 }
 
 #[test]

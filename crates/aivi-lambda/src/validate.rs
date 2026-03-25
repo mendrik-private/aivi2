@@ -582,7 +582,71 @@ fn validate_stage(
         (StageKind::TruthyFalsy(pair), core::StageKind::TruthyFalsy(core_pair))
             if pair == core_pair => {}
         (StageKind::Fanout(fanout), core::StageKind::Fanout(core_fanout))
-            if fanout == core_fanout => {}
+            if fanout.carrier == core_fanout.carrier
+                && fanout.element_subject == core_fanout.element_subject
+                && fanout.mapped_element_type == core_fanout.mapped_element_type
+                && fanout.mapped_collection_type == core_fanout.mapped_collection_type
+                && fanout.filters.len() == core_fanout.filters.len()
+                && fanout.join.is_some() == core_fanout.join.is_some() =>
+        {
+            let owner = module.core().pipes()[stage.pipe].owner;
+            validate_expected_closure(
+                module,
+                fanout.map,
+                owner,
+                ClosureKind::FanoutMap,
+                Some(&core_fanout.element_subject),
+                &[],
+                core_fanout.runtime_map,
+                errors,
+            );
+            for (filter, core_filter) in fanout.filters.iter().zip(&core_fanout.filters) {
+                if filter.stage_index != core_filter.stage_index
+                    || filter.stage_span != core_filter.stage_span
+                    || filter.predicate_expr != core_filter.predicate_expr
+                    || filter.input_subject != core_filter.input_subject
+                {
+                    errors.push(ValidationError::StageMirrorMismatch { stage: stage_id });
+                    return;
+                }
+                validate_expected_closure(
+                    module,
+                    filter.runtime,
+                    owner,
+                    ClosureKind::FanoutFilterPredicate,
+                    Some(&core_filter.input_subject),
+                    &[],
+                    core_filter.runtime_predicate,
+                    errors,
+                );
+            }
+            match (&fanout.join, &core_fanout.join) {
+                (Some(join), Some(core_join)) => {
+                    if join.stage_index != core_join.stage_index
+                        || join.stage_span != core_join.stage_span
+                        || join.origin_expr != core_join.origin_expr
+                        || join.input_subject != core_join.input_subject
+                        || join.collection_subject != core_join.collection_subject
+                        || join.result_type != core_join.result_type
+                    {
+                        errors.push(ValidationError::StageMirrorMismatch { stage: stage_id });
+                        return;
+                    }
+                    validate_expected_closure(
+                        module,
+                        join.runtime,
+                        owner,
+                        ClosureKind::FanoutJoin,
+                        Some(&core_join.collection_subject),
+                        &[],
+                        core_join.runtime_expr,
+                        errors,
+                    );
+                }
+                (None, None) => {}
+                _ => errors.push(ValidationError::StageMirrorMismatch { stage: stage_id }),
+            }
+        }
         _ => errors.push(ValidationError::StageMirrorMismatch { stage: stage_id }),
     }
 }

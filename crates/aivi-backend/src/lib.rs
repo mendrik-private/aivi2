@@ -56,8 +56,8 @@ pub use numeric::{RuntimeBigInt, RuntimeDecimal, RuntimeFloat};
 pub use program::{
     DecodeExtraFieldPolicy, DecodeField, DecodeFieldRequirement, DecodeMode, DecodePlan,
     DecodeStep, DecodeStepKind, DecodeSumStrategy, DecodeVariant, DomainDecodeSurface,
-    DomainDecodeSurfaceKind, FanoutCarrier, FanoutJoin, FanoutStage, GateStage, Item, ItemKind,
-    NonSourceWakeup, NonSourceWakeupCause, Pipeline, PipelineOrigin, Program, Recurrence,
+    DomainDecodeSurfaceKind, FanoutCarrier, FanoutFilter, FanoutJoin, FanoutStage, GateStage, Item,
+    ItemKind, NonSourceWakeup, NonSourceWakeupCause, Pipeline, PipelineOrigin, Program, Recurrence,
     RecurrenceStage, RecurrenceTarget, RecurrenceWakeupKind, SignalInfo, SourceArgumentKernel,
     SourceCancellationPolicy, SourceInstanceId, SourceOptionBinding, SourceOptionKernel,
     SourcePlan, SourceProvider, SourceReplacementPolicy, SourceStaleWorkPolicy,

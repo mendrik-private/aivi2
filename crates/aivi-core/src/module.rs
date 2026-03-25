@@ -251,6 +251,11 @@ impl fmt::Display for Module {
                                 fanout.mapped_element_type,
                                 fanout.mapped_collection_type
                             )?;
+                            writeln!(
+                                f,
+                                "      map      = {}",
+                                ExprPrinter::new(self, fanout.runtime_map)
+                            )?;
                             for filter in &fanout.filters {
                                 writeln!(
                                     f,
@@ -262,8 +267,10 @@ impl fmt::Display for Module {
                             if let Some(join) = &fanout.join {
                                 writeln!(
                                     f,
-                                    "      join[{}] {} => {}",
-                                    join.stage_index, join.collection_subject, join.result_type
+                                    "      join[{}] = {} => {}",
+                                    join.stage_index,
+                                    ExprPrinter::new(self, join.runtime_expr),
+                                    join.result_type
                                 )?;
                             }
                         }
@@ -446,6 +453,7 @@ pub struct FanoutStage {
     pub element_subject: Type,
     pub mapped_element_type: Type,
     pub mapped_collection_type: Type,
+    pub runtime_map: ExprId,
     pub filters: Vec<FanoutFilter>,
     pub join: Option<FanoutJoin>,
 }
@@ -466,6 +474,7 @@ pub struct FanoutJoin {
     pub origin_expr: HirExprId,
     pub input_subject: Type,
     pub collection_subject: Type,
+    pub runtime_expr: ExprId,
     pub result_type: Type,
 }
 

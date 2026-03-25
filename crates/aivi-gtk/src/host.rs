@@ -444,6 +444,13 @@ where
             }
             GtkPropertySetter::Bool(GtkBoolPropertySetter::Hexpand) => widget.set_hexpand(value),
             GtkPropertySetter::Bool(GtkBoolPropertySetter::Vexpand) => widget.set_vexpand(value),
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::Monospace) => {
+                if value {
+                    widget.add_css_class("monospace");
+                } else {
+                    widget.remove_css_class("monospace");
+                }
+            }
             GtkPropertySetter::Bool(GtkBoolPropertySetter::HeaderBarShowTitleButtons) => {
                 widget
                     .clone()
@@ -2197,6 +2204,49 @@ val view =
             assert_eq!(queued.len(), 1);
             assert_eq!(queued[0].route, routes[0].id);
             assert_eq!(queued[0].value, TestValue::Bool(true));
+        });
+    }
+
+    #[test]
+    fn concrete_host_applies_label_monospace_class() {
+        gtk::test_synced(|| {
+            let graph = lower_graph(
+                "gtk-host-label-monospace.aivi",
+                r#"
+val view =
+    <Window title="Host">
+        <Label text="Board" monospace />
+    </Window>
+"#,
+            );
+            let executor = GtkRuntimeExecutor::new_with_values(
+                graph,
+                GtkConcreteHost::<TestValue>::default(),
+                [],
+            )
+            .expect("concrete GTK host should mount a monospace label");
+
+            let root = executor
+                .root_widgets()
+                .expect("root widget should exist")
+                .into_iter()
+                .next()
+                .expect("window root should exist");
+            let label_handle = executor
+                .host()
+                .child_handles(&root)
+                .expect("window child order should be tracked")
+                .first()
+                .expect("window should contain the label child")
+                .clone();
+            let label = executor
+                .host()
+                .widget(&label_handle)
+                .expect("label handle should resolve")
+                .downcast::<gtk::Label>()
+                .expect("window child should be a label");
+
+            assert!(label.has_css_class("monospace"));
         });
     }
 

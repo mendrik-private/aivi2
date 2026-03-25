@@ -117,6 +117,7 @@ pub enum GtkBoolPropertySetter {
     Sensitive,
     Hexpand,
     Vexpand,
+    Monospace,
     HeaderBarShowTitleButtons,
     EntryEditable,
     SwitchActive,
@@ -344,6 +345,12 @@ const VEXPAND_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
     name: "vexpand",
     value_shape: GtkPropertyValueShape::Bool,
     setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::Vexpand),
+};
+
+const MONOSPACE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "monospace",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::Monospace),
 };
 
 const WINDOW_TITLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
@@ -652,6 +659,7 @@ const LABEL_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        MONOSPACE_PROPERTY,
         LABEL_TEXT_PROPERTY,
         LABEL_LABEL_PROPERTY,
     ],
@@ -1071,6 +1079,7 @@ mod tests {
         assert_eq!(property.value_shape, GtkPropertyValueShape::Text);
         assert!(lookup_widget_property(&button, "text").is_none());
         assert!(lookup_widget_property(&label, "label").is_some());
+        assert!(lookup_widget_property(&label, "monospace").is_some());
         assert!(lookup_widget_property(&entry, "text").is_some());
         assert!(lookup_widget_property(&entry, "placeholderText").is_some());
         assert!(lookup_widget_property(&entry, "label").is_none());

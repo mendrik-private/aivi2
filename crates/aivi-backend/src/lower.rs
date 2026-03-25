@@ -34,9 +34,9 @@ use crate::{
     CallingConventionKind, DecimalLiteral, DecodeExtraFieldPolicy, DecodeField,
     DecodeFieldRequirement, DecodeMode, DecodePlan, DecodePlanId, DecodeStep, DecodeStepId,
     DecodeStepKind, DecodeSumStrategy, DecodeVariant, DomainDecodeSurface, DomainDecodeSurfaceKind,
-    EnvSlotId, FanoutCarrier, FanoutJoin, FanoutStage, FloatLiteral, GateStage, InlinePipeCaseArm,
-    InlinePipeConstructor, InlinePipeExpr, InlinePipePattern, InlinePipePatternKind,
-    InlinePipeRecordPatternField, InlinePipeStage, InlinePipeStageKind,
+    EnvSlotId, FanoutCarrier, FanoutFilter, FanoutJoin, FanoutStage, FloatLiteral, GateStage,
+    InlinePipeCaseArm, InlinePipeConstructor, InlinePipeExpr, InlinePipePattern,
+    InlinePipePatternKind, InlinePipeRecordPatternField, InlinePipeStage, InlinePipeStageKind,
     InlinePipeTruthyFalsyBranch, InlineSubjectId, IntegerLiteral, Item, ItemId, ItemKind, Kernel,
     KernelExpr, KernelExprId, KernelExprKind, KernelId, KernelOrigin, KernelOriginKind, Layout,
     LayoutId, LayoutKind, LoweringError::*, MapEntry, NonSourceWakeup, NonSourceWakeupCause,
@@ -572,6 +572,31 @@ impl<'a> ProgramLowerer<'a> {
                 element_layout: self.intern_core_type(&fanout.element_subject)?,
                 mapped_element_layout: self.intern_core_type(&fanout.mapped_element_type)?,
                 mapped_collection_layout: self.intern_core_type(&fanout.mapped_collection_type)?,
+                map: self.lower_kernel(
+                    KernelOriginKind::FanoutMap {
+                        pipeline: pipeline_id,
+                        stage_index: stage.index,
+                    },
+                    fanout.map,
+                )?,
+                filters: fanout
+                    .filters
+                    .iter()
+                    .map(|filter| {
+                        Ok(FanoutFilter {
+                            stage_index: filter.stage_index,
+                            stage_span: filter.stage_span,
+                            input_layout: self.intern_core_type(&filter.input_subject)?,
+                            predicate: self.lower_kernel(
+                                KernelOriginKind::FanoutFilterPredicate {
+                                    pipeline: pipeline_id,
+                                    stage_index: filter.stage_index,
+                                },
+                                filter.runtime,
+                            )?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
                 join: fanout
                     .join
                     .as_ref()
@@ -579,8 +604,21 @@ impl<'a> ProgramLowerer<'a> {
                         Ok(FanoutJoin {
                             stage_index: join.stage_index,
                             stage_span: join.stage_span,
-                            input_layout: self.intern_core_type(&join.input_subject)?,
+                            input_layout: self.intern_core_type(&join.collection_subject)?,
                             collection_layout: self.intern_core_type(&join.collection_subject)?,
+                            kernel: self.lower_kernel(
+                                KernelOriginKind::FanoutJoin {
+                                    pipeline: pipeline_id,
+                                    stage_index: join.stage_index,
+                                },
+                                join.runtime,
+                            )?,
+                            kernel_result_layout: self.intern_core_type(
+                                match &join.result_type {
+                                    core::Type::Signal(payload) => payload.as_ref(),
+                                    other => other,
+                                },
+                            )?,
                             result_layout: self.intern_core_type(&join.result_type)?,
                         })
                     })

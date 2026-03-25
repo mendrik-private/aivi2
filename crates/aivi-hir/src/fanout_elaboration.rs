@@ -66,6 +66,7 @@ pub struct FanoutSegmentPlan {
     pub element_subject: GateType,
     pub mapped_element_type: GateType,
     pub mapped_collection_type: GateType,
+    pub runtime_map: GateRuntimeExpr,
     pub filters: Vec<FanoutFilterPlan>,
     pub join: Option<FanoutJoinPlan>,
     pub result_type: GateType,
@@ -87,6 +88,7 @@ pub struct FanoutJoinPlan {
     pub expr: ExprId,
     pub input_subject: GateType,
     pub collection_subject: GateType,
+    pub runtime_expr: GateRuntimeExpr,
     pub result_type: GateType,
 }
 
@@ -352,6 +354,21 @@ pub(crate) fn elaborate_fanout_segment(
             blockers,
         });
     }
+    let runtime_map = match lower_gate_pipe_body_runtime_expr(
+        module,
+        segment.map_expr(),
+        env,
+        &element_subject,
+        typing,
+    ) {
+        Ok(runtime_map) => runtime_map,
+        Err(blocker) => {
+            return FanoutSegmentOutcome::Blocked(BlockedFanoutSegment {
+                subject: Some(subject.clone()),
+                blockers: vec![blocker_for_map_runtime_blocker(blocker)],
+            });
+        }
+    };
 
     let mut filters = Vec::new();
     for (offset, stage) in segment.filter_stages().enumerate() {
@@ -417,6 +434,22 @@ pub(crate) fn elaborate_fanout_segment(
                 blockers: join_blockers,
             });
         }
+        let collection_subject = mapped_collection_type.gate_payload().clone();
+        let runtime_expr = match lower_gate_pipe_body_runtime_expr(
+            module,
+            join_expr,
+            env,
+            &collection_subject,
+            typing,
+        ) {
+            Ok(runtime_expr) => runtime_expr,
+            Err(blocker) => {
+                return FanoutSegmentOutcome::Blocked(BlockedFanoutSegment {
+                    subject: Some(subject.clone()),
+                    blockers: vec![blocker_for_join_runtime_blocker(blocker)],
+                });
+            }
+        };
 
         result_type = typing.apply_fanout_plan(
             FanoutPlanner::plan(FanoutStageKind::Join, carrier),
@@ -427,7 +460,8 @@ pub(crate) fn elaborate_fanout_segment(
             stage_span: stage.span,
             expr: join_expr,
             input_subject: mapped_collection_type.clone(),
-            collection_subject: mapped_collection_type.gate_payload().clone(),
+            collection_subject,
+            runtime_expr,
             result_type: result_type.clone(),
         });
     }
@@ -438,6 +472,7 @@ pub(crate) fn elaborate_fanout_segment(
         element_subject,
         mapped_element_type,
         mapped_collection_type,
+        runtime_map,
         filters,
         join,
         result_type,
@@ -512,6 +547,44 @@ fn blocker_for_join_issue(issue: GateIssue) -> FanoutElaborationBlocker {
     }
 }
 
+fn blocker_for_map_runtime_blocker(blocker: GateElaborationBlocker) -> FanoutElaborationBlocker {
+    match blocker {
+        GateElaborationBlocker::InvalidProjection { path, subject } => {
+            FanoutElaborationBlocker::MapInvalidProjection { path, subject }
+        }
+        GateElaborationBlocker::UnknownField { path, subject } => {
+            FanoutElaborationBlocker::MapUnknownField { path, subject }
+        }
+        GateElaborationBlocker::UnknownSubjectType
+        | GateElaborationBlocker::UnknownPredicateType
+        | GateElaborationBlocker::ImpurePredicate
+        | GateElaborationBlocker::PredicateNotBool { .. }
+        | GateElaborationBlocker::UnknownRuntimeExprType { .. }
+        | GateElaborationBlocker::UnsupportedRuntimeExpr { .. } => {
+            FanoutElaborationBlocker::UnknownMapBodyType
+        }
+    }
+}
+
+fn blocker_for_join_runtime_blocker(blocker: GateElaborationBlocker) -> FanoutElaborationBlocker {
+    match blocker {
+        GateElaborationBlocker::InvalidProjection { path, subject } => {
+            FanoutElaborationBlocker::JoinInvalidProjection { path, subject }
+        }
+        GateElaborationBlocker::UnknownField { path, subject } => {
+            FanoutElaborationBlocker::JoinUnknownField { path, subject }
+        }
+        GateElaborationBlocker::UnknownSubjectType
+        | GateElaborationBlocker::UnknownPredicateType
+        | GateElaborationBlocker::ImpurePredicate
+        | GateElaborationBlocker::PredicateNotBool { .. }
+        | GateElaborationBlocker::UnknownRuntimeExprType { .. }
+        | GateElaborationBlocker::UnsupportedRuntimeExpr { .. } => {
+            FanoutElaborationBlocker::UnknownJoinBodyType
+        }
+    }
+}
+
 fn fanout_filter_issue_blocker(issue: GateIssue, span: SourceSpan) -> FanoutFilterBlocker {
     match issue {
         GateIssue::InvalidProjection { path, subject, .. } => {
@@ -581,7 +654,10 @@ mod tests {
     use aivi_typing::FanoutCarrier;
 
     use super::{FanoutElaborationBlocker, FanoutSegmentOutcome, elaborate_fanouts};
-    use crate::{BuiltinType, GateType, Item, ValidationMode, lower_module};
+    use crate::{
+        BuiltinType, GateRuntimeExprKind, GateRuntimeProjectionBase, GateType, Item,
+        ValidationMode, lower_module,
+    };
 
     fn fixture_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -674,6 +750,16 @@ mod tests {
                     plan.mapped_collection_type,
                     GateType::List(Box::new(GateType::Primitive(BuiltinType::Text)))
                 );
+                match &plan.runtime_map.kind {
+                    GateRuntimeExprKind::Projection { base, path } => {
+                        assert_eq!(base, &GateRuntimeProjectionBase::AmbientSubject);
+                        assert_eq!(
+                            path.segments().iter().next().map(|segment| segment.text()),
+                            Some("email")
+                        );
+                    }
+                    other => panic!("expected retained map projection, found {other:?}"),
+                }
                 assert_eq!(plan.result_type, plan.mapped_collection_type);
                 assert!(plan.join.is_none(), "plain `*|>` should not invent a join");
             }
@@ -699,6 +785,8 @@ mod tests {
                     join.collection_subject,
                     GateType::List(Box::new(GateType::Primitive(BuiltinType::Text)))
                 );
+                assert_eq!(plan.runtime_map.ty, GateType::Primitive(BuiltinType::Text));
+                assert_eq!(join.runtime_expr.ty, GateType::Primitive(BuiltinType::Text));
                 assert_eq!(join.result_type, GateType::Primitive(BuiltinType::Text));
                 assert_eq!(plan.result_type, GateType::Primitive(BuiltinType::Text));
             }
@@ -720,6 +808,7 @@ mod tests {
                         BuiltinType::Text,
                     )))))
                 );
+                assert_eq!(plan.runtime_map.ty, GateType::Primitive(BuiltinType::Text));
                 assert_eq!(plan.result_type, plan.mapped_collection_type);
             }
             other => panic!("expected planned signal fanout segment, found {other:?}"),
@@ -748,6 +837,7 @@ mod tests {
                     join.result_type,
                     GateType::Signal(Box::new(GateType::Primitive(BuiltinType::Text)))
                 );
+                assert_eq!(join.runtime_expr.ty, GateType::Primitive(BuiltinType::Text));
                 assert_eq!(plan.result_type, join.result_type);
             }
             other => panic!("expected planned signal join segment, found {other:?}"),

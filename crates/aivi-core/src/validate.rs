@@ -818,6 +818,11 @@ fn validate_stage(
             }
         }
         StageKind::Fanout(fanout) => {
+            if !module.exprs().contains(fanout.runtime_map) {
+                errors.push(ValidationError::UnknownExpr {
+                    expr: fanout.runtime_map,
+                });
+            }
             for filter in &fanout.filters {
                 if !module.exprs().contains(filter.runtime_predicate) {
                     errors.push(ValidationError::UnknownExpr {
@@ -825,6 +830,13 @@ fn validate_stage(
                     });
                 } else if !module.exprs()[filter.runtime_predicate].ty.is_bool() {
                     errors.push(ValidationError::GatePredicateNotBool { stage: stage_id });
+                }
+            }
+            if let Some(join) = &fanout.join {
+                if !module.exprs().contains(join.runtime_expr) {
+                    errors.push(ValidationError::UnknownExpr {
+                        expr: join.runtime_expr,
+                    });
                 }
             }
             let expected = fanout

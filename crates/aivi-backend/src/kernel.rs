@@ -307,6 +307,18 @@ pub enum KernelOriginKind {
         pipeline: PipelineId,
         stage_index: usize,
     },
+    FanoutMap {
+        pipeline: PipelineId,
+        stage_index: usize,
+    },
+    FanoutFilterPredicate {
+        pipeline: PipelineId,
+        stage_index: usize,
+    },
+    FanoutJoin {
+        pipeline: PipelineId,
+        stage_index: usize,
+    },
     RecurrenceStart {
         pipeline: PipelineId,
         stage_index: usize,
@@ -347,6 +359,18 @@ impl fmt::Display for KernelOriginKind {
                 pipeline,
                 stage_index,
             } => write!(f, "signal-predicate pipeline{pipeline}[{stage_index}]"),
+            Self::FanoutMap {
+                pipeline,
+                stage_index,
+            } => write!(f, "fanout-map pipeline{pipeline}[{stage_index}]"),
+            Self::FanoutFilterPredicate {
+                pipeline,
+                stage_index,
+            } => write!(f, "fanout-filter pipeline{pipeline}[{stage_index}]"),
+            Self::FanoutJoin {
+                pipeline,
+                stage_index,
+            } => write!(f, "fanout-join pipeline{pipeline}[{stage_index}]"),
             Self::RecurrenceStart {
                 pipeline,
                 stage_index,

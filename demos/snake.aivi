@@ -51,6 +51,11 @@ type GameBoard = {
     rows: List BoardRow
 }
 
+type BoardTextState = {
+    first: Bool,
+    value: Text
+}
+
 val boardSize:BoardSize = {
     width: 12,
     height: 10
@@ -293,6 +298,23 @@ fun cellGlyph:Text kind:CellKind =>
      ||> Food      => "*"
      ||> Empty     => "."
 
+fun boardRowTextStep:Text text:Text cell:BoardCell =>
+    "{text}{cellGlyph cell.kind}"
+
+fun boardRowText:Text row:BoardRow =>
+    row.cells
+     |> reduce boardRowTextStep ""
+
+fun boardTextStep:BoardTextState state:BoardTextState row:BoardRow =>
+    state.first
+     T|> { first: False, value: boardRowText row }
+     F|> { first: False, value: "{state.value}\n{boardRowText row}" }
+
+fun boardTextFor:Text board:GameBoard =>
+    board.rows
+     |> reduce boardTextStep { first: True, value: "" }
+     |> .value
+
 fun scoreLineFor:Text game:Game =>
     "Score: {game.score}"
 
@@ -336,9 +358,9 @@ sig board : Signal GameBoard =
     game
      |> toBoard boardSize
 
-sig boardRows : Signal (List BoardRow) =
+sig boardText : Signal Text =
     board
-     |> .rows
+     |> boardTextFor
 
 sig scoreLine : Signal Text =
     game
@@ -358,15 +380,7 @@ val main =
             <Label text={dirLine} />
             <Label text={scoreLine} />
             <Label text={statusLine} />
-            <Box orientation={Vertical} spacing={2}>
-                <each of={boardRows} as={row} key={row.id}>
-                    <Box orientation={Horizontal} spacing={2}>
-                        <each of={row.cells} as={cell} key={cell.id}>
-                            <Label text={cellGlyph cell.kind} />
-                        </each>
-                    </Box>
-                </each>
-            </Box>
+            <Label text={boardText} monospace />
         </Box>
     </Window>
 

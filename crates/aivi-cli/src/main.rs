@@ -12,7 +12,6 @@ use std::{
     rc::Rc,
     sync::{Arc, mpsc as sync_mpsc},
     thread::{self, JoinHandle},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(unix)]
@@ -265,7 +264,12 @@ fn run_markup(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Stri
 
 fn validate_module_path(path: &[&str]) -> Result<(), String> {
     for segment in path {
-        if *segment == ".." || *segment == "." || segment.contains('/') || segment.contains('\\') {
+        if segment.is_empty()
+            || segment.contains("..")
+            || *segment == "."
+            || segment.contains('/')
+            || segment.contains('\\')
+        {
             return Err(format!("invalid module path segment: '{}'", segment));
         }
     }
@@ -682,38 +686,31 @@ impl Drop for TempFile {
     }
 }
 
-/// RAII wrapper that removes a temporary directory (and all its contents) on
-/// drop.
+/// RAII wrapper around [`tempfile::TempDir`] that places a staging directory
+/// in the given parent so it lives on the same filesystem as the final output
+/// path, enabling an atomic `fs::rename` on success.
 ///
-/// Used to guard staging directories created by `write_run_bundle` so that
-/// a partial build directory is never left behind when the process exits
-/// early due to an error or a panic.
-struct TempDir(Option<PathBuf>);
+/// On drop the directory and all its contents are removed automatically,
+/// even when the process exits early due to an error or a panic.
+struct StagingDir(tempfile::TempDir);
 
-impl TempDir {
-    fn new(path: PathBuf) -> Self {
-        Self(Some(path))
-    }
-
-    /// Consume the guard without deleting the directory.
-    ///
-    /// Call this once the directory has been successfully renamed/moved into
-    /// its final location so the drop implementation does not try to remove it
-    /// from the old path.
-    fn defuse(&mut self) {
-        self.0 = None;
+impl StagingDir {
+    /// Create a new temporary staging directory inside `parent`.
+    fn new_in(parent: &Path) -> Result<Self, String> {
+        let dir = tempfile::Builder::new()
+            .prefix(".aivi-bundle-staging-")
+            .tempdir_in(parent)
+            .map_err(|error| {
+                format!(
+                    "failed to create staging directory in {}: {error}",
+                    parent.display()
+                )
+            })?;
+        Ok(Self(dir))
     }
 
     fn path(&self) -> &Path {
-        self.0.as_deref().expect("TempDir has already been defused")
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        if let Some(path) = self.0.take() {
-            let _ = fs::remove_dir_all(path);
-        }
+        self.0.path()
     }
 }
 
@@ -2975,19 +2972,19 @@ fn write_run_bundle(
             output.display()
         ));
     }
-    if let Some(parent) = output.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    let staging_parent = output
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    if staging_parent != Path::new(".") {
+        fs::create_dir_all(staging_parent)
+            .map_err(|error| format!("failed to create {}: {error}", staging_parent.display()))?;
     }
-
-    let staging_path = build_staging_dir(output)?;
-    fs::create_dir_all(&staging_path)
-        .map_err(|error| format!("failed to create {}: {error}", staging_path.display()))?;
-    // Guard the staging directory with RAII so it is removed on early exit or
-    // panic, preventing stale partial-build directories from accumulating.
-    let mut staging_guard = TempDir::new(staging_path);
+    // Create a temp staging dir in the same directory as output so that
+    // `fs::rename` at the end is guaranteed to be an atomic same-filesystem
+    // move.  `StagingDir` (backed by `tempfile::TempDir`) removes the
+    // directory on drop even if the process panics before the rename.
+    let staging_guard = StagingDir::new_in(staging_parent)?;
 
     let result = (|| {
         let staging = staging_guard.path();
@@ -3033,31 +3030,19 @@ fn write_run_bundle(
                     output.display()
                 )
             })?;
-            // The staging directory has been moved; defuse the guard so it
-            // does not try to delete the directory from the old path.
-            staging_guard.defuse();
+            // The staging directory has been atomically moved to its final
+            // location.  When `staging_guard` drops, `TempDir` attempts to
+            // remove the original staging path, which no longer exists, so
+            // the cleanup is a silent no-op.  The output directory is safe.
             summary.launcher_path = output.join("run");
             summary.runtime_path = output.join("aivi");
             Ok(summary)
         }
         Err(error) => {
-            // staging_guard will be dropped here, cleaning up the directory.
+            // staging_guard drops here, cleaning up the partial build directory.
             Err(error)
         }
     }
-}
-
-fn build_staging_dir(output: &Path) -> Result<PathBuf, String> {
-    let parent = output.parent().unwrap_or_else(|| Path::new("."));
-    let name = output
-        .file_name()
-        .map(|name| name.to_string_lossy())
-        .unwrap_or_else(|| "bundle".into());
-    let unique = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| format!("system clock error while creating build directory: {error}"))?
-        .as_nanos();
-    Ok(parent.join(format!(".{name}.tmp-{}-{unique}", std::process::id())))
 }
 
 fn discover_workspace_root(path: &Path) -> PathBuf {

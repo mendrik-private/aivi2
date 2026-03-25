@@ -21,17 +21,17 @@ impl SourceFile {
 
     /// Return the current text snapshot for this file.
     pub fn text(self, db: &RootDatabase) -> String {
-        db.source_input(self).source.text().to_owned()
+        db.source_input(self).text.as_ref().to_owned()
     }
 
     /// Return the current path snapshot for this file.
     pub fn path(self, db: &RootDatabase) -> PathBuf {
-        db.source_input(self).source.path().to_path_buf()
+        db.source_input(self).path.as_ref().clone()
     }
 
     /// Return the current source snapshot for this file.
     pub fn source(self, db: &RootDatabase) -> Arc<aivi_base::SourceFile> {
-        db.source_input(self).source
+        db.make_source_file(self)
     }
 
     /// Return the current revision for this file.

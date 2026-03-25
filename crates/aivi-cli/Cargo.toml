@@ -16,6 +16,7 @@ aivi-runtime = { path = "../aivi-runtime" }
 aivi-syntax.workspace = true
 aivi-lsp = { path = "../aivi-lsp" }
 gtk = { package = "gtk4", version = "0.9.5" }
+tempfile = "3"
 tokio = { version = "1", features = ["rt", "sync"] }
 
 [[bin]]

@@ -88,6 +88,8 @@ pub enum RuntimeCallable {
     },
     DomainMember {
         handle: DomainMemberHandle,
+        parameters: Vec<LayoutId>,
+        result: LayoutId,
         bound_arguments: Vec<RuntimeValue>,
     },
     BuiltinClassMember {
@@ -666,7 +668,7 @@ impl fmt::Display for EvaluationError {
             ),
             Self::UnsupportedDomainMemberCall { kernel, handle, .. } => write!(
                 f,
-                "kernel {kernel} reached unresolved domain member {}.{} at runtime",
+                "kernel {kernel} cannot execute domain member {}.{} in the current backend runtime slice",
                 handle.domain_name, handle.member_name
             ),
             Self::UnsupportedBuiltinClassMember {
@@ -680,11 +682,11 @@ impl fmt::Display for EvaluationError {
             ),
             Self::UnsupportedInlinePipe { kernel, .. } => write!(
                 f,
-                "kernel {kernel} still contains an inline pipe; runtime evaluation for inline pipes remains a later backend slice"
+                "kernel {kernel} contains an inline pipe configuration that the current evaluator cannot execute"
             ),
             Self::UnsupportedInlinePipeSignalSubject { kernel, found, .. } => write!(
                 f,
-                "kernel {kernel} reached an inline pipe over signal subject `{found}`, but snapshot-time signal inline pipes remain a later runtime slice"
+                "kernel {kernel} cannot execute an inline pipe over signal subject `{found}` in the current runtime slice"
             ),
             Self::UnsupportedInlinePipePattern { kernel, .. } => write!(
                 f,
@@ -1023,8 +1025,12 @@ impl<'a> KernelEvaluator<'a> {
                             values.push(value)
                         }
                         KernelExprKind::DomainMember(handle) => {
+                            let (parameters, result) =
+                                callable_signature(self.program, expr.layout);
                             values.push(RuntimeValue::Callable(RuntimeCallable::DomainMember {
                                 handle: handle.clone(),
+                                parameters,
+                                result,
                                 bound_arguments: Vec::new(),
                             }))
                         }
@@ -1763,15 +1769,34 @@ impl<'a> KernelEvaluator<'a> {
             }
             RuntimeCallable::DomainMember {
                 handle,
+                parameters,
+                result,
                 bound_arguments,
             } => {
-                let _ = bound_arguments;
-                let _ = arguments;
-                Err(EvaluationError::UnsupportedDomainMemberCall {
-                    kernel: kernel_id,
+                let mut bound_arguments = bound_arguments;
+                bound_arguments.extend(arguments.into_iter().map(strip_signal));
+                if bound_arguments.len() < parameters.len() {
+                    return Ok(RuntimeValue::Callable(RuntimeCallable::DomainMember {
+                        handle,
+                        parameters,
+                        result,
+                        bound_arguments,
+                    }));
+                }
+                let remaining = bound_arguments.split_off(parameters.len());
+                let value = self.evaluate_domain_member(
+                    kernel_id,
                     expr,
-                    handle,
-                })
+                    &handle,
+                    &parameters,
+                    result,
+                    bound_arguments,
+                )?;
+                if remaining.is_empty() {
+                    Ok(value)
+                } else {
+                    self.apply_callable(kernel_id, expr, value, remaining, globals)
+                }
             }
             RuntimeCallable::BuiltinClassMember {
                 intrinsic,
@@ -1821,6 +1846,169 @@ impl<'a> KernelEvaluator<'a> {
                     self.apply_callable(kernel_id, expr, value, remaining, globals)
                 }
             }
+        }
+    }
+
+    fn evaluate_domain_member(
+        &self,
+        kernel_id: KernelId,
+        expr: KernelExprId,
+        handle: &DomainMemberHandle,
+        parameters: &[LayoutId],
+        result_layout: LayoutId,
+        arguments: Vec<RuntimeValue>,
+    ) -> Result<RuntimeValue, EvaluationError> {
+        if let Some(operator) = domain_member_binary_operator(handle.member_name.as_ref()) {
+            return self.evaluate_domain_binary_member(
+                kernel_id,
+                expr,
+                handle,
+                operator,
+                result_layout,
+                arguments,
+            );
+        }
+
+        match (handle.member_name.as_ref(), arguments.as_slice()) {
+            ("value", [argument])
+                if parameters.len() == 1 && is_named_domain_layout(self.program, parameters[0]) =>
+            {
+                return Ok(domain_member_carrier_value(argument.clone()));
+            }
+            ("singleton", [argument])
+                if parameters.len() == 1 && is_named_domain_layout(self.program, result_layout) =>
+            {
+                return Ok(RuntimeValue::List(vec![strip_signal(argument.clone())]));
+            }
+            ("head", [argument])
+                if parameters.len() == 1 && is_named_domain_layout(self.program, parameters[0]) =>
+            {
+                return match strip_signal(argument.clone()) {
+                    RuntimeValue::List(values) => values.into_iter().next().ok_or_else(|| {
+                        EvaluationError::UnsupportedDomainMemberCall {
+                            kernel: kernel_id,
+                            expr,
+                            handle: handle.clone(),
+                        }
+                    }),
+                    _ => Err(EvaluationError::UnsupportedDomainMemberCall {
+                        kernel: kernel_id,
+                        expr,
+                        handle: handle.clone(),
+                    }),
+                };
+            }
+            ("tail", [argument])
+                if parameters.len() == 1 && is_named_domain_layout(self.program, parameters[0]) =>
+            {
+                return match strip_signal(argument.clone()) {
+                    RuntimeValue::List(values) if !values.is_empty() => {
+                        Ok(RuntimeValue::List(values[1..].to_vec()))
+                    }
+                    _ => Err(EvaluationError::UnsupportedDomainMemberCall {
+                        kernel: kernel_id,
+                        expr,
+                        handle: handle.clone(),
+                    }),
+                };
+            }
+            ("fromList", [argument])
+                if parameters.len() == 1
+                    && matches!(
+                        self.program.layouts().get(result_layout).map(|layout| &layout.kind),
+                        Some(LayoutKind::Option { element })
+                            if is_named_domain_layout(self.program, *element)
+                    ) =>
+            {
+                return match strip_signal(argument.clone()) {
+                    RuntimeValue::List(values) if values.is_empty() => Ok(RuntimeValue::OptionNone),
+                    RuntimeValue::List(values) => Ok(RuntimeValue::OptionSome(Box::new(
+                        RuntimeValue::List(values),
+                    ))),
+                    _ => Err(EvaluationError::UnsupportedDomainMemberCall {
+                        kernel: kernel_id,
+                        expr,
+                        handle: handle.clone(),
+                    }),
+                };
+            }
+            _ => {}
+        }
+
+        if parameters.len() == 1
+            && matches!(arguments.as_slice(), [_])
+            && is_named_domain_layout(self.program, result_layout)
+        {
+            return Ok(strip_signal(
+                arguments
+                    .into_iter()
+                    .next()
+                    .expect("single-argument domain member should keep its argument"),
+            ));
+        }
+
+        Err(EvaluationError::UnsupportedDomainMemberCall {
+            kernel: kernel_id,
+            expr,
+            handle: handle.clone(),
+        })
+    }
+
+    fn evaluate_domain_binary_member(
+        &self,
+        kernel_id: KernelId,
+        expr: KernelExprId,
+        handle: &DomainMemberHandle,
+        operator: BinaryOperator,
+        result_layout: LayoutId,
+        arguments: Vec<RuntimeValue>,
+    ) -> Result<RuntimeValue, EvaluationError> {
+        let [left, right] = arguments.as_slice() else {
+            return Err(EvaluationError::UnsupportedDomainMemberCall {
+                kernel: kernel_id,
+                expr,
+                handle: handle.clone(),
+            });
+        };
+        let preserved_suffix = shared_suffixed_integer_suffix(left, right).ok_or_else(|| {
+            EvaluationError::UnsupportedDomainMemberCall {
+                kernel: kernel_id,
+                expr,
+                handle: handle.clone(),
+            }
+        })?;
+        let left = coerce_domain_numeric_value(left.clone()).ok_or_else(|| {
+            EvaluationError::UnsupportedDomainMemberCall {
+                kernel: kernel_id,
+                expr,
+                handle: handle.clone(),
+            }
+        })?;
+        let right = coerce_domain_numeric_value(right.clone()).ok_or_else(|| {
+            EvaluationError::UnsupportedDomainMemberCall {
+                kernel: kernel_id,
+                expr,
+                handle: handle.clone(),
+            }
+        })?;
+        let value = self.apply_binary(kernel_id, expr, operator, left, right)?;
+        if !matches!(
+            operator,
+            BinaryOperator::Add
+                | BinaryOperator::Subtract
+                | BinaryOperator::Multiply
+                | BinaryOperator::Divide
+                | BinaryOperator::Modulo
+        ) || !is_named_domain_layout(self.program, result_layout)
+        {
+            return Ok(value);
+        }
+        match (value, preserved_suffix) {
+            (RuntimeValue::Int(raw), Some(suffix)) => Ok(RuntimeValue::SuffixedInteger {
+                raw: raw.to_string().into_boxed_str(),
+                suffix,
+            }),
+            (value, _) => Ok(value),
         }
     }
 
@@ -2619,40 +2807,70 @@ impl<'a> KernelEvaluator<'a> {
         let right = strip_signal(right);
         match operator {
             BinaryOperator::Add => match (&left, &right) {
-                (RuntimeValue::Int(left), RuntimeValue::Int(right)) => {
-                    Ok(RuntimeValue::Int(left + right))
-                }
-                _ => Err(EvaluationError::UnsupportedBinary {
-                    kernel: kernel_id,
+                (RuntimeValue::Int(left), RuntimeValue::Int(right)) => left
+                    .checked_add(*right)
+                    .map(RuntimeValue::Int)
+                    .ok_or_else(|| EvaluationError::InvalidBinaryArithmetic {
+                        kernel: kernel_id,
+                        expr,
+                        operator,
+                        left: RuntimeValue::Int(*left),
+                        right: RuntimeValue::Int(*right),
+                        reason: "signed addition overflow",
+                    }),
+                _ => apply_i64_like_binary(
+                    kernel_id,
                     expr,
                     operator,
-                    left,
-                    right,
-                }),
+                    &left,
+                    &right,
+                    |left, right| left.checked_add(right),
+                    "signed addition overflow",
+                ),
             },
             BinaryOperator::Subtract => match (&left, &right) {
-                (RuntimeValue::Int(left), RuntimeValue::Int(right)) => {
-                    Ok(RuntimeValue::Int(left - right))
-                }
-                _ => Err(EvaluationError::UnsupportedBinary {
-                    kernel: kernel_id,
+                (RuntimeValue::Int(left), RuntimeValue::Int(right)) => left
+                    .checked_sub(*right)
+                    .map(RuntimeValue::Int)
+                    .ok_or_else(|| EvaluationError::InvalidBinaryArithmetic {
+                        kernel: kernel_id,
+                        expr,
+                        operator,
+                        left: RuntimeValue::Int(*left),
+                        right: RuntimeValue::Int(*right),
+                        reason: "signed subtraction overflow",
+                    }),
+                _ => apply_i64_like_binary(
+                    kernel_id,
                     expr,
                     operator,
-                    left,
-                    right,
-                }),
+                    &left,
+                    &right,
+                    |left, right| left.checked_sub(right),
+                    "signed subtraction overflow",
+                ),
             },
             BinaryOperator::Multiply => match (&left, &right) {
-                (RuntimeValue::Int(left), RuntimeValue::Int(right)) => {
-                    Ok(RuntimeValue::Int(left * right))
-                }
-                _ => Err(EvaluationError::UnsupportedBinary {
-                    kernel: kernel_id,
+                (RuntimeValue::Int(left), RuntimeValue::Int(right)) => left
+                    .checked_mul(*right)
+                    .map(RuntimeValue::Int)
+                    .ok_or_else(|| EvaluationError::InvalidBinaryArithmetic {
+                        kernel: kernel_id,
+                        expr,
+                        operator,
+                        left: RuntimeValue::Int(*left),
+                        right: RuntimeValue::Int(*right),
+                        reason: "signed multiplication overflow",
+                    }),
+                _ => apply_i64_like_binary(
+                    kernel_id,
                     expr,
                     operator,
-                    left,
-                    right,
-                }),
+                    &left,
+                    &right,
+                    |left, right| left.checked_mul(right),
+                    "signed multiplication overflow",
+                ),
             },
             BinaryOperator::Divide => match (&left, &right) {
                 (RuntimeValue::Int(left_int), RuntimeValue::Int(right_int)) => left_int
@@ -2670,13 +2888,34 @@ impl<'a> KernelEvaluator<'a> {
                             "signed division overflow"
                         },
                     }),
-                _ => Err(EvaluationError::UnsupportedBinary {
-                    kernel: kernel_id,
-                    expr,
-                    operator,
-                    left,
-                    right,
-                }),
+                _ => {
+                    let Some((left_int, right_int, preserved_suffix)) =
+                        coerce_i64_like_operands(&left, &right)
+                    else {
+                        return Err(EvaluationError::UnsupportedBinary {
+                            kernel: kernel_id,
+                            expr,
+                            operator,
+                            left,
+                            right,
+                        });
+                    };
+                    left_int
+                        .checked_div(right_int)
+                        .map(|value| runtime_i64_like_value(value, preserved_suffix))
+                        .ok_or_else(|| EvaluationError::InvalidBinaryArithmetic {
+                            kernel: kernel_id,
+                            expr,
+                            operator,
+                            left: left.clone(),
+                            right: right.clone(),
+                            reason: if right_int == 0 {
+                                "division by zero"
+                            } else {
+                                "signed division overflow"
+                            },
+                        })
+                }
             },
             BinaryOperator::Modulo => match (&left, &right) {
                 (RuntimeValue::Int(left_int), RuntimeValue::Int(right_int)) => left_int
@@ -2694,37 +2933,60 @@ impl<'a> KernelEvaluator<'a> {
                             "signed remainder overflow"
                         },
                     }),
-                _ => Err(EvaluationError::UnsupportedBinary {
-                    kernel: kernel_id,
-                    expr,
-                    operator,
-                    left,
-                    right,
-                }),
+                _ => {
+                    let Some((left_int, right_int, preserved_suffix)) =
+                        coerce_i64_like_operands(&left, &right)
+                    else {
+                        return Err(EvaluationError::UnsupportedBinary {
+                            kernel: kernel_id,
+                            expr,
+                            operator,
+                            left,
+                            right,
+                        });
+                    };
+                    left_int
+                        .checked_rem(right_int)
+                        .map(|value| runtime_i64_like_value(value, preserved_suffix))
+                        .ok_or_else(|| EvaluationError::InvalidBinaryArithmetic {
+                            kernel: kernel_id,
+                            expr,
+                            operator,
+                            left: left.clone(),
+                            right: right.clone(),
+                            reason: if right_int == 0 {
+                                "modulo by zero"
+                            } else {
+                                "signed remainder overflow"
+                            },
+                        })
+                }
             },
             BinaryOperator::GreaterThan => match (&left, &right) {
                 (RuntimeValue::Int(left), RuntimeValue::Int(right)) => {
                     Ok(RuntimeValue::Bool(left > right))
                 }
-                _ => Err(EvaluationError::UnsupportedBinary {
-                    kernel: kernel_id,
+                _ => apply_i64_like_comparison(
+                    kernel_id,
                     expr,
                     operator,
-                    left,
-                    right,
-                }),
+                    &left,
+                    &right,
+                    |left, right| left > right,
+                ),
             },
             BinaryOperator::LessThan => match (&left, &right) {
                 (RuntimeValue::Int(left), RuntimeValue::Int(right)) => {
                     Ok(RuntimeValue::Bool(left < right))
                 }
-                _ => Err(EvaluationError::UnsupportedBinary {
-                    kernel: kernel_id,
+                _ => apply_i64_like_comparison(
+                    kernel_id,
                     expr,
                     operator,
-                    left,
-                    right,
-                }),
+                    &left,
+                    &right,
+                    |left, right| left < right,
+                ),
             },
             BinaryOperator::And => match (&left, &right) {
                 (RuntimeValue::Bool(left), RuntimeValue::Bool(right)) => {
@@ -2761,6 +3023,85 @@ impl<'a> KernelEvaluator<'a> {
                 ))
             }
         }
+    }
+}
+
+fn apply_i64_like_binary(
+    kernel: KernelId,
+    expr: KernelExprId,
+    operator: BinaryOperator,
+    left: &RuntimeValue,
+    right: &RuntimeValue,
+    operation: impl FnOnce(i64, i64) -> Option<i64>,
+    overflow_reason: &'static str,
+) -> Result<RuntimeValue, EvaluationError> {
+    let Some((left_int, right_int, preserved_suffix)) = coerce_i64_like_operands(left, right)
+    else {
+        return Err(EvaluationError::UnsupportedBinary {
+            kernel,
+            expr,
+            operator,
+            left: left.clone(),
+            right: right.clone(),
+        });
+    };
+    operation(left_int, right_int)
+        .map(|value| runtime_i64_like_value(value, preserved_suffix))
+        .ok_or_else(|| EvaluationError::InvalidBinaryArithmetic {
+            kernel,
+            expr,
+            operator,
+            left: left.clone(),
+            right: right.clone(),
+            reason: overflow_reason,
+        })
+}
+
+fn apply_i64_like_comparison(
+    kernel: KernelId,
+    expr: KernelExprId,
+    operator: BinaryOperator,
+    left: &RuntimeValue,
+    right: &RuntimeValue,
+    comparison: impl FnOnce(i64, i64) -> bool,
+) -> Result<RuntimeValue, EvaluationError> {
+    let Some((left_int, right_int, _)) = coerce_i64_like_operands(left, right) else {
+        return Err(EvaluationError::UnsupportedBinary {
+            kernel,
+            expr,
+            operator,
+            left: left.clone(),
+            right: right.clone(),
+        });
+    };
+    Ok(RuntimeValue::Bool(comparison(left_int, right_int)))
+}
+
+fn coerce_i64_like_operands(
+    left: &RuntimeValue,
+    right: &RuntimeValue,
+) -> Option<(i64, i64, Option<Box<str>>)> {
+    let preserved_suffix = shared_suffixed_integer_suffix(left, right)?;
+    let left = coerce_i64_like_value(left.clone())?;
+    let right = coerce_i64_like_value(right.clone())?;
+    Some((left, right, preserved_suffix))
+}
+
+fn coerce_i64_like_value(value: RuntimeValue) -> Option<i64> {
+    match strip_signal(value) {
+        RuntimeValue::Int(value) => Some(value),
+        RuntimeValue::SuffixedInteger { raw, .. } => raw.parse::<i64>().ok(),
+        _ => None,
+    }
+}
+
+fn runtime_i64_like_value(value: i64, preserved_suffix: Option<Box<str>>) -> RuntimeValue {
+    match preserved_suffix {
+        Some(suffix) => RuntimeValue::SuffixedInteger {
+            raw: value.to_string().into_boxed_str(),
+            suffix,
+        },
+        None => RuntimeValue::Int(value),
     }
 }
 
@@ -3163,6 +3504,82 @@ fn ordering_rank(variant_name: &str) -> u8 {
     }
 }
 
+fn callable_signature(program: &Program, layout: LayoutId) -> (Vec<LayoutId>, LayoutId) {
+    let mut parameters = Vec::new();
+    let mut result = layout;
+    loop {
+        let Some(layout) = program.layouts().get(result) else {
+            return (parameters, result);
+        };
+        let LayoutKind::Arrow {
+            parameter,
+            result: next_result,
+        } = &layout.kind
+        else {
+            return (parameters, result);
+        };
+        parameters.push(*parameter);
+        result = *next_result;
+    }
+}
+
+fn is_named_domain_layout(program: &Program, layout: LayoutId) -> bool {
+    matches!(
+        program.layouts().get(layout).map(|layout| &layout.kind),
+        Some(LayoutKind::Domain { .. })
+    )
+}
+
+fn domain_member_binary_operator(member_name: &str) -> Option<BinaryOperator> {
+    match member_name {
+        "+" => Some(BinaryOperator::Add),
+        "-" => Some(BinaryOperator::Subtract),
+        "*" => Some(BinaryOperator::Multiply),
+        "/" => Some(BinaryOperator::Divide),
+        "%" => Some(BinaryOperator::Modulo),
+        ">" => Some(BinaryOperator::GreaterThan),
+        "<" => Some(BinaryOperator::LessThan),
+        _ => None,
+    }
+}
+
+fn domain_member_carrier_value(value: RuntimeValue) -> RuntimeValue {
+    match strip_signal(value) {
+        RuntimeValue::SuffixedInteger { raw, suffix } => raw
+            .parse::<i64>()
+            .map(RuntimeValue::Int)
+            .unwrap_or(RuntimeValue::SuffixedInteger { raw, suffix }),
+        other => other,
+    }
+}
+
+fn coerce_domain_numeric_value(value: RuntimeValue) -> Option<RuntimeValue> {
+    match strip_signal(value) {
+        RuntimeValue::SuffixedInteger { raw, .. } => raw.parse::<i64>().ok().map(RuntimeValue::Int),
+        other => Some(other),
+    }
+}
+
+fn shared_suffixed_integer_suffix(
+    left: &RuntimeValue,
+    right: &RuntimeValue,
+) -> Option<Option<Box<str>>> {
+    match (left, right) {
+        (
+            RuntimeValue::SuffixedInteger {
+                suffix: left_suffix,
+                ..
+            },
+            RuntimeValue::SuffixedInteger {
+                suffix: right_suffix,
+                ..
+            },
+        ) if left_suffix == right_suffix => Some(Some(left_suffix.clone())),
+        (RuntimeValue::SuffixedInteger { .. }, RuntimeValue::SuffixedInteger { .. }) => None,
+        _ => Some(None),
+    }
+}
+
 fn value_matches_layout(program: &Program, value: &RuntimeValue, layout: LayoutId) -> bool {
     let Some(layout) = program.layouts().get(layout) else {
         return false;
@@ -3230,8 +3647,12 @@ fn value_matches_layout(program: &Program, value: &RuntimeValue, layout: LayoutI
             value_matches_layout(program, value, *element)
         }
         (LayoutKind::Arrow { .. }, RuntimeValue::Callable(_)) => true,
-        (LayoutKind::AnonymousDomain { .. }, RuntimeValue::SuffixedInteger { .. })
-        | (LayoutKind::Domain { .. }, RuntimeValue::SuffixedInteger { .. }) => true,
+        (LayoutKind::AnonymousDomain { .. }, RuntimeValue::SuffixedInteger { .. }) => true,
+        (LayoutKind::Domain { .. }, RuntimeValue::Signal(_)) => false,
+        // Named-domain layouts erase their carrier shape in backend IR. Runtime evaluation relies
+        // on earlier typed lowering to keep those carrier values sound and only preserves the
+        // outer signal/non-signal distinction here.
+        (LayoutKind::Domain { .. }, _) => true,
         (LayoutKind::Opaque { name, .. }, RuntimeValue::Sum(value)) => {
             name.as_ref() == value.type_name.as_ref()
         }
@@ -3284,6 +3705,11 @@ fn structural_eq(
         (RuntimeValue::Decimal(left), RuntimeValue::Decimal(right)) => left == right,
         (RuntimeValue::BigInt(left), RuntimeValue::BigInt(right)) => left == right,
         (RuntimeValue::Text(left), RuntimeValue::Text(right)) => left == right,
+        (RuntimeValue::Bytes(left), RuntimeValue::Bytes(right)) => left == right,
+        (RuntimeValue::Int(left), RuntimeValue::SuffixedInteger { raw, .. })
+        | (RuntimeValue::SuffixedInteger { raw, .. }, RuntimeValue::Int(left)) => {
+            raw.parse::<i64>().ok() == Some(*left)
+        }
         (
             RuntimeValue::SuffixedInteger {
                 raw: left_raw,
@@ -3295,28 +3721,36 @@ fn structural_eq(
             },
         ) => left_raw == right_raw && left_suffix == right_suffix,
         (RuntimeValue::Tuple(left), RuntimeValue::Tuple(right))
-        | (RuntimeValue::List(left), RuntimeValue::List(right))
-        | (RuntimeValue::Set(left), RuntimeValue::Set(right)) => {
+        | (RuntimeValue::List(left), RuntimeValue::List(right)) => {
             if left.len() != right.len() {
                 false
             } else {
-                let mut equal = true;
                 for (left, right) in left.iter().zip(right.iter()) {
-                    equal &= structural_eq(kernel, expr, left, right)?;
+                    if !structural_eq(kernel, expr, left, right)? {
+                        return Ok(false);
+                    }
                 }
-                equal
+                true
             }
+        }
+        (RuntimeValue::Set(left), RuntimeValue::Set(right)) => {
+            unordered_runtime_values_eq(kernel, expr, left, right)?
+        }
+        (RuntimeValue::Map(left), RuntimeValue::Map(right)) => {
+            unordered_runtime_map_eq(kernel, expr, left, right)?
         }
         (RuntimeValue::Record(left), RuntimeValue::Record(right)) => {
             if left.len() != right.len() {
                 false
             } else {
-                let mut equal = true;
                 for (left, right) in left.iter().zip(right.iter()) {
-                    equal &= left.label == right.label;
-                    equal &= structural_eq(kernel, expr, &left.value, &right.value)?;
+                    if left.label != right.label
+                        || !structural_eq(kernel, expr, &left.value, &right.value)?
+                    {
+                        return Ok(false);
+                    }
                 }
-                equal
+                true
             }
         }
         (RuntimeValue::Sum(left), RuntimeValue::Sum(right)) => {
@@ -3326,11 +3760,12 @@ fn structural_eq(
             {
                 false
             } else {
-                let mut equal = true;
                 for (left, right) in left.fields.iter().zip(right.fields.iter()) {
-                    equal &= structural_eq(kernel, expr, left, right)?;
+                    if !structural_eq(kernel, expr, left, right)? {
+                        return Ok(false);
+                    }
                 }
-                equal
+                true
             }
         }
         (RuntimeValue::OptionNone, RuntimeValue::OptionNone) => true,
@@ -3342,7 +3777,10 @@ fn structural_eq(
         | (RuntimeValue::Signal(left), RuntimeValue::Signal(right)) => {
             structural_eq(kernel, expr, left, right)?
         }
-        _ => {
+        (RuntimeValue::Callable(_), _)
+        | (_, RuntimeValue::Callable(_))
+        | (RuntimeValue::Task(_), _)
+        | (_, RuntimeValue::Task(_)) => {
             return Err(EvaluationError::UnsupportedStructuralEquality {
                 kernel,
                 expr,
@@ -3350,8 +3788,102 @@ fn structural_eq(
                 right: right.clone(),
             });
         }
+        _ => false,
     };
     Ok(equal)
+}
+
+fn unordered_runtime_values_eq(
+    kernel: KernelId,
+    expr: KernelExprId,
+    left: &[RuntimeValue],
+    right: &[RuntimeValue],
+) -> Result<bool, EvaluationError> {
+    if left.len() != right.len() {
+        return Ok(false);
+    }
+    let mut matched = vec![false; right.len()];
+    'left_values: for left_value in left {
+        for (index, right_value) in right.iter().enumerate() {
+            if matched[index] {
+                continue;
+            }
+            if !runtime_values_may_match(left_value, right_value) {
+                continue;
+            }
+            if structural_eq(kernel, expr, left_value, right_value)? {
+                matched[index] = true;
+                continue 'left_values;
+            }
+        }
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+fn unordered_runtime_map_eq(
+    kernel: KernelId,
+    expr: KernelExprId,
+    left: &[RuntimeMapEntry],
+    right: &[RuntimeMapEntry],
+) -> Result<bool, EvaluationError> {
+    if left.len() != right.len() {
+        return Ok(false);
+    }
+    let mut matched = vec![false; right.len()];
+    'left_entries: for left_entry in left {
+        for (index, right_entry) in right.iter().enumerate() {
+            if matched[index] {
+                continue;
+            }
+            if !runtime_values_may_match(&left_entry.key, &right_entry.key)
+                || !runtime_values_may_match(&left_entry.value, &right_entry.value)
+            {
+                continue;
+            }
+            if structural_eq(kernel, expr, &left_entry.key, &right_entry.key)?
+                && structural_eq(kernel, expr, &left_entry.value, &right_entry.value)?
+            {
+                matched[index] = true;
+                continue 'left_entries;
+            }
+        }
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+fn runtime_values_may_match(left: &RuntimeValue, right: &RuntimeValue) -> bool {
+    match (left, right) {
+        (RuntimeValue::Signal(left), right) => runtime_values_may_match(left, right),
+        (left, RuntimeValue::Signal(right)) => runtime_values_may_match(left, right),
+        (RuntimeValue::Unit, RuntimeValue::Unit)
+        | (RuntimeValue::Bool(_), RuntimeValue::Bool(_))
+        | (RuntimeValue::Int(_), RuntimeValue::Int(_))
+        | (RuntimeValue::Float(_), RuntimeValue::Float(_))
+        | (RuntimeValue::Decimal(_), RuntimeValue::Decimal(_))
+        | (RuntimeValue::BigInt(_), RuntimeValue::BigInt(_))
+        | (RuntimeValue::Text(_), RuntimeValue::Text(_))
+        | (RuntimeValue::Bytes(_), RuntimeValue::Bytes(_))
+        | (RuntimeValue::Tuple(_), RuntimeValue::Tuple(_))
+        | (RuntimeValue::List(_), RuntimeValue::List(_))
+        | (RuntimeValue::Set(_), RuntimeValue::Set(_))
+        | (RuntimeValue::Map(_), RuntimeValue::Map(_))
+        | (RuntimeValue::Record(_), RuntimeValue::Record(_))
+        | (RuntimeValue::Sum(_), RuntimeValue::Sum(_))
+        | (RuntimeValue::OptionNone, RuntimeValue::OptionNone)
+        | (RuntimeValue::OptionSome(_), RuntimeValue::OptionSome(_))
+        | (RuntimeValue::ResultOk(_), RuntimeValue::ResultOk(_))
+        | (RuntimeValue::ResultErr(_), RuntimeValue::ResultErr(_))
+        | (RuntimeValue::ValidationValid(_), RuntimeValue::ValidationValid(_))
+        | (RuntimeValue::ValidationInvalid(_), RuntimeValue::ValidationInvalid(_))
+        | (RuntimeValue::Task(_), RuntimeValue::Task(_))
+        | (RuntimeValue::Callable(_), RuntimeValue::Callable(_))
+        | (RuntimeValue::SuffixedInteger { .. }, RuntimeValue::SuffixedInteger { .. }) => true,
+        (RuntimeValue::Int(_), RuntimeValue::SuffixedInteger { .. })
+        | (RuntimeValue::SuffixedInteger { .. }, RuntimeValue::Int(_)) => true,
+        _ => false,
+    }
 }
 
 fn project_field(
@@ -3531,8 +4063,9 @@ mod tests {
 
     use super::{
         DetachedRuntimeValue, RuntimeMapEntry, RuntimeRecordField, RuntimeSumValue, RuntimeValue,
-        append_validation_errors,
+        append_validation_errors, structural_eq,
     };
+    use crate::{KernelExprId, KernelId};
 
     #[test]
     fn display_formats_nested_runtime_values_without_intermediate_joining() {
@@ -3606,6 +4139,54 @@ mod tests {
     }
 
     #[test]
+    fn structural_equality_handles_bytes_maps_and_sets() {
+        let kernel = KernelId::from_raw(0);
+        let expr = KernelExprId::from_raw(0);
+
+        assert!(
+            structural_eq(
+                kernel,
+                expr,
+                &RuntimeValue::Bytes([1, 2, 3].into()),
+                &RuntimeValue::Bytes([1, 2, 3].into()),
+            )
+            .expect("bytes should compare structurally")
+        );
+
+        let left_map = RuntimeValue::Map(vec![
+            RuntimeMapEntry {
+                key: RuntimeValue::Text("left".into()),
+                value: RuntimeValue::Int(1),
+            },
+            RuntimeMapEntry {
+                key: RuntimeValue::Text("right".into()),
+                value: RuntimeValue::List(vec![RuntimeValue::Int(2), RuntimeValue::Int(3)]),
+            },
+        ]);
+        let right_map = RuntimeValue::Map(vec![
+            RuntimeMapEntry {
+                key: RuntimeValue::Text("right".into()),
+                value: RuntimeValue::List(vec![RuntimeValue::Int(2), RuntimeValue::Int(3)]),
+            },
+            RuntimeMapEntry {
+                key: RuntimeValue::Text("left".into()),
+                value: RuntimeValue::Int(1),
+            },
+        ]);
+        assert!(
+            structural_eq(kernel, expr, &left_map, &right_map)
+                .expect("maps should compare structurally regardless of insertion order")
+        );
+
+        let left_set = RuntimeValue::Set(vec![RuntimeValue::Int(1), RuntimeValue::Int(2)]);
+        let right_set = RuntimeValue::Set(vec![RuntimeValue::Int(2), RuntimeValue::Int(1)]);
+        assert!(
+            structural_eq(kernel, expr, &left_set, &right_set)
+                .expect("sets should compare structurally regardless of insertion order")
+        );
+    }
+
+    #[test]
     fn validation_error_accumulation_appends_non_empty_payloads() {
         let left = RuntimeValue::Sum(RuntimeSumValue {
             item: HirItemId::from_raw(11),
@@ -3669,6 +4250,68 @@ mod tests {
             original_text.as_ptr(),
             detached_text.as_ptr(),
             "detaching must copy boundary text storage instead of preserving addresses"
+        );
+    }
+
+    #[test]
+    fn structural_equality_matches_bytes_maps_and_sets() {
+        let kernel = KernelId::from_raw(0);
+        let expr = KernelExprId::from_raw(0);
+
+        assert!(
+            structural_eq(
+                kernel,
+                expr,
+                &RuntimeValue::Bytes(Box::from(*b"abc")),
+                &RuntimeValue::Bytes(Box::from(*b"abc")),
+            )
+            .expect("bytes equality should be supported")
+        );
+
+        let left_map = RuntimeValue::Map(vec![
+            RuntimeMapEntry {
+                key: RuntimeValue::Text("first".into()),
+                value: RuntimeValue::Int(1),
+            },
+            RuntimeMapEntry {
+                key: RuntimeValue::Text("second".into()),
+                value: RuntimeValue::List(vec![
+                    RuntimeValue::Bool(true),
+                    RuntimeValue::Bool(false),
+                ]),
+            },
+        ]);
+        let right_map = RuntimeValue::Map(vec![
+            RuntimeMapEntry {
+                key: RuntimeValue::Text("second".into()),
+                value: RuntimeValue::List(vec![
+                    RuntimeValue::Bool(true),
+                    RuntimeValue::Bool(false),
+                ]),
+            },
+            RuntimeMapEntry {
+                key: RuntimeValue::Text("first".into()),
+                value: RuntimeValue::Int(1),
+            },
+        ]);
+        assert!(
+            structural_eq(kernel, expr, &left_map, &right_map)
+                .expect("map equality should be order-independent")
+        );
+
+        let left_set = RuntimeValue::Set(vec![
+            RuntimeValue::Int(1),
+            RuntimeValue::Text("two".into()),
+            RuntimeValue::Bool(true),
+        ]);
+        let right_set = RuntimeValue::Set(vec![
+            RuntimeValue::Bool(true),
+            RuntimeValue::Int(1),
+            RuntimeValue::Text("two".into()),
+        ]);
+        assert!(
+            structural_eq(kernel, expr, &left_set, &right_set)
+                .expect("set equality should be order-independent")
         );
     }
 }

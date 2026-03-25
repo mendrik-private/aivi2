@@ -219,11 +219,22 @@ impl fmt::Display for Program {
                                 fanout.mapped_element_layout,
                                 fanout.mapped_collection_layout
                             )?;
+                            writeln!(f, "      map = kernel{}", fanout.map)?;
+                            for filter in &fanout.filters {
+                                writeln!(
+                                    f,
+                                    "      filter[{}] = kernel{}",
+                                    filter.stage_index, filter.predicate
+                                )?;
+                            }
                             if let Some(join) = &fanout.join {
                                 writeln!(
                                     f,
-                                    "      join[{}] layout{} => layout{}",
-                                    join.stage_index, join.collection_layout, join.result_layout
+                                    "      join[{}] kernel{} layout{} => layout{}",
+                                    join.stage_index,
+                                    join.kernel,
+                                    join.collection_layout,
+                                    join.kernel_result_layout
                                 )?;
                             }
                         }
@@ -475,7 +486,17 @@ pub struct FanoutStage {
     pub element_layout: LayoutId,
     pub mapped_element_layout: LayoutId,
     pub mapped_collection_layout: LayoutId,
+    pub map: KernelId,
+    pub filters: Vec<FanoutFilter>,
     pub join: Option<FanoutJoin>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FanoutFilter {
+    pub stage_index: usize,
+    pub stage_span: SourceSpan,
+    pub input_layout: LayoutId,
+    pub predicate: KernelId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -484,6 +505,8 @@ pub struct FanoutJoin {
     pub stage_span: SourceSpan,
     pub input_layout: LayoutId,
     pub collection_layout: LayoutId,
+    pub kernel: KernelId,
+    pub kernel_result_layout: LayoutId,
     pub result_layout: LayoutId,
 }
 

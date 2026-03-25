@@ -363,29 +363,19 @@ pub(crate) fn elaborate_runtime_expr(
         .map_err(|blockers| BlockedGeneralExpr { blockers })
 }
 
-fn signal_pipe_body_candidate(pipe: &PipeExpr) -> bool {
-    pipe.stages.iter().all(|stage| {
-        matches!(
-            stage.kind,
-            PipeStageKind::Transform { .. }
-                | PipeStageKind::Tap { .. }
-                | PipeStageKind::Gate { .. }
-                | PipeStageKind::Case { .. }
-                | PipeStageKind::Truthy { .. }
-                | PipeStageKind::Falsy { .. }
-        )
+fn signal_pipe_boundary_index(pipe: &GateRuntimePipeExpr) -> Option<usize> {
+    pipe.stages.iter().position(|stage| {
+        matches!(stage.kind, GateRuntimePipeStageKind::Gate { .. })
+            && stage.input_subject.is_signal()
     })
 }
 
-/// For a signal pipe that ends with a Gate on a Signal type (a signal filter), the Gate
-/// stage itself is scheduler-owned, but any preceding Transform stages can be compiled
-/// as the item body kernel.  This function extracts those pre-gate stages and returns
-/// them as a partial `GeneralExprItemElaboration` so the body kernel computes the value
-/// that the gate predicate receives as its ambient input subject.
+/// Extract the pure prefix for a signal pipe whose remaining stages are scheduler-owned.
 ///
-/// Returns `None` when the gate is the first stage (no transforms to extract) or when
-/// the expression is not a qualifying pipe.
-fn pre_gate_transform_body(
+/// When the runtime cannot execute the whole pipe inline, the linked-runtime body kernel still
+/// needs to produce the subject value that the first scheduler-owned stage consumes. That prefix
+/// may be the original head expression itself (when the boundary is the first stage).
+fn extract_signal_pipe_prefix_body(
     owner: ItemId,
     body_expr: ExprId,
     expr: GateRuntimeExpr,
@@ -393,27 +383,26 @@ fn pre_gate_transform_body(
     let GateRuntimeExprKind::Pipe(pipe) = expr.kind else {
         return None;
     };
-    let gate_idx = pipe.stages.iter().position(|stage| {
-        matches!(stage.kind, GateRuntimePipeStageKind::Gate { .. })
-            && stage.input_subject.is_signal()
-    })?;
-    if gate_idx == 0 {
-        return None;
-    }
-    let pre_gate_stages: Vec<GateRuntimePipeStage> = pipe.stages[..gate_idx].to_vec();
-    let body_ty = pre_gate_stages.last()?.result_subject.clone();
-    Some(GeneralExprItemElaboration {
-        owner,
-        body_expr,
-        parameters: Vec::new(),
-        outcome: GeneralExprOutcome::Lowered(GateRuntimeExpr {
+    let boundary = signal_pipe_boundary_index(&pipe)?;
+    let lowered_body = if boundary == 0 {
+        *pipe.head
+    } else {
+        let prefix_stages: Vec<GateRuntimePipeStage> = pipe.stages[..boundary].to_vec();
+        let body_ty = prefix_stages.last()?.result_subject.clone();
+        GateRuntimeExpr {
             span: expr.span,
             ty: body_ty,
             kind: GateRuntimeExprKind::Pipe(GateRuntimePipeExpr {
                 head: pipe.head,
-                stages: pre_gate_stages,
+                stages: prefix_stages,
             }),
-        }),
+        }
+    };
+    Some(GeneralExprItemElaboration {
+        owner,
+        body_expr,
+        parameters: Vec::new(),
+        outcome: GeneralExprOutcome::Lowered(lowered_body),
     })
 }
 
@@ -729,14 +718,9 @@ impl<'a> GeneralExprElaborator<'a> {
         signal: &SignalItem,
     ) -> Option<GeneralExprItemElaboration> {
         let body = signal.body?;
-        let pipe_candidate = match &self.module.exprs()[body].kind {
-            ExprKind::Pipe(pipe) => {
-                if !signal_pipe_body_candidate(pipe) {
-                    return None;
-                }
-                true
-            }
-            _ => false,
+        let pipe = match &self.module.exprs()[body].kind {
+            ExprKind::Pipe(pipe) => Some(pipe),
+            _ => None,
         };
         let expected = signal
             .annotation
@@ -757,7 +741,7 @@ impl<'a> GeneralExprElaborator<'a> {
         };
         match lowered {
             Ok(lowered_body)
-                if !pipe_candidate || signal_pipe_body_runtime_supported(&lowered_body) =>
+                if pipe.is_none() || signal_pipe_body_runtime_supported(&lowered_body) =>
             {
                 Some(GeneralExprItemElaboration {
                     owner,
@@ -766,13 +750,17 @@ impl<'a> GeneralExprElaborator<'a> {
                     outcome: GeneralExprOutcome::Lowered(lowered_body),
                 })
             }
-            Ok(lowered_body) => pre_gate_transform_body(owner, body, lowered_body),
-            Err(blockers) if pipe_candidate => Some(GeneralExprItemElaboration {
-                owner,
-                body_expr: body,
-                parameters: Vec::new(),
-                outcome: GeneralExprOutcome::Blocked(BlockedGeneralExpr { blockers }),
-            }),
+            Ok(lowered_body) => extract_signal_pipe_prefix_body(owner, body, lowered_body),
+            Err(blockers) if pipe.is_some() => self
+                .lower_signal_pipe_prefix(owner, body, pipe.expect("checked pipe presence"))
+                .or_else(|| {
+                    Some(GeneralExprItemElaboration {
+                        owner,
+                        body_expr: body,
+                        parameters: Vec::new(),
+                        outcome: GeneralExprOutcome::Blocked(BlockedGeneralExpr { blockers }),
+                    })
+                }),
             Err(blockers) => Some(GeneralExprItemElaboration {
                 owner,
                 body_expr: body,
@@ -780,6 +768,43 @@ impl<'a> GeneralExprElaborator<'a> {
                 outcome: GeneralExprOutcome::Blocked(BlockedGeneralExpr { blockers }),
             }),
         }
+    }
+
+    fn lower_signal_pipe_prefix(
+        &mut self,
+        owner: ItemId,
+        body_expr: ExprId,
+        pipe: &PipeExpr,
+    ) -> Option<GeneralExprItemElaboration> {
+        let prefix = self
+            .lower_pipe_expr(
+                pipe,
+                &GateExprEnv::default(),
+                None,
+                None,
+                PipeLoweringMode::PrefixBeforeSchedulerBoundary,
+            )
+            .ok()?;
+        let lowered_body = if prefix.stages.is_empty() {
+            *prefix.head
+        } else {
+            GateRuntimeExpr {
+                span: self.module.exprs()[body_expr].span,
+                ty: prefix
+                    .stages
+                    .last()
+                    .expect("prefix stages should exist")
+                    .result_subject
+                    .clone(),
+                kind: GateRuntimeExprKind::Pipe(prefix),
+            }
+        };
+        Some(GeneralExprItemElaboration {
+            owner,
+            body_expr,
+            parameters: Vec::new(),
+            outcome: GeneralExprOutcome::Lowered(lowered_body),
+        })
     }
 
     fn elaborate_instance_members(
@@ -1167,9 +1192,13 @@ impl<'a> GeneralExprElaborator<'a> {
                     )?),
                 }
             }
-            ExprKind::Pipe(pipe) => {
-                GateRuntimeExprKind::Pipe(self.lower_pipe_expr(&pipe, env, ambient, Some(&ty))?)
-            }
+            ExprKind::Pipe(pipe) => GateRuntimeExprKind::Pipe(self.lower_pipe_expr(
+                &pipe,
+                env,
+                ambient,
+                Some(&ty),
+                PipeLoweringMode::Full,
+            )?),
             ExprKind::Regex(_) | ExprKind::Cluster(_) | ExprKind::Markup(_) => {
                 unreachable!("unsupported runtime forms should be returned before type inference")
             }
@@ -1256,6 +1285,7 @@ impl<'a> GeneralExprElaborator<'a> {
         env: &GateExprEnv,
         ambient: Option<&GateType>,
         final_expected: Option<&GateType>,
+        mode: PipeLoweringMode,
     ) -> Result<GateRuntimePipeExpr, Vec<GeneralExprBlocker>> {
         let head = self.lower_expr(pipe.head, env, ambient, None)?;
         let mut current = head.ty.clone();
@@ -1316,6 +1346,11 @@ impl<'a> GeneralExprElaborator<'a> {
                             vec![GeneralExprBlocker::UnknownExprType { span: stage.span }]
                         })?;
                     let plan = GatePlanner::plan(self.typing.gate_carrier(&current));
+                    if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary)
+                        && current.is_signal()
+                    {
+                        break;
+                    }
                     lowered.push(GateRuntimePipeStage {
                         span: stage.span,
                         input_subject: current.clone(),
@@ -1370,6 +1405,9 @@ impl<'a> GeneralExprElaborator<'a> {
                     stage_index = pair.next_index;
                 }
                 PipeStageKind::Map { .. } => {
+                    if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary) {
+                        break;
+                    }
                     return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
                         span: stage.span,
                         kind: GateRuntimeUnsupportedKind::PipeStage(
@@ -1386,6 +1424,9 @@ impl<'a> GeneralExprElaborator<'a> {
                     }]);
                 }
                 PipeStageKind::FanIn { .. } => {
+                    if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary) {
+                        break;
+                    }
                     return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
                         span: stage.span,
                         kind: GateRuntimeUnsupportedKind::PipeStage(
@@ -1394,6 +1435,9 @@ impl<'a> GeneralExprElaborator<'a> {
                     }]);
                 }
                 PipeStageKind::RecurStart { .. } => {
+                    if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary) {
+                        break;
+                    }
                     return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
                         span: stage.span,
                         kind: GateRuntimeUnsupportedKind::PipeStage(
@@ -1402,6 +1446,9 @@ impl<'a> GeneralExprElaborator<'a> {
                     }]);
                 }
                 PipeStageKind::RecurStep { .. } => {
+                    if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary) {
+                        break;
+                    }
                     return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
                         span: stage.span,
                         kind: GateRuntimeUnsupportedKind::PipeStage(
@@ -2132,6 +2179,12 @@ impl<'a> GeneralExprElaborator<'a> {
         });
         Ok(())
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PipeLoweringMode {
+    Full,
+    PrefixBeforeSchedulerBoundary,
 }
 
 fn gate_env_from_parameters(parameters: &[GeneralExprParameter]) -> GateExprEnv {

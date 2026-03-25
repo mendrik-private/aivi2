@@ -5,7 +5,8 @@ use aivi_core::{self as core, ArenaOverflow};
 use aivi_hir::BindingId;
 
 use crate::{
-    Capture, Closure, ClosureId, ClosureKind, GateStage, Item,
+    Capture, Closure, ClosureId, ClosureKind, FanoutFilter, FanoutJoin, FanoutStage, GateStage,
+    Item,
     LoweringError::*,
     Module, NonSourceWakeup, Pipe, PipeRecurrence, RecurrenceStage, Stage, StageKind,
     analysis::{AnalysisError, capture_free_bindings},
@@ -272,7 +273,14 @@ impl<'a> ModuleLowerer<'a> {
                     })
                 }
                 core::StageKind::TruthyFalsy(pair) => StageKind::TruthyFalsy(pair.clone()),
-                core::StageKind::Fanout(fanout) => StageKind::Fanout(fanout.clone()),
+                core::StageKind::Fanout(fanout) => {
+                    let Some(fanout) =
+                        self.lower_fanout_stage(owner, stage.span, fanout, &runtime_names)
+                    else {
+                        continue;
+                    };
+                    StageKind::Fanout(fanout)
+                }
             };
 
             let lowered_id = match self.module.stages_mut().alloc(Stage {
@@ -389,6 +397,75 @@ impl<'a> ModuleLowerer<'a> {
             input_subject: stage.input_subject.clone(),
             result_subject: stage.result_subject.clone(),
             runtime,
+        })
+    }
+
+    fn lower_fanout_stage(
+        &mut self,
+        owner: core::ItemId,
+        span: SourceSpan,
+        fanout: &core::FanoutStage,
+        known_names: &BTreeMap<BindingId, Box<str>>,
+    ) -> Option<FanoutStage> {
+        let map = self.lower_closure(
+            owner,
+            span,
+            ClosureKind::FanoutMap,
+            Some(fanout.element_subject.clone()),
+            Vec::new(),
+            fanout.runtime_map,
+            true,
+            known_names,
+        )?;
+        let mut filters = Vec::with_capacity(fanout.filters.len());
+        for filter in &fanout.filters {
+            filters.push(FanoutFilter {
+                stage_index: filter.stage_index,
+                stage_span: filter.stage_span,
+                predicate_expr: filter.predicate_expr,
+                input_subject: filter.input_subject.clone(),
+                runtime: self.lower_closure(
+                    owner,
+                    filter.stage_span,
+                    ClosureKind::FanoutFilterPredicate,
+                    Some(filter.input_subject.clone()),
+                    Vec::new(),
+                    filter.runtime_predicate,
+                    true,
+                    known_names,
+                )?,
+            });
+        }
+        let join = if let Some(join) = &fanout.join {
+            Some(FanoutJoin {
+                stage_index: join.stage_index,
+                stage_span: join.stage_span,
+                origin_expr: join.origin_expr,
+                input_subject: join.input_subject.clone(),
+                collection_subject: join.collection_subject.clone(),
+                runtime: self.lower_closure(
+                    owner,
+                    join.stage_span,
+                    ClosureKind::FanoutJoin,
+                    Some(join.collection_subject.clone()),
+                    Vec::new(),
+                    join.runtime_expr,
+                    true,
+                    known_names,
+                )?,
+                result_type: join.result_type.clone(),
+            })
+        } else {
+            None
+        };
+        Some(FanoutStage {
+            carrier: fanout.carrier,
+            element_subject: fanout.element_subject.clone(),
+            mapped_element_type: fanout.mapped_element_type.clone(),
+            mapped_collection_type: fanout.mapped_collection_type.clone(),
+            map,
+            filters,
+            join,
         })
     }
 

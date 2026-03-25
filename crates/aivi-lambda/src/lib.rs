@@ -22,14 +22,14 @@ mod validate;
 pub use aivi_core::{Arena, ArenaId, ArenaOverflow};
 pub use aivi_core::{
     DecodeProgram, DecodeProgramId, DecodeStep, DecodeStepId, DomainDecodeSurface,
-    DomainDecodeSurfaceKind, Expr, ExprId, FanoutStage, ItemId, ItemKind, ItemParameter, PipeId,
-    PipeOrigin, SignalInfo, SourceId, SourceNode, StageId, TruthyFalsyStage, Type,
+    DomainDecodeSurfaceKind, Expr, ExprId, ItemId, ItemKind, ItemParameter, PipeId, PipeOrigin,
+    SignalInfo, SourceId, SourceNode, StageId, TruthyFalsyStage, Type,
 };
 pub use aivi_typing::{NonSourceWakeupCause, RecurrencePlan, RecurrenceWakeupPlan};
 pub use ids::{CaptureId, ClosureId};
 pub use lower::{LoweringError, LoweringErrors, lower_module};
 pub use module::{
-    Capture, Closure, ClosureKind, GateStage, Item, Module, NonSourceWakeup, Pipe, PipeRecurrence,
-    RecurrenceStage, Stage, StageKind,
+    Capture, Closure, ClosureKind, FanoutFilter, FanoutJoin, FanoutStage, GateStage, Item, Module,
+    NonSourceWakeup, Pipe, PipeRecurrence, RecurrenceStage, Stage, StageKind,
 };
 pub use validate::{ClosureMetadataMismatch, ValidationError, ValidationErrors, validate_module};
