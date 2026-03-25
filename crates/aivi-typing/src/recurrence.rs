@@ -372,7 +372,7 @@ impl RecurrenceWakeupPlanner {
         ))
     }
 
-    pub const fn plan_source(
+    pub fn plan_source(
         context: SourceRecurrenceWakeupContext,
     ) -> Result<RecurrenceWakeupPlan, RecurrenceWakeupError> {
         if let Some(cause) = provider_intrinsic_wakeup_cause(context.provider()) {
@@ -449,7 +449,7 @@ pub const fn builtin_source_option_wakeup_cause(
     }
 }
 
-const fn provider_intrinsic_wakeup_cause(
+fn provider_intrinsic_wakeup_cause(
     provider: BuiltinSourceProvider,
 ) -> Option<BuiltinSourceWakeupCause> {
     match provider.contract().intrinsic_wakeup() {

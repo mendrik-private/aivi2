@@ -1805,6 +1805,13 @@ impl<'a> TypeChecker<'a> {
         let mut report = ConstraintSolveReport::default();
         for constraint in constraints {
             match constraint.class() {
+                // TODO: `ConstraintClass::Eq` constraints are collected at use sites and
+                // dispatched here, but there is no dedicated constraint solver pass. Each
+                // constraint is resolved ad-hoc via `require_eq` rather than being deferred
+                // into a unified solver. As a result, Eq constraints that arise in positions
+                // not covered by `solve_constraints` would be silently ignored rather than
+                // producing type errors. A proper constraint solver pass should be introduced
+                // to handle all collected constraints uniformly.
                 ConstraintClass::Eq => {
                     if let Err(reason) = self.require_eq(constraint.subject(), &mut Vec::new()) {
                         self.diagnostics.push(
@@ -2593,6 +2600,13 @@ fn projection_path_text(path: &NamePath) -> String {
     )
 }
 
+// KNOWN ISSUE: This function mutates the module (by synthesizing and injecting new record
+// fields) during the type-checking phase. Because it alters the structure of the module
+// that was passed into the type checker, running type checking a second time on the
+// elaborated module will observe different record expressions than the first run, making
+// type checking non-idempotent. The elaboration of default record fields should be moved
+// to a separate, explicit elaboration pass that runs after type checking completes, so
+// that the type checker itself remains a pure read-only query over the module.
 fn apply_default_record_elisions(module: &Module, elisions: &[DefaultRecordElision]) -> Module {
     if elisions.is_empty() {
         return module.clone();

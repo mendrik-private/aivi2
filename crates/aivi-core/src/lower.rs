@@ -164,6 +164,12 @@ pub enum LoweringError {
         reason: &'static str,
     },
     Validation(ValidationError),
+    /// An internal structural invariant was violated during lowering. This indicates a bug in the
+    /// compiler, not in user input, but is reported as an error rather than a panic so that the
+    /// compiler can continue and surface any additional diagnostics.
+    InternalInvariantViolated {
+        message: &'static str,
+    },
 }
 
 impl std::fmt::Display for LoweringError {
@@ -283,10 +289,25 @@ impl std::fmt::Display for LoweringError {
                 "typed-core lowering cannot synthesize imported binding `{name}` ({import}): {reason}"
             ),
             Self::Validation(error) => write!(f, "typed-core validation failed: {error}"),
+            Self::InternalInvariantViolated { message } => {
+                write!(f, "typed-core lowering internal invariant violated: {message}")
+            }
         }
     }
 }
 
+/// Lower a fully elaborated HIR module into a typed-core module.
+///
+/// # Note: no pre-lowering completeness check
+///
+/// There is currently no validation that the elaboration report carried by `hir` is complete
+/// before lowering begins. If the elaboration phase produced partial results (e.g. because some
+/// HIR items are still blocked on type information), core lowering may silently produce incorrect
+/// or incomplete output for those items rather than surfacing a clear error.
+///
+/// TODO: add a completeness check here that verifies the elaboration report has resolved all
+/// items to either a concrete plan or an explicit blocked/error state before proceeding with
+/// lowering.
 pub fn lower_module(hir: &aivi_hir::Module) -> Result<Module, LoweringErrors> {
     ModuleLowerer::new(hir).build()
 }
@@ -1064,17 +1085,26 @@ impl<'a> ModuleLowerer<'a> {
                     })?;
                 stage_ids.push(stage_id);
             }
-            self.module
-                .pipes_mut()
-                .get_mut(pipe_id)
-                .expect("pipe just allocated")
-                .stages = stage_ids;
-            self.module
-                .items_mut()
-                .get_mut(builder.owner)
-                .expect("pipe owner should exist")
-                .pipes
-                .push(pipe_id);
+            match self.module.pipes_mut().get_mut(pipe_id) {
+                Some(pipe) => pipe.stages = stage_ids,
+                None => {
+                    self.errors
+                        .push(LoweringError::InternalInvariantViolated {
+                            message: "pipe arena did not retain the ID returned by alloc",
+                        });
+                    continue;
+                }
+            }
+            match self.module.items_mut().get_mut(builder.owner) {
+                Some(item) => item.pipes.push(pipe_id),
+                None => {
+                    self.errors
+                        .push(LoweringError::InternalInvariantViolated {
+                            message: "pipe owner item was not found in the item arena after seeding",
+                        });
+                    continue;
+                }
+            }
         }
         Ok(())
     }
@@ -1249,11 +1279,16 @@ impl<'a> ModuleLowerer<'a> {
                         LoweringErrors::new(vec![arena_overflow("decode-programs", overflow)])
                     })?;
             self.decode_by_owner.insert(owner, decode_id);
-            self.module
-                .sources_mut()
-                .get_mut(source_id)
-                .expect("source should exist when attaching decode")
-                .decode = Some(decode_id);
+            match self.module.sources_mut().get_mut(source_id) {
+                Some(source) => source.decode = Some(decode_id),
+                None => {
+                    self.errors
+                        .push(LoweringError::InternalInvariantViolated {
+                            message: "source arena did not retain the ID retrieved from source_by_owner",
+                        });
+                    continue;
+                }
+            }
         }
         Ok(())
     }

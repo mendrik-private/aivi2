@@ -16,6 +16,9 @@ pub async fn definition(
 
     let file = *state.files.get(uri)?;
     let analysis = crate::analysis::FileAnalysis::load(&state.db, file);
+    // TODO(aivi-base): lsp_position_to_offset now returns Option<ByteIndex>; update this
+    // call site to handle None (out-of-range column) instead of relying on the old
+    // silent-clamping behaviour.
     let cursor = analysis.source.lsp_position_to_offset(LspPosition {
         line: lsp_pos.line,
         character: lsp_pos.character,
