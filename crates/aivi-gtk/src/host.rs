@@ -309,9 +309,7 @@ where
             GtkConcreteWidgetKind::Entry => gtk::Entry::new().upcast::<gtk::Widget>(),
             GtkConcreteWidgetKind::Switch => gtk::Switch::new().upcast::<gtk::Widget>(),
             GtkConcreteWidgetKind::CheckButton => gtk::CheckButton::new().upcast::<gtk::Widget>(),
-            GtkConcreteWidgetKind::ToggleButton => {
-                gtk::ToggleButton::new().upcast::<gtk::Widget>()
-            }
+            GtkConcreteWidgetKind::ToggleButton => gtk::ToggleButton::new().upcast::<gtk::Widget>(),
             GtkConcreteWidgetKind::Image => gtk::Image::new().upcast::<gtk::Widget>(),
             GtkConcreteWidgetKind::Spinner => gtk::Spinner::new().upcast::<gtk::Widget>(),
             GtkConcreteWidgetKind::ProgressBar => gtk::ProgressBar::new().upcast::<gtk::Widget>(),
@@ -497,13 +495,12 @@ where
                     .set_active(value);
             }
             GtkPropertySetter::Bool(GtkBoolPropertySetter::SpinnerSpinning) => {
-                let spinner = widget
-                    .clone()
-                    .downcast::<gtk::Spinner>()
-                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                let spinner = widget.clone().downcast::<gtk::Spinner>().map_err(|_| {
+                    GtkConcreteHostError::WidgetDowncastFailed {
                         widget: schema.markup_name.into(),
                         expected_type: "gtk::Spinner",
-                    })?;
+                    }
+                })?;
                 if value {
                     spinner.start();
                 } else {
@@ -2045,7 +2042,10 @@ val view =
             );
             assert!(queued.iter().all(|event| event.route == routes[0].id));
             assert_eq!(
-                queued.last().expect("entry changes should queue one latest event").value,
+                queued
+                    .last()
+                    .expect("entry changes should queue one latest event")
+                    .value,
                 TestValue::Text("Typed query".to_string())
             );
         });
@@ -2180,7 +2180,11 @@ val view =
             assert_eq!(switch_handle, child_handles[2]);
 
             executor
-                .set_property_for_instance(&routes[0].instance, active_input, TestValue::Bool(false))
+                .set_property_for_instance(
+                    &routes[0].instance,
+                    active_input,
+                    TestValue::Bool(false),
+                )
                 .expect("programmatic switch updates should still apply");
             assert!(!switch.is_active());
             assert!(
@@ -2226,7 +2230,8 @@ val view =
     </Window>
 "#,
             );
-            let show_title_buttons_input = find_widget_input(&graph, "HeaderBar", "showTitleButtons");
+            let show_title_buttons_input =
+                find_widget_input(&graph, "HeaderBar", "showTitleButtons");
             let executor = GtkRuntimeExecutor::new_with_values(
                 graph,
                 GtkConcreteHost::<TestValue>::default(),

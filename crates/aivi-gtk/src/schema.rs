@@ -179,9 +179,7 @@ impl GtkPropertySetter {
                 GtkTextPropertySetter::BoxOrientation
                 | GtkTextPropertySetter::PanedOrientation
                 | GtkTextPropertySetter::SeparatorOrientation,
-            ) => {
-                "text naming a valid Orientation value"
-            }
+            ) => "text naming a valid Orientation value",
             Self::Text(_) => "Text",
             Self::TextOrI64(_) => "Int or integer text",
             Self::I64(_) => "Int",
@@ -634,7 +632,12 @@ const VIEWPORT_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     markup_name: "Viewport",
     kind: GtkConcreteWidgetKind::Viewport,
     root_kind: GtkWidgetRootKind::Embedded,
-    properties: &[VISIBLE_PROPERTY, SENSITIVE_PROPERTY, HEXPAND_PROPERTY, VEXPAND_PROPERTY],
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+    ],
     events: &[],
     default_child_group_override: None,
     child_groups: &[VIEWPORT_CHILD_GROUP],
@@ -999,9 +1002,9 @@ mod tests {
 
     use super::{
         GtkChildContainerKind, GtkConcreteEventPayload, GtkDefaultChildGroup,
-        ORIENTATION_VALUE_SHAPE,
-        GtkPropertyValueShape, lookup_widget_event, lookup_widget_property, lookup_widget_schema,
-        lookup_widget_schema_by_name, supported_widget_schemas,
+        GtkPropertyValueShape, ORIENTATION_VALUE_SHAPE, lookup_widget_event,
+        lookup_widget_property, lookup_widget_schema, lookup_widget_schema_by_name,
+        supported_widget_schemas,
     };
 
     fn span() -> SourceSpan {
@@ -1028,6 +1031,7 @@ mod tests {
             [
                 "Window",
                 "HeaderBar",
+                "Paned",
                 "Box",
                 "ScrolledWindow",
                 "Frame",

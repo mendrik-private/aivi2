@@ -65,8 +65,7 @@ const INVALID_TEXT_INTERPOLATION: DiagnosticCode =
     DiagnosticCode::new("syntax", "invalid-text-interpolation");
 const UNTERMINATED_TEXT_INTERPOLATION: DiagnosticCode =
     DiagnosticCode::new("syntax", "unterminated-text-interpolation");
-const PARSE_DEPTH_EXCEEDED: DiagnosticCode =
-    DiagnosticCode::new("syntax", "parse-depth-exceeded");
+const PARSE_DEPTH_EXCEEDED: DiagnosticCode = DiagnosticCode::new("syntax", "parse-depth-exceeded");
 
 const MAX_PARSE_DEPTH: usize = 256;
 

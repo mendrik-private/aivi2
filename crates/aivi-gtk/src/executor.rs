@@ -5,8 +5,8 @@ use aivi_runtime::InputHandle;
 use crate::{
     GtkBridgeExecutionError, GtkBridgeGraph, GtkBridgeNodeKind, GtkBridgeNodeRef, GtkChildGroup,
     GtkChildGroupDescriptor, GtkChildGroupEdit, GtkCollectionKey, GtkEachEdit,
-    GtkRepeatedChildEdit, GtkRepeatedChildIdentity, GtkShowState, PlanNodeTag,
-    RuntimeEventBinding, RuntimePropertyBinding, RuntimeSetterBinding, StaticPropertyPlan,
+    GtkRepeatedChildEdit, GtkRepeatedChildIdentity, GtkShowState, PlanNodeTag, RuntimeEventBinding,
+    RuntimePropertyBinding, RuntimeSetterBinding, StaticPropertyPlan,
 };
 
 /// Execute one lowered GTK bridge graph through an explicit host boundary.
@@ -1172,11 +1172,16 @@ where
                 child,
             });
         }
-        let local_offset =
-            self.root_widget_offset(&self.instance_state(parent)?.children, index)?;
         let block_widgets = self.instance_root_widgets(&child)?;
-        if let Some(target) = self.widget_mount_target(parent)? {
+        let target = self.widget_mount_target(parent, Some(&child))?;
+        if let Some(target) = target {
             if !block_widgets.is_empty() {
+                let local_offset = self.root_widget_offset_in_mount_target(
+                    parent,
+                    &self.instance_state(parent)?.children,
+                    index,
+                    &target,
+                )?;
                 let abs_index = self.offset_within_mount_target(&target, local_offset)?;
                 let widget = self.widget_handle(&target.widget)?.clone();
                 self.host
@@ -1198,7 +1203,7 @@ where
         start: usize,
         count: usize,
     ) -> Result<Vec<GtkNodeInstance>, GtkExecutorError<H::Error>> {
-        let (child_count, removed, block_widgets, local_offset) = {
+        let (child_count, removed, block_widgets, target, local_offset) = {
             let parent_state = self.instance_state(parent)?;
             let child_count = parent_state.children.len();
             if start > child_count || start + count > child_count {
@@ -1210,11 +1215,27 @@ where
             }
             let removed = parent_state.children[start..start + count].to_vec();
             let block_widgets = self.root_widgets_for_block(&removed)?;
-            let local_offset = self.root_widget_offset(&parent_state.children, start)?;
-            (child_count, removed, block_widgets, local_offset)
+            let target = removed
+                .first()
+                .map(|child| self.widget_mount_target(parent, Some(child)))
+                .transpose()?
+                .flatten();
+            let local_offset = target
+                .as_ref()
+                .map(|target| {
+                    self.root_widget_offset_in_mount_target(
+                        parent,
+                        &parent_state.children,
+                        start,
+                        target,
+                    )
+                })
+                .transpose()?
+                .unwrap_or(0);
+            (child_count, removed, block_widgets, target, local_offset)
         };
         debug_assert!(start <= child_count);
-        if let Some(target) = self.widget_mount_target(parent)? {
+        if let Some(target) = target {
             if !block_widgets.is_empty() {
                 let abs_index = self.offset_within_mount_target(&target, local_offset)?;
                 let widget = self.widget_handle(&target.widget)?.clone();
@@ -1238,7 +1259,7 @@ where
         count: usize,
         to: usize,
     ) -> Result<(), GtkExecutorError<H::Error>> {
-        let (child_count, block_widgets, local_from, local_to) = {
+        let (child_count, block_widgets, target, local_from, local_to) = {
             let parent_state = self.instance_state(parent)?;
             let child_count = parent_state.children.len();
             if start > child_count || start + count > child_count {
@@ -1258,12 +1279,34 @@ where
                 });
             }
             let block_widgets = self.root_widgets_for_block(&block)?;
-            let local_from = self.root_widget_offset(&parent_state.children, start)?;
-            let local_to = self.root_widget_offset(&remaining, to)?;
-            (child_count, block_widgets, local_from, local_to)
+            let target = block
+                .first()
+                .map(|child| self.widget_mount_target(parent, Some(child)))
+                .transpose()?
+                .flatten();
+            let local_from = target
+                .as_ref()
+                .map(|target| {
+                    self.root_widget_offset_in_mount_target(
+                        parent,
+                        &parent_state.children,
+                        start,
+                        target,
+                    )
+                })
+                .transpose()?
+                .unwrap_or(0);
+            let local_to = target
+                .as_ref()
+                .map(|target| {
+                    self.root_widget_offset_in_mount_target(parent, &remaining, to, target)
+                })
+                .transpose()?
+                .unwrap_or(0);
+            (child_count, block_widgets, target, local_from, local_to)
         };
         debug_assert!(start <= child_count);
-        if let Some(target) = self.widget_mount_target(parent)? {
+        if let Some(target) = target {
             if !block_widgets.is_empty() && local_from != local_to {
                 let abs_from = self.offset_within_mount_target(&target, local_from)?;
                 let abs_to = self.offset_within_mount_target(&target, local_to)?;
@@ -1396,9 +1439,16 @@ where
     fn widget_mount_target(
         &self,
         start: &GtkNodeInstance,
+        child: Option<&GtkNodeInstance>,
     ) -> Result<Option<WidgetMountTarget>, GtkExecutorError<H::Error>> {
         let mut current = Some(start.clone());
-        let mut explicit_group = None;
+        let mut explicit_group = child
+            .map(|child| self.bridge_node(child.node))
+            .transpose()?
+            .and_then(|node| match &node.kind {
+                GtkBridgeNodeKind::Group(group) => Some(group.descriptor),
+                _ => None,
+            });
         while let Some(instance) = current {
             let state = self.instance_state(&instance)?;
             match &self.bridge_node(instance.node)?.kind {
@@ -1440,8 +1490,12 @@ where
                     instance: target.anchor.clone(),
                 })?;
             let sibling_index = self.find_child_index(&parent, &current)?;
-            offset +=
-                self.root_widget_offset(&self.instance_state(&parent)?.children, sibling_index)?;
+            offset += self.root_widget_offset_in_mount_target(
+                &parent,
+                &self.instance_state(&parent)?.children,
+                sibling_index,
+                target,
+            )?;
             current = parent;
         }
         Ok(offset)
@@ -1456,15 +1510,24 @@ where
         id
     }
 
-    fn root_widget_offset(
+    fn root_widget_offset_in_mount_target(
         &self,
+        parent: &GtkNodeInstance,
         children: &[GtkNodeInstance],
         end: usize,
+        target: &WidgetMountTarget,
     ) -> Result<usize, GtkExecutorError<H::Error>> {
         let end = end.min(children.len());
         let mut offset = 0;
         for child in &children[..end] {
-            offset += self.instance_state(child)?.root_widgets.len();
+            let Some(child_target) = self.widget_mount_target(parent, Some(child))? else {
+                continue;
+            };
+            if child_target.widget == target.widget
+                && std::ptr::eq(child_target.group, target.group)
+            {
+                offset += self.instance_state(child)?.root_widgets.len();
+            }
         }
         Ok(offset)
     }
@@ -2362,12 +2425,12 @@ val view =
             .properties
             .iter()
             .find_map(|property| match property {
-                RuntimePropertyBinding::Setter(binding) if binding.name.text() == "title" => {
+                RuntimePropertyBinding::Setter(binding) if binding.name.text() == "text" => {
                     Some(binding.input)
                 }
                 _ => None,
             })
-            .expect("row template should carry the title setter");
+            .expect("row template should carry the text setter");
 
         let mut executor =
             GtkRuntimeExecutor::<TestHost, TestValue>::new(graph, TestHost::default())
@@ -2392,7 +2455,7 @@ val view =
                 .host()
                 .widget(&TestWidget(1))
                 .dynamic_props
-                .get("title"),
+                .get("text"),
             Some(&TestValue::Text("Shared title".to_string()))
         );
         assert_eq!(
@@ -2400,7 +2463,7 @@ val view =
                 .host()
                 .widget(&TestWidget(2))
                 .dynamic_props
-                .get("title"),
+                .get("text"),
             Some(&TestValue::Text("Shared title".to_string()))
         );
     }
@@ -2445,12 +2508,12 @@ val view =
             .properties
             .iter()
             .find_map(|property| match property {
-                RuntimePropertyBinding::Setter(binding) if binding.name.text() == "title" => {
+                RuntimePropertyBinding::Setter(binding) if binding.name.text() == "text" => {
                     Some(binding.input)
                 }
                 _ => None,
             })
-            .expect("row template should carry the title setter");
+            .expect("row template should carry the text setter");
 
         let mut executor =
             GtkRuntimeExecutor::<TestHost, TestValue>::new(graph, TestHost::default())
@@ -2502,7 +2565,7 @@ val view =
                 .host()
                 .widget(&alpha_handle)
                 .dynamic_props
-                .get("title"),
+                .get("text"),
             Some(&TestValue::Text("Alpha".to_string()))
         );
         assert_eq!(
@@ -2510,7 +2573,7 @@ val view =
                 .host()
                 .widget(&beta_handle)
                 .dynamic_props
-                .get("title"),
+                .get("text"),
             Some(&TestValue::Text("Beta".to_string()))
         );
     }

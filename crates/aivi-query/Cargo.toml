@@ -11,6 +11,7 @@ aivi-hir = { workspace = true }
 aivi-typing = { workspace = true }
 parking_lot = "0.12"
 rustc-hash = { workspace = true }
+tracing = "0.1"
 
 [lints]
 workspace = true

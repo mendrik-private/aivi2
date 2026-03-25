@@ -47,15 +47,34 @@ impl Workspace {
             return None;
         }
 
-        self.resolve_module_file_in_root(db, &self.root, module)
-            .or_else(|| {
-                if !is_bundled_stdlib_module(module) {
-                    return None;
-                }
+        // Workspace resolution always takes precedence over the bundled stdlib.
+        // If the module path starts with "aivi" and a file exists in both the
+        // workspace and the bundled stdlib, the workspace file wins (intentional
+        // user override). We emit a warning so the override is never silent.
+        //
+        // TODO: On case-insensitive filesystems (macOS HFS+, Windows NTFS) a
+        // user directory `Aivi/` could collide with `aivi/` in ways this check
+        // doesn't catch.  Normalise the first segment to lowercase before
+        // comparing if case-insensitive FS support is needed in the future.
+        let workspace_file = self.resolve_module_file_in_root(db, &self.root, module);
 
-                let root = self.bundled_stdlib_root.as_deref()?;
-                self.resolve_module_file_in_root(db, root, module)
-            })
+        if let Some(ref file) = workspace_file {
+            if is_bundled_stdlib_module(module) {
+                tracing::warn!(
+                    "user workspace file {:?} shadows bundled stdlib module {:?}",
+                    file.path(db),
+                    module,
+                );
+            }
+            return workspace_file;
+        }
+
+        if !is_bundled_stdlib_module(module) {
+            return None;
+        }
+
+        let root = self.bundled_stdlib_root.as_deref()?;
+        self.resolve_module_file_in_root(db, root, module)
     }
 
     fn resolve_module_file_in_root(

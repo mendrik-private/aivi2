@@ -329,6 +329,15 @@ fn explicit_trigger_bindings(
         .collect()
 }
 
+/// Extracts the `activeWhen` binding from a built-in source's options record for lifecycle
+/// planning.
+///
+/// This function performs structural extraction only — it locates the `activeWhen` field and
+/// records its `ExprId` for use by the lifecycle planner.  Type validation (enforcing that the
+/// expression has type `Signal Bool`) is handled separately by
+/// `validate_builtin_source_decorator_contract_types` in `validate.rs`, which checks every source
+/// option field against the provider contract.  Programs with a type-mismatched `activeWhen` will
+/// therefore carry a `source-option-type-mismatch` diagnostic and will never reach the runtime.
 fn active_when_binding(
     module: &Module,
     source: &SourceDecorator,

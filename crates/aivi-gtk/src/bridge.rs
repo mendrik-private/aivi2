@@ -240,9 +240,7 @@ impl GtkBridgeGraphBuilder {
         errors: &mut Vec<GtkBridgeLoweringError>,
     ) -> &'static GtkChildGroupDescriptor {
         let Some(parent_ref) = node.parent else {
-            errors.push(GtkBridgeLoweringError::MissingWidgetChildGroupParent {
-                group: node.plan,
-            });
+            errors.push(GtkBridgeLoweringError::MissingWidgetChildGroupParent { group: node.plan });
             return &INVALID_WIDGET_CHILD_GROUP;
         };
         let Some(parent) = self.assembly.node(parent_ref.plan) else {
@@ -259,7 +257,7 @@ impl GtkBridgeGraphBuilder {
             });
             return &INVALID_WIDGET_CHILD_GROUP;
         };
-        if parent_widget.widget != group.widget {
+        if !same_name_path(&parent_widget.widget, &group.widget) {
             errors.push(GtkBridgeLoweringError::WidgetChildGroupOwnerMismatch {
                 group: node.plan,
                 parent: parent.plan,
@@ -1332,6 +1330,13 @@ fn runtime_kind_tag(kind: &RuntimePlanNodeKind) -> PlanNodeTag {
         RuntimePlanNodeKind::Fragment(_) => PlanNodeTag::Fragment,
         RuntimePlanNodeKind::With(_) => PlanNodeTag::With,
     }
+}
+
+fn same_name_path(left: &NamePath, right: &NamePath) -> bool {
+    left.segments()
+        .iter()
+        .map(aivi_hir::Name::text)
+        .eq(right.segments().iter().map(aivi_hir::Name::text))
 }
 
 #[cfg(test)]

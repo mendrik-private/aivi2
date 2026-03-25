@@ -4812,6 +4812,17 @@ impl Validator<'_> {
         env: &GateExprEnv,
         typing: &mut GateTypeContext<'_>,
     ) {
+        // `recurrence_suffix()` returns `Err(PipeRecurrenceShapeError)` for pipes that violate
+        // stage-ordering constraints:
+        //   - `OrphanStep`    — a `<|@` step with no preceding `@|>` start
+        //   - `MissingStep`   — a `@|>` start with no following `<|@` step
+        //   - `TrailingStage` — any non-`<|@` stage after the recurrence suffix has begun
+        //
+        // All three cases are diagnosed during the lowering phase in `lower.rs` via
+        // `emit_orphan_recur_step`, `emit_unfinished_recurrence`, and
+        // `emit_illegal_recurrence_continuation`.  By the time this validation pass runs, the
+        // compiler has already emitted the relevant diagnostics; silently returning here is
+        // correct — we must not attempt to validate semantics on malformed pipe structure.
         let suffix = match pipe.recurrence_suffix() {
             Ok(Some(suffix)) => suffix,
             Ok(None) | Err(_) => return,

@@ -2334,7 +2334,32 @@ The selected root must be a `Window`. The CLI does not auto-wrap arbitrary widge
 
 `aivi run` links the compiled runtime stack, evaluates the selected view fragments against committed runtime snapshots, re-evaluates after each meaningful committed tick, and applies GTK updates through the bridge executor.
 
-The current cataloged widget/runtime slice includes `Window`, `HeaderBar`, `Box`, `ScrolledWindow`, `Frame`, `Viewport`, `Label`, `Button`, `Entry`, `Switch`, `CheckButton`, `ToggleButton`, `Image`, `Spinner`, `ProgressBar`, `Revealer`, and `Separator`. `Entry.onChange` publishes `Text`, `Switch.onToggle` publishes `Bool`, and JSON-backed source payloads may now decode `Float`, `Decimal`, `BigInt`, and `Bytes` through explicit contracts.
+The current cataloged widget/runtime slice includes `Window`, `HeaderBar`, `Paned`, `Box`, `ScrolledWindow`, `Frame`, `Viewport`, `Label`, `Button`, `Entry`, `Switch`, `CheckButton`, `ToggleButton`, `Image`, `Spinner`, `ProgressBar`, `Revealer`, and `Separator`. `Entry.onChange` publishes `Text`, `Switch.onToggle` publishes `Bool`, and JSON-backed source payloads may now decode `Float`, `Decimal`, `BigInt`, and `Bytes` through explicit contracts.
+
+Widgets with a single default child group still accept ordinary unnamed children. Widgets with richer slot layouts now use explicit dotted child-group wrappers, for example:
+
+```aivi
+<Paned>
+    <Paned.start>
+        <Label text="Primary" />
+    </Paned.start>
+    <Paned.end>
+        <HeaderBar>
+            <HeaderBar.start>
+                <Button label="Back" />
+            </HeaderBar.start>
+            <HeaderBar.titleWidget>
+                <Label text="Inbox" />
+            </HeaderBar.titleWidget>
+            <HeaderBar.end>
+                <Button label="More" />
+            </HeaderBar.end>
+        </HeaderBar>
+    </Paned.end>
+</Paned>
+```
+
+`HeaderBar.titleWidget` remains the default unnamed child group for backward compatibility. `Paned` requires explicit `start` / `end` child-group wrappers because it has no unnamed default slot.
 
 Exits 0 on clean application close, 1 on startup/compilation error.
 

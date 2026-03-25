@@ -120,6 +120,10 @@ pub enum ValidationError {
     SignalFilterPredicateNotBool {
         kernel: KernelId,
     },
+    InlinePipeGatePredicateNotBool {
+        kernel: KernelId,
+        expr: KernelExprId,
+    },
     RecurrenceMissingSteps {
         pipeline: PipelineId,
     },
@@ -343,6 +347,12 @@ impl fmt::Display for ValidationError {
                 write!(
                     f,
                     "signal-filter predicate kernel {kernel} does not return Bool"
+                )
+            }
+            Self::InlinePipeGatePredicateNotBool { kernel, expr } => {
+                write!(
+                    f,
+                    "inline-pipe gate predicate expression {expr} in kernel {kernel} does not return Bool"
                 )
             }
             Self::RecurrenceMissingSteps { pipeline } => {
@@ -1253,7 +1263,17 @@ fn validate_kernel(
                             push_expr(kernel_id, *expr, kernel, &mut work, errors)
                         }
                         InlinePipeStageKind::Gate { predicate, .. } => {
-                            push_expr(kernel_id, *predicate, kernel, &mut work, errors)
+                            push_expr(kernel_id, *predicate, kernel, &mut work, errors);
+                            if let Some(pred_expr) = kernel.exprs().get(*predicate) {
+                                if !is_bool_layout(program, pred_expr.layout) {
+                                    errors.push(
+                                        ValidationError::InlinePipeGatePredicateNotBool {
+                                            kernel: kernel_id,
+                                            expr: *predicate,
+                                        },
+                                    );
+                                }
+                            }
                         }
                         InlinePipeStageKind::Case { arms } => {
                             for arm in arms {

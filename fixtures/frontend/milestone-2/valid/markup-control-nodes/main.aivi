@@ -30,7 +30,7 @@ val screenView =
                     </case>
                     <case pattern={Ready items}>
                         <each of={items} as={item} key={item.id}>
-                            <Row title={itemLabel item} />
+                            <Label text={itemLabel item} />
                             <empty>
                                 <Label text="No items" />
                             </empty>

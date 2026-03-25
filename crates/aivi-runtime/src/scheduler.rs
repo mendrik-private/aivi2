@@ -102,7 +102,7 @@ impl<V> Publication<V> {
 
 #[derive(Clone)]
 pub struct WorkerPublicationSender<V> {
-    sender: mpsc::Sender<Publication<V>>,
+    sender: mpsc::SyncSender<Publication<V>>,
     notifier: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
 }
 
@@ -214,7 +214,7 @@ where
     dirty_scratch: Vec<bool>,
     publications_scratch: Vec<Option<Publication<V>>>,
     dropped_scratch: Vec<DroppedPublication>,
-    worker_publication_tx: mpsc::Sender<Publication<V>>,
+    worker_publication_tx: mpsc::SyncSender<Publication<V>>,
     worker_publication_rx: mpsc::Receiver<Publication<V>>,
     worker_publication_notifier: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
     initialized: bool,
@@ -232,7 +232,7 @@ where
     S: CommittedValueStore<V>,
 {
     pub fn with_value_store(graph: SignalGraph, storage: S) -> Self {
-        let (worker_publication_tx, worker_publication_rx) = mpsc::channel();
+        let (worker_publication_tx, worker_publication_rx) = mpsc::sync_channel(128);
         let owners = (0..graph.owner_count())
             .map(|_| OwnerRuntimeState { active: true })
             .collect();

@@ -210,8 +210,8 @@ fn run_build(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Strin
         ));
     }
 
-    let output = output
-        .ok_or_else(|| "expected `-o`/`--output <directory>` for `build`".to_owned())?;
+    let output =
+        output.ok_or_else(|| "expected `-o`/`--output <directory>` for `build`".to_owned())?;
     if let Some(view) = &requested_view {
         let segments: Vec<&str> = view.split('.').collect();
         if let Err(e) = validate_module_path(&segments) {
@@ -378,13 +378,15 @@ impl GtkHostValue for RunHostValue {
     }
 
     fn from_bool(v: bool) -> Self {
-        Self(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Bool(v)))
+        Self(DetachedRuntimeValue::from_runtime_owned(
+            RuntimeValue::Bool(v),
+        ))
     }
 
     fn from_text(v: &str) -> Self {
-        Self(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Text(
-            v.to_owned().into(),
-        )))
+        Self(DetachedRuntimeValue::from_runtime_owned(
+            RuntimeValue::Text(v.to_owned().into()),
+        ))
     }
 
     fn as_bool(&self) -> Option<bool> {
@@ -1004,7 +1006,7 @@ fn validate_run_plan(sources: &SourceDatabase, bridge: &GtkBridgeGraph) -> Resul
                 }
                 validate_run_widget_children(
                     node.span,
-                    widget.default_children.roots.len(),
+                    count_unnamed_widget_children(bridge, &widget.default_children.roots),
                     schema,
                     &mut blockers,
                 );
@@ -1072,6 +1074,18 @@ fn validate_run_plan(sources: &SourceDatabase, bridge: &GtkBridgeGraph) -> Resul
         rendered.push('\n');
     }
     Err(rendered)
+}
+
+fn count_unnamed_widget_children(bridge: &GtkBridgeGraph, roots: &[GtkBridgeNodeRef]) -> usize {
+    roots
+        .iter()
+        .filter(|root| {
+            !matches!(
+                bridge.node(root.plan).map(|node| &node.kind),
+                Some(GtkBridgeNodeKind::Group(_))
+            )
+        })
+        .count()
 }
 
 fn validate_run_widget_children(
@@ -2928,10 +2942,7 @@ fn build_staging_dir(output: &Path) -> Result<PathBuf, String> {
         .duration_since(UNIX_EPOCH)
         .map_err(|error| format!("system clock error while creating build directory: {error}"))?
         .as_nanos();
-    Ok(parent.join(format!(
-        ".{name}.tmp-{}-{unique}",
-        std::process::id()
-    )))
+    Ok(parent.join(format!(".{name}.tmp-{}-{unique}", std::process::id())))
 }
 
 fn discover_workspace_root(path: &Path) -> PathBuf {
@@ -3001,13 +3012,18 @@ fn copy_workspace_bundle_sources(
     Ok(copied)
 }
 
-fn write_bundle_launcher(path: &Path, entry_relative: &Path, view_name: &str) -> Result<(), String> {
+fn write_bundle_launcher(
+    path: &Path,
+    entry_relative: &Path,
+    view_name: &str,
+) -> Result<(), String> {
     let entry = shell_single_quote(&entry_relative.to_string_lossy());
     let view = shell_single_quote(view_name);
     let script = format!(
         "#!/bin/sh\nset -eu\nSCRIPT_DIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\nENTRY_REL={entry}\nVIEW_NAME={view}\nexec \"$SCRIPT_DIR/aivi\" run \"$SCRIPT_DIR/app/$ENTRY_REL\" --view \"$VIEW_NAME\"\n"
     );
-    fs::write(path, script).map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+    fs::write(path, script)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
     ensure_executable(path)
 }
 
@@ -4009,15 +4025,31 @@ val view =
             })
             .collect::<Vec<_>>();
 
-        assert!(groups.iter().any(|(widget, group)| widget == "Paned" && group == "start"));
-        assert!(groups.iter().any(|(widget, group)| widget == "Paned" && group == "end"));
-        assert!(groups.iter().any(|(widget, group)| widget == "HeaderBar" && group == "start"));
+        assert!(
+            groups
+                .iter()
+                .any(|(widget, group)| widget == "Paned" && group == "start")
+        );
+        assert!(
+            groups
+                .iter()
+                .any(|(widget, group)| widget == "Paned" && group == "end")
+        );
+        assert!(
+            groups
+                .iter()
+                .any(|(widget, group)| widget == "HeaderBar" && group == "start")
+        );
         assert!(
             groups
                 .iter()
                 .any(|(widget, group)| widget == "HeaderBar" && group == "titleWidget")
         );
-        assert!(groups.iter().any(|(widget, group)| widget == "HeaderBar" && group == "end"));
+        assert!(
+            groups
+                .iter()
+                .any(|(widget, group)| widget == "HeaderBar" && group == "end")
+        );
     }
 
     #[test]

@@ -110,11 +110,39 @@ impl LanguageServer for Backend {
         if let Some(change) = params.content_changes.into_iter().last() {
             crate::documents::change_document(&self.state, &uri, change.text);
         }
-        self.publish_diagnostics_for_uri(uri).await;
+        // Cancel any in-flight diagnostics task for this URI.
+        if let Some((_, handle)) = self.state.pending_diagnostics.remove(&uri) {
+            handle.abort();
+        }
+        // Spawn a debounced diagnostics task: if no further edits arrive within
+        // 100 ms the sleep completes and diagnostics are published.
+        let state_clone = Arc::clone(&self.state);
+        let client_clone = self.client.clone();
+        let uri_clone = uri.clone();
+        let handle = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let maybe_file = state_clone.files.get(&uri_clone).map(|f| *f);
+            let Some(file) = maybe_file else {
+                tracing::error!(
+                    "did_change debounce: URI {} is not tracked; diagnostics will not be published",
+                    uri_clone
+                );
+                return;
+            };
+            let lsp_diags =
+                crate::diagnostics::collect_lsp_diagnostics(&state_clone.db, file, &uri_clone);
+            client_clone.publish_diagnostics(uri_clone.clone(), lsp_diags, None).await;
+            tracing::debug!("Published diagnostics for {}", uri_clone);
+        });
+        self.state.pending_diagnostics.insert(uri, handle);
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
+        // Cancel any pending debounced task before removing the document.
+        if let Some((_, handle)) = self.state.pending_diagnostics.remove(&uri) {
+            handle.abort();
+        }
         crate::documents::close_document(&self.state, &uri);
         self.client.publish_diagnostics(uri, Vec::new(), None).await;
     }

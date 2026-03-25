@@ -10,6 +10,12 @@ macro_rules! define_handle {
                 self.0
             }
 
+            /// # Invariant
+            ///
+            /// The caller must ensure `raw` was obtained from a valid `Handle::as_raw()` call
+            /// on a handle that was created from a live graph, and the graph has not been
+            /// cleared or rebuilt since. Violating this invariant will silently reference the
+            /// wrong graph node.
             pub(crate) const fn from_raw(raw: u32) -> Self {
                 Self(raw)
             }
@@ -36,6 +42,11 @@ impl InputHandle {
         self.0.as_raw()
     }
 
+    /// # Invariant
+    ///
+    /// The caller must ensure `raw` was obtained from a valid `InputHandle::as_raw()` call
+    /// on a handle that was created from a live graph, and the graph has not been cleared
+    /// or rebuilt since. Violating this invariant will silently reference the wrong node.
     pub(crate) const fn from_raw(raw: u32) -> Self {
         Self(SignalHandle::from_raw(raw))
     }
@@ -63,6 +74,11 @@ impl DerivedHandle {
         self.0.as_raw()
     }
 
+    /// # Invariant
+    ///
+    /// The caller must ensure `raw` was obtained from a valid `DerivedHandle::as_raw()` call
+    /// on a handle that was created from a live graph, and the graph has not been cleared
+    /// or rebuilt since. Violating this invariant will silently reference the wrong node.
     pub(crate) const fn from_raw(raw: u32) -> Self {
         Self(SignalHandle::from_raw(raw))
     }
@@ -389,6 +405,7 @@ impl SignalGraphBuilder {
     }
 
     pub fn build(self) -> Result<SignalGraph, GraphBuildError> {
+        let signal_count = self.signals.len() as u32;
         let undefined = self
             .signals
             .iter()
@@ -396,6 +413,12 @@ impl SignalGraphBuilder {
             .filter_map(|(index, entry)| match entry.kind {
                 PendingSignalKind::Input => None,
                 PendingSignalKind::Derived { dependencies: None } => {
+                    debug_assert!(
+                        (index as u32) < signal_count,
+                        "Handle::from_raw: raw index {} out of bounds (signals len {})",
+                        index,
+                        signal_count
+                    );
                     Some(DerivedHandle::from_raw(index as u32))
                 }
                 PendingSignalKind::Derived {
@@ -421,6 +444,12 @@ impl SignalGraphBuilder {
                     dependencies: Some(dependencies),
                 } => {
                     indegree[index] = dependencies.len();
+                    debug_assert!(
+                        (index as u32) < signal_count,
+                        "Handle::from_raw: raw index {} out of bounds (signals len {})",
+                        index,
+                        signal_count
+                    );
                     let derived = DerivedHandle::from_raw(index as u32);
                     for &dependency in &dependencies {
                         dependents[dependency.index()].push(derived);
@@ -470,7 +499,15 @@ impl SignalGraphBuilder {
                 .iter()
                 .enumerate()
                 .filter_map(|(index, remaining)| {
-                    (*remaining > 0).then_some(SignalHandle::from_raw(index as u32))
+                    (*remaining > 0).then(|| {
+                        debug_assert!(
+                            (index as u32) < signals.len() as u32,
+                            "Handle::from_raw: raw index {} out of bounds (signals len {})",
+                            index,
+                            signals.len()
+                        );
+                        SignalHandle::from_raw(index as u32)
+                    })
                 })
                 .collect::<Vec<_>>();
             return Err(GraphBuildError::DependencyCycle { signals: cycle });
@@ -485,7 +522,15 @@ impl SignalGraphBuilder {
             if batches.len() <= spec.batch {
                 batches.resize_with(spec.batch + 1, Vec::new);
             }
-            batches[spec.batch].push(DerivedHandle::from_raw(index as u32));
+            batches[spec.batch].push({
+                debug_assert!(
+                    (index as u32) < signal_count,
+                    "Handle::from_raw: raw index {} out of bounds (signals len {})",
+                    index,
+                    signal_count
+                );
+                DerivedHandle::from_raw(index as u32)
+            });
         }
         for batch in &mut batches {
             batch.sort_by_key(|signal| signal.as_raw());

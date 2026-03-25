@@ -377,7 +377,6 @@ impl<'a> Lowerer<'a> {
     }
 
     fn store_item(&mut self, item: Item, ambient: bool) {
-        let span = item.span();
         if ambient {
             if self.module.push_ambient_item(item).is_err() {
                 self.emit_arena_overflow("HIR ambient item arena");
@@ -5539,12 +5538,10 @@ impl<'a> Lowerer<'a> {
     }
 
     fn alloc_control(&mut self, control: ControlNode) -> ControlNodeId {
-        self.module
-            .alloc_control_node(control)
-            .unwrap_or_else(|_| {
-                self.emit_arena_overflow("HIR control arena");
-                std::process::exit(1);
-            })
+        self.module.alloc_control_node(control).unwrap_or_else(|_| {
+            self.emit_arena_overflow("HIR control arena");
+            std::process::exit(1);
+        })
     }
 
     fn wrap_control(&mut self, control: ControlNode) -> MarkupNodeId {

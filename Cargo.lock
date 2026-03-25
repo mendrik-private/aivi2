@@ -135,6 +135,7 @@ dependencies = [
  "aivi-typing",
  "parking_lot",
  "rustc-hash",
+ "tracing",
 ]
 
 [[package]]

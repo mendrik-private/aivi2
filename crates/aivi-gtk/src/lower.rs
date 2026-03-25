@@ -8,8 +8,8 @@ use aivi_hir::{
 
 use crate::plan::{
     AttributeSite, CaseNode, ChildOp, ChildUpdateMode, EachNode, EmptyNode, EventHookPlan,
-    EventHookStrategy, EventHookTeardown, FragmentNode, GroupNode, MatchNode, PlanNode,
-    PlanNodeId, PlanNodeKind, PropertyPlan, RepeatedChildPolicy, SetterBindingPlan, SetterSource,
+    EventHookStrategy, EventHookTeardown, FragmentNode, GroupNode, MatchNode, PlanNode, PlanNodeId,
+    PlanNodeKind, PropertyPlan, RepeatedChildPolicy, SetterBindingPlan, SetterSource,
     SetterTeardown, SetterUpdateStrategy, ShowMountPolicy, ShowNode, StableNodeId,
     StaticPropertyPlan, StaticPropertyValue, WidgetNode, WidgetPlan, WithNode,
 };
@@ -445,7 +445,8 @@ impl<'module> Lowering<'module> {
                 span,
             });
         }
-        let children = self.child_ops_from_markup(stable_id, Some(&element.name), &element.children)?;
+        let children =
+            self.child_ops_from_markup(stable_id, Some(&element.name), &element.children)?;
         let (properties, event_hooks) =
             self.lower_attributes(stable_id, &element.name, &element.attributes)?;
         Ok(self.push_node(PlanNode {
@@ -627,21 +628,20 @@ impl<'module> Lowering<'module> {
         children
             .iter()
             .map(|child| {
-                let plan_id = self
-                    .markup_nodes
-                    .get(child)
-                    .copied()
-                    .ok_or(LoweringError::MissingLoweredMarkupChild {
+                let plan_id = self.markup_nodes.get(child).copied().ok_or(
+                    LoweringError::MissingLoweredMarkupChild {
                         parent,
                         child: *child,
-                    })?;
+                    },
+                )?;
                 if let Some(PlanNode {
                     span,
                     kind: PlanNodeKind::Group(group_node),
                     ..
                 }) = self.nodes.get(plan_id.index())
                 {
-                    let group_label = widget_child_group_label(&group_node.widget, &group_node.group);
+                    let group_label =
+                        widget_child_group_label(&group_node.widget, &group_node.group);
                     let Some(parent_widget) = widget else {
                         return Err(LoweringError::MisplacedChildGroup {
                             parent,
@@ -649,7 +649,7 @@ impl<'module> Lowering<'module> {
                             span: *span,
                         });
                     };
-                    if &group_node.widget != parent_widget {
+                    if !same_name_path(&group_node.widget, parent_widget) {
                         return Err(LoweringError::MismatchedChildGroupOwner {
                             parent_widget: parent_widget.to_string(),
                             group: group_label,
@@ -741,6 +741,13 @@ fn split_widget_child_group(name: &NamePath) -> Option<(NamePath, Name)> {
 
 fn widget_child_group_label(widget: &NamePath, group: &Name) -> String {
     format!("{}.{}", widget, group.text())
+}
+
+fn same_name_path(left: &NamePath, right: &NamePath) -> bool {
+    left.segments()
+        .iter()
+        .map(Name::text)
+        .eq(right.segments().iter().map(Name::text))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
