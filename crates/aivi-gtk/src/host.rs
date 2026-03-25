@@ -2032,6 +2032,113 @@ val view =
     }
 
     #[test]
+    fn concrete_host_mounts_named_child_groups_for_paned_and_header_bar() {
+        gtk::test_synced(|| {
+            let graph = lower_graph(
+                "gtk-host-named-groups.aivi",
+                r#"
+val showButtons = False
+val view =
+    <Window title="Host">
+        <Paned orientation="Horizontal">
+            <Paned.start>
+                <Label text="Primary" />
+            </Paned.start>
+            <Paned.end>
+                <HeaderBar showTitleButtons={showButtons}>
+                    <HeaderBar.start>
+                        <Button label="Back" />
+                    </HeaderBar.start>
+                    <HeaderBar.titleWidget>
+                        <Label text="Inbox" />
+                    </HeaderBar.titleWidget>
+                    <HeaderBar.end>
+                        <Button label="More" />
+                    </HeaderBar.end>
+                </HeaderBar>
+            </Paned.end>
+        </Paned>
+    </Window>
+"#,
+            );
+            let show_title_buttons_input = find_widget_input(&graph, "HeaderBar", "showTitleButtons");
+            let executor = GtkRuntimeExecutor::new_with_values(
+                graph,
+                GtkConcreteHost::<TestValue>::default(),
+                [(show_title_buttons_input, TestValue::Bool(false))],
+            )
+            .expect("concrete GTK host should mount named child groups");
+
+            let root = executor
+                .root_widgets()
+                .expect("root widget should exist")
+                .into_iter()
+                .next()
+                .expect("window root should exist");
+            let window_children = executor
+                .host()
+                .child_handles(&root)
+                .expect("window child order should be tracked");
+            let paned_handle = window_children
+                .first()
+                .expect("window should contain the paned child")
+                .clone();
+
+            let paned = executor
+                .host()
+                .widget(&paned_handle)
+                .expect("paned handle should resolve")
+                .downcast::<gtk::Paned>()
+                .expect("window child should be a paned widget");
+            let paned_children = executor
+                .host()
+                .child_handles(&paned_handle)
+                .expect("paned child handles should be tracked");
+            let start_child = paned
+                .start_child()
+                .expect("paned start child should be mounted")
+                .downcast::<gtk::Label>()
+                .expect("paned start child should be a label");
+            assert_eq!(start_child.text().as_str(), "Primary");
+
+            let end_child = paned
+                .end_child()
+                .expect("paned end child should be mounted")
+                .downcast::<gtk::HeaderBar>()
+                .expect("paned end child should be a header bar");
+            assert!(!end_child.property::<bool>("show-title-buttons"));
+            let title_widget = end_child
+                .title_widget()
+                .expect("header bar title widget should be mounted")
+                .downcast::<gtk::Label>()
+                .expect("header bar title widget should be a label");
+            assert_eq!(title_widget.text().as_str(), "Inbox");
+
+            let header_children = executor
+                .host()
+                .child_handles(&paned_children[1])
+                .expect("header bar child order should be tracked");
+            assert_eq!(header_children.len(), 3);
+
+            let back_button = executor
+                .host()
+                .widget(&header_children[0])
+                .expect("header bar start child should resolve")
+                .downcast::<gtk::Button>()
+                .expect("header bar start child should be a button");
+            assert_eq!(back_button.label().as_deref(), Some("Back"));
+
+            let more_button = executor
+                .host()
+                .widget(&header_children[1])
+                .expect("header bar end child should resolve")
+                .downcast::<gtk::Button>()
+                .expect("header bar end child should be a button");
+            assert_eq!(more_button.label().as_deref(), Some("More"));
+        });
+    }
+
+    #[test]
     fn concrete_host_attaches_window_key_controllers() {
         gtk::test_synced(|| {
             let graph = lower_graph(

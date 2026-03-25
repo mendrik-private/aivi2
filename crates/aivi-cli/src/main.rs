@@ -999,6 +999,7 @@ fn validate_run_widget_children(
                 ),
             },
         }),
+        aivi_gtk::GtkDefaultChildGroup::Ambiguous if child_count == 0 => {}
         aivi_gtk::GtkDefaultChildGroup::Ambiguous => blockers.push(RunValidationBlocker {
             span,
             message: format!(
@@ -3863,6 +3864,62 @@ val view =
     }
 
     #[test]
+    fn prepare_run_accepts_named_child_groups_for_paned_and_header_bar() {
+        let artifact = prepare_run_from_text(
+            "named-child-groups.aivi",
+            r#"
+val showButtons = False
+val view =
+    <Window title="Host">
+        <Paned orientation="Horizontal">
+            <Paned.start>
+                <Label text="Primary" />
+            </Paned.start>
+            <Paned.end>
+                <HeaderBar showTitleButtons={showButtons}>
+                    <HeaderBar.start>
+                        <Button label="Back" />
+                    </HeaderBar.start>
+                    <HeaderBar.titleWidget>
+                        <Label text="Inbox" />
+                    </HeaderBar.titleWidget>
+                    <HeaderBar.end>
+                        <Button label="More" />
+                    </HeaderBar.end>
+                </HeaderBar>
+            </Paned.end>
+        </Paned>
+    </Window>
+"#,
+            None,
+        )
+        .expect("named child groups should prepare successfully for run");
+
+        let groups = artifact
+            .bridge
+            .nodes()
+            .iter()
+            .filter_map(|node| match &node.kind {
+                GtkBridgeNodeKind::Group(group) => Some((
+                    group.widget.segments().last().text().to_owned(),
+                    group.descriptor.name.to_owned(),
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(groups.iter().any(|(widget, group)| widget == "Paned" && group == "start"));
+        assert!(groups.iter().any(|(widget, group)| widget == "Paned" && group == "end"));
+        assert!(groups.iter().any(|(widget, group)| widget == "HeaderBar" && group == "start"));
+        assert!(
+            groups
+                .iter()
+                .any(|(widget, group)| widget == "HeaderBar" && group == "titleWidget")
+        );
+        assert!(groups.iter().any(|(widget, group)| widget == "HeaderBar" && group == "end"));
+    }
+
+    #[test]
     fn prepare_run_rejects_non_window_root_widgets() {
         let error = prepare_run_from_text(
             "button-root.aivi",
@@ -3884,13 +3941,13 @@ val view =
             r#"
 val view =
     <Window title="Host">
-        <Paned />
+        <Notebook />
     </Window>
 "#,
             None,
         )
         .expect_err("widgets outside the schema catalog should be rejected before launch");
-        assert!(error.contains("does not support GTK widget `Paned`"));
+        assert!(error.contains("Notebook"));
     }
 
     #[test]
