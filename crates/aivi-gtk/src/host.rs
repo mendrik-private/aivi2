@@ -21,6 +21,20 @@ use crate::{
     StaticPropertyValue, lookup_widget_schema,
 };
 
+/// Assert that the calling code is running on the GTK main thread.
+///
+/// GTK4 requires all widget operations to be performed on the thread that
+/// initialised GTK.  Calling any GTK widget API from another thread produces
+/// undefined behaviour.  This function panics early with a clear diagnostic
+/// rather than producing a silent data race or a cryptic GLib assertion.
+fn assert_gtk_main_thread() {
+    assert!(
+        gtk::is_initialized_main_thread(),
+        "GTK widget operation called from a non-main thread. \
+         All GTK widget operations must be performed on the thread that initialised GTK."
+    );
+}
+
 pub trait GtkHostValue: Clone + 'static {
     fn unit() -> Self;
 
@@ -194,14 +208,17 @@ where
     }
 
     pub fn present_root_windows(&self) {
+        assert_gtk_main_thread();
         for mounted in self.widgets.values() {
             if mounted.schema.is_window_root() && mounted.widget.parent().is_none() {
-                let window = mounted
-                    .widget
-                    .clone()
-                    .downcast::<gtk::Window>()
-                    .expect("window handles should downcast cleanly");
-                window.present();
+                if let Ok(window) = mounted.widget.clone().downcast::<gtk::Window>() {
+                    window.present();
+                } else {
+                    eprintln!(
+                        "aivi-gtk: present_root_windows: widget with window schema could not be \
+                         downcast to gtk::Window; skipping (schema mismatch)"
+                    );
+                }
             }
         }
     }
@@ -397,42 +414,60 @@ where
                 widget
                     .clone()
                     .downcast::<gtk::HeaderBar>()
-                    .expect("header bar widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::HeaderBar",
+                    })?
                     .set_show_title_buttons(value);
             }
             GtkPropertySetter::Bool(GtkBoolPropertySetter::EntryEditable) => {
                 widget
                     .clone()
                     .downcast::<gtk::Entry>()
-                    .expect("entry widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Entry",
+                    })?
                     .set_editable(value);
             }
             GtkPropertySetter::Bool(GtkBoolPropertySetter::SwitchActive) => {
                 widget
                     .clone()
                     .downcast::<gtk::Switch>()
-                    .expect("switch widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Switch",
+                    })?
                     .set_active(value);
             }
             GtkPropertySetter::Bool(GtkBoolPropertySetter::CheckButtonActive) => {
                 widget
                     .clone()
                     .downcast::<gtk::CheckButton>()
-                    .expect("check button widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::CheckButton",
+                    })?
                     .set_active(value);
             }
             GtkPropertySetter::Bool(GtkBoolPropertySetter::ToggleButtonActive) => {
                 widget
                     .clone()
                     .downcast::<gtk::ToggleButton>()
-                    .expect("toggle button widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::ToggleButton",
+                    })?
                     .set_active(value);
             }
             GtkPropertySetter::Bool(GtkBoolPropertySetter::SpinnerSpinning) => {
                 let spinner = widget
                     .clone()
                     .downcast::<gtk::Spinner>()
-                    .expect("spinner widget should downcast");
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Spinner",
+                    })?;
                 if value {
                     spinner.start();
                 } else {
@@ -443,7 +478,10 @@ where
                 widget
                     .clone()
                     .downcast::<gtk::Revealer>()
-                    .expect("revealer widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Revealer",
+                    })?
                     .set_reveal_child(value);
             }
             _ => {
@@ -469,35 +507,50 @@ where
                 widget
                     .clone()
                     .downcast::<gtk::Window>()
-                    .expect("window widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Window",
+                    })?
                     .set_title(Some(value));
             }
             GtkPropertySetter::Text(GtkTextPropertySetter::FrameLabel) => {
                 widget
                     .clone()
                     .downcast::<gtk::Frame>()
-                    .expect("frame widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Frame",
+                    })?
                     .set_label(Some(value));
             }
             GtkPropertySetter::Text(GtkTextPropertySetter::LabelText) => {
                 widget
                     .clone()
                     .downcast::<gtk::Label>()
-                    .expect("label widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Label",
+                    })?
                     .set_text(value);
             }
             GtkPropertySetter::Text(GtkTextPropertySetter::LabelLabel) => {
                 widget
                     .clone()
                     .downcast::<gtk::Label>()
-                    .expect("label widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Label",
+                    })?
                     .set_label(value);
             }
             GtkPropertySetter::Text(GtkTextPropertySetter::ButtonLabel) => {
                 widget
                     .clone()
                     .downcast::<gtk::Button>()
-                    .expect("button widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Button",
+                    })?
                     .set_label(value);
             }
             GtkPropertySetter::Text(GtkTextPropertySetter::BoxOrientation) => {
@@ -507,7 +560,10 @@ where
                 widget
                     .clone()
                     .downcast::<gtk::Box>()
-                    .expect("box widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Box",
+                    })?
                     .set_orientation(orientation);
             }
             GtkPropertySetter::Text(GtkTextPropertySetter::SeparatorOrientation) => {
@@ -517,56 +573,80 @@ where
                 widget
                     .clone()
                     .downcast::<gtk::Separator>()
-                    .expect("separator widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Separator",
+                    })?
                     .set_orientation(orientation);
             }
             GtkPropertySetter::Text(GtkTextPropertySetter::EntryText) => {
                 widget
                     .clone()
                     .downcast::<gtk::Entry>()
-                    .expect("entry widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Entry",
+                    })?
                     .set_text(value);
             }
             GtkPropertySetter::Text(GtkTextPropertySetter::EntryPlaceholderText) => {
                 widget
                     .clone()
                     .downcast::<gtk::Entry>()
-                    .expect("entry widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Entry",
+                    })?
                     .set_placeholder_text(Some(value));
             }
             GtkPropertySetter::Text(GtkTextPropertySetter::CheckButtonLabel) => {
                 widget
                     .clone()
                     .downcast::<gtk::CheckButton>()
-                    .expect("check button widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::CheckButton",
+                    })?
                     .set_label(Some(value));
             }
             GtkPropertySetter::Text(GtkTextPropertySetter::ToggleButtonLabel) => {
                 widget
                     .clone()
                     .downcast::<gtk::ToggleButton>()
-                    .expect("toggle button widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::ToggleButton",
+                    })?
                     .set_label(value);
             }
             GtkPropertySetter::Text(GtkTextPropertySetter::ImageIconName) => {
                 widget
                     .clone()
                     .downcast::<gtk::Image>()
-                    .expect("image widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Image",
+                    })?
                     .set_icon_name(Some(value));
             }
             GtkPropertySetter::Text(GtkTextPropertySetter::ImageResourcePath) => {
                 widget
                     .clone()
                     .downcast::<gtk::Image>()
-                    .expect("image widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Image",
+                    })?
                     .set_resource(Some(value));
             }
             GtkPropertySetter::Text(GtkTextPropertySetter::ProgressBarText) => {
                 widget
                     .clone()
                     .downcast::<gtk::ProgressBar>()
-                    .expect("progress bar widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::ProgressBar",
+                    })?
                     .set_text(Some(value));
             }
             GtkPropertySetter::Text(GtkTextPropertySetter::RevealerTransitionType) => {
@@ -593,7 +673,10 @@ where
                 widget
                     .clone()
                     .downcast::<gtk::Revealer>()
-                    .expect("revealer widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Revealer",
+                    })?
                     .set_transition_type(transition);
             }
             GtkPropertySetter::TextOrI64(GtkTextOrI64PropertySetter::BoxSpacing) => {
@@ -603,7 +686,10 @@ where
                 widget
                     .clone()
                     .downcast::<gtk::Box>()
-                    .expect("box widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Box",
+                    })?
                     .set_spacing(spacing);
             }
             _ => {
@@ -632,7 +718,10 @@ where
                 widget
                     .clone()
                     .downcast::<gtk::Box>()
-                    .expect("box widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Box",
+                    })?
                     .set_spacing(spacing);
                 Ok(())
             }
@@ -643,7 +732,10 @@ where
                 widget
                     .clone()
                     .downcast::<gtk::Image>()
-                    .expect("image widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Image",
+                    })?
                     .set_pixel_size(size);
                 Ok(())
             }
@@ -654,7 +746,10 @@ where
                 widget
                     .clone()
                     .downcast::<gtk::Revealer>()
-                    .expect("revealer widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Revealer",
+                    })?
                     .set_transition_duration(duration);
                 Ok(())
             }
@@ -678,7 +773,10 @@ where
                 widget
                     .clone()
                     .downcast::<gtk::ProgressBar>()
-                    .expect("progress bar widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::ProgressBar",
+                    })?
                     .set_fraction(value.clamp(0.0, 1.0));
                 Ok(())
             }
@@ -713,54 +811,73 @@ where
         parent_widget: &gtk::Widget,
         route: GtkChildMountRoute,
         child: Option<&gtk::Widget>,
-    ) {
+    ) -> Result<(), GtkConcreteHostError> {
         match route {
             GtkChildMountRoute::WindowContent => {
                 parent_widget
                     .clone()
                     .downcast::<gtk::Window>()
-                    .expect("window widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "Window".into(),
+                        expected_type: "gtk::Window",
+                    })?
                     .set_child(child);
             }
             GtkChildMountRoute::HeaderBarTitleWidget => {
                 parent_widget
                     .clone()
                     .downcast::<gtk::HeaderBar>()
-                    .expect("header bar widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "HeaderBar".into(),
+                        expected_type: "gtk::HeaderBar",
+                    })?
                     .set_title_widget(child);
             }
             GtkChildMountRoute::ScrolledWindowContent => {
                 parent_widget
                     .clone()
                     .downcast::<gtk::ScrolledWindow>()
-                    .expect("scrolled window widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "ScrolledWindow".into(),
+                        expected_type: "gtk::ScrolledWindow",
+                    })?
                     .set_child(child);
             }
             GtkChildMountRoute::FrameChild => {
                 parent_widget
                     .clone()
                     .downcast::<gtk::Frame>()
-                    .expect("frame widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "Frame".into(),
+                        expected_type: "gtk::Frame",
+                    })?
                     .set_child(child);
             }
             GtkChildMountRoute::ViewportChild => {
                 parent_widget
                     .clone()
                     .downcast::<gtk::Viewport>()
-                    .expect("viewport widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "Viewport".into(),
+                        expected_type: "gtk::Viewport",
+                    })?
                     .set_child(child);
             }
             GtkChildMountRoute::RevealerChild => {
                 parent_widget
                     .clone()
                     .downcast::<gtk::Revealer>()
-                    .expect("revealer widget should downcast")
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "Revealer".into(),
+                        expected_type: "gtk::Revealer",
+                    })?
                     .set_child(child);
             }
             GtkChildMountRoute::BoxChildren => {
                 unreachable!("box children are handled by append/reorder APIs")
             }
         }
+        Ok(())
     }
 }
 
@@ -777,6 +894,7 @@ where
         _instance: &crate::GtkNodeInstance,
         widget: &NamePath,
     ) -> Result<Self::Widget, Self::Error> {
+        assert_gtk_main_thread();
         let handle = GtkConcreteWidget(self.next_widget);
         self.next_widget = self
             .next_widget
@@ -799,6 +917,7 @@ where
         widget: &Self::Widget,
         property: &StaticPropertyPlan,
     ) -> Result<(), Self::Error> {
+        assert_gtk_main_thread();
         let (schema, widget, _) = self.mounted_snapshot(widget)?;
         let descriptor = self.lookup_property(schema, property.name.text())?;
         match &property.value {
@@ -823,6 +942,7 @@ where
         binding: &RuntimeSetterBinding,
         value: &V,
     ) -> Result<(), Self::Error> {
+        assert_gtk_main_thread();
         let (schema, widget, _) = self.mounted_snapshot(widget)?;
         let descriptor = self.lookup_property(schema, binding.name.text())?;
         self.with_blocked_widget_events(&widget, || match descriptor.setter {
@@ -887,6 +1007,7 @@ where
         widget: &Self::Widget,
         route: &GtkEventRoute,
     ) -> Result<Self::EventHandle, Self::Error> {
+        assert_gtk_main_thread();
         let (schema, widget, _) = self.mounted_snapshot(widget)?;
         let handle = GtkConcreteEventHandle(self.next_event);
         self.next_event = self
@@ -902,11 +1023,23 @@ where
                 event: route.binding.name.text().to_owned().into_boxed_str(),
             }
         })?;
+        // NOTE: Signal handler IDs are stored in `MountedEvent` but are only
+        // disconnected when `disconnect_event` is explicitly called. If a widget
+        // is destroyed without going through `disconnect_event`, the handler ID
+        // becomes stale and can cause use-after-free or ghost callbacks if the
+        // handler closure captures live state (e.g. an Rc to the event queue).
+        //
+        // TODO: Track handler IDs alongside widget lifetimes and disconnect them
+        // automatically in `release_widget`, before the GTK object is dropped.
+        // Consider hooking into the widget's `destroy` signal as a safety net.
         let signal = match event.signal {
             GtkEventSignal::ButtonClicked => widget
                 .clone()
                 .downcast::<gtk::Button>()
-                .expect("button widget should downcast")
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::Button",
+                })?
                 .connect_clicked(move |_| {
                     queue.push(GtkQueuedEvent {
                         route: route_id,
@@ -919,7 +1052,10 @@ where
             GtkEventSignal::EntryChanged => widget
                 .clone()
                 .downcast::<gtk::Entry>()
-                .expect("entry widget should downcast")
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::Entry",
+                })?
                 .connect_changed(move |entry| {
                     let text = entry.text();
                     queue.push(GtkQueuedEvent {
@@ -933,7 +1069,10 @@ where
             GtkEventSignal::EntryActivated => widget
                 .clone()
                 .downcast::<gtk::Entry>()
-                .expect("entry widget should downcast")
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::Entry",
+                })?
                 .connect_activate(move |_| {
                     queue.push(GtkQueuedEvent {
                         route: route_id,
@@ -946,7 +1085,10 @@ where
             GtkEventSignal::SwitchToggled => widget
                 .clone()
                 .downcast::<gtk::Switch>()
-                .expect("switch widget should downcast")
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::Switch",
+                })?
                 .connect_active_notify(move |switch| {
                     queue.push(GtkQueuedEvent {
                         route: route_id,
@@ -959,7 +1101,10 @@ where
             GtkEventSignal::CheckButtonToggled => widget
                 .clone()
                 .downcast::<gtk::CheckButton>()
-                .expect("check button widget should downcast")
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::CheckButton",
+                })?
                 .connect_toggled(move |btn| {
                     queue.push(GtkQueuedEvent {
                         route: route_id,
@@ -972,7 +1117,10 @@ where
             GtkEventSignal::ToggleButtonToggled => widget
                 .clone()
                 .downcast::<gtk::ToggleButton>()
-                .expect("toggle button widget should downcast")
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::ToggleButton",
+                })?
                 .connect_toggled(move |btn| {
                     queue.push(GtkQueuedEvent {
                         route: route_id,
@@ -998,6 +1146,7 @@ where
         _widget: &Self::Widget,
         event: &Self::EventHandle,
     ) -> Result<(), Self::Error> {
+        assert_gtk_main_thread();
         let mounted = self.events.remove(&event.0).ok_or_else(|| {
             GtkConcreteHostError::UnknownEventHandle {
                 event: event.clone(),
@@ -1013,6 +1162,7 @@ where
         index: usize,
         children: &[Self::Widget],
     ) -> Result<(), Self::Error> {
+        assert_gtk_main_thread();
         let (schema, parent_widget, current_children) = self.mounted_snapshot(parent)?;
         if index > current_children.len() {
             return Err(GtkConcreteHostError::ChildIndexOutOfRange {
@@ -1047,14 +1197,17 @@ where
                         operation: "insert_children".into(),
                     }
                 })?;
-                self.set_single_child(&parent_widget, route, Some(child));
+                self.set_single_child(&parent_widget, route, Some(child))?;
                 next_children.splice(index..index, children.iter().cloned());
             }
             GtkChildMountRoute::BoxChildren => {
                 let box_widget = parent_widget
                     .clone()
                     .downcast::<gtk::Box>()
-                    .expect("box widget should downcast");
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Box",
+                    })?;
                 let mut insertion_index = index;
                 for (child_handle, child_widget) in children.iter().zip(child_widgets.iter()) {
                     let sibling = if insertion_index == 0 {
@@ -1077,6 +1230,7 @@ where
         index: usize,
         children: &[Self::Widget],
     ) -> Result<(), Self::Error> {
+        assert_gtk_main_thread();
         let (schema, parent_widget, current_children) = self.mounted_snapshot(parent)?;
         if index + children.len() > current_children.len() {
             return Err(GtkConcreteHostError::ChildIndexOutOfRange {
@@ -1102,14 +1256,17 @@ where
             | GtkChildMountRoute::FrameChild
             | GtkChildMountRoute::ViewportChild
             | GtkChildMountRoute::RevealerChild) => {
-                self.set_single_child(&parent_widget, route, None);
+                self.set_single_child(&parent_widget, route, None)?;
                 next_children.clear();
             }
             GtkChildMountRoute::BoxChildren => {
                 let box_widget = parent_widget
                     .clone()
                     .downcast::<gtk::Box>()
-                    .expect("box widget should downcast");
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Box",
+                    })?;
                 for child in &child_widgets {
                     box_widget.remove(child);
                 }
@@ -1127,6 +1284,7 @@ where
         to: usize,
         children: &[Self::Widget],
     ) -> Result<(), Self::Error> {
+        assert_gtk_main_thread();
         let (schema, parent_widget, current_children) = self.mounted_snapshot(parent)?;
         if from + count > current_children.len()
             || to > current_children.len().saturating_sub(count)
@@ -1147,7 +1305,10 @@ where
                 let box_widget = parent_widget
                     .clone()
                     .downcast::<gtk::Box>()
-                    .expect("box widget should downcast");
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Box",
+                    })?;
                 // Build the desired child order in a single linear pass:
                 // drain the moved slice then splice it at the target position.
                 // `Vec::splice` is O(n) in the children count; iterating over
@@ -1198,12 +1359,14 @@ where
         widget: &Self::Widget,
         visible: bool,
     ) -> Result<(), Self::Error> {
+        assert_gtk_main_thread();
         let (_, widget, _) = self.mounted_snapshot(widget)?;
         widget.set_visible(visible);
         Ok(())
     }
 
     fn release_widget(&mut self, widget: Self::Widget) -> Result<(), Self::Error> {
+        assert_gtk_main_thread();
         let mounted = self
             .widgets
             .remove(&widget.0)
@@ -1219,11 +1382,15 @@ where
             }
         }
         if mounted.schema.is_window_root() {
-            let window = mounted
-                .widget
-                .downcast::<gtk::Window>()
-                .expect("window schema should downcast to gtk::Window");
-            window.close();
+            match mounted.widget.downcast::<gtk::Window>() {
+                Ok(window) => window.close(),
+                Err(_) => {
+                    eprintln!(
+                        "aivi-gtk: release_widget: widget with window schema could not be \
+                         downcast to gtk::Window; window will not be closed (schema mismatch)"
+                    );
+                }
+            }
         }
         Ok(())
     }
@@ -1281,6 +1448,16 @@ pub enum GtkConcreteHostError {
         widget: Box<str>,
         property: Box<str>,
     },
+    /// A GTK widget could not be downcast to the expected concrete type.
+    ///
+    /// This indicates a schema-to-widget-kind mismatch: the widget was created
+    /// with a different concrete type than the property/event setter expected.
+    /// Rather than panicking, the operation is aborted and the error is
+    /// propagated so the caller can log or recover gracefully.
+    WidgetDowncastFailed {
+        widget: Box<str>,
+        expected_type: &'static str,
+    },
 }
 
 impl fmt::Display for GtkConcreteHostError {
@@ -1335,6 +1512,14 @@ impl fmt::Display for GtkConcreteHostError {
             Self::InterpolatedStaticText { widget, property } => write!(
                 f,
                 "GTK host cannot mount interpolated static text for property `{property}` on widget `{widget}`"
+            ),
+            Self::WidgetDowncastFailed {
+                widget,
+                expected_type,
+            } => write!(
+                f,
+                "GTK host widget `{widget}` could not be downcast to the expected type `{expected_type}`; \
+                 this indicates a schema-to-widget-kind mismatch"
             ),
         }
     }

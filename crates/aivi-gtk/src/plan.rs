@@ -37,6 +37,14 @@ pub enum StableNodeId {
     Control(ControlNodeId),
 }
 
+/// Maximum nesting depth for a widget plan.
+///
+/// Plans deeper than this limit are rejected by `WidgetPlan::validate` with a
+/// `PlanValidationError::PlanDepthExceeded` error.  The limit guards against
+/// pathological inputs (intentional or otherwise) that would cause the
+/// iterative plan traversal to consume unbounded stack or heap space.
+pub const MAX_PLAN_DEPTH: usize = 64;
+
 /// Full lowered widget/control graph rooted at one markup expression.
 ///
 /// Ownership model: the plan owns its node arena and refers back into HIR only through typed IDs.
