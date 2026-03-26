@@ -25,6 +25,12 @@ const HYDRATION_SETTLE_TIMEOUT: Duration = Duration::from_secs(2);
 
 type HostTask = Box<dyn FnOnce(&mut McpHostState) + Send + 'static>;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum JsonRpcTransport {
+    LineDelimited,
+    ContentLength,
+}
+
 pub(super) fn run_mcp(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
     let mut requested_path = None;
     let mut requested_view = None;
@@ -724,8 +730,11 @@ fn run_stdio_server(
     let stdout = io::stdout();
     let mut reader = BufReader::new(stdin.lock());
     let mut writer = stdout.lock();
+    let Some(transport) = detect_json_rpc_transport(&mut reader)? else {
+        return Ok(());
+    };
 
-    while let Some(message) = read_json_rpc_message(&mut reader)? {
+    while let Some(message) = read_json_rpc_message(&mut reader, transport)? {
         let request: JsonRpcRequest = serde_json::from_value(message)
             .map_err(|error| format!("failed to decode MCP JSON-RPC request: {error}"))?;
         let Some(id) = request.id.clone() else {
@@ -746,7 +755,7 @@ fn run_stdio_server(
                 }
             }),
         };
-        write_json_rpc_message(&mut writer, &response)?;
+        write_json_rpc_message(&mut writer, &response, transport)?;
     }
 
     controller.shutdown();
@@ -760,7 +769,12 @@ fn handle_json_rpc_request(
 ) -> Result<JsonValue, JsonRpcError> {
     match request.method.as_str() {
         "initialize" => Ok(json!({
-            "protocolVersion": MCP_PROTOCOL_VERSION,
+            "protocolVersion": request
+                .params
+                .as_ref()
+                .and_then(|params| params.get("protocolVersion"))
+                .and_then(JsonValue::as_str)
+                .unwrap_or(MCP_PROTOCOL_VERSION),
             "capabilities": { "tools": {} },
             "serverInfo": {
                 "name": "aivi",
@@ -1165,7 +1179,62 @@ fn tool_error(
     }))
 }
 
-fn read_json_rpc_message(reader: &mut impl BufRead) -> Result<Option<JsonValue>, String> {
+fn detect_json_rpc_transport(
+    reader: &mut impl BufRead,
+) -> Result<Option<JsonRpcTransport>, String> {
+    loop {
+        let buffer = reader
+            .fill_buf()
+            .map_err(|error| format!("failed to inspect MCP input framing: {error}"))?;
+        if buffer.is_empty() {
+            return Ok(None);
+        }
+        let mut index = 0;
+        while index < buffer.len() {
+            match buffer[index] {
+                b' ' | b'\t' | b'\r' | b'\n' => index += 1,
+                b'{' => return Ok(Some(JsonRpcTransport::LineDelimited)),
+                _ => return Ok(Some(JsonRpcTransport::ContentLength)),
+            }
+        }
+        reader.consume(index);
+    }
+}
+
+fn read_json_rpc_message(
+    reader: &mut impl BufRead,
+    transport: JsonRpcTransport,
+) -> Result<Option<JsonValue>, String> {
+    match transport {
+        JsonRpcTransport::LineDelimited => read_line_delimited_json_rpc_message(reader),
+        JsonRpcTransport::ContentLength => read_content_length_json_rpc_message(reader),
+    }
+}
+
+fn read_line_delimited_json_rpc_message(
+    reader: &mut impl BufRead,
+) -> Result<Option<JsonValue>, String> {
+    loop {
+        let mut line = String::new();
+        let read = reader
+            .read_line(&mut line)
+            .map_err(|error| format!("failed to read line-delimited MCP JSON: {error}"))?;
+        if read == 0 {
+            return Ok(None);
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        return serde_json::from_str(trimmed)
+            .map(Some)
+            .map_err(|error| format!("failed to parse line-delimited MCP JSON: {error}"));
+    }
+}
+
+fn read_content_length_json_rpc_message(
+    reader: &mut impl BufRead,
+) -> Result<Option<JsonValue>, String> {
     let mut content_length = None;
     loop {
         let mut line = String::new();
@@ -1175,16 +1244,13 @@ fn read_json_rpc_message(reader: &mut impl BufRead) -> Result<Option<JsonValue>,
         if read == 0 {
             return Ok(None);
         }
-        if line == "\r\n" {
+        if line == "\r\n" || line == "\n" {
             break;
         }
-        let Some((name, value)) = line.split_once(':') else {
-            return Err(format!("invalid MCP header line: {line:?}"));
-        };
-        if name.eq_ignore_ascii_case("content-length") {
+        let lower = line.to_ascii_lowercase();
+        if let Some(rest) = lower.strip_prefix("content-length:") {
             content_length = Some(
-                value
-                    .trim()
+                rest.trim()
                     .parse::<usize>()
                     .map_err(|error| format!("invalid MCP Content-Length header: {error}"))?,
             );
@@ -1201,14 +1267,30 @@ fn read_json_rpc_message(reader: &mut impl BufRead) -> Result<Option<JsonValue>,
         .map_err(|error| format!("failed to parse MCP JSON body: {error}"))
 }
 
-fn write_json_rpc_message(writer: &mut impl Write, value: &JsonValue) -> Result<(), String> {
+fn write_json_rpc_message(
+    writer: &mut impl Write,
+    value: &JsonValue,
+    transport: JsonRpcTransport,
+) -> Result<(), String> {
     let payload = serde_json::to_vec(value)
         .map_err(|error| format!("failed to encode MCP JSON body: {error}"))?;
-    write!(writer, "Content-Length: {}\r\n\r\n", payload.len())
-        .map_err(|error| format!("failed to write MCP header: {error}"))?;
-    writer
-        .write_all(&payload)
-        .map_err(|error| format!("failed to write MCP body: {error}"))?;
+    match transport {
+        JsonRpcTransport::LineDelimited => {
+            writer
+                .write_all(&payload)
+                .map_err(|error| format!("failed to write line-delimited MCP body: {error}"))?;
+            writer
+                .write_all(b"\n")
+                .map_err(|error| format!("failed to terminate line-delimited MCP body: {error}"))?;
+        }
+        JsonRpcTransport::ContentLength => {
+            write!(writer, "Content-Length: {}\r\n\r\n", payload.len())
+                .map_err(|error| format!("failed to write MCP header: {error}"))?;
+            writer
+                .write_all(&payload)
+                .map_err(|error| format!("failed to write MCP body: {error}"))?;
+        }
+    }
     writer
         .flush()
         .map_err(|error| format!("failed to flush MCP response: {error}"))
@@ -1938,9 +2020,10 @@ struct EventResult {
 #[cfg(test)]
 mod tests {
     use super::{
-        ConfiguredTarget, JsonRpcError, JsonRpcRequest, MCP_PROTOCOL_VERSION, McpHostController,
-        handle_json_rpc_request, parse_prefixed_u32, parse_prefixed_u64, read_json_rpc_message,
-        resolve_initial_entry_path, runtime_value_from_json, write_json_rpc_message,
+        ConfiguredTarget, JsonRpcError, JsonRpcRequest, JsonRpcTransport, MCP_PROTOCOL_VERSION,
+        McpHostController, detect_json_rpc_transport, handle_json_rpc_request, parse_prefixed_u32,
+        parse_prefixed_u64, read_json_rpc_message, resolve_initial_entry_path,
+        runtime_value_from_json, write_json_rpc_message,
     };
     use aivi_backend::RuntimeValue;
     use serde_json::{Value as JsonValue, json};
@@ -1991,11 +2074,44 @@ mod tests {
             "result": { "ok": true }
         });
         let mut buffer = Vec::new();
-        write_json_rpc_message(&mut buffer, &value).expect("message should encode");
-        let decoded = read_json_rpc_message(&mut BufReader::new(buffer.as_slice()))
-            .expect("message should decode")
-            .expect("reader should yield a message");
+        write_json_rpc_message(&mut buffer, &value, JsonRpcTransport::ContentLength)
+            .expect("message should encode");
+        let decoded = read_json_rpc_message(
+            &mut BufReader::new(buffer.as_slice()),
+            JsonRpcTransport::ContentLength,
+        )
+        .expect("message should decode")
+        .expect("reader should yield a message");
         assert_eq!(decoded, value);
+    }
+
+    #[test]
+    fn json_rpc_ndjson_round_trips_payloads() {
+        let value = json!({
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "initialize",
+            "params": { "protocolVersion": "2025-11-25" }
+        });
+        let mut buffer = Vec::new();
+        write_json_rpc_message(&mut buffer, &value, JsonRpcTransport::LineDelimited)
+            .expect("ndjson message should encode");
+        let decoded = read_json_rpc_message(
+            &mut BufReader::new(buffer.as_slice()),
+            JsonRpcTransport::LineDelimited,
+        )
+        .expect("ndjson message should decode")
+        .expect("reader should yield an ndjson message");
+        assert_eq!(decoded, value);
+    }
+
+    #[test]
+    fn detect_json_rpc_transport_prefers_ndjson_for_json_lines() {
+        let mut reader = BufReader::new(br#"{"jsonrpc":"2.0","method":"initialize"}\n"#.as_slice());
+        assert_eq!(
+            detect_json_rpc_transport(&mut reader).expect("transport detection should succeed"),
+            Some(JsonRpcTransport::LineDelimited)
+        );
     }
 
     #[test]
@@ -2070,6 +2186,28 @@ mod tests {
             launch_schema.get("path").is_some(),
             "launch_app should advertise an optional explicit path"
         );
+    }
+
+    #[test]
+    fn initialize_negotiates_client_protocol_version() {
+        let (task_tx, _task_rx) = sync_mpsc::channel();
+        let controller = McpHostController { task_tx };
+        let configured = ConfiguredTarget {
+            entry_path: Some(PathBuf::from("fixtures/snake/main.aivi")),
+            default_view: None,
+        };
+        let initialize = handle_json_rpc_request(
+            &controller,
+            &configured,
+            JsonRpcRequest {
+                jsonrpc: "2.0".to_owned(),
+                id: Some(JsonValue::from(4)),
+                method: "initialize".to_owned(),
+                params: Some(json!({ "protocolVersion": "2025-11-25" })),
+            },
+        )
+        .expect("initialize should succeed");
+        assert_eq!(initialize["protocolVersion"], json!("2025-11-25"));
     }
 
     #[test]
