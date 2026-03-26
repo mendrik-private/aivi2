@@ -4,7 +4,7 @@ layout: home
 hero:
   name: "AIVI"
   text: "Reactive GTK apps without callback soup"
-  tagline: A purely functional, GTK/libadwaita-first language built around pipe algebra, closed types, and source-backed signals.
+  tagline: "A purely functional, GTK/libadwaita-first language built around pipe algebra, closed types, and source-backed signals."
   actions:
     - theme: brand
       text: Language Tour
@@ -18,17 +18,17 @@ hero:
 
 features:
   - icon: 🔁
-    title: Signals, not mutable state
-    details: Values that change over time are explicit `Signal`s. You derive new signals; the scheduler handles propagation.
+    title: "Signals, not mutable state"
+    details: "Values that change over time are explicit `Signal`s. You derive new signals; the scheduler handles propagation."
   - icon: 🧩
-    title: Pipe algebra
-    details: `|>`, `?|>`, `||>`, `*|>`, `&|>`, `@|>`, and friends are the primary control-flow surface.
+    title: "Pipe algebra"
+    details: "`|>`, `?|>`, `||>`, `*|>`, `&|>`, `@|>`, and friends are the primary control-flow surface."
   - icon: 🎨
-    title: Native GTK markup
-    details: Tags such as `<Window>`, `<Box>`, `<Label>`, and `<each>` compile to native GTK and libadwaita structures.
+    title: "Native GTK markup"
+    details: "Tags such as `<Window>`, `<Box>`, `<Label>`, and `<each>` compile to native GTK and libadwaita structures."
   - icon: 🔒
-    title: Conservative surface
-    details: No null, no wildcard imports, no `if/else`, no loops, and no shipped anonymous-lambda syntax.
+    title: "Conservative surface"
+    details: "No null, no wildcard imports, no `if/else`, no loops, and no shipped anonymous-lambda syntax."
 ---
 
 ## A taste of AIVI
