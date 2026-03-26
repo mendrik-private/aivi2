@@ -1,88 +1,73 @@
 # List Rendering
 
-Rendering lists efficiently is one of the most common tasks in UI programming.
-AIVI provides two complementary tools: `<each>` for markup and `*\|>` for signal-level
-transformations.
+Render lists with `<each>`, keep keys stable, and do collection reshaping in pure data code before you hit markup.
 
-## Basic list rendering with each
+## Basic list rendering
 
-```text
-// TODO: add a verified AIVI example here
+```aivi
+type Item = {
+    id: Int,
+    title: Text
+}
+
+fun itemLabel:Text item:Item =>
+    item.title
+
+val items = [
+    { id: 1, title: "Alpha" },
+    { id: 2, title: "Beta" }
+]
+
+val listView =
+    <each of={items} as={item} key={item.id}>
+        <Label text={itemLabel item} />
+        <empty>
+            <Label text="No items" />
+        </empty>
+    </each>
 ```
 
-The `key` attribute is how the runtime tracks which widget corresponds to which item.
-When the list updates, the runtime:
-1. Reuses widgets for items with matching keys.
-2. Creates widgets for new keys.
-3. Destroys widgets for removed keys.
+## Reshape first, render second
 
-**Always provide a stable, unique `key`.**
+```aivi
+use aivi.list (
+    Partition
+    partition
+)
 
-## Transforming lists before rendering
+fun low:Bool value:Int =>
+    value < 3
 
-Use `*\|>` (map pipe) to transform each item in a list signal before passing it to `<each>`:
-
-```text
-// TODO: add a verified AIVI example here
+val split: (Partition Int) =
+    partition low [
+        1,
+        3,
+        2
+    ]
 ```
 
-`*\|>` applies `toTaskView` to every item in the list.
-The result is a new list of the same length with transformed items.
+## Fan out across carriers
 
-## Filtering with partition
+```aivi
+type User = {
+    active: Bool,
+    email: Text
+}
 
-To render only a subset of a list, derive helper functions with `aivi.list.partition` and then
-select the result you want:
+fun joinEmails:Text items:List Text =>
+    "joined"
 
-```text
-// TODO: add a verified AIVI example here
+val users: List User = [
+    {
+        active: True,
+        email: "ada@example.com"
+    }
+]
+
+val joinedEmails: Text =
+    users
+     *|> .email
+     <|* joinEmails
 ```
 
-`filteredTasks` recomputes whenever `tasks` or `currentFilter` changes.
-
-## Fan-out with *\|> and <\|*
-
-The fan-out pattern applies a transformation to every item in a list and then reduces the results
-with an explicit reducer. `*\|>` maps each item; `<\|*` immediately follows with the reducer:
-
-```text
-// TODO: add a verified AIVI example here
-```
-
-`*\|>` is pure mapping — it does not produce nested signals.
-`<\|*` is legal only immediately after `*\|>` and takes a reducer function.
-
-## Nested lists
-
-The snake game renders a board as a list of rows, each containing a list of cells.
-This is nested `<each>`:
-
-```text
-// TODO: add a verified AIVI example here
-```
-
-The outer `<each>` iterates rows; the inner `<each>` iterates cells within each row.
-Keys are scoped to their respective `<each>` block.
-
-## Dynamic keys
-
-The `key` attribute must be unique within a single `<each>` block but does not need to be
-globally unique. Row ids and cell ids can both be integers starting from `0` as long as
-they are unique within their own list.
-
-## Computing list statistics
-
-```text
-// TODO: add a verified AIVI example here
-```
-
-These are all derived signals — they update automatically when `tasks` changes.
-
-## Summary
-
-- `<each of={listSignal} as={item} key={item.id}>` renders a list.
-- `key` is required and must be unique within the block.
-- `*\|>` transforms every item in a list signal.
-- Use `partition` or a derived helper to select a filtered subset.
-- `*\|>` maps each item; `<\|*` immediately follows with a reducer function.
-- Nest `<each>` blocks for 2D data structures.
+The key rule is simple: transform collections in normal AIVI code, then keep markup focused on display.

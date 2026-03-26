@@ -352,6 +352,24 @@ impl RunHydrationWorker {
     fn drain_ready(&self) -> Vec<RunHydrationResponse> {
         self.response_rx.try_iter().collect()
     }
+
+    /// Like `drain_ready`, but waits briefly for a response that is expected to arrive very soon.
+    /// Used immediately after `request()` when the hydration work is fast (sub-millisecond), so
+    /// we can apply the result in the same `process_pending_work` cycle instead of waiting for
+    /// the next polling wakeup.
+    fn drain_ready_immediate(&self) -> Vec<RunHydrationResponse> {
+        match self
+            .response_rx
+            .recv_timeout(std::time::Duration::from_micros(500))
+        {
+            Ok(first) => {
+                let mut results = vec![first];
+                results.extend(self.response_rx.try_iter());
+                results
+            }
+            Err(_) => Vec::new(),
+        }
+    }
 }
 
 impl Drop for RunHydrationWorker {
@@ -434,9 +452,24 @@ impl RunHydrationCoordinator {
         &mut self,
         executor: &mut GtkRuntimeExecutor<GtkConcreteHost<RunHostValue>, RunHostValue>,
     ) -> Result<(), String> {
-        let latest = self
-            .worker
-            .drain_ready()
+        self.apply_from(self.worker.drain_ready(), executor)
+    }
+
+    /// Like `apply_ready`, but waits briefly for the response that was just requested.
+    /// This collapses the two-cycle request→apply pipeline into one for fast hydration.
+    fn apply_ready_immediate(
+        &mut self,
+        executor: &mut GtkRuntimeExecutor<GtkConcreteHost<RunHostValue>, RunHostValue>,
+    ) -> Result<(), String> {
+        self.apply_from(self.worker.drain_ready_immediate(), executor)
+    }
+
+    fn apply_from(
+        &mut self,
+        responses: Vec<RunHydrationResponse>,
+        executor: &mut GtkRuntimeExecutor<GtkConcreteHost<RunHostValue>, RunHostValue>,
+    ) -> Result<(), String> {
+        let latest = responses
             .into_iter()
             .filter(|response| self.revisions.should_apply(response.revision))
             .last();
@@ -523,6 +556,7 @@ impl RunSessionState {
         for event in queued_window_keys {
             self.driver
                 .dispatch_window_key_event(event.name.as_ref(), event.repeated);
+            self.driver.tick_now();
         }
         let failures = self.driver.drain_failures();
         if !failures.is_empty() {
@@ -534,12 +568,18 @@ impl RunSessionState {
             }
             return Err(rendered);
         }
-        if !self.driver.drain_outcomes().is_empty() {
+        let has_outcomes = !self.driver.drain_outcomes().is_empty();
+        if has_outcomes {
             let required_signal_globals = self.required_signal_globals.clone();
             self.hydration
                 .request_current(&self.driver, &required_signal_globals)?;
+            // Try to apply immediately: hydration is fast, so the background thread
+            // typically responds within microseconds, collapsing the two-cycle pipeline.
+            self.hydration.apply_ready_immediate(&mut self.executor)?;
+        } else {
+            // No new outcomes this cycle — apply any response that arrived since last time.
+            self.hydration.apply_ready(&mut self.executor)?;
         }
-        self.hydration.apply_ready(&mut self.executor)?;
         self.drain_main_context_requests();
         Ok(())
     }
@@ -741,7 +781,7 @@ pub(super) fn start_run_session_with_launch_config(
     {
         let weak_session = Rc::downgrade(&session);
         let schedule_state = schedule_state.clone();
-        glib::timeout_add_local(std::time::Duration::from_millis(10), move || {
+        glib::timeout_add_local(std::time::Duration::from_millis(1), move || {
             let Some(session) = weak_session.upgrade() else {
                 return glib::ControlFlow::Break;
             };
@@ -1258,6 +1298,37 @@ mod tests {
         assert!(
             head_x(&advanced_board) > initial_head_x,
             "the real run_main_loop path should keep advancing the snake while the GTK main loop runs"
+        );
+
+        harness.shutdown();
+    }
+
+    #[test]
+    fn process_pending_work_applies_queued_window_key_events_immediately() {
+        let path = repo_path("demos/snake.aivi");
+        let artifact = prepare_run_from_path(&path);
+        let direction_item = required_signal_item(&artifact, "dirLine");
+        let harness =
+            start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
+                .expect("snake demo should start a run session");
+        harness
+            .present_root_windows()
+            .expect("presenting the run-session window should release startup timers");
+        assert_eq!(text_signal_for(&harness, direction_item), "Right");
+
+        harness.with_access(|access| {
+            access
+                .executor_mut()
+                .host_mut()
+                .queue_window_key_event("ArrowUp", false);
+            access
+                .process_pending_work()
+                .expect("queued window key should process without waiting for another turn");
+        });
+        assert_eq!(
+            text_signal_for(&harness, direction_item),
+            "Up",
+            "queued window key events should update the direction signal in the same run-session work cycle"
         );
 
         harness.shutdown();

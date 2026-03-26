@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "Aivi": {
+      "command": "/home/mendrik/.cargo/bin/aivi",
+      "args": [
+        "mcp",
+        "--path",
+        "/home/mendrik/desk/mendrik/aivi2/demos/snake.aivi"
+      ]
+    }
+  }
+}

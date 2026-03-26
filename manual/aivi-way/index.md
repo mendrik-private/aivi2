@@ -1,71 +1,24 @@
 # The AIVI Way
 
-The Language Tour explained *what* AIVI's features are.
-This section explains *how to use them together* — the patterns, idioms, and mental models
-that experienced AIVI programmers reach for.
+The idiomatic shape of an AIVI program is:
 
-## The core pattern
-
-Every AIVI program follows the same shape:
-
-```aivi
-source events → signals → pure transformations → markup
-```
-
-1. **Sources** provide raw events: key presses, timer ticks, HTTP responses, button clicks.
-2. **Signals** accumulate and transform those events into current application state.
-3. **Pure functions** compute derived values from signal state.
-4. **Markup** binds derived signals to GTK widgets.
-
-The runtime wires all of this together. Your code is a pure description of the relationships.
-
-## Think in transformations, not mutations
-
-In most UI frameworks, you mutate state in response to events:
-
-```javascript
-// typical imperative approach (pseudo-code)
-button.on('click', () => {
-  this.count += 1
-  this.label.text = `Clicked ${this.count} times`
-})
-```
-
-In AIVI, you declare the relationships once:
+1. define domain data and helpers with `type`, `domain`, `fun`, and `val`
+2. bring in changing inputs with `@source` or explicit recurrence
+3. derive more `sig`s with pipes, `scan`, and applicative clusters
+4. render markup from the final data
 
 ```aivi
-// TODO: add a verified AIVI example here
+fun step:Int tick:Unit current:Int =>
+    current + 1
+
+@source timer.every 120 with {
+    immediate: True
+}
+sig tick: Signal Unit
+
+sig count: Signal Int =
+    tick
+     |> scan 0 step
 ```
 
-`labelText` is always `"Clicked {count} times"`. You do not update it. You declared it.
-
-## Model everything as signal transformations
-
-The rule of thumb: if a value can change, it is a signal. If it is derived from a signal,
-it is also a signal. If it is constant, it is a `val`.
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-## Keep functions pure
-
-AIVI functions (`fun`) cannot have side effects. This is a feature, not a limitation.
-
-- Functions are easy to test (no mocks, no setup).
-- Functions are easy to reason about (the output depends only on the inputs).
-- Functions can be reused across different signals.
-- The compiler can optimize them freely.
-
-All complexity lives in the signal graph, not inside functions.
-Functions just describe *how to transform* a value.
-
-## Sections in this chapter
-
-| Section | Pattern |
-|---|---|
-| [Async Data](/aivi-way/async-data) | `@source http.get` → `Ok`/`Err` pipe chains |
-| [Forms](/aivi-way/forms) | Per-field signals + `?\|>` gate + combined signal |
-| [State](/aivi-way/state) | Local `sig` + shared top-level signals |
-| [List Rendering](/aivi-way/list-rendering) | `<each>` + `*\|>` fan-out |
-| [Error Handling](/aivi-way/error-handling) | `Ok`/`Err` as values, not exceptions |
+The following chapters show concrete patterns for state, async data, errors, forms, and list rendering.

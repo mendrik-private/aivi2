@@ -1,137 +1,70 @@
 # Values and Types
 
-Every piece of data in AIVI has a type.
-Types in AIVI are **closed**: the compiler knows every possible shape a value of that type can have.
-There is no `any`, no `object`, no `null`.
+AIVI is explicit about declarations. `val` binds values, `type` defines closed types, and annotations use `:`.
 
-## `val` — a named constant
+## Basic values
 
 ```aivi
-// TODO: add a verified AIVI example here
+val answer = 42
+val title: Text = "Inbox"
+val ready: Bool = True
+
+val names: List Text = [
+    "Ada",
+    "Grace"
+]
 ```
 
-`val` declares an immutable, named value. There are no variables in AIVI — once declared,
-a value does not change. If something needs to change over time, that is a `sig` (covered in
-[Chapter 05](/tour/05-signals)).
+## Sum types
 
-You can annotate the type explicitly:
+Use closed constructors when the set of states matters.
 
 ```aivi
-// TODO: add a verified AIVI example here
+type Screen =
+  | Loading
+  | Ready Text
+  | Failed Text
+
+val current: Screen = Ready "Users"
 ```
 
-The compiler infers types when they are omitted, but annotations are welcome for documentation.
+## Records and constructor products
 
-## `type` — defining your own types
-
-AIVI has two flavours of `type`: **sum types** and **product types**.
-
-### Sum types (variants)
-
-A sum type lists all possible values (variants). If you have used TypeScript unions or Rust enums,
-this is the same idea — but exhaustive and closed.
+Records name their fields. Constructors carry positional payloads.
 
 ```aivi
-// TODO: add a verified AIVI example here
+use aivi.defaults (Option)
+
+type User = {
+    name: Text,
+    nickname: Option Text,
+    email: Option Text
+}
+
+type Vec2 = Vec2 Int Int
+
+val user: User = { name: "Ada" }
+val origin: Vec2 = Vec2 0 0
 ```
 
-Each variant is a constructor — a value of that type.
-You can write `Up` or `GameOver` directly; they are ordinary values.
+## Absence and failure are typed
 
-### Sum types with data
-
-Variants can carry data:
+There is no `null` or `undefined`. Model absence with `Option` and failures with `Result` or `Validation`.
 
 ```aivi
-// TODO: add a verified AIVI example here
+use aivi (
+    Err
+    None
+    Ok
+    Option
+    Result
+    Some
+)
+
+val maybeName: Option Text = Some "Ada"
+val missingName: Option Text = None
+val loaded: Result Text Int = Ok 2
+val failed: Result Text Int = Err "offline"
 ```
 
-`Option` and `Result` are **parametric types** — the type variables are filled in at use sites:
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-The type variable is always lowercase; type names and constructors are uppercase.
-
-### No null
-
-AIVI has no `null`, `nil`, or `undefined`. The absence of a value is always explicit:
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-Because you cannot ignore the `None` case (the compiler enforces it), null pointer bugs are
-impossible by construction.
-
-### Product types
-
-A product type groups multiple values into one shape. Use a constructor product for positional
-data and a record when fields are naturally named:
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-Create a value by calling the constructor or listing named fields:
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-Access named fields with dot projection:
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-`Point` is positional, so you usually unpack it with pattern matching (covered in
-[Chapter 04](/tour/04-pattern-matching)). `User` is a record, so dot projection works directly.
-
-Records are immutable — you cannot update a field in place. Instead, create a new record:
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-### Combining sum and product types
-
-Real programs combine both. Here is a snapshot from the Snake demo:
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-`Vec2` is a sum type with one variant that carries two `Int` values.
-`Snake` and `Game` are product types whose fields reference other types.
-
-## Built-in types
-
-| Type | Description | Example |
-|---|---|---|
-| `Int` | Signed integer | `42`, `-7` |
-| `Float` | Floating-point | `3.14` |
-| `Decimal` | Arbitrary-precision decimal | `3.14` |
-| `BigInt` | Arbitrary-precision integer | `999` |
-| `Bool` | `True` or `False` | `True` |
-| `Text` | UTF-8 string | `"hello"` |
-| `List A` | Homogeneous list | `[1, 2, 3]` |
-| `Option A` | Present (`Some A`) or absent (`None`) | `Some 42`, `None` |
-| `Result E A` | Success (`Ok A`) or failure (`Err E`) | `Ok 42`, `Err "oops"` |
-| `Validation E A` | Accumulating errors (`Valid A` or `Invalid E`) | `Valid 42` |
-| `Task E A` | Async computation that may fail | declared with `@source` |
-| `Signal T` | Time-varying value | `sig count : Signal Int` |
-
-`Bool` is a regular sum type under the hood: `type Bool = True | False`.
-The operators `and`, `or`, and `not` work on it.
-
-## Summary
-
-- `val` = named constant.
-- `type X = A | B` = sum type (pick one variant).
-- `type X = { field: T }` = product type (all fields together).
-- Type variables are lowercase; type names and constructors are uppercase.
-- No null — use `Option A`.
-
-[Next: Functions →](/tour/02-functions)
+Parametric types use normal application syntax, such as `Option Text` and `Result HttpError User`.

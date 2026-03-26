@@ -1,33 +1,36 @@
 # Language Tour
 
-This tour covers the AIVI language from first principles.
-It assumes you can read code in any mainstream language but does not assume functional programming experience.
+This tour covers the shipped AIVI surface in the same order most programs use it:
 
-## Reading guide
+1. values and types
+2. functions
+3. pipes
+4. pattern matching
+5. signals
+6. sources
+7. markup
+8. type classes
+9. domains
 
-Each chapter builds on the previous one. Read them in order on your first pass.
-
-| Chapter | What you learn | Key concept |
-|---|---|---|
-| [01 · Values & Types](/tour/01-values-types) | `val`, `type`, sum and product types | Everything has a type; no null |
-| [02 · Functions](/tour/02-functions) | `fun`, labeled parameters, calling conventions | Labeled params eliminate positional ambiguity |
-| [03 · Pipes](/tour/03-pipes) | `\|>`, projection shorthand, chaining | Data flows left-to-right |
-| [04 · Pattern Matching](/tour/04-pattern-matching) | `\|\|>`, exhaustiveness, nested patterns | Match shapes, not just values |
-| [05 · Signals](/tour/05-signals) | `sig`, `scan`, explicit recurrence with `@\|>...<\|@` | Time-varying values |
-| [06 · Sources](/tour/06-sources) | `@source`, bodyless input signals, lifecycle | Where values come from |
-| [07 · Markup](/tour/07-markup) | `<label>`, `<each>`, `<match>` | GTK widgets as AIVI expressions |
-| [08 · Type Classes](/tour/08-typeclasses) | `class`, `instance`, `Eq`, `Ord`, `Traversable`, HKT | Explicit capability constraints |
-| [09 · Domains](/tour/09-domains) | `domain`, `literal`, suffix syntax | Typed refinements of base types |
-
-## A complete program
-
-Before diving into the details, here is a small but complete AIVI program.
-The tour will dissect each piece.
+## A small complete program
 
 ```aivi
-// TODO: add a verified AIVI example here
+type Status = Idle | Busy
+
+fun statusLabel:Text status:Status =>
+    status
+     ||> Idle => "Idle"
+     ||> Busy => "Busy"
+
+val main =
+    <Window title="Milestone 1">
+        <Box spacing={12}>
+            <Label text="Frontend fixture corpus" />
+            <Label text={statusLabel Idle} />
+        </Box>
+    </Window>
+
+export (statusLabel, main)
 ```
 
-Do not worry if parts are unfamiliar — the tour explains everything step by step.
-
-[Start with Values & Types →](/tour/01-values-types)
+Read the chapters as a reference, not as speculation. If you come from Haskell, Elm, F#, or PureScript, keep one rule in mind: only rely on the syntax you see implemented here.

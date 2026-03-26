@@ -1,114 +1,71 @@
 # Markup
 
-AIVI markup is a tree of GTK widget declarations. It looks like JSX, but compiles to
-native GTK4/libadwaita widgets — no web rendering, no virtual DOM, no Electron.
+GTK and libadwaita UI trees are written directly in AIVI markup. Widget tags are PascalCase; control nodes are lower-case reserved tags.
 
-## Basic tags
+## Basic widgets
 
-```text
-// TODO: add a verified AIVI example here
+```aivi
+val hero =
+    <Window title="Milestone 1">
+        <Box spacing={12}>
+            <Label text="Frontend fixture corpus" />
+            <Button label="Refresh" />
+        </Box>
+    </Window>
 ```
 
-Tags are PascalCase GTK widget names. Attributes set widget properties.
-The current executable widget catalog ships `Window`, `Box`, `Label`, and `Button`: `Window`
-accepts one child, `Box` accepts a list of children, and `Label`/`Button` are leaf widgets.
-Self-closing tags (`<Label ... />`) have no children.
+Attribute expressions use `{...}`. Text attributes support interpolation like `"Hello {name}"`.
 
-The outer `<Window>` is the root widget. Every AIVI application has exactly one `export main`
-with a `<Window>` at the top.
+## Control nodes
 
-## String interpolation
+```aivi
+type Item = {
+    id: Int,
+    title: Text
+}
 
-Use `{expression}` inside a double-quoted string to embed a value:
+type Screen =
+  | Loading
+  | Ready (List Item)
+  | Failed Text
 
-```text
-// TODO: add a verified AIVI example here
+fun itemLabel:Text item:Item =>
+    item.title
+
+val header = "Users"
+
+val screen =
+    Ready [
+        { id: 1, title: "Alpha" },
+        { id: 2, title: "Beta" }
+    ]
+
+val screenView =
+    <fragment>
+        <Label text={header} />
+        <show when={True} keepMounted={True}>
+            <with value={screen} as={currentScreen}>
+                <match on={currentScreen}>
+                    <case pattern={Loading}>
+                        <Label text="Loading..." />
+                    </case>
+                    <case pattern={Ready items}>
+                        <each of={items} as={item} key={item.id}>
+                            <Label text={itemLabel item} />
+                            <empty>
+                                <Label text="No items" />
+                            </empty>
+                        </each>
+                    </case>
+                    <case pattern={Failed reason}>
+                        <Label text="Error {reason}" />
+                    </case>
+                </match>
+            </with>
+        </show>
+    </fragment>
 ```
 
-The interpolation works in both `val` strings and markup attribute strings.
+The shipped control nodes are `<fragment>`, `<each>`, `<empty>`, `<show>`, `<with>`, `<match>`, and `<case>`.
 
-## Binding signals to attributes
-
-When an attribute value is wrapped in `{...}` with a signal, the widget re-renders automatically
-when the signal changes:
-
-```text
-// TODO: add a verified AIVI example here
-```
-
-The `<Label>` text updates every time `labelText` changes — which happens whenever `count`
-changes. There is no explicit update call.
-
-## The each tag
-
-`<each>` renders a list of items. It requires a `key` attribute to help the runtime identify
-stable items across updates:
-
-```text
-// TODO: add a verified AIVI example here
-```
-
-- `of={users}` — the list signal to iterate.
-- `as={user}` — the name bound to each item inside the block.
-- `key={user.id}` — a stable unique identifier for each item.
-
-The `key` attribute is required. It allows the runtime to reuse widgets for unchanged items
-rather than rebuilding the whole list.
-
-## Nested each
-
-```text
-// TODO: add a verified AIVI example here
-```
-
-Each row is a horizontal `<Box>`, and each cell inside it is a `<Label>`.
-This is the exact structure in the Snake demo.
-
-## The match tag
-
-`<match>` and `<case>` are markup-level pattern matching. They render different widget trees
-based on a value:
-
-```text
-// TODO: add a verified AIVI example here
-```
-
-Like `||>`, `<match>` is exhaustive — all variants must be covered.
-
-## The show tag
-
-`<show>` renders its children only when a condition is true:
-
-```text
-// TODO: add a verified AIVI example here
-```
-
-When `isLoggedIn` is `False`, the `<Button>` is removed from the widget tree.
-
-## Orientation and spacing
-
-GTK `Box` is the main layout widget. `orientation` takes `Vertical` or `Horizontal`
-(both are AIVI values of type `Orientation`). `spacing` is an `Int` in pixels.
-
-```text
-// TODO: add a verified AIVI example here
-```
-
-## Attribute expressions
-
-Attribute values can be any AIVI expression:
-
-```text
-// TODO: add a verified AIVI example here
-```
-
-## Summary
-
-- Tags are GTK widget names in PascalCase.
-- `{signal}` binds an attribute to a live signal.
-- String interpolation: `"Hello {name}"`.
-- `<each of={list} as={item} key={item.id}>` iterates a list signal.
-- `<match on={signal}>` with `<case pattern=...>` arms for conditional rendering.
-- `<show when={boolSignal}>` for presence/absence toggling.
-
-[Next: Type Classes →](/tour/08-typeclasses)
+Event attributes exist at the markup boundary, but keep examples grounded: handlers target bodyless input signals, not arbitrary statements.

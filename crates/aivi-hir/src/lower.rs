@@ -5972,8 +5972,8 @@ mod tests {
             "milestone-2/valid/type-kinds/main.aivi",
             "milestone-2/valid/pipe-branch-and-join/main.aivi",
             "milestone-2/valid/pipe-fanout-carriers/main.aivi",
-            "milestone-2/valid/pipe-recurrence-suffix/main.aivi",
-            "milestone-2/valid/pipe-recurrence-nonsource-wakeup/main.aivi",
+            "milestone-2/valid/pipe-scan-signal-wakeup/main.aivi",
+            "milestone-2/valid/pipe-explicit-recurrence-wakeups/main.aivi",
             "milestone-1/valid/records/record_shorthand_and_elision.aivi",
             "milestone-1/valid/sources/source_declarations.aivi",
             "milestone-1/valid/strings/text_and_regex.aivi",
@@ -6790,11 +6790,11 @@ provider custom.feed
     }
 
     #[test]
-    fn resolved_validation_accepts_nonsource_recurrence_wakeup_fixture() {
-        let lowered = lower_fixture("milestone-2/valid/pipe-recurrence-nonsource-wakeup/main.aivi");
+    fn resolved_validation_accepts_explicit_recurrence_wakeup_fixture() {
+        let lowered = lower_fixture("milestone-2/valid/pipe-explicit-recurrence-wakeups/main.aivi");
         assert!(
             !lowered.has_errors(),
-            "non-source recurrence wakeup fixture should lower cleanly: {:?}",
+            "explicit recurrence wakeup fixture should lower cleanly: {:?}",
             lowered.diagnostics()
         );
         let report = lowered
@@ -6802,17 +6802,17 @@ provider custom.feed
             .validate(ValidationMode::RequireResolvedNames);
         assert!(
             report.is_ok(),
-            "non-source recurrence wakeup fixture should validate cleanly, got diagnostics: {:?}",
+            "explicit recurrence wakeup fixture should validate cleanly, got diagnostics: {:?}",
             report.diagnostics()
         );
     }
 
     #[test]
     fn lowers_recurrence_wakeup_decorators_into_typed_payloads() {
-        let lowered = lower_fixture("milestone-2/valid/pipe-recurrence-nonsource-wakeup/main.aivi");
+        let lowered = lower_fixture("milestone-2/valid/pipe-explicit-recurrence-wakeups/main.aivi");
         assert!(
             !lowered.has_errors(),
-            "non-source recurrence wakeup fixture should lower cleanly: {:?}",
+            "explicit recurrence wakeup fixture should lower cleanly: {:?}",
             lowered.diagnostics()
         );
 

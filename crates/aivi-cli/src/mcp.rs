@@ -315,6 +315,7 @@ impl McpHostState {
     ) -> Result<SourcePublishResult, String> {
         let source_id = parse_source_id(&args.source_id)?;
         let before = self.list_signals(ListSignalsArgs::default())?;
+        let started_at = Instant::now();
         let session = self.require_session()?;
         session.harness.with_access(|access| {
             let driver = access.driver();
@@ -351,6 +352,7 @@ impl McpHostState {
             source,
             changed_signals: diff_signals(&before, &after),
             session: self.session_status()?,
+            time_us: started_at.elapsed().as_micros() as u64,
         })
     }
 
@@ -383,6 +385,7 @@ impl McpHostState {
 
     fn emit_gtk_event(&mut self, args: EmitGtkEventArgs) -> Result<EventResult, String> {
         let before = self.list_signals(ListSignalsArgs::default())?;
+        let started_at = Instant::now();
         let widget =
             match args.event.as_str() {
                 "window_key" => None,
@@ -436,12 +439,14 @@ impl McpHostState {
             .harness
             .with_access(|access| access.process_pending_work())?;
         self.settle_session()?;
+        let elapsed_us = started_at.elapsed().as_micros() as u64;
         let after = self.list_signals(ListSignalsArgs::default())?;
         let gtk = self.snapshot_gtk_tree(SnapshotGtkArgs::default())?;
         Ok(EventResult {
             changed_signals: diff_signals(&before, &after),
             gtk,
             session: self.session_status()?,
+            time_us: elapsed_us,
         })
     }
 
@@ -944,11 +949,12 @@ fn handle_tool_call(
                 .call(move |host| host.publish_source_value(args))
                 .map_err(JsonRpcError::tool_failure)?;
             tool_success(
-                format!("Published a new value into {}", result.source.id),
+                format!("Published a new value into {} in {}µs", result.source.id, result.time_us),
                 json!({
                     "source": result.source,
                     "changedSignals": result.changed_signals,
                     "session": result.session,
+                    "timeUs": result.time_us,
                 }),
             )
         }
@@ -982,13 +988,15 @@ fn handle_tool_call(
                 .map_err(JsonRpcError::tool_failure)?;
             tool_success(
                 format!(
-                    "Applied the GTK event; {} signal(s) changed",
+                    "Applied the GTK event in {}µs; {} signal(s) changed",
+                    result.time_us,
                     result.changed_signals.len()
                 ),
                 json!({
                     "changedSignals": result.changed_signals,
                     "gtk": result.gtk,
                     "session": result.session,
+                    "timeUs": result.time_us,
                 }),
             )
         }
@@ -1092,7 +1100,7 @@ fn tool_definitions() -> Vec<JsonValue> {
         }),
         json!({
             "name": "publish_source_value",
-            "description": "Inject a decoded value into a source input. By default this enters manual mode first.",
+            "description": "Inject a decoded value into a source input. By default this enters manual mode first. Returns timeUs: elapsed microseconds from publish to hydration settle.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1132,7 +1140,7 @@ fn tool_definitions() -> Vec<JsonValue> {
         }),
         json!({
             "name": "emit_gtk_event",
-            "description": "Emulate a supported GTK interaction on a live widget and wait for hydration to settle.",
+            "description": "Emulate a supported GTK interaction on a live widget and wait for hydration to settle. Returns timeUs: elapsed microseconds from event dispatch to hydration settle.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1987,6 +1995,7 @@ struct SourcePublishResult {
     source: SourceSnapshot,
     changed_signals: Vec<SignalSnapshot>,
     session: SessionStatus,
+    time_us: u64,
 }
 
 #[derive(Clone, Serialize)]
@@ -2023,6 +2032,7 @@ struct EventResult {
     changed_signals: Vec<SignalSnapshot>,
     gtk: Vec<WidgetSnapshot>,
     session: SessionStatus,
+    time_us: u64,
 }
 
 #[cfg(test)]

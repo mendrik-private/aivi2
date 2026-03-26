@@ -231,6 +231,17 @@ where
         self.queued_window_keys.drain()
     }
 
+    pub fn queue_window_key_event(&mut self, name: &str, repeated: bool) {
+        GtkConcreteHost::<V>::assert_gtk_main_thread();
+        self.queued_window_keys.push(GtkQueuedWindowKeyEvent {
+            name: name.into(),
+            repeated,
+        });
+        if let Some(notifier) = &self.event_notifier {
+            notifier();
+        }
+    }
+
     pub fn present_root_windows(&self) {
         assert_gtk_main_thread();
         for mounted in self.widgets.values() {

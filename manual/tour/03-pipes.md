@@ -1,283 +1,155 @@
 # Pipes
 
-Pipes are the centrepiece of AIVI's surface syntax.
-The idea is borrowed from Unix: data flows from left to right through a sequence of transformations.
+Pipes are AIVI's primary control-flow surface. The value on the left becomes the current subject of the stage on the right.
 
-## The transform pipe `|>`
+## Transform, gate, branch, and pipe-call
 
-`|>` takes the value on its left and passes it as the first argument to the function on its right.
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-This is equivalent to `toString (double 42)`. Pipes let you read computation top-to-bottom
-instead of inside-out.
-
-Compare these two forms of the same computation:
+The current subject placeholder is `.`. `_` is for wildcard patterns, not pipe subjects.
 
 ```aivi
-// TODO: add a verified AIVI example here
+type User = {
+    active: Bool,
+    age: Int,
+    email: Text
+}
+
+type Shipping = { status: Text }
+
+type Order = {
+    shipping: Shipping
+}
+
+type Status =
+  | Paid
+  | Pending
+  | Failed Text
+
+fun maybeActiveUser:Option User user:User =>
+    user
+     ?|> (.active and .age > 18)
+
+fun statusLabel:Text status:Status =>
+    status
+     ||> Paid          => "paid"
+     ||> Pending       => "pending"
+     ||> Failed reason => "failed {reason}"
+
+fun startOrWait:Text ready:Bool =>
+    ready
+     T|> "start"
+     F|> "wait"
+
+fun observeShipping:Text shipping:Shipping =>
+    shipping
+     |> .status
+
+fun shippingStatus:Text order:Order =>
+    order
+     |> .shipping
+     | observeShipping
+     |> .status
 ```
 
-When you pass partial arguments before the piped value, `|>` inserts the left-hand value
-as the **last** argument:
+`|` performs pipe-call composition: it feeds the current subject into the named function on the right.
+
+## Fan-out and fan-in
+
+Use `*|>` to map across list-like carriers and `<|*` to join them back down.
 
 ```aivi
-// TODO: add a verified AIVI example here
+type User = {
+    active: Bool,
+    email: Text
+}
+
+fun joinEmails:Text items:List Text =>
+    "joined"
+
+val users: List User = [
+    {
+        active: True,
+        email: "ada@example.com"
+    }
+]
+
+val emails: List Text =
+    users
+     *|> .email
+
+val joinedEmails: Text =
+    users
+     *|> .email
+     <|* joinEmails
+
+sig liveUsers: Signal (List User) = [
+    {
+        active: True,
+        email: "ada@example.com"
+    }
+]
+
+sig liveEmails: Signal (List Text) =
+    liveUsers
+     *|> .email
+
+sig liveJoinedEmails: Signal Text =
+    liveUsers
+     *|> .email
+     <|* joinEmails
 ```
 
-## Projection shorthand
+## Applicative clusters
 
-A common pattern is projecting a field from a record:
+`&|>` gathers independent carriers so a final stage can apply a constructor or named function to all of them.
 
 ```aivi
-// TODO: add a verified AIVI example here
+type UserDraft =
+  | UserDraft Text Text Int
+
+type NamePair =
+  | NamePair Text Text
+
+sig nameText = "Ada"
+sig emailText = "ada@example.com"
+sig ageValue = 36
+sig firstName = "Ada"
+sig lastName = "Lovelace"
+
+sig validatedUser =
+  &|> nameText
+  &|> emailText
+  &|> ageValue
+  |> UserDraft
+
+sig namePair =
+  &|> firstName
+  &|> lastName
+  |> NamePair
 ```
 
-The `.field` syntax is a shorthand for `#r => r.field`.
-It composes naturally in pipes:
+## Explicit recurrence pipes
+
+`@|>` starts a recurrence, `?|>` guards it, and `<|@` advances it.
 
 ```aivi
-// TODO: add a verified AIVI example here
+domain Duration over Int
+    literal s: Int -> Duration
+
+type Cursor = { hasNext: Bool }
+
+fun keep:Cursor cursor:Cursor =>
+    cursor
+
+val initial: Cursor = {
+    hasNext: True
+}
+
+@recur.timer 1s
+sig cursor: Signal Cursor =
+    initial
+     @|> keep
+     ?|> .hasNext
+     <|@ keep
 ```
 
-## Pipe context memos
-
-Any pipe step can introduce a named binding that is available in **every subsequent stage**
-of the same pipe chain. There are two placements:
-
-**Before the expression** — names the incoming subject:
-
-```aivi
-[1 .. 10]
- *|> i i % 2    // name the incoming element 'i', fan out with i % 2
- ||> 0 => "even {i}"
- ||> _ => "odd {i}"
-```
-
-`#i` captures the element as it enters the step. The expression `i % 2` then computes
-the new value flowing forward. `i` remains accessible in all stages below.
-
-**After the expression** — names the result:
-
-```aivi
-uid
- |> fetchUser result
- T|> { user: Some .body, status: result.status }
- F|> { user: None,       status: "failed" }
-```
-
-`#result` captures the output of `fetchUser`. The `T|>` and `F|>` branches can then
-reference both the unwrapped value (via `.body` for the ambient projection) and
-`result.status` from the memo.
-
-### Ambient value and ambient projection
-
-Within a pipe step, `_` is the **ambient value** — the value currently flowing through.
-`.field` is **ambient projection** — shorthand for accessing a field on the ambient value.
-You cannot write `_.field`; write `.field` instead.
-
-## Chaining pipes
-
-Pipes chain arbitrarily. Each `|>` is one step in the computation:
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-## Why pipes instead of nested calls?
-
-Consider a computation with five steps. With nested calls, you must read inside-out:
-
-```aivi
-step5 (step4 (step3 (step2 (step1 input))))
-```
-
-With pipes:
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-The computation reads in execution order, top to bottom.
-Each step is on its own line. Inserting, removing, or reordering steps is straightforward.
-
-## The gate pipe `?|>`
-
-`?|>` passes the value only if a condition is true.
-If the condition is false, the value is **suppressed** — nothing flows downstream.
-Inside a `*|>` fan-out, suppression means the item is **dropped from the result list**.
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-`validInput` only has a value when `rawInput` is non-empty.
-This is useful for validation: downstream signals only fire when the gate is open.
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-## The truthy and falsy pipes `T|>` and `F|>`
-
-`T|>` and `F|>` are conditional path selectors. Given a `Bool` on the left, they pass
-a value (not the condition) depending on whether it is `True` or `False`:
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-`T|>` and `F|>` are usually used in pairs. They are the AIVI alternative to `if`/`else`:
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-If `isOpposite candidate current` is `True`, the result is `current`.
-Otherwise it is `candidate`.
-
-## `T|>` and `F|>` with ADTs
-
-`T|>` and `F|>` also work with `Option` and `Result`. The `T|>` branch receives the **inner
-value** unwrapped; the `F|>` branch receives the error or absence:
-
-```aivi
-opt
-  T|> "Hello {_}"      // same as: opt ||> Some x => "Hello {x}"
-  F|> "Goodbye"        // same as:     ||> None   => "Goodbye"
-```
-
-```aivi
-res
-  T|> doFun _          // same as: res ||> Ok  x => doFun x
-  F|> log _            //          res ||> Err e => log e
-```
-
-The `_` placeholder stands in for the unwrapped value on that branch.
-This is more compact than spelling out the full `||>` match when you only care about the
-success or failure path.
-
-On signals, `T|>` / `F|>` runs pointwise over the committed snapshot for the currently supported
-carrier slice: `Signal Bool`, `Signal (Option A)`, `Signal (Result E A)`, and
-`Signal (Validation E A)`. The branch result stays a signal. The gate pipe `?|>` on signals remains a
-separate scheduler-owned pipeline slice.
-
-## The map pipe `*|>`
-
-`*|>` applies a function to every element of a `List`, producing a new `List`:
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-It is the pipe equivalent of `map`. The `*` reads as "for each":
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-A `?|>` inside a `*|>` fan-out **skips the item** — it acts as a filter rather than a
-gate on a signal. Items for which the predicate is false are dropped from the result list:
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-This combines map and filter in a single pipeline without a separate `filter` call.
-
-## The fan-in pipe `<|*`
-
-`<|*` closes a `*|>` fan-out by collecting the results back into a single value using a
-reducer function. Together, `*|>` and `<|*` express a map–reduce in a straight pipeline:
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-The reducer receives the accumulated value and each element in turn.
-
-## The recur-start pipe `@|>`
-
-`@|>` begins a recurrent pipe suffix. The seed value sits on its left; the recurrence
-**start stage** sits on its right:
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-The seed is the accumulated state before any iterations run. Wakeups come from the attached
-`@source` / `@recur.*` decorator or other explicit recurrence wakeup, not from the expression on
-the right of `@|>`.
-
-For ordinary event-driven signal state, use `upstream |> scan seed step` instead. `@|>` is the
-explicit recurrence/cursor form, not the default way to fold source events.
-
-## The recur-step pipe `<|@`
-
-`<|@` adds a recurrence step stage. It receives the current accumulated state and returns the
-next state:
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-Guards (`?|>`) may appear between `@|>` and `<|@` to suppress a step entirely when a
-condition is false:
-
-```aivi
-initial
- @|> prepare
- ?|> .ready
- <|@ advance
-```
-
-## The apply pipe `&|>`
-
-`&|>` zips two signals together, applying a signal of functions to a signal of values
-pointwise. It is the signal equivalent of `<*>` in applicative functors:
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-Every time either signal updates, the result recomputes. This is how you combine multiple
-independent signals into one derived value without explicit `zip` calls.
-
-## Operator quick reference
-
-::: details Pipe operator quick reference
-
-| Operator | Name | Reads as |
-|---|---|---|
-| `\|>` | transform | "then apply" |
-| `?\|>` | gate | "only if" |
-| `\|\|>` | case | "match against" — see next chapter |
-| `*\|>` | map | "for each item in list, apply" |
-| `&\|>` | apply | "zip-apply across signals" |
-| `T\|>` | truthy branch | "if true, use" |
-| `F\|>` | falsy branch | "if false, use" |
-| `@\|>` | recur enter | "enter loop driven by" |
-| `<\|@` | recur step | "on each wakeup, advance with" |
-| `<\|*` | fan-in | "join the collection from *\|> with a reducer" |
-
-:::
-
-## Summary
-
-- `|>` passes a value through a function, left-to-right.
-- `.field` is shorthand for `#r => r.field`.
-- Pipes chain: each `|>` is one step.
-- `?|>` gates: suppresses the value when false — drops the item inside `*|>`.
-- `T|>` and `F|>` select branches based on a `Bool`, `Option`, or `Result`; the inner value is unwrapped automatically.
-- `#name` before an expression names the incoming subject; `#name` after names the result — both are available in all stages below.
-- `_` is the ambient value; `.field` is ambient projection (not `_.field`).
-- `*|>` maps a function over every element of a list.
-- `<|*` collects a `*|>` fan-out back into a single value with a reducer.
-- `seed @|> start` begins an explicit recurrent suffix; wakeups come from the attached `@source` or `@recur.*` decorator.
-- `<|@` adds one or more step stages; `?|>` between `@|>` and `<|@` skips the iteration when false.
-- `upstream |> scan seed step` is the usual signal-state fold over source or event updates.
-- `&|>` zips a signal of functions with a signal of values pointwise.
-
-[Next: Pattern Matching →](/tour/04-pattern-matching)
+There is no `#name` pipe memo syntax in the shipped language. Keep pipe stages to named functions, constructors, literals, projections, and the documented pipe operators.

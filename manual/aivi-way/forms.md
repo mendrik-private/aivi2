@@ -1,82 +1,54 @@
 # Forms
 
-Forms are a classic source of complexity in UI code: each field has its own state, validation
-must run at the right time, and the submit button should only be active when everything is valid.
-
-In AIVI, each field is a signal, validation is a gate (`?|>`), and the combined form state
-is a derived signal.
-
-## One signal per field
-
-Declare a signal for each form field, driven by an `@source input.changed` event:
+Keep form state in signals, then derive validated shapes from those signals. The current manual stays conservative and shows the data flow; event wiring belongs at the markup boundary.
 
 ```aivi
-// TODO: add a verified AIVI example here
+type Registration =
+  | Registration Text Text Int
+
+fun nonEmpty:Bool value:Text =>
+    value != ""
+
+fun positive:Bool value:Int =>
+    value > 0
+
+fun allReady:Bool nameReady:Bool emailReady:Bool ageReady:Bool =>
+    nameReady and emailReady and ageReady
+
+sig nameText = "Ada"
+sig emailText = "ada@example.com"
+sig ageValue = 36
+
+sig draft: Signal Registration =
+  &|> nameText
+  &|> emailText
+  &|> ageValue
+  |> Registration
+
+sig nameReady: Signal Bool =
+    nameText
+     |> nonEmpty
+
+sig emailReady: Signal Bool =
+    emailText
+     |> nonEmpty
+
+sig ageReady: Signal Bool =
+    ageValue
+     |> positive
+
+sig canSubmit: Signal Bool =
+  &|> nameReady
+  &|> emailReady
+  &|> ageReady
+  |> allReady
 ```
 
-Each source fires whenever the user types in the corresponding input widget.
+A good form flow is:
 
-## Validating with ?|>
+1. source or event signals own raw field values
+2. pure helpers validate or normalize them
+3. applicative clusters build the checked aggregate
+4. markup reads the derived signals
 
-`?|>` is the gate pipe: the value passes through only when the predicate is `True`.
-A validated signal only has a value when the field is valid.
-
-The gate predicate must be a named function — not a lambda:
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-`validName` only has a value when `rawName` is non-empty.
-`validEmail` only has a value when `rawEmail` is non-empty and the email field is present.
-
-When a signal has no value (because a gate suppressed it), downstream signals depending on it
-also have no value.
-
-## Combining fields into a form signal
-
-`&|>` is the apply pipe — it combines independent signals under one applicative carrier.
-`Signal` is applicative, not monadic: `&|>` does **not** bind the unwrapped value into a lambda.
-Instead, stack the signals with `&|>` and then apply a pure constructor function:
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-`validForm` only has a value when all three fields are valid simultaneously.
-The constructor receives the unwrapped `Text` values from each validated signal in declaration order.
-
-## Enabling the submit button
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-`canSubmit` is `True` when both fields are valid. Bind it to the button's `sensitive` attribute
-so the button enables itself the moment both fields pass validation.
-
-## Wiring submission
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-`submitClicked` is an input signal. In markup, connect it with `onClick={submitClicked}` on the
-submit button.
-
-## Full example
-
-```aivi
-// TODO: add a verified AIVI example here
-```
-
-The `sensitive` attribute on `<Button>` controls whether it is clickable.
-It is bound to `canSubmit`, so the button enables itself the moment both fields are valid.
-
-## Summary
-
-- One `sig` per field, driven by `@source input.changed`.
-- Gate predicates must be named functions; use `?|> isNonEmpty`, not inline lambdas.
-- Combine validated fields with `&|>` and a pure constructor — `Signal` is applicative, not monadic.
-- `canSubmit` is a derived boolean signal built with `&|>` and a combining function.
-- Bind `sensitive={canSubmit}` to the submit button.
+Avoid inventing `input.changed`-style providers unless they are documented in `aivi.md` and exercised by the shipped runtime surface.

@@ -1313,6 +1313,14 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
             });
         }
 
+        // If no upstream dependency changed this tick and the signal already has a committed
+        // value, the output of this pure function is guaranteed to be the same — skip the
+        // (potentially expensive) kernel re-evaluation.
+        let any_updated = (0..expected_inputs).any(|i| inputs.updated(i));
+        if !any_updated && self.committed_signals.contains_key(&binding.backend_item) {
+            return Ok(DerivedSignalUpdate::Unchanged);
+        }
+
         let mut globals = self.committed_signals.clone();
         globals.remove(&binding.backend_item);
         for (index, dependency) in binding.dependency_items.iter().copied().enumerate() {

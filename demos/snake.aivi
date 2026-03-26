@@ -66,11 +66,9 @@ val boardSize:BoardSize = {
     height: 20
 }
 
-val boardColumnIndices:(List Int) = [0..23]
-
-val boardRowIndices:(List Int) = [0..19]
-
-val maxLength:Int = 6
+val boardColumnIndices = [0..23]
+val boardRowIndices = [0..19]
+val maxLength = 50
 
 val initialGame:Game = {
     snake: [

@@ -3734,7 +3734,7 @@ val view =
     fn check_accepts_milestone_two_valid_fixtures() {
         for path in [
             "milestone-2/valid/source-decorator-signals/main.aivi",
-            "milestone-2/valid/pipe-recurrence-nonsource-wakeup/main.aivi",
+            "milestone-2/valid/pipe-explicit-recurrence-wakeups/main.aivi",
         ] {
             let result = check_file(&fixture(path)).expect("check should run");
             assert_eq!(result, ExitCode::SUCCESS, "expected {path} to pass");

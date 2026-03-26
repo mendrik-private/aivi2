@@ -1083,11 +1083,11 @@ mod tests {
     }
 
     #[test]
-    fn elaborates_nonsource_recurrences_into_scheduler_node_plans() {
-        let lowered = lower_fixture("milestone-2/valid/pipe-recurrence-nonsource-wakeup/main.aivi");
+    fn elaborates_explicit_recurrences_into_scheduler_node_plans() {
+        let lowered = lower_fixture("milestone-2/valid/pipe-explicit-recurrence-wakeups/main.aivi");
         assert!(
             !lowered.has_errors(),
-            "non-source recurrence fixture should lower cleanly: {:?}",
+            "explicit recurrence fixture should lower cleanly: {:?}",
             lowered.diagnostics()
         );
 
@@ -1159,7 +1159,7 @@ mod tests {
 
     #[test]
     fn elaborates_scan_signal_wakeups() {
-        let lowered = lower_fixture("milestone-2/valid/pipe-recurrence-suffix/main.aivi");
+        let lowered = lower_fixture("milestone-2/valid/pipe-scan-signal-wakeup/main.aivi");
         assert!(
             !lowered.has_errors(),
             "timer scan fixture should lower cleanly: {:?}",
