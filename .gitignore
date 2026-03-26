@@ -27,3 +27,5 @@ npm-debug.log*
 
 # WASM build artefacts (future playground)
 manual/public/wasm/
+**/*.vsix
+tooling/packages/vscode-aivi/vscode-aivi-0.1.0.vsix

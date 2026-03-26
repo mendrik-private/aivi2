@@ -57,23 +57,23 @@ type BoardTextState = {
 }
 
 val boardSize:BoardSize = {
-    width: 12,
-    height: 10
+    width: 24,
+    height: 20
 }
 
-val boardColumnIndices:(List Int) = [0..11]
+val boardColumnIndices:(List Int) = [0..23]
 
-val boardRowIndices:(List Int) = [0..9]
+val boardRowIndices:(List Int) = [0..19]
 
 val maxLength:Int = 6
 
 val initialGame:Game = {
     snake: [
-        Pixel 6 5,
-        Pixel 5 5,
-        Pixel 4 5
+        Pixel 12 10,
+        Pixel 11 10,
+        Pixel 10 10
     ],
-    food: Pixel 10 1,
+    food: Pixel 20 2,
     score: 0,
     status: Running,
     seed: 2463534242

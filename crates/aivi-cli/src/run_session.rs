@@ -83,6 +83,7 @@ struct RunSessionState {
     executor: GtkRuntimeExecutor<GtkConcreteHost<RunHostValue>, RunHostValue>,
     driver: GlibLinkedRuntimeDriver,
     hydration: RunHydrationCoordinator,
+    required_signal_globals: BTreeMap<BackendItemId, Box<str>>,
     main_context_requests: MainContextRequestQueue<RunSessionState>,
     main_loop: glib::MainLoop,
     lifecycle: RunSessionLifecycle,
@@ -249,7 +250,10 @@ impl<'a> RunSessionAccess<'a> {
     }
 
     pub(super) fn request_current_hydration(&mut self) -> Result<(), String> {
-        self.session.hydration.request_current(&self.session.driver)
+        let required_signal_globals = self.session.required_signal_globals.clone();
+        self.session
+            .hydration
+            .request_current(&self.session.driver, &required_signal_globals)
     }
 
     pub(super) fn quit(&mut self) {
@@ -383,10 +387,17 @@ impl RunHydrationCoordinator {
         self.revisions.latest_applied()
     }
 
-    fn request_current(&mut self, driver: &GlibLinkedRuntimeDriver) -> Result<(), String> {
+    fn request_current(
+        &mut self,
+        driver: &GlibLinkedRuntimeDriver,
+        required_signal_globals: &BTreeMap<BackendItemId, Box<str>>,
+    ) -> Result<(), String> {
         let globals = driver
             .current_signal_globals()
             .map_err(|error| format!("{error}"))?;
+        if !run_hydration_globals_ready(required_signal_globals, &globals) {
+            return Ok(());
+        }
         self.request(globals)
     }
 
@@ -507,7 +518,9 @@ impl RunSessionState {
             return Err(rendered);
         }
         if !self.driver.drain_outcomes().is_empty() {
-            self.hydration.request_current(&self.driver)?;
+            let required_signal_globals = self.required_signal_globals.clone();
+            self.hydration
+                .request_current(&self.driver, &required_signal_globals)?;
         }
         self.hydration.apply_ready(&mut self.executor)?;
         self.drain_main_context_requests();
@@ -593,6 +606,7 @@ pub(super) fn start_run_session_with_launch_config(
         module,
         bridge,
         hydration_inputs,
+        required_signal_globals,
         runtime_assembly,
         core,
         backend,
@@ -654,6 +668,7 @@ pub(super) fn start_run_session_with_launch_config(
             }),
             session_notifier,
         ),
+        required_signal_globals,
         main_context_requests,
         main_loop: main_loop.clone(),
         lifecycle: RunSessionLifecycle::new(),
@@ -690,9 +705,10 @@ pub(super) fn start_run_session_with_launch_config(
         })?;
         if session.hydration.latest_requested().is_none() {
             let driver = session.driver.clone();
+            let required_signal_globals = session.required_signal_globals.clone();
             session
                 .hydration
-                .request_current(&driver)
+                .request_current(&driver, &required_signal_globals)
                 .map_err(|error| {
                     format!("failed to start run view `{}`: {error}", session.view_name)
                 })?;
