@@ -14,6 +14,7 @@ pub mod gate;
 pub mod kind;
 pub mod recurrence;
 pub mod source_contracts;
+pub mod walker;
 
 pub use decode::{
     DecodeDomainRule, DecodeExtraFieldPolicy, DecodeFieldPlan, DecodeFieldRequirement, DecodeMode,
@@ -40,6 +41,7 @@ pub use recurrence::{
     RecurrenceWakeupEvidence, RecurrenceWakeupKind, RecurrenceWakeupPlan, RecurrenceWakeupPlanner,
     SourceRecurrenceWakeupContext, builtin_source_option_wakeup_cause,
 };
+pub use walker::StructuralWalker;
 pub use source_contracts::{
     BuiltinSourceProvider, SourceCancellationPolicy, SourceContract, SourceContractIntrinsicWakeup,
     SourceContractType, SourceLifecycleContract, SourceNominalType, SourceOptionContract,

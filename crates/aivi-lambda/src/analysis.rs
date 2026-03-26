@@ -6,6 +6,7 @@ use aivi_core::{
     expr::{ExprKind, PatternKind, PipeStageKind, ProjectionBase, Reference, TextSegment},
 };
 use aivi_hir::BindingId;
+use aivi_typing::StructuralWalker;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CapturedBinding {
@@ -34,9 +35,9 @@ pub(crate) fn capture_free_bindings(
     let mut captures = BTreeMap::<BindingId, CapturedBinding>::new();
     let mut root_scope = BTreeSet::new();
     root_scope.extend(initial_locals.iter().copied());
-    let mut work = vec![(root, root_scope)];
+    let mut walker = StructuralWalker::<_, ()>::new((root, root_scope));
 
-    while let Some((expr_id, scope)) = work.pop() {
+    while let Some((expr_id, scope)) = walker.next_frame() {
         let expr = &core.exprs()[expr_id];
         match &expr.kind {
             ExprKind::AmbientSubject
@@ -92,45 +93,45 @@ pub(crate) fn capture_free_bindings(
                     }
                 }
             }
-            ExprKind::OptionSome { payload } => work.push((*payload, scope)),
+            ExprKind::OptionSome { payload } => walker.push_frame((*payload, scope)),
             ExprKind::Text(text) => {
                 for segment in text.segments.iter().rev() {
                     if let TextSegment::Interpolation { expr, .. } = segment {
-                        work.push((*expr, scope.clone()));
+                        walker.push_frame((*expr, scope.clone()));
                     }
                 }
             }
             ExprKind::Tuple(elements) | ExprKind::List(elements) | ExprKind::Set(elements) => {
                 for child in elements.iter().rev() {
-                    work.push((*child, scope.clone()));
+                    walker.push_frame((*child, scope.clone()));
                 }
             }
             ExprKind::Map(entries) => {
                 for entry in entries.iter().rev() {
-                    work.push((entry.value, scope.clone()));
-                    work.push((entry.key, scope.clone()));
+                    walker.push_frame((entry.value, scope.clone()));
+                    walker.push_frame((entry.key, scope.clone()));
                 }
             }
             ExprKind::Record(fields) => {
                 for field in fields.iter().rev() {
-                    work.push((field.value, scope.clone()));
+                    walker.push_frame((field.value, scope.clone()));
                 }
             }
             ExprKind::Projection { base, .. } => {
                 if let ProjectionBase::Expr(base) = base {
-                    work.push((*base, scope));
+                    walker.push_frame((*base, scope));
                 }
             }
             ExprKind::Apply { callee, arguments } => {
                 for argument in arguments.iter().rev() {
-                    work.push((*argument, scope.clone()));
+                    walker.push_frame((*argument, scope.clone()));
                 }
-                work.push((*callee, scope));
+                walker.push_frame((*callee, scope));
             }
-            ExprKind::Unary { expr, .. } => work.push((*expr, scope)),
+            ExprKind::Unary { expr, .. } => walker.push_frame((*expr, scope)),
             ExprKind::Binary { left, right, .. } => {
-                work.push((*right, scope.clone()));
-                work.push((*left, scope));
+                walker.push_frame((*right, scope.clone()));
+                walker.push_frame((*left, scope));
             }
             ExprKind::Pipe(pipe) => {
                 for stage in pipe.stages.iter().rev() {
@@ -139,21 +140,21 @@ pub(crate) fn capture_free_bindings(
                         | PipeStageKind::Tap { expr }
                         | PipeStageKind::Gate {
                             predicate: expr, ..
-                        } => work.push((*expr, scope.clone())),
+                        } => walker.push_frame((*expr, scope.clone())),
                         PipeStageKind::Case { arms } => {
                             for arm in arms.iter().rev() {
                                 let mut arm_scope = scope.clone();
                                 extend_scope_with_pattern(&mut arm_scope, &arm.pattern);
-                                work.push((arm.body, arm_scope));
+                                walker.push_frame((arm.body, arm_scope));
                             }
                         }
                         PipeStageKind::TruthyFalsy(pair) => {
-                            work.push((pair.falsy.body, scope.clone()));
-                            work.push((pair.truthy.body, scope.clone()));
+                            walker.push_frame((pair.falsy.body, scope.clone()));
+                            walker.push_frame((pair.truthy.body, scope.clone()));
                         }
                     }
                 }
-                work.push((pipe.head, scope));
+                walker.push_frame((pipe.head, scope));
             }
         }
     }

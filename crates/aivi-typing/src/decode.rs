@@ -258,16 +258,15 @@ impl DecodePlanner {
         subject: TypeId,
         mode: DecodeMode,
     ) -> Result<DecodeSchema, DecodePlanningError> {
-        let mut frames = vec![Frame::Enter(subject)];
+        let mut walker = crate::walker::StructuralWalker::new(Frame::Enter(subject));
         let mut path = Vec::new();
-        let mut assembled = Vec::new();
         let mut steps = Vec::new();
 
-        while let Some(frame) = frames.pop() {
+        while let Some(frame) = walker.next_frame() {
             match frame {
                 Frame::Enter(ty) => match types.node(ty) {
                     TypeNode::Primitive(scalar) => {
-                        assembled.push(push_step(
+                        walker.push_assembled(push_step(
                             &mut steps,
                             DecodeStep::IntrinsicScalar {
                                 ty,
@@ -286,13 +285,13 @@ impl DecodePlanner {
                         });
                     }
                     TypeNode::Tuple(elements) => {
-                        frames.push(Frame::ExitTuple {
+                        walker.push_frame(Frame::ExitTuple {
                             ty,
                             arity: elements.len(),
                         });
                         for (index, element) in elements.iter().copied().enumerate().rev() {
                             schedule_child(
-                                &mut frames,
+                                &mut walker,
                                 element,
                                 DecodePathSegment::TupleElement(index),
                             );
@@ -306,7 +305,7 @@ impl DecodePlanner {
                                 kind: DecodePlanningErrorKind::OpenRecord { ty },
                             });
                         }
-                        frames.push(Frame::ExitRecord {
+                        walker.push_frame(Frame::ExitRecord {
                             ty,
                             fields: record
                                 .fields()
@@ -320,7 +319,7 @@ impl DecodePlanner {
                         });
                         for field in record.fields().iter().rev() {
                             schedule_child(
-                                &mut frames,
+                                &mut walker,
                                 field.ty(),
                                 DecodePathSegment::RecordField(field.name().clone()),
                             );
@@ -334,7 +333,7 @@ impl DecodePlanner {
                                 kind: DecodePlanningErrorKind::OpenSum { ty },
                             });
                         }
-                        frames.push(Frame::ExitSum {
+                        walker.push_frame(Frame::ExitSum {
                             ty,
                             variants: sum
                                 .variants()
@@ -349,7 +348,7 @@ impl DecodePlanner {
                         for variant in sum.variants().iter().rev() {
                             if let Some(payload) = variant.payload() {
                                 schedule_child(
-                                    &mut frames,
+                                    &mut walker,
                                     payload,
                                     DecodePathSegment::SumVariantPayload(variant.name().clone()),
                                 );
@@ -357,33 +356,33 @@ impl DecodePlanner {
                         }
                     }
                     TypeNode::Domain(domain) => {
-                        frames.push(Frame::ExitDomain {
+                        walker.push_frame(Frame::ExitDomain {
                             ty,
                             rule: DecodeDomainRule::ExplicitSurface,
                         });
                         schedule_child(
-                            &mut frames,
+                            &mut walker,
                             domain.carrier(),
                             DecodePathSegment::DomainCarrier,
                         );
                     }
                     TypeNode::List(element) => {
-                        frames.push(Frame::ExitList { ty });
-                        schedule_child(&mut frames, *element, DecodePathSegment::ListElement);
+                        walker.push_frame(Frame::ExitList { ty });
+                        schedule_child(&mut walker, *element, DecodePathSegment::ListElement);
                     }
                     TypeNode::Option(element) => {
-                        frames.push(Frame::ExitOption { ty });
-                        schedule_child(&mut frames, *element, DecodePathSegment::OptionValue);
+                        walker.push_frame(Frame::ExitOption { ty });
+                        schedule_child(&mut walker, *element, DecodePathSegment::OptionValue);
                     }
                     TypeNode::Result { error, value } => {
-                        frames.push(Frame::ExitResult { ty });
-                        schedule_child(&mut frames, *value, DecodePathSegment::ResultValue);
-                        schedule_child(&mut frames, *error, DecodePathSegment::ResultError);
+                        walker.push_frame(Frame::ExitResult { ty });
+                        schedule_child(&mut walker, *value, DecodePathSegment::ResultValue);
+                        schedule_child(&mut walker, *error, DecodePathSegment::ResultError);
                     }
                     TypeNode::Validation { error, value } => {
-                        frames.push(Frame::ExitValidation { ty });
-                        schedule_child(&mut frames, *value, DecodePathSegment::ValidationValue);
-                        schedule_child(&mut frames, *error, DecodePathSegment::ValidationError);
+                        walker.push_frame(Frame::ExitValidation { ty });
+                        schedule_child(&mut walker, *value, DecodePathSegment::ValidationValue);
+                        schedule_child(&mut walker, *error, DecodePathSegment::ValidationError);
                     }
                 },
                 Frame::PushPath(segment) => path.push(segment),
@@ -391,15 +390,15 @@ impl DecodePlanner {
                     path.pop().expect("unbalanced decode-planning path frame");
                 }
                 Frame::ExitTuple { ty, arity } => {
-                    let elements = take_tail(&mut assembled, arity);
-                    assembled.push(push_step(&mut steps, DecodeStep::Tuple { ty, elements }));
+                    let elements = walker.take_tail(arity);
+                    walker.push_assembled(push_step(&mut steps, DecodeStep::Tuple { ty, elements }));
                 }
                 Frame::ExitRecord {
                     ty,
                     fields,
                     extra_fields,
                 } => {
-                    let schemas = take_tail(&mut assembled, fields.len());
+                    let schemas = walker.take_tail(fields.len());
                     let fields = fields
                         .into_iter()
                         .zip(schemas)
@@ -409,7 +408,7 @@ impl DecodePlanner {
                             schema,
                         })
                         .collect();
-                    assembled.push(push_step(
+                    walker.push_assembled(push_step(
                         &mut steps,
                         DecodeStep::Record {
                             ty,
@@ -427,7 +426,7 @@ impl DecodePlanner {
                         .iter()
                         .filter(|variant| variant.has_payload)
                         .count();
-                    let mut payloads = take_tail(&mut assembled, payload_count).into_iter();
+                    let mut payloads = walker.take_tail(payload_count).into_iter();
                     let variants = variants
                         .into_iter()
                         .map(|variant| DecodeVariantPlan {
@@ -439,7 +438,7 @@ impl DecodePlanner {
                             }),
                         })
                         .collect();
-                    assembled.push(push_step(
+                    walker.push_assembled(push_step(
                         &mut steps,
                         DecodeStep::Sum {
                             ty,
@@ -449,34 +448,35 @@ impl DecodePlanner {
                     ));
                 }
                 Frame::ExitDomain { ty, rule } => {
-                    let carrier = pop_one(&mut assembled);
-                    assembled.push(push_step(
+                    let carrier = walker.pop_one();
+                    walker.push_assembled(push_step(
                         &mut steps,
                         DecodeStep::Domain { ty, carrier, rule },
                     ));
                 }
                 Frame::ExitList { ty } => {
-                    let element = pop_one(&mut assembled);
-                    assembled.push(push_step(&mut steps, DecodeStep::List { ty, element }));
+                    let element = walker.pop_one();
+                    walker.push_assembled(push_step(&mut steps, DecodeStep::List { ty, element }));
                 }
                 Frame::ExitOption { ty } => {
-                    let element = pop_one(&mut assembled);
-                    assembled.push(push_step(&mut steps, DecodeStep::Option { ty, element }));
+                    let element = walker.pop_one();
+                    walker
+                        .push_assembled(push_step(&mut steps, DecodeStep::Option { ty, element }));
                 }
                 Frame::ExitResult { ty } => {
-                    let mut parts = take_tail(&mut assembled, 2).into_iter();
+                    let mut parts = walker.take_tail(2).into_iter();
                     let error = parts.next().expect("missing result error schema");
                     let value = parts.next().expect("missing result value schema");
-                    assembled.push(push_step(
+                    walker.push_assembled(push_step(
                         &mut steps,
                         DecodeStep::Result { ty, error, value },
                     ));
                 }
                 Frame::ExitValidation { ty } => {
-                    let mut parts = take_tail(&mut assembled, 2).into_iter();
+                    let mut parts = walker.take_tail(2).into_iter();
                     let error = parts.next().expect("missing validation error schema");
                     let value = parts.next().expect("missing validation value schema");
-                    assembled.push(push_step(
+                    walker.push_assembled(push_step(
                         &mut steps,
                         DecodeStep::Validation { ty, error, value },
                     ));
@@ -484,8 +484,7 @@ impl DecodePlanner {
             }
         }
 
-        let root = pop_one(&mut assembled);
-        debug_assert!(assembled.is_empty());
+        let root = walker.finish_one();
 
         Ok(DecodeSchema {
             subject,
@@ -545,28 +544,20 @@ struct PendingVariant {
     has_payload: bool,
 }
 
-fn schedule_child(frames: &mut Vec<Frame>, child: TypeId, path: DecodePathSegment) {
-    frames.push(Frame::PopPath);
-    frames.push(Frame::Enter(child));
-    frames.push(Frame::PushPath(path));
+fn schedule_child(
+    walker: &mut crate::walker::StructuralWalker<Frame, DecodePlanId>,
+    child: TypeId,
+    path: DecodePathSegment,
+) {
+    walker.push_frame(Frame::PopPath);
+    walker.push_frame(Frame::Enter(child));
+    walker.push_frame(Frame::PushPath(path));
 }
 
 fn push_step(steps: &mut Vec<DecodeStep>, step: DecodeStep) -> DecodePlanId {
     let id = DecodePlanId::from_index(steps.len());
     steps.push(step);
     id
-}
-
-fn take_tail<T>(items: &mut Vec<T>, count: usize) -> Vec<T> {
-    let split_at = items
-        .len()
-        .checked_sub(count)
-        .expect("decode planner requested more child schemas than available");
-    items.split_off(split_at)
-}
-
-fn pop_one<T>(items: &mut Vec<T>) -> T {
-    items.pop().expect("missing decode planner child schema")
 }
 
 #[cfg(test)]

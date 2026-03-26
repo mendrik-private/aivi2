@@ -71,16 +71,56 @@ impl ValidationReport {
     pub fn is_ok(&self) -> bool {
         self.diagnostics.is_empty()
     }
+
+    pub fn extend(&mut self, other: ValidationReport) {
+        self.diagnostics.extend(other.diagnostics);
+    }
+}
+
+/// Validates structural integrity: roots, imports, decorators, types, patterns,
+/// expressions, markup/control nodes, clusters, and items.
+pub fn validate_structure(module: &Module, mode: ValidationMode) -> ValidationReport {
+    let mut v = Validator { module, mode, diagnostics: Vec::new() };
+    v.validate_roots();
+    v.validate_type_parameters();
+    v.validate_imports();
+    v.validate_decorators();
+    v.validate_types();
+    v.validate_patterns();
+    v.validate_exprs();
+    v.validate_markup_nodes();
+    v.validate_control_nodes();
+    v.validate_clusters();
+    v.validate_items();
+    ValidationReport::new(v.diagnostics)
+}
+
+/// Validates binding uniqueness and signal cycle freedom.
+pub fn validate_bindings(module: &Module, mode: ValidationMode) -> ValidationReport {
+    let mut v = Validator { module, mode, diagnostics: Vec::new() };
+    v.validate_bindings();
+    v.validate_signal_cycles();
+    ValidationReport::new(v.diagnostics)
+}
+
+/// Validates the type system: kinds, instances, source contracts, expression
+/// types, constructor arity, and pipe semantics.
+pub fn validate_types(module: &Module, mode: ValidationMode) -> ValidationReport {
+    let mut v = Validator { module, mode, diagnostics: Vec::new() };
+    v.validate_type_kinds();
+    v.validate_instance_items();
+    v.validate_source_contract_types();
+    v.validate_expression_types();
+    v.validate_constructor_arity();
+    v.validate_pipe_semantics();
+    ValidationReport::new(v.diagnostics)
 }
 
 pub fn validate_module(module: &Module, mode: ValidationMode) -> ValidationReport {
-    let mut validator = Validator {
-        module,
-        mode,
-        diagnostics: Vec::new(),
-    };
-    validator.run();
-    ValidationReport::new(validator.diagnostics)
+    let mut report = validate_structure(module, mode);
+    report.extend(validate_bindings(module, mode));
+    report.extend(validate_types(module, mode));
+    report
 }
 
 struct Validator<'a> {
@@ -93,27 +133,6 @@ const REGEX_LITERAL_PREFIX_LEN: usize = 3;
 const REGEX_NEST_LIMIT: u32 = 256;
 
 impl Validator<'_> {
-    fn run(&mut self) {
-        self.validate_roots();
-        self.validate_bindings();
-        self.validate_type_parameters();
-        self.validate_imports();
-        self.validate_decorators();
-        self.validate_types();
-        self.validate_patterns();
-        self.validate_exprs();
-        self.validate_markup_nodes();
-        self.validate_control_nodes();
-        self.validate_clusters();
-        self.validate_items();
-        self.validate_signal_cycles();
-        self.validate_type_kinds();
-        self.validate_instance_items();
-        self.validate_source_contract_types();
-        self.validate_expression_types();
-        self.validate_constructor_arity();
-        self.validate_pipe_semantics();
-    }
 
     fn validate_roots(&mut self) {
         for item in &self.module.root_items {

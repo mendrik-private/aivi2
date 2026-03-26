@@ -34,6 +34,42 @@ impl fmt::Display for ArenaOverflow {
 
 impl Error for ArenaOverflow {}
 
+/// Allocate a value into a typed-core [`Arena`], or push an error via a local `arena_overflow`
+/// helper and return early from the enclosing function.
+///
+/// # Requirements
+///
+/// A function named `arena_overflow(family: &'static str, overflow: ArenaOverflow) -> E` must be
+/// in scope at the call site, where `E` is the element type of `$errors`.
+///
+/// # Variants
+///
+/// ```ignore
+/// // Returns `()` on overflow.
+/// alloc_or_diag!(arena, value, "family", errors);
+///
+/// // Returns `None` on overflow (for Option-returning functions).
+/// alloc_or_diag!(arena, value, "family", errors, return None);
+///
+/// // Propagates with `?` on overflow (for Result-returning functions).
+/// alloc_or_diag!(arena, value, "family", errors, return Err(...));
+/// ```
+#[macro_export]
+macro_rules! alloc_or_diag {
+    ($arena:expr, $value:expr, $family:literal, $errors:expr) => {
+        $crate::alloc_or_diag!($arena, $value, $family, $errors, return)
+    };
+    ($arena:expr, $value:expr, $family:literal, $errors:expr, $on_overflow:expr) => {{
+        match ($arena).alloc($value) {
+            ::std::result::Result::Ok(id) => id,
+            ::std::result::Result::Err(overflow) => {
+                $errors.push(arena_overflow($family, overflow));
+                $on_overflow
+            }
+        }
+    }};
+}
+
 /// Compact typed arena with deterministic, index-stable ids owned by one typed-core module.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Arena<Id, T> {

@@ -1,8 +1,8 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use aivi_base::{Diagnostic, DiagnosticCode, Severity, SourceSpan};
 use aivi_syntax as syn;
-use aivi_typing::{Kind, SourceOptionWakeupCause};
+use aivi_typing::Kind;
 
 use crate::{
     ApplicativeCluster, ApplicativeSpineHead, AtLeastTwo, BigIntLiteral, BinaryOperator, Binding,
@@ -19,7 +19,7 @@ use crate::{
     Pattern, PatternId, PatternKind, PipeExpr, PipeStage, PipeStageKind, ProjectionBase,
     RecordExpr, RecordExprField, RecordFieldSurface, RecordPatternField, RecurrenceWakeupDecorator,
     RecurrenceWakeupDecoratorKind, RegexLiteral, ResolutionState, ShowControl, SignalItem,
-    SourceDecorator, SourceLifecycleDependencies, SourceMetadata, SourceProviderContractItem,
+    SourceDecorator, SourceProviderContractItem,
     SourceProviderRef, SuffixedIntegerLiteral, TermReference, TermResolution, TextFragment,
     TextInterpolation, TextLiteral, TextSegment, TypeField, TypeId, TypeItem, TypeItemBody,
     TypeKind, TypeNode, TypeParameter, TypeParameterId, TypeReference, TypeResolution, TypeVariant,
@@ -58,6 +58,40 @@ impl LoweringResult {
     }
 }
 
+/// Lowers a syntax module to HIR, leaving all name references as
+/// [`ResolutionState::Unresolved`]. Import bindings from `use` declarations are
+/// resolved via `resolver` (needed to detect cycles and populate metadata for
+/// imported bindings), but term/type/export references inside item bodies are
+/// not resolved. Call [`resolve_imports`] on the result to fill those in.
+pub fn lower_structure(
+    module: &syn::Module,
+    resolver: Option<&dyn crate::resolver::ImportResolver>,
+) -> LoweringResult {
+    let null_resolver = crate::resolver::NullImportResolver;
+    let mut lowerer = Lowerer::new(module.file, resolver.unwrap_or(&null_resolver));
+    for item in &module.items {
+        lowerer.lower_item(item);
+    }
+    lowerer.lower_ambient_prelude();
+    LoweringResult::new(lowerer.module, lowerer.diagnostics)
+}
+
+/// Resolves all [`ResolutionState::Unresolved`] name references in a
+/// structurally-lowered HIR module produced by [`lower_structure`].
+///
+/// This pass builds the module-level name namespaces, resolves every term,
+/// type, and export reference, and validates cluster normalisation. It does
+/// not call any external import resolver — import-binding resolution is
+/// already complete after [`lower_structure`].
+pub fn resolve_imports(module: Module) -> LoweringResult {
+    let null_resolver = crate::resolver::NullImportResolver;
+    let mut lowerer = Lowerer::from_module(module, &null_resolver);
+    let namespaces = lowerer.build_namespaces();
+    lowerer.resolve_module(&namespaces);
+    lowerer.validate_cluster_normalization();
+    LoweringResult::new(lowerer.module, lowerer.diagnostics)
+}
+
 pub fn lower_module(module: &syn::Module) -> LoweringResult {
     lower_module_with_resolver(module, None)
 }
@@ -75,7 +109,7 @@ pub fn lower_module_with_resolver(
     let namespaces = lowerer.build_namespaces();
     lowerer.resolve_module(&namespaces);
     lowerer.validate_cluster_normalization();
-    lowerer.populate_signal_metadata(&namespaces);
+    crate::signal_metadata_elaboration::populate_signal_metadata(&mut lowerer.module);
     LoweringResult::new(lowerer.module, lowerer.diagnostics)
 }
 
@@ -234,15 +268,6 @@ struct Lowerer<'a> {
 }
 
 #[derive(Clone, Copy)]
-enum DependencyWork {
-    Expr(ExprId),
-    Pattern(PatternId),
-    Markup(MarkupNodeId),
-    Control(ControlNodeId),
-    Cluster(crate::ClusterId),
-}
-
-#[derive(Clone, Copy)]
 enum AmbientProjectionWork {
     Expr {
         expr: ExprId,
@@ -313,6 +338,14 @@ impl<'a> Lowerer<'a> {
     fn new(file: aivi_base::FileId, resolver: &'a dyn crate::resolver::ImportResolver) -> Self {
         Self {
             module: Module::new(file),
+            diagnostics: Vec::new(),
+            resolver,
+        }
+    }
+
+    fn from_module(module: Module, resolver: &'a dyn crate::resolver::ImportResolver) -> Self {
+        Self {
+            module,
             diagnostics: Vec::new(),
             resolver,
         }
@@ -4060,423 +4093,6 @@ impl<'a> Lowerer<'a> {
             .expect("resolved item id should still exist") = resolved;
     }
 
-    /// Computes and stores signal dependency graphs and source decorator metadata for every
-    /// `sig` item in the module.
-    ///
-    /// # Phase-conflation note
-    ///
-    /// This function performs semantic analysis (dependency resolution and source metadata
-    /// extraction) inside what is structurally a *lowering* pass. Signal metadata analysis
-    /// really belongs in a dedicated semantic-analysis phase that runs after name resolution
-    /// and before HIR validation, not as a sub-step of the lowering loop.
-    ///
-    /// The current placement couples two distinct concerns: syntactic lowering (building the
-    /// HIR from the parse tree) and semantic analysis (determining what each signal depends on
-    /// and how it is sourced). This makes the lowering phase harder to reason about and prevents
-    /// incremental re-analysis of just the metadata when, e.g., only a decorator argument changes.
-    ///
-    /// TODO: Extract `populate_signal_metadata` (and `compute_signal_metadata`) into a separate
-    /// `analyze_signal_metadata` pass that runs as an explicit stage between name resolution and
-    /// HIR validation.
-    fn populate_signal_metadata(&mut self, namespaces: &Namespaces) {
-        let item_ids = self
-            .module
-            .items()
-            .iter()
-            .map(|(item_id, _)| item_id)
-            .collect::<Vec<_>>();
-        for item_id in item_ids {
-            let (signal_dependencies, source_metadata) = match &self.module.items()[item_id] {
-                Item::Signal(item) => self.compute_signal_metadata(item, namespaces),
-                _ => continue,
-            };
-            let Some(Item::Signal(item)) = self.module.arenas.items.get_mut(item_id) else {
-                continue;
-            };
-            item.signal_dependencies = signal_dependencies;
-            item.source_metadata = source_metadata;
-        }
-    }
-
-    fn compute_signal_metadata(
-        &self,
-        item: &SignalItem,
-        namespaces: &Namespaces,
-    ) -> (Vec<ItemId>, Option<SourceMetadata>) {
-        let source = item.header.decorators.iter().find_map(|decorator_id| {
-            let decorator = &self.module.decorators()[*decorator_id];
-            match &decorator.payload {
-                DecoratorPayload::Source(source) => Some(source),
-                _ => None,
-            }
-        });
-        let mut work = Vec::new();
-        if let Some(body) = item.body {
-            work.push(DependencyWork::Expr(body));
-        }
-        let source_dependencies = source.map(|source| {
-            let mut roots = source
-                .arguments
-                .iter()
-                .copied()
-                .map(DependencyWork::Expr)
-                .collect::<Vec<_>>();
-            if let Some(options) = source.options {
-                roots.push(DependencyWork::Expr(options));
-            }
-            self.collect_signal_dependencies(roots)
-        });
-        if let Some(source) = source {
-            work.extend(source.arguments.iter().copied().map(DependencyWork::Expr));
-            if let Some(options) = source.options {
-                work.push(DependencyWork::Expr(options));
-            }
-        }
-        let signal_dependencies = self.collect_signal_dependencies(work);
-        let source_metadata = source.map(|source| {
-            let source_dependencies = source_dependencies.unwrap_or_default();
-            let provider = SourceProviderRef::from_path(source.provider.as_ref());
-            SourceMetadata {
-                custom_contract: self.resolve_custom_source_contract(&provider, namespaces),
-                lifecycle_dependencies: self
-                    .compute_source_lifecycle_dependencies(source, &provider),
-                provider,
-                is_reactive: !source_dependencies.is_empty(),
-                signal_dependencies: source_dependencies,
-            }
-        });
-        (signal_dependencies, source_metadata)
-    }
-
-    fn compute_source_lifecycle_dependencies(
-        &self,
-        source: &SourceDecorator,
-        provider: &SourceProviderRef,
-    ) -> SourceLifecycleDependencies {
-        let mut lifecycle = SourceLifecycleDependencies::default();
-        lifecycle.reconfiguration.extend(
-            self.collect_signal_dependencies(
-                source
-                    .arguments
-                    .iter()
-                    .copied()
-                    .map(DependencyWork::Expr)
-                    .collect(),
-            ),
-        );
-
-        let Some(options) = source.options else {
-            normalize_dependency_list(&mut lifecycle.reconfiguration);
-            return lifecycle;
-        };
-        let option_work = vec![DependencyWork::Expr(options)];
-        let Some(builtin_provider) = provider.builtin() else {
-            lifecycle
-                .reconfiguration
-                .extend(self.collect_signal_dependencies(option_work));
-            normalize_dependency_list(&mut lifecycle.reconfiguration);
-            return lifecycle;
-        };
-        let ExprKind::Record(record) = &self.module.exprs()[options].kind else {
-            lifecycle
-                .reconfiguration
-                .extend(self.collect_signal_dependencies(option_work));
-            normalize_dependency_list(&mut lifecycle.reconfiguration);
-            return lifecycle;
-        };
-
-        let contract = builtin_provider.contract();
-        for field in &record.fields {
-            let dependencies =
-                self.collect_signal_dependencies(vec![DependencyWork::Expr(field.value)]);
-            if field.label.text() == "activeWhen" && contract.option("activeWhen").is_some() {
-                lifecycle.active_when.extend(dependencies);
-                continue;
-            }
-            match contract
-                .wakeup_option(field.label.text())
-                .map(|option| option.cause())
-            {
-                Some(SourceOptionWakeupCause::TriggerSignal) => {
-                    lifecycle.explicit_triggers.extend(dependencies)
-                }
-                Some(
-                    SourceOptionWakeupCause::RetryPolicy | SourceOptionWakeupCause::PollingPolicy,
-                )
-                | None => lifecycle.reconfiguration.extend(dependencies),
-            }
-        }
-
-        normalize_dependency_list(&mut lifecycle.reconfiguration);
-        normalize_dependency_list(&mut lifecycle.explicit_triggers);
-        normalize_dependency_list(&mut lifecycle.active_when);
-        lifecycle
-    }
-
-    fn resolve_custom_source_contract(
-        &self,
-        provider: &SourceProviderRef,
-        namespaces: &Namespaces,
-    ) -> Option<crate::CustomSourceContractMetadata> {
-        let key = provider.custom_key()?;
-        let item_id = match lookup_item(&namespaces.provider_contracts, key) {
-            LookupResult::Unique(item_id) => item_id,
-            LookupResult::Ambiguous | LookupResult::Missing => return None,
-        };
-        let Item::SourceProviderContract(item) = &self.module.items()[item_id] else {
-            unreachable!("provider contract namespace should only contain provider contract items");
-        };
-        Some(item.contract.clone())
-    }
-
-    fn collect_signal_dependencies(&self, mut work: Vec<DependencyWork>) -> Vec<ItemId> {
-        let mut dependencies = HashSet::new();
-        let mut seen_exprs = HashSet::new();
-        let mut seen_patterns = HashSet::new();
-        let mut seen_markups = HashSet::new();
-        let mut seen_controls = HashSet::new();
-        let mut seen_clusters = HashSet::new();
-
-        while let Some(node) = work.pop() {
-            match node {
-                DependencyWork::Expr(expr_id) => {
-                    if !seen_exprs.insert(expr_id) {
-                        continue;
-                    }
-                    match &self.module.exprs()[expr_id].kind {
-                        ExprKind::Name(reference) => {
-                            if let ResolutionState::Resolved(TermResolution::Item(item_id)) =
-                                reference.resolution
-                            {
-                                if matches!(self.module.items()[item_id], Item::Signal(_)) {
-                                    dependencies.insert(item_id);
-                                }
-                            }
-                        }
-                        ExprKind::Integer(_)
-                        | ExprKind::Float(_)
-                        | ExprKind::Decimal(_)
-                        | ExprKind::BigInt(_)
-                        | ExprKind::SuffixedInteger(_)
-                        | ExprKind::AmbientSubject
-                        | ExprKind::Regex(_) => {}
-                        ExprKind::Text(text) => {
-                            for segment in &text.segments {
-                                if let TextSegment::Interpolation(interpolation) = segment {
-                                    work.push(DependencyWork::Expr(interpolation.expr));
-                                }
-                            }
-                        }
-                        ExprKind::Tuple(elements) => {
-                            work.extend(elements.iter().copied().map(DependencyWork::Expr));
-                        }
-                        ExprKind::List(elements) => {
-                            work.extend(elements.iter().copied().map(DependencyWork::Expr));
-                        }
-                        ExprKind::Map(map) => {
-                            work.extend(map.entries.iter().flat_map(|entry| {
-                                [
-                                    DependencyWork::Expr(entry.key),
-                                    DependencyWork::Expr(entry.value),
-                                ]
-                            }));
-                        }
-                        ExprKind::Set(elements) => {
-                            work.extend(elements.iter().copied().map(DependencyWork::Expr));
-                        }
-                        ExprKind::Record(record) => {
-                            work.extend(
-                                record
-                                    .fields
-                                    .iter()
-                                    .map(|field| DependencyWork::Expr(field.value)),
-                            );
-                        }
-                        ExprKind::Projection { base, .. } => {
-                            if let ProjectionBase::Expr(base) = base {
-                                work.push(DependencyWork::Expr(*base));
-                            }
-                        }
-                        ExprKind::Apply { callee, arguments } => {
-                            work.push(DependencyWork::Expr(*callee));
-                            work.extend(arguments.iter().copied().map(DependencyWork::Expr));
-                        }
-                        ExprKind::Unary { expr, .. } => work.push(DependencyWork::Expr(*expr)),
-                        ExprKind::Binary { left, right, .. } => {
-                            work.push(DependencyWork::Expr(*left));
-                            work.push(DependencyWork::Expr(*right));
-                        }
-                        ExprKind::Pipe(pipe) => {
-                            work.push(DependencyWork::Expr(pipe.head));
-                            for stage in pipe.stages.iter() {
-                                match &stage.kind {
-                                    PipeStageKind::Transform { expr }
-                                    | PipeStageKind::Gate { expr }
-                                    | PipeStageKind::Map { expr }
-                                    | PipeStageKind::Apply { expr }
-                                    | PipeStageKind::Tap { expr }
-                                    | PipeStageKind::FanIn { expr }
-                                    | PipeStageKind::Truthy { expr }
-                                    | PipeStageKind::Falsy { expr }
-                                    | PipeStageKind::RecurStart { expr }
-                                    | PipeStageKind::RecurStep { expr } => {
-                                        work.push(DependencyWork::Expr(*expr))
-                                    }
-                                    PipeStageKind::Case { pattern, body } => {
-                                        work.push(DependencyWork::Expr(*body));
-                                        work.push(DependencyWork::Pattern(*pattern));
-                                    }
-                                }
-                            }
-                        }
-                        ExprKind::Cluster(cluster_id) => {
-                            work.push(DependencyWork::Cluster(*cluster_id))
-                        }
-                        ExprKind::Markup(node_id) => work.push(DependencyWork::Markup(*node_id)),
-                    }
-                }
-                DependencyWork::Pattern(pattern_id) => {
-                    if !seen_patterns.insert(pattern_id) {
-                        continue;
-                    }
-                    match &self.module.patterns()[pattern_id].kind {
-                        PatternKind::Wildcard
-                        | PatternKind::Binding(_)
-                        | PatternKind::Integer(_)
-                        | PatternKind::UnresolvedName(_) => {}
-                        PatternKind::Text(text) => {
-                            for segment in &text.segments {
-                                if let TextSegment::Interpolation(interpolation) = segment {
-                                    work.push(DependencyWork::Expr(interpolation.expr));
-                                }
-                            }
-                        }
-                        PatternKind::Tuple(elements) => {
-                            work.extend(elements.iter().copied().map(DependencyWork::Pattern));
-                        }
-                        PatternKind::List { elements, rest } => {
-                            work.extend(elements.iter().copied().map(DependencyWork::Pattern));
-                            if let Some(rest) = rest {
-                                work.push(DependencyWork::Pattern(*rest));
-                            }
-                        }
-                        PatternKind::Record(fields) => {
-                            work.extend(
-                                fields
-                                    .iter()
-                                    .map(|field| DependencyWork::Pattern(field.pattern)),
-                            );
-                        }
-                        PatternKind::Constructor { arguments, .. } => {
-                            work.extend(arguments.iter().copied().map(DependencyWork::Pattern));
-                        }
-                    }
-                }
-                DependencyWork::Markup(node_id) => {
-                    if !seen_markups.insert(node_id) {
-                        continue;
-                    }
-                    match &self.module.markup_nodes()[node_id].kind {
-                        MarkupNodeKind::Element(element) => {
-                            for attribute in &element.attributes {
-                                match &attribute.value {
-                                    MarkupAttributeValue::ImplicitTrue => {}
-                                    MarkupAttributeValue::Expr(expr) => {
-                                        work.push(DependencyWork::Expr(*expr))
-                                    }
-                                    MarkupAttributeValue::Text(text) => {
-                                        for segment in &text.segments {
-                                            if let TextSegment::Interpolation(interpolation) =
-                                                segment
-                                            {
-                                                work.push(DependencyWork::Expr(interpolation.expr));
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            work.extend(
-                                element.children.iter().copied().map(DependencyWork::Markup),
-                            );
-                        }
-                        MarkupNodeKind::Control(control_id) => {
-                            work.push(DependencyWork::Control(*control_id))
-                        }
-                    }
-                }
-                DependencyWork::Control(control_id) => {
-                    if !seen_controls.insert(control_id) {
-                        continue;
-                    }
-                    match &self.module.control_nodes()[control_id] {
-                        ControlNode::Show(show) => {
-                            work.push(DependencyWork::Expr(show.when));
-                            if let Some(keep_mounted) = show.keep_mounted {
-                                work.push(DependencyWork::Expr(keep_mounted));
-                            }
-                            work.extend(show.children.iter().copied().map(DependencyWork::Markup));
-                        }
-                        ControlNode::Each(each) => {
-                            work.push(DependencyWork::Expr(each.collection));
-                            if let Some(key) = each.key {
-                                work.push(DependencyWork::Expr(key));
-                            }
-                            work.extend(each.children.iter().copied().map(DependencyWork::Markup));
-                            if let Some(empty) = each.empty {
-                                work.push(DependencyWork::Control(empty));
-                            }
-                        }
-                        ControlNode::Empty(empty) => {
-                            work.extend(empty.children.iter().copied().map(DependencyWork::Markup));
-                        }
-                        ControlNode::Match(match_node) => {
-                            work.push(DependencyWork::Expr(match_node.scrutinee));
-                            work.extend(
-                                match_node
-                                    .cases
-                                    .iter()
-                                    .copied()
-                                    .map(DependencyWork::Control),
-                            );
-                        }
-                        ControlNode::Case(case) => {
-                            work.push(DependencyWork::Pattern(case.pattern));
-                            work.extend(case.children.iter().copied().map(DependencyWork::Markup));
-                        }
-                        ControlNode::Fragment(fragment) => {
-                            work.extend(
-                                fragment
-                                    .children
-                                    .iter()
-                                    .copied()
-                                    .map(DependencyWork::Markup),
-                            );
-                        }
-                        ControlNode::With(with) => {
-                            work.push(DependencyWork::Expr(with.value));
-                            work.extend(with.children.iter().copied().map(DependencyWork::Markup));
-                        }
-                    }
-                }
-                DependencyWork::Cluster(cluster_id) => {
-                    if !seen_clusters.insert(cluster_id) {
-                        continue;
-                    }
-                    let cluster = &self.module.clusters()[cluster_id];
-                    let spine = cluster.normalized_spine();
-                    work.extend(spine.apply_arguments().map(DependencyWork::Expr));
-                    if let ApplicativeSpineHead::Expr(expr) = spine.pure_head() {
-                        work.push(DependencyWork::Expr(expr));
-                    }
-                }
-            }
-        }
-
-        let mut signal_dependencies = dependencies.into_iter().collect::<Vec<_>>();
-        signal_dependencies.sort();
-        signal_dependencies
-    }
-
     fn resolve_decorator(
         &mut self,
         decorator_id: DecoratorId,
@@ -5670,11 +5286,6 @@ impl<'a> Lowerer<'a> {
             std::process::exit(1);
         })
     }
-}
-
-fn normalize_dependency_list(dependencies: &mut Vec<ItemId>) {
-    dependencies.sort();
-    dependencies.dedup();
 }
 
 impl ResolveEnv {

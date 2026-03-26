@@ -311,20 +311,6 @@ impl<'a> WidgetRuntimeAssemblyBuilder<'a> {
                 }
                 PropertyPlan::Setter(setter) => {
                     validate_attribute_site(plan_id, stable_id, &setter.site, errors);
-                    // CAUTION: `InputHandle` values are assigned from a sequential counter
-                    // that is local to `SignalGraphBuilder`.  Each call to
-                    // `assemble_widget_runtime` creates a fresh builder, so handles start at
-                    // 0 in every assembly.  This means handles from different assemblies
-                    // (i.e. different `WidgetRuntimeAssembly` owners) can alias: handle 3
-                    // in assembly A refers to a completely different input than handle 3 in
-                    // assembly B.
-                    //
-                    // TODO: Scope handles per-owner, either by using a (owner_id, local_id)
-                    // pair as the handle representation, or by ensuring that all handles
-                    // allocated during a session are drawn from a single monotonically
-                    // increasing counter that is never reset between assemblies.  This would
-                    // make cross-assembly handle comparisons a hard error rather than a
-                    // silent aliasing hazard.
                     let input = graph_builder
                         .add_input(runtime_setter_name(stable_id, setter), Some(owner))
                         .expect("runtime owner handles were validated before setter allocation");
@@ -332,6 +318,7 @@ impl<'a> WidgetRuntimeAssemblyBuilder<'a> {
                         site: setter.site.clone(),
                         name: setter.name.clone(),
                         source: setter.source.clone(),
+                        owner,
                         input,
                         update: setter.update,
                         teardown: setter.teardown,
@@ -350,6 +337,7 @@ impl<'a> WidgetRuntimeAssemblyBuilder<'a> {
                 site: event.site.clone(),
                 name: event.name.clone(),
                 handler: event.handler,
+                owner,
                 input,
                 hookup: event.hookup,
                 teardown: event.teardown,
@@ -374,6 +362,7 @@ impl<'a> WidgetRuntimeAssemblyBuilder<'a> {
     ) -> RuntimeShowNode {
         let owner = plan_to_owner[plan_id.index()];
         let when = RuntimeExprInput {
+            owner,
             expr: show.when,
             input: graph_builder
                 .add_input(runtime_control_name(node.stable_id, "when"), Some(owner))
@@ -383,6 +372,7 @@ impl<'a> WidgetRuntimeAssemblyBuilder<'a> {
             ShowMountPolicy::UnmountWhenHidden => RuntimeShowMountPolicy::UnmountWhenHidden,
             ShowMountPolicy::KeepMounted { decision } => RuntimeShowMountPolicy::KeepMounted {
                 decision: RuntimeExprInput {
+                    owner,
                     expr: decision,
                     input: graph_builder
                         .add_input(
@@ -412,6 +402,7 @@ impl<'a> WidgetRuntimeAssemblyBuilder<'a> {
     ) -> RuntimeEachNode {
         let owner = plan_to_owner[plan_id.index()];
         let collection = RuntimeExprInput {
+            owner,
             expr: each.collection,
             input: graph_builder
                 .add_input(
@@ -423,6 +414,7 @@ impl<'a> WidgetRuntimeAssemblyBuilder<'a> {
         let key_input = match &each.child_policy {
             RepeatedChildPolicy::Positional { .. } => None,
             RepeatedChildPolicy::Keyed { key, .. } => Some(RuntimeExprInput {
+                owner,
                 expr: *key,
                 input: graph_builder
                     .add_input(runtime_control_name(node.stable_id, "key"), Some(owner))
@@ -479,6 +471,7 @@ impl<'a> WidgetRuntimeAssemblyBuilder<'a> {
             .collect::<Vec<_>>();
         RuntimeMatchNode {
             scrutinee: RuntimeExprInput {
+                owner,
                 expr: match_node.scrutinee,
                 input: graph_builder
                     .add_input(
@@ -502,6 +495,7 @@ impl<'a> WidgetRuntimeAssemblyBuilder<'a> {
         let owner = plan_to_owner[plan_id.index()];
         RuntimeWithNode {
             value: RuntimeExprInput {
+                owner,
                 expr: with_node.value,
                 input: graph_builder
                     .add_input(runtime_control_name(node.stable_id, "value"), Some(owner))
@@ -614,6 +608,7 @@ pub struct RuntimeSetterBinding {
     pub site: AttributeSite,
     pub name: Name,
     pub source: SetterSource,
+    pub owner: OwnerHandle,
     pub input: InputHandle,
     pub update: SetterUpdateStrategy,
     pub teardown: SetterTeardown,
@@ -624,6 +619,7 @@ pub struct RuntimeEventBinding {
     pub site: AttributeSite,
     pub name: Name,
     pub handler: ExprId,
+    pub owner: OwnerHandle,
     pub input: InputHandle,
     pub hookup: EventHookStrategy,
     pub teardown: EventHookTeardown,
@@ -689,6 +685,7 @@ pub struct RuntimeWithNode {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeExprInput {
+    pub owner: OwnerHandle,
     pub expr: ExprId,
     pub input: InputHandle,
 }

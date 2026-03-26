@@ -16,6 +16,7 @@ mod lower;
 mod recurrence_elaboration;
 pub mod resolver;
 mod sequence;
+mod signal_metadata_elaboration;
 mod source_contract_resolution;
 mod source_lifecycle_elaboration;
 pub mod symbols;
@@ -85,7 +86,8 @@ pub use ids::{
     PatternId, TypeId, TypeParameterId,
 };
 pub use lower::lower_module_with_resolver;
-pub use lower::{LoweringResult, lower_module};
+pub use lower::{LoweringResult, lower_module, lower_structure, resolve_imports};
+pub use signal_metadata_elaboration::populate_signal_metadata;
 pub use recurrence_elaboration::{
     BlockedRecurrenceNode, RecurrenceElaborationBlocker, RecurrenceElaborationReport,
     RecurrenceGuardPlan, RecurrenceNodeElaboration, RecurrenceNodeOutcome, RecurrenceNodePlan,
@@ -113,9 +115,10 @@ pub use truthy_falsy_elaboration::{
 };
 pub use typecheck::{
     ClassMemberImplementation, ConstraintClass, ResolvedClassMemberDispatch, TypeCheckReport,
-    TypeConstraint, elaborate_default_record_fields, typecheck_module,
+    TypeConstraint, apply_defaults, elaborate_default_record_fields, typecheck_module,
 };
 pub use validate::{
     GateRecordField, GateType, TypeBinding, TypeConstructorBinding, TypeConstructorHead,
-    ValidationMode, ValidationReport, case_pattern_field_types, validate_module,
+    ValidationMode, ValidationReport, case_pattern_field_types, validate_bindings,
+    validate_module, validate_structure, validate_types,
 };

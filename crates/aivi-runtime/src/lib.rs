@@ -23,8 +23,8 @@ pub use glib_adapter::{
     GlibSchedulerDriver, GlibSchedulerError, GlibWorkerPublicationSender,
 };
 pub use graph::{
-    DerivedHandle, DerivedSpec, GraphBuildError, InputHandle, OwnerHandle, OwnerSpec, SignalGraph,
-    SignalGraphBuilder, SignalHandle, SignalKind, SignalSpec, TopologyBatch,
+    DerivedHandle, DerivedSpec, GraphBuildError, InputHandle, InputValidationError, OwnerHandle,
+    OwnerSpec, SignalGraph, SignalGraphBuilder, SignalHandle, SignalKind, SignalSpec, TopologyBatch,
 };
 pub use hir_adapter::{
     HirGateStageBinding, HirGateStageId, HirOwnerBinding, HirRecurrenceBinding,

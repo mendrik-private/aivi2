@@ -588,12 +588,11 @@ impl EqDeriver {
             class: Class::Eq,
             subject,
         };
-        let mut frames = vec![Frame::Enter(subject)];
+        let mut walker = crate::walker::StructuralWalker::new(Frame::Enter(subject));
         let mut path = Vec::new();
-        let mut assembled = Vec::new();
         let mut steps = Vec::new();
 
-        while let Some(frame) = frames.pop() {
+        while let Some(frame) = walker.next_frame() {
             match frame {
                 // TODO(mu-types): This deriver traverses the TypeStore graph purely by following
                 // TypeId references stored in each TypeNode. If a recursive type (mu-type) is ever
@@ -623,7 +622,7 @@ impl EqDeriver {
                             });
                         }
                         _ => {
-                            assembled.push(push_step(
+                            walker.push_assembled(push_step(
                                 &mut steps,
                                 EqStep::IntrinsicScalar {
                                     ty,
@@ -634,7 +633,7 @@ impl EqDeriver {
                     },
                     TypeNode::Reference(reference) => {
                         if context.contains(*reference) {
-                            assembled.push(push_step(
+                            walker.push_assembled(push_step(
                                 &mut steps,
                                 EqStep::FromContext {
                                     ty,
@@ -653,13 +652,13 @@ impl EqDeriver {
                         }
                     }
                     TypeNode::Tuple(elements) => {
-                        frames.push(Frame::ExitTuple {
+                        walker.push_frame(Frame::ExitTuple {
                             ty,
                             arity: elements.len(),
                         });
                         for (index, element) in elements.iter().copied().enumerate().rev() {
                             schedule_child(
-                                &mut frames,
+                                &mut walker,
                                 element,
                                 EqPathSegment::TupleElement(index),
                             );
@@ -674,7 +673,7 @@ impl EqDeriver {
                             });
                         }
 
-                        frames.push(Frame::ExitRecord {
+                        walker.push_frame(Frame::ExitRecord {
                             ty,
                             field_names: record
                                 .fields()
@@ -684,7 +683,7 @@ impl EqDeriver {
                         });
                         for field in record.fields().iter().rev() {
                             schedule_child(
-                                &mut frames,
+                                &mut walker,
                                 field.ty(),
                                 EqPathSegment::RecordField(field.name().clone()),
                             );
@@ -699,7 +698,7 @@ impl EqDeriver {
                             });
                         }
 
-                        frames.push(Frame::ExitSum {
+                        walker.push_frame(Frame::ExitSum {
                             ty,
                             variants: sum
                                 .variants()
@@ -713,7 +712,7 @@ impl EqDeriver {
                         for variant in sum.variants().iter().rev() {
                             if let Some(payload) = variant.payload() {
                                 schedule_child(
-                                    &mut frames,
+                                    &mut walker,
                                     payload,
                                     EqPathSegment::SumVariantPayload(variant.name().clone()),
                                 );
@@ -721,26 +720,26 @@ impl EqDeriver {
                         }
                     }
                     TypeNode::Domain(domain) => {
-                        frames.push(Frame::ExitDomain { ty });
-                        schedule_child(&mut frames, domain.carrier(), EqPathSegment::DomainCarrier);
+                        walker.push_frame(Frame::ExitDomain { ty });
+                        schedule_child(&mut walker, domain.carrier(), EqPathSegment::DomainCarrier);
                     }
                     TypeNode::List(element) => {
-                        frames.push(Frame::ExitList { ty });
-                        schedule_child(&mut frames, *element, EqPathSegment::ListElement);
+                        walker.push_frame(Frame::ExitList { ty });
+                        schedule_child(&mut walker, *element, EqPathSegment::ListElement);
                     }
                     TypeNode::Option(element) => {
-                        frames.push(Frame::ExitOption { ty });
-                        schedule_child(&mut frames, *element, EqPathSegment::OptionValue);
+                        walker.push_frame(Frame::ExitOption { ty });
+                        schedule_child(&mut walker, *element, EqPathSegment::OptionValue);
                     }
                     TypeNode::Result { error, value } => {
-                        frames.push(Frame::ExitResult { ty });
-                        schedule_child(&mut frames, *value, EqPathSegment::ResultValue);
-                        schedule_child(&mut frames, *error, EqPathSegment::ResultError);
+                        walker.push_frame(Frame::ExitResult { ty });
+                        schedule_child(&mut walker, *value, EqPathSegment::ResultValue);
+                        schedule_child(&mut walker, *error, EqPathSegment::ResultError);
                     }
                     TypeNode::Validation { error, value } => {
-                        frames.push(Frame::ExitValidation { ty });
-                        schedule_child(&mut frames, *value, EqPathSegment::ValidationValue);
-                        schedule_child(&mut frames, *error, EqPathSegment::ValidationError);
+                        walker.push_frame(Frame::ExitValidation { ty });
+                        schedule_child(&mut walker, *value, EqPathSegment::ValidationValue);
+                        schedule_child(&mut walker, *error, EqPathSegment::ValidationError);
                     }
                 },
                 Frame::PushPath(segment) => path.push(segment),
@@ -748,24 +747,24 @@ impl EqDeriver {
                     path.pop().expect("unbalanced derivation path frame");
                 }
                 Frame::ExitTuple { ty, arity } => {
-                    let elements = take_tail(&mut assembled, arity);
-                    assembled.push(push_step(&mut steps, EqStep::Tuple { ty, elements }));
+                    let elements = walker.take_tail(arity);
+                    walker.push_assembled(push_step(&mut steps, EqStep::Tuple { ty, elements }));
                 }
                 Frame::ExitRecord { ty, field_names } => {
-                    let witnesses = take_tail(&mut assembled, field_names.len());
+                    let witnesses = walker.take_tail(field_names.len());
                     let fields = field_names
                         .into_iter()
                         .zip(witnesses)
                         .map(|(name, witness)| EqFieldPlan { name, witness })
                         .collect();
-                    assembled.push(push_step(&mut steps, EqStep::Record { ty, fields }));
+                    walker.push_assembled(push_step(&mut steps, EqStep::Record { ty, fields }));
                 }
                 Frame::ExitSum { ty, variants } => {
                     let payload_count = variants
                         .iter()
                         .filter(|variant| variant.has_payload)
                         .count();
-                    let mut payloads = take_tail(&mut assembled, payload_count).into_iter();
+                    let mut payloads = walker.take_tail(payload_count).into_iter();
                     let variants = variants
                         .into_iter()
                         .map(|variant| EqVariantPlan {
@@ -777,31 +776,34 @@ impl EqDeriver {
                             }),
                         })
                         .collect();
-                    assembled.push(push_step(&mut steps, EqStep::Sum { ty, variants }));
+                    walker.push_assembled(push_step(&mut steps, EqStep::Sum { ty, variants }));
                 }
                 Frame::ExitDomain { ty } => {
-                    let carrier = pop_one(&mut assembled);
-                    assembled.push(push_step(&mut steps, EqStep::Domain { ty, carrier }));
+                    let carrier = walker.pop_one();
+                    walker.push_assembled(push_step(&mut steps, EqStep::Domain { ty, carrier }));
                 }
                 Frame::ExitList { ty } => {
-                    let element = pop_one(&mut assembled);
-                    assembled.push(push_step(&mut steps, EqStep::List { ty, element }));
+                    let element = walker.pop_one();
+                    walker.push_assembled(push_step(&mut steps, EqStep::List { ty, element }));
                 }
                 Frame::ExitOption { ty } => {
-                    let element = pop_one(&mut assembled);
-                    assembled.push(push_step(&mut steps, EqStep::Option { ty, element }));
+                    let element = walker.pop_one();
+                    walker.push_assembled(push_step(&mut steps, EqStep::Option { ty, element }));
                 }
                 Frame::ExitResult { ty } => {
-                    let mut parts = take_tail(&mut assembled, 2).into_iter();
+                    let mut parts = walker.take_tail(2).into_iter();
                     let error = parts.next().expect("missing result error witness");
                     let value = parts.next().expect("missing result value witness");
-                    assembled.push(push_step(&mut steps, EqStep::Result { ty, error, value }));
+                    walker.push_assembled(push_step(
+                        &mut steps,
+                        EqStep::Result { ty, error, value },
+                    ));
                 }
                 Frame::ExitValidation { ty } => {
-                    let mut parts = take_tail(&mut assembled, 2).into_iter();
+                    let mut parts = walker.take_tail(2).into_iter();
                     let error = parts.next().expect("missing validation error witness");
                     let value = parts.next().expect("missing validation value witness");
-                    assembled.push(push_step(
+                    walker.push_assembled(push_step(
                         &mut steps,
                         EqStep::Validation { ty, error, value },
                     ));
@@ -809,8 +811,7 @@ impl EqDeriver {
             }
         }
 
-        let root = pop_one(&mut assembled);
-        debug_assert!(assembled.is_empty());
+        let root = walker.finish_one();
 
         Ok(EqDerivation { head, root, steps })
     }
@@ -856,28 +857,20 @@ struct PendingVariant {
     has_payload: bool,
 }
 
-fn schedule_child(frames: &mut Vec<Frame>, child: TypeId, path: EqPathSegment) {
-    frames.push(Frame::PopPath);
-    frames.push(Frame::Enter(child));
-    frames.push(Frame::PushPath(path));
+fn schedule_child(
+    walker: &mut crate::walker::StructuralWalker<Frame, EqPlanId>,
+    child: TypeId,
+    path: EqPathSegment,
+) {
+    walker.push_frame(Frame::PopPath);
+    walker.push_frame(Frame::Enter(child));
+    walker.push_frame(Frame::PushPath(path));
 }
 
 fn push_step(steps: &mut Vec<EqStep>, step: EqStep) -> EqPlanId {
     let id = EqPlanId::from_index(steps.len());
     steps.push(step);
     id
-}
-
-fn take_tail<T>(items: &mut Vec<T>, count: usize) -> Vec<T> {
-    let split_at = items
-        .len()
-        .checked_sub(count)
-        .expect("derivation frame requested more witnesses than available");
-    items.split_off(split_at)
-}
-
-fn pop_one<T>(items: &mut Vec<T>) -> T {
-    items.pop().expect("missing derivation witness")
 }
 
 fn validate_unique_field_names(fields: &[RecordField]) -> Result<(), ShapeError> {

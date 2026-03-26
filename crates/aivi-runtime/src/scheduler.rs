@@ -7,7 +7,7 @@ use std::{
 use aivi_backend::{CommittedValueStore, InlineCommittedValueStore};
 
 use crate::graph::{
-    DerivedHandle, InputHandle, OwnerHandle, SignalGraph, SignalHandle, SignalKind,
+    DerivedHandle, InputHandle, OwnerHandle, SignalGraph, SignalHandle,
 };
 
 pub trait DerivedNodeEvaluator<V> {
@@ -679,20 +679,14 @@ where
     }
 
     fn validate_input(&self, input: InputHandle) -> Result<(), SchedulerAccessError> {
-        self.validate_signal(input.as_signal())?;
-        match self
-            .graph
-            .signal(input.as_signal())
-            .map(|signal| signal.kind())
-        {
-            Some(SignalKind::Input) => Ok(()),
-            Some(SignalKind::Derived(_)) => Err(SchedulerAccessError::SignalIsNotInput {
-                signal: input.as_raw(),
-            }),
-            None => Err(SchedulerAccessError::UnknownSignalHandle {
-                signal: input.as_raw(),
-            }),
-        }
+        self.graph.validate_input(input).map_err(|err| match err {
+            crate::graph::InputValidationError::UnknownHandle { raw } => {
+                SchedulerAccessError::UnknownSignalHandle { signal: raw }
+            }
+            crate::graph::InputValidationError::NotAnInput { raw } => {
+                SchedulerAccessError::SignalIsNotInput { signal: raw }
+            }
+        })
     }
 
     fn validate_input_state(

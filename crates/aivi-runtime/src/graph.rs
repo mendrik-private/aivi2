@@ -146,6 +146,24 @@ impl SignalGraph {
     pub(crate) fn contains_owner(&self, handle: OwnerHandle) -> bool {
         handle.index() < self.owners.len()
     }
+
+    /// Validate that `input` refers to an existing input signal in this graph.
+    ///
+    /// Returns `Ok(())` only when the handle is in-bounds and the signal at that index has kind
+    /// [`SignalKind::Input`].  All other conditions (out-of-bounds raw index, or the slot holds a
+    /// derived signal) are reported as distinct [`InputValidationError`] variants so callers can
+    /// surface precise diagnostics rather than silently dispatching to the wrong node.
+    pub fn validate_input(&self, input: InputHandle) -> Result<(), InputValidationError> {
+        match self.signal(input.as_signal()).map(|s| s.kind()) {
+            Some(SignalKind::Input) => Ok(()),
+            Some(SignalKind::Derived(_)) => Err(InputValidationError::NotAnInput {
+                raw: input.as_raw(),
+            }),
+            None => Err(InputValidationError::UnknownHandle {
+                raw: input.as_raw(),
+            }),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -248,6 +266,15 @@ impl TopologyBatch {
     pub fn signals(&self) -> &[DerivedHandle] {
         &self.signals
     }
+}
+
+/// Error returned by [`SignalGraph::validate_input`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InputValidationError {
+    /// The raw handle index is out of bounds for this graph.
+    UnknownHandle { raw: u32 },
+    /// The handle is in-bounds but refers to a derived signal, not an input.
+    NotAnInput { raw: u32 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

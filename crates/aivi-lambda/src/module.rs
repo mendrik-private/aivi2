@@ -296,13 +296,25 @@ impl fmt::Display for Module {
     }
 }
 
+/// A lambda-level function parameter, owned by an [`Item`] or [`Closure`].
+///
+/// Mirrors [`core::ItemParameter`] but is decoupled from it so that changes to the
+/// core representation do not force changes here, and vice-versa.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Parameter {
+    pub binding: aivi_hir::BindingId,
+    pub span: SourceSpan,
+    pub name: Box<str>,
+    pub ty: core::Type,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Item {
     pub origin: aivi_hir::ItemId,
     pub span: SourceSpan,
     pub name: Box<str>,
     pub kind: core::ItemKind,
-    pub parameters: Vec<core::ItemParameter>,
+    pub parameters: Vec<Parameter>,
     pub body: Option<ClosureId>,
     pub pipes: Vec<core::PipeId>,
 }
@@ -432,7 +444,7 @@ pub struct Closure {
     /// Invariant: if `ambient_subject` is `Some`, the closure body must not reference
     /// `ExprKind::AmbientSubject` with a type that differs from the recorded type.
     pub ambient_subject: Option<core::Type>,
-    pub parameters: Vec<core::ItemParameter>,
+    pub parameters: Vec<Parameter>,
     /// The set of captured bindings from enclosing scopes.
     ///
     /// # Self-recursive closures

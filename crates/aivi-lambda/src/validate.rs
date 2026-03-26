@@ -4,8 +4,8 @@ use aivi_core::{self as core};
 use aivi_hir::BindingId;
 
 use crate::{
-    CaptureId, ClosureId, ClosureKind, GateStage, Item, Module, Pipe, RecurrenceStage, Stage,
-    StageKind,
+    CaptureId, ClosureId, ClosureKind, GateStage, Item, Module, Parameter, Pipe, RecurrenceStage,
+    Stage, StageKind,
     analysis::{AnalysisError, capture_free_bindings},
 };
 
@@ -345,7 +345,7 @@ pub fn validate_module(module: &Module) -> Result<(), ValidationErrors> {
                     && item.span == core_item.span
                     && item.name == core_item.name
                     && item.kind == core_item.kind
-                    && item.parameters == core_item.parameters
+                    && parameters_mirror(&item.parameters, &core_item.parameters)
                     && item.pipes == core_item.pipes =>
             {
                 validate_item_body(module, item_id, item, core_item, &mut errors);
@@ -657,7 +657,7 @@ fn validate_expected_closure(
     expected_owner: core::ItemId,
     expected_kind: ClosureKind,
     expected_subject: Option<&core::Type>,
-    expected_parameters: &[core::ItemParameter],
+    expected_parameters: &[Parameter],
     expected_root: core::ExprId,
     errors: &mut Vec<ValidationError>,
 ) {
@@ -827,9 +827,16 @@ fn validate_closure(
     }
 }
 
-fn parameter_name_map(parameters: &[core::ItemParameter]) -> BTreeMap<BindingId, Box<str>> {
+fn parameter_name_map(parameters: &[Parameter]) -> BTreeMap<BindingId, Box<str>> {
     parameters
         .iter()
         .map(|parameter| (parameter.binding, parameter.name.clone()))
         .collect()
+}
+
+fn parameters_mirror(lambda: &[Parameter], core: &[core::ItemParameter]) -> bool {
+    lambda.len() == core.len()
+        && lambda.iter().zip(core.iter()).all(|(l, c)| {
+            l.binding == c.binding && l.span == c.span && l.name == c.name && l.ty == c.ty
+        })
 }

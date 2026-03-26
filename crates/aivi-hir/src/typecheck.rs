@@ -109,7 +109,7 @@ impl TypeConstraint {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TypeCheckReport {
     diagnostics: Vec<Diagnostic>,
-    elaborated_module: Module,
+    elisions: Vec<DefaultRecordElision>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -129,27 +129,16 @@ pub struct ResolvedClassMemberDispatch {
 }
 
 impl TypeCheckReport {
-    pub fn new(elaborated_module: Module, diagnostics: Vec<Diagnostic>) -> Self {
-        Self {
-            diagnostics,
-            elaborated_module,
-        }
+    fn new(diagnostics: Vec<Diagnostic>, elisions: Vec<DefaultRecordElision>) -> Self {
+        Self { diagnostics, elisions }
     }
 
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
     }
 
-    pub fn elaborated_module(&self) -> &Module {
-        &self.elaborated_module
-    }
-
     pub fn into_diagnostics(self) -> Vec<Diagnostic> {
         self.diagnostics
-    }
-
-    pub fn into_elaborated_module(self) -> Module {
-        self.elaborated_module
     }
 
     pub fn is_ok(&self) -> bool {
@@ -160,12 +149,17 @@ impl TypeCheckReport {
 pub fn typecheck_module(module: &Module) -> TypeCheckReport {
     let mut checker = TypeChecker::new(module);
     checker.run();
-    let elaborated_module = checker.build_elaborated_module();
-    TypeCheckReport::new(elaborated_module, checker.diagnostics)
+    TypeCheckReport::new(checker.diagnostics, checker.default_record_elisions)
+}
+
+/// Applies the default-record-field elisions computed by [`typecheck_module`] to `module`,
+/// returning the elaborated module with synthesized fields injected.
+pub fn apply_defaults(module: &Module, report: &TypeCheckReport) -> Module {
+    apply_default_record_elisions(module, &report.elisions)
 }
 
 pub fn elaborate_default_record_fields(module: &Module) -> Module {
-    typecheck_module(module).into_elaborated_module()
+    apply_defaults(module, &typecheck_module(module))
 }
 
 pub(crate) fn expression_matches(
@@ -255,10 +249,6 @@ impl<'a> TypeChecker<'a> {
                 | Item::Export(_) => {}
             }
         }
-    }
-
-    fn build_elaborated_module(&self) -> Module {
-        apply_default_record_elisions(self.module, &self.default_record_elisions)
     }
 
     fn check_value_item(&mut self, item: &ValueItem) {
@@ -2728,6 +2718,27 @@ mod tests {
         typecheck_module(lowered.module())
     }
 
+    fn typecheck_and_elaborate_text(path: &str, text: &str) -> (TypeCheckReport, Module) {
+        let mut sources = SourceDatabase::new();
+        let file_id = sources.add_file(path, text);
+        let parsed = parse_module(&sources[file_id]);
+        assert!(
+            !parsed.has_errors(),
+            "typecheck input should parse cleanly: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+        let lowered = lower_module(&parsed.module);
+        assert!(
+            !lowered.has_errors(),
+            "typecheck input should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+        let lowered_module = lowered.module().clone();
+        let report = typecheck_module(&lowered_module);
+        let elaborated = apply_defaults(&lowered_module, &report);
+        (report, elaborated)
+    }
+
     fn lowered_module_text(path: &str, text: &str) -> Module {
         let mut sources = SourceDatabase::new();
         let file_id = sources.add_file(path, text);
@@ -2868,7 +2879,7 @@ mod tests {
 
     #[test]
     fn typecheck_elaborates_option_default_record_elision_into_explicit_fields() {
-        let report = typecheck_text(
+        let (report, module) = typecheck_and_elaborate_text(
             "record-elision-hir.aivi",
             "use aivi.defaults (Option)\n\
              type Profile = {\n\
@@ -2886,7 +2897,7 @@ mod tests {
             report.diagnostics()
         );
 
-        let module = report.elaborated_module();
+        let module = &module;
         let profile = value_body(module, "profile");
         let ExprKind::Record(record) = &module.exprs()[profile].kind else {
             panic!("expected `profile` to stay a record literal");
@@ -3253,7 +3264,7 @@ mod tests {
 
     #[test]
     fn typecheck_elaborates_same_module_default_instances_into_explicit_fields() {
-        let report = typecheck_text(
+        let (report, module) = typecheck_and_elaborate_text(
             "same-module-default-instance-hir.aivi",
             "class Default A\n\
              \x20\x20\x20\x20default : A\n\
@@ -3273,7 +3284,7 @@ mod tests {
             report.diagnostics()
         );
 
-        let module = report.elaborated_module();
+        let module = &module;
         let user = value_body(module, "user");
         let ExprKind::Record(record) = &module.exprs()[user].kind else {
             panic!("expected `user` to stay a record literal");

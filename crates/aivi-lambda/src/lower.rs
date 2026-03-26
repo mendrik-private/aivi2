@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 
 use aivi_base::SourceSpan;
-use aivi_core::{self as core, ArenaOverflow};
+use aivi_core::{self as core, ArenaOverflow, alloc_or_diag};
 use aivi_hir::BindingId;
 
 use crate::{
     Capture, Closure, ClosureId, ClosureKind, FanoutFilter, FanoutJoin, FanoutStage, GateStage,
-    Item,
+    Item, Parameter,
     LoweringError::*,
     Module, NonSourceWakeup, Pipe, PipeRecurrence, RecurrenceStage, Stage, StageKind,
     analysis::{AnalysisError, capture_free_bindings},
@@ -176,13 +176,14 @@ impl<'a> ModuleLowerer<'a> {
 
     fn seed_items(&mut self) {
         for (item_id, item) in self.core.items().iter() {
+            let lambda_params = core_to_lambda_parameters(&item.parameters);
             let body = item.body.and_then(|root| {
                 match self.lower_closure(
                     item_id,
                     item.span,
                     ClosureKind::ItemBody,
                     None,
-                    item.parameters.clone(),
+                    lambda_params.clone(),
                     root,
                     false,
                     &parameter_name_map(&item.parameters),
@@ -192,21 +193,15 @@ impl<'a> ModuleLowerer<'a> {
                 }
             });
 
-            let lowered_id = match self.module.items_mut().alloc(Item {
+            let lowered_id = alloc_or_diag!(self.module.items_mut(), Item {
                 origin: item.origin,
                 span: item.span,
                 name: item.name.clone(),
                 kind: item.kind.clone(),
-                parameters: item.parameters.clone(),
+                parameters: lambda_params,
                 body,
                 pipes: item.pipes.clone(),
-            }) {
-                Ok(id) => id,
-                Err(overflow) => {
-                    self.errors.push(arena_overflow("items", overflow));
-                    return;
-                }
-            };
+            }, "items", self.errors);
             debug_assert_eq!(lowered_id, item_id);
         }
     }
@@ -283,20 +278,14 @@ impl<'a> ModuleLowerer<'a> {
                 }
             };
 
-            let lowered_id = match self.module.stages_mut().alloc(Stage {
+            let lowered_id = alloc_or_diag!(self.module.stages_mut(), Stage {
                 pipe: stage.pipe,
                 index: stage.index,
                 span: stage.span,
                 input_subject: stage.input_subject.clone(),
                 result_subject: stage.result_subject.clone(),
                 kind,
-            }) {
-                Ok(id) => id,
-                Err(overflow) => {
-                    self.errors.push(arena_overflow("stages", overflow));
-                    return;
-                }
-            };
+            }, "stages", self.errors);
             debug_assert_eq!(lowered_id, stage_id);
         }
     }
@@ -357,18 +346,12 @@ impl<'a> ModuleLowerer<'a> {
                 })
             });
 
-            let lowered_id = match self.module.pipes_mut().alloc(Pipe {
+            let lowered_id = alloc_or_diag!(self.module.pipes_mut(), Pipe {
                 owner: pipe.owner,
                 origin: pipe.origin.clone(),
                 stages: pipe.stages.clone(),
                 recurrence,
-            }) {
-                Ok(id) => id,
-                Err(overflow) => {
-                    self.errors.push(arena_overflow("pipes", overflow));
-                    return;
-                }
-            };
+            }, "pipes", self.errors);
             debug_assert_eq!(lowered_id, pipe_id);
         }
     }
@@ -475,7 +458,7 @@ impl<'a> ModuleLowerer<'a> {
         span: SourceSpan,
         kind: ClosureKind,
         ambient_subject: Option<core::Type>,
-        parameters: Vec<core::ItemParameter>,
+        parameters: Vec<Parameter>,
         root: core::ExprId,
         allow_captures: bool,
         known_names: &BTreeMap<BindingId, Box<str>>,
@@ -517,7 +500,7 @@ impl<'a> ModuleLowerer<'a> {
             }
         }
 
-        let closure_id = match self.module.closures_mut().alloc(Closure {
+        let closure_id = alloc_or_diag!(self.module.closures_mut(), Closure {
             owner,
             span,
             kind,
@@ -525,28 +508,16 @@ impl<'a> ModuleLowerer<'a> {
             parameters,
             captures: Vec::new(),
             root,
-        }) {
-            Ok(id) => id,
-            Err(overflow) => {
-                self.errors.push(arena_overflow("closures", overflow));
-                return None;
-            }
-        };
+        }, "closures", self.errors, return None);
 
         let mut capture_ids = Vec::with_capacity(captures.len());
         for capture in captures {
-            let capture_id = match self.module.captures_mut().alloc(Capture {
+            let capture_id = alloc_or_diag!(self.module.captures_mut(), Capture {
                 closure: closure_id,
                 binding: capture.binding,
                 name: capture.name,
                 ty: capture.ty,
-            }) {
-                Ok(id) => id,
-                Err(overflow) => {
-                    self.errors.push(arena_overflow("captures", overflow));
-                    return None;
-                }
-            };
+            }, "captures", self.errors, return None);
             capture_ids.push(capture_id);
         }
         self.module
@@ -562,6 +533,18 @@ fn parameter_name_map(parameters: &[core::ItemParameter]) -> BTreeMap<BindingId,
     parameters
         .iter()
         .map(|parameter| (parameter.binding, parameter.name.clone()))
+        .collect()
+}
+
+fn core_to_lambda_parameters(params: &[core::ItemParameter]) -> Vec<Parameter> {
+    params
+        .iter()
+        .map(|p| Parameter {
+            binding: p.binding,
+            span: p.span,
+            name: p.name.clone(),
+            ty: p.ty.clone(),
+        })
         .collect()
 }
 
