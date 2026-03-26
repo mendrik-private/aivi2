@@ -597,6 +597,7 @@ pub(super) fn start_run_session_with_launch_config(
         core,
         backend,
         event_handlers,
+        ..
     } = artifact;
     let linked = link_backend_runtime(runtime_assembly, &core, backend).map_err(|errors| {
         let mut rendered = String::from("failed to link backend runtime for `aivi run`:\n");

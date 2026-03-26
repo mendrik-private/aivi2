@@ -68,7 +68,7 @@ pub(super) fn run_mcp(mut args: impl Iterator<Item = OsString>) -> Result<ExitCo
     let cwd = env::current_dir().map_err(|error| {
         format!("failed to determine current directory for `aivi mcp`: {error}")
     })?;
-    let entry_path = resolve_run_entrypoint(&cwd, requested_path.as_deref())?;
+    let entry_path = resolve_initial_entry_path(&cwd, requested_path.as_deref())?;
     let configured = ConfiguredTarget {
         entry_path,
         default_view: requested_view,
@@ -96,7 +96,7 @@ pub(super) fn run_mcp(mut args: impl Iterator<Item = OsString>) -> Result<ExitCo
 
 #[derive(Clone)]
 struct ConfiguredTarget {
-    entry_path: PathBuf,
+    entry_path: Option<PathBuf>,
     default_view: Option<String>,
 }
 
@@ -149,6 +149,7 @@ struct HostedSession {
 impl McpHostState {
     fn launch_prepared(&mut self, prepared: PreparedLaunch) -> Result<SessionStatus, String> {
         self.stop_session();
+        let entry_path = prepared.entry_path.clone();
         let harness = run_session::start_run_session_with_launch_config(
             &prepared.entry_path,
             prepared.artifact,
@@ -156,12 +157,15 @@ impl McpHostState {
         )?;
         harness.install_quit_on_last_window_close();
         harness.present_root_windows();
+        let view_name = harness.view_name().to_owned();
         self.widget_ids.clear();
         self.next_widget_id = 0;
+        self.configured.entry_path = Some(entry_path.clone());
+        self.configured.default_view = Some(view_name.clone());
         self.session = Some(HostedSession {
-            view_name: harness.view_name().to_owned(),
+            view_name,
             harness,
-            path: prepared.entry_path,
+            path: entry_path,
         });
         self.session_status()
     }
@@ -193,7 +197,11 @@ impl McpHostState {
         });
         Ok(SessionStatus {
             launched: true,
-            configured_entry_path: self.configured.entry_path.display().to_string(),
+            configured_entry_path: self
+                .configured
+                .entry_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
             configured_view: self.configured.default_view.clone(),
             active_entry_path: Some(session.path.display().to_string()),
             active_view: Some(session.view_name.clone()),
@@ -210,7 +218,11 @@ impl McpHostState {
     fn session_status_unlaunched(&self) -> SessionStatus {
         SessionStatus {
             launched: false,
-            configured_entry_path: self.configured.entry_path.display().to_string(),
+            configured_entry_path: self
+                .configured
+                .entry_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
             configured_view: self.configured.default_view.clone(),
             active_entry_path: None,
             active_view: None,
@@ -571,6 +583,44 @@ fn prepare_launch_request(
     })
 }
 
+fn resolve_initial_entry_path(
+    current_dir: &Path,
+    explicit_path: Option<&Path>,
+) -> Result<Option<PathBuf>, String> {
+    match resolve_v1_entrypoint(current_dir, explicit_path) {
+        Ok(resolved) => Ok(Some(resolved.entry_path().to_path_buf())),
+        Err(aivi_query::EntrypointResolutionError::MissingImplicitEntrypoint { .. })
+            if explicit_path.is_none() =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(format!(
+            "failed to resolve entrypoint for `aivi mcp`: {error}"
+        )),
+    }
+}
+
+fn resolve_launch_entry_path(
+    configured: &ConfiguredTarget,
+    args: &LaunchSourceArgs,
+) -> Result<PathBuf, String> {
+    if let Some(path) = &args.path {
+        return Ok(PathBuf::from(path));
+    }
+    configured.entry_path.clone().ok_or_else(|| {
+        "no app entrypoint is configured; pass `path` to `launch_app` or start `aivi mcp --path <entry-file>`".to_owned()
+    })
+}
+
+fn effective_configured_target(
+    controller: &McpHostController,
+    fallback: &ConfiguredTarget,
+) -> ConfiguredTarget {
+    controller
+        .call(|host| Ok(host.configured.clone()))
+        .unwrap_or_else(|_| fallback.clone())
+}
+
 fn build_source_context(args: LaunchSourceArgs) -> Result<SourceProviderContext, String> {
     let cwd = match args.cwd {
         Some(cwd) => PathBuf::from(cwd),
@@ -716,7 +766,11 @@ fn handle_json_rpc_request(
                 "name": "aivi",
                 "version": env!("CARGO_PKG_VERSION"),
             },
-            "instructions": "Use launch_app to start the configured app, then inspect signals, GTK structure, and source state."
+            "instructions": if configured.entry_path.is_some() {
+                "Use launch_app to start the configured app, then inspect signals, GTK structure, and source state.".to_owned()
+            } else {
+                "Use launch_app with `path` to start an app, then inspect signals, GTK structure, and source state.".to_owned()
+            }
         })),
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({ "tools": tool_definitions() })),
@@ -743,11 +797,14 @@ fn handle_tool_call(
         "launch_app" => {
             let args: LaunchSourceArgs = serde_json::from_value(arguments)
                 .map_err(|error| JsonRpcError::invalid_params(error.to_string()))?;
+            let configured = effective_configured_target(controller, configured);
             let requested_view = args
                 .view
                 .clone()
                 .or_else(|| configured.default_view.clone());
-            let prepared = prepare_launch_request(&configured.entry_path, requested_view, args)
+            let entry_path = resolve_launch_entry_path(&configured, &args)
+                .map_err(JsonRpcError::tool_failure)?;
+            let prepared = prepare_launch_request(&entry_path, requested_view, args)
                 .map_err(JsonRpcError::tool_failure)?;
             let status = controller
                 .call(move |host| host.launch_prepared(prepared))
@@ -763,11 +820,14 @@ fn handle_tool_call(
         "restart_app" => {
             let args: LaunchSourceArgs = serde_json::from_value(arguments)
                 .map_err(|error| JsonRpcError::invalid_params(error.to_string()))?;
+            let configured = effective_configured_target(controller, configured);
             let requested_view = args
                 .view
                 .clone()
                 .or_else(|| configured.default_view.clone());
-            let prepared = prepare_launch_request(&configured.entry_path, requested_view, args)
+            let entry_path = resolve_launch_entry_path(&configured, &args)
+                .map_err(JsonRpcError::tool_failure)?;
+            let prepared = prepare_launch_request(&entry_path, requested_view, args)
                 .map_err(JsonRpcError::tool_failure)?;
             let status = controller
                 .call(move |host| host.launch_prepared(prepared))
@@ -919,10 +979,11 @@ fn tool_definitions() -> Vec<JsonValue> {
     vec![
         json!({
             "name": "launch_app",
-            "description": "Launch the configured AIVI app with optional source-context overrides.",
+            "description": "Launch the configured AIVI app or the provided `path`, with optional source-context overrides.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "path": { "type": "string" },
                     "view": { "type": "string" },
                     "args": { "type": "array", "items": { "type": "string" } },
                     "cwd": { "type": "string" },
@@ -934,10 +995,11 @@ fn tool_definitions() -> Vec<JsonValue> {
         }),
         json!({
             "name": "restart_app",
-            "description": "Restart the configured AIVI app with optional source-context overrides.",
+            "description": "Restart the configured AIVI app or the provided `path`, with optional source-context overrides.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "path": { "type": "string" },
                     "view": { "type": "string" },
                     "args": { "type": "array", "items": { "type": "string" } },
                     "cwd": { "type": "string" },
@@ -1701,6 +1763,7 @@ struct ToolCallRequest {
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 struct LaunchSourceArgs {
+    path: Option<String>,
     view: Option<String>,
     args: Option<Vec<String>>,
     cwd: Option<String>,
@@ -1767,7 +1830,7 @@ struct PublishSourceValueArgs {
 #[derive(Serialize)]
 struct SessionStatus {
     launched: bool,
-    configured_entry_path: String,
+    configured_entry_path: Option<String>,
     configured_view: Option<String>,
     active_entry_path: Option<String>,
     active_view: Option<String>,
@@ -1875,9 +1938,9 @@ struct EventResult {
 #[cfg(test)]
 mod tests {
     use super::{
-        ConfiguredTarget, JsonRpcRequest, MCP_PROTOCOL_VERSION, McpHostController,
+        ConfiguredTarget, JsonRpcError, JsonRpcRequest, MCP_PROTOCOL_VERSION, McpHostController,
         handle_json_rpc_request, parse_prefixed_u32, parse_prefixed_u64, read_json_rpc_message,
-        runtime_value_from_json, write_json_rpc_message,
+        resolve_initial_entry_path, runtime_value_from_json, write_json_rpc_message,
     };
     use aivi_backend::RuntimeValue;
     use serde_json::{Value as JsonValue, json};
@@ -1940,7 +2003,7 @@ mod tests {
         let (task_tx, _task_rx) = sync_mpsc::channel();
         let controller = McpHostController { task_tx };
         let configured = ConfiguredTarget {
-            entry_path: PathBuf::from("fixtures/snake/main.aivi"),
+            entry_path: Some(PathBuf::from("fixtures/snake/main.aivi")),
             default_view: None,
         };
         let initialize = handle_json_rpc_request(
@@ -1956,6 +2019,12 @@ mod tests {
         .expect("initialize should succeed");
         assert_eq!(initialize["protocolVersion"], json!(MCP_PROTOCOL_VERSION));
         assert_eq!(initialize["serverInfo"]["name"], json!("aivi"));
+        assert!(
+            initialize["instructions"]
+                .as_str()
+                .expect("initialize instructions should be text")
+                .contains("configured app")
+        );
 
         let tools = handle_json_rpc_request(
             &controller,
@@ -1995,6 +2064,52 @@ mod tests {
                 "find_widgets",
                 "emit_gtk_event",
             ]
+        );
+        let launch_schema = &tools["tools"][0]["inputSchema"]["properties"];
+        assert!(
+            launch_schema.get("path").is_some(),
+            "launch_app should advertise an optional explicit path"
+        );
+    }
+
+    #[test]
+    fn resolve_initial_entry_path_allows_missing_implicit_main() {
+        let temp = tempfile::tempdir().expect("tempdir should create");
+        let resolved = resolve_initial_entry_path(temp.path(), None)
+            .expect("missing implicit main is allowed");
+        assert!(
+            resolved.is_none(),
+            "server startup should remain unbound when no implicit main exists"
+        );
+    }
+
+    #[test]
+    fn launch_app_requires_path_when_server_starts_unbound() {
+        let (task_tx, task_rx) = sync_mpsc::channel();
+        drop(task_rx);
+        let controller = McpHostController { task_tx };
+        let configured = ConfiguredTarget {
+            entry_path: None,
+            default_view: None,
+        };
+        let error = handle_json_rpc_request(
+            &controller,
+            &configured,
+            JsonRpcRequest {
+                jsonrpc: "2.0".to_owned(),
+                id: Some(JsonValue::from(3)),
+                method: "tools/call".to_owned(),
+                params: Some(json!({
+                    "name": "launch_app",
+                    "arguments": {}
+                })),
+            },
+        )
+        .expect_err("unbound launch_app should fail with an actionable message");
+        assert_eq!(error.code, JsonRpcError::tool_failure("").code);
+        assert!(
+            error.message.contains("pass `path`"),
+            "tool failure should tell the caller how to bind an app"
         );
     }
 }
