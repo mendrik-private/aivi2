@@ -2363,7 +2363,41 @@ Widgets with a single default child group still accept ordinary unnamed children
 
 Exits 0 on clean application close, 1 on startup/compilation error.
 
-### 26.5 `aivi fmt [--stdin | --check] [<path>...]`
+### 26.5 `aivi execute <path> [-- args...]`
+
+```
+aivi execute src/cli.aivi
+aivi execute src/cli.aivi -- --model gpt-5.4 prompt.txt
+```
+
+`aivi execute` selects the top-level `val main`. The binding must be annotated as `Task E A`;
+`function main`, `sig main`, and non-task values are rejected.
+
+The command links the compiled runtime stack without GTK, settles any startup source activity,
+evaluates `main`, and executes the resulting host task plan directly in the CLI process.
+
+The current execute-time host surface includes:
+
+- `@source process.args`
+- `@source process.cwd`
+- `@source env.get "NAME"`
+- `@source stdio.read`
+- `@source path.home`
+- `@source path.configHome`
+- `@source path.dataHome`
+- `@source path.cacheHome`
+- `@source path.tempDir`
+- `aivi.stdio.stdoutWrite`
+- `aivi.stdio.stderrWrite`
+- `aivi.fs.writeText`
+- `aivi.fs.writeBytes`
+- `aivi.fs.createDirAll`
+- `aivi.fs.deleteFile`
+
+Arguments after `--` are exposed through `process.args`. Exits 0 on success, 1 on validation or
+runtime error.
+
+### 26.6 `aivi fmt [--stdin | --check] [<path>...]`
 
 ```
 aivi fmt src/app.aivi             # format to stdout
@@ -2373,7 +2407,7 @@ aivi fmt --check src/a.aivi src/b.aivi   # verify formatting; exit 1 if any diff
 
 The formatter is canonical: single deterministic output for any valid source. Formatting is part of the language contract (§22).
 
-### 26.6 `aivi lex <path>`
+### 26.7 `aivi lex <path>`
 
 ```
 aivi lex src/app.aivi
@@ -2381,7 +2415,7 @@ aivi lex src/app.aivi
 
 Tokenizes and prints the token stream. Useful for debugging lexer behavior, regex literal handling, or suffix literal resolution.
 
-### 26.7 `aivi lsp`
+### 26.8 `aivi lsp`
 
 ```
 aivi lsp
@@ -2389,7 +2423,7 @@ aivi lsp
 
 Starts the AIVI Language Server on stdin/stdout using the Language Server Protocol. Editor integrations launch this subprocess and communicate over stdio. See §27 for supported capabilities.
 
-### 26.8 `aivi db migrate`
+### 26.9 `aivi db migrate`
 
 ```
 aivi db migrate
@@ -2397,7 +2431,7 @@ aivi db migrate
 
 Diffs current record types against the last applied migration state and writes a new SQL file under `db/migrations/` with a timestamp-prefixed filename. The generated file is ordinary SQL intended for review and commit.
 
-### 26.9 `aivi db apply`
+### 26.10 `aivi db apply`
 
 ```
 aivi db apply

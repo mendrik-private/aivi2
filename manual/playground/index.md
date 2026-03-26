@@ -35,11 +35,19 @@ While the playground is being built, you can try AIVI locally:
 3. Install the binary: `cp target/release/aivi ~/.local/bin/`
 4. Create a file `hello.aivi`:
 
-```text
-// TODO: add a verified AIVI example here
+```aivi
+use aivi.stdio (
+    stdoutWrite
+)
+
+val main : Task Text Unit =
+    stdoutWrite "hello from AIVI"
 ```
 
-5. Run it: `aivi run hello.aivi`
+5. Run it: `aivi execute hello.aivi`
 
 The [VSCode extension](https://github.com/mendrik/aivi2/tree/main/tooling/packages/vscode-aivi)
 provides syntax highlighting and error reporting while you edit.
+
+Use `aivi run` when your entrypoint is GTK markup. Use `aivi execute` when your entrypoint is a
+headless `Task`.

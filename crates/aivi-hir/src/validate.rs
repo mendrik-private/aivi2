@@ -24,7 +24,7 @@ use crate::{
         ApplicativeSpineHead, BuiltinTerm, BuiltinType, ClassMemberResolution, ControlNode,
         ControlNodeKind, CustomSourceRecurrenceWakeup, DecoratorPayload, DomainMemberKind,
         DomainMemberResolution, ExportResolution, ExprKind, ImportBindingMetadata,
-        ImportBindingResolution, ImportValueType, Item, LiteralSuffixResolution,
+        ImportBindingResolution, ImportValueType, IntrinsicValue, Item, LiteralSuffixResolution,
         MarkupAttributeValue, MarkupNodeKind, Module, Name, NamePath, PatternKind, PipeStage,
         PipeStageKind, PipeTransformMode, RecurrenceWakeupDecoratorKind, ResolutionState,
         SignalItem, SourceDecorator, SourceMetadata, SourceProviderRef, TermReference,
@@ -5235,6 +5235,17 @@ impl Validator<'_> {
                             | BuiltinSourceProvider::WindowKeyDown => {
                                 "this built-in source should already have planned a wakeup; if you hit this diagnostic, keep the failing fixture because the recurrence wakeup adapter is inconsistent"
                             }
+                            BuiltinSourceProvider::ProcessArgs
+                            | BuiltinSourceProvider::ProcessCwd
+                            | BuiltinSourceProvider::EnvGet
+                            | BuiltinSourceProvider::StdioRead
+                            | BuiltinSourceProvider::PathHome
+                            | BuiltinSourceProvider::PathConfigHome
+                            | BuiltinSourceProvider::PathDataHome
+                            | BuiltinSourceProvider::PathCacheHome
+                            | BuiltinSourceProvider::PathTempDir => {
+                                "this built-in source publishes one host-context snapshot when subscribed; add an explicit recurrence wakeup or switch to a non-recurrent signal"
+                            }
                             BuiltinSourceProvider::HttpGet
                             | BuiltinSourceProvider::HttpPost
                             | BuiltinSourceProvider::FsRead => {
@@ -9468,6 +9479,62 @@ impl<'a> GateTypeContext<'a> {
         }
     }
 
+    fn intrinsic_value_type(&self, value: IntrinsicValue) -> GateType {
+        fn primitive(builtin: BuiltinType) -> GateType {
+            GateType::Primitive(builtin)
+        }
+
+        fn arrow(parameter: GateType, result: GateType) -> GateType {
+            GateType::Arrow {
+                parameter: Box::new(parameter),
+                result: Box::new(result),
+            }
+        }
+
+        fn task(error: GateType, value: GateType) -> GateType {
+            GateType::Task {
+                error: Box::new(error),
+                value: Box::new(value),
+            }
+        }
+
+        match value {
+            IntrinsicValue::RandomBytes => arrow(
+                primitive(BuiltinType::Int),
+                task(primitive(BuiltinType::Text), primitive(BuiltinType::Bytes)),
+            ),
+            IntrinsicValue::RandomInt => arrow(
+                primitive(BuiltinType::Int),
+                arrow(
+                    primitive(BuiltinType::Int),
+                    task(primitive(BuiltinType::Text), primitive(BuiltinType::Int)),
+                ),
+            ),
+            IntrinsicValue::StdoutWrite | IntrinsicValue::StderrWrite => arrow(
+                primitive(BuiltinType::Text),
+                task(primitive(BuiltinType::Text), primitive(BuiltinType::Unit)),
+            ),
+            IntrinsicValue::FsWriteText => arrow(
+                primitive(BuiltinType::Text),
+                arrow(
+                    primitive(BuiltinType::Text),
+                    task(primitive(BuiltinType::Text), primitive(BuiltinType::Unit)),
+                ),
+            ),
+            IntrinsicValue::FsWriteBytes => arrow(
+                primitive(BuiltinType::Text),
+                arrow(
+                    primitive(BuiltinType::Bytes),
+                    task(primitive(BuiltinType::Text), primitive(BuiltinType::Unit)),
+                ),
+            ),
+            IntrinsicValue::FsCreateDirAll | IntrinsicValue::FsDeleteFile => arrow(
+                primitive(BuiltinType::Text),
+                task(primitive(BuiltinType::Text), primitive(BuiltinType::Unit)),
+            ),
+        }
+    }
+
     fn domain_member_candidates(
         &self,
         reference: &TermReference,
@@ -11131,7 +11198,10 @@ impl<'a> GateTypeContext<'a> {
             | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_)) => {
                 GateExprInfo::default()
             }
-            ResolutionState::Resolved(TermResolution::IntrinsicValue(_)) => GateExprInfo::default(),
+            ResolutionState::Resolved(TermResolution::IntrinsicValue(value)) => GateExprInfo {
+                ty: Some(self.intrinsic_value_type(*value)),
+                ..GateExprInfo::default()
+            },
             ResolutionState::Resolved(TermResolution::Builtin(builtin)) => {
                 let (ty, actual) = match builtin {
                     crate::hir::BuiltinTerm::True | crate::hir::BuiltinTerm::False => {

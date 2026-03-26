@@ -59,6 +59,12 @@ pub enum RuntimeConstructor {
 pub enum RuntimeTaskPlan {
     RandomInt { low: i64, high: i64 },
     RandomBytes { count: i64 },
+    StdoutWrite { text: Box<str> },
+    StderrWrite { text: Box<str> },
+    FsWriteText { path: Box<str>, text: Box<str> },
+    FsWriteBytes { path: Box<str>, bytes: Box<[u8]> },
+    FsCreateDirAll { path: Box<str> },
+    FsDeleteFile { path: Box<str> },
 }
 
 impl fmt::Display for RuntimeTaskPlan {
@@ -66,6 +72,12 @@ impl fmt::Display for RuntimeTaskPlan {
         match self {
             Self::RandomInt { low, high } => write!(f, "randomInt({low}, {high})"),
             Self::RandomBytes { count } => write!(f, "randomBytes({count})"),
+            Self::StdoutWrite { text } => write!(f, "stdoutWrite({text})"),
+            Self::StderrWrite { text } => write!(f, "stderrWrite({text})"),
+            Self::FsWriteText { path, .. } => write!(f, "writeText({path})"),
+            Self::FsWriteBytes { path, .. } => write!(f, "writeBytes({path})"),
+            Self::FsCreateDirAll { path } => write!(f, "createDirAll({path})"),
+            Self::FsDeleteFile { path } => write!(f, "deleteFile({path})"),
         }
     }
 }
@@ -2818,6 +2830,12 @@ fn intrinsic_value_arity(value: IntrinsicValue) -> usize {
     match value {
         IntrinsicValue::RandomBytes => 1,
         IntrinsicValue::RandomInt => 2,
+        IntrinsicValue::StdoutWrite => 1,
+        IntrinsicValue::StderrWrite => 1,
+        IntrinsicValue::FsWriteText => 2,
+        IntrinsicValue::FsWriteBytes => 2,
+        IntrinsicValue::FsCreateDirAll => 1,
+        IntrinsicValue::FsDeleteFile => 1,
     }
 }
 
@@ -2837,6 +2855,38 @@ fn evaluate_intrinsic_value(
             Ok(RuntimeValue::Task(RuntimeTaskPlan::RandomInt {
                 low: expect_intrinsic_i64(kernel, expr, value, 0, low)?,
                 high: expect_intrinsic_i64(kernel, expr, value, 1, high)?,
+            }))
+        }
+        (IntrinsicValue::StdoutWrite, [text]) => {
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::StdoutWrite {
+                text: expect_intrinsic_text(kernel, expr, value, 0, text)?,
+            }))
+        }
+        (IntrinsicValue::StderrWrite, [text]) => {
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::StderrWrite {
+                text: expect_intrinsic_text(kernel, expr, value, 0, text)?,
+            }))
+        }
+        (IntrinsicValue::FsWriteText, [path, text]) => {
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::FsWriteText {
+                path: expect_intrinsic_text(kernel, expr, value, 0, path)?,
+                text: expect_intrinsic_text(kernel, expr, value, 1, text)?,
+            }))
+        }
+        (IntrinsicValue::FsWriteBytes, [path, bytes]) => {
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::FsWriteBytes {
+                path: expect_intrinsic_text(kernel, expr, value, 0, path)?,
+                bytes: expect_intrinsic_bytes(kernel, expr, value, 1, bytes)?,
+            }))
+        }
+        (IntrinsicValue::FsCreateDirAll, [path]) => {
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::FsCreateDirAll {
+                path: expect_intrinsic_text(kernel, expr, value, 0, path)?,
+            }))
+        }
+        (IntrinsicValue::FsDeleteFile, [path]) => {
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::FsDeleteFile {
+                path: expect_intrinsic_text(kernel, expr, value, 0, path)?,
             }))
         }
         _ => unreachable!("intrinsic arity should be enforced before evaluation"),
@@ -3132,6 +3182,44 @@ fn expect_intrinsic_i64(
     }
 }
 
+fn expect_intrinsic_text(
+    kernel: KernelId,
+    expr: KernelExprId,
+    value: IntrinsicValue,
+    index: usize,
+    argument: &RuntimeValue,
+) -> Result<Box<str>, EvaluationError> {
+    match strip_signal(argument.clone()) {
+        RuntimeValue::Text(found) => Ok(found),
+        found => Err(EvaluationError::InvalidIntrinsicArgument {
+            kernel,
+            expr,
+            value,
+            index,
+            found: found.clone(),
+        }),
+    }
+}
+
+fn expect_intrinsic_bytes(
+    kernel: KernelId,
+    expr: KernelExprId,
+    value: IntrinsicValue,
+    index: usize,
+    argument: &RuntimeValue,
+) -> Result<Box<[u8]>, EvaluationError> {
+    match strip_signal(argument.clone()) {
+        RuntimeValue::Bytes(found) => Ok(found),
+        found => Err(EvaluationError::InvalidIntrinsicArgument {
+            kernel,
+            expr,
+            value,
+            index,
+            found: found.clone(),
+        }),
+    }
+}
+
 fn expect_arity<const N: usize>(
     arguments: Vec<RuntimeValue>,
 ) -> Result<[RuntimeValue; N], &'static str> {
@@ -3176,7 +3264,8 @@ fn value_matches_layout(program: &Program, value: &RuntimeValue, layout: LayoutI
         (LayoutKind::Primitive(PrimitiveType::BigInt), RuntimeValue::BigInt(_)) => true,
         (LayoutKind::Primitive(PrimitiveType::Text), RuntimeValue::Text(_)) => true,
         (LayoutKind::Primitive(PrimitiveType::Bytes), RuntimeValue::Bytes(_)) => true,
-        (LayoutKind::Primitive(PrimitiveType::Task), RuntimeValue::Task(_)) => true,
+        (LayoutKind::Primitive(PrimitiveType::Task), RuntimeValue::Task(_))
+        | (LayoutKind::Task { .. }, RuntimeValue::Task(_)) => true,
         (LayoutKind::Tuple(expected), RuntimeValue::Tuple(elements)) => {
             expected.len() == elements.len()
                 && expected

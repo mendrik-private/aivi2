@@ -155,6 +155,47 @@ impl BackendLinkedRuntime {
         self.spawn_task_worker(instance)
     }
 
+    pub fn evaluate_task_value_by_owner(
+        &self,
+        owner: hir::ItemId,
+    ) -> Result<DetachedRuntimeValue, BackendRuntimeError> {
+        let binding = self
+            .task_by_owner(owner)
+            .cloned()
+            .ok_or(BackendRuntimeError::UnknownTaskOwner { owner })?;
+        let (kernel, required_signals) = match &binding.execution {
+            LinkedTaskExecutionBinding::Ready {
+                kernel,
+                required_signals,
+            } => (*kernel, required_signals.clone()),
+            LinkedTaskExecutionBinding::Blocked(blocker) => {
+                return Err(BackendRuntimeError::TaskExecutionBlocked {
+                    instance: binding.instance,
+                    owner: binding.owner,
+                    blocker: blocker.clone(),
+                });
+            }
+        };
+        let snapshots = self.committed_signal_snapshots()?;
+        let globals = self.required_task_globals(
+            binding.instance,
+            kernel,
+            required_signals.as_ref(),
+            &snapshots,
+        )?;
+        let runtime_globals = materialize_detached_globals(&globals);
+        let mut evaluator = KernelEvaluator::new(self.backend.as_ref());
+        let value = evaluator
+            .evaluate_item(binding.backend_item, &runtime_globals)
+            .map_err(|error| BackendRuntimeError::EvaluateTaskBody {
+                instance: binding.instance,
+                owner: binding.owner,
+                backend_item: binding.backend_item,
+                error,
+            })?;
+        Ok(DetachedRuntimeValue::from_runtime_owned(value))
+    }
+
     pub fn tick(&mut self) -> Result<TickOutcome, BackendRuntimeError> {
         let committed = self.committed_signal_snapshots()?;
         let runtime_committed = materialize_detached_globals(&committed);
@@ -1012,6 +1053,12 @@ pub enum BackendRuntimeError {
         instance: TaskInstanceId,
         message: Box<str>,
     },
+    EvaluateTaskBody {
+        instance: TaskInstanceId,
+        owner: hir::ItemId,
+        backend_item: BackendItemId,
+        error: EvaluationError,
+    },
     EvaluateDerivedSignal {
         signal: DerivedHandle,
         item: hir::ItemId,
@@ -1131,6 +1178,16 @@ impl fmt::Display for BackendRuntimeError {
             Self::SpawnTaskWorker { instance, message } => write!(
                 f,
                 "failed to spawn worker thread for task instance {}: {message}",
+                instance.as_raw()
+            ),
+            Self::EvaluateTaskBody {
+                instance,
+                owner,
+                backend_item,
+                error,
+            } => write!(
+                f,
+                "task instance {} for owner {owner} failed while evaluating backend item item{backend_item}: {error}",
                 instance.as_raw()
             ),
             Self::EvaluateDerivedSignal {

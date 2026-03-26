@@ -22,11 +22,20 @@ pub enum BuiltinSourceProvider {
     SocketConnect,
     MailboxSubscribe,
     ProcessSpawn,
+    ProcessArgs,
+    ProcessCwd,
+    EnvGet,
+    StdioRead,
+    PathHome,
+    PathConfigHome,
+    PathDataHome,
+    PathCacheHome,
+    PathTempDir,
     WindowKeyDown,
 }
 
 impl BuiltinSourceProvider {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 19] = [
         Self::HttpGet,
         Self::HttpPost,
         Self::TimerEvery,
@@ -36,6 +45,15 @@ impl BuiltinSourceProvider {
         Self::SocketConnect,
         Self::MailboxSubscribe,
         Self::ProcessSpawn,
+        Self::ProcessArgs,
+        Self::ProcessCwd,
+        Self::EnvGet,
+        Self::StdioRead,
+        Self::PathHome,
+        Self::PathConfigHome,
+        Self::PathDataHome,
+        Self::PathCacheHome,
+        Self::PathTempDir,
         Self::WindowKeyDown,
     ];
 
@@ -50,6 +68,15 @@ impl BuiltinSourceProvider {
             "socket.connect" => Some(Self::SocketConnect),
             "mailbox.subscribe" => Some(Self::MailboxSubscribe),
             "process.spawn" => Some(Self::ProcessSpawn),
+            "process.args" => Some(Self::ProcessArgs),
+            "process.cwd" => Some(Self::ProcessCwd),
+            "env.get" => Some(Self::EnvGet),
+            "stdio.read" => Some(Self::StdioRead),
+            "path.home" => Some(Self::PathHome),
+            "path.configHome" => Some(Self::PathConfigHome),
+            "path.dataHome" => Some(Self::PathDataHome),
+            "path.cacheHome" => Some(Self::PathCacheHome),
+            "path.tempDir" => Some(Self::PathTempDir),
             "window.keyDown" => Some(Self::WindowKeyDown),
             _ => None,
         }
@@ -66,6 +93,15 @@ impl BuiltinSourceProvider {
             Self::SocketConnect => "socket.connect",
             Self::MailboxSubscribe => "mailbox.subscribe",
             Self::ProcessSpawn => "process.spawn",
+            Self::ProcessArgs => "process.args",
+            Self::ProcessCwd => "process.cwd",
+            Self::EnvGet => "env.get",
+            Self::StdioRead => "stdio.read",
+            Self::PathHome => "path.home",
+            Self::PathConfigHome => "path.configHome",
+            Self::PathDataHome => "path.dataHome",
+            Self::PathCacheHome => "path.cacheHome",
+            Self::PathTempDir => "path.tempDir",
             Self::WindowKeyDown => "window.keyDown",
         }
     }
@@ -105,6 +141,17 @@ impl BuiltinSourceProvider {
                 PROCESS_RECURRENCE,
                 STREAM_LIFECYCLE,
             ),
+            Self::ProcessArgs
+            | Self::ProcessCwd
+            | Self::EnvGet
+            | Self::StdioRead
+            | Self::PathHome
+            | Self::PathConfigHome
+            | Self::PathDataHome
+            | Self::PathCacheHome
+            | Self::PathTempDir => {
+                SourceContract::new(self, &NO_OPTIONS, STATIC_RECURRENCE, STATIC_LIFECYCLE)
+            }
             Self::WindowKeyDown => {
                 SourceContract::new(self, &WINDOW_OPTIONS, WINDOW_RECURRENCE, STREAM_LIFECYCLE)
             }
@@ -695,6 +742,7 @@ static WINDOW_OPTIONS: [SourceOptionContract; 3] = [
     SourceOptionContract::new("repeat", SourceContractType::bool()),
     SourceOptionContract::new("focusOnly", SourceContractType::bool()),
 ];
+static NO_OPTIONS: [SourceOptionContract; 0] = [];
 
 const HTTP_RECURRENCE: SourceRecurrenceContract =
     SourceRecurrenceContract::new(None, &HTTP_WAKEUP_OPTIONS);
@@ -722,9 +770,12 @@ const WINDOW_RECURRENCE: SourceRecurrenceContract = SourceRecurrenceContract::ne
     Some(SourceContractIntrinsicWakeup::ProviderDefinedTrigger),
     &[],
 );
+const STATIC_RECURRENCE: SourceRecurrenceContract = SourceRecurrenceContract::new(None, &[]);
 const HTTP_LIFECYCLE: SourceLifecycleContract =
     SourceLifecycleContract::new(SourceCancellationPolicy::CancelInFlight);
 const TIMER_LIFECYCLE: SourceLifecycleContract =
+    SourceLifecycleContract::new(SourceCancellationPolicy::ProviderManaged);
+const STATIC_LIFECYCLE: SourceLifecycleContract =
     SourceLifecycleContract::new(SourceCancellationPolicy::ProviderManaged);
 const STREAM_LIFECYCLE: SourceLifecycleContract =
     SourceLifecycleContract::new(SourceCancellationPolicy::ProviderManaged);

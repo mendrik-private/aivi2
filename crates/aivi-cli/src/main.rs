@@ -6,7 +6,7 @@ use std::{
     env,
     ffi::OsString,
     fs,
-    io::{self, Read},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
     process::ExitCode,
     rc::Rc,
@@ -20,7 +20,8 @@ use std::os::unix::fs::PermissionsExt;
 
 use aivi_backend::{
     DetachedRuntimeValue, ItemId as BackendItemId, KernelEvaluator, Program as BackendProgram,
-    RuntimeValue, compile_program, lower_module as lower_backend_module, validate_program,
+    RuntimeTaskPlan, RuntimeValue, compile_program, lower_module as lower_backend_module,
+    validate_program,
 };
 use aivi_base::{Diagnostic, FileId, Severity, SourceDatabase, SourceSpan};
 use aivi_core::{
@@ -46,8 +47,9 @@ use aivi_query::{
     parsed_file as query_parsed_file,
 };
 use aivi_runtime::{
-    GlibLinkedRuntimeDriver, HirRuntimeAssembly, InputHandle as RuntimeInputHandle, Publication,
-    SourceProviderManager, assemble_hir_runtime, link_backend_runtime,
+    BackendLinkedRuntime, GlibLinkedRuntimeDriver, HirRuntimeAssembly,
+    InputHandle as RuntimeInputHandle, Publication, SourceProviderContext, SourceProviderManager,
+    assemble_hir_runtime, link_backend_runtime,
 };
 use aivi_syntax::{Formatter, ItemKind, TokenKind, lex_module, parse_module};
 use gtk::{glib, prelude::*};
@@ -86,6 +88,10 @@ fn run() -> Result<ExitCode, String> {
 
     if first == OsString::from("run") {
         return run_markup(args);
+    }
+
+    if first == OsString::from("execute") {
+        return run_execute(args);
     }
 
     if first == OsString::from("lex") {
@@ -261,6 +267,32 @@ fn run_markup(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Stri
         }
     }
     run_markup_file(&path, requested_view.as_deref())
+}
+
+fn run_execute(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
+    let path = args
+        .next()
+        .map(PathBuf::from)
+        .ok_or_else(|| "expected a path argument after `execute`".to_owned())?;
+    let mut program_args = Vec::new();
+    let mut accepting_program_args = false;
+
+    while let Some(argument) = args.next() {
+        if accepting_program_args {
+            program_args.push(argument.to_string_lossy().into_owned());
+            continue;
+        }
+        if argument == OsString::from("--") {
+            accepting_program_args = true;
+            continue;
+        }
+        return Err(format!(
+            "unexpected execute argument `{}`; pass program arguments after `--`",
+            argument.to_string_lossy()
+        ));
+    }
+
+    execute_file(&path, &program_args)
 }
 
 fn validate_module_path(path: &[&str]) -> Result<(), String> {
@@ -825,13 +857,326 @@ fn run_markup_file(path: &Path, requested_view: Option<&str>) -> Result<ExitCode
     launch_run(path, artifact)
 }
 
+struct ExecuteArtifact {
+    main_owner: aivi_hir::ItemId,
+    runtime_assembly: HirRuntimeAssembly,
+    core: aivi_core::Module,
+    backend: Arc<BackendProgram>,
+}
+
+fn execute_file(path: &Path, program_args: &[String]) -> Result<ExitCode, String> {
+    let context = current_execute_source_context(program_args)?;
+    let mut stdout = io::stdout().lock();
+    let mut stderr = io::stderr().lock();
+    execute_file_with_context(path, context, &mut stdout, &mut stderr)
+}
+
+fn current_execute_source_context(program_args: &[String]) -> Result<SourceProviderContext, String> {
+    let cwd = env::current_dir()
+        .map_err(|error| format!("failed to determine current directory for `aivi execute`: {error}"))?;
+    let env_vars = env::vars_os()
+        .map(|(key, value)| {
+            (
+                key.to_string_lossy().into_owned(),
+                value.to_string_lossy().into_owned(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    Ok(SourceProviderContext::new(
+        program_args.to_vec(),
+        cwd,
+        env_vars,
+    ))
+}
+
+fn execute_file_with_context(
+    path: &Path,
+    context: SourceProviderContext,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+) -> Result<ExitCode, String> {
+    require_file_exists(path)?;
+    let snapshot = WorkspaceHirSnapshot::load(path)?;
+    let syntax_failed = workspace_syntax_failed(&snapshot, |sources, diagnostics| {
+        print_diagnostics(sources, diagnostics.iter())
+    });
+    if syntax_failed {
+        return Ok(ExitCode::FAILURE);
+    }
+
+    let (hir_lowering_failed, hir_validation_failed) = workspace_hir_failed(
+        &snapshot,
+        |sources, diagnostics| print_diagnostics(sources, diagnostics.iter()),
+        |sources, diagnostics| print_diagnostics(sources, diagnostics.iter()),
+    );
+    if hir_lowering_failed || hir_validation_failed {
+        return Ok(ExitCode::FAILURE);
+    }
+
+    let lowered = snapshot.entry_hir();
+    let artifact = match prepare_execute_artifact(lowered.module()) {
+        Ok(artifact) => artifact,
+        Err(message) => {
+            write_output_line(stderr, &message)?;
+            return Ok(ExitCode::FAILURE);
+        }
+    };
+    if let Err(message) = launch_execute(path, artifact, context, stdout, stderr) {
+        write_output_line(stderr, &message)?;
+        return Ok(ExitCode::FAILURE);
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn prepare_execute_artifact(module: &HirModule) -> Result<ExecuteArtifact, String> {
+    let main = select_execute_main(module)?;
+    let main_owner = find_value_owner(module, main).ok_or_else(|| {
+        format!(
+            "failed to recover owning item for execute entrypoint `{}`",
+            main.name.text()
+        )
+    })?;
+    let lowered = lower_execute_backend_stack(module)?;
+    let runtime_assembly = assemble_hir_runtime(module).map_err(|errors| {
+        let mut rendered = String::from("failed to assemble runtime plans for `aivi execute`:\n");
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
+    if runtime_assembly.task_by_owner(main_owner).is_none() {
+        return Err(
+            "`aivi execute` requires `val main` to be annotated as `Task ...`".to_owned(),
+        );
+    }
+    Ok(ExecuteArtifact {
+        main_owner,
+        runtime_assembly,
+        core: lowered.core,
+        backend: lowered.backend,
+    })
+}
+
+fn select_execute_main<'a>(module: &'a HirModule) -> Result<&'a ValueItem, String> {
+    let mut found_value = None;
+    let mut found_non_value_kind = None;
+    for (_, item) in module.items().iter() {
+        match item {
+            Item::Value(value) if value.name.text() == "main" => {
+                found_value = Some(value);
+            }
+            Item::Function(item) if item.name.text() == "main" => {
+                found_non_value_kind = Some("function")
+            }
+            Item::Signal(item) if item.name.text() == "main" => {
+                found_non_value_kind = Some("signal")
+            }
+            Item::Type(item) if item.name.text() == "main" => {
+                found_non_value_kind = Some("type")
+            }
+            Item::Class(item) if item.name.text() == "main" => {
+                found_non_value_kind = Some("class")
+            }
+            Item::Domain(item) if item.name.text() == "main" => {
+                found_non_value_kind = Some("domain")
+            }
+            _ => {}
+        }
+    }
+    if let Some(value) = found_value {
+        return Ok(value);
+    }
+    if let Some(kind) = found_non_value_kind {
+        return Err(format!(
+            "`aivi execute` requires a top-level `val main : Task ...`; found top-level `{kind} main` instead"
+        ));
+    }
+    Err("no top-level `val main` found; define `val main : Task ... = ...`".to_owned())
+}
+
+fn launch_execute(
+    path: &Path,
+    artifact: ExecuteArtifact,
+    context: SourceProviderContext,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+) -> Result<(), String> {
+    let ExecuteArtifact {
+        main_owner,
+        runtime_assembly,
+        core,
+        backend,
+    } = artifact;
+    let mut linked = link_backend_runtime(runtime_assembly, &core, backend).map_err(|errors| {
+        let mut rendered = format!(
+            "failed to link backend runtime for `aivi execute` in {}:\n",
+            path.display()
+        );
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
+    let mut providers = SourceProviderManager::with_context(context);
+    settle_execute_sources(&mut linked, &mut providers)?;
+    let value = linked.evaluate_task_value_by_owner(main_owner).map_err(|error| {
+        format!(
+            "failed to evaluate `main` for `aivi execute` in {}: {error}",
+            path.display()
+        )
+    })?;
+    execute_main_task_value(value.into_runtime(), stdout, stderr)
+}
+
+fn settle_execute_sources(
+    linked: &mut BackendLinkedRuntime,
+    providers: &mut SourceProviderManager,
+) -> Result<(), String> {
+    loop {
+        let outcome = linked
+            .tick_with_source_lifecycle()
+            .map_err(|error| format!("failed to tick linked runtime for `aivi execute`: {error}"))?;
+        let had_source_actions = !outcome.source_actions().is_empty();
+        providers.apply_actions(outcome.source_actions()).map_err(|error| {
+            format!("failed to apply source lifecycle actions for `aivi execute`: {error}")
+        })?;
+        if !had_source_actions && linked.queued_message_count() == 0 {
+            return Ok(());
+        }
+    }
+}
+
+fn execute_main_task_value(
+    value: RuntimeValue,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+) -> Result<(), String> {
+    let RuntimeValue::Task(plan) = value else {
+        return Err(format!(
+            "`aivi execute` expected `main` to evaluate to a task plan, found `{value}`"
+        ));
+    };
+    let result = execute_runtime_task_plan(plan, stdout, stderr)?;
+    if result != RuntimeValue::Unit {
+        write_output_line(stdout, &result.to_string())?;
+    }
+    Ok(())
+}
+
+fn execute_runtime_task_plan(
+    plan: RuntimeTaskPlan,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+) -> Result<RuntimeValue, String> {
+    match plan {
+        RuntimeTaskPlan::RandomInt { low, high } => Ok(RuntimeValue::Int(
+            sample_random_i64_inclusive(low, high)?,
+        )),
+        RuntimeTaskPlan::RandomBytes { count } => {
+            let count = usize::try_from(count)
+                .map_err(|_| format!("random byte count must be non-negative, found {count}"))?;
+            Ok(RuntimeValue::Bytes(read_os_random_bytes(count)?))
+        }
+        RuntimeTaskPlan::StdoutWrite { text } => {
+            stdout
+                .write_all(text.as_bytes())
+                .map_err(|error| format!("failed to write stdout: {error}"))?;
+            stdout
+                .flush()
+                .map_err(|error| format!("failed to flush stdout: {error}"))?;
+            Ok(RuntimeValue::Unit)
+        }
+        RuntimeTaskPlan::StderrWrite { text } => {
+            stderr
+                .write_all(text.as_bytes())
+                .map_err(|error| format!("failed to write stderr: {error}"))?;
+            stderr
+                .flush()
+                .map_err(|error| format!("failed to flush stderr: {error}"))?;
+            Ok(RuntimeValue::Unit)
+        }
+        RuntimeTaskPlan::FsWriteText { path, text } => {
+            fs::write(Path::new(path.as_ref()), text.as_ref())
+                .map_err(|error| format!("failed to write {}: {error}", path))?;
+            Ok(RuntimeValue::Unit)
+        }
+        RuntimeTaskPlan::FsWriteBytes { path, bytes } => {
+            fs::write(Path::new(path.as_ref()), bytes.as_ref())
+                .map_err(|error| format!("failed to write {}: {error}", path))?;
+            Ok(RuntimeValue::Unit)
+        }
+        RuntimeTaskPlan::FsCreateDirAll { path } => {
+            fs::create_dir_all(Path::new(path.as_ref()))
+                .map_err(|error| format!("failed to create {}: {error}", path))?;
+            Ok(RuntimeValue::Unit)
+        }
+        RuntimeTaskPlan::FsDeleteFile { path } => {
+            fs::remove_file(Path::new(path.as_ref()))
+                .map_err(|error| format!("failed to delete {}: {error}", path))?;
+            Ok(RuntimeValue::Unit)
+        }
+    }
+}
+
+fn write_output_line(target: &mut impl Write, text: &str) -> Result<(), String> {
+    writeln!(target, "{text}").map_err(|error| format!("failed to write CLI output: {error}"))
+}
+
+fn sample_random_i64_inclusive(low: i64, high: i64) -> Result<i64, String> {
+    if low > high {
+        return Err(format!(
+            "randomInt requires `low <= high`, found low={low} and high={high}"
+        ));
+    }
+    if low == i64::MIN && high == i64::MAX {
+        return Ok(i64::from_le_bytes(random_u64()?.to_le_bytes()));
+    }
+    let range = u128::try_from(i128::from(high) - i128::from(low) + 1)
+        .expect("inclusive i64 range should fit into u128");
+    let domain = u128::from(u64::MAX) + 1;
+    let limit = (domain / range) * range;
+    loop {
+        let candidate = u128::from(random_u64()?);
+        if candidate < limit {
+            let value = i128::from(low)
+                + i128::try_from(candidate % range)
+                    .expect("random range remainder should fit into i128");
+            return Ok(i64::try_from(value).expect("random value should remain within i64 bounds"));
+        }
+    }
+}
+
+fn random_u64() -> Result<u64, String> {
+    let bytes = read_os_random_bytes(std::mem::size_of::<u64>())?;
+    let array: [u8; std::mem::size_of::<u64>()] = bytes
+        .as_ref()
+        .try_into()
+        .expect("fixed-length random byte buffer should match u64 width");
+    Ok(u64::from_le_bytes(array))
+}
+
+fn read_os_random_bytes(count: usize) -> Result<Box<[u8]>, String> {
+    let mut file = fs::File::open("/dev/urandom")
+        .map_err(|error| format!("failed to open /dev/urandom: {error}"))?;
+    let mut bytes = vec![0u8; count];
+    if count > 0 {
+        file.read_exact(&mut bytes)
+            .map_err(|error| format!("failed to read {count} random byte(s): {error}"))?;
+    }
+    Ok(bytes.into_boxed_slice())
+}
+
 fn prepare_run_artifact(
     sources: &SourceDatabase,
     module: &HirModule,
     requested_view: Option<&str>,
 ) -> Result<RunArtifact, String> {
     let view = select_run_view(module, requested_view)?;
-    let view_owner = find_run_view_owner(module, view).ok_or_else(|| {
+    let view_owner = find_value_owner(module, view).ok_or_else(|| {
         format!(
             "failed to recover owning item for run view `{}`",
             view.name.text()
@@ -956,13 +1301,13 @@ fn markup_view_names(values: &[&ValueItem]) -> Vec<String> {
         .collect()
 }
 
-fn find_run_view_owner(module: &HirModule, view: &ValueItem) -> Option<aivi_hir::ItemId> {
+fn find_value_owner(module: &HirModule, value: &ValueItem) -> Option<aivi_hir::ItemId> {
     module
         .items()
         .iter()
         .find_map(|(item_id, item)| match item {
             Item::Value(candidate)
-                if candidate.body == view.body && candidate.name.text() == view.name.text() =>
+                if candidate.body == value.body && candidate.name.text() == value.name.text() =>
             {
                 Some(item_id)
             }
@@ -1228,8 +1573,19 @@ struct LoweredRunBackendStack {
 }
 
 fn lower_run_backend_stack(module: &HirModule) -> Result<LoweredRunBackendStack, String> {
+    lower_runtime_backend_stack(module, "`aivi run`")
+}
+
+fn lower_execute_backend_stack(module: &HirModule) -> Result<LoweredRunBackendStack, String> {
+    lower_runtime_backend_stack(module, "`aivi execute`")
+}
+
+fn lower_runtime_backend_stack(
+    module: &HirModule,
+    command_name: &str,
+) -> Result<LoweredRunBackendStack, String> {
     let core = lower_runtime_module(module).map_err(|errors| {
-        let mut rendered = String::from("failed to lower `aivi run` module into typed core:\n");
+        let mut rendered = format!("failed to lower {command_name} module into typed core:\n");
         for error in errors.errors() {
             rendered.push_str("- ");
             rendered.push_str(&error.to_string());
@@ -1238,7 +1594,7 @@ fn lower_run_backend_stack(module: &HirModule) -> Result<LoweredRunBackendStack,
         rendered
     })?;
     validate_core_module(&core).map_err(|errors| {
-        let mut rendered = String::from("typed-core validation failed for `aivi run`:\n");
+        let mut rendered = format!("typed-core validation failed for {command_name}:\n");
         for error in errors.errors() {
             rendered.push_str("- ");
             rendered.push_str(&error.to_string());
@@ -1247,7 +1603,7 @@ fn lower_run_backend_stack(module: &HirModule) -> Result<LoweredRunBackendStack,
         rendered
     })?;
     let lambda = lower_lambda_module(&core).map_err(|errors| {
-        let mut rendered = String::from("failed to lower `aivi run` module into typed lambda:\n");
+        let mut rendered = format!("failed to lower {command_name} module into typed lambda:\n");
         for error in errors.errors() {
             rendered.push_str("- ");
             rendered.push_str(&error.to_string());
@@ -1256,7 +1612,7 @@ fn lower_run_backend_stack(module: &HirModule) -> Result<LoweredRunBackendStack,
         rendered
     })?;
     validate_lambda_module(&lambda).map_err(|errors| {
-        let mut rendered = String::from("typed-lambda validation failed for `aivi run`:\n");
+        let mut rendered = format!("typed-lambda validation failed for {command_name}:\n");
         for error in errors.errors() {
             rendered.push_str("- ");
             rendered.push_str(&error.to_string());
@@ -1265,7 +1621,7 @@ fn lower_run_backend_stack(module: &HirModule) -> Result<LoweredRunBackendStack,
         rendered
     })?;
     let backend = lower_backend_module(&lambda).map_err(|errors| {
-        let mut rendered = String::from("failed to lower `aivi run` module into backend IR:\n");
+        let mut rendered = format!("failed to lower {command_name} module into backend IR:\n");
         for error in errors.errors() {
             rendered.push_str("- ");
             rendered.push_str(&error.to_string());
@@ -1274,7 +1630,7 @@ fn lower_run_backend_stack(module: &HirModule) -> Result<LoweredRunBackendStack,
         rendered
     })?;
     validate_program(&backend).map_err(|errors| {
-        let mut rendered = String::from("backend validation failed for `aivi run`:\n");
+        let mut rendered = format!("backend validation failed for {command_name}:\n");
         for error in errors.errors() {
             rendered.push_str("- ");
             rendered.push_str(&error.to_string());
@@ -3403,10 +3759,10 @@ fn run_lsp(_args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
 
 fn print_usage() {
     eprintln!(
-        "usage:\n  aivi <path>\n  aivi check <path>\n  aivi compile <path> [-o <object>]\n  aivi build <path> -o <bundle> [--view <name>]\n  aivi run <path> [--view <name>]\n  aivi lex <path>\n  aivi fmt <path>\n  aivi fmt --stdin\n  aivi fmt --check [path...]\n  aivi lsp"
+        "usage:\n  aivi <path>\n  aivi check <path>\n  aivi compile <path> [-o <object>]\n  aivi build <path> -o <bundle> [--view <name>]\n  aivi run <path> [--view <name>]\n  aivi execute <path> [-- args...]\n  aivi lex <path>\n  aivi fmt <path>\n  aivi fmt --stdin\n  aivi fmt --check [path...]\n  aivi lsp"
     );
     eprintln!(
-        "commands:\n  check    Lex, parse, lower, and validate a module through HIR\n  compile  Lower through typed core, typed lambda, backend, and Cranelift codegen\n  build    Package a runnable bundle directory around the live GTK/runtime path\n  run      Launch the current live GTK runtime path\n  lex      Dump the lossless token stream\n  fmt      Canonically format the supported surface subset\n  lsp      Start the language server"
+        "commands:\n  check    Lex, parse, lower, and validate a module through HIR\n  compile  Lower through typed core, typed lambda, backend, and Cranelift codegen\n  build    Package a runnable bundle directory around the live GTK/runtime path\n  run      Launch the current live GTK runtime path\n  execute  Evaluate a top-level `val main : Task ...` without GTK\n  lex      Dump the lossless token stream\n  fmt      Canonically format the supported surface subset\n  lsp      Start the language server"
     );
     eprintln!(
         "milestone-2 surface items: {:?}",
@@ -3443,12 +3799,14 @@ fn print_usage() {
 mod tests {
     use super::{
         HydratedRunNode, RunHydrationStaticState, WorkspaceHirSnapshot, check_file,
-        plan_run_hydration, prepare_run_artifact,
+        execute_file_with_context, execute_runtime_task_plan, plan_run_hydration,
+        prepare_run_artifact,
     };
-    use aivi_backend::RuntimeValue;
+    use aivi_backend::{RuntimeTaskPlan, RuntimeValue};
     use aivi_base::SourceDatabase;
     use aivi_gtk::{GtkBridgeNodeKind, RuntimePropertyBinding, RuntimeShowMountPolicy};
     use aivi_hir::{ValidationMode, lower_module as lower_hir_module};
+    use aivi_runtime::SourceProviderContext;
     use aivi_syntax::parse_module;
     use std::{
         collections::BTreeMap,
@@ -3599,6 +3957,21 @@ mod tests {
         );
         let lowered = snapshot.entry_hir();
         prepare_run_artifact(&snapshot.sources, lowered.module(), requested_view)
+    }
+
+    fn execute_workspace(
+        path: &Path,
+        context: SourceProviderContext,
+    ) -> (ExitCode, String, String) {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = execute_file_with_context(path, context, &mut stdout, &mut stderr)
+            .expect("execute should return an exit code");
+        (
+            code,
+            String::from_utf8(stdout).expect("stdout should stay UTF-8 in tests"),
+            String::from_utf8(stderr).expect("stderr should stay UTF-8 in tests"),
+        )
     }
 
     fn control_window_source() -> &'static str {
@@ -4340,5 +4713,229 @@ val second =
         )
         .expect_err("multiple unnamed markup views should require `--view`");
         assert!(error.contains("--view <name>"));
+    }
+
+    #[test]
+    fn execute_reads_host_context_sources_and_writes_stdout() {
+        let workspace = TempDir::new("execute-context");
+        let entry = workspace.write(
+            "main.aivi",
+            r#"
+use aivi.stdio (
+    stdoutWrite
+)
+
+@source process.args
+sig cliArgs : Signal (List Text)
+
+@source process.cwd
+sig cwd : Signal Text
+
+@source env.get "ACCESS_TOKEN"
+sig token : Signal (Option Text)
+
+@source stdio.read
+sig stdinText : Signal Text
+
+@source path.home
+sig homeDir : Signal Text
+
+@source path.configHome
+sig configHome : Signal Text
+
+@source path.dataHome
+sig dataHome : Signal Text
+
+@source path.cacheHome
+sig cacheHome : Signal Text
+
+@source path.tempDir
+sig tempDir : Signal Text
+
+val main : Task Text Unit =
+    stdoutWrite "{cliArgs}|{cwd}|{token}|{stdinText}|{homeDir}|{configHome}|{dataHome}|{cacheHome}|{tempDir}"
+"#,
+        );
+        let cwd = workspace.path().join("working");
+        fs::create_dir_all(&cwd).expect("execute cwd should be creatable");
+        let home = workspace.path().join("home");
+        let config = workspace.path().join("config");
+        let data = workspace.path().join("data");
+        let cache = workspace.path().join("cache");
+        for path in [&home, &config, &data, &cache] {
+            fs::create_dir_all(path).expect("context directories should be creatable");
+        }
+        let context = SourceProviderContext::new(
+            vec!["alpha".to_owned(), "beta".to_owned()],
+            cwd.clone(),
+            BTreeMap::from([
+                ("HOME".to_owned(), home.to_string_lossy().into_owned()),
+                (
+                    "XDG_CONFIG_HOME".to_owned(),
+                    config.to_string_lossy().into_owned(),
+                ),
+                ("XDG_DATA_HOME".to_owned(), data.to_string_lossy().into_owned()),
+                (
+                    "XDG_CACHE_HOME".to_owned(),
+                    cache.to_string_lossy().into_owned(),
+                ),
+                ("ACCESS_TOKEN".to_owned(), "secret".to_owned()),
+            ]),
+        )
+        .with_stdin_text("payload");
+
+        let (code, stdout, stderr) = execute_workspace(&entry, context);
+
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert!(stderr.is_empty(), "stderr should stay empty, found {stderr:?}");
+        assert_eq!(
+            stdout,
+            format!(
+                "[alpha, beta]|{}|Some secret|payload|{}|{}|{}|{}|{}",
+                cwd.display(),
+                home.display(),
+                config.display(),
+                data.display(),
+                cache.display(),
+                env::temp_dir().display()
+            )
+        );
+    }
+
+    #[test]
+    fn execute_runs_stderr_task_without_touching_stdout() {
+        let workspace = TempDir::new("execute-stderr");
+        let entry = workspace.write(
+            "main.aivi",
+            r#"
+use aivi.stdio (
+    stderrWrite
+)
+
+val main : Task Text Unit =
+    stderrWrite "problem"
+"#,
+        );
+
+        let (code, stdout, stderr) =
+            execute_workspace(&entry, SourceProviderContext::new(Vec::new(), workspace.path().to_path_buf(), BTreeMap::new()));
+
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert!(stdout.is_empty(), "stdout should stay empty, found {stdout:?}");
+        assert_eq!(stderr, "problem");
+    }
+
+    #[test]
+    fn execute_writes_text_files_relative_to_the_cli_context() {
+        let workspace = TempDir::new("execute-write-text");
+        let entry = workspace.write(
+            "main.aivi",
+            r#"
+use aivi.fs (
+    writeText
+)
+
+@source process.cwd
+sig cwd : Signal Text
+
+val main : Task Text Unit =
+    writeText "{cwd}/out.txt" "hello from execute"
+"#,
+        );
+        let cwd = workspace.path().join("cwd");
+        fs::create_dir_all(&cwd).expect("execute cwd should be creatable");
+
+        let (code, stdout, stderr) = execute_workspace(
+            &entry,
+            SourceProviderContext::new(Vec::new(), cwd.clone(), BTreeMap::new()),
+        );
+
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert!(stdout.is_empty(), "stdout should stay empty, found {stdout:?}");
+        assert!(stderr.is_empty(), "stderr should stay empty, found {stderr:?}");
+        assert_eq!(
+            fs::read_to_string(cwd.join("out.txt")).expect("text task should create output file"),
+            "hello from execute"
+        );
+    }
+
+    #[test]
+    fn execute_creates_and_deletes_filesystem_paths() {
+        let workspace = TempDir::new("execute-fs-paths");
+        let create_entry = workspace.write(
+            "create.aivi",
+            r#"
+use aivi.fs (
+    createDirAll
+)
+
+@source process.cwd
+sig cwd : Signal Text
+
+val main : Task Text Unit =
+    createDirAll "{cwd}/nested/logs"
+"#,
+        );
+        let delete_entry = workspace.write(
+            "delete.aivi",
+            r#"
+use aivi.fs (
+    deleteFile
+)
+
+@source process.cwd
+sig cwd : Signal Text
+
+val main : Task Text Unit =
+    deleteFile "{cwd}/remove-me.txt"
+"#,
+        );
+        let cwd = workspace.path().join("cwd");
+        fs::create_dir_all(&cwd).expect("execute cwd should be creatable");
+        fs::write(cwd.join("remove-me.txt"), "bye").expect("delete fixture should be writable");
+
+        let (create_code, create_stdout, create_stderr) = execute_workspace(
+            &create_entry,
+            SourceProviderContext::new(Vec::new(), cwd.clone(), BTreeMap::new()),
+        );
+        assert_eq!(create_code, ExitCode::SUCCESS);
+        assert!(create_stdout.is_empty());
+        assert!(create_stderr.is_empty());
+        assert!(cwd.join("nested/logs").is_dir());
+
+        let (delete_code, delete_stdout, delete_stderr) = execute_workspace(
+            &delete_entry,
+            SourceProviderContext::new(Vec::new(), cwd.clone(), BTreeMap::new()),
+        );
+        assert_eq!(delete_code, ExitCode::SUCCESS);
+        assert!(delete_stdout.is_empty());
+        assert!(delete_stderr.is_empty());
+        assert!(!cwd.join("remove-me.txt").exists());
+    }
+
+    #[test]
+    fn execute_runtime_task_plan_writes_raw_bytes() {
+        let workspace = TempDir::new("execute-write-bytes");
+        let path = workspace.path().join("blob.bin");
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        let result = execute_runtime_task_plan(
+            RuntimeTaskPlan::FsWriteBytes {
+                path: path.to_string_lossy().into_owned().into_boxed_str(),
+                bytes: vec![0, 1, 2, 3].into_boxed_slice(),
+            },
+            &mut stdout,
+            &mut stderr,
+        )
+        .expect("write-bytes task should execute");
+
+        assert_eq!(result, RuntimeValue::Unit);
+        assert!(stdout.is_empty());
+        assert!(stderr.is_empty());
+        assert_eq!(
+            fs::read(&path).expect("written bytes should be readable"),
+            vec![0, 1, 2, 3]
+        );
     }
 }
