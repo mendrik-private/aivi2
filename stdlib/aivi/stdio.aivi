@@ -1,0 +1,8 @@
+// aivi.stdio: headless CLI output tasks.
+//
+// `stdoutWrite` and `stderrWrite` are resolved through the compiler's intrinsic
+// catalog (IntrinsicValue::StdoutWrite / IntrinsicValue::StderrWrite). The
+// concrete runtime behavior is currently provided by `aivi execute`.
+//
+// No source-level declarations are needed; import metadata is injected directly
+// during import resolution.

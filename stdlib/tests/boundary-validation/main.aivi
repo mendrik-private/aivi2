@@ -38,6 +38,14 @@ use aivi.fs (
   Created
   Changed
   Deleted
+  writeText
+  writeBytes
+  createDirAll
+  deleteFile
+)
+use aivi.stdio (
+  stdoutWrite
+  stderrWrite
 )
 use aivi.auth (
   PkceConfig
@@ -228,3 +236,45 @@ val smtpConfig: SmtpConfig = {
 
 val smtpAuthFailed: SmtpError = SmtpAuthFailed
 
+type CliWrite = Text -> Task Text Unit
+type CliWriteBytes = Text -> Bytes -> Task Text Unit
+
+val stdoutWriter: CliWrite = stdoutWrite
+val stderrWriter: CliWrite = stderrWrite
+val fsWriteText: Text -> Text -> Task Text Unit = writeText
+val fsWriteBytes: CliWriteBytes = writeBytes
+val fsCreateDirAll: CliWrite = createDirAll
+val fsDeleteFile: CliWrite = deleteFile
+
+val stdoutTask: Task Text Unit = stdoutWrite "stdout"
+val stderrTask: Task Text Unit = stderrWrite "stderr"
+val mkdirTask: Task Text Unit = createDirAll "/tmp/aivi-boundary"
+val writeTextTask: Task Text Unit = writeText "/tmp/aivi-boundary/out.txt" "ok"
+val deleteTask: Task Text Unit = deleteFile "/tmp/aivi-boundary/out.txt"
+
+@source process.args
+sig cliArgs: Signal (List Text)
+
+@source process.cwd
+sig cliCwd: Signal Text
+
+@source env.get "ACCESS_TOKEN"
+sig cliToken: Signal (Option Text)
+
+@source stdio.read
+sig stdinText: Signal Text
+
+@source path.home
+sig homeDir: Signal Text
+
+@source path.configHome
+sig configHomeDir: Signal Text
+
+@source path.dataHome
+sig dataHomeDir: Signal Text
+
+@source path.cacheHome
+sig cacheHomeDir: Signal Text
+
+@source path.tempDir
+sig tempDir: Signal Text

@@ -251,6 +251,12 @@ pub enum BuiltinTerm {
 pub enum IntrinsicValue {
     RandomInt,
     RandomBytes,
+    StdoutWrite,
+    StderrWrite,
+    FsWriteText,
+    FsWriteBytes,
+    FsCreateDirAll,
+    FsDeleteFile,
 }
 
 impl fmt::Display for IntrinsicValue {
@@ -258,6 +264,12 @@ impl fmt::Display for IntrinsicValue {
         match self {
             Self::RandomInt => f.write_str("aivi.random.randomInt"),
             Self::RandomBytes => f.write_str("aivi.random.randomBytes"),
+            Self::StdoutWrite => f.write_str("aivi.stdio.stdoutWrite"),
+            Self::StderrWrite => f.write_str("aivi.stdio.stderrWrite"),
+            Self::FsWriteText => f.write_str("aivi.fs.writeText"),
+            Self::FsWriteBytes => f.write_str("aivi.fs.writeBytes"),
+            Self::FsCreateDirAll => f.write_str("aivi.fs.createDirAll"),
+            Self::FsDeleteFile => f.write_str("aivi.fs.deleteFile"),
         }
     }
 }

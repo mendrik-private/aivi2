@@ -32,7 +32,10 @@ pub use hir_adapter::{
     HirRuntimeAssemblyBuilder, HirRuntimeGatePlan, HirRuntimeInstantiationError, HirSignalBinding,
     HirSignalBindingKind, HirSourceBinding, HirTaskBinding, assemble_hir_runtime,
 };
-pub use providers::{MailboxPublishError, SourceProviderExecutionError, SourceProviderManager};
+pub use providers::{
+    MailboxPublishError, SourceProviderContext, SourceProviderExecutionError,
+    SourceProviderManager,
+};
 pub use scheduler::{
     DependencyValue, DependencyValues, DerivedNodeEvaluator, DroppedPublication, Generation,
     Publication, PublicationDropReason, PublicationStamp, Scheduler, SchedulerAccessError,

@@ -1,12 +1,12 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fmt, fs,
-    io::{BufRead, BufReader},
+    env, fmt, fs,
+    io::{BufRead, BufReader, Read},
     net::TcpStream,
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
         atomic::{AtomicBool, Ordering},
         mpsc::{self, RecvTimeoutError, SyncSender, TrySendError},
     },
@@ -117,6 +117,145 @@ impl fmt::Display for MailboxPublishError {
 impl std::error::Error for MailboxPublishError {}
 
 #[derive(Clone)]
+pub struct SourceProviderContext {
+    args: Arc<[String]>,
+    cwd: Arc<PathBuf>,
+    env: Arc<BTreeMap<String, String>>,
+    stdin_override: Option<Result<Box<str>, Box<str>>>,
+    stdin_text: Arc<OnceLock<Result<Box<str>, Box<str>>>>,
+}
+
+impl Default for SourceProviderContext {
+    fn default() -> Self {
+        Self::current()
+    }
+}
+
+impl SourceProviderContext {
+    pub fn current() -> Self {
+        let args = env::args_os()
+            .skip(1)
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let env = env::vars_os()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.to_string_lossy().into_owned(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        Self::new(args, cwd, env)
+    }
+
+    pub fn new(args: Vec<String>, cwd: PathBuf, env: BTreeMap<String, String>) -> Self {
+        Self {
+            args: Arc::from(args.into_boxed_slice()),
+            cwd: Arc::new(cwd),
+            env: Arc::new(env),
+            stdin_override: None,
+            stdin_text: Arc::new(OnceLock::new()),
+        }
+    }
+
+    pub fn with_stdin_text(mut self, stdin: impl Into<String>) -> Self {
+        self.stdin_override = Some(Ok(stdin.into().into_boxed_str()));
+        self
+    }
+
+    fn args_runtime_value(&self) -> RuntimeValue {
+        RuntimeValue::List(
+            self.args
+                .iter()
+                .cloned()
+                .map(|arg| RuntimeValue::Text(arg.into_boxed_str()))
+                .collect(),
+        )
+    }
+
+    fn cwd_runtime_value(&self) -> RuntimeValue {
+        RuntimeValue::Text(self.cwd.to_string_lossy().into_owned().into_boxed_str())
+    }
+
+    fn env_runtime_value(&self, key: &str) -> RuntimeValue {
+        match self.env.get(key) {
+            Some(value) => RuntimeValue::OptionSome(Box::new(RuntimeValue::Text(
+                value.clone().into_boxed_str(),
+            ))),
+            None => RuntimeValue::OptionNone,
+        }
+    }
+
+    fn stdin_text(&self) -> Result<Box<str>, Box<str>> {
+        if let Some(value) = &self.stdin_override {
+            return value.clone();
+        }
+        self.stdin_text
+            .get_or_init(|| {
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut input)
+                    .map_err(|error| format!("failed to read stdin: {error}").into_boxed_str())?;
+                Ok(input.into_boxed_str())
+            })
+            .clone()
+    }
+
+    fn home_dir_text(&self) -> Result<Box<str>, Box<str>> {
+        self.env
+            .get("HOME")
+            .cloned()
+            .map(String::into_boxed_str)
+            .ok_or_else(|| "HOME is not set".into())
+    }
+
+    fn config_home_text(&self) -> Result<Box<str>, Box<str>> {
+        if let Some(path) = self.env.get("XDG_CONFIG_HOME") {
+            return Ok(path.clone().into_boxed_str());
+        }
+        let home = self.home_dir_text()?;
+        Ok(PathBuf::from(home.as_ref())
+            .join(".config")
+            .to_string_lossy()
+            .into_owned()
+            .into_boxed_str())
+    }
+
+    fn data_home_text(&self) -> Result<Box<str>, Box<str>> {
+        if let Some(path) = self.env.get("XDG_DATA_HOME") {
+            return Ok(path.clone().into_boxed_str());
+        }
+        let home = self.home_dir_text()?;
+        Ok(PathBuf::from(home.as_ref())
+            .join(".local")
+            .join("share")
+            .to_string_lossy()
+            .into_owned()
+            .into_boxed_str())
+    }
+
+    fn cache_home_text(&self) -> Result<Box<str>, Box<str>> {
+        if let Some(path) = self.env.get("XDG_CACHE_HOME") {
+            return Ok(path.clone().into_boxed_str());
+        }
+        let home = self.home_dir_text()?;
+        Ok(PathBuf::from(home.as_ref())
+            .join(".cache")
+            .to_string_lossy()
+            .into_owned()
+            .into_boxed_str())
+    }
+
+    fn temp_dir_text(&self) -> Box<str> {
+        env::temp_dir()
+            .to_string_lossy()
+            .into_owned()
+            .into_boxed_str()
+    }
+}
+
+#[derive(Clone)]
 enum ActiveProviderState {
     Passive {
         provider: RuntimeSourceProvider,
@@ -156,21 +295,27 @@ pub struct SourceProviderManager {
     active: BTreeMap<SourceInstanceId, ActiveProviderState>,
     mailboxes: Arc<Mutex<MailboxHub>>,
     thread_handles: Arc<Mutex<BTreeMap<SourceInstanceId, Vec<thread::JoinHandle<()>>>>>,
+    context: SourceProviderContext,
 }
 
 impl Default for SourceProviderManager {
     fn default() -> Self {
-        Self {
-            active: BTreeMap::new(),
-            mailboxes: Arc::default(),
-            thread_handles: Arc::new(Mutex::new(BTreeMap::new())),
-        }
+        Self::with_context(SourceProviderContext::current())
     }
 }
 
 impl SourceProviderManager {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_context(context: SourceProviderContext) -> Self {
+        Self {
+            active: BTreeMap::new(),
+            mailboxes: Arc::new(Mutex::new(MailboxHub::default())),
+            thread_handles: Arc::new(Mutex::new(BTreeMap::new())),
+            context,
+        }
     }
 
     pub fn active_provider(&self, instance: SourceInstanceId) -> Option<&RuntimeSourceProvider> {
@@ -338,6 +483,178 @@ impl SourceProviderManager {
                 let stop = Arc::new(AtomicBool::new(false));
                 let handle = spawn_process_worker(port, plan, stop.clone());
                 self.thread_handles.lock().unwrap().entry(instance).or_default().push(handle);
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::ProcessArgs) => {
+                validate_argument_count(instance, BuiltinSourceProvider::ProcessArgs, config, 0)?;
+                reject_options(instance, BuiltinSourceProvider::ProcessArgs, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                publish_immediate_value(
+                    instance,
+                    BuiltinSourceProvider::ProcessArgs,
+                    &port,
+                    self.context.args_runtime_value(),
+                )?;
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::ProcessCwd) => {
+                validate_argument_count(instance, BuiltinSourceProvider::ProcessCwd, config, 0)?;
+                reject_options(instance, BuiltinSourceProvider::ProcessCwd, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                publish_immediate_value(
+                    instance,
+                    BuiltinSourceProvider::ProcessCwd,
+                    &port,
+                    self.context.cwd_runtime_value(),
+                )?;
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::EnvGet) => {
+                validate_argument_count(instance, BuiltinSourceProvider::EnvGet, config, 1)?;
+                reject_options(instance, BuiltinSourceProvider::EnvGet, config)?;
+                let key =
+                    parse_text_argument(instance, BuiltinSourceProvider::EnvGet, 0, &config.arguments[0])?;
+                let stop = Arc::new(AtomicBool::new(false));
+                publish_immediate_value(
+                    instance,
+                    BuiltinSourceProvider::EnvGet,
+                    &port,
+                    self.context.env_runtime_value(key.as_ref()),
+                )?;
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::StdioRead) => {
+                validate_argument_count(instance, BuiltinSourceProvider::StdioRead, config, 0)?;
+                reject_options(instance, BuiltinSourceProvider::StdioRead, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                let stdin = self.context.stdin_text().map_err(|detail| {
+                    SourceProviderExecutionError::StartFailed {
+                        instance,
+                        provider: BuiltinSourceProvider::StdioRead,
+                        detail,
+                    }
+                })?;
+                publish_immediate_value(
+                    instance,
+                    BuiltinSourceProvider::StdioRead,
+                    &port,
+                    RuntimeValue::Text(stdin),
+                )?;
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::PathHome) => {
+                validate_argument_count(instance, BuiltinSourceProvider::PathHome, config, 0)?;
+                reject_options(instance, BuiltinSourceProvider::PathHome, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                let path = self.context.home_dir_text().map_err(|detail| {
+                    SourceProviderExecutionError::StartFailed {
+                        instance,
+                        provider: BuiltinSourceProvider::PathHome,
+                        detail,
+                    }
+                })?;
+                publish_immediate_value(
+                    instance,
+                    BuiltinSourceProvider::PathHome,
+                    &port,
+                    RuntimeValue::Text(path),
+                )?;
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::PathConfigHome) => {
+                validate_argument_count(instance, BuiltinSourceProvider::PathConfigHome, config, 0)?;
+                reject_options(instance, BuiltinSourceProvider::PathConfigHome, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                let path = self.context.config_home_text().map_err(|detail| {
+                    SourceProviderExecutionError::StartFailed {
+                        instance,
+                        provider: BuiltinSourceProvider::PathConfigHome,
+                        detail,
+                    }
+                })?;
+                publish_immediate_value(
+                    instance,
+                    BuiltinSourceProvider::PathConfigHome,
+                    &port,
+                    RuntimeValue::Text(path),
+                )?;
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::PathDataHome) => {
+                validate_argument_count(instance, BuiltinSourceProvider::PathDataHome, config, 0)?;
+                reject_options(instance, BuiltinSourceProvider::PathDataHome, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                let path = self.context.data_home_text().map_err(|detail| {
+                    SourceProviderExecutionError::StartFailed {
+                        instance,
+                        provider: BuiltinSourceProvider::PathDataHome,
+                        detail,
+                    }
+                })?;
+                publish_immediate_value(
+                    instance,
+                    BuiltinSourceProvider::PathDataHome,
+                    &port,
+                    RuntimeValue::Text(path),
+                )?;
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::PathCacheHome) => {
+                validate_argument_count(instance, BuiltinSourceProvider::PathCacheHome, config, 0)?;
+                reject_options(instance, BuiltinSourceProvider::PathCacheHome, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                let path = self.context.cache_home_text().map_err(|detail| {
+                    SourceProviderExecutionError::StartFailed {
+                        instance,
+                        provider: BuiltinSourceProvider::PathCacheHome,
+                        detail,
+                    }
+                })?;
+                publish_immediate_value(
+                    instance,
+                    BuiltinSourceProvider::PathCacheHome,
+                    &port,
+                    RuntimeValue::Text(path),
+                )?;
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::PathTempDir) => {
+                validate_argument_count(instance, BuiltinSourceProvider::PathTempDir, config, 0)?;
+                reject_options(instance, BuiltinSourceProvider::PathTempDir, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                publish_immediate_value(
+                    instance,
+                    BuiltinSourceProvider::PathTempDir,
+                    &port,
+                    RuntimeValue::Text(self.context.temp_dir_text()),
+                )?;
                 ActiveProviderState::Passive {
                     provider: config.provider.clone(),
                     stop,
@@ -2574,6 +2891,52 @@ fn parse_duration(
             value: other.clone(),
         }),
     }
+}
+
+fn validate_argument_count(
+    instance: SourceInstanceId,
+    provider: BuiltinSourceProvider,
+    config: &EvaluatedSourceConfig,
+    expected: usize,
+) -> Result<(), SourceProviderExecutionError> {
+    if config.arguments.len() != expected {
+        return Err(SourceProviderExecutionError::InvalidArgumentCount {
+            instance,
+            provider,
+            expected,
+            found: config.arguments.len(),
+        });
+    }
+    Ok(())
+}
+
+fn reject_options(
+    instance: SourceInstanceId,
+    provider: BuiltinSourceProvider,
+    config: &EvaluatedSourceConfig,
+) -> Result<(), SourceProviderExecutionError> {
+    if let Some(option) = config.options.first() {
+        return Err(SourceProviderExecutionError::UnsupportedOption {
+            instance,
+            provider,
+            option_name: option.option_name.clone(),
+        });
+    }
+    Ok(())
+}
+
+fn publish_immediate_value(
+    instance: SourceInstanceId,
+    provider: BuiltinSourceProvider,
+    port: &DetachedRuntimePublicationPort,
+    value: RuntimeValue,
+) -> Result<(), SourceProviderExecutionError> {
+    port.publish(DetachedRuntimeValue::from_runtime_owned(value))
+        .map_err(|error| SourceProviderExecutionError::StartFailed {
+            instance,
+            provider,
+            detail: format!("failed to publish initial value: {error:?}").into_boxed_str(),
+        })
 }
 
 fn parse_option_duration(

@@ -29,6 +29,36 @@ AIVI manages source lifecycle automatically:
 
 You never subscribe or unsubscribe manually.
 
+## Headless host-context sources
+
+`aivi execute` also exposes one-shot host-context providers for CLI programs. These publish once
+at startup, commit a snapshot, and then stay stable for the rest of the run.
+
+```aivi
+@source process.args
+sig args : Signal (List Text)
+
+@source env.get "ACCESS_TOKEN"
+sig token : Signal (Option Text)
+
+@source path.configHome
+sig configHome : Signal Text
+```
+
+Available execute-time providers:
+
+| Source | Emits | Meaning |
+|---|---|---|
+| `process.args` | `List Text` | Positional arguments after `aivi execute <path> --` |
+| `process.cwd` | `Text` | Current working directory for the launched CLI process |
+| `env.get "NAME"` | `Option Text` | Environment variable lookup |
+| `stdio.read` | `Text` | Entire stdin payload read once before execution |
+| `path.home` | `Text` | User home directory |
+| `path.configHome` | `Text` | XDG config home |
+| `path.dataHome` | `Text` | XDG data home |
+| `path.cacheHome` | `Text` | XDG cache home |
+| `path.tempDir` | `Text` | Host temporary directory |
+
 ## Timer sources
 
 A timer source is just a bodyless input signal that publishes `Unit` at a fixed interval:
@@ -132,6 +162,15 @@ Spawns a child process and streams its output as `ProcessEvent` values. `stdout`
 | Source | Emits | Key options |
 |---|---|---|
 | `timer.every N` | `TimerTick` | `immediate`, `coalesce` |
+| `process.args` | `List Text` | none |
+| `process.cwd` | `Text` | none |
+| `env.get "NAME"` | `Option Text` | none |
+| `stdio.read` | `Text` | none |
+| `path.home` | `Text` | none |
+| `path.configHome` | `Text` | none |
+| `path.dataHome` | `Text` | none |
+| `path.cacheHome` | `Text` | none |
+| `path.tempDir` | `Text` | none |
 | `window.keyDown` | `Key` | `repeat`, `focusOnly` |
 | `http.get "url"` | `Result HttpError A` | `headers`, `decode`, `retry`, `timeout` |
 | `http.post "url"` | `Result HttpError A` | `body`, `headers`, `decode`, `retry`, `timeout` |
@@ -158,6 +197,7 @@ events and delivers only the latest. Essential for high-frequency timers.
 - `@source provider.name ...` decorates the next bodyless `sig` declaration.
 - Use `upstream |> scan seed step` to accumulate source events into signal state.
 - `@recur.backoff Nx` drives an explicit retrying recurrence for `Task`.
+- `aivi execute` adds one-shot process/stdin/path providers for headless programs.
 - Sources are activated on mount and torn down on unmount automatically.
 - All source types emit typed values — no raw events reach user code.
 
