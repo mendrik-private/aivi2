@@ -475,6 +475,7 @@ struct RunArtifact {
     module: HirModule,
     bridge: GtkBridgeGraph,
     hydration_inputs: BTreeMap<RuntimeInputHandle, CompiledRunInput>,
+    required_signal_globals: BTreeMap<BackendItemId, Box<str>>,
     runtime_assembly: HirRuntimeAssembly,
     core: aivi_core::Module,
     backend: Arc<BackendProgram>,
@@ -615,7 +616,6 @@ struct ResolvedRunEventHandler {
     signal_name: Box<str>,
     input: RuntimeInputHandle,
 }
-
 /// RAII wrapper that deletes a temporary file on drop.
 ///
 /// This ensures temporary files are cleaned up even when the program exits
@@ -1153,12 +1153,14 @@ fn prepare_run_artifact(
         lowered.backend.as_ref(),
         &runtime_backend_by_hir,
     )?;
+    let required_signal_globals = collect_run_required_signal_globals(&hydration_inputs);
     let event_handlers = resolve_run_event_handlers(module, &bridge, &runtime_assembly, sources)?;
     Ok(RunArtifact {
         view_name: view.name.text().into(),
         module: module.clone(),
         bridge,
         hydration_inputs,
+        required_signal_globals,
         runtime_assembly,
         core: lowered.core,
         backend: lowered.backend,
@@ -1863,6 +1865,50 @@ fn compile_run_inputs(
     Ok(inputs)
 }
 
+fn collect_run_required_signal_globals(
+    inputs: &BTreeMap<RuntimeInputHandle, CompiledRunInput>,
+) -> BTreeMap<BackendItemId, Box<str>> {
+    let mut required = BTreeMap::new();
+    for input in inputs.values() {
+        extend_run_required_signal_globals(input, &mut required);
+    }
+    required
+}
+
+fn extend_run_required_signal_globals(
+    input: &CompiledRunInput,
+    required: &mut BTreeMap<BackendItemId, Box<str>>,
+) {
+    match input {
+        CompiledRunInput::Expr(fragment) => {
+            for dependency in &fragment.required_signal_globals {
+                required
+                    .entry(dependency.runtime_item)
+                    .or_insert_with(|| dependency.name.clone());
+            }
+        }
+        CompiledRunInput::Text(text) => {
+            for segment in &text.segments {
+                let CompiledRunTextSegment::Interpolation(fragment) = segment else {
+                    continue;
+                };
+                for dependency in &fragment.required_signal_globals {
+                    required
+                        .entry(dependency.runtime_item)
+                        .or_insert_with(|| dependency.name.clone());
+                }
+            }
+        }
+    }
+}
+
+fn run_hydration_globals_ready(
+    required: &BTreeMap<BackendItemId, Box<str>>,
+    globals: &BTreeMap<BackendItemId, DetachedRuntimeValue>,
+) -> bool {
+    required.keys().all(|item| globals.contains_key(item))
+}
+
 fn compile_run_expr_fragment(
     sources: &SourceDatabase,
     module: &HirModule,
@@ -2010,7 +2056,6 @@ fn compile_run_expr_fragment(
 }
 
 type RuntimeBindingEnv = BTreeMap<aivi_hir::BindingId, RuntimeValue>;
-
 fn plan_run_hydration(
     shared: &RunHydrationStaticState,
     globals: &BTreeMap<BackendItemId, DetachedRuntimeValue>,
@@ -3411,9 +3456,9 @@ mod tests {
     use super::{
         HydratedRunNode, RunHydrationStaticState, WorkspaceHirSnapshot, check_file,
         execute_file_with_context, execute_runtime_task_plan, plan_run_hydration,
-        prepare_run_artifact,
+        prepare_run_artifact, run_hydration_globals_ready,
     };
-    use aivi_backend::{RuntimeTaskPlan, RuntimeValue};
+    use aivi_backend::{DetachedRuntimeValue, RuntimeTaskPlan, RuntimeValue};
     use aivi_base::SourceDatabase;
     use aivi_gtk::{GtkBridgeNodeKind, RuntimePropertyBinding, RuntimeShowMountPolicy};
     use aivi_hir::{ValidationMode, lower_module as lower_hir_module};
@@ -3764,6 +3809,41 @@ export (Greeting, Farewell)
             panic!("expected a root widget, found {:?}", root.kind.tag());
         };
         assert_eq!(widget.widget.segments().last().text(), "Window");
+        let required = artifact
+            .required_signal_globals
+            .values()
+            .map(|name| name.as_ref())
+            .collect::<Vec<_>>();
+        assert!(required.contains(&"boardText"));
+        assert!(required.contains(&"scoreLine"));
+        assert!(required.contains(&"statusLine"));
+        assert!(required.contains(&"dirLine"));
+    }
+
+    #[test]
+    fn run_hydration_waits_for_required_signal_snapshots() {
+        let artifact = prepare_run_from_path(&repo_path("demos/snake.aivi"), None)
+            .expect("snake demo should prepare for run");
+        assert!(
+            !run_hydration_globals_ready(&artifact.required_signal_globals, &BTreeMap::new()),
+            "empty runtime globals must not be treated as ready for snake hydration"
+        );
+
+        let globals = artifact
+            .required_signal_globals
+            .keys()
+            .copied()
+            .map(|item| {
+                (
+                    item,
+                    DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Text("ready".into())),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        assert!(
+            run_hydration_globals_ready(&artifact.required_signal_globals, &globals),
+            "hydration should proceed once every compiled signal dependency has a snapshot"
+        );
     }
 
     #[test]

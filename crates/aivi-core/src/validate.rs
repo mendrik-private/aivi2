@@ -860,10 +860,6 @@ fn validate_recurrence(
     let Some(recurrence) = &pipe.recurrence else {
         return;
     };
-    if recurrence.steps.is_empty() {
-        errors.push(ValidationError::RecurrenceMissingSteps { pipe: pipe_id });
-        return;
-    }
     let mut current = recurrence.start.result_subject.clone();
     for step in &recurrence.steps {
         if step.input_subject != current {

@@ -964,11 +964,6 @@ fn validate_pipeline(
             recurrence.start.result_layout,
             errors,
         );
-        if recurrence.steps.is_empty() {
-            errors.push(ValidationError::RecurrenceMissingSteps {
-                pipeline: pipeline_id,
-            });
-        }
         let mut current = recurrence.start.result_layout;
         for step in &recurrence.steps {
             validate_kernel_contract(

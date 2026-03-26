@@ -3217,30 +3217,72 @@ val retried : Task Int Int =
     }
 
     #[test]
-    fn linked_runtime_links_scan_signals() {
+    fn linked_runtime_applies_scan_steps_once_per_wakeup() {
         let lowered = lower_text(
             "runtime-startup-scan-signal.aivi",
             r#"
-fun step:Int tick:Unit current:Int =>
-    current + 1
+fun step:Int next:Int current:Int =>
+    current + next
 
-@source timer.every 120 with {
-    immediate: True
-}
-sig tick : Signal Unit
+provider custom.feed
+    wakeup: providerTrigger
+
+@source custom.feed
+sig next : Signal Int
 
 sig counter : Signal Int =
-    tick
+    next
      |> scan 0 step
 "#,
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
             .expect("runtime assembly should build");
-        let _linked = link_backend_runtime(
+        let mut linked = link_backend_runtime(
             assembly,
             &lowered.core,
             std::sync::Arc::new(lowered.backend.clone()),
         )
         .expect("scan signals should now link successfully");
+        let first = linked
+            .tick_with_source_lifecycle()
+            .expect("initial scan tick should succeed");
+        assert_eq!(first.source_actions().len(), 1);
+        let port = match &first.source_actions()[0] {
+            LinkedSourceLifecycleAction::Activate { port, .. } => port.clone(),
+            _ => panic!("expected source activation"),
+        };
+        let counter_signal = linked
+            .assembly()
+            .signal(item_id(lowered.hir.module(), "counter"))
+            .expect("counter signal binding should exist")
+            .signal();
+        assert_eq!(
+            linked.runtime().current_value(counter_signal).unwrap(),
+            Some(&RuntimeValue::Int(0))
+        );
+
+        port.publish(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Int(
+            2,
+        )))
+        .expect("first source publication should queue");
+        linked
+            .tick_with_source_lifecycle()
+            .expect("first scan publication tick should succeed");
+        assert_eq!(
+            linked.runtime().current_value(counter_signal).unwrap(),
+            Some(&RuntimeValue::Int(2))
+        );
+
+        port.publish(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Int(
+            3,
+        )))
+        .expect("second source publication should queue");
+        linked
+            .tick_with_source_lifecycle()
+            .expect("second scan publication tick should succeed");
+        assert_eq!(
+            linked.runtime().current_value(counter_signal).unwrap(),
+            Some(&RuntimeValue::Int(5))
+        );
     }
 }
