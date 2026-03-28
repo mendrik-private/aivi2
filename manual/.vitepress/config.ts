@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitepress'
 import aiviGrammar from '../../tooling/packages/vscode-aivi/syntaxes/aivi.tmLanguage.json'
+import aiviDarkTheme from './theme/aivi-dark-theme.json'
 
 export default defineConfig({
   title: 'AIVI',
@@ -14,6 +15,7 @@ export default defineConfig({
 
   markdown: {
     languages: [aiviGrammar as any],
+    theme: aiviDarkTheme as any,
   },
 
   themeConfig: {

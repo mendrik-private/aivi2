@@ -6,9 +6,53 @@
 
 :root {
   --vp-font-family-mono: 'Fira Code', 'Fira Mono', 'Cascadia Code', 'JetBrains Mono', monospace;
+
+  /* Ghostty / AIVI Dark palette exposed as CSS custom properties */
+  --aivi-bg:      #1D1F21;
+  --aivi-bg-alt:  #282C34;
+  --aivi-border:  #373B41;
+  --aivi-fg:      #C5C8C6;
+  --aivi-comment: #707880;
+  --aivi-blue:    #81A2BE;
+  --aivi-yellow:  #F0C674;
+  --aivi-green:   #B5BD68;
+  --aivi-orange:  #DE935F;
+  --aivi-red:     #CC6666;
+  --aivi-purple:  #B294BB;
+  --aivi-cyan:    #8ABEB7;
 }
 
-/* Code blocks */
+/* ── Code block container ─────────────────────────────────────────────────── */
+.vp-doc div[class*='language-'],
+.vp-doc [class*='language-'] {
+  background-color: var(--aivi-bg) !important;
+  border: 1px solid var(--aivi-border);
+  border-radius: 6px;
+}
+
+/* Shiki outputs pre with inline background from the theme; match it */
+.vp-doc div[class*='language-'] pre,
+.vp-doc div[class*='language-'] code {
+  background-color: var(--aivi-bg) !important;
+}
+
+/* ── Inline code ──────────────────────────────────────────────────────────── */
+.vp-doc :not(pre) > code {
+  background-color: var(--aivi-bg-alt);
+  border: 1px solid var(--aivi-border);
+  color: var(--aivi-fg);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+/* ── Line numbers (if enabled) ────────────────────────────────────────────── */
+.vp-doc div[class*='language-'] .line-numbers-wrapper {
+  background-color: var(--aivi-bg);
+  border-right: 1px solid var(--aivi-border);
+  color: var(--aivi-comment);
+}
+
+/* ── Code block font settings ─────────────────────────────────────────────── */
 .vp-doc pre,
 .vp-doc pre code,
 .vp-doc div[class*='language-'] code {
@@ -16,6 +60,8 @@
   font-variant-ligatures: common-ligatures contextual;
   font-feature-settings: 'liga' 1, 'calt' 1, 'ss01' 1, 'ss03' 1, 'ss05' 1;
   -webkit-font-smoothing: antialiased;
+  font-size: 0.875em;
+  line-height: 1.65;
 }
 
 /* Inline code */
@@ -30,4 +76,16 @@
 .VPNav code {
   font-family: var(--vp-font-family-mono);
   font-feature-settings: 'liga' 1, 'calt' 1;
+}
+
+/* ── Copy button: blend into dark background ──────────────────────────────── */
+.vp-doc div[class*='language-'] button.copy {
+  background-color: var(--aivi-bg-alt);
+  border: 1px solid var(--aivi-border);
+  color: var(--aivi-comment);
+}
+
+.vp-doc div[class*='language-'] button.copy:hover {
+  color: var(--aivi-fg);
+  border-color: var(--aivi-blue);
 }

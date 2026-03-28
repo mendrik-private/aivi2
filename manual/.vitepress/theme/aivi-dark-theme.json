@@ -1,0 +1,247 @@
+{
+  "name": "aivi-dark",
+  "displayName": "AIVI Dark (Ghostty)",
+  "type": "dark",
+  "colors": {
+    "editor.background": "#1D1F21",
+    "editor.foreground": "#C5C8C6"
+  },
+  "tokenColors": [
+    {
+      "name": "Comment",
+      "scope": ["comment", "comment.line", "comment.block", "comment.line.double-slash"],
+      "settings": { "foreground": "#707880", "fontStyle": "italic" }
+    },
+    {
+      "name": "String",
+      "scope": ["string", "string.quoted.double"],
+      "settings": { "foreground": "#B5BD68" }
+    },
+    {
+      "name": "String interpolation",
+      "scope": ["string.template", "punctuation.section.interpolation"],
+      "settings": { "foreground": "#8ABEB7" }
+    },
+    {
+      "name": "Escape sequence",
+      "scope": "constant.character.escape",
+      "settings": { "foreground": "#8ABEB7" }
+    },
+    {
+      "name": "Number",
+      "scope": ["constant.numeric", "constant.numeric.integer", "constant.numeric.float"],
+      "settings": { "foreground": "#DE935F" }
+    },
+    {
+      "name": "Number unit suffix",
+      "scope": "keyword.other.unit",
+      "settings": { "foreground": "#F0C674" }
+    },
+    {
+      "name": "Declaration keywords — fun value signal source result view adapter data domain class instance",
+      "scope": [
+        "keyword.declaration.fun.aivi",
+        "keyword.declaration.value.aivi",
+        "keyword.declaration.signal.aivi",
+        "keyword.declaration.source.aivi",
+        "keyword.declaration.result.aivi",
+        "keyword.declaration.view.aivi",
+        "keyword.declaration.adapter.aivi",
+        "keyword.declaration.data.aivi",
+        "keyword.declaration.domain.aivi",
+        "keyword.declaration.class.aivi",
+        "keyword.declaration.instance.aivi",
+        "keyword.declaration",
+        "storage.type"
+      ],
+      "settings": { "foreground": "#81A2BE" }
+    },
+    {
+      "name": "use / export",
+      "scope": [
+        "keyword.control.import",
+        "keyword.control.export",
+        "keyword.other.import",
+        "keyword.other.export"
+      ],
+      "settings": { "foreground": "#81A2BE" }
+    },
+    {
+      "name": "export bold",
+      "scope": "keyword.control.export.aivi",
+      "settings": { "foreground": "#B294BB", "fontStyle": "bold" }
+    },
+    {
+      "name": "Built-in other keywords — with as of key on pattern and or not match when if",
+      "scope": ["keyword.other", "keyword.control", "keyword"],
+      "settings": { "foreground": "#81A2BE" }
+    },
+    {
+      "name": "Type name",
+      "scope": [
+        "entity.name.type",
+        "entity.name.class",
+        "support.class",
+        "support.type"
+      ],
+      "settings": { "foreground": "#F0C674" }
+    },
+    {
+      "name": "Built-in types — Int Bool Text List Option Result etc.",
+      "scope": ["support.type.builtin", "support.type.primitive"],
+      "settings": { "foreground": "#81A2BE" }
+    },
+    {
+      "name": "Constructor — uppercase identifier",
+      "scope": ["entity.name.tag.constructor", "variable.language.constructor"],
+      "settings": { "foreground": "#F0C674" }
+    },
+    {
+      "name": "Built-in value constants — True False None Some Ok Err Valid Invalid",
+      "scope": ["support.constant.builtin", "support.constant", "constant.language"],
+      "settings": { "foreground": "#F0C674" }
+    },
+    {
+      "name": "Function name",
+      "scope": ["entity.name.function", "entity.name.variable.signal"],
+      "settings": { "foreground": "#C5C8C6", "fontStyle": "bold" }
+    },
+    {
+      "name": "Value / variable name",
+      "scope": ["entity.name.variable", "variable.other"],
+      "settings": { "foreground": "#C5C8C6" }
+    },
+    {
+      "name": "Module / namespace name",
+      "scope": ["entity.name.namespace", "entity.name.module"],
+      "settings": { "foreground": "#8ABEB7" }
+    },
+    {
+      "name": "Record field / property key",
+      "scope": ["variable.other.property", "support.variable.property", "meta.property-name"],
+      "settings": { "foreground": "#8ABEB7" }
+    },
+    {
+      "name": "Pipe — transform |>",
+      "scope": "keyword.operator.pipe.transform",
+      "settings": { "foreground": "#DE935F" }
+    },
+    {
+      "name": "Pipe — gate ?|>",
+      "scope": "keyword.operator.pipe.gate",
+      "settings": { "foreground": "#F0C674" }
+    },
+    {
+      "name": "Pipe — case ||>",
+      "scope": "keyword.operator.pipe.case",
+      "settings": { "foreground": "#B294BB" }
+    },
+    {
+      "name": "Pipe — map *|>",
+      "scope": "keyword.operator.pipe.map",
+      "settings": { "foreground": "#8ABEB7" }
+    },
+    {
+      "name": "Pipe — apply &|>",
+      "scope": "keyword.operator.pipe.apply",
+      "settings": { "foreground": "#B5BD68" }
+    },
+    {
+      "name": "Pipe — truthy T|>",
+      "scope": "keyword.operator.pipe.truthy",
+      "settings": { "foreground": "#B5BD68" }
+    },
+    {
+      "name": "Pipe — falsy F|>",
+      "scope": "keyword.operator.pipe.falsy",
+      "settings": { "foreground": "#CC6666" }
+    },
+    {
+      "name": "Pipe — recur @|> <|@",
+      "scope": ["keyword.operator.pipe.recur-start", "keyword.operator.pipe.recur-step"],
+      "settings": { "foreground": "#CC6666" }
+    },
+    {
+      "name": "Pipe — fanin <|*",
+      "scope": "keyword.operator.pipe.fanin",
+      "settings": { "foreground": "#7AA6DA" }
+    },
+    {
+      "name": "Arrow -> and =>",
+      "scope": [
+        "keyword.operator.arrow.thin",
+        "keyword.operator.arrow.fat",
+        "keyword.operator.arrow"
+      ],
+      "settings": { "foreground": "#DE935F" }
+    },
+    {
+      "name": "Operator — general",
+      "scope": ["keyword.operator", "punctuation.operator"],
+      "settings": { "foreground": "#C5C8C6" }
+    },
+    {
+      "name": "Type annotation colon",
+      "scope": "keyword.operator.type-annotation",
+      "settings": { "foreground": "#969896" }
+    },
+    {
+      "name": "Punctuation — dot projection accessor",
+      "scope": ["keyword.operator.projection", "punctuation.accessor"],
+      "settings": { "foreground": "#969896" }
+    },
+    {
+      "name": "Decorator sigil @",
+      "scope": [
+        "punctuation.definition.decorator",
+        "keyword.decorator.source",
+        "keyword.decorator.recur",
+        "entity.name.label.decorator",
+        "entity.name.label.provider",
+        "entity.name.label.method"
+      ],
+      "settings": { "foreground": "#B294BB" }
+    },
+    {
+      "name": "Markup tag punctuation",
+      "scope": ["punctuation.definition.tag", "meta.tag.punctuation"],
+      "settings": { "foreground": "#4B4F55" }
+    },
+    {
+      "name": "Markup control tag — show each match with case",
+      "scope": "entity.name.tag.control",
+      "settings": { "foreground": "#8ABEB7", "fontStyle": "bold" }
+    },
+    {
+      "name": "Markup component tag — PascalCase",
+      "scope": "entity.name.tag.component",
+      "settings": { "foreground": "#F0C674" }
+    },
+    {
+      "name": "Markup HTML/GTK tag — lowercase",
+      "scope": "entity.name.tag.html",
+      "settings": { "foreground": "#81A2BE" }
+    },
+    {
+      "name": "Markup attribute name",
+      "scope": "entity.other.attribute-name",
+      "settings": { "foreground": "#B294BB" }
+    },
+    {
+      "name": "Import names",
+      "scope": "variable.other.import",
+      "settings": { "foreground": "#C5C8C6" }
+    },
+    {
+      "name": "Punctuation — brackets parens braces",
+      "scope": [
+        "punctuation.definition.parameters",
+        "punctuation.definition.string.begin",
+        "punctuation.definition.string.end",
+        "meta.brace",
+        "punctuation"
+      ],
+      "settings": { "foreground": "#C5C8C6" }
+    }
+  ]
+}
