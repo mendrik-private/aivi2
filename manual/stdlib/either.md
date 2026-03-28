@@ -15,9 +15,8 @@ use aivi.core.either (
     fromRight
     swap
     toOption
-    fromOption
-    rightFromResult
-    rightFromOption
+    toResult
+    fromResult
     partitionEithers
 )
 ```
@@ -35,7 +34,11 @@ type Either L R =
 A value of type `Either L R` is either a `Left L` or a `Right R`. Use `||>` to branch on which case you have:
 
 ```aivi
-use aivi.core.either (Either)
+use aivi.core.either (
+    Either
+    Left
+    Right
+)
 
 fun describeResult:Text result: (Either Text Int) => result
   ||> Left msg -> "Error: {msg}"
@@ -58,8 +61,11 @@ use aivi.core.either (
     mapRight
 )
 
-fun doubleRight: Either Text Int result: (Either Text Int) =>
-    mapRight (fun n)
+fun double:Int n:Int =>
+    n * 2
+
+fun doubleRight: (Either Text Int) result: (Either Text Int) =>
+    mapRight double result
 ```
 
 ---
@@ -78,8 +84,11 @@ use aivi.core.either (
     mapLeft
 )
 
+fun toMessage:Text code:Int =>
+    "Error {code}"
+
 fun wrapError: (Either Text Int) result: (Either Int Int) =>
-    mapLeft (fun msg)
+    mapLeft toMessage result
 ```
 
 ---
@@ -122,8 +131,14 @@ use aivi.core.either (
     fold
 )
 
+fun whenLeft:Int ignored:Text =>
+    0
+
+fun whenRight:Int ignored:Text =>
+    1
+
 fun toLength:Int e: (Either Text Text) =>
-    fold (fun n)
+    fold whenLeft whenRight e
 ```
 
 ---
@@ -211,32 +226,32 @@ fun rightOrNone: (Option Int) e: (Either Text Int) =>
 
 ---
 
-## fromOption
+## fromResult
 
-Wraps an `Option` into `Either`, using the given default for the `Left` case when the option is `None`.
+Converts a `Result E A` into an `Either E A`. `Ok value` becomes `Right value`; `Err error` becomes `Left error`.
 
 ```
-fromOption : L -> Option R -> Either L R
+fromResult : Result E A -> Either E A
 ```
 
 ```aivi
 use aivi.core.either (
     Either
-    fromOption
+    fromResult
 )
 
-fun optToEither: (Either Text Int) opt: (Option Int) =>
-    fromOption "missing" opt
+fun resultToEither: (Either Text Int) result: (Result Text Int) =>
+    fromResult result
 ```
 
 ---
 
 ## partitionEithers
 
-Splits a list of `Either` values into two lists: lefts and rights.
+Splits a list of `Either` values into a tuple of lefts and rights.
 
 ```
-partitionEithers : List (Either L R) -> { lefts: List L, rights: List R }
+partitionEithers : List (Either L R) -> (List L, List R)
 ```
 
 ```aivi
@@ -245,6 +260,9 @@ use aivi.core.either (
     partitionEithers
 )
 
+fun takeLefts: (List Text) parts: ((List Text, List Int)) => parts
+  ||> (lefts, ignored) -> lefts
+
 fun splitResults: (List Text) items: (List (Either Text Int)) =>
-    (partitionEithers items).lefts
+    takeLefts (partitionEithers items)
 ```

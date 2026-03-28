@@ -560,21 +560,60 @@ Set [1, 2, 4]
 
 Core typeclasses are compiler-owned ambient prelude items injected into every checked module; local declarations may shadow them.
 
-Constraint syntax shared across class heads, members, functions, and instance heads:
+Implemented surface syntax is:
 
 ```aivi
 class Functor F
     map : (A -> B) -> F A -> F B
 
-class Functor F -> Applicative F
-    pure  : A -> F A
+class Applicative F
+    with Functor F
+    pure : A -> F A
     apply : F (A -> B) -> F A -> F B
 
-class (Eq A, Show A) -> Example A
-    render : A -> Text
+class Traversable F
+    with Functor F
+    with Foldable F
+    traverse : Applicative G -> (A -> G B) -> F A -> G (F B)
+
+class Container F
+    require Eq A
+    contains : A -> F A -> Bool
+
+fun same : Eq A -> Bool v:A =>
+    v == v
+
+instance Eq A -> Eq (Option A)
+    (==) left right = True
+
+instance Applicative Option
+    pureInt = Some 1
+
+instance Functor (Result Text)
+    labelInt = Ok 1
 ```
 
-`Constraint -> ...` attaches a single constraint; `(C1, C2) -> ...` attaches multiple.
+Parser-accurate rules:
+
+- canonical class head: `class <ClassName> <TypeParam>+`
+- canonical superclass syntax is body-level `with <Constraint>`
+- canonical per-parameter constraint syntax is body-level `require <Constraint>`
+- class bodies contain same-indent lines of:
+  - `with <Constraint>`
+  - `require <Constraint>`
+  - `<member> : [ConstraintPrefix ->] <Type>`
+- class and instance member names may be identifiers or parenthesized operators such as `(==)`
+- `with` and `require` are soft keywords only inside class bodies and only when not immediately followed by `:`
+- `require` is the implemented keyword; `requires` is not syntax
+- `instance` is the implemented mechanism; `implements` is not syntax
+- constraint prefixes are implemented for function annotations, class-member annotations, and instance heads
+- single constraints use `Constraint -> ...`; multiple constraints use `(C1, C2) -> ...`
+- function example: `fun same : Eq A -> Bool v:A => ...`
+- instance-head example: `instance Eq A -> Eq (Option A)`
+- class declarations do not accept head constraint prefixes; superclass relationships are written only as body-level `with` lines
+- higher-kinded type application uses ordinary left-associative type application: `F A`, `F Int`, `F (A -> B)`, `Result Text A`, `Either L R`
+- higher-kinded instance targets are accepted when kind-correct, e.g. `instance Applicative Option` and `instance Functor (Result Text)`
+- current constraint-prefix disambiguation is parser-driven: a constraint must parse as a type application whose callee looks like a class name (currently a multi-character identifier such as `Eq`, `Functor`, `Applicative`)
 
 ### 7.1 Resolution rules
 

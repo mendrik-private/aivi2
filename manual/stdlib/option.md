@@ -90,7 +90,9 @@ Chains an `Option`-returning function over a `Some` value. Returns `None` when t
 ```aivi
 use aivi.option (flatMap)
 
-fun parsePositive: (Option Int) n:Int =>
+fun parsePositive: (Option Int) n:Int => n > 0
+  T|> Some n
+  F|> None
 
 fun parseAndFilter: (Option Int) opt: (Option Int) => opt
   |> flatMap parsePositive

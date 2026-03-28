@@ -220,11 +220,13 @@ use aivi.core.float (
     isNegative
 )
 
-fun signum:Text n:Float => isPositive n
-  T|> "positive"
-  F|> isNegative n
+fun describeNonPositive:Text n:Float => isNegative n
   T|> "negative"
   F|> "zero"
+
+fun signum:Text n:Float => isPositive n
+  T|> "positive"
+  F|> describeNonPositive n
 ```
 
 ---
@@ -240,8 +242,11 @@ square : Float -> Float
 ```aivi
 use aivi.core.float (square)
 
+fun addFloats:Float left:Float right:Float =>
+    left + right
+
 fun distanceSquared:Float dx:Float dy:Float =>
-    square dx + square dy
+    addFloats (square dx) (square dy)
 ```
 
 ---
@@ -261,9 +266,9 @@ use aivi.core.float (
     toDegrees
 )
 
-fun halfCircleInRadians:Float _:Unit =>
+fun halfCircleInRadians:Float ignored:Unit =>
     toRadians 180.0
 
-fun rightAngleInDegrees:Float _:Unit =>
+fun rightAngleInDegrees:Float ignored:Unit =>
     toDegrees 1.5707963267948966
 ```

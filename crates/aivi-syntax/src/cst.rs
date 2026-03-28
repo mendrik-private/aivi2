@@ -267,8 +267,7 @@ pub struct ClassMember {
 }
 
 /// A `with SuperclassName TypeParam` declaration inside a class body.
-/// Maps to a superclass in the HIR; uses the body syntax rather than the
-/// legacy `(SuperclassName TypeParam) -> class Name Param` prefix form.
+/// Maps to a superclass in the HIR and is the canonical class-superclass syntax.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClassWithDecl {
     pub superclass: TypeExpr,

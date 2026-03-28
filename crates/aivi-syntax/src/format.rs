@@ -274,10 +274,6 @@ impl Formatter {
 
     fn format_class_item(&self, item: &NamedItem) -> Vec<String> {
         let mut header = "class ".to_owned();
-        if !item.constraints.is_empty() {
-            header.push_str(&self.format_constraint_list_inline(&item.constraints));
-            header.push_str(" => ");
-        }
         header.push_str(self.item_name(&item.name));
         for parameter in &item.type_parameters {
             header.push(' ');

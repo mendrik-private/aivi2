@@ -78,6 +78,8 @@ isEven : Int -> Bool
 ```
 
 ```aivi
+use aivi.list (filter)
+
 use aivi.math (isEven)
 
 fun evensOnly: List Int numbers: List Int =>
@@ -95,6 +97,8 @@ isOdd : Int -> Bool
 ```
 
 ```aivi
+use aivi.list (filter)
+
 use aivi.math (isOdd)
 
 fun oddsOnly: List Int numbers: List Int =>

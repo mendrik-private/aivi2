@@ -38,6 +38,8 @@ const MISSING_CLASS_WITH_TYPE: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-class-with-type");
 const MISSING_CLASS_REQUIRE_TYPE: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-class-require-type");
+const UNSUPPORTED_CLASS_HEAD_CONSTRAINTS: DiagnosticCode =
+    DiagnosticCode::new("syntax", "unsupported-class-head-constraints");
 const MISSING_INSTANCE_CLASS: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-instance-class");
 const MISSING_INSTANCE_TARGET: DiagnosticCode =
@@ -335,8 +337,7 @@ impl<'a> Parser<'a> {
 
     fn parse_class_item(&mut self, base: ItemBase, keyword_index: usize, end: usize) -> NamedItem {
         let mut cursor = keyword_index + 1;
-        let (constraints, name, type_parameters) =
-            self.parse_class_head(keyword_index, &mut cursor, end);
+        let (name, type_parameters) = self.parse_class_head(keyword_index, &mut cursor, end);
 
         let body = self
             .parse_class_body(&mut cursor, end)
@@ -355,7 +356,7 @@ impl<'a> Parser<'a> {
             keyword_span: self.source_span_of_token(keyword_index),
             name,
             type_parameters,
-            constraints,
+            constraints: Vec::new(),
             annotation: None,
             parameters: Vec::new(),
             body,
@@ -1653,7 +1654,7 @@ impl<'a> Parser<'a> {
         keyword_index: usize,
         cursor: &mut usize,
         end: usize,
-    ) -> (Vec<TypeExpr>, Option<Identifier>, Vec<Identifier>) {
+    ) -> (Option<Identifier>, Vec<Identifier>) {
         let checkpoint = *cursor;
         if let Some(constraints) = self.parse_constraint_list(cursor, end)
             && constraints.iter().all(Self::is_constraint_expr)
@@ -1661,14 +1662,23 @@ impl<'a> Parser<'a> {
                 .consume_kind(cursor, end, TokenKind::ThinArrow)
                 .is_some()
         {
+            self.diagnostics.push(
+                Diagnostic::error("class declarations do not accept head constraint prefixes")
+                    .with_code(UNSUPPORTED_CLASS_HEAD_CONSTRAINTS)
+                    .with_primary_label(
+                        self.source_span_for_range(checkpoint, *cursor),
+                        "move these constraints into indented `with ...` lines inside the class body",
+                    )
+                    .with_note("supported form: `class Applicative F` followed by `with Functor F`"),
+            );
             let name = self.parse_named_item_name(keyword_index, cursor, end, "class declaration");
             let type_parameters = self.parse_type_parameters_same_line(cursor, end);
-            return (constraints, name, type_parameters);
+            return (name, type_parameters);
         }
         *cursor = checkpoint;
         let name = self.parse_named_item_name(keyword_index, cursor, end, "class declaration");
         let type_parameters = self.parse_type_parameters_same_line(cursor, end);
-        (Vec::new(), name, type_parameters)
+        (name, type_parameters)
     }
 
     fn parse_function_param(&mut self, cursor: &mut usize, end: usize) -> Option<FunctionParam> {
@@ -4763,12 +4773,10 @@ instance Eq Blob
     }
 
     #[test]
-    fn parser_tracks_constraint_prefixes_on_classes_functions_and_instances() {
+    fn parser_tracks_constraint_prefixes_on_functions_and_instances() {
         let (_, parsed) = load(
             r#"class Functor F
     map : (A -> B) -> F A -> F B
-class (Functor F, Foldable F) -> Traversable F
-    traverse : Applicative G -> (A -> G B) -> F A -> G (F B)
 fun same:Eq A -> Bool v:A => v == v
 instance Eq A -> Eq (Option A)
     (==) left right = True
@@ -4780,22 +4788,36 @@ instance Eq A -> Eq (Option A)
             parsed.all_diagnostics().collect::<Vec<_>>()
         );
 
-        let Item::Class(traversable) = &parsed.module.items[1] else {
-            panic!("expected traversable class item");
-        };
-        assert_eq!(traversable.constraints.len(), 2);
-        let body = traversable.class_body().expect("class body");
-        assert_eq!(body.members[0].constraints.len(), 1);
-
-        let Item::Fun(function) = &parsed.module.items[2] else {
+        let Item::Fun(function) = &parsed.module.items[1] else {
             panic!("expected constrained function item");
         };
         assert_eq!(function.constraints.len(), 1);
 
-        let Item::Instance(instance) = &parsed.module.items[3] else {
+        let Item::Instance(instance) = &parsed.module.items[2] else {
             panic!("expected constrained instance item");
         };
         assert_eq!(instance.context.len(), 1);
+    }
+
+    #[test]
+    fn parser_rejects_class_head_constraint_prefixes() {
+        let (_, parsed) = load(
+            r#"class (Functor F, Foldable F) -> Traversable F
+    traverse : Applicative G -> (A -> G B) -> F A -> G (F B)
+"#,
+        );
+
+        assert!(
+            parsed.has_errors(),
+            "expected class-head constraint prefixes to be rejected"
+        );
+        assert!(
+            parsed
+                .all_diagnostics()
+                .any(|diagnostic| diagnostic.code == Some(UNSUPPORTED_CLASS_HEAD_CONSTRAINTS)),
+            "expected unsupported class-head constraint diagnostic, got: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
     }
 
     #[test]

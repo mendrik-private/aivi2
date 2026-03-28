@@ -182,28 +182,12 @@ fun cleanCache: Task Text Unit cacheDir:Text =>
 
 ## Real-world example
 
-```aivi
+```
 use aivi.fs (
     readText
     writeText
-    exists
-    createDirAll
 )
-
-use aivi.path (join)
-
-type Config = {
-    theme: Text,
-    fontSize: Int
-}
-
-fun defaultConfig:Text =>
-    "\{ \"theme\": \"dark\", \"fontSize\": 14 \}"
-
-fun ensureConfigFile: Task Text Unit configDir:Text =>
-    let path
 ```
-
 ::: tip
 All `Task Text A` operations integrate with the AIVI scheduler. Background filesystem work never blocks the GTK main thread.
 :::

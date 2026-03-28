@@ -171,7 +171,9 @@ Unlike `zipValidation`, `andThen` stops at the first failure and does not accumu
 ```aivi
 use aivi.validation (andThen)
 
-fun ensurePositive: (Validation Text Int) n:Int =>
+fun ensurePositive: (Validation Text Int) n:Int => n > 0
+  T|> Valid n
+  F|> Invalid "must be positive"
 
 fun validateCount: (Validation Text Int) v: (Validation Text Int) => v
   |> andThen ensurePositive
@@ -188,7 +190,10 @@ Combines two validations into one that holds a tuple of both values. If either o
 ```aivi
 use aivi.validation (zipValidation)
 
-use aivi.nonEmpty (singleton)
+use aivi.nonEmpty (
+    NonEmptyList
+    singleton
+)
 
 type FieldError =
   | EmptyName
@@ -198,7 +203,9 @@ fun validateName: (Validation (NonEmptyList FieldError) Text) name:Text => name
   ||> "" -> Invalid (singleton EmptyName)
   ||> _  -> Valid name
 
-fun validateAge: (Validation (NonEmptyList FieldError) Int) age:Int =>
+fun validateAge: (Validation (NonEmptyList FieldError) Int) age:Int => age > 0
+  T|> Valid age
+  F|> Invalid (singleton InvalidAge)
 
 fun validateForm: (Validation (NonEmptyList FieldError) (Text, Int)) name:Text age:Int =>
     zipValidation (validateName name) (validateAge age)
@@ -216,6 +223,11 @@ Collapses a `Validation` to a single value by applying `onValid` to `Valid` or `
 
 ```aivi
 use aivi.validation (fold)
+
+use aivi.nonEmpty (
+    NonEmptyList
+    length
+)
 
 fun countErrors:Int errors: (NonEmptyList Text) =>
     length errors

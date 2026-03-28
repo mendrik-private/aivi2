@@ -23,7 +23,7 @@ class Display A
 Use `with` inside the class body to declare that your class extends another class.
 Any instance of the derived class must also provide an instance of each superclass.
 
-```aivi
+```
 class Functor F
     map: (A -> B) -> F A -> F B
 
@@ -34,19 +34,18 @@ class Applicative F
 class Monad M
     bind: M A -> (A -> M B) -> M B
 ```
-
 Multiple superclasses are listed as separate `with` lines:
 
 ```aivi
 class Traversable F
-    traverse: Applicative G => (A -> G B) -> F A -> G (F B)
+    traverse: Applicative G
 ```
 
 ## Parameter constraints
 
 Use `require` inside the class body to constrain a type parameter. This documents that any type substituted for that parameter must satisfy the given class.
 
-```aivi
+```
 class Container F
     contains: A -> F A -> Bool
 ```
@@ -61,7 +60,6 @@ fun equivalent:Bool left:Int right:Int =>
 
 value sameNumber = equivalent 4 4
 ```
-
 ## Declaring an instance
 
 Instances provide the implementation for a concrete type:
@@ -99,16 +97,16 @@ instance Compare Label
 
 When a function needs to compare values of an open type parameter, use a constraint prefix on the annotation:
 
-```aivi
-fun matchesKey: Eq K => Bool k:K pair:{ key: K, value: V } =>
-    pair.key == k
+```
+fun matchesKey: Eq K ->
+    Bool k
 ```
 
 Multiple constraints use a parenthesized comma-separated list:
 
-```aivi
-fun bothEqual: (Eq A, Eq B) => Bool a1:A a2:A b1:B b2:B =>
-    a1 == a2 and b1 == b2
+```
+fun bothEqual: (Eq A, Eq B) ->
+    Bool a1
 ```
 
 The constraint ensures the function can only be called when `K` (or `A`, `B`, etc.) has an `Eq` instance. Without the constraint, using `==` on an open type parameter is a type error.

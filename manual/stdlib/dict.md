@@ -56,7 +56,10 @@ singleton : K -> V -> Dict K V
 ```
 
 ```aivi
-use aivi.core.dict (singleton)
+use aivi.core.dict (
+    Dict
+    singleton
+)
 
 value greeting: (Dict Text Text) = singleton "hello" "world"
 ```
@@ -98,8 +101,11 @@ use aivi.core.dict (
     insertWith
 )
 
+fun addScores:Int total:Int n:Int =>
+    total + n
+
 fun addScore: (Dict Text Int) key:Text n:Int d: (Dict Text Int) =>
-    insertWith (fun total)
+    insertWith addScores key n d
 ```
 
 ---
@@ -298,12 +304,15 @@ use aivi.core.dict (
     mapValues
 )
 
+fun double:Int n:Int =>
+    n * 2
+
 value d: (Dict Text Int) =
     insert "pts" 5 {
         entries: []
     }
 
-value doubled: (Dict Text Int) = mapValues (fun n)
+value doubled: (Dict Text Int) = mapValues double d
 ```
 
 ---
@@ -323,11 +332,14 @@ use aivi.core.dict (
     filterValues
 )
 
+fun isHigh:Bool n:Int =>
+    n > 50
+
 value d: (Dict Text Int) = { entries: [] }
  |> insert "low" 3
  |> insert "high" 99
 
-value highOnly: (Dict Text Int) = filterValues (fun b)
+value highOnly: (Dict Text Int) = filterValues isHigh d
 ```
 
 ---
@@ -347,6 +359,9 @@ use aivi.core.dict (
     mergeWith
 )
 
+fun addScores:Int left:Int right:Int =>
+    left + right
+
 value left: (Dict Text Int) =
     insert "a" 1 {
         entries: []
@@ -357,7 +372,7 @@ value right: (Dict Text Int) =
         entries: []
     }
 
-value merged: (Dict Text Int) = mergeWith (fun sum)
+value merged: (Dict Text Int) = mergeWith addScores left right
 ```
 
 ---

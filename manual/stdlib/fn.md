@@ -126,8 +126,8 @@ always : A -> B -> A
 ```aivi
 use aivi.core.fn (always)
 
-fun constantZero:Int _:Text =>
-    always 0 _
+fun constantZero:Int ignored:Text =>
+    always 0 ignored
 ```
 
 ---
@@ -145,8 +145,11 @@ use aivi.core.fn (on)
 
 use aivi.math (abs)
 
+fun byInt:Bool left:Int right:Int =>
+    left < right
+
 fun absCompare:Bool x:Int y:Int =>
-    on (fun same)
+    on byInt abs x y
 ```
 
 ---

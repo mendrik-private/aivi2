@@ -109,7 +109,9 @@ Chains a `Result`-returning function over an `Ok` value. Propagates `Err` withou
 ```aivi
 use aivi.result (flatMap)
 
-fun ensurePositive: (Result Text Int) n:Int =>
+fun ensurePositive: (Result Text Int) n:Int => n > 0
+  T|> Ok n
+  F|> Err "must be positive"
 
 fun validateCount: (Result Text Int) result: (Result Text Int) => result
   |> flatMap ensurePositive
@@ -210,7 +212,7 @@ Collapses a `Result` to a single value by applying `onOk` to `Ok` or `onErr` to 
 ```aivi
 use aivi.result (fold)
 
-fun zero:Int _:Text =>
+fun zero:Int ignored:Text =>
     0
 
 fun identity:Int n:Int =>

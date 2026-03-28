@@ -829,8 +829,7 @@ pub struct ClassItem {
     pub header: ItemHeader,
     pub name: Name,
     pub parameters: NonEmpty<TypeParameterId>,
-    /// Superclass constraints from both the legacy `(X) -> class` prefix syntax and
-    /// the body-level `with X Param` declarations.
+    /// Superclass constraints from body-level `with X Param` declarations.
     pub superclasses: Vec<TypeId>,
     /// Per-parameter constraints from `require X Param` body declarations.
     /// Each TypeId is a class application asserting the instantiation must satisfy the class.

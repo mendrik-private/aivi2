@@ -45,7 +45,12 @@ these states as the OS or user triggers lifecycle events:
 ```aivi
 use aivi.app.lifecycle (AppLifecycle)
 
-fun describeLifecycle state =>
+fun describeLifecycle:Text state:AppLifecycle => state
+  ||> Starting  -> "starting"
+  ||> Running   -> "running"
+  ||> Suspended -> "suspended"
+  ||> Stopping  -> "stopping"
+  ||> Stopped   -> "stopped"
 ```
 
 ### AppActionResult
@@ -63,7 +68,10 @@ can also be cancelled by the user (e.g. a file dialog dismissed without selectin
 ```aivi
 use aivi.app.lifecycle (AppActionResult)
 
-fun handleSave result =>
+fun handleSave:Text result: (AppActionResult Text) => result
+  ||> ActionOk v      -> "saved: {v}"
+  ||> ActionFailed e  -> "failed: {e}"
+  ||> ActionCancelled -> "cancelled"
 ```
 
 ### AppCommand
@@ -85,9 +93,11 @@ A named app command suitable for display in menus, toolbars, or a command palett
 ```aivi
 use aivi.app.lifecycle (AppCommand)
 
-use aivi.option (none)
-
-value newFileCommand = { label }
+value newFileCommand:AppCommand = {
+    label: "New File",
+    description: "Create a new empty file",
+    shortcut: None
+}
 ```
 
 ### UndoState
@@ -109,8 +119,10 @@ Snapshot of the undo/redo history. Bind this to toolbar button sensitivity and m
 ```aivi
 use aivi.app.lifecycle (UndoState)
 
-value emptyUndoState = {
-    canUndo
+value emptyUndoState:UndoState = {
+    canUndo: False,
+    canRedo: False,
+    depth: 0
 }
 ```
 
@@ -118,17 +130,17 @@ value emptyUndoState = {
 
 ```aivi
 type NotificationLevel =
-  | Info
-  | Warning
-  | Error
-  | Success
+  | NoteInfo
+  | NoteWarning
+  | NoteError
+  | NoteSuccess
 ```
 
 Severity of an in-app notification. Maps to libadwaita toast and banner styling.
 
 ### AppNotification
 
-```aivi
+```
 type AppNotification = {
     level: NotificationLevel,
     title: Text,
@@ -144,10 +156,10 @@ use aivi.app.lifecycle (
     NotificationLevel
 )
 
-use aivi.option (none)
-
-value savedNotification = {
-    level
+value savedNotification:AppNotification = {
+    level: NoteInfo,
+    title: "File saved",
+    body: None
 }
 ```
 
@@ -156,9 +168,11 @@ value savedNotification = {
 ```aivi
 use aivi.app.lifecycle (AppLifecycle)
 
-signal lifecycle:AppLifecycle = source AppLifecycle.Starting
+signal lifecycle:AppLifecycle = source Starting
 
-fun isRunning state =>
+fun isRunning:Bool state:AppLifecycle => state
+  ||> Running -> True
+  ||> _       -> False
 ```
 
 ## Example — undo button binding
@@ -166,5 +180,6 @@ fun isRunning state =>
 ```aivi
 use aivi.app.lifecycle (UndoState)
 
-fun undoButtonSensitive undoState =>
+fun undoButtonSensitive:Bool undoState:UndoState =>
+    undoState.canUndo
 ```

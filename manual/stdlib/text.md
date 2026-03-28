@@ -25,9 +25,12 @@ isEmpty : Text -> Bool
 ```aivi
 use aivi.text (isEmpty)
 
-fun showPlaceholder:Text label:Text => isEmpty label
+fun placeholderFor:Text isBlank:Bool label:Text => isBlank
   T|> "Untitled"
   F|> label
+
+fun showPlaceholder:Text label:Text =>
+    placeholderFor (isEmpty label) label
 ```
 
 ---

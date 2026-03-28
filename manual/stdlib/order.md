@@ -152,8 +152,11 @@ type Person = {
 fun byInt:Bool a:Int b:Int =>
     a < b
 
+fun ageOf:Int person:Person =>
+    person.age
+
 fun youngerFirst:Bool p1:Person p2:Person =>
-    comparing.age byInt p1 p2
+    comparing ageOf byInt p1 p2
 ```
 
 The `.age` shorthand projects a `Person` to its `age` field. You can pass `youngerFirst` anywhere a `(Person -> Person -> Bool)` comparator is expected — for example as the `compare` argument to `minOf` or `clamp`.

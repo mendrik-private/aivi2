@@ -132,7 +132,8 @@ class Functor F
 class Contravariant F
     contramap : (B -> A) -> F A -> F B
 
-class Functor F -> Filterable F
+class Filterable F
+    with Functor F
     filterMap : (A -> Option B) -> F A -> F B
 
 class Eq A
@@ -142,16 +143,21 @@ class Eq A
 class Default A
     default : A
 
-class Eq A -> Ord A
+class Ord A
+    with Eq A
     compare : A -> A -> Ordering
 
-class Semigroupoid C -> Category C
+class Category C
+    with Semigroupoid C
     id : C A A
 
-class Semigroup A -> Monoid A
+class Monoid A
+    with Semigroup A
     empty : A
 
-class (Functor T, Foldable T) -> Traversable T
+class Traversable T
+    with Functor T
+    with Foldable T
     traverse : Applicative G -> (A -> G B) -> T A -> G (T B)
 
 class Profunctor P
@@ -160,37 +166,50 @@ class Profunctor P
 class Bifunctor F
     bimap : (A -> C) -> (B -> D) -> F A B -> F C D
 
-class Monoid A -> Group A
+class Group A
+    with Monoid A
     invert : A -> A
 
-class Functor F -> Alt F
+class Alt F
+    with Functor F
     alt : F A -> F A -> F A
 
-class Functor F -> Apply F
+class Apply F
+    with Functor F
     apply : F (A -> B) -> F A -> F B
 
-class Functor W -> Extend W
+class Extend W
+    with Functor W
     extend : (W A -> B) -> W A -> W B
 
-class Alt F -> Plus F
+class Plus F
+    with Alt F
     zero : F A
 
-class Apply F -> Applicative F
+class Applicative F
+    with Apply F
     pure : A -> F A
 
-class Apply M -> Chain M
+class Chain M
+    with Apply M
     chain : (A -> M B) -> M A -> M B
 
-class Extend W -> Comonad W
+class Comonad W
+    with Extend W
     extract : W A -> A
 
-class (Applicative F, Plus F) -> Alternative F
+class Alternative F
+    with Applicative F
+    with Plus F
     guard : Bool -> F Unit
 
-class (Applicative M, Chain M) -> Monad M
+class Monad M
+    with Applicative M
+    with Chain M
     join : M (M A) -> M A
 
-class Monad M -> ChainRec M
+class ChainRec M
+    with Monad M
     chainRec : (A -> M (Result A B)) -> A -> M B
 
 type __AiviListTailState A = {
@@ -622,21 +641,14 @@ impl<'a> Lowerer<'a> {
         }
         let parameters = crate::NonEmpty::from_vec(parameters)
             .expect("class fallback parameter list should be non-empty");
-        // Superclasses: legacy prefix syntax `(X) -> class Name Param` (item.constraints)
-        // plus new body-level `with X Param` declarations (body.with_decls).
-        let mut superclasses: Vec<TypeId> = item
-            .constraints
-            .iter()
-            .map(|constraint| self.lower_type_expr(constraint))
-            .collect();
-        let (param_constraints, members) = item
+        let (superclasses, param_constraints, members) = item
             .class_body()
             .map(|body| {
-                superclasses.extend(
-                    body.with_decls
-                        .iter()
-                        .map(|w| self.lower_type_expr(&w.superclass)),
-                );
+                let superclasses: Vec<TypeId> = body
+                    .with_decls
+                    .iter()
+                    .map(|w| self.lower_type_expr(&w.superclass))
+                    .collect();
                 let param_constraints: Vec<TypeId> = body
                     .require_decls
                     .iter()
@@ -668,7 +680,7 @@ impl<'a> Lowerer<'a> {
                             }),
                     })
                     .collect();
-                (param_constraints, members)
+                (superclasses, param_constraints, members)
             })
             .unwrap_or_else(|| {
                 self.emit_error(
@@ -676,7 +688,7 @@ impl<'a> Lowerer<'a> {
                     "class declaration is missing a body",
                     code("missing-class-body"),
                 );
-                (Vec::new(), Vec::new())
+                (Vec::new(), Vec::new(), Vec::new())
             });
 
         ClassItem {
