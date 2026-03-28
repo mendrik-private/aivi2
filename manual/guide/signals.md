@@ -1,219 +1,110 @@
 # Signals
 
-Signals are the reactive core of AIVI. A signal is a value that changes over time. When a signal's inputs change, it automatically recomputes. The runtime builds a dependency graph and schedules updates efficiently.
+Signals are the reactive core of AIVI. A signal is a named value in the dependency graph: when its inputs change, the signal is recomputed by the runtime.
 
-## Declaring a Signal
+## Declaring a signal
 
 ```aivi
-signal count: Signal Int = 0
+signal count = 21
 ```
 
-This declares a signal `count` with initial value `0`. The type `Signal Int` says it carries integers.
+This declares a reactive value named `count`.
 
-When another signal depends on `count`, it automatically re-evaluates whenever `count` changes:
+## Deriving from another signal
+
+Signals are often defined from earlier signals with pipes:
 
 ```aivi
-signal doubled: Signal Int = count * 2
-signal message: Signal Text = "Count is {count}"
+fun double: Int n:Int =>
+    n * 2
+
+signal count = 21
+
+signal doubledCount =
+    count
+     |> double
 ```
 
-## Deriving Signals
+## Boolean gating
 
-Signals can be derived by transforming another signal through a pipeline:
-
-```aivi
-signal score: Signal Int = ...
-
-signal grade: Signal Text =
-    score
-     ||> _ if score >= 90 -> "A"
-     ||> _ if score >= 75 -> "B"
-     ||> _ if score >= 60 -> "C"
-     ||> _                -> "F"
-```
-
-Any pipe operator works — the signal automatically re-evaluates each time the source signal emits.
-
-## The `scan` Function
-
-`scan` is the primary way to accumulate state from a signal over time. It folds each incoming value into an accumulated state:
+Signals can branch just like ordinary values:
 
 ```aivi
-signal count: Signal Int =
-    keyPresses
-     |> scan 0 (state _ => state + 1)
-```
+signal ready = True
 
-- The first argument is the **initial state** (`0`)
-- The second argument is the **step function** — it receives the current state and the new value, and returns the next state
-
-Using a named function:
-
-```aivi
-fun countStep: Int state: Int _: Key =>
-    state + 1
-
-signal count: Signal Int =
-    keyPresses
-     |> scan 0 countStep
-```
-
-A more complex example that tracks a running direction:
-
-```aivi
-fun updateDirection: Direction key: Key current: Direction =>
-    arrowKey key
-     |> filterDirection current
-
-signal direction: Signal Direction =
-    keyDown
-     |> scan Right updateDirection
-```
-
-## Signal Meta-State
-
-Every signal exposes reactive meta-state signals as fields:
-
-| Field | Type | Description |
-|---|---|---|
-| `.running` | `Signal Bool` | `True` while the signal is being evaluated or a source is in-flight |
-| `.done` | `Signal Bool` | `True` once the signal has settled with a value |
-| `.stale` | `Signal Bool` | `True` before the first settled value is available |
-| `.error` | `Signal (Option Error)` | `Some e` if the signal has failed, `None` otherwise |
-
-```aivi
-signal users: Signal (Result HttpError (List User)) = ...
-
-signal isLoading: Signal Bool = users.running
-signal hasError: Signal Bool  = users.error *|> isSome
-```
-
-### Initial State
-
-When a signal is first created:
-- `.running` is `False`
-- `.done` is `False`
-- `.stale` is `True`
-- `.error` is `None`
-
-Once the signal settles with a value, `.done` becomes `True` and `.stale` becomes `False`. `.done` never goes back to `False` within the same epoch.
-
-## Signal Graph Guarantees
-
-The AIVI runtime provides strong guarantees about signal evaluation:
-
-- **Glitch-free**: a downstream signal never sees an inconsistent combination of old and new upstream values
-- **Batched**: all changes in a single event are processed together before the UI updates
-- **Topologically ordered**: signals always evaluate after all their dependencies
-- **Minimal**: a signal only re-evaluates if its inputs actually changed
-
-## Combining Signals
-
-Use `&|>` to combine multiple signals. The combined signal emits when any input changes:
-
-```aivi
-signal firstName: Signal Text = ...
-signal lastName: Signal Text  = ...
-
-signal fullName: Signal Text =
- &|> firstName
- &|> lastName
-  |> (\first last => "{first} {last}")
+signal statusText =
+    ready
+     T|> "ready"
+     F|> "waiting"
 ```
 
 ## Filtering with `?|>`
 
-`?|>` turns a signal into `Signal (Option A)` — it emits `Some value` when the predicate holds, and `None` when it does not:
+`?|>` turns a value into `Option` when a predicate may reject it:
 
 ```aivi
-type User = { active: Bool, name: Text }
+type User = {
+    active: Bool,
+    email: Text
+}
 
-signal activeUser: Signal (Option User) =
-    userSignal
+type Session = { user: User }
+
+value seed: User = {
+    active: True,
+    email: "ada@example.com"
+}
+
+signal sessions: Signal Session = {
+    user: seed
+}
+
+signal activeUsers: Signal User =
+    sessions
+     |> .user
      ?|> .active
 ```
 
-## Accumulation with `+|>`
+## Previous and diff
 
-`+|>` is the signal version of a stateful fold. It accumulates state across emissions:
+The language has dedicated pipes for time-oriented signal transformations:
 
 ```aivi
-signal total: Signal Int =
-    priceSignal
-     +|> 0 (state price => state + price)
+signal score = 10
+
+signal previousScore =
+    score
+     ~|> 0
+
+signal scoreDelta =
+    score
+     -|> 0
 ```
 
-Shorthand using `prev` and `.`:
+## Shaping signal outputs
+
+Signals can still produce richer values without leaving the ordinary expression model:
 
 ```aivi
-signal total: Signal Int =
-    priceSignal
-     +|> prev + .
-```
-
-## The Previous Value with `~|>`
-
-`~|>` pairs each new emission with the previous one:
-
-```aivi
-signal transition: Signal (Status, Status) =
-    statusSignal
-     ~|> Idle
-```
-
-`Idle` is the initial "previous" value before the first real emission. After that, the signal emits `(previousStatus, currentStatus)`.
-
-## Signals vs Values
-
-| | `value` | `signal` |
-|---|---|---|
-| Computed | Once, at startup | Every time inputs change |
-| Type | `T` | `Signal T` |
-| Can use sources | No | Yes |
-| Reactive | No | Yes |
-
-Values are constants. Signals are reactive. Use a `value` when the result never needs to change; use a `signal` when it must respond to external events or other signals.
-
-## Full Example
-
-Here is the signal pipeline from the snake game:
-
-```aivi
-@source window.keyDown with {
-    repeat: False,
-    focusOnly: True
+type NamePair = {
+    first: Text,
+    last: Text
 }
-signal keyDown: Signal Key
 
-signal direction: Signal Direction =
-    keyDown
-     |> scan Right updateDirectionOrRestart
+signal firstName = "Ada"
+signal lastName = "Lovelace"
 
-signal restartCount: Signal Int =
-    keyDown
-     |> scan 0 updateRestartCount
-
-@source timer.every 200 with {
-    immediate: False,
-    coalesce: True
+signal namePair = {
+    first: firstName,
+    last: lastName
 }
-signal tick: Signal Unit
-
-signal gameState: Signal GameTickState =
-    tick
-     |> scan initialGameTickState stepOnTick
-
-signal game: Signal Game =
-    gameState
-     |> gameValue
-
-signal board: Signal GameBoard =
-    game
-     |> toBoard boardSize
-
-signal boardText: Signal Text =
-    board
-     |> boardTextFor
 ```
 
-Each signal declares its dependency explicitly. The runtime builds the graph, schedules evaluation, and ensures the UI always reflects a consistent state.
+## Signals versus values
+
+| Form | Meaning |
+| --- | --- |
+| `value answer = 42` | Fixed expression |
+| `signal count = 21` | Reactive graph node |
+
+Use `value` when something does not participate in reactive recomputation. Use `signal` when it should.

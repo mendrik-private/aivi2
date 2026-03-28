@@ -1,19 +1,19 @@
 domain Duration over Int
-    literal s : Int -> Duration
+    literal sec : Int -> Duration
 
 domain Retry over Int
-    literal x : Int -> Retry
+    literal rt : Int -> Retry
 
 fun step #value =>
     value
 
-@recur.timer 5s
+@recur.timer 5sec
 sig polled : Signal Int =
     0
      @|> step
      <|@ step
 
-@recur.backoff 3x
+@recur.backoff 3rt
 val retried : Task Int Int =
     0
      @|> step

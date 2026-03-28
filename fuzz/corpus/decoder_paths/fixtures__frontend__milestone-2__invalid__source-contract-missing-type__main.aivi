@@ -12,14 +12,14 @@ type DecodeMode =
   | Permissive
 
 domain Duration over Int
-    literal s : Int -> Duration
+    literal sec : Int -> Duration
 
 domain Repeat over Int
     literal x : Int -> Repeat
 
 @source http.get "/users" with {
     decode: Strict,
-    retry: 3x,
-    timeout: 5s
+    retry: 3rt,
+    timeout: 5sec
 }
 sig users : Signal (Result HttpError (List User))

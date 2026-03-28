@@ -1,76 +1,40 @@
 # Types
 
-AIVI is statically typed. Every value, function, and signal has a type known at compile time. There are no implicit conversions, no null, and no runtime type confusion.
+AIVI is statically typed. The compiler knows the type of every expression before the program runs, so mistakes are caught early and values do not silently change shape at runtime.
 
-## Primitive Types
+## Primitive types
 
-| Type | Description | Example |
-|---|---|---|
-| `Int` | Whole number | `42`, `0`, `-7` |
-| `Float` | Floating-point number | `3.14`, `-0.5` |
-| `Bool` | Boolean | `True`, `False` |
-| `Text` | UTF-8 string | `"hello"` |
-| `Unit` | The "nothing" type — exactly one value | `()` |
+| Type | Meaning | Example |
+| --- | --- | --- |
+| `Int` | Whole numbers | `42`, `0`, `0 - 7` |
+| `Float` | Floating-point numbers | `3.14`, `0.5` |
+| `Bool` | Booleans | `True`, `False` |
+| `Text` | UTF-8 text | `"hello"` |
+| `Unit` | A type with one value | `()` |
 
-## Type Aliases
+## `type` for aliases and records
 
-Give a name to any type:
+Use `type` when you want a plain alias or a record shape:
 
 ```aivi
-type Key = Key Text
 type Score = Int
-type UserId = Int
+
+type User = {
+    id: Int,
+    name: Text,
+    email: Text
+}
+
+value bestScore: Score = 42
+
+value ada: User = {
+    id: 1,
+    name: "Ada",
+    email: "ada@example.com"
+}
 ```
 
-The first form (`Key Text`) is a **newtype** — it wraps `Text` in a named constructor `Key` so the two cannot be mixed up accidentally.
-
-## Union Types
-
-A union type (also called an algebraic data type or ADT) has several named constructors, only one of which is active at a time:
-
-```aivi
-type Direction =
-  | Up
-  | Down
-  | Left
-  | Right
-```
-
-Constructors can carry data:
-
-```aivi
-type Status =
-  | Running
-  | GameOver
-
-type LoadState =
-  | NotAsked
-  | Loading
-  | Loaded User
-  | Failed Text
-```
-
-`Loaded User` carries a value of type `User`. `Failed Text` carries an error message.
-
-Compact single-line form is also allowed:
-
-```aivi
-type Status = Running | GameOver
-```
-
-### Using Constructors
-
-Constructors are used as values. If a constructor carries data, apply it like a function:
-
-```aivi
-value state = NotAsked
-value loaded = Loaded { id: 1, name: "Ada" }
-value failed = Failed "network error"
-```
-
-## Record Types
-
-Records are product types — they hold several named fields at once:
+Records carry several named fields at once:
 
 ```aivi
 type User = {
@@ -78,194 +42,161 @@ type User = {
     name: Text,
     email: Text
 }
-```
 
-Create a record with `{ field: value, ... }`:
-
-```aivi
-value user: User = {
-    id: 1,
-    name: "Ada",
-    email: "ada@example.com"
-}
-```
-
-Access fields with `.`:
-
-```aivi
-fun getUserName: Text user: User =>
+fun userName: Text user:User =>
     user.name
+
+value shownName =
+    userName {
+        id: 1,
+        name: "Ada",
+        email: "ada@example.com"
+    }
 ```
 
-### Record Shorthand
+## `data` for constructors and tagged values
 
-When a local variable has the same name as a field, you can omit the value:
+Use `data` for algebraic data types: enums, tagged unions, and constructor-backed wrappers.
 
 ```aivi
-value name = "Ada"
-value email = "ada@example.com"
+data Direction =
+  | Up
+  | Down
+  | Left
+  | Right
 
-value user: User = {
-    id: 1,
-    name,       // same as name: name
-    email       // same as email: email
+data UserId =
+  | UserId Int
+
+value facing = Left
+value currentUser = UserId 7
+```
+
+Constructors can carry payloads:
+
+```aivi
+data LoadState =
+  | NotAsked
+  | Loading
+  | Loaded Text
+  | Failed Text
+
+value readyState = Loaded "Ada"
+value failedState = Failed "offline"
+```
+
+## Matching typed values
+
+Because constructors are part of the type, pattern matching stays precise:
+
+```aivi
+data LoadState =
+  | NotAsked
+  | Loading
+  | Loaded Text
+  | Failed Text
+
+fun loadLabel: Text state:LoadState =>
+    state
+     ||> NotAsked      -> "idle"
+     ||> Loading       -> "loading"
+     ||> Loaded name   -> "ready {name}"
+     ||> Failed reason -> "failed {reason}"
+
+value currentLabel = loadLabel (Loaded "Grace")
+```
+
+## Built-in parameterised types
+
+AIVI ships with several useful generic types. You use them by supplying the concrete payload type:
+
+```aivi
+type User = {
+    id: Int,
+    name: Text
 }
+
+value maybeUser: (Option User) =
+    Some {
+        id: 1,
+        name: "Ada"
+    }
+
+value noUser: (Option User) = None
+value success: (Result Text Int) = Ok 42
+value failure: (Result Text Int) = Err "not found"
 ```
 
-### Record Update
-
-Copy a record and change some fields using `{ existing | field: newValue }`:
+Lists are homogeneous, so every element has the same type:
 
 ```aivi
-fun withScore: Game game: Game score: Int =>
-    { game | score }
-```
+value primes: List Int = [
+    2,
+    3,
+    5,
+    7,
+    11
+]
 
-Wait — update syntax is `{ record | field: newValue }`:
+value names: List Text = [
+    "Ada",
+    "Grace",
+    "Alan"
+]
 
-```aivi
-fun resetScore: Game game: Game =>
-    { game | score: 0 }
-```
-
-## Parameterised Types
-
-Types can take type parameters (written after the type name):
-
-```aivi
-type Option A =
-  | None
-  | Some A
-
-type Result E A =
-  | Err E
-  | Ok A
-
-type List A = ...   // built-in
-```
-
-Use them by supplying the type argument:
-
-```aivi
-value maybeName: Option Text = Some "Ada"
-value noName: Option Text = None
-
-value success: Result Text Int = Ok 42
-value failure: Result Text Int = Err "not found"
+value emptyNumbers: List Int = []
 ```
 
 ## Tuples
 
-A tuple holds a fixed number of values of potentially different types:
+Tuples hold a fixed number of values, often with different types:
 
 ```aivi
-value pair: (Int, Text) = (1, "one")
-value triple: (Bool, Int, Text) = (True, 0, "zero")
+value pair: (Int, Text) = (
+    1,
+    "one"
+)
+
+value triple: (Bool, Int, Text) = (
+    True,
+    0,
+    "zero"
+)
 ```
 
-Access tuple elements through pattern matching:
+You usually unpack tuples with pattern matching:
 
 ```aivi
-fun fst: Int pair: (Int, Int) =>
+fun firstInt: Int pair:(Int, Int) =>
     pair
      ||> (first, _) -> first
+
+value firstValue =
+    firstInt (
+        4,
+        9
+    )
 ```
 
-## Type Parameters in Functions
+## Text interpolation
 
-Functions can be polymorphic — they work for any type that satisfies a constraint:
-
-```aivi
-fun identity: A x: A =>
-    x
-```
-
-Here `A` is a type variable. The compiler infers what `A` is at each call site.
-
-## The Option Type
-
-`Option A` represents a value that may or may not be present. It replaces null.
+Interpolation lets typed values appear inside text literals:
 
 ```aivi
-value foundUser: Option User = Some { id: 1, name: "Ada", email: "ada@example.com" }
-value noUser: Option User = None
-```
-
-Use pattern matching to handle both cases:
-
-```aivi
-fun userDisplayName: Text opt: Option User =>
-    opt
-     ||> Some user -> user.name
-     ||> None      -> "Guest"
-```
-
-## The Result Type
-
-`Result E A` represents either success (`Ok A`) or failure (`Err E`). It replaces exceptions.
-
-```aivi
-fun safeDivide: Result Text Int a: Int b: Int =>
-    b == 0
-     T|> Err "division by zero"
-     F|> Ok (a / b)
-```
-
-## Lists
-
-Lists are homogeneous sequences. All elements must have the same type.
-
-```aivi
-value primes: List Int = [2, 3, 5, 7, 11]
-value names: List Text = ["Ada", "Grace", "Alan"]
-value empty: List Int = []
-```
-
-Ranges create a list of consecutive integers:
-
-```aivi
-value indices = [0..9]    // [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-```
-
-Use `append` to build lists:
-
-```aivi
-fun prepend: List Int item: Int xs: List Int =>
-    append [item] xs
-```
-
-## Strings
-
-Text literals use double quotes. Interpolate expressions with `{expr}`:
-
-```aivi
-value name = "Ada"
-value score = 42
-value message = "Hello, {name}! Your score is {score}."
-```
-
-Any expression can appear inside `{}`. The result is automatically converted to text.
-
-### Regular Expressions
-
-Regex literals use the `rx` prefix:
-
-```aivi
-value datePattern = rx"\d{4}-\d{2}-\d{2}"
-value slugPattern = rx"[a-z0-9]+(-[a-z0-9]+)*"
+value name: Text = "Ada"
+value score: Int = 42
+value message: Text = "Hello, {name}! Your score is {score}."
 ```
 
 ## Summary
 
-| Form | Syntax |
-|---|---|
-| Union type | `type Name = Con1 \| Con2 T` |
-| Record type | `type Name = { field: Type, ... }` |
-| Newtype | `type Name = Name WrappedType` |
-| Option | `Some value` / `None` |
-| Result | `Ok value` / `Err error` |
-| List | `[a, b, c]` |
-| Tuple | `(a, b)` |
-| Range | `[low..high]` |
-| String interpolation | `"text {expr} more text"` |
-| Regex | `rx"pattern"` |
+| Form | Use it for |
+| --- | --- |
+| `type Name = Alias` | Plain aliases |
+| `type Name = { ... }` | Records |
+| `data Name = Con1 \| Con2` | Tagged unions |
+| `data Name = Name Wrapped` | Constructor-backed wrappers |
+| `Option A` | Value may be present or absent |
+| `Result E A` | Success or failure |
+| `List A` | Homogeneous sequences |
+| `(A, B)` | Fixed-size tuples |

@@ -3414,7 +3414,9 @@ impl<'a> Lowerer<'a> {
                         "item",
                     );
                     for (member_index, member) in item.members.iter().enumerate() {
-                        if member.kind == DomainMemberKind::Literal {
+                        if member.kind == DomainMemberKind::Literal
+                            && member.name.text().chars().count() >= 2
+                        {
                             insert_site(
                                 &mut namespaces.literal_suffixes,
                                 member.name.text(),
@@ -3528,7 +3530,9 @@ impl<'a> Lowerer<'a> {
                         item.header.span,
                     );
                     for (member_index, member) in item.members.iter().enumerate() {
-                        if member.kind == DomainMemberKind::Literal {
+                        if member.kind == DomainMemberKind::Literal
+                            && member.name.text().chars().count() >= 2
+                        {
                             insert_site(
                                 &mut namespaces.literal_suffixes,
                                 member.name.text(),
@@ -5148,6 +5152,17 @@ impl<'a> Lowerer<'a> {
         suffix: &Name,
         namespaces: &Namespaces,
     ) -> ResolutionState<LiteralSuffixResolution> {
+        if suffix.text().chars().count() < 2 {
+            self.emit_error(
+                suffix.span(),
+                format!(
+                    "literal suffix `{}` is too short; domain literal suffixes must be at least two characters long",
+                    suffix.text()
+                ),
+                code("literal-suffix-too-short"),
+            );
+            return ResolutionState::Unresolved;
+        }
         let Some(candidates) = namespaces.literal_suffixes.get(suffix.text()) else {
             self.emit_error(
                 suffix.span(),

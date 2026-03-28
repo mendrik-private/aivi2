@@ -871,6 +871,20 @@ impl Validator<'_> {
                     for member in &item.members {
                         self.check_span("domain member", member.span);
                         self.check_name(&member.name);
+                        if member.kind == DomainMemberKind::Literal
+                            && member.name.text().chars().count() < 2
+                        {
+                            self.diagnostics.push(
+                                Diagnostic::error(
+                                    "domain literal suffixes must be at least two characters long",
+                                )
+                                .with_code(code("literal-suffix-too-short"))
+                                .with_primary_label(
+                                    member.name.span(),
+                                    "use a suffix with at least two characters",
+                                ),
+                            );
+                        }
                         self.require_type(
                             member.span,
                             "domain member",

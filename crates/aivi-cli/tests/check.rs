@@ -244,6 +244,7 @@ fn check_rejects_invalid_hir_fixtures() {
         "milestone-2/invalid/instance-member-operator-mismatch/main.aivi",
         "milestone-2/invalid/operator-expression-typing/main.aivi",
         "milestone-2/invalid/trailing-declaration-body-token/main.aivi",
+        "milestone-2/invalid/single-char-domain-literal-suffix/main.aivi",
         "milestone-2/invalid/custom-source-provider-unknown-option/main.aivi",
         "milestone-2/invalid/custom-source-provider-option-type-mismatch/main.aivi",
         "milestone-2/invalid/custom-source-provider-argument-count-mismatch/main.aivi",

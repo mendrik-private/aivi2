@@ -13,7 +13,7 @@ type DecodeMode =
   | Permissive
 
 domain Retry over Int
-literal x: Int -> Retry
+literal rt: Int -> Retry
 
 export (
   HttpError,

@@ -137,6 +137,11 @@ impl Formatter {
                 }
             }
             Some(TypeDeclBody::Sum(variants)) => {
+                if variants.len() == 1 {
+                    let mut lines = vec![format!("{header} =")];
+                    lines.extend(self.format_sum_block(variants).into_lines());
+                    return lines;
+                }
                 let inline = self.format_sum_inline(variants);
                 let line = format!("{header} = {inline}");
                 if display_width(&line) <= INLINE_LIMIT {
@@ -235,6 +240,11 @@ impl Formatter {
                 }
             }
             Some(TypeDeclBody::Sum(variants)) => {
+                if variants.len() == 1 {
+                    let mut lines = vec![format!("{header} =")];
+                    lines.extend(self.format_sum_block(variants).into_lines());
+                    return lines;
+                }
                 let inline = self.format_sum_inline(variants);
                 let line = format!("{header} = {inline}");
                 if display_width(&line) <= INLINE_LIMIT {
@@ -1783,7 +1793,8 @@ mod tests {
         assert_eq!(
             formatted,
             concat!(
-                "type Pair = Pair Text Text\n",
+                "type Pair =\n",
+                "  | Pair Text Text\n",
                 "\n",
                 "type SaveState =\n",
                 "  | Saved\n",
@@ -2010,6 +2021,30 @@ value view =
                 "    status\n",
                 "     ||> Idle          -> \"idle\"\n",
                 "     ||> Failed reason -> \"failed {reason}\"\n",
+            )
+        );
+    }
+
+    #[test]
+    fn formatter_keeps_single_variant_type_sums_block_shaped() {
+        let formatted = format_text("type Map K V =\n  | EmptyMap\n");
+        assert_eq!(
+            formatted,
+            concat!(
+                "type Map K V =\n",
+                "  | EmptyMap\n",
+            )
+        );
+    }
+
+    #[test]
+    fn formatter_keeps_single_variant_data_sums_block_shaped() {
+        let formatted = format_text("data Mode =\n  | Stream\n");
+        assert_eq!(
+            formatted,
+            concat!(
+                "data Mode =\n",
+                "  | Stream\n",
             )
         );
     }

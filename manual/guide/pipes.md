@@ -1,232 +1,76 @@
 # Pipes & Operators
 
-Pipes are the primary way to compose data transformations in AIVI. Instead of deeply nested function calls, you write a linear left-to-right flow.
+Pipes are the main way to express flow in AIVI. Instead of deeply nested calls, you write a left-to-right transformation pipeline.
 
-## The Basic Pipe `|>`
+## The basic pipe `|>`
 
-`|>` applies a function to the value on its left:
-
-```aivi
-fun double: Int n: Int => n * 2
-fun addOne: Int n: Int => n + 1
-
-value result = 5 |> double |> addOne   // 11
-```
-
-This is equivalent to `addOne (double 5)`, but reads in the order of execution.
-
-In multi-line form, align the pipes for readability:
+`|>` sends the value on the left into the function on the right:
 
 ```aivi
+fun double: Int n:Int =>
+    n * 2
+
+fun addOne: Int n:Int =>
+    n + 1
+
 value result =
     5
      |> double
      |> addOne
 ```
 
-### Passing Extra Arguments
+That reads in execution order: start with `5`, then double it, then add one.
 
-When the function you're piping into takes more than one argument, supply the extra arguments immediately after the function name. The piped value is used as the **last** argument:
+## Passing extra arguments
+
+The piped value becomes the last argument:
 
 ```aivi
-fun multiply: Int factor: Int n: Int => factor * n
+fun multiply: Int factor:Int n:Int =>
+    factor * n
 
-value result =
+value scaled =
     5
-     |> multiply 3   // multiply 3 5 = 15
+     |> multiply 3
 ```
 
-## Map `*|>`
+`multiply 3` produces a function waiting for the final argument, so the pipeline stays compact.
 
-`*|>` applies a function inside a container. It works on `Option`, `Result`, `Signal`, and any `Functor`:
+## Pattern matching with `||>`
 
-```aivi
-fun doubleOpt: Option Int opt: Option Int =>
-    opt
-     *|> double
-```
-
-If `opt` is `None`, the result is `None`. If it is `Some 5`, the result is `Some 10`.
-
-On signals, `*|>` maps over each emitted value:
+`||>` is the branching pipe:
 
 ```aivi
-signal doubled: Signal Int =
-    counter
-     *|> double
-```
+data Status =
+  | Draft
+  | Published
+  | Archived
 
-## Validate `!|>`
-
-`!|>` applies a validation function. The function returns a `Result`, and any `Err` short-circuits the pipeline:
-
-```aivi
-type ValidationError = TooShort | TooLong
-
-fun validateLength: Result ValidationError Text s: Text =>
-    s
-     ||> _ if length s < 3  -> Err TooShort
-     ||> _ if length s > 50 -> Err TooLong
-     ||> _                   -> Ok s
-
-signal validName: Signal (Result ValidationError Text) =
-    nameInput
-     !|> validateLength
-```
-
-## Guard `?|>`
-
-`?|>` keeps a value only if a predicate holds, wrapping it in `Option`:
-
-```aivi
-type User = {
-    active: Bool,
-    age: Int,
-    name: Text
-}
-
-fun activeAdults: Option User user: User =>
-    user
-     ?|> (.active and .age >= 18)
-```
-
-The `.` shorthand accesses fields on the tested value.
-
-## Combine `&|>`
-
-`&|>` combines multiple signals into a tuple. The combined signal emits a new value whenever any input changes:
-
-```aivi
-signal firstName: Signal Text = ...
-signal lastName: Signal Text  = ...
-
-signal fullName: Signal Text =
- &|> firstName
- &|> lastName
-  |> (\first last => "{first} {last}")
-```
-
-Notice the leading `&|>` — when combining signals at the start of a pipeline you write the operator before the first signal too.
-
-After combining, `|>` receives all the combined values as arguments to the next function. Here a lambda `\first last => ...` is used, but a named function works just as well.
-
-### Combining Into a Type
-
-A common pattern is to collect several validated signals into a record or constructor:
-
-```aivi
-type UserDraft = UserDraft Text Text Int
-
-signal nameText: Signal Text  = ...
-signal emailText: Signal Text = ...
-signal ageValue: Signal Int   = ...
-
-signal draft: Signal UserDraft =
- &|> nameText
- &|> emailText
- &|> ageValue
-  |> UserDraft
-```
-
-## Accumulate `+|>`
-
-`+|>` folds incoming values into state. It replaces mutable variables.
-
-```aivi
-fun addToTotal: Int total: Int n: Int =>
-    total + n
-
-signal runningTotal: Signal Int =
-    numbers
-     +|> 0 addToTotal
-```
-
-The first argument is the **seed** (initial state). The function receives the current state and the new value, and returns the next state.
-
-### Shorthand Form
-
-For simple arithmetic accumulation, use the shorthand with `prev` (the previous state) and `.` (the current value):
-
-```aivi
-signal total: Signal Int =
-    numbers
-     +|> prev + .
-```
-
-`prev` refers to the previous accumulated value, and `.` is the current incoming value.
-
-## Diff `-|>`
-
-`-|>` emits the difference between the current and previous value:
-
-```aivi
-signal delta: Signal Int =
-    score
-     -|>
-```
-
-For numeric types, this is subtraction. For custom types, the domain defines what "diff" means.
-
-## Previous `~|>`
-
-`~|>` pairs each new value with the previous one, yielding a tuple `(previous, current)`:
-
-```aivi
-signal transition: Signal (Status, Status) =
+fun statusLabel: Text status:Status =>
     status
-     ~|> Idle
+     ||> Draft     -> "draft"
+     ||> Published -> "published"
+     ||> Archived  -> "archived"
+
+value currentLabel = statusLabel Published
 ```
 
-The argument is the **initial previous value** used before any real previous value is available.
+## Boolean branches with `T|>` and `F|>`
 
-## Boolean Branches `T|>` and `F|>`
-
-Split a boolean value into two branches:
+For `Bool`, the dedicated true/false pipes are shorter than a full match:
 
 ```aivi
-fun label: Text active: Bool =>
-    active
-     T|> "active"
-     F|> "inactive"
+fun availabilityLabel: Text ready:Bool =>
+    ready
+     T|> "ready"
+     F|> "waiting"
+
+value shownAvailability = availabilityLabel True
 ```
 
-These can be used inline in a pipeline:
+## Filtering with `?|>`
 
-```aivi
-signal displayText: Signal Text =
-    isActive
-     T|> "On"
-     F|> "Off"
-```
-
-## Source Boundary `@|>`
-
-`@|>` marks a pipeline step as a source boundary, meaning the step performs an effect (like an HTTP request) and is scheduled by the runtime source system. This is typically used internally by `@source`-declared signals.
-
-## Operator Precedence
-
-Pipes are **left-associative** and have lower precedence than arithmetic and function application. From highest to lowest:
-
-1. Field access `.`
-2. Function application
-3. Arithmetic operators (`*`, `/`, `+`, `-`)
-4. Comparison operators (`==`, `!=`, `<`, `>`, `<=`, `>=`)
-5. Boolean operators (`and`, `or`)
-6. Pipe operators (all `|>` variants)
-
-Within the pipe operators themselves, they all have the same precedence and associate left-to-right:
-
-```aivi
-// This:
-a &|> b |> f
-
-// Is the same as:
-(a &|> b) |> f
-```
-
-## Combining Operators
-
-Operators compose naturally in a pipeline:
+`?|>` keeps a value only when a predicate holds, returning `Option A`:
 
 ```aivi
 type User = {
@@ -235,27 +79,67 @@ type User = {
     email: Text
 }
 
-fun formatUser: Text user: User => "({user.age}) {user.email}"
+value seed: User = {
+    active: True,
+    age: 32,
+    email: "ada@example.com"
+}
 
-signal activeUserText: Signal (Option Text) = userSignal
-  ?|> (.active and .age > 18)
-  *|> formatUser
+value activeAdult: (Option User) =
+    seed
+     ?|> (.active and .age > 18)
 ```
 
-This reads: "take `userSignal`, keep only active adults, then format each one."
+This is especially useful when a later step should only run for values that pass a gate.
 
-## Summary
+## Previous-value pipe `~|>`
 
-| Operator | Name | Description |
-|---|---|---|
-| ` \|>` | Apply | `value \|> f` → `f value` |
-| `*\|>` | Map | Apply inside a container or signal |
-| `!\|>` | Validate | Apply a `Result`-returning function |
-| `?\|>` | Guard | Keep value only if predicate holds |
-| `\|\|>` | Case-split | Pattern match |
-| `&\|>` | Combine | Merge multiple signals |
-| `+\|>` | Accumulate | Fold values into state |
-| `-\|>` | Diff | Difference from previous value |
-| `~\|>` | Previous | Pair with previous value |
-| `T\|>` | True branch | Result when boolean is `True` |
-| `F\|>` | False branch | Result when boolean is `False` |
+`~|>` pairs the current value with a previous one. The argument supplies the initial previous value:
+
+```aivi
+signal score = 10
+
+signal previousScore =
+    score
+     ~|> 0
+```
+
+## Diff pipe `-|>`
+
+`-|>` tracks a change relative to the previous value:
+
+```aivi
+signal score = 10
+
+signal scoreDelta =
+    score
+     -|> 0
+```
+
+## One important rule: no nested pipes
+
+Pipes must stay on the top-level expression spine. If you need a pipe inside another expression, pull it out into a named helper:
+
+```aivi
+fun normalizeTitle: Text title:Text =>
+    title
+     ||> "Inbox" -> "priority"
+     ||> _       -> title
+
+fun displayTitle: Text title:Text =>
+    normalizeTitle title
+```
+
+That keeps pipe flow explicit and matches the compiler's current nesting rule.
+
+## Operators in this guide
+
+| Operator | Meaning |
+| --- | --- |
+| `|>` | Apply a function |
+| `||>` | Pattern match / case split |
+| `T|>` | Branch for `True` |
+| `F|>` | Branch for `False` |
+| `?|>` | Filter to `Option` |
+| `~|>` | Carry previous value |
+| `-|>` | Compute a difference |

@@ -1,83 +1,57 @@
 # Domains
 
-A **domain** is a typed abstraction over a carrier type. It adds operators, literal syntax, and semantic behaviour to an existing type without changing the type itself.
+Domains add typed behavior to an existing carrier type. They are how AIVI models things like durations, retries, paths, and other value families that should have their own operators or literal syntax.
 
-Think of domains as a way to say: "I want `Int` to behave like a `Duration` in this context — with `s` suffixes and its own arithmetic rules."
-
-## Declaring a Domain
+## Declaring a domain
 
 ```aivi
 domain Duration over Int
+    literal ms: Int -> Duration
+    (+): Duration -> Duration -> Duration
+    unwrap: Duration -> Int
 ```
 
-This declares `Duration` as a domain over `Int`. Values of type `Duration` are integers at runtime, but the compiler tracks them as `Duration` and applies its operators.
+This declares a `Duration` domain whose runtime carrier is `Int`.
 
-## Literal Suffixes
+## Literal suffixes
 
-Domains can define **literal suffixes** that make code read naturally:
+A domain can define literal suffixes:
 
 ```aivi
 domain Duration over Int
-    literal s: Int -> Duration
+    literal ms: Int -> Duration
 
-domain Retry over Int
-    literal x: Int -> Retry
+value delay: Duration = 250ms
 ```
 
-With these declarations, you can write:
+Suffixes must be explicit and unambiguous. In current AIVI they must also be at least two characters long.
 
-```aivi
-value timeout = 5s      // Duration with value 5
-value retries = 3x      // Retry with value 3
-```
+## Operators and named members
 
-The suffix is a zero-cost conversion — it just changes how the compiler categorises the value.
-
-## Custom Operators
-
-Domains can define operators that work specifically on their carrier type:
+Domains can attach operators and named methods:
 
 ```aivi
 domain Path over Text
     literal root: Text -> Path
-    (/) : Path -> Text -> Path
+    (/): Path -> Text -> Path
     unwrap: Path -> Text
 ```
 
-This gives `Path` values a `/` operator for path joining:
-
-```aivi
-value configDir: Path = root "/etc"
-value configFile: Path = configDir / "app.conf"
-```
-
-## Domain Resolution
-
-When you use a literal suffix or domain operator, the compiler resolves which domain applies. The resolution must be **unambiguous** — if two domains could apply to the same expression, the compiler reports an error.
-
-This means domains are not implicit type classes — they are explicit, closed, and statically resolved.
-
-## Built-In Domains
-
-AIVI's source system uses domains for configuration values. For example, `http.get` options accept `Duration` and `Retry`:
+That lets you write domain-aware expressions such as:
 
 ```aivi
 domain Duration over Int
-    literal s: Int -> Duration
+    literal ms: Int -> Duration
+    (+): Duration -> Duration -> Duration
+    unwrap: Duration -> Int
 
-domain Retry over Int
-    literal x: Int -> Retry
-
-@source http.get "https://api.example.com/data" with {
-    timeout: 10s,
-    retry: 2x
-}
-signal data: Signal (Result HttpError Data)
+value total: Duration = 10ms + 5ms
+value raw: Int = unwrap total
 ```
 
-## `NonEmpty` Domain
+## Generic domains
 
-The standard library includes a `NonEmpty` domain for lists that are guaranteed to have at least one element:
+Domains can also be parameterised:
 
 ```aivi
 domain NonEmpty A over List A
@@ -86,20 +60,13 @@ domain NonEmpty A over List A
     tail: NonEmpty A -> List A
 ```
 
-This prevents operations like "get the first element" from needing to return `Option`:
-
-```aivi
-fun firstItem: A xs: NonEmpty A =>
-    head xs    // always safe, no Option needed
-```
+This is useful when you want stronger guarantees than the carrier type alone can express.
 
 ## Summary
 
-| Form | Purpose |
-|---|---|
-| `domain Name over BaseType` | Declare a domain |
-| `literal suffix: BaseType -> Domain` | Add a literal suffix |
-| `(op): Domain -> X -> Y` | Add an operator |
-| `name: Domain -> Y` | Add a named operation |
-
-Domains make numeric and text types safer and more expressive without adding runtime cost.
+| Form | Meaning |
+| --- | --- |
+| `domain Name over Carrier` | Declare a domain |
+| `literal ms : Int -> Duration` | Add a literal suffix |
+| `(+) : D -> D -> D` | Add an operator |
+| `unwrap : D -> Carrier` | Add a named method |

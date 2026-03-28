@@ -14,15 +14,15 @@ type Map K V =
   | Entry K V (Map K V)
 
 domain Duration over Int
-    literal s : Int -> Duration
+    literal sec : Int -> Duration
 
 domain Retry over Int
-    literal x : Int -> Retry
+    literal rt : Int -> Retry
 
 @source http.get "/users" with {
     headers: Entry "Authorization" "Bearer demo" EmptyMap,
     decode: Strict,
-    retry: 3x,
-    timeout: 5s
+    retry: 3rt,
+    timeout: 5sec
 }
 signal users : Signal (Result HttpError (List User))

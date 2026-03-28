@@ -270,7 +270,7 @@ type HttpError =
 type DecodeMode = Strict | Permissive
 
 domain Retry over Int
-    literal x: Int -> Retry
+    literal rt: Int -> Retry
 ```
 
 Use with `@source http.get`:
@@ -282,8 +282,8 @@ type User = { id: Int, name: Text }
 
 @source http.get "https://api.example.com/users" with {
     decode: Strict,
-    retry: 2x,
-    timeout: 10s
+    retry: 2rt,
+    timeout: 10sec
 }
 signal users: Signal (Result HttpError (List User))
 ```

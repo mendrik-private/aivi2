@@ -1,0 +1,4 @@
+domain Distance over Int
+    literal m : Int -> Distance
+
+value walk = 3m

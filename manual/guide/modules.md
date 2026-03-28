@@ -1,99 +1,45 @@
 # Modules
 
-AIVI organises code into modules. Each file is a module. You can import names from other modules and choose which names your module exposes.
+Each `.aivi` file is a module. Modules import names with `use` and expose names with `export`.
 
 ## Importing with `use`
-
-The `use` declaration imports names from another module:
-
-```aivi
-use aivi.defaults (Option)
-```
-
-This imports `Option` from the `aivi.defaults` module. Imported names are available throughout the file.
-
-You can import multiple names in a single `use`:
 
 ```aivi
 use aivi.network (
     http
     socket
+    Request
+    Channel
 )
+
+type PrimaryRequest = (Request Text)
+
+type ProviderChannel = (Channel Text Text)
 ```
 
-## Exporting with `export`
+Imported names become available to the rest of the file.
 
-The `export` declaration controls what is visible to other modules:
+## Exporting names
+
+You can export one name:
 
 ```aivi
-export (statusLabel, main)
+value greeting = "hello"
+
+export greeting
 ```
 
-Only the listed names are accessible from outside the module. Names not listed are private.
-
-You can also export a single name:
+Or several names together:
 
 ```aivi
-export main
-```
+data Direction =
+  | Up
+  | Down
+  | Left
+  | Right
 
-## What Can Be Exported
-
-Any top-level declaration can be exported: values, functions, signals, types, domains, and classes:
-
-```aivi
-type Status = Idle | Busy
-
-fun statusLabel: Text status: Status =>
-    status
-     ||> Idle -> "Idle"
-     ||> Busy -> "Busy"
-
-value main =
-    <Window title="App">
-        <Label text={statusLabel Idle} />
-    </Window>
-
-export (statusLabel, main)
-```
-
-## The Standard Library
-
-The standard library is in the `aivi` namespace. Key modules:
-
-| Module | Contents |
-|---|---|
-| `aivi.defaults` | `Option`, `Result`, common types |
-| `aivi.network` | `http`, `socket` sources |
-
-The standard library exports the following types and classes by default:
-
-```
-Ordering, List, Option, Result, Validation, Signal, Task
-Less, Equal, Greater
-Some, None, Ok, Err, Valid, Invalid
-Eq, Default, Functor, Ord, Semigroup, Monoid
-Bifunctor, Traversable, Filterable, Applicative, Monad, Foldable
-```
-
-## Module Structure
-
-A typical AIVI module is structured as:
-
-1. `use` imports at the top
-2. `type` declarations
-3. `value` and `fun` declarations
-4. `signal` declarations
-5. `value main` (the root markup expression, if this is an entry point)
-6. `export` at the bottom
-
-```aivi
-use aivi.defaults (Option)
-
-type Direction = Up | Down | Left | Right
-
-fun opposite: Direction d: Direction =>
-    d
+fun opposite: Direction direction:Direction =>
+    direction
      ||> Up    -> Down
      ||> Down  -> Up
      ||> Left  -> Right
@@ -104,10 +50,40 @@ value startDirection: Direction = Right
 export (Direction, opposite, startDirection)
 ```
 
+## A small complete module
+
+```aivi
+use aivi.network (
+    http
+    socket
+)
+
+fun joinProviders: Text left:Text right:Text =>
+    "{left}/{right}"
+
+value primaryProvider = http
+value fallbackProvider = socket
+value providerPair = joinProviders primaryProvider fallbackProvider
+
+export providerPair
+```
+
+## Typical module layout
+
+A practical order is:
+
+1. `use`
+2. `type` / `data` / `domain` / `class`
+3. `fun` and `value`
+4. `signal`
+5. `export`
+
+That ordering is not required by the language, but it keeps modules easy to scan.
+
 ## Summary
 
-| Form | Purpose |
-|---|---|
-| `use module (names)` | Import specific names from a module |
-| `export (names)` | Make names visible to other modules |
-| `export name` | Export a single name |
+| Form | Meaning |
+| --- | --- |
+| `use module (names)` | Import selected names |
+| `export name` | Export one name |
+| `export (a, b, c)` | Export several names |

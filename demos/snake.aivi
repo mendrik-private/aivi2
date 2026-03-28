@@ -161,9 +161,9 @@ fun filterDirection:Direction current:Direction opt:(Option Direction) =>
 
 fun updateDirection:Direction key:Key current:Direction =>
     arrowKey key
-     |> filterDirection current
+     |> filterDirection current 
 
-fun restartKey:Bool key:Key =>
+fun restartKey:Bool key:Key =>  
     key
      ||> Key " "     -> True
      ||> Key "Space" -> True

@@ -1,81 +1,99 @@
 # Pattern Matching
 
-AIVI has no `if`/`else` or `switch` statements. Branching is done through pattern matching using the `||>` pipe operator. It is exhaustive — the compiler requires you to handle every case.
+AIVI uses pattern matching for branching. There is no `if` / `else` statement layer on top of the language: values are inspected directly with the case-split pipe `||>`.
 
-## The Case-Split Operator `||>`
+Every branch is an expression, and the compiler checks that your match is exhaustive.
 
-The `||>` operator matches a value against a series of patterns. Each arm uses `->` to separate the pattern from its result:
+## The case-split pipe `||>`
+
+Use `||>` when you want to branch on a value:
 
 ```aivi
-fun describeNumber: Text n: Int =>
+fun describeNumber: Text n:Int =>
     n
      ||> 0 -> "zero"
      ||> 1 -> "one"
      ||> _ -> "many"
+
+value sampleDescription = describeNumber 1
 ```
 
-The `_` wildcard matches anything. Arms are tried top-to-bottom; the first matching arm wins.
+The `_` pattern matches anything. Arms are tried from top to bottom.
 
-## Matching Union Types
+## Matching custom data
+
+Custom sum types are declared with `data` and matched by constructor name:
 
 ```aivi
-type Direction = Up | Down | Left | Right
+data Direction =
+  | Up
+  | Down
+  | Left
+  | Right
 
-fun directionLabel: Text dir: Direction =>
-    dir
+fun directionLabel: Text direction:Direction =>
+    direction
      ||> Up    -> "up"
      ||> Down  -> "down"
      ||> Left  -> "left"
      ||> Right -> "right"
+
+value currentDirection = directionLabel Left
 ```
 
-Each constructor must be covered. If you forget one, the compiler reports an error.
-
-### Constructors With Data
-
-When a constructor carries a value, bind it to a name in the pattern:
+If a constructor carries data, bind that payload in the pattern:
 
 ```aivi
-type LoadState =
+data LoadState =
   | NotAsked
-  | Loaded User
+  | Loaded Text
   | Failed Text
 
-fun describe: Text state: LoadState =>
+fun describeLoadState: Text state:LoadState =>
     state
-     ||> NotAsked        -> "waiting"
-     ||> Loaded user     -> "loaded: {user.name}"
-     ||> Failed message  -> "error: {message}"
+     ||> NotAsked      -> "waiting"
+     ||> Loaded name   -> "loaded {name}"
+     ||> Failed reason -> "error {reason}"
+
+value stateMessage = describeLoadState (Loaded "Ada")
 ```
 
-## The Wildcard `_`
+## Wildcards
 
-`_` matches any value without binding it:
+Use `_` when you only care about one or two cases:
 
 ```aivi
-fun isRunning: Bool status: Status =>
+data Status =
+  | Running
+  | Paused
+  | Stopped
+
+fun isRunning: Bool status:Status =>
     status
-     ||> Running  -> True
-     ||> _        -> False
+     ||> Running -> True
+     ||> _       -> False
+
+value runningNow = isRunning Running
 ```
 
-## Guards
+## Condition-first branching
 
-Add a condition after the pattern using `if`:
+When the choice is really a boolean condition, calculate the condition first and then branch with `T|>` / `F|>`:
 
 ```aivi
-fun classify: Text n: Int =>
-    n
-     ||> _ if n > 0  -> "positive"
-     ||> _ if n < 0  -> "negative"
-     ||> _           -> "zero"
+fun classifyNumber: Text n:Int =>
+    n > 0
+     T|> "positive"
+     F|> "not positive"
+
+value numberClass = classifyNumber 12
 ```
 
-Guards can use any boolean expression. A wildcard with a guard acts like `else if`.
+That keeps the branch expression explicit without introducing a separate statement form.
 
-## Record Patterns
+## Record patterns
 
-Destructure a record by listing the fields you want:
+Records can be destructured directly in a match arm:
 
 ```aivi
 type Profile = {
@@ -83,154 +101,139 @@ type Profile = {
     score: Int
 }
 
-fun summary: Text profile: Profile =>
+fun profileSummary: Text profile:Profile =>
     profile
      ||> { name, score } -> "{name} scored {score}"
+
+value summaryText =
+    profileSummary {
+        name: "Ada",
+        score: 100
+    }
 ```
 
-You can mix pattern-bound fields with literal checks:
+You can combine record destructuring with a follow-up boolean check:
 
 ```aivi
-fun isTopScore: Bool profile: Profile =>
+type Profile = {
+    name: Text,
+    score: Int
+}
+
+fun isTopScore: Bool profile:Profile =>
     profile
-     ||> { score } if score >= 100 -> True
-     ||> _                         -> False
+     ||> { score } -> score >= 100
+
+value topScore =
+    isTopScore {
+        name: "Grace",
+        score: 120
+    }
 ```
 
-## Tuple Patterns
+## Tuple patterns
 
-Match on tuples by wrapping the pattern in parentheses:
+Tuples let you match several values at once:
 
 ```aivi
-fun movePixel: Pixel head: Pixel direction: Direction =>
-    (head, direction)
-     ||> (Pixel px py, Up)    -> Pixel px (py - 1)
-     ||> (Pixel px py, Down)  -> Pixel px (py + 1)
-     ||> (Pixel px py, Left)  -> Pixel (px - 1) py
-     ||> (Pixel px py, Right) -> Pixel (px + 1) py
+data Point =
+  | Point Int Int
+
+data Direction =
+  | Up
+  | Down
+  | Left
+  | Right
+
+fun step: Point move:(Point, Direction) =>
+    move
+     ||> (Point x y, Up)    -> Point x (y - 1)
+     ||> (Point x y, Down)  -> Point x (y + 1)
+     ||> (Point x y, Left)  -> Point (x - 1) y
+     ||> (Point x y, Right) -> Point (x + 1) y
+
+value movedPoint =
+    step (
+        Point 4 9,
+        Up
+    )
 ```
 
-This simultaneously destructures both the `Pixel` constructor and the `Direction` constructor.
+## Nested patterns
 
-## Nested Patterns
-
-Patterns can be nested arbitrarily:
+Patterns can be nested as deeply as the data requires:
 
 ```aivi
-type Inner = A | B
-type Outer = Outer Inner
+data Inner = A | B
 
-fun describe: Text outer: Outer =>
+data Outer =
+  | Outer Inner
+
+fun describeOuter: Text outer:Outer =>
     outer
      ||> Outer A -> "outer A"
      ||> Outer B -> "outer B"
+
+value outerLabel = describeOuter (Outer A)
 ```
 
-## The Option Type
+## Built-in sum types
 
-`Option` is a union type, so pattern matching handles it naturally:
+`Option` and `Result` are ordinary data types, so matching them feels the same:
 
 ```aivi
-fun displayName: Text opt: Option Text =>
-    opt
+fun displayName: Text maybeName:(Option Text) =>
+    maybeName
      ||> Some name -> name
      ||> None      -> "anonymous"
+
+value shownName = displayName (Some "Ada")
 ```
 
-## The Result Type
-
 ```aivi
-fun handleResult: Text result: Result Text Int =>
+fun handleResult: Text result:(Result Text Int) =>
     result
      ||> Ok value    -> "got {value}"
-     ||> Err message -> "failed: {message}"
+     ||> Err message -> "failed {message}"
+
+value handledResult = handleResult (Ok 42)
 ```
 
-## Boolean Branches: `T|>` and `F|>`
+## Boolean branches
 
-For simple true/false decisions, `T|>` and `F|>` are more readable than a full `||>` match on `Bool`:
+When the subject is already `Bool`, `T|>` and `F|>` are shorter than a full match:
 
 ```aivi
-fun label: Text active: Bool =>
+fun statusLabel: Text active:Bool =>
     active
      T|> "active"
      F|> "inactive"
-```
 
-This is equivalent to:
-
-```aivi
-fun label: Text active: Bool =>
-    active
-     ||> True  -> "active"
-     ||> False -> "inactive"
-```
-
-`T|>` gives the value for `True`, `F|>` for `False`.
-
-## Guard-Only Filtering: `?|>`
-
-The `?|>` operator passes a value through only when a predicate holds. It returns `Option A`:
-
-```aivi
-type User = {
-    active: Bool,
-    age: Int,
-    email: Text
-}
-
-fun activeAdult: Option User user: User =>
-    user
-     ?|> (.active and .age > 18)
-```
-
-The `.` shorthand accesses fields on the value being tested. This is useful for filtering signals:
-
-```aivi
-signal adultUsers: Signal (Option User) =
-    userSignal
-     ?|> (.active and .age > 18)
+value currentStatus = statusLabel True
 ```
 
 ## Exhaustiveness
 
-Pattern matches must cover every possible case. The compiler will reject incomplete matches:
+AIVI checks that every constructor is covered. In practice that means:
 
-```aivi
-// This will NOT compile if Direction has four constructors:
-fun label: Text dir: Direction =>
-    dir
-     ||> Up   -> "up"
-     ||> Down -> "down"
-     // Left and Right are missing!
-```
+- list every constructor explicitly, or
+- finish with `_` when you want a catch-all branch.
 
-Use a wildcard `_` to cover remaining cases when you don't need to distinguish them:
-
-```aivi
-fun isVertical: Bool dir: Direction =>
-    dir
-     ||> Up   -> True
-     ||> Down -> True
-     ||> _    -> False
-```
+That guarantee is one of the reasons pattern matching is the normal way to branch in AIVI.
 
 ## Summary
 
-| Pattern | What it matches |
-|---|---|
-| `Constructor` | Exact constructor |
-| `Constructor name` | Constructor and binds its payload to `name` |
-| `Constructor (Nested p)` | Nested constructor pattern |
-| `{ field, other }` | Record with those fields bound |
-| `(a, b)` | Tuple, binding both elements |
-| `_` | Anything (no binding) |
-| `name` | Anything, bound to `name` |
-| Guard: `pattern if cond` | Pattern plus boolean condition |
+| Pattern | Meaning |
+| --- | --- |
+| `Constructor` | Match one exact constructor |
+| `Constructor name` | Match a constructor and bind its payload |
+| `{ field, other }` | Destructure selected record fields |
+| `(a, b)` | Match a tuple |
+| `_` | Match anything without binding |
+| `pattern if cond` | Match only when the extra condition holds |
 
-| Operator | Purpose |
-|---|---|
-| `\|\|>` | Case-split / pattern match |
-| `T\|>` | True branch of a boolean |
-| `F\|>` | False branch of a boolean |
-| `?\|>` | Guard — filter to `Option` |
+| Operator | Meaning |
+| --- | --- |
+| `||>` | Pattern match / case split |
+| `T|>` | Branch for `True` |
+| `F|>` | Branch for `False` |

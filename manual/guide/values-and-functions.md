@@ -1,180 +1,165 @@
 # Values & Functions
 
-AIVI has two kinds of named definitions at the top level: **values** (constants) and **functions**.
+At the top level, AIVI keeps values and functions separate:
+
+- `value` declares a named constant expression
+- `fun` declares a named pure function
+
+That split keeps intent obvious in larger modules and matches the current surface language directly.
 
 ## Values
 
-A `value` declaration binds a name to an expression that is computed once. It never changes.
+A `value` binds a name to a single expression:
 
 ```aivi
-value answer = 42
-value greeting = "Hello, world"
-value pi: Float = 3.14159
-value boardSize: BoardSize = { width: 24, height: 20 }
+value answer: Int = 42
+value greeting: Text = "Hello"
+value isReady: Bool = True
 ```
 
-You can optionally annotate the type after the name with a colon. If you omit it, the compiler infers the type.
+Type annotations are optional when the compiler can infer them, but they are useful in public modules and documentation.
 
-Values can refer to other values:
+Values can refer to earlier values:
 
 ```aivi
-value width = 24
-value height = 20
-value cellCount = width * height
+value width: Int = 24
+value height: Int = 20
+value cellCount: Int = width * height
 ```
 
-Values can hold any expression — including records, lists, and markup:
+Values can also hold records and lists:
 
 ```aivi
-value initialSnake: List Pixel = [
-    Pixel 6 10,
-    Pixel 5 10,
-    Pixel 4 10
+type BoardSize = {
+    width: Int,
+    height: Int
+}
+
+value boardSize: BoardSize = {
+    width: 24,
+    height: 20
+}
+
+value checkpoints: List Int = [
+    4,
+    8,
+    12
 ]
 ```
 
 ## Functions
 
-A `fun` declaration defines a named pure function with one or more parameters.
+A `fun` declaration names a pure function:
 
 ```aivi
-fun add: Int x: Int y: Int =>
+fun add: Int x:Int y:Int =>
     x + y
+
+value total = add 3 4
 ```
 
-The return type comes immediately after the function name. Each parameter is written as `name: Type`. The body follows `=>`.
+The return type comes immediately after the function name. Parameters follow as `name:Type`.
 
 ```aivi
-fun greet: Text name: Text =>
+fun greet: Text name:Text =>
     "Hello, {name}!"
+
+value greetingText = greet "Ada"
 ```
 
-Functions can call other functions:
+## Multiple parameters
+
+Parameters are separated by spaces, not commas:
 
 ```aivi
-fun square: Int n: Int =>
-    n * n
-
-fun sumOfSquares: Int a: Int b: Int =>
-    square a + square b
-```
-
-### Multiple Parameters
-
-Parameters are separated by spaces — no commas, no parentheses:
-
-```aivi
-fun clamp: Int low: Int high: Int value: Int =>
-    value
-     T|> low   // if value < low
-     F|> value
-```
-
-Wait — that example uses pipes. Here is a simpler one using arithmetic:
-
-```aivi
-fun between: Bool low: Int high: Int n: Int =>
+fun between: Bool low:Int high:Int n:Int =>
     n >= low and n <= high
+
+value scoreAllowed = between 0 100 42
 ```
 
-### Multi-Line Bodies
+## Multi-line bodies
 
-When the body spans multiple lines, indent it consistently:
+Function bodies are still just expressions, so multi-line definitions usually lean on pipes:
 
 ```aivi
-fun describeScore: Text score: Int =>
-    score
-     ||> _ if score >= 100 -> "excellent"
-     ||> _ if score >= 50  -> "good"
-     ||> _                 -> "keep going"
+fun describeScore: Text score:Int =>
+    score >= 50
+     T|> "good"
+     F|> "keep going"
+
+value scoreLabel = describeScore 88
 ```
 
-## Lambdas
+## Calling functions
 
-You can write anonymous functions inline using `=>`:
+Call a function by writing the function name followed by its arguments:
 
 ```aivi
-value double: List Int =
-    [1, 2, 3]
-     |> map (x => x * 2)
+fun area: Int width:Int height:Int =>
+    width * height
+
+value roomArea = area 5 8
 ```
 
-### Dot Shorthand
-
-The `.` character is a shorthand for a lambda that accesses a field or applies a function to the implicit argument:
+If an argument is itself an expression, wrap it in parentheses:
 
 ```aivi
-fun getNames: List Text users: List User =>
-    users
-     |> map .name
+fun area: Int width:Int height:Int =>
+    width * height
+
+value adjustedArea = area (2 + 3) (4 * 2)
 ```
 
-`.name` is equivalent to `u => u.name`.
+## Partial application
 
-You can also chain dot access for field projection:
+Functions can be partially applied. Supplying fewer arguments returns another function:
 
 ```aivi
-fun getShippingStatus: Text order: Order =>
-    order
-     |> .shipping
-     |> .status
+fun multiply: Int left:Int right:Int =>
+    left * right
+
+value double = multiply 2
+value ten = double 5
 ```
 
-## Type Annotations
+## Named helpers instead of inline lambdas
 
-All type annotations use `:` (a colon):
+For examples and playground-friendly snippets, prefer a named helper over an inline anonymous function:
+
+```aivi
+fun trimStatus: Text status:Text =>
+    status
+     ||> " ready " -> "ready"
+     ||> _         -> status
+
+fun decorateStatus: Text status:Text =>
+    "[{status}]"
+
+value shownStatus =
+    " ready "
+     |> trimStatus
+     |> decorateStatus
+```
+
+That style gives each step a reusable name and stays inside the current language surface.
+
+## Type annotations
+
+Both `value` and `fun` use `:` for type annotations:
 
 ```aivi
 value count: Int = 0
-fun negate: Int n: Int => 0 - n
-```
 
-When the compiler can infer the type, the annotation is optional. For top-level declarations it is good practice to include it for documentation.
-
-## Calling Functions
-
-Functions are called by juxtaposition — put the function name first, then its arguments, separated by spaces:
-
-```aivi
-fun area: Int w: Int h: Int =>
-    w * h
-
-value roomArea = area 5 8   // result: 40
-```
-
-When passing a complex expression as an argument, wrap it in parentheses:
-
-```aivi
-value result = area (2 + 3) (4 * 2)
-```
-
-## Partial Application
-
-Functions can be partially applied. Supplying fewer arguments than required returns a new function waiting for the rest:
-
-```aivi
-fun multiply: Int a: Int b: Int =>
-    a * b
-
-value double = multiply 2     // a function Int -> Int
-value ten    = double 5       // 10
-```
-
-This is especially useful with pipes:
-
-```aivi
-value numbers = [1, 2, 3, 4, 5]
-value doubled =
-    numbers
-     |> map (multiply 2)
+fun negate: Int n:Int =>
+    0 - n
 ```
 
 ## Summary
 
-| Form | Syntax |
-|---|---|
-| Constant | `value name: Type = expr` |
-| Function | `fun name: ReturnType param: Type => body` |
-| Lambda | `x => expr` |
-| Dot shorthand | `.field` or `.method` |
-| Function call | `f arg1 arg2` |
+| Form | Example |
+| --- | --- |
+| Value | `value answer:Int = 42` |
+| Function | `fun add:Int x:Int y:Int => x + y` |
+| Function call | `add 3 4` |
+| Partial application | `value double = multiply 2` |

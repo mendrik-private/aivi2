@@ -15,17 +15,17 @@ type Map K =
   | EmptyMap
 
 domain Duration over Int
-    literal s : Int -> Duration
+    literal sec : Int -> Duration
 
 domain Retry over Int
-    literal x : Int -> Retry
+    literal rt : Int -> Retry
 
 val authHeaders : Map Text = EmptyMap
 
 @source http.get "/users" with {
     headers: authHeaders,
     decode: Strict,
-    retry: 3x,
-    timeout: 5s
+    retry: 3rt,
+    timeout: 5sec
 }
 sig users : Signal (Result HttpError (List User))

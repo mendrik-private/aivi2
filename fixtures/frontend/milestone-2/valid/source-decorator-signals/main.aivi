@@ -28,10 +28,10 @@ type Map K V =
   | EmptyMap
 
 domain Duration over Int
-    literal s : Int -> Duration
+    literal sec : Int -> Duration
 
 domain Retry over Int
-    literal x : Int -> Retry
+    literal rt : Int -> Retry
 
 value authHeaders : Map Text Text = EmptyMap
 
@@ -40,8 +40,8 @@ signal apiHost = "https://api.example.com"
 @source http.get "{apiHost}/users" with {
     headers: authHeaders,
     decode: Strict,
-    retry: 3x,
-    timeout: 5s
+    retry: 3rt,
+    timeout: 5sec
 }
 signal users : Signal (Result HttpError (List User))
 
