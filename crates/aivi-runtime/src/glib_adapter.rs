@@ -939,7 +939,7 @@ mod tests {
     repeat: True
     focusOnly: True
 }
-sig keyDown : Signal Text
+signal keyDown : Signal Text
 "#,
                 );
                 let assembly = crate::assemble_hir_runtime(lowered.hir.module())

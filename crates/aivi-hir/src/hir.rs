@@ -1045,6 +1045,10 @@ pub enum PipeStageKind {
     Falsy { expr: ExprId },
     RecurStart { expr: ExprId },
     RecurStep { expr: ExprId },
+    Validate { expr: ExprId },
+    Previous { expr: ExprId },
+    Accumulate { seed: ExprId, step: ExprId },
+    Diff { expr: ExprId },
 }
 
 /// Presentation-free structural view of one fan-out segment inside a pipe.

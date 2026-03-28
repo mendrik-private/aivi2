@@ -12,4 +12,4 @@ type FsWatchEvent =
     decode: Strict,
     reloadOn: Changed
 }
-sig fileText : Signal (Result FsError Text)
+signal fileText : Signal (Result FsError Text)

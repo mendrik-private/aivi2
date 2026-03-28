@@ -1411,8 +1411,8 @@ mod tests {
         let hir = lower_text(
             "positional-each.aivi",
             r#"
-val items = [1]
-val view =
+value items = [1]
+value view =
     <each of={items} as={item}>
         <Label text="Row" />
     </each>
@@ -1553,7 +1553,7 @@ val view =
         let hir = lower_text(
             "show-keep-mounted.aivi",
             r#"
-val view =
+value view =
     <show when={True} keepMounted={False}>
         <Label text="Ready" />
     </show>

@@ -8,4 +8,4 @@ provider custom.feed
 @source custom.feed with {
     retry: 5ms
 }
-sig updates : Signal Int
+signal updates : Signal Int

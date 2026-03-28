@@ -2,16 +2,16 @@ type Screen =
   | Loading
   | Ready Text
 
-val screenTitle = "Milestone 2"
-val refreshStep = 10
+value screenTitle = "Milestone 2"
+value refreshStep = 10
 
-fun titleFor:Text screen:Screen =>
+value titleFor:Text screen:Screen =>
     screen
      ||> Loading => "Loading"
      ||> Ready title => title
 
-val currentScreen = Ready screenTitle
-val pageTitle = titleFor currentScreen
+value currentScreen = Ready screenTitle
+value pageTitle = titleFor currentScreen
 
-sig refreshMs = 30
-sig nextRefresh = refreshMs + refreshStep
+signal refreshMs = 30
+signal nextRefresh = refreshMs + refreshStep

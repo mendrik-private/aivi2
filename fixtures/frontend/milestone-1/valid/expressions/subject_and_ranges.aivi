@@ -2,10 +2,10 @@ type User = {
     email: Text
 }
 
-fun displayEmail:Text user:User =>
+value displayEmail:Text user:User =>
     .email
 
-val current = .
-val projection = .email
-val span = 1..10
-val values = [1..10]
+value current = .
+value projection = .email
+value span = 1..10
+value values = [1..10]

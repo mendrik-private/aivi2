@@ -70,9 +70,13 @@ impl Formatter {
 
         match item {
             Item::Type(item) => lines.extend(self.format_type_item(item)),
-            Item::Value(item) => lines.extend(self.format_value_item("val", item, true)),
-            Item::Function(item) => lines.extend(self.format_function_item(item)),
-            Item::Signal(item) => lines.extend(self.format_value_item("sig", item, true)),
+            Item::Data(item) => lines.extend(self.format_data_item(item)),
+            Item::Value(item) => lines.extend(self.format_value_item_decl(item)),
+            Item::Signal(item) => lines.extend(self.format_value_item("signal", item, true)),
+            Item::Source(item) => lines.extend(self.format_value_item("source", item, true)),
+            Item::ResultDecl(item) => lines.extend(self.format_value_item("result", item, true)),
+            Item::View(item) => lines.extend(self.format_value_item("view", item, true)),
+            Item::Adapter(item) => lines.extend(self.format_value_item("adapter", item, true)),
             Item::Class(item) => lines.extend(self.format_class_item(item)),
             Item::Instance(item) => lines.extend(self.format_instance_item(item)),
             Item::Domain(item) => lines.extend(self.format_domain_item(item)),
@@ -104,7 +108,10 @@ impl Formatter {
     fn compacts_with_next_item(&self, item: &Item, lines: &[String]) -> bool {
         item.decorators().is_empty()
             && lines.len() == 1
-            && matches!(item, Item::Value(_) | Item::Signal(_) | Item::Export(_))
+            && matches!(
+                item,
+                Item::Value(_) | Item::Signal(_) | Item::Source(_) | Item::Export(_)
+            )
     }
 
     fn format_type_item(&self, item: &NamedItem) -> Vec<String> {
@@ -170,9 +177,7 @@ impl Formatter {
         } else if block.starts_with_delimiter() {
             block.prefixed(&format!("{header} = ")).into_lines()
         } else {
-            let indent = if matches!(&body.kind, ExprKind::Pipe(pipe) if pipe.head.is_none())
-                && matches!(keyword, "val" | "sig")
-            {
+            let indent = if matches!(&body.kind, ExprKind::Pipe(pipe) if pipe.head.is_none()) {
                 1
             } else {
                 INDENT_WIDTH
@@ -183,10 +188,15 @@ impl Formatter {
         }
     }
 
-    fn format_function_item(&self, item: &NamedItem) -> Vec<String> {
-        let mut header = format!("fun {}", self.item_name(&item.name));
+    /// Format a `value` declaration — no-params form uses `=`, params form uses `=>`.
+    fn format_value_item_decl(&self, item: &NamedItem) -> Vec<String> {
+        if item.parameters.is_empty() {
+            return self.format_value_item("value", item, true);
+        }
+        // Function form: `value name params => body`
+        let mut header = format!("value {}", self.item_name(&item.name));
         if let Some(annotation) = &item.annotation {
-            header.push(':');
+            header.push_str(": ");
             header.push_str(&self.format_type_inline(annotation, 0));
         }
         for parameter in &item.parameters {
@@ -204,6 +214,42 @@ impl Formatter {
         let mut lines = vec![header];
         lines.extend(block.indented(INDENT_WIDTH).into_lines());
         lines
+    }
+
+    fn format_data_item(&self, item: &NamedItem) -> Vec<String> {
+        let mut header = format!("data {}", self.item_name(&item.name));
+        for parameter in &item.type_parameters {
+            header.push(' ');
+            header.push_str(&parameter.text);
+        }
+
+        match item.type_body() {
+            Some(TypeDeclBody::Alias(ty)) => {
+                let force_break =
+                    self.should_force_type_break(display_width(&format!("{header} = ")), ty);
+                let block = self.format_type_block(ty, force_break);
+                if block.is_inline() {
+                    vec![format!(
+                        "{header} = {}",
+                        block.inline_text().expect("inline block")
+                    )]
+                } else {
+                    block.prefixed(&format!("{header} = ")).into_lines()
+                }
+            }
+            Some(TypeDeclBody::Sum(variants)) => {
+                let inline = self.format_sum_inline(variants);
+                let line = format!("{header} = {inline}");
+                if display_width(&line) <= INLINE_LIMIT {
+                    vec![line]
+                } else {
+                    let mut lines = vec![format!("{header} =")];
+                    lines.extend(self.format_sum_block(variants).into_lines());
+                    lines
+                }
+            }
+            None => vec![format!("{header} =")],
+        }
     }
 
     fn format_class_item(&self, item: &NamedItem) -> Vec<String> {
@@ -1166,6 +1212,14 @@ impl Formatter {
             PipeStageKind::FanIn { expr } => self.format_pipe_expr_stage("<|*", stage, expr),
             PipeStageKind::Truthy { expr } => self.format_pipe_expr_stage("T|>", stage, expr),
             PipeStageKind::Falsy { expr } => self.format_pipe_expr_stage("F|>", stage, expr),
+            PipeStageKind::Validate { expr } => self.format_pipe_expr_stage("!|>", stage, expr),
+            PipeStageKind::Previous { expr } => self.format_pipe_expr_stage("~|>", stage, expr),
+            PipeStageKind::Accumulate { seed, step } => {
+                let seed_str = self.format_expr_inline(seed, EXPR_PIPE_PREC + 1);
+                let step_str = self.format_expr_inline(step, EXPR_PIPE_PREC + 1);
+                format!("+|> {seed_str} {step_str}")
+            }
+            PipeStageKind::Diff { expr } => self.format_pipe_expr_stage("-|>", stage, expr),
         }
     }
 
@@ -1191,6 +1245,18 @@ impl Formatter {
             PipeStageKind::FanIn { expr } => self.format_aligned_pipe_stage("<|*", stage, expr),
             PipeStageKind::Truthy { expr } => self.format_aligned_pipe_stage("T|>", stage, expr),
             PipeStageKind::Falsy { expr } => self.format_aligned_pipe_stage("F|>", stage, expr),
+            PipeStageKind::Validate { expr } => {
+                self.format_aligned_pipe_stage("!|>", stage, expr)
+            }
+            PipeStageKind::Previous { expr } => {
+                self.format_aligned_pipe_stage("~|>", stage, expr)
+            }
+            PipeStageKind::Accumulate { seed, step } => {
+                let seed_str = self.format_expr_inline(seed, EXPR_PIPE_PREC + 1);
+                let step_str = self.format_expr_inline(step, EXPR_PIPE_PREC + 1);
+                format!("+|> {seed_str} {step_str}")
+            }
+            PipeStageKind::Diff { expr } => self.format_aligned_pipe_stage("-|>", stage, expr),
         }
     }
 
@@ -1722,15 +1788,15 @@ mod tests {
                 "  | Saved\n",
                 "  | Dirty Text\n",
                 "\n",
-                "sig documentTitle = \"Notes\"\n",
-                "sig documentBody = \"Hello\"\n",
+                "signal documentTitle = \"Notes\"\n",
+                "signal documentBody = \"Hello\"\n",
                 "\n",
-                "sig draft =\n",
+                "signal draft =\n",
                 "  &|> documentTitle\n",
                 "  &|> documentBody\n",
                 "  |> Pair\n",
                 "\n",
-                "fun label:Text state:SaveState =>\n",
+                "value label:Text state:SaveState =>\n",
                 "    state\n",
                 "     ||> Saved         => \"saved\"\n",
                 "     ||> Dirty message => \"dirty {message}\"\n",
@@ -1744,12 +1810,12 @@ mod tests {
         assert_eq!(
             formatted,
             concat!(
-                "fun formatCount:Text count:Int =>\n",
+                "value formatCount:Text count:Int =>\n",
                 "    \"{count} unread\"\n",
                 "\n",
-                "val count = 3\n",
+                "value count = 3\n",
                 "\n",
-                "val dashboard =\n",
+                "value dashboard =\n",
                 "    <fragment>\n",
                 "        <Label text=\"Inbox\" />\n",
                 "        <show when={True} keepMounted={True}>\n",
@@ -1771,7 +1837,7 @@ mod tests {
                 "class Eq A\n",
                 "    (==): A -> A -> Bool\n",
                 "\n",
-                "fun equivalent:Bool left:Int right:Int =>\n",
+                "value equivalent:Bool left:Int right:Int =>\n",
                 "    left + 1 == right - 1 and left != right\n",
             )
         );
@@ -1781,7 +1847,7 @@ mod tests {
     fn formatter_preserves_qualified_markup_tag_names() {
         let formatted = format_text(
             r#"
-val view =
+value view =
     <Window>
         <Paned.start>
             <Label />
@@ -1792,7 +1858,7 @@ val view =
         assert_eq!(
             formatted,
             concat!(
-                "val view =\n",
+                "value view =\n",
                 "    <Window>\n",
                 "        <Paned.start>\n",
                 "            <Label />\n",
@@ -1811,12 +1877,12 @@ val view =
                 "domain Duration over Int\n",
                 "    literal ms: Int -> Duration\n",
                 "    (*): Duration -> Int -> Duration\n",
-                "    value: Duration -> Int\n",
+                "    unwrap: Duration -> Int\n",
                 "\n",
                 "domain Path over Text\n",
                 "    literal root: Text -> Path\n",
                 "    (/): Path -> Text -> Path\n",
-                "    value: Path -> Text\n",
+                "    unwrap: Path -> Text\n",
             )
         );
     }
@@ -1858,10 +1924,10 @@ val view =
 
     #[test]
     fn formatter_normalizes_multiplicative_operator_layout() {
-        let formatted = format_text("val total=left+middle*right/scale%modulo\n");
+        let formatted = format_text("value total=left+middle*right/scale%modulo\n");
         assert_eq!(
             formatted,
-            "val total = left + middle * right / scale % modulo\n"
+            "value total = left + middle * right / scale % modulo\n"
         );
     }
 
@@ -1880,7 +1946,7 @@ val view =
     #[test]
     fn formatter_keeps_compact_domain_literal_suffixes() {
         let formatted = format_text(
-            "domain Duration over Int\n    literal ms:Int -> Duration\nval delay:Duration=250ms\nval applied=wrap 250ms\n",
+            "domain Duration over Int\n    literal ms:Int -> Duration\nvalue delay:Duration=250ms\nvalue applied=wrap 250ms\n",
         );
         assert_eq!(
             formatted,
@@ -1888,8 +1954,8 @@ val view =
                 "domain Duration over Int\n",
                 "    literal ms: Int -> Duration\n",
                 "\n",
-                "val delay: Duration = 250ms\n",
-                "val applied = wrap 250ms\n",
+                "value delay: Duration = 250ms\n",
+                "value applied = wrap 250ms\n",
             )
         );
     }
@@ -1897,15 +1963,15 @@ val view =
     #[test]
     fn formatter_keeps_builtin_noninteger_literals() {
         let formatted = format_text(
-            "val pi:Float=3.14\nval amount:Decimal=19.25d\nval whole:Decimal=19d\nval count:BigInt=123n\n",
+            "value pi:Float=3.14\nvalue amount:Decimal=19.25d\nvalue whole:Decimal=19d\nvalue count:BigInt=123n\n",
         );
         assert_eq!(
             formatted,
             concat!(
-                "val pi: Float = 3.14\n",
-                "val amount: Decimal = 19.25d\n",
-                "val whole: Decimal = 19d\n",
-                "val count: BigInt = 123n\n",
+                "value pi: Float = 3.14\n",
+                "value amount: Decimal = 19.25d\n",
+                "value whole: Decimal = 19d\n",
+                "value count: BigInt = 123n\n",
             )
         );
     }
@@ -1913,18 +1979,18 @@ val view =
     #[test]
     fn formatter_normalizes_map_and_set_literals() {
         let formatted = format_text(
-            "val headers=Map{\"Authorization\":\"Bearer demo\",\"Accept\":\"application/json\"}\nval tags=Set[1,2,4]\n",
+            "value headers=Map{\"Authorization\":\"Bearer demo\",\"Accept\":\"application/json\"}\nvalue tags=Set[1,2,4]\n",
         );
         assert_eq!(
             formatted,
             concat!(
-                "val headers =\n",
+                "value headers =\n",
                 "    Map {\n",
                 "        \"Authorization\": \"Bearer demo\",\n",
                 "        \"Accept\": \"application/json\"\n",
                 "    }\n",
                 "\n",
-                "val tags = Set [1, 2, 4]\n",
+                "value tags = Set [1, 2, 4]\n",
             )
         );
     }
@@ -1932,14 +1998,14 @@ val view =
     #[test]
     fn formatter_aligns_match_arms_and_top_level_spacing() {
         let formatted = format_text(
-            "type Status=Idle|Failed Text\nfun label:Text status:Status =>\nstatus||>Idle=>\"idle\"||>Failed reason=>\"failed {reason}\"\n",
+            "type Status=Idle|Failed Text\nvalue label:Text status:Status =>\nstatus||>Idle=>\"idle\"||>Failed reason=>\"failed {reason}\"\n",
         );
         assert_eq!(
             formatted,
             concat!(
                 "type Status = Idle | Failed Text\n",
                 "\n",
-                "fun label:Text status:Status =>\n",
+                "value label:Text status:Status =>\n",
                 "    status\n",
                 "     ||> Idle          => \"idle\"\n",
                 "     ||> Failed reason => \"failed {reason}\"\n",
@@ -1950,38 +2016,38 @@ val view =
     #[test]
     fn formatter_preserves_subject_placeholders_ranges_and_discard_params() {
         let formatted =
-            format_text("fun ignore:Int _=>.\nval projection=.email\nval values=[1..10]\n");
+            format_text("value ignore:Int _=>.\nvalue projection=.email\nvalue values=[1..10]\n");
         assert_eq!(
             formatted,
             concat!(
-                "fun ignore:Int _ =>\n",
+                "value ignore:Int _ =>\n",
                 "    .\n",
                 "\n",
-                "val projection = .email\n",
-                "val values = [1..10]\n",
+                "value projection = .email\n",
+                "value values = [1..10]\n",
             )
         );
     }
 
     #[test]
     fn formatter_normalizes_text_interpolation_holes() {
-        let formatted = format_text("val greeting=\"Hello { name }, use \\{literal\\} braces\"\n");
+        let formatted = format_text("value greeting=\"Hello { name }, use \\{literal\\} braces\"\n");
         assert_eq!(
             formatted,
-            "val greeting = \"Hello {name}, use \\{literal\\} braces\"\n",
+            "value greeting = \"Hello {name}, use \\{literal\\} braces\"\n",
         );
     }
 
     #[test]
     fn formatter_reescapes_text_control_characters() {
-        let formatted = format_text("val board=\"top\\nbottom\"\n");
-        assert_eq!(formatted, "val board = \"top\\nbottom\"\n");
+        let formatted = format_text("value board=\"top\\nbottom\"\n");
+        assert_eq!(formatted, "value board = \"top\\nbottom\"\n");
     }
 
     #[test]
     fn formatter_normalizes_use_imports_and_records() {
         let formatted =
-            format_text("use aivi.network(http,socket)\nval profile:Profile={name,nickname}\n");
+            format_text("use aivi.network(http,socket)\nvalue profile:Profile={name,nickname}\n");
         assert_eq!(
             formatted,
             concat!(
@@ -1990,7 +2056,7 @@ val view =
                 "    socket\n",
                 ")\n",
                 "\n",
-                "val profile: Profile = {\n",
+                "value profile: Profile = {\n",
                 "    name,\n",
                 "    nickname\n",
                 "}\n",

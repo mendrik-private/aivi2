@@ -2175,10 +2175,10 @@ mod tests {
         let graph = lower_graph(
             "show-button.aivi",
             r#"
-val keep = False
-val isVisible = True
-val click = True
-val view =
+value keep = False
+value isVisible = True
+value click = True
+value view =
     <Box>
         <show when={True} keepMounted={keep}>
             <Button label="Save" visible={isVisible} onClick={click} />
@@ -2257,8 +2257,8 @@ val view =
         let graph = lower_graph(
             "keyed-each.aivi",
             r#"
-val items = [1]
-val view =
+value items = [1]
+value view =
     <Box>
         <each of={items} as={item} key={item}>
             <Label text="Row" />

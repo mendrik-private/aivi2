@@ -1,7 +1,7 @@
 type User = { email: Text }
 
-val seed:User = { email: "ada@example.com" }
+value seed:User = { email: "ada@example.com" }
 
-val maybeUser =
+value maybeUser =
     seed
      ?|> .email

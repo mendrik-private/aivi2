@@ -8,10 +8,10 @@ type Session = {
 type Box A =
   | Box A
 
-val emptyBody =
+value emptyBody =
     Box None
 
 @source http.post "/login" with {
     body: emptyBody
 }
-sig login : Signal (Result HttpError Session)
+signal login : Signal (Result HttpError Session)

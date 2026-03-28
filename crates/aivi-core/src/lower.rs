@@ -3577,12 +3577,16 @@ mod tests {
                     stages: aivi_hir::NonEmpty::new(
                         aivi_hir::PipeStage {
                             span: unit_span(),
+                            subject_memo: None,
+                            result_memo: None,
                             kind: aivi_hir::PipeStageKind::Transform {
                                 expr: callable_expr,
                             },
                         },
                         vec![aivi_hir::PipeStage {
                             span: unit_span(),
+                            subject_memo: None,
+                            result_memo: None,
                             kind: aivi_hir::PipeStageKind::Transform {
                                 expr: replacement_expr,
                             },
@@ -3656,7 +3660,7 @@ domain Duration over Int
     value : Duration -> Int
 
 @source custom.feed
-sig timeout : Signal Duration
+signal timeout : Signal Duration
 "#,
         );
         assert!(
@@ -3695,17 +3699,17 @@ sig timeout : Signal Duration
         let lowered = lower_text(
             "typed-core-source-config.aivi",
             r#"
-sig apiHost = "https://api.example.com"
-sig refresh = 0
-sig enabled = True
-sig pollInterval = 5
+signal apiHost = "https://api.example.com"
+signal refresh = 0
+signal enabled = True
+signal pollInterval = 5
 
 @source http.get "{apiHost}/users" with {
     refreshOn: refresh,
     activeWhen: enabled,
     refreshEvery: pollInterval
 }
-sig users : Signal Int
+signal users : Signal Int
 "#,
         );
         assert!(
@@ -3743,9 +3747,9 @@ sig users : Signal Int
         let lowered = lower_text(
             "typed-core-general-exprs.aivi",
             r#"
-val answer = 42
+value answer = 42
 
-fun add:Int x:Int y:Int =>
+value add:Int x:Int y:Int =>
     x + y
 "#,
         );
@@ -3845,17 +3849,17 @@ domain Duration over Int
 domain Retry over Int
     literal x : Int -> Retry
 
-fun step:Int value:Int =>
-    value
+value step:Int n:Int =>
+    n
 
 @recur.timer 5s
-sig polled : Signal Int =
+signal polled : Signal Int =
     0
      @|> step
      <|@ step
 
 @recur.backoff 3x
-val retried : Task Int Int =
+value retried : Task Int Int =
     0
      @|> step
      <|@ step
@@ -3896,13 +3900,13 @@ type Cursor = {
     hasNext: Bool
 }
 
-fun keep:Cursor cursor:Cursor =>
+value keep:Cursor cursor:Cursor =>
     cursor
 
-val seed:Cursor = { hasNext: True }
+value seed:Cursor = { hasNext: True }
 
 @recur.timer 1s
-sig cursor : Signal Cursor =
+signal cursor : Signal Cursor =
     seed
      @|> keep
      ?|> .hasNext
@@ -3990,7 +3994,7 @@ instance Semigroup Blob
     append left right =
         left
 
-val combined:Blob =
+value combined:Blob =
     append (Blob 1) (Blob 2)
 "#,
         );
@@ -4035,16 +4039,16 @@ val combined:Blob =
         let lowered = lower_text(
             "typed-core-foldable-reduce.aivi",
             r#"
-fun add:Int acc:Int value:Int =>
-    acc + value
+value add:Int acc:Int n:Int =>
+    acc + n
 
-fun joinStep:Text acc:Text value:Text =>
-    append acc value
+value joinStep:Text acc:Text s:Text =>
+    append acc s
 
-val joined:Text =
+value joined:Text =
     reduce joinStep "" ["hel", "lo"]
 
-val total:Int =
+value total:Int =
     reduce add 10 [1, 2, 3]
 "#,
         );
@@ -4081,30 +4085,30 @@ val total:Int =
         let lowered = lower_text(
             "typed-core-extended-typeclasses.aivi",
             r#"
-fun addOne:Int value:Int =>
-    value + 1
+value addOne:Int n:Int =>
+    n + 1
 
-fun keepSmall:(Option Int) value:Int =>
-    value < 3
-     T|> Some value
+value keepSmall:(Option Int) n:Int =>
+    n < 3
+     T|> Some n
      F|> None
 
-fun punctuate:Text value:Text =>
-    append value "!"
+value punctuate:Text s:Text =>
+    append s "!"
 
-val okOne:Result Text Int =
+value okOne:Result Text Int =
     Ok 1
 
-val ordered:Ordering =
+value ordered:Ordering =
     compare 1.0 2.0
 
-val mapped:Result Text Int =
+value mapped:Result Text Int =
     bimap punctuate addOne okOne
 
-val traversed:Option (List Int) =
+value traversed:Option (List Int) =
     traverse keepSmall [1, 2]
 
-val filtered:List Int =
+value filtered:List Int =
     filterMap keepSmall [1, 3, 2]
 "#,
         );
@@ -4218,7 +4222,7 @@ instance Semigroup Blob
     append left right =
         left
 
-val combined:Blob =
+value combined:Blob =
     append (Blob 1) (Blob 2)
 "#,
         );
@@ -4269,7 +4273,7 @@ domain Duration over Int
     value : Duration -> Int
 
 @source custom.feed
-sig timeout : Signal Duration
+signal timeout : Signal Duration
 "#,
         );
         assert!(
@@ -4299,17 +4303,17 @@ domain Duration over Int
 domain Retry over Int
     literal x : Int -> Retry
 
-fun step:Int value:Int =>
-    value
+value step:Int n:Int =>
+    n
 
 @recur.timer 5s
-sig polled : Signal Int =
+signal polled : Signal Int =
     0
      @|> step
      <|@ step
 
 @recur.backoff 3x
-val retried : Task Int Int =
+value retried : Task Int Int =
     0
      @|> step
      <|@ step

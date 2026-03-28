@@ -31,53 +31,53 @@ type KmpSummary = {
     missingMatches: List Int
 }
 
-fun samePair:Bool pair:(Text, Text) =>
+value samePair:Bool pair:(Text, Text) =>
     pair
      ||> (left, right) => left == right
 
-fun pairedTokensMatch:Bool left:(List Text) right:(List Text) =>
+value pairedTokensMatch:Bool left:(List Text) right:(List Text) =>
     zip left right
      |> all samePair
 
-fun sameCount:Bool left:Int right:Int =>
+value sameCount:Bool left:Int right:Int =>
     left == right
 
-fun sameTokens:Bool left:(List Text) right:(List Text) =>
+value sameTokens:Bool left:(List Text) right:(List Text) =>
     sameCount (length left) (length right)
      T|> pairedTokensMatch left right
      F|> False
 
-fun matchedWhenEqual:(Option Int) matched:Int prefix:(List Text) slice:(List Text) =>
+value matchedWhenEqual:(Option Int) matched:Int prefix:(List Text) slice:(List Text) =>
     sameTokens prefix slice
      T|> Some matched
      F|> None
 
-fun matchingLength:(Option Int) candidate:PrefixCandidate =>
+value matchingLength:(Option Int) candidate:PrefixCandidate =>
     candidate
      ||> { matched, prefix, slice } => matchedWhenEqual matched prefix slice
 
-fun matchedLength:Int candidates:(List PrefixCandidate) =>
+value matchedLength:Int candidates:(List PrefixCandidate) =>
     findMap matchingLength candidates
      ||> Some matched => matched
      ||> None         => 0
 
-fun appendLps:(List Int) values:(List Int) entry:PrefixEntry =>
+value appendLps:(List Int) values:(List Int) entry:PrefixEntry =>
     entry
      ||> { candidates } => append values [matchedLength candidates]
 
-fun collectWindowMatch:(List Int) patternTokens:(List Text) matches:(List Int) start:Int tokens:(List Text) =>
+value collectWindowMatch:(List Int) patternTokens:(List Text) matches:(List Int) start:Int tokens:(List Text) =>
     sameTokens patternTokens tokens
      T|> append matches [start]
      F|> matches
 
-fun collectMatch:(List Int) patternTokens:(List Text) matches:(List Int) window:SearchWindow =>
+value collectMatch:(List Int) patternTokens:(List Text) matches:(List Int) window:SearchWindow =>
     window
      ||> { start, tokens } => collectWindowMatch patternTokens matches start tokens
 
-val pattern: Text = "ababc"
-val haystack: Text = "ababcababc"
+value pattern: Text = "ababc"
+value haystack: Text = "ababcababc"
 
-val patternTokens: List Text = [
+value patternTokens: List Text = [
     "a",
     "b",
     "a",
@@ -85,7 +85,7 @@ val patternTokens: List Text = [
     "c"
 ]
 
-val lpsEntries: List PrefixEntry = [
+value lpsEntries: List PrefixEntry = [
     {
         prefixTokens: ["a"],
         candidates: []
@@ -162,7 +162,7 @@ val lpsEntries: List PrefixEntry = [
     }
 ]
 
-val searchWindows: List SearchWindow = [
+value searchWindows: List SearchWindow = [
     {
         start: 0,
         tokens: ["a", "b", "a", "b", "c"]
@@ -189,7 +189,7 @@ val searchWindows: List SearchWindow = [
     }
 ]
 
-val missingWindows: List SearchWindow = [
+value missingWindows: List SearchWindow = [
     {
         start: 0,
         tokens: ["a", "a", "a", "a", "a"]
@@ -200,19 +200,19 @@ val missingWindows: List SearchWindow = [
     }
 ]
 
-val lpsTable: List Int =
+value lpsTable: List Int =
     lpsEntries
      |> reduce appendLps []
 
-val matches: List Int =
+value matches: List Int =
     searchWindows
      |> reduce (collectMatch patternTokens) []
 
-val missingMatches: List Int =
+value missingMatches: List Int =
     missingWindows
      |> reduce (collectMatch patternTokens) []
 
-val kmpSummary: KmpSummary = {
+value kmpSummary: KmpSummary = {
     pattern,
     haystack,
     lpsTable,

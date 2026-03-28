@@ -50,72 +50,72 @@ type CountTask = Task Text Int
 type CheckedName =
   | Validation Text Text
 
-val maybeName: Option Text = Some "Ada"
-val missingName: Option Text = None
-val chosenName: Text = getOrElse "guest" missingName
-val okCount: Result Text Int = Ok 2
-val errCount: Result Text Int = Err "missing"
-val chosenCount: Int = withDefault 0 okCount
-val checkedName: CheckedName = Valid "Ada"
+value maybeName: Option Text = Some "Ada"
+value missingName: Option Text = None
+value chosenName: Text = getOrElse "guest" missingName
+value okCount: Result Text Int = Ok 2
+value errCount: Result Text Int = Err "missing"
+value chosenCount: Int = withDefault 0 okCount
+value checkedName: CheckedName = Valid "Ada"
 
-val nameCount: Int =
+value nameCount: Int =
     length [
         "Ada",
         "Grace"
     ]
 
-val firstName: Option Text =
+value firstName: Option Text =
     head [
         "Ada",
         "Grace"
     ]
 
-fun smaller:Bool left:Int right:Int =>
+value smaller:Bool left:Int right:Int =>
     left < right
 
-fun keepSmall:(Option Int) value:Int =>
-    value < 3
-     T|> Some value
+value keepSmall:(Option Int) x:Int =>
+    x < 3
+     T|> Some x
      F|> None
 
-fun addOne:Int value:Int =>
-    value + 1
+value addOne:Int x:Int =>
+    x + 1
 
-fun punctuate:Text value:Text =>
-    append value "!"
+value punctuate:Text x:Text =>
+    append x "!"
 
-val leastCount: Int = min smaller 4 2
-val greatestCount: Int = max smaller 4 2
-val explicitLess: Ordering = Less
+value leastCount: Int = min smaller 4 2
+value greatestCount: Int = max smaller 4 2
+value explicitLess: Ordering = Less
 
-val leastOfCounts: Int =
+value leastOfCounts: Int =
     minOf smaller 5 [
         3,
         4
     ]
 
-val labels: Text =
+value labels: Text =
     join ", " [
         "Ada",
         "Grace"
     ]
 
-val orderedCount: Ordering = compare 1 2
-val combinedLabel: Text = append "Ada" " Lovelace"
-val emptyLabels: Text = empty
-val mappedOk: Result Text Int = bimap punctuate addOne (Ok 1)
+value orderedCount: Ordering = compare 1 2
+value combinedLabel: Text = append "Ada" " Lovelace"
+value emptyLabels: Text = empty
+value mappedOk: Result Text Int = bimap punctuate addOne (Ok 1)
 
-val traversedCounts: Option (List Int) =
+value traversedCounts: Option (List Int) =
     traverse keepSmall [
         1,
         2
     ]
 
-val filteredCounts: List Int =
+value filteredCounts: List Int =
     filterMap keepSmall [
         1,
         3,
         2
     ]
 
-val sameCount: Bool = chosenCount == 2
+value sameCount: Bool = chosenCount == 2

@@ -1,7 +1,7 @@
 domain Amount A over A
     wrap : A -> Amount A
     (+) : Amount A -> Amount A -> Amount A
-    value : Amount A -> A
+    unwrap : Amount A -> A
 
-val total : Amount Int = wrap 1 + wrap 2
-val raw : Int = value total
+value total : Amount Int = wrap 1 + wrap 2
+value raw : Int = unwrap total

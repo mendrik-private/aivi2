@@ -960,7 +960,7 @@ type User = {
 }
 
 @source custom.feed
-sig users : Signal (Result HttpError (List User))
+signal users : Signal (Result HttpError (List User))
 "#,
         );
         assert!(
@@ -1008,12 +1008,12 @@ type User = {
     id: Int
 }
 
-val mode = Permissive
+value mode = Permissive
 
 @source custom.feed with {
     decode: mode
 }
-sig user : Signal User
+signal user : Signal User
 "#,
         );
         assert!(
@@ -1051,7 +1051,7 @@ type Message =
   | Data Text Int
 
 @source custom.feed
-sig inbox : Signal Message
+signal inbox : Signal Message
 "#,
         );
         assert!(
@@ -1093,7 +1093,7 @@ domain Url over Text
     parse : Text -> Result Text Url
 
 @source custom.feed
-sig url : Signal Url
+signal url : Signal Url
 "#,
         );
         assert!(
@@ -1126,7 +1126,7 @@ sig url : Signal Url
             "source_decode_nested_signal.aivi",
             r#"
 @source custom.feed
-sig bad : Signal (Signal Int)
+signal bad : Signal (Signal Int)
 "#,
         );
         assert!(
@@ -1175,7 +1175,7 @@ type Tree =
   | Branch Tree Tree
 
 @source custom.feed
-sig tree : Signal Tree
+signal tree : Signal Tree
 "#,
         );
         assert!(

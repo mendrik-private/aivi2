@@ -680,7 +680,7 @@ fn check_accepts_bundled_stdlib_fallback() {
     workspace.write("aivi.toml", "");
     let main = workspace.write(
         "main.aivi",
-        "use aivi.bundledsmoketest (\n    bundledSentinel\n    BundledToken\n)\n\ntype Alias = BundledToken\nval marker = bundledSentinel\n",
+        "use aivi.bundledsmoketest (\n    bundledSentinel\n    BundledToken\n)\n\ntype Alias = BundledToken\nvalue marker = bundledSentinel\n",
     );
     let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
         .arg("check")
@@ -707,7 +707,7 @@ fn check_accepts_bundled_root_and_prelude_stdlib_imports() {
     workspace.write("aivi.toml", "");
     let main = workspace.write(
         "main.aivi",
-        "use aivi (\n    Option\n    Result\n    Validation\n    Signal\n    Task\n    Some\n    None\n    Ok\n    Err\n    Valid\n    Invalid\n)\n\nuse aivi.prelude (\n    Int\n    Bool\n    Text\n    List\n    Eq\n    Default\n    Functor\n    Applicative\n    Monad\n    Foldable\n    getOrElse\n    withDefault\n    length\n    head\n    join\n)\n\ntype NameSignal = Signal Text\ntype CountTask = Task Text Int\ntype CheckedName = Validation Text Text\n\nval maybeName:Option Text = Some \"Ada\"\nval missingName:Option Text = None\nval chosenName:Text = getOrElse \"guest\" missingName\n\nval okCount:Result Text Int = Ok 2\nval errCount:Result Text Int = Err \"missing\"\nval chosenCount:Int = withDefault 0 okCount\n\nval checkedName:CheckedName = Valid \"Ada\"\nval nameCount:Int = length [\"Ada\", \"Grace\"]\nval firstName:Option Text = head [\"Ada\", \"Grace\"]\nval labels:Text = join \", \" [\"Ada\", \"Grace\"]\nval sameCount:Bool = chosenCount == 2\n",
+        "use aivi (\n    Option\n    Result\n    Validation\n    Signal\n    Task\n    Some\n    None\n    Ok\n    Err\n    Valid\n    Invalid\n)\n\nuse aivi.prelude (\n    Int\n    Bool\n    Text\n    List\n    Eq\n    Default\n    Functor\n    Applicative\n    Monad\n    Foldable\n    getOrElse\n    withDefault\n    length\n    head\n    join\n)\n\ntype NameSignal = Signal Text\ntype CountTask = Task Text Int\ntype CheckedName = Validation Text Text\n\nvalue maybeName:Option Text = Some \"Ada\"\nvalue missingName:Option Text = None\nvalue chosenName:Text = getOrElse \"guest\" missingName\n\nvalue okCount:Result Text Int = Ok 2\nvalue errCount:Result Text Int = Err \"missing\"\nvalue chosenCount:Int = withDefault 0 okCount\n\nvalue checkedName:CheckedName = Valid \"Ada\"\nvalue nameCount:Int = length [\"Ada\", \"Grace\"]\nvalue firstName:Option Text = head [\"Ada\", \"Grace\"]\nvalue labels:Text = join \", \" [\"Ada\", \"Grace\"]\nvalue sameCount:Bool = chosenCount == 2\n",
     );
     let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
         .arg("check")
@@ -773,17 +773,17 @@ type User = {
     name: Text
 }
 
-val headers:HttpHeaders =
+value headers:HttpHeaders =
     Map {
         "Authorization": "Bearer demo"
     }
 
-val query:HttpQuery =
+value query:HttpQuery =
     Map {
         "page": "1"
     }
 
-val decodeMode:DecodeMode =
+value decodeMode:DecodeMode =
     Strict
 
 type RetryBudget = Retry
@@ -792,35 +792,35 @@ type UsersResponse = HttpResponse (List User)
 type UsersTask = HttpTask (List User)
 
 @source http.get "https://api.example.com/users"
-sig users : Signal UsersResponse
+signal users : Signal UsersResponse
 
 @source timer.every 120 with {
     immediate: True,
     coalesce: True
 }
-sig tick : Signal TimerTick
+signal tick : Signal TimerTick
 
 @source timer.after 1000
-sig ready : Signal TimerReady
+signal ready : Signal TimerReady
 
-val timeoutError:HttpError =
+value timeoutError:HttpError =
     Timeout
 
-val decodeError:HttpError =
+value decodeError:HttpError =
     DecodeFailure "bad-json"
 
-val requestError:HttpError =
+value requestError:HttpError =
     RequestFailure "offline"
 
-val level:LogLevel =
+value level:LogLevel =
     Debug
 
-val context:LogContext =
+value context:LogContext =
     Map {
         "module": "cli"
     }
 
-val entry:LogEntry = {
+value entry:LogEntry = {
     level: level,
     message: "loaded",
     context: context
@@ -832,7 +832,7 @@ type CurrentLogError = LogError
 
 type PollDelay = Duration
 
-val errorLevel:LogLevel =
+value errorLevel:LogLevel =
     Error
 "#,
     );

@@ -1,60 +1,60 @@
-fun keepOk:(Result E A) item:A =>
+value keepOk:(Result E A) item:A =>
     Ok item
 
-fun keepErr:(Result E A) error:E =>
+value keepErr:(Result E A) error:E =>
     Err error
 
-fun mapError:(Result E2 A) transform:(E1 -> E2) error:E1 =>
+value mapError:(Result E2 A) transform:(E1 -> E2) error:E1 =>
     Err (transform error)
 
-fun keepSome:(Option A) item:A =>
+value keepSome:(Option A) item:A =>
     Some item
 
-fun singleton:(List A) item:A =>
+value singleton:(List A) item:A =>
     [item]
 
-fun isOk:Bool value:(Result E A) =>
-    value
+value isOk:Bool opt:(Result E A) =>
+    opt
      T|> True
      F|> False
 
-fun isErr:Bool value:(Result E A) =>
-    value
+value isErr:Bool opt:(Result E A) =>
+    opt
      F|> True
      T|> False
 
-fun mapErr:(Result E2 A) transform:(E1 -> E2) value:(Result E1 A) =>
-    value
+value mapErr:(Result E2 A) transform:(E1 -> E2) opt:(Result E1 A) =>
+    opt
      T|> keepOk
      F|> mapError transform
 
-fun withDefault:A fallback:A value:(Result E A) =>
-    value
+value withDefault:A fallback:A opt:(Result E A) =>
+    opt
      ||> Ok item   => item
      ||> Err error => fallback
 
-fun orElse:(Result E A) fallback:(Result E A) value:(Result E A) =>
-    value
+value orElse:(Result E A) fallback:(Result E A) opt:(Result E A) =>
+    opt
      T|> keepOk
      F|> fallback
 
-fun flatMap:(Result E B) next:(A -> Result E B) value:(Result E A) =>
-    value
+value flatMap:(Result E B) next:(A -> Result E B) opt:(Result E A) =>
+    opt
      T|> next
      F|> keepErr
 
-fun flatten:(Result E A) value:(Result E (Result E A)) =>
-    value
+value flatten:(Result E A) opt:(Result E (Result E A)) =>
+    opt
      ||> Ok nested => nested
      ||> Err error => Err error
 
-fun toOption:(Option A) value:(Result E A) =>
-    value
+value toOption:(Option A) opt:(Result E A) =>
+    opt
      T|> keepSome
      F|> None
 
-fun toList:(List A) value:(Result E A) =>
-    value
+value toList:(List A) opt:(Result E A) =>
+    opt
      T|> singleton
      F|> []
 

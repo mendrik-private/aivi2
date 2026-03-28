@@ -813,7 +813,7 @@ mod tests {
             "source-decode-float.aivi",
             r#"
 @source custom.feed
-sig temperature : Signal Float
+signal temperature : Signal Float
 "#,
             "temperature",
         );
@@ -854,7 +854,7 @@ sig temperature : Signal Float
             "source-decode-decimal.aivi",
             r#"
 @source custom.feed
-sig price : Signal Decimal
+signal price : Signal Decimal
 "#,
             "price",
         );
@@ -875,7 +875,7 @@ sig price : Signal Decimal
             "source-decode-bigint.aivi",
             r#"
 @source custom.feed
-sig count : Signal BigInt
+signal count : Signal BigInt
 "#,
             "count",
         );
@@ -900,7 +900,7 @@ sig count : Signal BigInt
             "source-decode-bytes.aivi",
             r#"
 @source custom.feed
-sig bytes : Signal Bytes
+signal bytes : Signal Bytes
 "#,
             "bytes",
         );
@@ -925,7 +925,7 @@ type Key =
     repeat: False
     focusOnly: True
 }
-sig keyDown : Signal Key
+signal keyDown : Signal Key
 "#,
             "keyDown",
         );
@@ -979,7 +979,7 @@ sig keyDown : Signal Key
             "source-decode-invalid-decimal.aivi",
             r#"
 @source custom.feed
-sig price : Signal Decimal
+signal price : Signal Decimal
 "#,
             "price",
         );
@@ -1000,7 +1000,7 @@ sig price : Signal Decimal
             "source-decode-invalid-bytes.aivi",
             r#"
 @source custom.feed
-sig bytes : Signal Bytes
+signal bytes : Signal Bytes
 "#,
             "bytes",
         );

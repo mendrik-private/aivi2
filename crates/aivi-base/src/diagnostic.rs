@@ -260,7 +260,7 @@ mod tests {
     #[test]
     fn renders_primary_and_secondary_labels() {
         let mut sources = SourceDatabase::new();
-        let file_id = sources.add_file("sample.aivi", "sig counter = 0\n");
+        let file_id = sources.add_file("sample.aivi", "signal counter = 0\n");
         let file = &sources[file_id];
 
         let rendered = Diagnostic::error("top-level syntax error")
@@ -278,7 +278,7 @@ mod tests {
 
         assert!(rendered.contains("error[syntax::unexpected-token]: top-level syntax error"));
         assert!(rendered.contains(" --> sample.aivi:1:1"));
-        assert!(rendered.contains("sig counter = 0"));
+        assert!(rendered.contains("signal counter = 0"));
         assert!(rendered.contains("expected a declaration keyword here"));
         // Secondary labels must be rendered, not silently dropped.
         assert!(

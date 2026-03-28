@@ -6,7 +6,7 @@ domain Duration over Int
     literal min: Int -> Duration
     millis: Int -> Duration
     trySeconds: Int -> Result DurationError Duration
-    value: Duration -> Int
+    unwrap: Duration -> Int
     (+): Duration -> Duration -> Duration
     (-): Duration -> Duration -> Duration
 

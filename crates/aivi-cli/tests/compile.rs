@@ -330,9 +330,9 @@ type Window = {
     delay: Duration
 }
 
-sig windows : Signal Window = { delay: 10ms }
+signal windows : Signal Window = { delay: 10ms }
 
-sig slowWindows : Signal Window =
+signal slowWindows : Signal Window =
     windows
      ?|> ((.delay + 5ms) > 12ms)
 "#,

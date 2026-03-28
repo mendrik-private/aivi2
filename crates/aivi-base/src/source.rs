@@ -100,7 +100,7 @@ impl fmt::Display for Span {
 pub struct FileId(u32);
 
 impl FileId {
-    pub(crate) const fn new(raw: u32) -> Self {
+    pub const fn new(raw: u32) -> Self {
         Self(raw)
     }
 
@@ -454,12 +454,12 @@ mod tests {
     #[test]
     fn tracks_line_columns_and_line_text() {
         let mut database = SourceDatabase::new();
-        let file_id = database.add_file("sample.aivi", "val answer = 42\nsig counter = 0\n");
+        let file_id = database.add_file("sample.aivi", "value answer = 42\nsignal counter = 0\n");
         let file = &database[file_id];
 
         assert_eq!(file.line_count(), 3);
-        assert_eq!(file.line_text(0), Some("val answer = 42"));
-        assert_eq!(file.line_text(1), Some("sig counter = 0"));
+        assert_eq!(file.line_text(0), Some("value answer = 42"));
+        assert_eq!(file.line_text(1), Some("signal counter = 0"));
         assert_eq!(file.line_text(2), Some(""));
         assert_eq!(
             file.line_column(ByteIndex::new(0)),
@@ -469,7 +469,7 @@ mod tests {
         let counter_offset = file.text().find("counter").unwrap();
         assert_eq!(
             file.line_column(ByteIndex::new(counter_offset as u32)),
-            LineColumn { line: 2, column: 5 }
+            LineColumn { line: 2, column: 8 }
         );
     }
 

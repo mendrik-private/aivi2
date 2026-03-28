@@ -288,7 +288,11 @@ fn collect_truthy_falsy_pipe(
             PipeStageKind::Case { .. }
             | PipeStageKind::Apply { .. }
             | PipeStageKind::RecurStart { .. }
-            | PipeStageKind::RecurStep { .. } => PipeSubjectStepOutcome::Continue {
+            | PipeStageKind::RecurStep { .. }
+            | PipeStageKind::Validate { .. }
+            | PipeStageKind::Previous { .. }
+            | PipeStageKind::Diff { .. }
+            | PipeStageKind::Accumulate { .. } => PipeSubjectStepOutcome::Continue {
                 new_subject: None,
                 advance_by: 1,
             },

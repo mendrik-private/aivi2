@@ -596,7 +596,7 @@ type HttpError =
 
 domain Url over Text
     parse : Text -> Result Text Url
-    value : Url -> Text
+    unwrap : Url -> Text
 
 type User = {
     id: Int,
@@ -604,7 +604,7 @@ type User = {
 }
 
 @source custom.feed
-sig users : Signal (Result HttpError (List User))
+signal users : Signal (Result HttpError (List User))
 "#,
         );
         assert!(
@@ -654,10 +654,10 @@ sig users : Signal (Result HttpError (List User))
 domain Duration over Int
     parse : Int -> Result Text Duration
     millis : Int -> Duration
-    value : Duration -> Int
+    unwrap : Duration -> Int
 
 @source custom.feed
-sig timeout : Signal Duration
+signal timeout : Signal Duration
 "#,
         );
         assert!(
@@ -692,10 +692,10 @@ sig timeout : Signal Duration
             r#"
 domain Duration over Int
     millis : Int -> Duration
-    value : Duration -> Int
+    unwrap : Duration -> Int
 
 @source custom.feed
-sig timeout : Signal Duration
+signal timeout : Signal Duration
 "#,
         );
         assert!(
@@ -731,10 +731,10 @@ sig timeout : Signal Duration
 domain Duration over Int
     millis : Int -> Duration
     tryMillis : Int -> Result Text Duration
-    value : Duration -> Int
+    unwrap : Duration -> Int
 
 @source custom.feed
-sig timeout : Signal Duration
+signal timeout : Signal Duration
 "#,
         );
         assert!(
@@ -775,10 +775,10 @@ sig timeout : Signal Duration
             r#"
 domain NonEmpty A over List A
     parse : List A -> Result Text (NonEmpty A)
-    value : NonEmpty A -> List A
+    unwrap : NonEmpty A -> List A
 
 @source custom.feed
-sig names : Signal (NonEmpty Text)
+signal names : Signal (NonEmpty Text)
 "#,
         );
         assert!(
@@ -812,7 +812,7 @@ sig names : Signal (NonEmpty Text)
             "source_decode_program_blocked_payload.aivi",
             r#"
 @source custom.feed
-sig bad : Signal (Signal Int)
+signal bad : Signal (Signal Int)
 "#,
         );
         assert!(

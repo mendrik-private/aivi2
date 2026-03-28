@@ -29,61 +29,61 @@ type KnapsackSummary = {
     note: Text
 }
 
-val emptyPlan: Plan = {
+value emptyPlan: Plan = {
     total: 0,
     picked: []
 }
 
-fun choosePlan:Plan left:Plan right:Plan =>
+value choosePlan:Plan left:Plan right:Plan =>
     right.total > left.total
      T|> right
      F|> left
 
-fun selectCell:(Option Cell) target:Int cell:Cell =>
+value selectCell:(Option Cell) target:Int cell:Cell =>
     cell.capacity == target
      T|> Some cell
      F|> None
 
-fun planAt:Plan capacity:Int row:(List Cell) =>
+value planAt:Plan capacity:Int row:(List Cell) =>
     row
      |> findMap (selectCell capacity)
      ||> Some cell => cell.plan
      ||> None      => emptyPlan
 
-fun extendPlan:Plan item:KnapsackItem base:Plan =>
+value extendPlan:Plan item:KnapsackItem base:Plan =>
     base
-     ||> { total, picked } => { total: total + item.value, picked: append picked [item.label] }
+     ||> { total, picked } => { total: total + item.x, picked: append picked [item.label] }
 
-fun includePlan:Plan item:KnapsackItem previous:(List Cell) capacity:Int =>
+value includePlan:Plan item:KnapsackItem previous:(List Cell) capacity:Int =>
     capacity < item.weight
      T|> emptyPlan
      F|> extendPlan item (planAt (capacity - item.weight) previous)
 
-fun nextCell:Cell item:KnapsackItem previous:(List Cell) capacity:Int =>
+value nextCell:Cell item:KnapsackItem previous:(List Cell) capacity:Int =>
     {
         capacity,
         plan: choosePlan (planAt capacity previous) (includePlan item previous capacity)
     }
 
-fun appendBuilt:(List B) build:(A -> B) items:(List B) value:A =>
-    append items [build value]
+value appendBuilt:(List B) build:(A -> B) items:(List B) x:A =>
+    append items [build x]
 
-fun stepRow:(List Cell) capacities:(List Int) previous:(List Cell) item:KnapsackItem =>
+value stepRow:(List Cell) capacities:(List Int) previous:(List Cell) item:KnapsackItem =>
     capacities
      |> reduce (appendBuilt (nextCell item previous)) []
 
-fun baseCell:Cell capacity:Int =>
+value baseCell:Cell capacity:Int =>
     {
         capacity,
         plan: emptyPlan
     }
 
-fun pickedLabel:Text plan:Plan =>
+value pickedLabel:Text plan:Plan =>
     isEmpty plan.picked
      T|> "none"
      F|> join " + " plan.picked
 
-val capacities: List Int = [
+value capacities: List Int = [
     0,
     1,
     2,
@@ -94,7 +94,7 @@ val capacities: List Int = [
     7
 ]
 
-val items: List KnapsackItem = [
+value items: List KnapsackItem = [
     {
         label: "map",
         weight: 1,
@@ -117,19 +117,19 @@ val items: List KnapsackItem = [
     }
 ]
 
-val initialRow: List Cell =
+value initialRow: List Cell =
     capacities
      |> reduce (appendBuilt baseCell) []
 
-val optimizedRow: List Cell =
+value optimizedRow: List Cell =
     items
      |> reduce (stepRow capacities) initialRow
 
-val bestPlan: Plan = planAt 7 optimizedRow
-val zeroPlan: Plan = planAt 0 optimizedRow
-val emptyItemsPlan: Plan = planAt 7 initialRow
+value bestPlan: Plan = planAt 7 optimizedRow
+value zeroPlan: Plan = planAt 0 optimizedRow
+value emptyItemsPlan: Plan = planAt 7 initialRow
 
-val knapsackSummary: KnapsackSummary = {
+value knapsackSummary: KnapsackSummary = {
     bestAtSeven: bestPlan.total,
     pickedAtSeven: pickedLabel bestPlan,
     bestAtZero: zeroPlan.total,

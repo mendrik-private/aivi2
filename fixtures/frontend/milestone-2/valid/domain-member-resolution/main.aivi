@@ -1,7 +1,7 @@
 domain Duration over Int
     literal ms : Int -> Duration
     make : Int -> Duration
-    value : Duration -> Int
+    unwrap : Duration -> Int
 
 domain Count over Int
     make : Int -> Count
@@ -10,9 +10,9 @@ domain NonEmpty A over List A
     singleton : A -> NonEmpty A
     head : NonEmpty A -> A
 
-val delay : Duration = make 250
-val delayMillis : Int = value delay
-val literalMillis : Int = value 250ms
-val first : Int = head (singleton 1)
+value delay : Duration = make 250
+value delayMillis : Int = unwrap delay
+value literalMillis : Int = unwrap 250ms
+value first : Int = head (singleton 1)
 
 export first

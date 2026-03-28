@@ -23,9 +23,9 @@ pub async fn hover(params: HoverParams, state: Arc<ServerState>) -> Option<Hover
     let sym = analysis.tightest_symbol_at_offset(cursor)?;
 
     let kind_label = match sym.kind {
-        aivi_hir::LspSymbolKind::Function => "fun",
-        aivi_hir::LspSymbolKind::Variable => "val",
-        aivi_hir::LspSymbolKind::Event => "sig",
+        aivi_hir::LspSymbolKind::Function => "value",
+        aivi_hir::LspSymbolKind::Variable => "value",
+        aivi_hir::LspSymbolKind::Event => "signal",
         aivi_hir::LspSymbolKind::Struct => "type",
         aivi_hir::LspSymbolKind::Interface => "class",
         aivi_hir::LspSymbolKind::Namespace => "domain",

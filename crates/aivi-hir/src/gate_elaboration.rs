@@ -540,7 +540,11 @@ fn collect_gate_pipe(
                 PipeStageKind::Case { .. }
                 | PipeStageKind::Apply { .. }
                 | PipeStageKind::RecurStart { .. }
-                | PipeStageKind::RecurStep { .. } => PipeSubjectStepOutcome::Continue {
+                | PipeStageKind::RecurStep { .. }
+                | PipeStageKind::Validate { .. }
+                | PipeStageKind::Previous { .. }
+                | PipeStageKind::Diff { .. }
+                | PipeStageKind::Accumulate { .. } => PipeSubjectStepOutcome::Continue {
                     new_subject: None,
                     advance_by: 1,
                 },
@@ -1568,6 +1572,30 @@ fn lower_runtime_pipe_expr(
                     GateRuntimeUnsupportedPipeStageKind::RecurStep,
                 ));
             }
+            PipeStageKind::Validate { .. } => {
+                return Err(unsupported_runtime_pipe_stage(
+                    stage.span,
+                    GateRuntimeUnsupportedPipeStageKind::RecurStart,
+                ));
+            }
+            PipeStageKind::Previous { .. } => {
+                return Err(unsupported_runtime_pipe_stage(
+                    stage.span,
+                    GateRuntimeUnsupportedPipeStageKind::RecurStart,
+                ));
+            }
+            PipeStageKind::Accumulate { .. } => {
+                return Err(unsupported_runtime_pipe_stage(
+                    stage.span,
+                    GateRuntimeUnsupportedPipeStageKind::RecurStart,
+                ));
+            }
+            PipeStageKind::Diff { .. } => {
+                return Err(unsupported_runtime_pipe_stage(
+                    stage.span,
+                    GateRuntimeUnsupportedPipeStageKind::RecurStart,
+                ));
+            }
         };
         stages.push(GateRuntimePipeStage {
             span: stage.span,
@@ -1821,12 +1849,12 @@ type User = {
     age: Int
 }
 
-fun isEligible:Bool user:User =>
+value isEligible:Bool user:User =>
     .active and .age > 18
 
-sig users:Signal User = { active: True, age: 21 }
+signal users:Signal User = { active: True, age: 21 }
 
-sig eligibleUsers:Signal User =
+signal eligibleUsers:Signal User =
     users
      ?|> isEligible
 "#,
@@ -1882,9 +1910,9 @@ type User = {
     age: Int
 }
 
-sig users:Signal User = { active: True, age: 21 }
+signal users:Signal User = { active: True, age: 21 }
 
-sig activeUsers:Signal User =
+signal activeUsers:Signal User =
     users
      ?|> (.active and .age > 18)
 "#,
@@ -1965,9 +1993,9 @@ type Window = {
     delay: Duration
 }
 
-sig windows:Signal Window = { delay: 10ms }
+signal windows:Signal Window = { delay: 10ms }
 
-sig slowWindows:Signal Window =
+signal slowWindows:Signal Window =
     windows
      ?|> ((.delay + 5ms) > 12ms)
 "#,
@@ -2052,14 +2080,14 @@ type User = {
     email: Text
 }
 
-fun joinEmails:Text items:List Text =>
+value joinEmails:Text items:List Text =>
     "joined"
 
-val users:List User = [
+value users:List User = [
     { email: "ada@example.com" }
 ]
 
-val maybeJoined:Option Text =
+value maybeJoined:Option Text =
     users
      *|> .email
      <|* joinEmails
@@ -2104,17 +2132,17 @@ type User = {
     email: Text
 }
 
-fun keepText:Bool email:Text =>
+value keepText:Bool email:Text =>
     True
 
-fun joinEmails:Text items:List Text =>
+value joinEmails:Text items:List Text =>
     "joined"
 
-val users:List User = [
+value users:List User = [
     { email: "ada@example.com" }
 ]
 
-val joinedEmails:Text =
+value joinedEmails:Text =
     users
      *|> .email
      ?|> keepText
@@ -2150,13 +2178,13 @@ type Cursor = {
     hasNext: Bool
 }
 
-fun keep:Cursor cursor:Cursor =>
+value keep:Cursor cursor:Cursor =>
     cursor
 
-val seed:Cursor = { hasNext: True }
+value seed:Cursor = { hasNext: True }
 
 @recur.timer 5s
-sig cursor : Signal Cursor =
+signal cursor : Signal Cursor =
     seed
      @|> keep
      ?|> .hasNext
@@ -2233,8 +2261,8 @@ sig cursor : Signal Cursor =
         }
         let source = format!(
             r#"
-sig flags : Signal Bool
-sig filtered : Signal Bool = flags ?|> {predicate}
+signal flags : Signal Bool
+signal filtered : Signal Bool = flags ?|> {predicate}
 "#
         );
         // Run in a thread with a 64 MB stack so infer_expr (still recursive) has

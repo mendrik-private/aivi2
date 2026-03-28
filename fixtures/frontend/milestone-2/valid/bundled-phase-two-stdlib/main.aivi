@@ -34,15 +34,15 @@ type User = {
   name: Text
 }
 
-val headers: HttpHeaders = Map {
+value headers: HttpHeaders = Map {
   "Authorization": "Bearer demo"
 }
 
-val query: HttpQuery = Map {
+value query: HttpQuery = Map {
   "page": "1"
 }
 
-val decodeMode: DecodeMode = Strict
+value decodeMode: DecodeMode = Strict
 
 type RetryBudget = Retry
 
@@ -50,30 +50,30 @@ type UsersResponse = HttpResponse (List User)
 type UsersTask     = HttpTask (List User)
 
 @source http.get "https://api.example.com/users"
-sig users: Signal UsersResponse
+signal users: Signal UsersResponse
 
 @source timer.every 120 with {
   immediate: True
   coalesce: True
 }
-sig tick: Signal TimerTick
+signal tick: Signal TimerTick
 
 @source timer.after 1000
-sig ready: Signal TimerReady
+signal ready: Signal TimerReady
 
-val timeoutError: HttpError = Timeout
+value timeoutError: HttpError = Timeout
 
-val decodeError: HttpError = DecodeFailure "bad-json"
+value decodeError: HttpError = DecodeFailure "bad-json"
 
-val requestError: HttpError = RequestFailure "offline"
+value requestError: HttpError = RequestFailure "offline"
 
-val level: LogLevel = Debug
+value level: LogLevel = Debug
 
-val context: LogContext = Map {
+value context: LogContext = Map {
   "module": "fixtures"
 }
 
-val entry: LogEntry = {
+value entry: LogEntry = {
   level: level,
   message: "loaded",
   context: context
@@ -85,4 +85,4 @@ type CurrentLogError = LogError
 
 type PollDelay = Duration
 
-val errorLevel: LogLevel = Error
+value errorLevel: LogLevel = Error

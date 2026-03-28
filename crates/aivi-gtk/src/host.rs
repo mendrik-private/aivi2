@@ -1788,12 +1788,12 @@ mod tests {
             let graph = lower_graph(
                 "gtk-host.aivi",
                 r#"
-val titleText = "Runtime title"
-val gap = 4
-val isVisible = False
-val isEnabled = True
-val click = True
-val view =
+value titleText = "Runtime title"
+value gap = 4
+value isVisible = False
+value isEnabled = True
+value click = True
+value view =
     <Window title="Host">
         <Box orientation="Vertical" spacing={gap}>
             <Label text={titleText} />
@@ -1890,11 +1890,11 @@ val view =
             let graph = lower_graph(
                 "gtk-host-expanded.aivi",
                 r#"
-val query = "Runtime query"
-val canEdit = False
-val isEnabled = True
-val submit = True
-val view =
+value query = "Runtime query"
+value canEdit = False
+value isEnabled = True
+value submit = True
+value view =
     <Window title="Host">
         <ScrolledWindow>
             <Box>
@@ -2008,10 +2008,10 @@ val view =
             let graph = lower_graph(
                 "gtk-host-entry-change.aivi",
                 r#"
-val query = "Runtime query"
-sig changed : Signal Text
+value query = "Runtime query"
+signal changed : Signal Text
 
-val view =
+value view =
     <Window title="Host">
         <Entry text={query} onChange={changed} />
     </Window>
@@ -2075,10 +2075,10 @@ val view =
             let graph = lower_graph(
                 "gtk-host-additional-widgets.aivi",
                 r#"
-val showButtons = False
-val isEnabled = True
-val toggled = True
-val view =
+value showButtons = False
+value isEnabled = True
+value toggled = True
+value view =
     <Window title="Host">
         <Viewport>
             <Frame label="Controls">
@@ -2224,7 +2224,7 @@ val view =
             let graph = lower_graph(
                 "gtk-host-label-monospace.aivi",
                 r#"
-val view =
+value view =
     <Window title="Host">
         <Label text="Board" monospace />
     </Window>
@@ -2267,8 +2267,8 @@ val view =
             let graph = lower_graph(
                 "gtk-host-named-groups.aivi",
                 r#"
-val showButtons = False
-val view =
+value showButtons = False
+value view =
     <Window title="Host">
         <Paned orientation="Horizontal">
             <Paned.start>
@@ -2375,7 +2375,7 @@ val view =
             let graph = lower_graph(
                 "gtk-window-keys.aivi",
                 r#"
-val view =
+value view =
     <Window title="Host" />
 "#,
             );
@@ -2410,7 +2410,7 @@ val view =
             let graph = lower_graph(
                 "gtk-host-static-property-guard.aivi",
                 r#"
-val view =
+value view =
     <Window title="Host" />
 "#,
             );
@@ -2464,7 +2464,7 @@ val view =
             let graph = lower_graph(
                 "gtk-host-move-children.aivi",
                 r#"
-val view =
+value view =
     <Window title="Host">
         <Box>
             <Label text="A" />

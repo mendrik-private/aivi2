@@ -1,6 +1,6 @@
-val ready:Bool = True
+value ready:Bool = True
 
-val branch =
+value branch =
     ready
      T|> .name
      F|> "wait"

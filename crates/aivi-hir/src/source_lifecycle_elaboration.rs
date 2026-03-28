@@ -452,17 +452,17 @@ mod tests {
 domain Duration over Int
     literal s : Int -> Duration
 
-sig apiHost = "https://api.example.com"
-sig refresh = 0
-sig enabled = True
-sig pollInterval : Signal Duration = 5s
+signal apiHost = "https://api.example.com"
+signal refresh = 0
+signal enabled = True
+signal pollInterval : Signal Duration = 5s
 
 @source http.get "{apiHost}/users" with {
     refreshOn: refresh,
     activeWhen: enabled,
     refreshEvery: pollInterval
 }
-sig users : Signal Int
+signal users : Signal Int
 "#,
         );
         assert!(
@@ -532,13 +532,13 @@ provider custom.feed
     argument path: Text
     option activeWhen: Signal Bool
 
-sig path = "/tmp/demo.txt"
-sig enabled = True
+signal path = "/tmp/demo.txt"
+signal enabled = True
 
 @source custom.feed path with {
     activeWhen: enabled
 }
-sig updates : Signal Int
+signal updates : Signal Int
 "#,
         );
         assert!(

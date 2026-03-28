@@ -22,55 +22,55 @@ type SurfaceSummary = {
     failedLoad: Text
 }
 
-fun displayName:Text profile:Profile =>
+value displayName:Text profile:Profile =>
     profile
      ||> { nickname: Some alias } => alias
      ||> { name, nickname: None } => name
 
-fun roleLabel:Text role:Role =>
+value roleLabel:Text role:Role =>
     role
      ||> Admin  => "admin"
      ||> Member => "member"
      ||> Guest  => "guest"
 
-fun readyLabel:Text ready:Bool =>
+value readyLabel:Text ready:Bool =>
     ready
      T|> "ready"
      F|> "waiting"
 
-fun loadLabel:Text state:LoadState =>
+value loadLabel:Text state:LoadState =>
     state
      ||> NotAsked       => "idle"
      ||> Loaded profile => displayName profile
      ||> Failed message => "error:{message}"
 
-val sampleProfile: Profile = {
+value sampleProfile: Profile = {
     name: "Ada",
     nickname: Some "Countess",
     role: Admin,
     ready: True
 }
 
-val sampleState: LoadState = Loaded sampleProfile
-val failedState: LoadState = Failed "offline"
-val summaryName: Text = displayName sampleProfile
+value sampleState: LoadState = Loaded sampleProfile
+value failedState: LoadState = Failed "offline"
+value summaryName: Text = displayName sampleProfile
 
-val summaryRole: Text =
+value summaryRole: Text =
     sampleProfile
      |> .role
      |> roleLabel
 
-val summaryReady: Text =
+value summaryReady: Text =
     sampleProfile
      |> .ready
      |> readyLabel
 
-val summaryLoad: Text = loadLabel sampleState
-val idleLoad: Text = loadLabel NotAsked
-val failedLoad: Text = loadLabel failedState
-val banner: Text = "{summaryName} / {summaryRole} / {summaryReady}"
+value summaryLoad: Text = loadLabel sampleState
+value idleLoad: Text = loadLabel NotAsked
+value failedLoad: Text = loadLabel failedState
+value banner: Text = "{summaryName} / {summaryRole} / {summaryReady}"
 
-val surfaceSummary: SurfaceSummary = {
+value surfaceSummary: SurfaceSummary = {
     banner,
     activeLoad: summaryLoad,
     idleLoad,

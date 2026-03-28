@@ -5,12 +5,12 @@ type LoadState =
   | Loaded User
   | Failed Text
 
-fun loadedName:Text state:LoadState =>
+value loadedName:Text state:LoadState =>
     state
      ||> NotAsked => "waiting"
      ||> Loaded (User name _) => name
      ||> Failed message => message
 
-fun firstOfPair:Int pair:(Int, Int) =>
+value firstOfPair:Int pair:(Int, Int) =>
     pair
      ||> (first, _) => first

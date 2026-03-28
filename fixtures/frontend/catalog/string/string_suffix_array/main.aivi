@@ -27,70 +27,70 @@ type SuffixCatalog = {
     duplicateCandidates: SuffixSummary
 }
 
-fun viewSuffixes:SuffixView items:(List Suffix) =>
+value viewSuffixes:SuffixView items:(List Suffix) =>
     {
         first: head items,
         rest: tail items
     }
 
-fun suffixLabel:Text suffix:Suffix =>
+value suffixLabel:Text suffix:Suffix =>
     "{suffix.start}:{suffix.value}"
 
-fun earlier:Bool left:Suffix right:Suffix =>
+value earlier:Bool left:Suffix right:Suffix =>
     left.value < right.value or (left.value == right.value and left.start < right.start)
 
-fun insertAfterHead:(List Suffix) sorted:(List Suffix) item:Suffix first:Suffix remaining:(List Suffix) =>
+value insertAfterHead:(List Suffix) sorted:(List Suffix) item:Suffix first:Suffix remaining:(List Suffix) =>
     earlier item first
      T|> append [item] sorted
      F|> append [first] (insertSuffix remaining item)
 
-fun insertSuffix:(List Suffix) sorted:(List Suffix) item:Suffix =>
+value insertSuffix:(List Suffix) sorted:(List Suffix) item:Suffix =>
     viewSuffixes sorted
      ||> { first: None }                             => [item]
      ||> { first: Some first, rest: Some remaining } => insertAfterHead sorted item first remaining
 
-fun collectLabels:(List Text) labels:(List Text) suffix:Suffix =>
+value collectLabels:(List Text) labels:(List Text) suffix:Suffix =>
     append labels [
         suffixLabel suffix
     ]
 
-fun describeOrder:Text items:(List Suffix) =>
+value describeOrder:Text items:(List Suffix) =>
     length items == 0
      T|> "empty"
      F|> join " < " (items |> reduce collectLabels [])
 
-fun firstLabel:Text items:(List Suffix) =>
+value firstLabel:Text items:(List Suffix) =>
     viewSuffixes items
      ||> { first: Some suffix } => suffixLabel suffix
      ||> { first: None }        => "empty"
 
-fun summarize:SuffixSummary items:(List Suffix) =>
+value summarize:SuffixSummary items:(List Suffix) =>
     {
         order: describeOrder items,
         first: firstLabel items,
         count: length items
     }
 
-val sampleCandidates: List Suffix = [
+value sampleCandidates: List Suffix = [
     { start: 0, value: "aba" },
     { start: 1, value: "ba" },
     { start: 2, value: "a" }
 ]
 
-val duplicateCandidatesInput: List Suffix = [
+value duplicateCandidatesInput: List Suffix = [
     { start: 4, value: "ana" },
     { start: 1, value: "ana" }
 ]
 
-val sampleSorted: List Suffix =
+value sampleSorted: List Suffix =
     sampleCandidates
      |> reduce insertSuffix []
 
-val duplicateSorted: List Suffix =
+value duplicateSorted: List Suffix =
     duplicateCandidatesInput
      |> reduce insertSuffix []
 
-val suffixCatalog: SuffixCatalog = {
+value suffixCatalog: SuffixCatalog = {
     sampleWord: summarize sampleSorted,
     duplicateCandidates: summarize duplicateSorted
 }

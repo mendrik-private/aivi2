@@ -4,22 +4,22 @@ type NonEmpty A =
 type NonEmptyList A =
   | MkNEL A (List A)
 
-fun singleton:(NonEmptyList A) item:A =>
+value singleton:(NonEmptyList A) item:A =>
     MkNEL item []
 
-fun cons:(NonEmptyList A) item:A nel:(NonEmptyList A) =>
+value cons:(NonEmptyList A) item:A nel:(NonEmptyList A) =>
     nel
      ||> MkNEL h t => MkNEL item (append [h] t)
 
-fun head:A nel:(NonEmptyList A) =>
+value head:A nel:(NonEmptyList A) =>
     nel
      ||> MkNEL h _ => h
 
-fun toList:(List A) nel:(NonEmptyList A) =>
+value toList:(List A) nel:(NonEmptyList A) =>
     nel
      ||> MkNEL h t => append [h] t
 
-fun fromNonEmpty:(NonEmptyList A) ne:(NonEmpty A) =>
+value fromNonEmpty:(NonEmptyList A) ne:(NonEmpty A) =>
     ne
      ||> MkNonEmpty h t => MkNEL h t
 

@@ -6,18 +6,18 @@ type Profile = {
     bio: Option Text
 }
 
-val name = "Ada"
-val nickname = Some "Countess"
+value name = "Ada"
+value nickname = Some "Countess"
 
-val richProfile:Profile = {
+value richProfile:Profile = {
     name,
     nickname
 }
 
-val minimalProfile:Profile = {
+value minimalProfile:Profile = {
     name: "Grace"
 }
 
-fun profileName:Text profile:Profile =>
+value profileName:Text profile:Profile =>
     profile
      ||> { name, nickname } => name

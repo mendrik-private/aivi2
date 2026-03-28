@@ -119,15 +119,15 @@ type User = {
   name: Text
 }
 
-val headers: HttpHeaders = Map {
+value headers: HttpHeaders = Map {
   "Authorization": "Bearer demo"
 }
 
-val query: HttpQuery = Map {
+value query: HttpQuery = Map {
   "page": "1"
 }
 
-val decodeMode: DecodeMode = Strict
+value decodeMode: DecodeMode = Strict
 
 type RetryBudget = Retry
 
@@ -146,19 +146,19 @@ sig tick: Signal TimerTick
 @source timer.after 1000
 sig ready: Signal TimerReady
 
-val timeoutError: HttpError = Timeout
+value timeoutError: HttpError = Timeout
 
-val decodeError: HttpError = DecodeFailure "bad-json"
+value decodeError: HttpError = DecodeFailure "bad-json"
 
-val requestError: HttpError = RequestFailure "offline"
+value requestError: HttpError = RequestFailure "offline"
 
-val level: LogLevel = Debug
+value level: LogLevel = Debug
 
-val context: LogContext = Map {
+value context: LogContext = Map {
   "module": "stdlib"
 }
 
-val entry: LogEntry = {
+value entry: LogEntry = {
   level: level,
   message: "loaded",
   context: context
@@ -170,24 +170,24 @@ type CurrentLogError = LogError
 
 type PollDelay = Duration
 
-val errorLevel: LogLevel = Error
+value errorLevel: LogLevel = Error
 
-val fsCreated: FsEvent = Created
-val fsChanged: FsEvent = Changed
-val fsDeleted: FsEvent = Deleted
+value fsCreated: FsEvent = Created
+value fsChanged: FsEvent = Changed
+value fsDeleted: FsEvent = Deleted
 
-val fsNotFound: FsError = NotFound "/etc/missing"
-val fsPermDenied: FsError = PermissionDenied "/root/file"
+value fsNotFound: FsError = NotFound "/etc/missing"
+value fsPermDenied: FsError = PermissionDenied "/root/file"
 
-val pkceUserCancelled: PkceError = UserCancelled
-val pkceTimedOut: PkceError = PkceTimeout
+value pkceUserCancelled: PkceError = UserCancelled
+value pkceTimedOut: PkceError = PkceTimeout
 
-val busOwned: BusNameState = Owned
-val busQueued: BusNameState = Queued
-val busLost: BusNameState = Lost
-val dbusNoReply: DbusError = NoReply
+value busOwned: BusNameState = Owned
+value busQueued: BusNameState = Queued
+value busLost: BusNameState = Lost
+value dbusNoReply: DbusError = NoReply
 
-val testCall: DbusCall = {
+value testCall: DbusCall = {
   destination: "org.gnome.AiviMail.Daemon",
   path: "/org/gnome/AiviMail/Daemon",
   interface: "org.gnome.AiviMail.IDaemon",
@@ -195,7 +195,7 @@ val testCall: DbusCall = {
   body: []
 }
 
-val testSignal: DbusSignal = {
+value testSignal: DbusSignal = {
   path: "/org/gnome/AiviMail/Daemon",
   interface: "org.gnome.AiviMail.IDaemon",
   member: "SyncStateChanged",
@@ -204,53 +204,53 @@ val testSignal: DbusSignal = {
 
 type MailCapability = GoaCapability
 
-val mailCap: GoaCapability = Mail
+value mailCap: GoaCapability = Mail
 
-val notification: Notification = {
+value notification: Notification = {
   summary: "New mail",
   body: Some "You have 3 new messages",
   icon: Some "mail-unread",
   actions: []
 }
 
-val notifFailed: NotificationError = NotificationFailed "dbus error"
+value notifFailed: NotificationError = NotificationFailed "dbus error"
 
-val schemaMismatch: DbError = SchemaMismatch "v2 required"
-val queryFailed: DbError = QueryFailed "no such table"
-val sortAsc: SortDir = Asc
-val sortDesc: SortDir = Desc
+value schemaMismatch: DbError = SchemaMismatch "v2 required"
+value queryFailed: DbError = QueryFailed "no such table"
+value sortAsc: SortDir = Asc
+value sortDesc: SortDir = Desc
 
-val syncState: SyncState = {
+value syncState: SyncState = {
   lastSyncedAt: None,
   inProgress: True,
   error: None
 }
 
-val imapAuthFailed: ImapError = ImapAuthFailed
-val imapConnFailed: ImapError = ImapConnectionFailed "timeout"
+value imapAuthFailed: ImapError = ImapAuthFailed
+value imapConnFailed: ImapError = ImapConnectionFailed "timeout"
 
-val smtpConfig: SmtpConfig = {
+value smtpConfig: SmtpConfig = {
   host: "smtp.gmail.com",
   port: 587
 }
 
-val smtpAuthFailed: SmtpError = SmtpAuthFailed
+value smtpAuthFailed: SmtpError = SmtpAuthFailed
 
 type CliWrite = Text -> Task Text Unit
 type CliWriteBytes = Text -> Bytes -> Task Text Unit
 
-val stdoutWriter: CliWrite = stdoutWrite
-val stderrWriter: CliWrite = stderrWrite
-val fsWriteText: Text -> Text -> Task Text Unit = writeText
-val fsWriteBytes: CliWriteBytes = writeBytes
-val fsCreateDirAll: CliWrite = createDirAll
-val fsDeleteFile: CliWrite = deleteFile
+value stdoutWriter: CliWrite = stdoutWrite
+value stderrWriter: CliWrite = stderrWrite
+value fsWriteText: Text -> Text -> Task Text Unit = writeText
+value fsWriteBytes: CliWriteBytes = writeBytes
+value fsCreateDirAll: CliWrite = createDirAll
+value fsDeleteFile: CliWrite = deleteFile
 
-val stdoutTask: Task Text Unit = stdoutWrite "stdout"
-val stderrTask: Task Text Unit = stderrWrite "stderr"
-val mkdirTask: Task Text Unit = createDirAll "/tmp/aivi-boundary"
-val writeTextTask: Task Text Unit = writeText "/tmp/aivi-boundary/out.txt" "ok"
-val deleteTask: Task Text Unit = deleteFile "/tmp/aivi-boundary/out.txt"
+value stdoutTask: Task Text Unit = stdoutWrite "stdout"
+value stderrTask: Task Text Unit = stderrWrite "stderr"
+value mkdirTask: Task Text Unit = createDirAll "/tmp/aivi-boundary"
+value writeTextTask: Task Text Unit = writeText "/tmp/aivi-boundary/out.txt" "ok"
+value deleteTask: Task Text Unit = deleteFile "/tmp/aivi-boundary/out.txt"
 
 @source process.args
 sig cliArgs: Signal (List Text)

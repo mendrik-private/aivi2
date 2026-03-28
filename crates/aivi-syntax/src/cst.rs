@@ -459,6 +459,10 @@ pub enum PipeStageKind {
     FanIn { expr: Expr },
     Truthy { expr: Expr },
     Falsy { expr: Expr },
+    Validate { expr: Expr },
+    Previous { expr: Expr },
+    Accumulate { seed: Expr, step: Expr },
+    Diff { expr: Expr },
 }
 
 /// Pipe spine with an optional leading subject.
@@ -700,9 +704,13 @@ pub struct ErrorItem {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Item {
     Type(NamedItem),
+    Data(NamedItem),
     Value(NamedItem),
-    Function(NamedItem),
     Signal(NamedItem),
+    Source(NamedItem),
+    ResultDecl(NamedItem),
+    View(NamedItem),
+    Adapter(NamedItem),
     Class(NamedItem),
     Instance(InstanceItem),
     Domain(DomainItem),
@@ -716,9 +724,13 @@ pub enum Item {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ItemKind {
     Type,
+    Data,
     Value,
-    Function,
     Signal,
+    Source,
+    ResultDecl,
+    View,
+    Adapter,
     Class,
     Instance,
     Domain,
@@ -732,9 +744,13 @@ impl Item {
     pub fn kind(&self) -> ItemKind {
         match self {
             Item::Type(_) => ItemKind::Type,
+            Item::Data(_) => ItemKind::Data,
             Item::Value(_) => ItemKind::Value,
-            Item::Function(_) => ItemKind::Function,
             Item::Signal(_) => ItemKind::Signal,
+            Item::Source(_) => ItemKind::Source,
+            Item::ResultDecl(_) => ItemKind::ResultDecl,
+            Item::View(_) => ItemKind::View,
+            Item::Adapter(_) => ItemKind::Adapter,
             Item::Class(_) => ItemKind::Class,
             Item::Instance(_) => ItemKind::Instance,
             Item::Domain(_) => ItemKind::Domain,
@@ -748,9 +764,13 @@ impl Item {
     pub fn base(&self) -> &ItemBase {
         match self {
             Item::Type(item)
+            | Item::Data(item)
             | Item::Value(item)
-            | Item::Function(item)
             | Item::Signal(item)
+            | Item::Source(item)
+            | Item::ResultDecl(item)
+            | Item::View(item)
+            | Item::Adapter(item)
             | Item::Class(item) => &item.base,
             Item::Instance(item) => &item.base,
             Item::Domain(item) => &item.base,

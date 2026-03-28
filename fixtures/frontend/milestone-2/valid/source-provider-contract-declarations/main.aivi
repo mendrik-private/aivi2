@@ -14,4 +14,4 @@ provider custom.feed
     timeout: 5ms,
     mode: Stream
 }
-sig updates : Signal Int
+signal updates : Signal Int

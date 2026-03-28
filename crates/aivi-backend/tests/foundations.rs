@@ -237,10 +237,10 @@ fn lowers_source_decode_into_backend_plans() {
         r#"
 domain Duration over Int
     parse : Int -> Result Text Duration
-    value : Duration -> Int
+    unwrap : Duration -> Int
 
 @source custom.feed
-sig timeout : Signal Duration
+signal timeout : Signal Duration
 "#,
     );
 
@@ -271,7 +271,7 @@ sig timeout : Signal Duration
 fn evaluates_multiplicative_builtin_arithmetic_with_precedence() {
     let backend = lower_text(
         "backend-multiplicative-builtins.aivi",
-        "val total:Int = 2 + 3 * 4 - 8 / 2 + 14 % 4\n",
+        "value total:Int = 2 + 3 * 4 - 8 / 2 + 14 % 4\n",
     );
 
     let mut evaluator = KernelEvaluator::new(&backend);
@@ -287,14 +287,14 @@ fn evaluates_multiplicative_builtin_arithmetic_with_precedence() {
 fn evaluates_surface_subject_placeholders_and_integer_ranges() {
     let backend = lower_text(
         "backend-surface-subject-and-ranges.aivi",
-        r#"val ambientFinal:Int =
+        r#"value ambientFinal:Int =
     1
      |> 2
      |> 4
      |> .
 
-val span:List Int = 1..3
-val bracketed:List Int = [1..3]
+value span:List Int = 1..3
+value bracketed:List Int = [1..3]
 "#,
     );
 
@@ -331,7 +331,7 @@ val bracketed:List Int = [1..3]
 
 #[test]
 fn division_by_zero_reports_backend_evaluation_error() {
-    let backend = lower_text("backend-division-by-zero.aivi", "val broken:Int = 1 / 0\n");
+    let backend = lower_text("backend-division-by-zero.aivi", "value broken:Int = 1 / 0\n");
 
     let mut evaluator = KernelEvaluator::new(&backend);
     assert!(matches!(
@@ -382,17 +382,17 @@ fn lowers_source_config_values_into_backend_kernels() {
     let backend = lower_text(
         "backend-source-config.aivi",
         r#"
-sig apiHost = "https://api.example.com"
-sig refresh = 0
-sig enabled = True
-sig pollInterval = 5
+signal apiHost = "https://api.example.com"
+signal refresh = 0
+signal enabled = True
+signal pollInterval = 5
 
 @source http.get "{apiHost}/users" with {
     refreshOn: refresh,
     activeWhen: enabled,
     refreshEvery: pollInterval
 }
-sig users : Signal Int
+signal users : Signal Int
 "#,
     );
 
@@ -433,10 +433,10 @@ fn lowers_item_body_kernels_into_backend_items() {
     let backend = lower_text(
         "backend-item-bodies.aivi",
         r#"
-fun addOne:Int value:Int =>
-    value + 1
+value addOne:Int n:Int =>
+    n + 1
 
-val answer =
+value answer =
     addOne 41
 "#,
     );
@@ -464,15 +464,15 @@ fn runtime_evaluates_item_bodies_and_source_kernels() {
     let backend = lower_text(
         "backend-runtime-values.aivi",
         r#"
-sig apiHost = "https://api.example.com"
-sig refresh = 0
-sig enabled = True
-sig pollInterval = 5
+signal apiHost = "https://api.example.com"
+signal refresh = 0
+signal enabled = True
+signal pollInterval = 5
 
-fun addOne:Int value:Int =>
-    value + 1
+value addOne:Int n:Int =>
+    n + 1
 
-val answer =
+value answer =
     addOne 41
 
 @source http.get "{apiHost}/users" with {
@@ -480,7 +480,7 @@ val answer =
     activeWhen: enabled,
     refreshEvery: addOne pollInterval
 }
-sig users : Signal Int
+signal users : Signal Int
 "#,
     );
 
@@ -557,18 +557,18 @@ fn runtime_evaluates_builtin_overloaded_class_members() {
     let backend = lower_text(
         "backend-builtin-class-members.aivi",
         r#"
-fun increment:Int value:Int => value + 1
+value increment:Int n:Int => n + 1
 
-val joined:Text =
+value joined:Text =
     append "hel" "lo"
 
-val lifted:Option Int =
+value lifted:Option Int =
     map increment (Some 1)
 
-val singleton:Option Int =
+value singleton:Option Int =
     pure 3
 
-val none:List Int =
+value none:List Int =
     empty
 "#,
     );
@@ -672,52 +672,52 @@ fn runtime_evaluates_builtin_foldable_reduce_members() {
     let backend = lower_text(
         "backend-foldable-reduce.aivi",
         r#"
-fun add:Int acc:Int value:Int =>
-    acc + value
+value add:Int acc:Int item:Int =>
+    acc + item
 
-fun joinStep:Text acc:Text value:Text =>
-    append acc value
+value joinStep:Text acc:Text item:Text =>
+    append acc item
 
-val maybeInput:Option Int =
+value maybeInput:Option Int =
     Some 4
 
-val noneInput:Option Int =
+value noneInput:Option Int =
     None
 
-val okInput:Result Text Int =
+value okInput:Result Text Int =
     Ok 5
 
-val errInput:Result Text Int =
+value errInput:Result Text Int =
     Err "bad"
 
-val validInput:Validation Text Int =
+value validInput:Validation Text Int =
     Valid 6
 
-val invalidInput:Validation Text Int =
+value invalidInput:Validation Text Int =
     Invalid "missing"
 
-val total:Int =
+value total:Int =
     reduce add 10 [1, 2, 3]
 
-val joined:Text =
+value joined:Text =
     reduce joinStep "" ["hel", "lo"]
 
-val maybeTotal:Int =
+value maybeTotal:Int =
     reduce add 10 maybeInput
 
-val noneTotal:Int =
+value noneTotal:Int =
     reduce add 10 noneInput
 
-val okTotal:Int =
+value okTotal:Int =
     reduce add 10 okInput
 
-val errTotal:Int =
+value errTotal:Int =
     reduce add 10 errInput
 
-val validTotal:Int =
+value validTotal:Int =
     reduce add 10 validInput
 
-val invalidTotal:Int =
+value invalidTotal:Int =
     reduce add 10 invalidInput
 "#,
     );
@@ -805,66 +805,66 @@ fn runtime_evaluates_extended_builtin_typeclass_members() {
     let backend = lower_text(
         "backend-extended-typeclass-members.aivi",
         r#"
-fun addOne:Int value:Int =>
-    value + 1
+value addOne:Int n:Int =>
+    n + 1
 
-fun keepSmall:(Option Int) value:Int =>
-    value < 3
-     T|> Some value
+value keepSmall:(Option Int) n:Int =>
+    n < 3
+     T|> Some n
      F|> None
 
-fun punctuate:Text value:Text =>
-    append value "!"
+value punctuate:Text s:Text =>
+    append s "!"
 
-val okOne:Result Text Int =
+value okOne:Result Text Int =
     Ok 1
 
-val errBad:Result Text Int =
+value errBad:Result Text Int =
     Err "bad"
 
-val validOne:Validation Text Int =
+value validOne:Validation Text Int =
     Valid 1
 
-val invalidNo:Validation Text Int =
+value invalidNo:Validation Text Int =
     Invalid "no"
 
-val orderedFloat:Ordering =
+value orderedFloat:Ordering =
     compare 1.0 2.0
 
-val orderedBig:Ordering =
+value orderedBig:Ordering =
     compare 1n 2n
 
-val mappedOk:Result Text Int =
+value mappedOk:Result Text Int =
     bimap punctuate addOne okOne
 
-val mappedErr:Result Text Int =
+value mappedErr:Result Text Int =
     bimap punctuate addOne errBad
 
-val mappedValid:Validation Text Int =
+value mappedValid:Validation Text Int =
     bimap punctuate addOne validOne
 
-val mappedInvalid:Validation Text Int =
+value mappedInvalid:Validation Text Int =
     bimap punctuate addOne invalidNo
 
-val traversedList:Option (List Int) =
+value traversedList:Option (List Int) =
     traverse keepSmall [1, 2]
 
-val traversedSome:Option (Option Int) =
+value traversedSome:Option (Option Int) =
     traverse keepSmall (Some 1)
 
-val traversedOk:Option (Result Text Int) =
+value traversedOk:Option (Result Text Int) =
     traverse keepSmall okOne
 
-val traversedValid:Option (Validation Text Int) =
+value traversedValid:Option (Validation Text Int) =
     traverse keepSmall validOne
 
-val filteredList:List Int =
+value filteredList:List Int =
     filterMap keepSmall [1, 3, 2]
 
-val filteredSome:Option Int =
+value filteredSome:Option Int =
     filterMap keepSmall (Some 2)
 
-val filteredMissing:Option Int =
+value filteredMissing:Option Int =
     filterMap keepSmall (Some 4)
 "#,
     );
@@ -1050,16 +1050,16 @@ fn runtime_evaluates_validation_apply_through_backend_runtime() {
         r#"
 type Pair = Pair Text Text
 
-fun pair:Pair left:Text right:Text =>
+value pair:Pair left:Text right:Text =>
     Pair left right
 
-val first:Validation Text Text =
+value first:Validation Text Text =
     Valid "Ada"
 
-val second:Validation Text Text =
+value second:Validation Text Text =
     Valid "Lovelace"
 
-val combined:Validation Text Pair =
+value combined:Validation Text Pair =
     apply (map pair first) second
 "#,
     );
@@ -1113,10 +1113,10 @@ use shared.types (
     Envelope
 )
 
-fun increment:Int value:Int =>
-    value + 1
+value increment:Int n:Int =>
+    n + 1
 
-val lifted:Envelope (Option Int) =
+value lifted:Envelope (Option Int) =
     map increment (Some 1)
 "#,
     );
@@ -1163,10 +1163,10 @@ instance Semigroup Blob
     append left right =
         left
 
-fun combine:Blob left:Blob right:Blob =>
+value combine:Blob left:Blob right:Blob =>
     append left right
 
-val combined:Blob =
+value combined:Blob =
     combine (Blob 1) (Blob 2)
 "#,
     );
@@ -1705,17 +1705,17 @@ fn evaluates_inline_case_pipe_with_pattern_binding_and_parameter_capture() {
     let backend = lower_text(
         "backend-inline-case-captures.aivi",
         r#"
-val fallback = "guest"
+value fallback = "guest"
 
-fun greet:Text prefix:Text maybeUser:(Option Text) =>
+value greet:Text prefix:Text maybeUser:(Option Text) =>
     maybeUser
      ||> Some name => "{prefix}:{name}"
      ||> None => "{prefix}:{fallback}"
 
-val present =
+value present =
     greet "user" (Some "Ada")
 
-val missing =
+value missing =
     greet "user" None
 "#,
     );
@@ -1742,11 +1742,11 @@ fn evaluates_inline_truthy_falsy_item_bodies() {
     let backend = lower_text(
         "backend-inline-truthy-falsy.aivi",
         r#"
-val ready = True
-val start = "start"
-val wait = "wait"
+value ready = True
+value start = "start"
+value wait = "wait"
 
-val branch =
+value branch =
     ready
      T|> start
      F|> wait
@@ -1766,14 +1766,14 @@ fn evaluates_signal_carried_inline_case_pipes_with_committed_snapshots_and_captu
     let backend = lower_text(
         "backend-signal-inline-case-captures.aivi",
         r#"
-fun greetSelected:Signal Text prefix:Text fallback:Text =>
+value greetSelected:Signal Text prefix:Text fallback:Text =>
     selectedUser
      ||> Some name => "{prefix}:{name}"
      ||> None => "{prefix}:{fallback}"
 
-sig selectedUser : Signal (Option Text)
+signal selectedUser : Signal (Option Text)
 
-sig greeting : Signal Text =
+signal greeting : Signal Text =
     greetSelected "user" "guest"
 "#,
     );
@@ -1811,14 +1811,14 @@ fn evaluates_signal_carried_inline_truthy_falsy_pipes_with_committed_snapshots()
     let backend = lower_text(
         "backend-signal-inline-truthy-falsy.aivi",
         r#"
-fun renderStatus:Signal Text prefix:Text readyText:Text waitText:Text =>
+value renderStatus:Signal Text prefix:Text readyText:Text waitText:Text =>
     ready
      T|> "{prefix}:{readyText}"
      F|> "{prefix}:{waitText}"
 
-sig ready : Signal Bool
+signal ready : Signal Bool
 
-sig status : Signal Text =
+signal status : Signal Text =
     renderStatus "state" "go" "wait"
 "#,
     );
@@ -1859,21 +1859,21 @@ type Status =
   | Ready Text
   | Failed Text Text
 
-sig current : Signal Status
+signal current : Signal Status
 
-fun render:Text status:Status =>
+value render:Text status:Status =>
     status
      ||> Idle => "idle"
      ||> Ready name => name
      ||> Failed code message => "{code}:{message}"
 
-val idleLabel =
+value idleLabel =
     render current
 
-val readyLabel =
+value readyLabel =
     render (Ready "Ada")
 
-val failedLabel =
+value failedLabel =
     render (Failed "503" "offline")
 "#,
     );
@@ -1946,17 +1946,17 @@ domain Duration over Int
 domain Retry over Int
     literal x : Int -> Retry
 
-fun step:Int value:Int =>
-    value
+value step:Int x:Int =>
+    x
 
 @recur.timer 5s
-sig polled : Signal Int =
+signal polled : Signal Int =
     0
      @|> step
      <|@ step
 
 @recur.backoff 3x
-val retried : Task Int Int =
+value retried : Task Int Int =
     0
      @|> step
      <|@ step
@@ -2046,9 +2046,9 @@ type Window = {
     delay: Duration
 }
 
-sig windows : Signal Window = { delay: 10ms }
+signal windows : Signal Window = { delay: 10ms }
 
-sig slowWindows : Signal Window =
+signal slowWindows : Signal Window =
     windows
      ?|> ((.delay + 5ms) > 12ms)
 "#,
@@ -2140,8 +2140,8 @@ domain Duration over Int
     literal ms : Int -> Duration
     (+) : Duration -> Duration -> Duration
 
-val same : Bool = 10ms + 5ms == 15ms
-val different : Bool = 10ms + 5ms != 12ms
+value same : Bool = 10ms + 5ms == 15ms
+value different : Bool = 10ms + 5ms != 12ms
 "#,
     );
     let mut evaluator = KernelEvaluator::new(&equality);
@@ -2185,9 +2185,9 @@ domain NonEmpty A over List A
     head : NonEmpty A -> A
     tail : NonEmpty A -> List A
 
-val items : NonEmpty Int = singleton 1
-val first : Int = head items
-val rest : List Int = tail items
+value items : NonEmpty Int = singleton 1
+value first : Int = head items
+value rest : List Int = tail items
 "#,
     );
     let mut evaluator = KernelEvaluator::new(&backend);
@@ -2214,11 +2214,11 @@ fn runtime_evaluates_inline_pipe_domain_member_calls() {
         r#"
 domain Duration over Int
     literal ms : Int -> Duration
-    value : Duration -> Int
+    unwrap : Duration -> Int
 
-val raw : Int =
+value raw : Int =
     10ms
-     |> value
+     |> unwrap
 "#,
     );
     let mut evaluator = KernelEvaluator::new(&backend);
@@ -2244,9 +2244,9 @@ type Window = {
     delay: Duration
 }
 
-sig windows : Signal Window = { delay: 10ms }
+signal windows : Signal Window = { delay: 10ms }
 
-sig slowWindows : Signal Window =
+signal slowWindows : Signal Window =
     windows
      ?|> ((.delay + 5ms) > 12ms)
 "#,
@@ -2771,9 +2771,9 @@ type Window = {
     delay: Duration
 }
 
-sig windows : Signal Window = { delay: 10ms }
+signal windows : Signal Window = { delay: 10ms }
 
-sig slowWindows : Signal Window =
+signal slowWindows : Signal Window =
     windows
      ?|> ((.delay + 5ms) > 12ms)
 "#,

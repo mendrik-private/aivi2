@@ -5,4 +5,4 @@ use aivi.network (
 @source timer.every 120 with {
     immediate: http
 }
-sig tick : Signal Unit
+signal tick : Signal Unit

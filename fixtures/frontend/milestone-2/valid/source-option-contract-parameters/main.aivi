@@ -18,26 +18,26 @@ type FsError =
 type FsWatchEvent =
   | Changed
 
-val loginBody =
+value loginBody =
     Credentials "demo" "secret"
 
-val decodeMode =
+value decodeMode =
     Strict
 
-sig fileEvents : Signal FsWatchEvent =
+signal fileEvents : Signal FsWatchEvent =
     Changed
 
-val reloadTrigger =
+value reloadTrigger =
     fileEvents
 
 @source http.post "/login" with {
     body: loginBody,
     decode: decodeMode
 }
-sig login : Signal (Result HttpError Session)
+signal login : Signal (Result HttpError Session)
 
 @source fs.read "/tmp/demo.txt" with {
     decode: decodeMode,
     reloadOn: reloadTrigger
 }
-sig fileText : Signal (Result FsError Text)
+signal fileText : Signal (Result FsError Text)

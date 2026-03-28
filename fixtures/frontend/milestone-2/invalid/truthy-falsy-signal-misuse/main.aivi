@@ -2,16 +2,16 @@ type User = {
     name: Text
 }
 
-sig ready : Signal Bool = True
+signal ready : Signal Bool = True
 
-sig user : Signal User = { name: "Ada" }
+signal user : Signal User = { name: "Ada" }
 
-val badProjection =
+value badProjection =
     ready
      T|> .name
      F|> "wait"
 
-val badSubject =
+value badSubject =
     user
      T|> .name
      F|> "guest"

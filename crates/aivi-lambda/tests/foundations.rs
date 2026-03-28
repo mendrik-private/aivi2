@@ -115,9 +115,9 @@ fn lowers_value_and_function_bodies_into_item_closures() {
     let lambda = lower_text(
         "lambda-general-exprs.aivi",
         r#"
-val answer = 42
+value answer = 42
 
-fun add:Int x:Int y:Int =>
+value add:Int x:Int y:Int =>
     x + y
 "#,
     );

@@ -22,4 +22,4 @@ domain Repeat over Int
     retry: 3x,
     timeout: 5s
 }
-sig users : Signal (Result HttpError (List User))
+signal users : Signal (Result HttpError (List User))

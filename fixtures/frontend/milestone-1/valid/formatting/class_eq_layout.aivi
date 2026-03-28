@@ -1,4 +1,4 @@
 class Eq A
  (==):A->A->Bool
-fun equivalent:Bool left:Int right:Int =>
+value equivalent:Bool left:Int right:Int =>
 left+1==right-1 and left!=right

@@ -1,1 +1,1 @@
-val brokenPattern = rx"a{2,1}"
+value brokenPattern = rx"a{2,1}"

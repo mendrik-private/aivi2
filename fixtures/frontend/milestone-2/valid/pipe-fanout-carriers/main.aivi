@@ -3,31 +3,31 @@ type User = {
     email: Text
 }
 
-fun joinEmails:Text items:List Text =>
+value joinEmails:Text items:List Text =>
     "joined"
 
-val users:List User = [
+value users:List User = [
     { active: True, email: "ada@example.com" }
 ]
 
-val emails:List Text =
+value emails:List Text =
     users
      *|> .email
 
-val joinedEmails:Text =
+value joinedEmails:Text =
     users
      *|> .email
      <|* joinEmails
 
-sig liveUsers:Signal (List User) = [
+signal liveUsers:Signal (List User) = [
     { active: True, email: "ada@example.com" }
 ]
 
-sig liveEmails:Signal (List Text) =
+signal liveEmails:Signal (List Text) =
     liveUsers
      *|> .email
 
-sig liveJoinedEmails:Signal Text =
+signal liveJoinedEmails:Signal Text =
     liveUsers
      *|> .email
      <|* joinEmails

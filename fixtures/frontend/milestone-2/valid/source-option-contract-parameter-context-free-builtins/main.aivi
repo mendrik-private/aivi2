@@ -8,10 +8,10 @@ type Session = {
 type Pair A =
   | Pair A (Option A)
 
-val requestBody =
+value requestBody =
     Pair 1 None
 
 @source http.post "/login" with {
     body: requestBody
 }
-sig login : Signal (Result HttpError Session)
+signal login : Signal (Result HttpError Session)

@@ -55,7 +55,7 @@ fn explicit_override_bypasses_implicit_main_discovery() {
     let workspace = ScratchDir::new("explicit-override");
     workspace.write("aivi.toml", "");
     let cwd = workspace.mkdir("nested/tool");
-    let explicit_entry = workspace.write("apps/demo.aivi", "val demo = 1\n");
+    let explicit_entry = workspace.write("apps/demo.aivi", "value demo = 1\n");
 
     let resolved = resolve_v1_entrypoint(&cwd, Some(&explicit_entry))
         .expect("explicit overrides should bypass implicit workspace discovery");
@@ -69,10 +69,10 @@ fn explicit_override_bypasses_implicit_main_discovery() {
 fn implicit_resolution_uses_the_nearest_manifest_ancestor() {
     let workspace = ScratchDir::new("nearest-manifest");
     workspace.write("aivi.toml", "");
-    workspace.write("main.aivi", "val outer = 1\n");
+    workspace.write("main.aivi", "value outer = 1\n");
     let nested_root = workspace.mkdir("apps");
     workspace.write("apps/aivi.toml", "");
-    let nested_entry = workspace.write("apps/main.aivi", "val inner = 2\n");
+    let nested_entry = workspace.write("apps/main.aivi", "value inner = 2\n");
     let cwd = workspace.mkdir("apps/tooling");
 
     let resolved = resolve_v1_entrypoint(&cwd, None)
@@ -87,7 +87,7 @@ fn implicit_resolution_uses_the_nearest_manifest_ancestor() {
 fn implicit_resolution_uses_the_current_directory_when_no_manifest_exists() {
     let workspace = ScratchDir::new("cwd-fallback");
     let cwd = workspace.mkdir("playground");
-    let entry = workspace.write("playground/main.aivi", "val view = 3\n");
+    let entry = workspace.write("playground/main.aivi", "value view = 3\n");
 
     let resolved =
         resolve_v1_entrypoint(&cwd, None).expect("current directory should be the workspace root");
@@ -101,7 +101,7 @@ fn implicit_resolution_uses_the_current_directory_when_no_manifest_exists() {
 fn missing_implicit_main_reports_the_expected_path_without_guessing() {
     let workspace = ScratchDir::new("missing-main");
     workspace.write("aivi.toml", "");
-    workspace.write("apps/alternate.aivi", "val alternate = 4\n");
+    workspace.write("apps/alternate.aivi", "value alternate = 4\n");
     let cwd = workspace.mkdir("apps/tooling");
     let expected_path = workspace.path().join("main.aivi");
 

@@ -51,9 +51,13 @@ pub enum TokenKind {
     Arrow,
     ThinArrow,
     TypeKw,
-    ValKw,
-    FunKw,
-    SigKw,
+    DataKw,
+    ValueKw,
+    SignalKw,
+    SourceKw,
+    ResultDeclKw,
+    ViewKw,
+    AdapterKw,
     ClassKw,
     InstanceKw,
     DomainKw,
@@ -70,6 +74,10 @@ pub enum TokenKind {
     PipeRecurStep,
     PipeTap,
     PipeFanIn,
+    PipeValidate,
+    PipePrevious,
+    PipeAccumulate,
+    PipeDiff,
     TruthyBranch,
     FalsyBranch,
     Unknown,
@@ -91,9 +99,13 @@ impl TokenKind {
         matches!(
             self,
             TokenKind::TypeKw
-                | TokenKind::ValKw
-                | TokenKind::FunKw
-                | TokenKind::SigKw
+                | TokenKind::DataKw
+                | TokenKind::ValueKw
+                | TokenKind::SignalKw
+                | TokenKind::SourceKw
+                | TokenKind::ResultDeclKw
+                | TokenKind::ViewKw
+                | TokenKind::AdapterKw
                 | TokenKind::ClassKw
                 | TokenKind::InstanceKw
                 | TokenKind::DomainKw
@@ -115,8 +127,32 @@ impl TokenKind {
                 | TokenKind::PipeRecurStep
                 | TokenKind::PipeTap
                 | TokenKind::PipeFanIn
+                | TokenKind::PipeValidate
+                | TokenKind::PipePrevious
+                | TokenKind::PipeAccumulate
+                | TokenKind::PipeDiff
                 | TokenKind::TruthyBranch
                 | TokenKind::FalsyBranch
+        )
+    }
+
+    pub const fn is_keyword(self) -> bool {
+        matches!(
+            self,
+            TokenKind::TypeKw
+                | TokenKind::DataKw
+                | TokenKind::ValueKw
+                | TokenKind::SignalKw
+                | TokenKind::SourceKw
+                | TokenKind::ResultDeclKw
+                | TokenKind::ViewKw
+                | TokenKind::AdapterKw
+                | TokenKind::ClassKw
+                | TokenKind::InstanceKw
+                | TokenKind::DomainKw
+                | TokenKind::ProviderKw
+                | TokenKind::UseKw
+                | TokenKind::ExportKw
         )
     }
 }
@@ -505,7 +541,8 @@ fn lex_range(source: &SourceFile, range: std::ops::Range<usize>) -> LexedModule 
 }
 
 fn match_compound(bytes: &[u8], cursor: usize, end: usize) -> Option<(TokenKind, usize)> {
-    const PATTERNS: [(&[u8], TokenKind); 17] = [
+    // Patterns ordered longest-first so no short prefix shadows a longer match.
+    const PATTERNS: [(&[u8], TokenKind); 21] = [
         (b"<|@", TokenKind::PipeRecurStep),
         (b"<|*", TokenKind::PipeFanIn),
         (b"</", TokenKind::CloseTagStart),
@@ -515,6 +552,10 @@ fn match_compound(bytes: &[u8], cursor: usize, end: usize) -> Option<(TokenKind,
         (b"||>", TokenKind::PipeCase),
         (b"?|>", TokenKind::PipeGate),
         (b"*|>", TokenKind::PipeMap),
+        (b"!|>", TokenKind::PipeValidate),
+        (b"~|>", TokenKind::PipePrevious),
+        (b"+|>", TokenKind::PipeAccumulate),
+        (b"-|>", TokenKind::PipeDiff),
         (b"T|>", TokenKind::TruthyBranch),
         (b"F|>", TokenKind::FalsyBranch),
         (b"...", TokenKind::Ellipsis),
@@ -538,9 +579,13 @@ fn match_compound(bytes: &[u8], cursor: usize, end: usize) -> Option<(TokenKind,
 fn keyword_kind(text: &str) -> Option<TokenKind> {
     match text {
         "type" => Some(TokenKind::TypeKw),
-        "val" => Some(TokenKind::ValKw),
-        "fun" => Some(TokenKind::FunKw),
-        "sig" => Some(TokenKind::SigKw),
+        "data" => Some(TokenKind::DataKw),
+        "value" => Some(TokenKind::ValueKw),
+        "signal" => Some(TokenKind::SignalKw),
+        "source" => Some(TokenKind::SourceKw),
+        "result" => Some(TokenKind::ResultDeclKw),
+        "view" => Some(TokenKind::ViewKw),
+        "adapter" => Some(TokenKind::AdapterKw),
         "class" => Some(TokenKind::ClassKw),
         "instance" => Some(TokenKind::InstanceKw),
         "domain" => Some(TokenKind::DomainKw),

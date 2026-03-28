@@ -1,10 +1,10 @@
-val name = "Ada"
-val count = 3
-val title = "Inbox"
-val status = "ready"
+value name = "Ada"
+value count = 3
+value title = "Inbox"
+value status = "ready"
 
-val greeting = "Hello {name}, you have {count} items"
-val statusLine = "{title} ({status})"
+value greeting = "Hello {name}, you have {count} items"
+value statusLine = "{title} ({status})"
 
-val datePattern = rx"\d{4}-\d{2}-\d{2}"
-val slugPattern = rx"[a-z0-9]+(-[a-z0-9]+)*"
+value datePattern = rx"\d{4}-\d{2}-\d{2}"
+value slugPattern = rx"[a-z0-9]+(-[a-z0-9]+)*"

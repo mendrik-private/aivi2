@@ -1,10 +1,10 @@
-fun greetUser:Text name:Text =>
+value greetUser:Text name:Text =>
     "hello {name}"
 
-fun joinLabels:Text left:Text right:Text =>
+value joinLabels:Text left:Text right:Text =>
     "{left} / {right}"
 
-val defaultRole: Text = "owner"
+value defaultRole: Text = "owner"
 
 export greetUser
 export joinLabels

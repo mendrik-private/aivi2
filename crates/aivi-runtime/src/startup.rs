@@ -2255,17 +2255,17 @@ mod tests {
         let lowered = lower_text(
             "runtime-startup-basic.aivi",
             r#"
-val prefix = "https://example.com/"
+value prefix = "https://example.com/"
 
-sig id = 7
-sig next = id + 1
-sig enabled = True
-sig label = "Ada"
+signal id = 7
+signal next = id + 1
+signal enabled = True
+signal label = "Ada"
 
 @source http.get "{prefix}{id}" with {
     activeWhen: enabled
 }
-sig users : Signal Text
+signal users : Signal Text
 "#,
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
@@ -2350,7 +2350,7 @@ sig users : Signal Text
         let lowered = lower_text(
             "runtime-startup-moving-gc.aivi",
             r#"
-sig label = "Ada"
+signal label = "Ada"
 "#,
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
@@ -2403,10 +2403,10 @@ sig label = "Ada"
             "runtime-startup-missing-snapshot.aivi",
             r#"
 @source http.get "/host"
-sig apiHost : Signal Text
+signal apiHost : Signal Text
 
 @source http.get "{apiHost}/users"
-sig users : Signal Text
+signal users : Signal Text
 "#,
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
@@ -2437,10 +2437,10 @@ sig users : Signal Text
             "runtime-startup-missing-signal-mapping.aivi",
             r#"
 @source http.get "/host"
-sig apiHost : Signal Text
+signal apiHost : Signal Text
 
 @source http.get "{apiHost}/users"
-sig users : Signal Text
+signal users : Signal Text
 "#,
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
@@ -2477,7 +2477,7 @@ sig users : Signal Text
         let lowered = lower_text(
             "runtime-startup-manual-task-success.aivi",
             r#"
-val answer = 42
+value answer = 42
 "#,
         );
         let mut linked = manual_task_linked_runtime(&lowered, "answer");
@@ -2512,7 +2512,7 @@ val answer = 42
         let lowered = lower_text(
             "runtime-startup-manual-task-error.aivi",
             r#"
-val total = 1.0 + 2.0
+value total = 1.0 + 2.0
 "#,
         );
         let mut linked = manual_task_linked_runtime(&lowered, "total");
@@ -2549,7 +2549,7 @@ val total = 1.0 + 2.0
         let lowered = lower_text(
             "runtime-startup-manual-task-cancel.aivi",
             r#"
-val answer = 42
+value answer = 42
 "#,
         );
         let mut linked = manual_task_linked_runtime(&lowered, "answer");
@@ -2608,11 +2608,11 @@ val answer = 42
 domain Retry over Int
     literal x : Int -> Retry
 
-fun step:Int value:Int =>
-    value
+value step:Int n:Int =>
+    n
 
 @recur.backoff 3x
-val retried : Task Int Int =
+value retried : Task Int Int =
     0
      @|> step
      <|@ step
@@ -2648,13 +2648,13 @@ val retried : Task Int Int =
         let lowered = lower_text(
             "runtime-startup-inline-case-helper.aivi",
             r#"
-fun choose:Text maybeName:(Option Text) =>
+value choose:Text maybeName:(Option Text) =>
     maybeName
      ||> Some name => name
      ||> None => "guest"
 
-sig maybeName = Some "Ada"
-sig label = choose maybeName
+signal maybeName = Some "Ada"
+signal label = choose maybeName
 "#,
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
@@ -2685,14 +2685,14 @@ sig label = choose maybeName
         let lowered = lower_text(
             "runtime-startup-signal-inline-case.aivi",
             r#"
-fun greetSelected:Signal Text prefix:Text fallback:Text selected:Signal (Option Text) =>
+value greetSelected:Signal Text prefix:Text fallback:Text selected:Signal (Option Text) =>
     selected
      ||> Some name => "{prefix}:{name}"
      ||> None => "{prefix}:{fallback}"
 
-sig selectedUser : Signal (Option Text) = Some "Ada"
+signal selectedUser : Signal (Option Text) = Some "Ada"
 
-sig greeting : Signal Text =
+signal greeting : Signal Text =
     greetSelected "user" "guest" selectedUser
 "#,
         );
@@ -2724,14 +2724,14 @@ sig greeting : Signal Text =
         let lowered = lower_text(
             "runtime-startup-signal-inline-truthy-falsy.aivi",
             r#"
-fun renderStatus:Signal Text prefix:Text readyText:Text waitText:Text statusReady:Signal Bool =>
+value renderStatus:Signal Text prefix:Text readyText:Text waitText:Text statusReady:Signal Bool =>
     statusReady
      T|> "{prefix}:{readyText}"
      F|> "{prefix}:{waitText}"
 
-sig ready : Signal Bool = True
+signal ready : Signal Bool = True
 
-sig status : Signal Text =
+signal status : Signal Text =
     renderStatus "state" "go" "wait" ready
 "#,
         );
@@ -2775,30 +2775,30 @@ type FormError = {
     message: Text
 }
 
-sig ready : Signal Bool = True
+signal ready : Signal Bool = True
 
-sig maybeUser : Signal (Option User) = Some { name: "Ada" }
+signal maybeUser : Signal (Option User) = Some { name: "Ada" }
 
-sig loaded : Signal (Result LoadError User) = Err { message: "offline" }
+signal loaded : Signal (Result LoadError User) = Err { message: "offline" }
 
-sig submitted : Signal (Validation FormError User) = Valid { name: "Grace" }
+signal submitted : Signal (Validation FormError User) = Valid { name: "Grace" }
 
-sig readyText : Signal Text =
+signal readyText : Signal Text =
     ready
      T|> "start"
      F|> "wait"
 
-sig greeting : Signal Text =
+signal greeting : Signal Text =
     maybeUser
      T|> .name
      F|> "guest"
 
-sig rendered : Signal Text =
+signal rendered : Signal Text =
     loaded
      T|> .name
      F|> .message
 
-sig summary : Signal Text =
+signal summary : Signal Text =
     submitted
      T|> .name
      F|> .message
@@ -2848,9 +2848,9 @@ type Session = {
     user: User
 }
 
-sig session : Signal Session = { user: { name: "Ada" } }
+signal session : Signal Session = { user: { name: "Ada" } }
 
-sig label : Signal Text =
+signal label : Signal Text =
     session
      |> .user
      |> .name
@@ -2889,10 +2889,10 @@ type Status =
   | Ready Text
   | Failed Text Text
 
-sig current : Signal Status =
+signal current : Signal Status =
     Failed "503" "offline"
 
-sig label : Signal Text =
+signal label : Signal Text =
     current
      ||> Idle => "idle"
      ||> Ready name => name
@@ -2936,11 +2936,11 @@ type Session = {
     user: User
 }
 
-val seed:User = { active: True, email: "ada@example.com" }
+value seed:User = { active: True, email: "ada@example.com" }
 
-sig sessions : Signal Session = { user: seed }
+signal sessions : Signal Session = { user: seed }
 
-sig activeUsers : Signal User =
+signal activeUsers : Signal User =
     sessions
      |> .user
      ?|> .active
@@ -2986,9 +2986,9 @@ type User = {
     email: Text
 }
 
-sig users : Signal User = { active: True, email: "ada@example.com" }
+signal users : Signal User = { active: True, email: "ada@example.com" }
 
-sig activeUsers : Signal User =
+signal activeUsers : Signal User =
     users
      ?|> .active
 "#,
@@ -3033,18 +3033,18 @@ type User = {
     email: Text
 }
 
-fun joinEmails:Text items:List Text =>
+value joinEmails:Text items:List Text =>
     "joined"
 
-sig liveUsers : Signal (List User) = [
+signal liveUsers : Signal (List User) = [
     { active: True, email: "ada@example.com" }
 ]
 
-sig liveEmails : Signal (List Text) =
+signal liveEmails : Signal (List Text) =
     liveUsers
      *|> .email
 
-sig liveJoinedEmails : Signal Text =
+signal liveJoinedEmails : Signal Text =
     liveUsers
      *|> .email
      <|* joinEmails
@@ -3096,7 +3096,7 @@ provider custom.feed
     wakeup: providerTrigger
 
 @source custom.feed
-sig status : Signal Text =
+signal status : Signal Text =
     "ready"
 "#,
         );
@@ -3147,14 +3147,14 @@ sig status : Signal Text =
         let lowered = lower_text(
             "runtime-startup-source-recurrence-steps.aivi",
             r#"
-fun bump:Int value:Int =>
-    value + 1
+value bump:Int n:Int =>
+    n + 1
 
 provider custom.feed
     wakeup: providerTrigger
 
 @source custom.feed
-sig counter : Signal Int =
+signal counter : Signal Int =
     0
      @|> bump
      <|@ bump
@@ -3210,11 +3210,11 @@ sig counter : Signal Int =
 domain Retry over Int
     literal x : Int -> Retry
 
-fun keep:Int value:Int =>
-    value
+value keep:Int n:Int =>
+    n
 
 @recur.backoff 3x
-val retried : Task Int Int =
+value retried : Task Int Int =
     0
      @|> keep
      <|@ keep
@@ -3232,16 +3232,16 @@ val retried : Task Int Int =
         let lowered = lower_text(
             "runtime-startup-scan-signal.aivi",
             r#"
-fun step:Int next:Int current:Int =>
+value step:Int next:Int current:Int =>
     current + next
 
 provider custom.feed
     wakeup: providerTrigger
 
 @source custom.feed
-sig next : Signal Int
+signal next : Signal Int
 
-sig counter : Signal Int =
+signal counter : Signal Int =
     next
      |> scan 0 step
 "#,
@@ -3302,10 +3302,10 @@ sig counter : Signal Int =
         let lowered = lower_text(
             "runtime-startup-recurrence-non-wakeup-deps.aivi",
             r#"
-fun setDirection:Int next:Int current:Int =>
+value setDirection:Int next:Int current:Int =>
     next
 
-fun stepGame:Int tick:Int current:Int =>
+value stepGame:Int tick:Int current:Int =>
     current + direction
 
 provider custom.turn
@@ -3315,16 +3315,16 @@ provider custom.tick
     wakeup: providerTrigger
 
 @source custom.turn
-sig turn : Signal Int
+signal turn : Signal Int
 
-sig direction : Signal Int =
+signal direction : Signal Int =
     turn
      |> scan 1 setDirection
 
 @source custom.tick
-sig tick : Signal Int
+signal tick : Signal Int
 
-sig game : Signal Int =
+signal game : Signal Int =
     tick
      |> scan 0 stepGame
 "#,

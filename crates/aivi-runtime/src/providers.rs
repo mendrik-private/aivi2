@@ -3304,7 +3304,7 @@ mod tests {
 @source timer.every 5 with {
     immediate: True
 }
-sig tick : Signal Unit
+signal tick : Signal Unit
 "#,
         );
         let assembly =
@@ -3352,7 +3352,7 @@ type User = {{
 }}
 
 @source http.get "{base_url}/users"
-sig users : Signal (Result HttpError (List User))
+signal users : Signal (Result HttpError (List User))
 "#
             ),
         );
@@ -3397,7 +3397,7 @@ type HttpError =
 @source http.get "{base_url}/users" with {{
     refreshEvery: 40
 }}
-sig users : Signal (Result HttpError Text)
+signal users : Signal (Result HttpError Text)
 "#
             ),
         );
@@ -3456,7 +3456,7 @@ type MailboxError =
   | MailboxFailure Text
 
 @source mailbox.subscribe "jobs"
-sig job : Signal (Result MailboxError Text)
+signal job : Signal (Result MailboxError Text)
 "#,
         );
         let assembly =
@@ -3500,7 +3500,7 @@ type MailboxError =
   | MailboxFailure Text
 
 @source mailbox.subscribe "jobs"
-sig job : Signal (Result MailboxError Text)
+signal job : Signal (Result MailboxError Text)
 "#,
         );
         let assembly =
@@ -3557,7 +3557,7 @@ type FsError =
   | DecodeFailure Text
 
 @source fs.read "{}"
-sig fileText : Signal (Result FsError Text)
+signal fileText : Signal (Result FsError Text)
 "#,
                 path.display()
             ),
@@ -3604,7 +3604,7 @@ type FsWatchEvent =
   | Deleted
 
 @source fs.watch "{}"
-sig fileEvents : Signal FsWatchEvent
+signal fileEvents : Signal FsWatchEvent
 "#,
                 path.display()
             ),
@@ -3657,7 +3657,7 @@ type SocketError =
   | RequestFailure Text
 
 @source socket.connect "tcp://{}:{}"
-sig message : Signal (Result SocketError Text)
+signal message : Signal (Result SocketError Text)
 "#,
                 address.ip(),
                 address.port()
@@ -3705,7 +3705,7 @@ type ProcessEvent =
   | Spawned
 
 @source process.spawn "true"
-sig events : Signal ProcessEvent
+signal events : Signal ProcessEvent
 "#,
         );
         let assembly =
@@ -3746,7 +3746,7 @@ type Key =
     repeat: False
     focusOnly: True
 }
-sig keyDown : Signal Key
+signal keyDown : Signal Key
 "#,
         );
         let assembly =
@@ -3788,7 +3788,7 @@ sig keyDown : Signal Key
             "runtime-provider-timer-cancel.aivi",
             r#"
 @source timer.every 5
-sig tick : Signal Unit
+signal tick : Signal Unit
 "#,
         );
         let assembly =

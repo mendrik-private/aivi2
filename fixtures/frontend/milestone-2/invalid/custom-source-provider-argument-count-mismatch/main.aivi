@@ -3,4 +3,4 @@ provider custom.feed
     wakeup: providerTrigger
 
 @source custom.feed
-sig updates : Signal Int
+signal updates : Signal Int

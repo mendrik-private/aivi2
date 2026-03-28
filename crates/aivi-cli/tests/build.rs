@@ -48,7 +48,7 @@ fn build_writes_a_self_contained_runnable_bundle() {
     workspace.write(
         "main.aivi",
         r#"
-val screenView =
+value screenView =
     <Window title="AIVI" />
 "#,
     );
@@ -112,7 +112,7 @@ val screenView =
         .expect("bundle should copy the entry source");
     assert_eq!(
         bundled_source,
-        "\nval screenView =\n    <Window title=\"AIVI\" />\n"
+        "\nvalue screenView =\n    <Window title=\"AIVI\" />\n"
     );
     assert!(
         bundle_path.join("stdlib/aivi.toml").is_file(),
@@ -133,7 +133,7 @@ use shared.types (
 
 type Welcome = Greeting
 
-val appView =
+value appView =
     <Window title="Workspace" />
 "#,
     );

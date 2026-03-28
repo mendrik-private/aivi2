@@ -2,9 +2,9 @@ type User = {
     name: Text
 }
 
-val user:User = { name: "Ada" }
+value user:User = { name: "Ada" }
 
-val message:Text =
+value message:Text =
     user
      T|> .name
      F|> "guest"

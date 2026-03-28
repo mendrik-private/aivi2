@@ -207,7 +207,7 @@ domain Duration over Int
     literal ms : Int -> Duration
     (+) : Duration -> Duration -> Duration
 
-val total = 10ms + 5ms
+value total = 10ms + 5ms
 "#,
             "total",
         );
@@ -226,7 +226,7 @@ domain Duration over Int
     literal ms : Int -> Duration
     (-) : Duration -> Duration -> Duration
 
-val remaining = 10ms - 5ms
+value remaining = 10ms - 5ms
 "#,
             "remaining",
         );
@@ -245,7 +245,7 @@ domain Amount A over A
     wrap : A -> Amount A
     (+) : Amount A -> Amount A -> Amount A
 
-val total = wrap 1 + wrap 2
+value total = wrap 1 + wrap 2
 "#,
             "total",
         );
@@ -267,7 +267,7 @@ domain Path over Text
     root : Text -> Path
     (/) : Path -> Text -> Path
 
-val nested = root "/tmp" / "config"
+value nested = root "/tmp" / "config"
 "#,
             "nested",
         );
@@ -286,7 +286,7 @@ domain Duration over Int
     literal ms : Int -> Duration
     (*) : Duration -> Int -> Duration
 
-val scaled = 10ms * 2
+value scaled = 10ms * 2
 "#,
             "scaled",
         );

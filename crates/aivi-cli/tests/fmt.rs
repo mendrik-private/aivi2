@@ -55,7 +55,7 @@ impl Drop for TempFile {
 fn fmt_normalizes_markup_layout() {
     let input = TempFile::new(
         "fmt-normalize",
-        "val dashboard=<fragment><Label text=\"Inbox\"/><show when={True} keepMounted={True}><with value={formatCount count} as={label}><Label text={label}/></with></show></fragment>\n",
+        "value dashboard=<fragment><Label text=\"Inbox\"/><show when={True} keepMounted={True}><with value={formatCount count} as={label}><Label text={label}/></with></show></fragment>\n",
     );
 
     let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
@@ -72,7 +72,7 @@ fn fmt_normalizes_markup_layout() {
     assert_eq!(
         String::from_utf8(output.stdout).expect("stdout should be utf-8"),
         concat!(
-            "val dashboard =\n",
+            "value dashboard =\n",
             "    <fragment>\n",
             "        <Label text=\"Inbox\" />\n",
             "        <show when={True} keepMounted={True}>\n",
@@ -87,7 +87,7 @@ fn fmt_normalizes_markup_layout() {
 
 #[test]
 fn fmt_fails_on_syntax_errors() {
-    let input = TempFile::new("fmt-error", "val broken = <show when={True}>\n");
+    let input = TempFile::new("fmt-error", "value broken = <show when={True}>\n");
 
     let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
         .arg("fmt")

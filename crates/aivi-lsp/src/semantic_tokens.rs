@@ -31,9 +31,13 @@ fn token_type_index(kind: TokenKind) -> Option<u32> {
     match kind {
         // Keywords
         TokenKind::TypeKw
-        | TokenKind::ValKw
-        | TokenKind::FunKw
-        | TokenKind::SigKw
+        | TokenKind::DataKw
+        | TokenKind::ValueKw
+        | TokenKind::SignalKw
+        | TokenKind::SourceKw
+        | TokenKind::ResultDeclKw
+        | TokenKind::ViewKw
+        | TokenKind::AdapterKw
         | TokenKind::ClassKw
         | TokenKind::InstanceKw
         | TokenKind::DomainKw
@@ -76,6 +80,10 @@ fn token_type_index(kind: TokenKind) -> Option<u32> {
         | TokenKind::PipeFanIn
         | TokenKind::TruthyBranch
         | TokenKind::FalsyBranch
+        | TokenKind::PipeValidate
+        | TokenKind::PipePrevious
+        | TokenKind::PipeAccumulate
+        | TokenKind::PipeDiff
         | TokenKind::At
         | TokenKind::Hash
         | TokenKind::Colon

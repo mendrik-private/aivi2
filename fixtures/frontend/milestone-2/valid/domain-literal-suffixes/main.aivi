@@ -2,9 +2,9 @@ domain Duration over Int
     literal ms : Int -> Duration
     literal sec : Int -> Duration
     (+) : Duration -> Duration -> Duration
-    value : Duration -> Int
+    unwrap : Duration -> Int
 
-val delay : Duration = 250ms
-val total = 250ms + 3sec
+value delay : Duration = 250ms
+value total = 250ms + 3sec
 
 export delay

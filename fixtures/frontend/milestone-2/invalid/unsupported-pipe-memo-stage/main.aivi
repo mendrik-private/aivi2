@@ -1,3 +1,3 @@
-val mapped =
+value mapped =
     [1, 2, 3]
      *|> . + 1 #mapped

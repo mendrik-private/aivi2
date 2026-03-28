@@ -1164,7 +1164,7 @@ mod tests {
         assert!(sources.borrow_mut().take().is_none());
     }
 
-    #[test]
+    #[gtk::test]
     fn timer_sources_stay_paused_until_windows_present() {
         let path = repo_path("demos/snake.aivi");
         let artifact = prepare_run_from_path(&path);
@@ -1214,7 +1214,7 @@ mod tests {
         harness.shutdown();
     }
 
-    #[test]
+    #[gtk::test]
     fn main_loop_run_advances_timer_driven_board_after_presentation() {
         let path = repo_path("demos/snake.aivi");
         let artifact = prepare_run_from_path(&path);
@@ -1246,7 +1246,7 @@ mod tests {
         harness.shutdown();
     }
 
-    #[test]
+    #[gtk::test]
     fn main_loop_run_hydrates_board_label_after_timer_ticks() {
         let path = repo_path("demos/snake.aivi");
         let artifact = prepare_run_from_path(&path);
@@ -1272,7 +1272,7 @@ mod tests {
         harness.shutdown();
     }
 
-    #[test]
+    #[gtk::test]
     fn harness_run_main_loop_advances_timer_driven_board_without_borrow_panics() {
         let path = repo_path("demos/snake.aivi");
         let artifact = prepare_run_from_path(&path);
@@ -1303,7 +1303,7 @@ mod tests {
         harness.shutdown();
     }
 
-    #[test]
+    #[gtk::test]
     fn process_pending_work_applies_queued_window_key_events_immediately() {
         let path = repo_path("demos/snake.aivi");
         let artifact = prepare_run_from_path(&path);
@@ -1334,7 +1334,7 @@ mod tests {
         harness.shutdown();
     }
 
-    #[test]
+    #[gtk::test]
     fn space_restarts_snake_after_game_over() {
         let path = repo_path("demos/snake.aivi");
         let artifact = prepare_run_from_path(&path);

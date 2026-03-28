@@ -4,4 +4,4 @@ domain Duration over Int
 @source timer.every 120 with {
     jitterMs: 5s
 }
-sig tick : Signal Unit
+signal tick : Signal Unit

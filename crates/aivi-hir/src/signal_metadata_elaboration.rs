@@ -275,8 +275,15 @@ fn collect_signal_dependencies(module: &Module, mut work: Vec<DependencyWork>) -
                                 | PipeStageKind::Truthy { expr }
                                 | PipeStageKind::Falsy { expr }
                                 | PipeStageKind::RecurStart { expr }
-                                | PipeStageKind::RecurStep { expr } => {
+                                | PipeStageKind::RecurStep { expr }
+                                | PipeStageKind::Validate { expr }
+                                | PipeStageKind::Previous { expr }
+                                | PipeStageKind::Diff { expr } => {
                                     work.push(DependencyWork::Expr(*expr))
+                                }
+                                PipeStageKind::Accumulate { seed, step } => {
+                                    work.push(DependencyWork::Expr(*seed));
+                                    work.push(DependencyWork::Expr(*step));
                                 }
                                 PipeStageKind::Case { pattern, body } => {
                                     work.push(DependencyWork::Expr(*body));

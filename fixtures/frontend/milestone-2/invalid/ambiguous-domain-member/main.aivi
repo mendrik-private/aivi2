@@ -4,4 +4,4 @@ domain Duration over Int
 domain Count over Int
     make : Int -> Count
 
-val bad = make 1
+value bad = make 1

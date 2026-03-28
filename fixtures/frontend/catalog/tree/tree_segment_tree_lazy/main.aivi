@@ -33,23 +33,23 @@ type TreeCatalog = {
     coverage: Text
 }
 
-fun segmentLength:Int cover:Range =>
+value segmentLength:Int cover:Range =>
     cover.stop - cover.start
 
-fun sameRange:Bool left:Range right:Range =>
+value sameRange:Bool left:Range right:Range =>
     left.start == right.start and left.stop == right.stop
 
-fun disjoint:Bool left:Range right:Range =>
+value disjoint:Bool left:Range right:Range =>
     left.stop < right.start or left.stop == right.start or right.stop < left.start or right.stop == left.start
 
-fun applyNode:Node delta:Int node:Node =>
+value applyNode:Node delta:Int node:Node =>
     {
         cover: node.cover,
         total: node.total + delta * segmentLength node.cover,
         lazy: node.lazy + delta
     }
 
-fun rebuildTree:LazyTree cover:Range left:Node right:Node =>
+value rebuildTree:LazyTree cover:Range left:Node right:Node =>
     {
         root: {
             cover,
@@ -60,72 +60,72 @@ fun rebuildTree:LazyTree cover:Range left:Node right:Node =>
         right
     }
 
-fun pushRoot:LazyTree tree:LazyTree =>
+value pushRoot:LazyTree tree:LazyTree =>
     tree.root.lazy == 0
      T|> tree
      F|> { root: { cover: tree.root.cover, total: tree.root.total, lazy: 0 }, left: applyNode tree.root.lazy tree.left, right: applyNode tree.root.lazy tree.right }
 
-fun updateChild:Node target:Range delta:Int node:Node =>
+value updateChild:Node target:Range delta:Int node:Node =>
     sameRange node.cover target
      T|> applyNode delta node
      F|> node
 
-fun updateChildren:LazyTree target:Range delta:Int tree:LazyTree =>
+value updateChildren:LazyTree target:Range delta:Int tree:LazyTree =>
     rebuildTree tree.root.cover (updateChild target delta tree.left) (updateChild target delta tree.right)
 
-fun updateAligned:LazyTree target:Range delta:Int tree:LazyTree =>
+value updateAligned:LazyTree target:Range delta:Int tree:LazyTree =>
     sameRange tree.root.cover target
      T|> { root: applyNode delta tree.root, left: tree.left, right: tree.right }
      F|> updateChildren target delta (pushRoot tree)
 
-fun skipUpdate:Bool target:Range delta:Int tree:LazyTree =>
+value skipUpdate:Bool target:Range delta:Int tree:LazyTree =>
     delta == 0 or disjoint tree.root.cover target
 
-fun updateRange:LazyTree target:Range delta:Int tree:LazyTree =>
+value updateRange:LazyTree target:Range delta:Int tree:LazyTree =>
     skipUpdate target delta tree
      T|> tree
      F|> updateAligned target delta tree
 
-fun queryRightOrZero:Int target:Range tree:LazyTree =>
+value queryRightOrZero:Int target:Range tree:LazyTree =>
     sameRange tree.right.cover target
      T|> tree.right.total
      F|> 0
 
-fun queryChild:Int target:Range tree:LazyTree =>
+value queryChild:Int target:Range tree:LazyTree =>
     sameRange tree.left.cover target
      T|> tree.left.total
      F|> queryRightOrZero target tree
 
-fun queryRange:Int target:Range tree:LazyTree =>
+value queryRange:Int target:Range tree:LazyTree =>
     sameRange tree.root.cover target
      T|> tree.root.total
      F|> queryChild target (pushRoot tree)
 
-fun summarizeTree:TreeSummary label:Text focus:Range tree:LazyTree =>
+value summarizeTree:TreeSummary label:Text focus:Range tree:LazyTree =>
     pushRoot tree
      ||> { left, right } => { label, focusTotal: queryRange focus tree, rootTotal: tree.root.total, pendingRoot: tree.root.lazy, leftTotal: left.total, rightTotal: right.total, note: "focus {focus.start}:{focus.stop}" }
 
-val wholeRange: Range = {
+value wholeRange: Range = {
     start: 0,
     stop: 4
 }
 
-val leftRange: Range = {
+value leftRange: Range = {
     start: 0,
     stop: 2
 }
 
-val rightRange: Range = {
+value rightRange: Range = {
     start: 2,
     stop: 4
 }
 
-val outsideRange: Range = {
+value outsideRange: Range = {
     start: 4,
     stop: 6
 }
 
-val baseTree: LazyTree = {
+value baseTree: LazyTree = {
     root: {
         cover: wholeRange,
         total: 10,
@@ -143,12 +143,12 @@ val baseTree: LazyTree = {
     }
 }
 
-val wholeCoverTree: LazyTree = updateRange wholeRange 5 baseTree
-val leftPatchTree: LazyTree = updateRange leftRange 2 wholeCoverTree
-val rightPatchTree: LazyTree = updateRange rightRange (0 - 1) wholeCoverTree
-val noopTree: LazyTree = updateRange outsideRange 3 baseTree
+value wholeCoverTree: LazyTree = updateRange wholeRange 5 baseTree
+value leftPatchTree: LazyTree = updateRange leftRange 2 wholeCoverTree
+value rightPatchTree: LazyTree = updateRange rightRange (0 - 1) wholeCoverTree
+value noopTree: LazyTree = updateRange outsideRange 3 baseTree
 
-val treeCatalog: TreeCatalog = {
+value treeCatalog: TreeCatalog = {
     wholeCover: summarizeTree "whole-cover" leftRange wholeCoverTree,
     leftPatch: summarizeTree "left-patch" leftRange leftPatchTree,
     rightPatch: summarizeTree "right-patch" rightRange rightPatchTree,

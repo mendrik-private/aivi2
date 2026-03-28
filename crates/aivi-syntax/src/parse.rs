@@ -233,12 +233,41 @@ impl<'a> Parser<'a> {
             TokenKind::TypeKw => {
                 Item::Type(self.parse_type_item(base, keyword_index, end, "type declaration"))
             }
-            TokenKind::ValKw => {
-                Item::Value(self.parse_value_item(base, keyword_index, end, "value declaration"))
+            TokenKind::DataKw => {
+                Item::Data(self.parse_type_item(base, keyword_index, end, "data declaration"))
             }
-            TokenKind::FunKw => Item::Function(self.parse_function_item(base, keyword_index, end)),
-            TokenKind::SigKw => {
+            TokenKind::ValueKw => {
+                Item::Value(self.parse_value_item(base, keyword_index, end))
+            }
+            TokenKind::SignalKw => {
                 Item::Signal(self.parse_signal_item(base, keyword_index, end, "signal declaration"))
+            }
+            TokenKind::SourceKw => {
+                Item::Source(self.parse_source_item(base, keyword_index, end))
+            }
+            TokenKind::ResultDeclKw => {
+                Item::ResultDecl(self.parse_value_item_with_eq(
+                    base,
+                    keyword_index,
+                    end,
+                    "result declaration",
+                ))
+            }
+            TokenKind::ViewKw => {
+                Item::View(self.parse_value_item_with_eq(
+                    base,
+                    keyword_index,
+                    end,
+                    "view declaration",
+                ))
+            }
+            TokenKind::AdapterKw => {
+                Item::Adapter(self.parse_value_item_with_eq(
+                    base,
+                    keyword_index,
+                    end,
+                    "adapter declaration",
+                ))
             }
             TokenKind::ClassKw => Item::Class(self.parse_class_item(base, keyword_index, end)),
             TokenKind::InstanceKw => {
@@ -480,7 +509,87 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parse a `value` declaration: no-params form uses `=`, params form uses `=>`.
     fn parse_value_item(
+        &mut self,
+        base: ItemBase,
+        keyword_index: usize,
+        end: usize,
+    ) -> NamedItem {
+        let mut cursor = keyword_index + 1;
+        let name =
+            self.parse_named_item_name(keyword_index, &mut cursor, end, "value declaration");
+        let (constraints, annotation) = self.parse_function_signature_annotation(&mut cursor, end);
+
+        let mut parameters = Vec::new();
+        while self.starts_function_param(cursor, end) {
+            let Some(parameter) = self.parse_function_param(&mut cursor, end) else {
+                break;
+            };
+            parameters.push(parameter);
+        }
+
+        let body = if !parameters.is_empty() {
+            // Function form: `value name params => body`
+            if self
+                .consume_kind(&mut cursor, end, TokenKind::Arrow)
+                .is_some()
+            {
+                self.parse_expression_body(
+                    keyword_index,
+                    &mut cursor,
+                    end,
+                    "value declaration",
+                    "value declaration is missing its body after `=>`",
+                    "expected a body expression after `=>`",
+                )
+            } else {
+                self.diagnostics.push(
+                    Diagnostic::error("value declaration with parameters is missing `=>`")
+                        .with_code(MISSING_FUNCTION_ARROW)
+                        .with_primary_label(
+                            self.source_span_of_token(keyword_index),
+                            "expected `=>` after the parameters",
+                        ),
+                );
+                None
+            }
+        } else if self
+            .consume_kind(&mut cursor, end, TokenKind::Equals)
+            .is_some()
+        {
+            // Constant form: `value name = body`
+            self.parse_expression_body(
+                keyword_index,
+                &mut cursor,
+                end,
+                "value declaration",
+                "value declaration is missing its body after `=`",
+                "expected an expression after `=`",
+            )
+        } else {
+            self.missing_body_diagnostic(
+                keyword_index,
+                "value declaration is missing its body",
+                "expected `=` followed by an expression, or parameters followed by `=>`",
+            );
+            None
+        };
+
+        NamedItem {
+            base,
+            keyword_span: self.source_span_of_token(keyword_index),
+            name,
+            type_parameters: Vec::new(),
+            constraints,
+            annotation,
+            parameters,
+            body,
+        }
+    }
+
+    /// Parse a `source`, `result`, `view`, or `adapter` declaration using `=` body form.
+    fn parse_value_item_with_eq(
         &mut self,
         base: ItemBase,
         keyword_index: usize,
@@ -498,14 +607,14 @@ impl<'a> Parser<'a> {
                 keyword_index,
                 &mut cursor,
                 end,
-                "value declaration",
-                "value declaration is missing its body after `=`",
+                description,
+                &format!("{description} is missing its body after `=`"),
                 "expected an expression after `=`",
             )
         } else {
             self.missing_body_diagnostic(
                 keyword_index,
-                "value declaration is missing its body",
+                &format!("{description} is missing its body"),
                 "expected `=` followed by an expression",
             );
             None
@@ -523,58 +632,14 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_function_item(
+    /// Parse a `source` declaration — same surface shape as `signal` with optional type + `=` body.
+    fn parse_source_item(
         &mut self,
         base: ItemBase,
         keyword_index: usize,
         end: usize,
     ) -> NamedItem {
-        let mut cursor = keyword_index + 1;
-        let name =
-            self.parse_named_item_name(keyword_index, &mut cursor, end, "function declaration");
-        let (constraints, annotation) = self.parse_function_signature_annotation(&mut cursor, end);
-        let mut parameters = Vec::new();
-        while self.starts_function_param(cursor, end) {
-            let Some(parameter) = self.parse_function_param(&mut cursor, end) else {
-                break;
-            };
-            parameters.push(parameter);
-        }
-
-        let body = if self
-            .consume_kind(&mut cursor, end, TokenKind::Arrow)
-            .is_some()
-        {
-            self.parse_expression_body(
-                keyword_index,
-                &mut cursor,
-                end,
-                "function declaration",
-                "function declaration is missing its body after `=>`",
-                "expected a function body after `=>`",
-            )
-        } else {
-            self.diagnostics.push(
-                Diagnostic::error("function declaration is missing `=>` before its body")
-                    .with_code(MISSING_FUNCTION_ARROW)
-                    .with_primary_label(
-                        self.source_span_of_token(keyword_index),
-                        "expected `=>` after the function signature",
-                    ),
-            );
-            None
-        };
-
-        NamedItem {
-            base,
-            keyword_span: self.source_span_of_token(keyword_index),
-            name,
-            type_parameters: Vec::new(),
-            constraints,
-            annotation,
-            parameters,
-            body,
-        }
+        self.parse_signal_item(base, keyword_index, end, "source declaration")
     }
 
     fn parse_signal_item(
@@ -1240,7 +1305,7 @@ impl<'a> Parser<'a> {
     fn parse_decorator_range(&mut self, start: usize, end: usize) -> Option<Decorator> {
         let mut cursor = start;
         let _ = self.consume_kind(&mut cursor, end, TokenKind::At)?;
-        let name = match self.parse_qualified_name(&mut cursor, end) {
+        let name = match self.parse_decorator_qualified_name(&mut cursor, end) {
             Some(name) => name,
             None => {
                 self.diagnostics.push(
@@ -1862,6 +1927,42 @@ impl<'a> Parser<'a> {
                     let result_memo = self.parse_optional_pipe_memo(cursor, end);
                     (subject_memo, PipeStageKind::Falsy { expr }, result_memo)
                 }
+                TokenKind::PipeValidate => {
+                    cluster_active = false;
+                    let subject_memo = self.parse_optional_pipe_memo(cursor, end);
+                    let expr =
+                        self.parse_range_expr(cursor, end, stop.with_pipe_stage().with_hash())?;
+                    let result_memo = self.parse_optional_pipe_memo(cursor, end);
+                    (subject_memo, PipeStageKind::Validate { expr }, result_memo)
+                }
+                TokenKind::PipePrevious => {
+                    cluster_active = false;
+                    let subject_memo = self.parse_optional_pipe_memo(cursor, end);
+                    let expr =
+                        self.parse_range_expr(cursor, end, stop.with_pipe_stage().with_hash())?;
+                    let result_memo = self.parse_optional_pipe_memo(cursor, end);
+                    (subject_memo, PipeStageKind::Previous { expr }, result_memo)
+                }
+                TokenKind::PipeAccumulate => {
+                    // `signal +|> seed (state input => next)`
+                    // The seed expression comes first, then the step function expression.
+                    cluster_active = false;
+                    let subject_memo = self.parse_optional_pipe_memo(cursor, end);
+                    let seed =
+                        self.parse_range_expr(cursor, end, stop.with_pipe_stage().with_hash())?;
+                    let step =
+                        self.parse_range_expr(cursor, end, stop.with_pipe_stage().with_hash())?;
+                    let result_memo = self.parse_optional_pipe_memo(cursor, end);
+                    (subject_memo, PipeStageKind::Accumulate { seed, step }, result_memo)
+                }
+                TokenKind::PipeDiff => {
+                    cluster_active = false;
+                    let subject_memo = self.parse_optional_pipe_memo(cursor, end);
+                    let expr =
+                        self.parse_range_expr(cursor, end, stop.with_pipe_stage().with_hash())?;
+                    let result_memo = self.parse_optional_pipe_memo(cursor, end);
+                    (subject_memo, PipeStageKind::Diff { expr }, result_memo)
+                }
                 _ => break,
             };
             stages.push(PipeStage {
@@ -2231,7 +2332,11 @@ impl<'a> Parser<'a> {
 
     fn parse_ambient_projection(&mut self, cursor: &mut usize, end: usize) -> Option<Expr> {
         let start = self.consume_kind(cursor, end, TokenKind::Dot)?;
-        if self.peek_kind(*cursor, end) != Some(TokenKind::Identifier) {
+        let next_is_ident = matches!(
+            self.peek_kind(*cursor, end),
+            Some(k) if k == TokenKind::Identifier || k.is_keyword()
+        );
+        if !next_is_ident {
             return Some(Expr {
                 span: self.source_span_of_token(start),
                 kind: ExprKind::SubjectPlaceholder,
@@ -2453,7 +2558,7 @@ impl<'a> Parser<'a> {
                     let _ = self.consume_kind(cursor, end, TokenKind::Greater);
                     break;
                 }
-                Some(TokenKind::Identifier) => {
+                Some(kind) if kind == TokenKind::Identifier || kind.is_keyword() => {
                     let Some(attribute) =
                         self.parse_markup_attribute(cursor, end, case_pattern_attrs)
                     else {
@@ -2946,7 +3051,9 @@ impl<'a> Parser<'a> {
 
     fn starts_function_param(&self, start: usize, end: usize) -> bool {
         self.peek_nontrivia(start, end).is_some_and(|index| {
-            !self.tokens[index].line_start() && self.tokens[index].kind() == TokenKind::Identifier
+            let kind = self.tokens[index].kind();
+            !self.tokens[index].line_start()
+                && (kind == TokenKind::Identifier || kind.is_keyword())
         })
     }
 
@@ -3012,6 +3119,12 @@ impl<'a> Parser<'a> {
                 {
                     starts.push(index);
                 }
+                kind if kind.is_keyword()
+                    && depth == 0
+                    && self.peek_kind(index + 1, end) == Some(TokenKind::Colon) =>
+                {
+                    starts.push(index);
+                }
                 _ => {}
             }
             scan = index + 1;
@@ -3035,6 +3148,7 @@ impl<'a> Parser<'a> {
                     depth = depth.saturating_sub(1)
                 }
                 TokenKind::Identifier if depth == 0 => last = Some(index),
+                kind if kind.is_keyword() && depth == 0 => last = Some(index),
                 _ => {}
             }
             scan = index + 1;
@@ -3366,7 +3480,8 @@ impl<'a> Parser<'a> {
 
     fn parse_identifier(&self, cursor: &mut usize, end: usize) -> Option<Identifier> {
         let index = self.peek_nontrivia(*cursor, end)?;
-        if self.tokens[index].kind() != TokenKind::Identifier {
+        let kind = self.tokens[index].kind();
+        if kind != TokenKind::Identifier && !kind.is_keyword() {
             return None;
         }
         *cursor = index + 1;
@@ -3375,7 +3490,8 @@ impl<'a> Parser<'a> {
 
     fn parse_qualified_name(&self, cursor: &mut usize, end: usize) -> Option<QualifiedName> {
         let first = self.peek_nontrivia(*cursor, end)?;
-        if self.tokens[first].kind() != TokenKind::Identifier {
+        let first_kind = self.tokens[first].kind();
+        if first_kind != TokenKind::Identifier && !first_kind.is_keyword() {
             return None;
         }
 
@@ -3389,7 +3505,8 @@ impl<'a> Parser<'a> {
             let Some(segment_index) = self.peek_nontrivia(dot_index + 1, end) else {
                 break;
             };
-            if self.tokens[segment_index].kind() != TokenKind::Identifier {
+            let seg_kind = self.tokens[segment_index].kind();
+            if seg_kind != TokenKind::Identifier && !seg_kind.is_keyword() {
                 break;
             }
             segments.push(self.identifier_from_token(segment_index));
@@ -3451,6 +3568,16 @@ impl<'a> Parser<'a> {
             return Some(index);
         }
         None
+    }
+
+    /// Parses a qualified name in decorator position. Accepts keyword tokens as identifiers
+    /// (e.g. `@source`, `@adapter`) since both keywords and identifiers are valid decorator names.
+    fn parse_decorator_qualified_name(
+        &self,
+        cursor: &mut usize,
+        end: usize,
+    ) -> Option<QualifiedName> {
+        self.parse_qualified_name(cursor, end)
     }
 
     fn identifier_from_token(&self, index: usize) -> Identifier {
@@ -3915,15 +4042,15 @@ instance Eq Blob
 domain Duration over Int
     literal ms : Int -> Duration
     (*) : Duration -> Int -> Duration
-sig flow = value |> compute ?|> ready ||> Ready => keep *|> .email &|> build @|> loop <|@ step | debug <|* merge T|> start F|> stop
-val same = left == right
-val different = left != right
-val quotient = left / right
-val remainder = left % right
-val range = 1..10
+signal flow = value |> compute ?|> ready ||> Ready => keep *|> .email &|> build @|> loop <|@ step | debug <|* merge T|> start F|> stop
+value same = left == right
+value different = left != right
+value quotient = left / right
+value remainder = left % right
+value range = 1..10
 <Label text={status} />
 </match>
-val datePattern = rx"\d{4}-\d{2}-\d{2}"
+value datePattern = rx"\d{4}-\d{2}-\d{2}"
 "#,
         );
         let file = &sources[file_id];
@@ -3967,7 +4094,7 @@ val datePattern = rx"\d{4}-\d{2}-\d{2}"
         let mut sources = SourceDatabase::new();
         let file_id = sources.add_file(
             "comments.aivi",
-            "/** module doc **/\nval answer = 42 // inline note\n",
+            "/** module doc **/\nvalue answer = 42 // inline note\n",
         );
         let lexed = lex_module(&sources[file_id]);
         let comment_kinds = lexed
@@ -3994,11 +4121,11 @@ val datePattern = rx"\d{4}-\d{2}-\d{2}"
     decode: Strict,
     retry: 3
 }
-sig users : Signal User
+signal users : Signal User
 
 type Bool = True | False
-val answer = 42
-fun add:Int x:Int y:Int =>
+value answer = 42
+value add : Int => x : Int => y : Int =>
     x + y
 use aivi.network (
     http
@@ -4012,7 +4139,7 @@ export main
         assert_eq!(parsed.module.items[0].kind(), ItemKind::Signal);
         assert_eq!(parsed.module.items[1].kind(), ItemKind::Type);
         assert_eq!(parsed.module.items[2].kind(), ItemKind::Value);
-        assert_eq!(parsed.module.items[3].kind(), ItemKind::Function);
+        assert_eq!(parsed.module.items[3].kind(), ItemKind::Value);
         assert_eq!(parsed.module.items[4].kind(), ItemKind::Use);
         assert_eq!(parsed.module.items[5].kind(), ItemKind::Export);
 
@@ -4052,14 +4179,14 @@ export main
         }
 
         match &parsed.module.items[3] {
-            Item::Function(item) => {
-                assert_eq!(item.parameters.len(), 2);
+            Item::Value(item) => {
+                assert!(!item.parameters.is_empty());
                 assert!(matches!(
                     item.expr_body().map(|expr| &expr.kind),
                     Some(ExprKind::Binary { .. })
                 ));
             }
-            other => panic!("expected function item, got {other:?}"),
+            other => panic!("expected value item with parameters, got {other:?}"),
         }
 
         match &parsed.module.items[4] {
@@ -4131,7 +4258,7 @@ export main
 
     #[test]
     fn parser_structures_text_interpolation_segments() {
-        let (_, parsed) = load(r#"val greeting = "Hello {name}, use \{literal\} braces""#);
+        let (_, parsed) = load(r#"value greeting = "Hello {name}, use \{literal\} braces""#);
 
         assert!(!parsed.has_errors());
         match &parsed.module.items[0] {
@@ -4161,7 +4288,7 @@ export main
 
     #[test]
     fn parser_decodes_text_escape_sequences() {
-        let (_, parsed) = load(r#"val board = "top\nbottom \u{41} \x42 \{ok\}""#);
+        let (_, parsed) = load(r#"value board = "top\nbottom \u{41} \x42 \{ok\}""#);
 
         assert!(!parsed.has_errors());
         match &parsed.module.items[0] {
@@ -4216,7 +4343,7 @@ export main
         }
 
         match &parsed.module.items[1] {
-            Item::Function(item) => match item.expr_body().map(|expr| &expr.kind) {
+            Item::Value(item) => match item.expr_body().map(|expr| &expr.kind) {
                 Some(ExprKind::Binary {
                     operator: BinaryOperator::And,
                     left,
@@ -4246,7 +4373,7 @@ export main
     #[test]
     fn parser_respects_binary_precedence_and_left_associativity() {
         let (_, parsed) = load(
-            "val ranked = left + middle > threshold and ready or fallback\nval diff = a - b - c\n",
+            "value ranked = left + middle > threshold and ready or fallback\nvalue diff = a - b - c\n",
         );
 
         assert!(!parsed.has_errors());
@@ -4329,7 +4456,7 @@ export main
     #[test]
     fn parser_respects_multiplicative_precedence_and_left_associativity() {
         let (_, parsed) =
-            load("val total = base + rate * scale\nval grouped = total / count % bucket\n");
+            load("value total = base + rate * scale\nvalue grouped = total / count % bucket\n");
 
         assert!(!parsed.has_errors());
 
@@ -4388,7 +4515,7 @@ export main
             r#"class Eq A
     (==) : A -> A -> Bool
 
-fun same:Bool left:Blob right:Blob =>
+value same:Bool left:Blob right:Blob =>
     True
 
 instance Eq Blob
@@ -4464,7 +4591,7 @@ instance Eq Blob
                 assert!(matches!(
                     body.members[2].name,
                     DomainMemberName::Signature(ClassMemberName::Identifier(ref identifier))
-                        if identifier.text == "value"
+                        if identifier.text == "unwrap"
                 ));
             }
             other => panic!("expected domain item, got {other:?}"),
@@ -4478,7 +4605,7 @@ instance Eq Blob
     map : (A -> B) -> F A -> F B
 class (Functor F, Foldable F) => Traversable F
     traverse : Applicative G => (A -> G B) -> F A -> G (F B)
-fun same:Eq A => Bool value:A => value == value
+value same:Eq A => Bool v:A => v == v
 instance Eq A => Eq (Option A)
     (==) left right = True
 "#,
@@ -4496,7 +4623,7 @@ instance Eq A => Eq (Option A)
         let body = traversable.class_body().expect("class body");
         assert_eq!(body.members[0].constraints.len(), 1);
 
-        let Item::Function(function) = &parsed.module.items[2] else {
+        let Item::Value(function) = &parsed.module.items[2] else {
             panic!("expected constrained function item");
         };
         assert_eq!(function.constraints.len(), 1);
@@ -4569,7 +4696,7 @@ instance Eq A => Eq (Option A)
     #[test]
     fn parser_distinguishes_compact_literal_suffixes_from_spaced_application() {
         let (_, parsed) = load(
-            "domain Duration over Int\n    literal ms : Int -> Duration\nval compact = 250ms\nval spaced = 250 ms\n",
+            "domain Duration over Int\n    literal ms : Int -> Duration\nvalue compact = 250ms\nvalue spaced = 250 ms\n",
         );
 
         assert!(!parsed.has_errors());
@@ -4652,7 +4779,7 @@ instance Eq A => Eq (Option A)
         }
 
         let (_, parsed) = load(
-            "val bigint = 123n\nval decimal = 19d\nval precise = 19.25d\nval floaty = 3.5\nval hexish = 0xFF\n",
+            "value bigint = 123n\nvalue decimal = 19d\nvalue precise = 19.25d\nvalue floaty = 3.5\nvalue hexish = 0xFF\n",
         );
 
         assert!(!parsed.has_errors());
@@ -4666,7 +4793,7 @@ instance Eq A => Eq (Option A)
     #[test]
     fn parser_builds_map_and_set_literals_without_consuming_bare_names() {
         let (_, parsed) = load(
-            "val headers = Map { \"Authorization\": token, \"Accept\": \"application/json\" }\nval tags = Set [1, 2, selected]\nval bare = Map\n",
+            "value headers = Map { \"Authorization\": token, \"Accept\": \"application/json\" }\nvalue tags = Set [1, 2, selected]\nvalue bare = Map\n",
         );
 
         assert!(!parsed.has_errors());
@@ -4735,7 +4862,7 @@ instance Eq A => Eq (Option A)
 
     #[test]
     fn parser_reports_missing_item_name() {
-        let (_, parsed) = load("val = 42\n");
+        let (_, parsed) = load("value = 42\n");
 
         assert!(parsed.has_errors());
         assert!(
@@ -4770,7 +4897,7 @@ instance Eq A => Eq (Option A)
     #[test]
     fn parser_reports_trailing_tokens_after_expression_body() {
         let (_, parsed) =
-            load("fun prependCells:List Int head:Int tail:List Int =>\n    head :: tail\n");
+            load("value prependCells:List Int head:Int tail:List Int =>\n    head :: tail\n");
 
         assert!(parsed.has_errors());
         assert!(
@@ -4855,7 +4982,7 @@ instance Eq A => Eq (Option A)
     fn parser_preserves_qualified_markup_tag_names() {
         let (_, parsed) = load(
             r#"
-val view =
+value view =
     <Window>
         <Paned.start>
             <Label />
@@ -4896,11 +5023,11 @@ val view =
     #[test]
     fn parser_accepts_subject_placeholders_ranges_and_discard_params() {
         let (_, parsed) = load(
-            r#"val subject = .
-val projection = .email
-val span = 1..10
-val values = [1..10]
-fun ignore:Int _ =>
+            r#"value subject = .
+value projection = .email
+value span = 1..10
+value values = [1..10]
+value ignore:Int _ =>
     0
 "#,
         );
@@ -4945,7 +5072,7 @@ fun ignore:Int _ =>
                 if matches!(elements.as_slice(), [Expr { kind: ExprKind::Range { .. }, .. }])
         ));
 
-        let Item::Function(ignore) = &parsed.module.items[4] else {
+        let Item::Value(ignore) = &parsed.module.items[4] else {
             panic!("expected ignore function item");
         };
         assert_eq!(ignore.parameters.len(), 1);
@@ -4955,7 +5082,7 @@ fun ignore:Int _ =>
     #[test]
     fn parser_accepts_pipe_subject_and_result_memos() {
         let (_, parsed) = load(
-            r#"val memoed =
+            r#"value memoed =
     20
      |> #before before + 1 #after
      |> after + before
@@ -5003,8 +5130,8 @@ fun ignore:Int _ =>
     #[test]
     fn parser_rejects_discard_exprs_and_markup_child_interpolation() {
         let (_, parsed) = load(
-            r#"val current = _
-val view =
+            r#"value current = _
+value view =
     <Label>{current}</Label>
 "#,
         );

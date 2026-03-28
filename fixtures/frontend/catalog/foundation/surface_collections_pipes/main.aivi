@@ -30,75 +30,75 @@ type CollectionSummary = {
     note: Text
 }
 
-fun add:Int total:Int value:Int =>
-    total + value
+value add:Int total:Int x:Int =>
+    total + x
 
-fun even:Bool value:Int =>
-    value == 2 or value == 4
+value even:Bool x:Int =>
+    x == 2 or x == 4
 
-val numbers: List Int = [
+value numbers: List Int = [
     1,
     2,
     3,
     4
 ]
 
-val emptyNumbers: List Int = []
-val maybeName: Option Text = Some "Ada"
-val missingName: Option Text = None
+value emptyNumbers: List Int = []
+value maybeName: Option Text = Some "Ada"
+value missingName: Option Text = None
 
-val countFromPipe: Int =
+value countFromPipe: Int =
     numbers
      |> length
 
-val totalFromReduce: Int =
+value totalFromReduce: Int =
     numbers
      |> reduce add 0
 
-val firstFromPipe: Option Int =
+value firstFromPipe: Option Int =
     numbers
      |> head
 
-val restFromPipe: Option (List Int) =
+value restFromPipe: Option (List Int) =
     numbers
      |> tail
 
-val hasEvenFromPipe: Bool =
+value hasEvenFromPipe: Bool =
     numbers
      |> any even
 
-val splitNumbers: (Partition Int) =
+value splitNumbers: (Partition Int) =
     numbers
      |> partition even
 
-val displayNameFromPipe: Text =
+value displayNameFromPipe: Text =
     missingName
      |> getOrElse "guest"
 
-val presentNameItems: List Text =
+value presentNameItems: List Text =
     maybeName
      |> optionToList
 
-val nameResult: Result Text Text =
+value nameResult: Result Text Text =
     maybeName
      |> toResult "missing"
 
-val recoveredName: Text =
+value recoveredName: Text =
     nameResult
      |> withDefault "guest"
 
-val nameOption: Option Text =
+value nameOption: Option Text =
     nameResult
      |> toOption
 
-val emptyFirst: Option Int =
+value emptyFirst: Option Int =
     emptyNumbers
      |> head
 
-val collectionNote: Text = ["{countFromPipe} items", "total {totalFromReduce}", displayNameFromPipe, recoveredName]
+value collectionNote: Text = ["{countFromPipe} items", "total {totalFromReduce}", displayNameFromPipe, recoveredName]
  |> join ", "
 
-val collectionSummary: CollectionSummary = {
+value collectionSummary: CollectionSummary = {
     count: countFromPipe,
     total: totalFromReduce,
     first: firstFromPipe,

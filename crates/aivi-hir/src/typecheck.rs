@@ -2920,9 +2920,9 @@ mod tests {
                  nickname: Option Text,\n\
                  bio: Option Text\n\
              }\n\
-             val name = \"Ada\"\n\
-             val nickname = Some \"Countess\"\n\
-             val profile:Profile = { name, nickname }\n",
+             value name = \"Ada\"\n\
+             value nickname = Some \"Countess\"\n\
+             value profile:Profile = { name, nickname }\n",
         );
         assert!(
             report.is_ok(),
@@ -2941,9 +2941,9 @@ mod tests {
                  nickname: Option Text,\n\
                  bio: Option Text\n\
              }\n\
-             val name = \"Ada\"\n\
-             val nickname = Some \"Countess\"\n\
-             val profile:Profile = { name, nickname }\n",
+             value name = \"Ada\"\n\
+             value nickname = Some \"Countess\"\n\
+             value profile:Profile = { name, nickname }\n",
         );
         assert!(
             report.is_ok(),
@@ -2995,9 +2995,9 @@ mod tests {
     fn typecheck_reports_missing_eq_for_map_equality() {
         let report = typecheck_text(
             "map-equality.aivi",
-            "val left = Map { \"id\": 1 }\n\
-             val right = Map { \"id\": 1 }\n\
-             val same:Bool = left == right\n",
+            "value left = Map { \"id\": 1 }\n\
+             value right = Map { \"id\": 1 }\n\
+             value same:Bool = left == right\n",
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
@@ -3012,9 +3012,9 @@ mod tests {
     fn typecheck_reports_missing_eq_for_map_inequality() {
         let report = typecheck_text(
             "map-inequality.aivi",
-            "val left = Map { \"id\": 1 }\n\
-             val right = Map { \"id\": 2 }\n\
-             val different:Bool = left != right\n",
+            "value left = Map { \"id\": 1 }\n\
+             value right = Map { \"id\": 2 }\n\
+             value different:Bool = left != right\n",
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
@@ -3032,11 +3032,11 @@ mod tests {
             "class Eq A\n\
              \x20\x20\x20\x20(==) : A -> A -> Bool\n\
              type Blob = Blob Bytes\n\
-             fun blobEquals:Bool left:Blob right:Blob =>\n\
+             value blobEquals:Bool left:Blob right:Blob =>\n\
              \x20\x20\x20\x20True\n\
              instance Eq Blob\n\
              \x20\x20\x20\x20(==) left right = blobEquals left right\n\
-             fun compare:Bool left:Blob right:Blob =>\n\
+             value compare:Bool left:Blob right:Blob =>\n\
              \x20\x20\x20\x20left == right\n",
         );
         assert!(
@@ -3086,7 +3086,7 @@ mod tests {
     fn typecheck_reports_invalid_unary_operator_without_resolved_operand_type() {
         let report = typecheck_text(
             "invalid-unary-operator.aivi",
-            "val broken:Bool = not None\n",
+            "value broken:Bool = not None\n",
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
@@ -3101,8 +3101,8 @@ mod tests {
     fn typecheck_accepts_prelude_functor_map_calls() {
         let report = typecheck_text(
             "prelude-map-call.aivi",
-            "fun increment:Int value:Int => value + 1\n\
-             val mapped:Option Int = map increment (Some 1)\n",
+            "value increment:Int n:Int => n + 1\n\
+             value mapped:Option Int = map increment (Some 1)\n",
         );
         assert!(
             report.is_ok(),
@@ -3115,9 +3115,9 @@ mod tests {
     fn typecheck_accepts_prelude_foldable_reduce_calls() {
         let report = typecheck_text(
             "prelude-reduce-call.aivi",
-            "fun add:Int acc:Int value:Int => acc + value\n\
-             val joined:Text = reduce append empty [\"hel\", \"lo\"]\n\
-             val total:Int = reduce add 10 (Some 2)\n",
+            "value add:Int acc:Int item:Int => acc + item\n\
+             value joined:Text = reduce append empty [\"hel\", \"lo\"]\n\
+             value total:Int = reduce add 10 (Some 2)\n",
         );
         assert!(
             report.is_ok(),
@@ -3130,7 +3130,7 @@ mod tests {
     fn typecheck_accepts_class_member_names_from_expected_arrow_types() {
         let report = typecheck_text(
             "class-member-name-expected-arrow.aivi",
-            "val pureOption:(Int -> Option Int) = pure\n",
+            "value pureOption:(Int -> Option Int) = pure\n",
         );
         assert!(
             report.is_ok(),
@@ -3143,8 +3143,8 @@ mod tests {
     fn typecheck_accepts_function_signature_constraints_at_call_sites() {
         let report = typecheck_text(
             "function-signature-constraints.aivi",
-            "fun same:Eq A => Bool value:A => True\n\
-             val sameText:Bool = same \"Ada\"\n",
+            "value same:Eq A => Bool x:A => True\n\
+             value sameText:Bool = same \"Ada\"\n",
         );
         assert!(
             report.is_ok(),
@@ -3157,7 +3157,7 @@ mod tests {
     fn typecheck_accepts_ord_comparison_for_text() {
         let report = typecheck_text(
             "ord-text-comparison.aivi",
-            "val ordered:Bool = \"a\" < \"b\"\n",
+            "value ordered:Bool = \"a\" < \"b\"\n",
         );
         assert!(
             report.is_ok(),
@@ -3170,7 +3170,7 @@ mod tests {
     fn typecheck_reports_invalid_binary_operator_for_non_ord_comparison() {
         let report = typecheck_text(
             "invalid-binary-operator.aivi",
-            "val broken:Bool = [1] < [2]\n",
+            "value broken:Bool = [1] < [2]\n",
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
@@ -3183,7 +3183,7 @@ mod tests {
 
     #[test]
     fn typecheck_reports_value_annotation_mismatch() {
-        let report = typecheck_text("value-mismatch.aivi", "val answer:Text = 42\n");
+        let report = typecheck_text("value-mismatch.aivi", "value answer:Text = 42\n");
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
                 diagnostic.code == Some(DiagnosticCode::new("hir", "type-mismatch"))
@@ -3197,8 +3197,8 @@ mod tests {
     fn typecheck_accepts_unannotated_function_name_from_expected_arrow() {
         let report = typecheck_text(
             "function-name-expected-arrow.aivi",
-            "fun keep value => value\n\
-             val chosen:(Option Int -> Option Int) = keep\n",
+            "value keep x => x\n\
+             value chosen:(Option Int -> Option Int) = keep\n",
         );
         assert!(
             report.is_ok(),
@@ -3211,8 +3211,8 @@ mod tests {
     fn typecheck_accepts_unannotated_function_application_from_expected_result() {
         let report = typecheck_text(
             "function-application-expected-result.aivi",
-            "fun keepNone value:Option Int => None\n\
-             val result:Option Int = keepNone None\n",
+            "value keepNone opt:Option Int => None\n\
+             value result:Option Int = keepNone None\n",
         );
         assert!(
             report.is_ok(),
@@ -3225,8 +3225,8 @@ mod tests {
     fn typecheck_accepts_function_application_with_expected_builtin_hole_argument() {
         let report = typecheck_text(
             "function-application-expected-hole.aivi",
-            "fun keep:Option Int value:Option Int => value\n\
-             val result:Option Int = keep None\n",
+            "value keep:Option Int opt:Option Int => opt\n\
+             value result:Option Int = keep None\n",
         );
         assert!(
             report.is_ok(),
@@ -3239,8 +3239,8 @@ mod tests {
     fn typecheck_reports_function_application_result_mismatch() {
         let report = typecheck_text(
             "function-application-result-mismatch.aivi",
-            "fun keep:Option Int value:Option Int => value\n\
-             val result:Option Text = keep None\n",
+            "value keep:Option Int opt:Option Int => opt\n\
+             value result:Option Text = keep None\n",
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
@@ -3260,8 +3260,8 @@ mod tests {
                  name: Text,\n\
                  nickname: Nickname\n\
              }\n\
-             val name = \"Ada\"\n\
-             val user:User = { name }\n",
+             value name = \"Ada\"\n\
+             value user:User = { name }\n",
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
@@ -3286,8 +3286,8 @@ mod tests {
                  name: Text,\n\
                  nickname: Nickname\n\
              }\n\
-             val name = \"Ada\"\n\
-             val user:User = { name }\n",
+             value name = \"Ada\"\n\
+             value user:User = { name }\n",
         );
         assert!(
             report.is_ok(),
@@ -3307,7 +3307,7 @@ mod tests {
                  name: Text,\n\
                  nickname: Nickname\n\
              }\n\
-             val user:User = { name: \"Ada\" }\n",
+             value user:User = { name: \"Ada\" }\n",
         );
         assert!(
             report.is_ok(),
@@ -3329,8 +3329,8 @@ mod tests {
                  name: Text,\n\
                  nickname: Nickname\n\
              }\n\
-             val name = \"Ada\"\n\
-             val user:User = { name }\n",
+             value name = \"Ada\"\n\
+             value user:User = { name }\n",
         );
         assert!(
             report.is_ok(),
@@ -3365,7 +3365,7 @@ mod tests {
         let report = typecheck_text(
             "same-module-constructor-mismatch.aivi",
             "type Box A = Box A\n\
-             val wrapped:(Box Text) = Box 42\n",
+             value wrapped:(Box Text) = Box 42\n",
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
@@ -3381,9 +3381,9 @@ mod tests {
         let report = typecheck_text(
             "mixed-applicative-cluster.aivi",
             "type NamePair = NamePair Text Text\n\
-             val first:(Option Text) = Some \"Ada\"\n\
-             sig last = \"Lovelace\"\n\
-             val broken =\n\
+             value first:(Option Text) = Some \"Ada\"\n\
+             signal last = \"Lovelace\"\n\
+             value broken =\n\
               &|> first\n\
               &|> last\n\
                |> NamePair\n",
@@ -3402,15 +3402,15 @@ mod tests {
         let report = typecheck_text(
             "partial-builtin-clusters.aivi",
             "type NamePair = NamePair Text Text\n\
-             val first = Some \"Ada\"\n\
-             val last = None\n\
-             val maybePair:Option NamePair =\n\
+             value first = Some \"Ada\"\n\
+             value last = None\n\
+             value maybePair:Option NamePair =\n\
               &|> first\n\
               &|> last\n\
                |> NamePair\n\
-             val okFirst = Ok \"Ada\"\n\
-             val errLast = Err \"missing\"\n\
-             val resultPair:Result Text NamePair =\n\
+             value okFirst = Ok \"Ada\"\n\
+             value errLast = Err \"missing\"\n\
+             value resultPair:Result Text NamePair =\n\
               &|> okFirst\n\
               &|> errLast\n\
                |> NamePair\n",
@@ -3429,8 +3429,8 @@ mod tests {
             r#"type Screen =
   | Loading
   | Ready Text
-val current:Screen = Loading
-val broken =
+value current:Screen = Loading
+value broken =
     current
      ||> Loading => 0
      ||> Ready title => title
@@ -3453,13 +3453,13 @@ val broken =
   | Loading
   | Ready Text
   | Failed Text
-val current:Screen = Loading
-val maybeLabel:Option Text =
+value current:Screen = Loading
+value maybeLabel:Option Text =
     current
      ||> Loading => None
      ||> Ready title => Some title
      ||> Failed reason => Some reason
-val resultLabel:Result Text Text =
+value resultLabel:Result Text Text =
     current
      ||> Loading => Ok "loading"
      ||> Ready title => Ok title
@@ -3477,8 +3477,8 @@ val resultLabel:Result Text Text =
     fn typecheck_accepts_applied_calls_in_case_branches() {
         let report = typecheck_text(
             "applied-call-case-branches.aivi",
-            r#"fun addOne:Int n:Int => n + 1
-val value:Int =
+            r#"value addOne:Int n:Int => n + 1
+value x:Int =
     0
      ||> 0 => addOne 0
      ||> _ => 1
@@ -3495,8 +3495,8 @@ val value:Int =
     fn typecheck_accepts_applied_calls_in_truthy_falsy_branches() {
         let report = typecheck_text(
             "applied-call-truthy-falsy-branches.aivi",
-            r#"fun addOne:Int n:Int => n + 1
-val value:Int =
+            r#"value addOne:Int n:Int => n + 1
+value x:Int =
     True
      T|> addOne 0
      F|> 1
@@ -3517,8 +3517,8 @@ val value:Int =
     n: Int,
     items: List A
 }
-fun remaining:Int acc:(TakeAcc A) => acc.n
-fun items:(List A) acc:(TakeAcc A) => acc.items
+value remaining:Int acc:(TakeAcc A) => acc.n
+value items:(List A) acc:(TakeAcc A) => acc.items
 "#,
         );
         assert!(
@@ -3911,13 +3911,13 @@ fun items:(List A) acc:(TakeAcc A) => acc.items
     fn typecheck_accepts_expected_polymorphic_ambient_helper_application() {
         let report = typecheck_text(
             "expected-polymorphic-ambient-helper-application.aivi",
-            "fun even:Bool value:Int => value == 2 or value == 4\n\
-             val maybeName:Option Text = Some \"Ada\"\n\
-             val numbers:List Int = [1, 2, 3, 4]\n\
-             val chosenName:Text = __aivi_option_getOrElse \"guest\" maybeName\n\
-             val count:Int = __aivi_list_length numbers\n\
-             val firstNumber:Option Int = __aivi_list_head numbers\n\
-             val hasEven:Bool = __aivi_list_any even numbers\n",
+            "value even:Bool n:Int => n == 2 or n == 4\n\
+             value maybeName:Option Text = Some \"Ada\"\n\
+             value numbers:List Int = [1, 2, 3, 4]\n\
+             value chosenName:Text = __aivi_option_getOrElse \"guest\" maybeName\n\
+             value count:Int = __aivi_list_length numbers\n\
+             value firstNumber:Option Int = __aivi_list_head numbers\n\
+             value hasEven:Bool = __aivi_list_any even numbers\n",
         );
         assert!(
             report.is_ok(),
@@ -3930,9 +3930,9 @@ fun items:(List A) acc:(TakeAcc A) => acc.items
     fn typecheck_allows_signal_names_in_direct_function_calls() {
         let report = typecheck_text(
             "signal-name-direct-call.aivi",
-            "sig direction : Signal Int = 1\n\
-             fun step:Int value:Int => value\n\
-             fun current:Int tick:Unit => step direction\n",
+            "signal direction : Signal Int = 1\n\
+             value step:Int x:Int => x\n\
+             value current:Int tick:Unit => step direction\n",
         );
         assert!(
             report.is_ok(),
@@ -3945,8 +3945,8 @@ fun items:(List A) acc:(TakeAcc A) => acc.items
     fn typecheck_reports_invalid_pipe_stage_input_for_transforms() {
         let report = typecheck_text(
             "invalid-pipe-stage-transform.aivi",
-            "fun describe:Text value:Int => \"count\"\n\
-             val broken:Text = \"Ada\" |> describe\n",
+            "value describe:Text n:Int => \"count\"\n\
+             value broken:Text = \"Ada\" |> describe\n",
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
@@ -3961,8 +3961,8 @@ fun items:(List A) acc:(TakeAcc A) => acc.items
     fn typecheck_reports_invalid_pipe_stage_input_for_taps() {
         let report = typecheck_text(
             "invalid-pipe-stage-tap.aivi",
-            "fun describe:Text value:Int => \"count\"\n\
-             val broken:Text = \"Ada\" | describe\n",
+            "value describe:Text n:Int => \"count\"\n\
+             value broken:Text = \"Ada\" | describe\n",
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
@@ -4034,8 +4034,8 @@ fun items:(List A) acc:(TakeAcc A) => acc.items
     fn typecheck_accepts_projection_from_unannotated_record_values() {
         let report = typecheck_text(
             "projection-from-record-value.aivi",
-            "val profile = { name: \"Ada\", age: 36 }\n\
-             val name:Text = profile.name\n",
+            "value profile = { name: \"Ada\", age: 36 }\n\
+             value name:Text = profile.name\n",
         );
         assert!(
             report.is_ok(),
@@ -4048,8 +4048,8 @@ fun items:(List A) acc:(TakeAcc A) => acc.items
     fn typecheck_reports_unknown_field_from_unannotated_record_projection() {
         let report = typecheck_text(
             "projection-unknown-field.aivi",
-            "val profile = { name: \"Ada\", age: 36 }\n\
-             val missing:Text = profile.missing\n",
+            "value profile = { name: \"Ada\", age: 36 }\n\
+             value missing:Text = profile.missing\n",
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
@@ -4064,10 +4064,10 @@ fun items:(List A) acc:(TakeAcc A) => acc.items
     fn typecheck_accepts_collection_literals_with_expected_shapes() {
         let report = typecheck_text(
             "expected-collection-literals.aivi",
-            "val pair:(Option Int, Result Text Int) = (None, Ok 1)\n\
-             val items:List (Option Int) = [None, Some 2]\n\
-             val headers:Map Text (Option Int) = Map { \"primary\": None, \"backup\": Some 3 }\n\
-             val tags:Set (Option Int) = Set [None, Some 4]\n",
+            "value pair:(Option Int, Result Text Int) = (None, Ok 1)\n\
+             value items:List (Option Int) = [None, Some 2]\n\
+             value headers:Map Text (Option Int) = Map { \"primary\": None, \"backup\": Some 3 }\n\
+             value tags:Set (Option Int) = Set [None, Some 4]\n",
         );
         assert!(
             report.is_ok(),
@@ -4080,10 +4080,10 @@ fun items:(List A) acc:(TakeAcc A) => acc.items
     fn typecheck_reports_collection_literal_element_mismatches() {
         let report = typecheck_text(
             "expected-collection-literal-mismatches.aivi",
-            "val pair:(Option Int, Result Text Int) = (Some \"Ada\", Ok \"Ada\")\n\
-             val items:List (Option Int) = [Some \"Ada\"]\n\
-             val headers:Map Text (Option Int) = Map { \"primary\": Some \"Ada\" }\n\
-             val tags:Set (Option Int) = Set [Some \"Ada\"]\n",
+            "value pair:(Option Int, Result Text Int) = (Some \"Ada\", Ok \"Ada\")\n\
+             value items:List (Option Int) = [Some \"Ada\"]\n\
+             value headers:Map Text (Option Int) = Map { \"primary\": Some \"Ada\" }\n\
+             value tags:Set (Option Int) = Set [Some \"Ada\"]\n",
         );
         let mismatch_count = report
             .diagnostics()
@@ -4103,10 +4103,10 @@ fun items:(List A) acc:(TakeAcc A) => acc.items
     fn typecheck_accepts_builtin_noninteger_literals_with_matching_annotations() {
         let report = typecheck_text(
             "builtin-noninteger-literals-valid.aivi",
-            "val pi:Float = 3.14\n\
-             val amount:Decimal = 19.25d\n\
-             val whole:Decimal = 19d\n\
-             val count:BigInt = 123n\n",
+            "value pi:Float = 3.14\n\
+             value amount:Decimal = 19.25d\n\
+             value whole:Decimal = 19d\n\
+             value count:BigInt = 123n\n",
         );
         assert!(
             report.is_ok(),
@@ -4119,9 +4119,9 @@ fun items:(List A) acc:(TakeAcc A) => acc.items
     fn typecheck_reports_noninteger_literal_type_mismatches() {
         let report = typecheck_text(
             "builtin-noninteger-literals-invalid.aivi",
-            "val pi:Float = 19.25d\n\
-             val amount:Decimal = 3.14\n\
-             val count:BigInt = 42\n",
+            "value pi:Float = 19.25d\n\
+             value amount:Decimal = 3.14\n\
+             value count:BigInt = 42\n",
         );
         let mismatch_count = report
             .diagnostics()

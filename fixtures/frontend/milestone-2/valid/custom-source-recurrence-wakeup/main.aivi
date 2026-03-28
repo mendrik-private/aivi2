@@ -1,11 +1,11 @@
-fun step:Int value:Int current:Int =>
-    value
+value step:Int x:Int current:Int =>
+    x
 
-sig refresh = 0
+signal refresh = 0
 
 @source custom.feed refresh
-sig updateEvents : Signal Int
+signal updateEvents : Signal Int
 
-sig updates : Signal Int =
+signal updates : Signal Int =
     updateEvents
      |> scan 0 step

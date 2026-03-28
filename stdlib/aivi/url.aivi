@@ -2,7 +2,7 @@ type UrlError = Text
 
 domain Url over Text
     parse: Text -> Result UrlError Url
-    value: Url -> Text
+    unwrap: Url -> Text
 
 export UrlError
 export Url

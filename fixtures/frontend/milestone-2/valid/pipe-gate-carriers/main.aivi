@@ -7,15 +7,15 @@ type Session = {
     user: User
 }
 
-val seed:User = { active: True, email: "ada@example.com" }
+value seed:User = { active: True, email: "ada@example.com" }
 
-val maybeActive:Option User =
+value maybeActive:Option User =
     seed
      ?|> .active
 
-sig sessions:Signal Session = { user: seed }
+signal sessions:Signal Session = { user: seed }
 
-sig activeUsers:Signal User =
+signal activeUsers:Signal User =
     sessions
      |> .user
      ?|> .active

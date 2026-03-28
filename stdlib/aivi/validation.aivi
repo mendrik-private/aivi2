@@ -2,38 +2,38 @@ use aivi.nonEmpty (NonEmptyList)
 
 type Errors E = NonEmptyList E
 
-fun isValid:Bool value:(Validation E A) =>
-    value
+value isValid:Bool opt:(Validation E A) =>
+    opt
      T|> True
      F|> False
 
-fun isInvalid:Bool value:(Validation E A) =>
-    value
+value isInvalid:Bool opt:(Validation E A) =>
+    opt
      F|> True
      T|> False
 
-fun getOrElse:A fallback:A value:(Validation E A) =>
-    value
+value getOrElse:A fallback:A opt:(Validation E A) =>
+    opt
      ||> Valid item => item
      ||> Invalid _  => fallback
 
-fun mapErr:(Validation E2 A) transform:(E1 -> E2) value:(Validation E1 A) =>
-    value
+value mapErr:(Validation E2 A) transform:(E1 -> E2) opt:(Validation E1 A) =>
+    opt
      ||> Valid item  => Valid item
      ||> Invalid err => Invalid (transform err)
 
-fun toResult:(Result E A) value:(Validation E A) =>
-    value
+value toResult:(Result E A) opt:(Validation E A) =>
+    opt
      ||> Valid item  => Ok item
      ||> Invalid err => Err err
 
-fun fromResult:(Validation E A) value:(Result E A) =>
-    value
+value fromResult:(Validation E A) opt:(Result E A) =>
+    opt
      ||> Ok item   => Valid item
      ||> Err error => Invalid error
 
-fun toOption:(Option A) value:(Validation E A) =>
-    value
+value toOption:(Option A) opt:(Validation E A) =>
+    opt
      T|> Some
      F|> None
 

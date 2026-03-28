@@ -20,7 +20,7 @@ domain Duration over Int
 domain Retry over Int
     literal x : Int -> Retry
 
-val authHeaders : Map Text = EmptyMap
+value authHeaders : Map Text = EmptyMap
 
 @source http.get "/users" with {
     headers: authHeaders,
@@ -28,4 +28,4 @@ val authHeaders : Map Text = EmptyMap
     retry: 3x,
     timeout: 5s
 }
-sig users : Signal (Result HttpError (List User))
+signal users : Signal (Result HttpError (List User))

@@ -5,4 +5,4 @@ domain Duration over Int
     immediate: 1,
     jitter: 1
 }
-sig tick : Signal Unit
+signal tick : Signal Unit

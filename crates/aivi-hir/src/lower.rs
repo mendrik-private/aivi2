@@ -198,63 +198,63 @@ type __AiviListTailState A = {
     items: List A
 }
 
-fun __aivi_option_getOrElse:A fallback:A value:(Option A) =>
-    value
+value __aivi_option_getOrElse:A fallback:A opt:(Option A) =>
+    opt
      ||> Some item => item
      ||> None      => fallback
 
-fun __aivi_list_keepSome:(Option A) item:A =>
+value __aivi_list_keepSome:(Option A) item:A =>
     Some item
 
-fun __aivi_list_keepFirst:(Option A) found:(Option A) item:A =>
+value __aivi_list_keepFirst:(Option A) found:(Option A) item:A =>
     found
      T|> __aivi_list_keepSome
      F|> Some item
 
-fun __aivi_list_lengthStep:Int total:Int item:A =>
+value __aivi_list_lengthStep:Int total:Int item:A =>
     total + 1
 
-fun __aivi_list_length:Int items:(List A) =>
+value __aivi_list_length:Int items:(List A) =>
     items
      |> reduce __aivi_list_lengthStep 0
 
-fun __aivi_list_head:(Option A) items:(List A) =>
+value __aivi_list_head:(Option A) items:(List A) =>
     items
      |> reduce __aivi_list_keepFirst None
 
-fun __aivi_list_tailState:(__AiviListTailState A) items:(List A) item:A seenFirst:Bool =>
+value __aivi_list_tailState:(__AiviListTailState A) items:(List A) item:A seenFirst:Bool =>
     seenFirst
      T|> { seenFirst: True, items: append items [item] }
      F|> { seenFirst: True, items: [] }
 
-fun __aivi_list_tailStep:(__AiviListTailState A) state:(__AiviListTailState A) item:A =>
+value __aivi_list_tailStep:(__AiviListTailState A) state:(__AiviListTailState A) item:A =>
     state
      ||> { seenFirst, items } => __aivi_list_tailState items item seenFirst
 
-fun __aivi_list_tailItems:(Option (List A)) items:(List A) seenFirst:Bool =>
+value __aivi_list_tailItems:(Option (List A)) items:(List A) seenFirst:Bool =>
     seenFirst
      T|> Some items
      F|> None
 
-fun __aivi_list_tailFromState:(Option (List A)) state:(__AiviListTailState A) =>
+value __aivi_list_tailFromState:(Option (List A)) state:(__AiviListTailState A) =>
     state
      ||> { seenFirst, items } => __aivi_list_tailItems items seenFirst
 
-fun __aivi_list_tail:(Option (List A)) items:(List A) =>
+value __aivi_list_tail:(Option (List A)) items:(List A) =>
     items
      |> reduce __aivi_list_tailStep { seenFirst: False, items: [] }
      |> __aivi_list_tailFromState
 
-fun __aivi_list_anyStep:Bool predicate:(A -> Bool) found:Bool item:A =>
+value __aivi_list_anyStep:Bool predicate:(A -> Bool) found:Bool item:A =>
     found
      T|> True
      F|> predicate item
 
-fun __aivi_list_any:Bool predicate:(A -> Bool) items:(List A) =>
+value __aivi_list_any:Bool predicate:(A -> Bool) items:(List A) =>
     items
      |> reduce (__aivi_list_anyStep predicate) False
 
-fun scan:S seed:S step:(A -> S -> S) input:A =>
+value scan:S seed:S step:(A -> S -> S) input:A =>
     step input seed
 "#;
 
@@ -385,9 +385,20 @@ impl<'a> Lowerer<'a> {
 
         let lowered = match item {
             syn::Item::Type(item) => Some(Item::Type(self.lower_type_item(item))),
-            syn::Item::Value(item) => Some(Item::Value(self.lower_value_item(item))),
-            syn::Item::Function(item) => Some(Item::Function(self.lower_function_item(item))),
-            syn::Item::Signal(item) => Some(Item::Signal(self.lower_signal_item(item))),
+            syn::Item::Data(item) => Some(Item::Type(self.lower_type_item(item))),
+            syn::Item::Value(item) => {
+                if item.parameters.is_empty() {
+                    Some(Item::Value(self.lower_value_item(item)))
+                } else {
+                    Some(Item::Function(self.lower_function_item(item)))
+                }
+            }
+            syn::Item::Signal(item) | syn::Item::Source(item) => {
+                Some(Item::Signal(self.lower_signal_item(item)))
+            }
+            syn::Item::ResultDecl(item) | syn::Item::View(item) | syn::Item::Adapter(item) => {
+                Some(Item::Value(self.lower_value_item(item)))
+            }
             syn::Item::Class(item) => Some(Item::Class(self.lower_class_item(item))),
             syn::Item::Instance(item) => Some(Item::Instance(self.lower_instance_item(item))),
             syn::Item::Domain(item) => Some(Item::Domain(self.lower_domain_item(item))),
@@ -2017,6 +2028,19 @@ impl<'a> Lowerer<'a> {
                 expr: self.lower_expr(expr),
             },
             syn::PipeStageKind::Falsy { expr } => PipeStageKind::Falsy {
+                expr: self.lower_expr(expr),
+            },
+            syn::PipeStageKind::Validate { expr } => PipeStageKind::Validate {
+                expr: self.lower_expr(expr),
+            },
+            syn::PipeStageKind::Previous { expr } => PipeStageKind::Previous {
+                expr: self.lower_expr(expr),
+            },
+            syn::PipeStageKind::Accumulate { seed, step } => PipeStageKind::Accumulate {
+                seed: self.lower_expr(seed),
+                step: self.lower_expr(step),
+            },
+            syn::PipeStageKind::Diff { expr } => PipeStageKind::Diff {
                 expr: self.lower_expr(expr),
             },
         };
@@ -3804,9 +3828,22 @@ impl<'a> Lowerer<'a> {
                                 | PipeStageKind::Truthy { expr }
                                 | PipeStageKind::Falsy { expr }
                                 | PipeStageKind::RecurStart { expr }
-                                | PipeStageKind::RecurStep { expr } => {
+                                | PipeStageKind::RecurStep { expr }
+                                | PipeStageKind::Validate { expr }
+                                | PipeStageKind::Previous { expr }
+                                | PipeStageKind::Diff { expr } => {
                                     work.push(AmbientProjectionWork::Expr {
                                         expr: *expr,
+                                        ambient_allowed: true,
+                                    });
+                                }
+                                PipeStageKind::Accumulate { seed, step } => {
+                                    work.push(AmbientProjectionWork::Expr {
+                                        expr: *step,
+                                        ambient_allowed: true,
+                                    });
+                                    work.push(AmbientProjectionWork::Expr {
+                                        expr: *seed,
                                         ambient_allowed: true,
                                     });
                                 }
@@ -4334,8 +4371,15 @@ impl<'a> Lowerer<'a> {
                         | PipeStageKind::Truthy { expr }
                         | PipeStageKind::Falsy { expr }
                         | PipeStageKind::RecurStart { expr }
-                        | PipeStageKind::RecurStep { expr } => {
+                        | PipeStageKind::RecurStep { expr }
+                        | PipeStageKind::Validate { expr }
+                        | PipeStageKind::Previous { expr }
+                        | PipeStageKind::Diff { expr } => {
                             self.resolve_expr(*expr, namespaces, &stage_env)
+                        }
+                        PipeStageKind::Accumulate { seed, step } => {
+                            self.resolve_expr(*seed, namespaces, &stage_env);
+                            self.resolve_expr(*step, namespaces, &stage_env);
                         }
                         PipeStageKind::Case { pattern, body } => {
                             let bindings = self.resolve_pattern(*pattern, namespaces, &stage_env);
@@ -6064,7 +6108,7 @@ mod tests {
 
     #[test]
     fn lower_injects_ambient_typeclass_prelude() {
-        let lowered = lower_text("ambient-prelude.aivi", "val answer:Int = 42\n");
+        let lowered = lower_text("ambient-prelude.aivi", "value answer:Int = 42\n");
         assert!(
             !lowered.has_errors(),
             "ambient prelude should lower cleanly, got diagnostics: {:?}",
@@ -6112,7 +6156,7 @@ mod tests {
             r#"
 type Bool = True | False
 
-val answer:Int = 42
+value answer:Int = 42
 "#,
         );
         assert!(
@@ -6417,15 +6461,15 @@ type User = {
 domain Retry over Int
     literal x : Int -> Retry
 
-fun keepCount:Int response:(Result HttpError (List User)) current:Int =>
+value keepCount:Int response:(Result HttpError (List User)) current:Int =>
     current
 
 @source http.get "/users" with {
     retry: 3x
 }
-sig responses : Signal (Result HttpError (List User))
+signal responses : Signal (Result HttpError (List User))
 
-sig retried : Signal Int =
+signal retried : Signal Int =
     responses
      |> scan 0 keepCount
 "#,
@@ -6453,10 +6497,10 @@ sig retried : Signal Int =
 domain Duration over Int
     literal s : Int -> Duration
 
-sig enabled : Signal Bool =
+signal enabled : Signal Bool =
     True
 
-sig jitterValue : Signal Duration =
+signal jitterValue : Signal Duration =
     5s
 
 @source timer.every 120 with {
@@ -6464,7 +6508,7 @@ sig jitterValue : Signal Duration =
     activeWhen: enabled,
     jitter: jitterValue
 }
-sig tick : Signal Unit
+signal tick : Signal Unit
 "#,
         );
         assert!(
@@ -6596,7 +6640,7 @@ provider custom.feed
     wakeup: backoff
 
 @source custom.feed
-sig updates : Signal Int
+signal updates : Signal Int
 "#,
         );
         assert!(
@@ -6625,7 +6669,7 @@ sig updates : Signal Int
             "provider_contract_resolution_order.aivi",
             r#"
 @source custom.feed
-sig updates : Signal Int
+signal updates : Signal Int
 
 provider custom.feed
     wakeup: timer
@@ -6924,25 +6968,25 @@ domain Duration over Int
 domain Retry over Int
     literal x : Int -> Retry
 
-fun step value =>
-    value
+value step x =>
+    x
 
 @recur.timer
-sig bare : Signal Int =
+signal bare : Signal Int =
     0
      @|> step
      <|@ step
 
 @source http.get "/users"
 @recur.backoff 3x
-sig mixed : Signal Int =
+signal mixed : Signal Int =
     0
      @|> step
      <|@ step
 
 @recur.timer 5s
 @recur.backoff 3x
-val duplicate : Task Int Int =
+value duplicate : Task Int Int =
     0
      @|> step
      <|@ step
@@ -7072,23 +7116,23 @@ provider custom.feed
     argument path: Text
     option activeWhen: Signal Bool
 
-sig apiHost = "https://api.example.com"
-sig refresh = 0
-sig enabled = True
-sig pollInterval : Signal Duration = 5s
-sig path = "/tmp/demo.txt"
+signal apiHost = "https://api.example.com"
+signal refresh = 0
+signal enabled = True
+signal pollInterval : Signal Duration = 5s
+signal path = "/tmp/demo.txt"
 
 @source http.get "{apiHost}/users" with {
     refreshOn: refresh,
     activeWhen: enabled,
     refreshEvery: pollInterval
 }
-sig users : Signal Int
+signal users : Signal Int
 
 @source custom.feed path with {
     activeWhen: enabled
 }
-sig updates : Signal Int
+signal updates : Signal Int
 "#,
         );
         assert!(
@@ -7294,10 +7338,10 @@ sig updates : Signal Int
     fn tracks_signal_dependencies_through_helper_bodies() {
         let lowered = lower_text(
             "signal-helper-dependencies.aivi",
-            "sig direction : Signal Int = 1\n\
-             sig tick : Signal Int = 0\n\
-             fun stepOnTick:Int tick:Int => direction\n\
-             sig game : Signal Int = stepOnTick tick\n",
+            "signal direction : Signal Int = 1\n\
+             signal tick : Signal Int = 0\n\
+             value stepOnTick:Int tick:Int => direction\n\
+             signal game : Signal Int = stepOnTick tick\n",
         );
         assert!(
             !lowered.has_errors(),
@@ -7318,13 +7362,13 @@ sig updates : Signal Int
         let lowered = lower_text(
             "expression-headed-clusters.aivi",
             "type NamePair = NamePair Text Text\n\
-             sig firstName = \"Ada\"\n\
-             sig lastName = \"Lovelace\"\n\
-             sig headedPair =\n\
+             signal firstName = \"Ada\"\n\
+             signal lastName = \"Lovelace\"\n\
+             signal headedPair =\n\
               firstName\n\
                &|> lastName\n\
                 |> NamePair\n\
-             sig headedTuple =\n\
+             signal headedTuple =\n\
               firstName\n\
                &|> lastName\n",
         );
@@ -7391,9 +7435,9 @@ sig updates : Signal Int
         let lowered = lower_text(
             "nested-cluster-pipe-subject.aivi",
             "type NamePair = NamePair Text Text\n\
-             sig firstName = \"Ada\"\n\
-             sig lastName = \"Lovelace\"\n\
-             sig ok =\n\
+             signal firstName = \"Ada\"\n\
+             signal lastName = \"Lovelace\"\n\
+             signal ok =\n\
               firstName\n\
                &|> (lastName |> .display)\n\
                 |> NamePair\n",
@@ -7409,7 +7453,7 @@ sig updates : Signal Int
     fn rejects_interpolated_pattern_text() {
         let lowered = lower_text(
             "interpolated-pattern-text.aivi",
-            "val subject = \"Ada\"\nval result = subject ||> \"{subject}\" => 1\n",
+            "value subject = \"Ada\"\nvalue result = subject ||> \"{subject}\" => 1\n",
         );
         assert!(
             lowered.has_errors(),
@@ -7649,7 +7693,7 @@ sig updates : Signal Int
     fn does_not_double_report_followup_recurrence_starts() {
         let lowered = lower_text(
             "duplicate-recurrence-starts.aivi",
-            "fun step value => value\nval broken = 0 @|> step @|> step <|@ step\n",
+            "value step x => x\nvalue broken = 0 @|> step @|> step <|@ step\n",
         );
         assert!(
             lowered.has_errors(),
@@ -7685,10 +7729,10 @@ sig updates : Signal Int
     fn exposes_trailing_recurrence_suffix_views() {
         let lowered = lower_text(
             "recurrence-suffix-view.aivi",
-            "fun keep value => value\n\
-             fun start value => value\n\
-             fun step value => value\n\
-             sig retried = 0 |> keep | keep @|> start <|@ step <|@ step\n",
+            "value keep x => x\n\
+             value start x => x\n\
+             value step x => x\n\
+             signal retried = 0 |> keep | keep @|> start <|@ step <|@ step\n",
         );
         assert!(
             !lowered.has_errors(),
@@ -7746,10 +7790,10 @@ sig updates : Signal Int
             "domain Duration over Int\n\
              \tliteral s : Int -> Duration\n\
              type Cursor = { hasNext: Bool }\n\
-             fun keep:Cursor cursor:Cursor => cursor\n\
-             val seed:Cursor = { hasNext: True }\n\
+             value keep:Cursor cursor:Cursor => cursor\n\
+             value seed:Cursor = { hasNext: True }\n\
              @recur.timer 1s\n\
-             sig cursor : Signal Cursor =\n\
+             signal cursor : Signal Cursor =\n\
               seed\n\
                @|> keep\n\
                ?|> .hasNext\n\
@@ -7782,10 +7826,10 @@ sig updates : Signal Int
         let lowered = lower_text(
             "fanout-filter-before-join.aivi",
             "type User = { email: Text }\n\
-             fun keepText:Bool email:Text => True\n\
-             fun joinEmails:Text items:List Text => \"joined\"\n\
-             val users:List User = [{ email: \"ada@example.com\" }]\n\
-             val joinedEmails:Text =\n\
+             value keepText:Bool email:Text => True\n\
+             value joinEmails:Text items:List Text => \"joined\"\n\
+             value users:List User = [{ email: \"ada@example.com\" }]\n\
+             value joinedEmails:Text =\n\
               users\n\
                *|> .email\n\
                ?|> keepText\n\
@@ -8072,7 +8116,7 @@ sig updates : Signal Int
         assert!(matches!(path.members[1].kind, DomainMemberKind::Operator));
         assert_eq!(path.members[1].name.text(), "/");
         assert!(matches!(path.members[2].kind, DomainMemberKind::Method));
-        assert_eq!(path.members[2].name.text(), "value");
+        assert_eq!(path.members[2].name.text(), "unwrap");
 
         let non_empty = match find_named_item(lowered.module(), "NonEmpty") {
             Item::Domain(item) => item,
@@ -8253,10 +8297,10 @@ sig updates : Signal Int
     fn lowers_builtin_noninteger_literals_and_preserves_raw_spelling() {
         let lowered = lower_text(
             "builtin-noninteger-literals.aivi",
-            "val pi:Float = 3.14\n\
-             val amount:Decimal = 19.25d\n\
-             val whole:Decimal = 19d\n\
-             val count:BigInt = 123n\n",
+            "value pi:Float = 3.14\n\
+             value amount:Decimal = 19.25d\n\
+             value whole:Decimal = 19d\n\
+             value count:BigInt = 123n\n",
         );
         assert!(
             !lowered.has_errors(),
@@ -8301,7 +8345,7 @@ sig updates : Signal Int
     fn lowers_map_and_set_literals() {
         let lowered = lower_text(
             "map-set-literals.aivi",
-            "val headers = Map { \"x\": 1, \"y\": 2 }\nval tags = Set [\"a\", \"b\"]\n",
+            "value headers = Map { \"x\": 1, \"y\": 2 }\nvalue tags = Set [\"a\", \"b\"]\n",
         );
         assert!(
             !lowered.has_errors(),
@@ -8358,7 +8402,7 @@ sig updates : Signal Int
     fn duplicate_map_keys_report_hir_diagnostics() {
         let lowered = lower_text(
             "duplicate-map-key.aivi",
-            "val headers = Map { \"Authorization\": \"a\", \"Authorization\": \"b\" }\n",
+            "value headers = Map { \"Authorization\": \"a\", \"Authorization\": \"b\" }\n",
         );
         assert!(
             lowered.has_errors(),
@@ -8423,7 +8467,7 @@ sig updates : Signal Int
     fn grouped_exports_lower_to_individual_resolved_hir_items() {
         let lowered = lower_text(
             "grouped-export.aivi",
-            "type Status = Idle | Busy\nval main = Idle\nexport (Idle, main)\n",
+            "type Status = Idle | Busy\nvalue main = Idle\nexport (Idle, main)\n",
         );
         assert!(
             !lowered.has_errors(),
@@ -8523,10 +8567,10 @@ sig updates : Signal Int
         let lowered = lower_text(
             "builtin-shadowing.aivi",
             concat!(
-                "val True = 0\n",
-                "val chosen = True\n",
+                "value True = 0\n",
+                "value chosen = True\n",
                 "type Option = Option Int\n",
-                "val wrapped:Option = Option 1\n",
+                "value wrapped:Option = Option 1\n",
             ),
         );
         assert!(

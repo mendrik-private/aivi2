@@ -48,9 +48,9 @@ fn lowers_schema_declared_event_attributes_as_direct_event_hooks() {
     let hir = lower_text(
         "event-attrs.aivi",
         r#"
-val isVisible = True
-val clickHandler = True
-val view =
+value isVisible = True
+value clickHandler = True
+value view =
     <Button label="Save" visible={isVisible} onClick={clickHandler} />
 "#,
     );
@@ -99,8 +99,8 @@ fn leaves_unsupported_widget_event_names_as_ordinary_attributes() {
     let hir = lower_text(
         "unsupported-widget-event.aivi",
         r#"
-val clickHandler = True
-val view =
+value clickHandler = True
+value view =
     <Label onClick={clickHandler} />
 "#,
     );
@@ -135,10 +135,10 @@ fn lowers_expanded_catalog_widgets_with_entry_events_and_scrolled_children() {
     let hir = lower_text(
         "expanded-widget-catalog.aivi",
         r#"
-val query = "Draft"
-val canEdit = False
-val submit = True
-val view =
+value query = "Draft"
+value canEdit = False
+value submit = True
+value view =
     <ScrolledWindow>
         <Entry text={query} placeholderText="Search" editable={canEdit} onActivate={submit} />
     </ScrolledWindow>

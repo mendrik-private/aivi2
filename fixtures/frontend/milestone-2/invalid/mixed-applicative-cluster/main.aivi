@@ -1,9 +1,9 @@
 type NamePair = NamePair Text Text
 
-val first:(Option Text) = Some "Ada"
-sig last = "Lovelace"
+value first:(Option Text) = Some "Ada"
+signal last = "Lovelace"
 
-val broken =
+value broken =
  &|> first
  &|> last
   |> NamePair

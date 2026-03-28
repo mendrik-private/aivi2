@@ -4,15 +4,15 @@ type SaveState =
   | Saved
   | Dirty Text
 
-sig documentTitle = "Notes"
-sig documentBody = "Hello"
+signal documentTitle = "Notes"
+signal documentBody = "Hello"
 
-sig draft =
+signal draft =
    &|> documentTitle
  &|> documentBody
     |> Pair
 
-fun label:Text state:SaveState =>
+value label:Text state:SaveState =>
   state
     ||> Saved => "saved"
    ||> Dirty message => "dirty {message}"

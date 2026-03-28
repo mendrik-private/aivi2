@@ -36,21 +36,21 @@ type KruskalSummary = {
     spansAllNodes: Bool
 }
 
-val initialParents: Parents = {
+value initialParents: Parents = {
     a: A,
     b: B,
     c: C,
     d: D
 }
 
-fun nodeLabel:Text node:Node =>
+value nodeLabel:Text node:Node =>
     node
      ||> A => "A"
      ||> B => "B"
      ||> C => "C"
      ||> D => "D"
 
-fun edgeLabel:Text edge:Edge =>
+value edgeLabel:Text edge:Edge =>
     join "" [
         nodeLabel edge.left,
         "-",
@@ -58,46 +58,46 @@ fun edgeLabel:Text edge:Edge =>
         ":{edge.weight}"
     ]
 
-fun appendEdgeLabel:(List Text) parts:(List Text) edge:Edge =>
+value appendEdgeLabel:(List Text) parts:(List Text) edge:Edge =>
     append parts [
         edgeLabel edge
     ]
 
-fun edgeListLabel:Text edges:(List Edge) =>
+value edgeListLabel:Text edges:(List Edge) =>
     edges
      |> reduce appendEdgeLabel []
      |> join ", "
 
-fun parentOf:Node parents:Parents node:Node =>
+value parentOf:Node parents:Parents node:Node =>
     node
      ||> A => parents.a
      ||> B => parents.b
      ||> C => parents.c
      ||> D => parents.d
 
-fun setParent:Parents parents:Parents node:Node value:Node =>
+value setParent:Parents parents:Parents node:Node x:Node =>
     node
-     ||> A => { a: value, b: parents.b, c: parents.c, d: parents.d }
-     ||> B => { a: parents.a, b: value, c: parents.c, d: parents.d }
-     ||> C => { a: parents.a, b: parents.b, c: value, d: parents.d }
-     ||> D => { a: parents.a, b: parents.b, c: parents.c, d: value }
+     ||> A => { a: x, b: parents.b, c: parents.c, d: parents.d }
+     ||> B => { a: parents.a, b: x, c: parents.c, d: parents.d }
+     ||> C => { a: parents.a, b: parents.b, c: x, d: parents.d }
+     ||> D => { a: parents.a, b: parents.b, c: parents.c, d: x }
 
-fun rootOf:Node parents:Parents node:Node =>
+value rootOf:Node parents:Parents node:Node =>
     parentOf parents (parentOf parents (parentOf parents (parentOf parents node)))
 
-fun sameComponent:Bool parents:Parents edge:Edge =>
+value sameComponent:Bool parents:Parents edge:Edge =>
     (rootOf parents edge.left) == (rootOf parents edge.right)
 
-fun unionParents:Parents parents:Parents left:Node right:Node =>
+value unionParents:Parents parents:Parents left:Node right:Node =>
     setParent parents (rootOf parents left) (rootOf parents right)
 
-fun minusOne:Int value:Int =>
-    value - 1
+value minusOne:Int x:Int =>
+    x - 1
 
-fun sameCount:Bool left:Int right:Int =>
+value sameCount:Bool left:Int right:Int =>
     left == right
 
-fun acceptEdge:KruskalState state:KruskalState edge:Edge =>
+value acceptEdge:KruskalState state:KruskalState edge:Edge =>
     {
         parents: unionParents state.parents edge.left edge.right,
         chosen: append state.chosen [edge],
@@ -105,7 +105,7 @@ fun acceptEdge:KruskalState state:KruskalState edge:Edge =>
         totalWeight: state.totalWeight + edge.weight
     }
 
-fun rejectEdge:KruskalState state:KruskalState edge:Edge =>
+value rejectEdge:KruskalState state:KruskalState edge:Edge =>
     {
         parents: state.parents,
         chosen: state.chosen,
@@ -113,24 +113,24 @@ fun rejectEdge:KruskalState state:KruskalState edge:Edge =>
         totalWeight: state.totalWeight
     }
 
-fun step:KruskalState state:KruskalState edge:Edge =>
+value step:KruskalState state:KruskalState edge:Edge =>
     sameComponent state.parents edge
      T|> rejectEdge state edge
      F|> acceptEdge state edge
 
-val cycleHeavyEdge: Edge = {
+value cycleHeavyEdge: Edge = {
     left: A,
     right: C,
     weight: 4
 }
 
-val crossCycleEdge: Edge = {
+value crossCycleEdge: Edge = {
     left: B,
     right: D,
     weight: 5
 }
 
-val sortedGraph: WeightedGraph = {
+value sortedGraph: WeightedGraph = {
     nodes: [A, B, C, D],
     edges: [
         { left: A, right: B, weight: 1 },
@@ -141,20 +141,20 @@ val sortedGraph: WeightedGraph = {
     ]
 }
 
-val initialState: KruskalState = {
+value initialState: KruskalState = {
     parents: initialParents,
     chosen: [],
     rejected: [],
     totalWeight: 0
 }
 
-val kruskalState: KruskalState =
+value kruskalState: KruskalState =
     sortedGraph.edges
      |> reduce step initialState
 
-val expectedEdgeCount: Int = minusOne (length sortedGraph.nodes)
+value expectedEdgeCount: Int = minusOne (length sortedGraph.nodes)
 
-val kruskalSummary: KruskalSummary = {
+value kruskalSummary: KruskalSummary = {
     mstEdges: edgeListLabel kruskalState.chosen,
     rejectedEdges: edgeListLabel kruskalState.rejected,
     totalWeight: kruskalState.totalWeight,

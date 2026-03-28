@@ -293,7 +293,11 @@ fn collect_fanout_pipe(
                 PipeStageKind::Case { .. }
                 | PipeStageKind::Apply { .. }
                 | PipeStageKind::RecurStart { .. }
-                | PipeStageKind::RecurStep { .. } => PipeSubjectStepOutcome::Continue {
+                | PipeStageKind::RecurStep { .. }
+                | PipeStageKind::Validate { .. }
+                | PipeStageKind::Previous { .. }
+                | PipeStageKind::Diff { .. }
+                | PipeStageKind::Accumulate { .. } => PipeSubjectStepOutcome::Continue {
                     new_subject: None,
                     advance_by: 1,
                 },
@@ -856,17 +860,17 @@ type User = {
     email: Text
 }
 
-fun keepText:Bool email:Text =>
+value keepText:Bool email:Text =>
     True
 
-fun joinEmails:Text items:List Text =>
+value joinEmails:Text items:List Text =>
     "joined"
 
-val users:List User = [
+value users:List User = [
     { email: "ada@example.com" }
 ]
 
-val joinedEmails:Text =
+value joinedEmails:Text =
     users
      *|> .email
      ?|> keepText

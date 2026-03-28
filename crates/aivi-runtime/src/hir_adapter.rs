@@ -1247,27 +1247,27 @@ mod tests {
 domain Duration over Int
     literal s : Int -> Duration
 
-fun keep value =>
+value keep value =>
     value
 
-sig apiHost = "https://api.example.com"
-sig refresh = 0
-sig enabled = True
-sig pollInterval : Signal Duration = 5s
+signal apiHost = "https://api.example.com"
+signal refresh = 0
+signal enabled = True
+signal pollInterval : Signal Duration = 5s
 
 @source http.get "{apiHost}/users" with {
     refreshOn: refresh,
     activeWhen: enabled,
     refreshEvery: pollInterval
 }
-sig users : Signal Int
+signal users : Signal Int
 
-sig gatedUsers : Signal Int =
+signal gatedUsers : Signal Int =
     users
      ?|> True
 
 @recur.timer 5s
-sig retried : Signal Int =
+signal retried : Signal Int =
     0
      @|> keep
      <|@ keep
@@ -1377,11 +1377,11 @@ sig retried : Signal Int =
 domain Retry over Int
     literal x : Int -> Retry
 
-fun keep value =>
+value keep value =>
     value
 
 @recur.backoff 3x
-val retried : Task Int Int =
+value retried : Task Int Int =
     0
      @|> keep
      <|@ keep
@@ -1424,17 +1424,17 @@ val retried : Task Int Int =
         let lowered = lower_text(
             "runtime-hir-adapter-bodyless-source-scan.aivi",
             r#"
-fun step:Int value:Int current:Int =>
-    value
+value step:Int n:Int current:Int =>
+    n
 
-sig enabled = True
+signal enabled = True
 
 @source http.get "/users" with {
     activeWhen: enabled
 }
-sig userEvents : Signal Int
+signal userEvents : Signal Int
 
-sig gated : Signal Int =
+signal gated : Signal Int =
     userEvents
      |> scan 0 step
 "#,
@@ -1505,13 +1505,13 @@ sig gated : Signal Int =
         let lowered = lower_text(
             "runtime-hir-adapter-unsupported-source-option.aivi",
             r#"
-sig enabled = True
-sig other = False
+signal enabled = True
+signal other = False
 
 @source http.get "/users" with {
     activeWhen: enabled and other
 }
-sig users : Signal Int
+signal users : Signal Int
 "#,
         );
         assert!(
@@ -1539,7 +1539,7 @@ sig users : Signal Int
             "runtime-hir-adapter-blocked-decode.aivi",
             r#"
 @source custom.feed
-sig bad : Signal (Signal Int)
+signal bad : Signal (Signal Int)
 "#,
         );
         assert!(
@@ -1563,7 +1563,7 @@ sig bad : Signal (Signal Int)
         let lowered = lower_text(
             "runtime-hir-adapter-gate-preservation.aivi",
             r#"
-val maybeOne:Option Int =
+value maybeOne:Option Int =
     1
      ?|> True
 "#,

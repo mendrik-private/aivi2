@@ -1,7 +1,7 @@
-fun step value =>
-    value
+value step x =>
+    x
 
-val broken : Int =
+value broken : Int =
     0
      @|> step
      <|@ step

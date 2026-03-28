@@ -9,13 +9,13 @@ type Vec2 = Vec2 Int Int
 
 type Result A = Err Text | Ok A
 
-val answer = 42
+value answer = 42
 
-fun add:Int x:Int y:Int =>
+value add:Int x:Int y:Int =>
     x + y
 
-fun defaultResult:Result Int value:Int =>
-    Ok value
+value defaultResult:Result Int x:Int =>
+    Ok x
 
-sig counter = 0
-sig nextCounter = counter + 1
+signal counter = 0
+signal nextCounter = counter + 1

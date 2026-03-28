@@ -86,61 +86,61 @@ type User = {
     email: Option Text
 }
 
-val user: User = { name: "Ada" }
-val ok: Validation (NonEmptyList Text) Text = Valid "Ada"
-val err: Validation (NonEmptyList Text) Text = Invalid (singleton "field required")
-val isOkSentinel: Bool = isValid ok
-val isErrSentinel: Bool = isInvalid err
-val names: NonEmptyList Text = singleton "Ada"
-val nameHead: Text = nelHead names
-val nameList: List Text = nelToList names
-val longerNames: NonEmptyList Text = nelCons "Grace" names
-val errors: Errors Text = singleton "field required"
+value user: User = { name: "Ada" }
+value ok: Validation (NonEmptyList Text) Text = Valid "Ada"
+value err: Validation (NonEmptyList Text) Text = Invalid (singleton "field required")
+value isOkSentinel: Bool = isValid ok
+value isErrSentinel: Bool = isInvalid err
+value names: NonEmptyList Text = singleton "Ada"
+value nameHead: Text = nelHead names
+value nameList: List Text = nelToList names
+value longerNames: NonEmptyList Text = nelCons "Grace" names
+value errors: Errors Text = singleton "field required"
 
-val numbers: List Int = [
+value numbers: List Int = [
     1,
     2,
     3
 ]
 
-val emptyList: List Int = []
-val numsEmpty: Bool = isEmpty emptyList
-val numsPresent: Bool = nonEmpty numbers
-val numsLength: Int = length numbers
-val numsHead: Option Int = head numbers
-val numsTail: Option (List Int) = tail numbers
-val numsLast: Option Int = last numbers
+value emptyList: List Int = []
+value numsEmpty: Bool = isEmpty emptyList
+value numsPresent: Bool = nonEmpty numbers
+value numsLength: Int = length numbers
+value numsHead: Option Int = head numbers
+value numsTail: Option (List Int) = tail numbers
+value numsLast: Option Int = last numbers
 
-fun smaller:Bool left:Int right:Int =>
+value smaller:Bool left:Int right:Int =>
     left < right
 
-val smallestNumber: Int = min smaller 4 2
-val largestNumber: Int = max smaller 4 2
+value smallestNumber: Int = min smaller 4 2
+value largestNumber: Int = max smaller 4 2
 
-val smallestFromMany: Int =
+value smallestFromMany: Int =
     minOf smaller 6 [
         4,
         9,
         2
     ]
 
-fun positive:Bool n:Int =>
+value positive:Bool n:Int =>
     n > 0
 
-val foundPositive: Option Int = find positive numbers
+value foundPositive: Option Int = find positive numbers
 
-fun even:Bool n:Int =>
+value even:Bool n:Int =>
     n == 2
 
-val split: (Partition Int) = partition even numbers
+value split: (Partition Int) = partition even numbers
 
-val greeting: Text =
+value greeting: Text =
     join ", " [
         "Hello",
         "World"
     ]
 
-val combined: Text =
+value combined: Text =
     concat [
         "a",
         "i",
@@ -148,27 +148,27 @@ val combined: Text =
         "i"
     ]
 
-val wrapped: Text = surround "[" "]" greeting
-val emptyStr: Bool = textIsEmpty ""
-val nonEmptyStr: Bool = textNonEmpty "aivi"
-val maybeId: Option Int = Some 42
-val hasId: Bool = isSome maybeId
-val noId: Option Int = None
-val missingId: Bool = isNone noId
-val idValue: Int = getOrElse 0 maybeId
-val idItems: List Int = optionToList maybeId
-val idResult: Result Text Int = toResult "no-id" maybeId
-val okAge: Result Text Int = Ok 30
-val errAge: Result Text Int = Err "missing"
-val ageOk: Bool = isOk okAge
-val ageErr: Bool = isErr errAge
-val ageValue: Int = withDefault 0 okAge
-val ageOption: Option Int = toOption okAge
+value wrapped: Text = surround "[" "]" greeting
+value emptyStr: Bool = textIsEmpty ""
+value nonEmptyStr: Bool = textNonEmpty "aivi"
+value maybeId: Option Int = Some 42
+value hasId: Bool = isSome maybeId
+value noId: Option Int = None
+value missingId: Bool = isNone noId
+value idValue: Int = getOrElse 0 maybeId
+value idItems: List Int = optionToList maybeId
+value idResult: Result Text Int = toResult "no-id" maybeId
+value okAge: Result Text Int = Ok 30
+value errAge: Result Text Int = Err "missing"
+value ageOk: Bool = isOk okAge
+value ageErr: Bool = isErr errAge
+value ageValue: Int = withDefault 0 okAge
+value ageOption: Option Int = toOption okAge
 
-fun prefixErr:Text msg:Text =>
+value prefixErr:Text msg:Text =>
     "error:{msg}"
 
-val prefixedErr: Result Text Int = mapErr prefixErr errAge
+value prefixedErr: Result Text Int = mapErr prefixErr errAge
 
 type PollDelay = Duration
 

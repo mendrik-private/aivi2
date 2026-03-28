@@ -8,25 +8,25 @@ type BigIntSummary = {
     factorCount: Int
 }
 
-fun addBigInt:BigInt total:BigInt value:BigInt =>
-    total + value
+value addBigInt:BigInt total:BigInt x:BigInt =>
+    total + x
 
-fun multiplyBigInt:BigInt product:BigInt value:BigInt =>
-    product * value
+value multiplyBigInt:BigInt product:BigInt x:BigInt =>
+    product * x
 
-fun sumBigInts:BigInt values:(List BigInt) =>
+value sumBigInts:BigInt values:(List BigInt) =>
     reduce addBigInt 0n values
 
-fun productBigInts:BigInt values:(List BigInt) =>
+value productBigInts:BigInt values:(List BigInt) =>
     reduce multiplyBigInt 1n values
 
-val archiveChunks: List BigInt = [
+value archiveChunks: List BigInt = [
     9999999999999999999999n,
     8888888888888888888888n,
     7777777777777777777777n
 ]
 
-val factorialFactors: List BigInt = [
+value factorialFactors: List BigInt = [
     1n,
     2n,
     3n,
@@ -41,11 +41,11 @@ val factorialFactors: List BigInt = [
     12n
 ]
 
-val noFactors: List BigInt = []
-val totalBytes: BigInt = sumBigInts archiveChunks
-val factorialTwelve: BigInt = productBigInts factorialFactors
+value noFactors: List BigInt = []
+value totalBytes: BigInt = sumBigInts archiveChunks
+value factorialTwelve: BigInt = productBigInts factorialFactors
 
-val bigIntSummary: BigIntSummary = {
+value bigIntSummary: BigIntSummary = {
     totalBytes,
     factorialTwelve,
     emptyFactorial: productBigInts noFactors,

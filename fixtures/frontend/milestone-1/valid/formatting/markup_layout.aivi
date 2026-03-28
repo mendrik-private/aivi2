@@ -1,9 +1,9 @@
-fun formatCount:Text count:Int =>
+value formatCount:Text count:Int =>
     "{count} unread"
 
-val count = 3
+value count = 3
 
-val dashboard =
+value dashboard =
     <fragment>
       <Label text="Inbox" />
         <show when={True} keepMounted={True}>

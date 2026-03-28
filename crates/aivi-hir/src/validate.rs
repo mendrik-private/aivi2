@@ -433,12 +433,29 @@ impl Validator<'_> {
                             | PipeStageKind::Truthy { expr }
                             | PipeStageKind::Falsy { expr }
                             | PipeStageKind::RecurStart { expr }
-                            | PipeStageKind::RecurStep { expr } => {
+                            | PipeStageKind::RecurStep { expr }
+                            | PipeStageKind::Validate { expr }
+                            | PipeStageKind::Previous { expr }
+                            | PipeStageKind::Diff { expr } => {
                                 self.require_expr(
                                     stage.span,
                                     "pipe stage",
                                     "stage expression",
                                     *expr,
+                                );
+                            }
+                            PipeStageKind::Accumulate { seed, step } => {
+                                self.require_expr(
+                                    stage.span,
+                                    "pipe stage",
+                                    "accumulate seed",
+                                    *seed,
+                                );
+                                self.require_expr(
+                                    stage.span,
+                                    "pipe stage",
+                                    "accumulate step",
+                                    *step,
                                 );
                             }
                             PipeStageKind::Case { pattern, body } => {
@@ -4444,9 +4461,24 @@ impl Validator<'_> {
                                     }
                                     PipeStageKind::Apply { expr }
                                     | PipeStageKind::RecurStart { expr }
-                                    | PipeStageKind::RecurStep { expr } => {
+                                    | PipeStageKind::RecurStep { expr }
+                                    | PipeStageKind::Validate { expr }
+                                    | PipeStageKind::Previous { expr }
+                                    | PipeStageKind::Diff { expr } => {
                                         work.push(CaseExhaustivenessWork::Expr {
                                             expr: *expr,
+                                            env: env.clone(),
+                                        });
+                                        current = None;
+                                        stage_index += 1;
+                                    }
+                                    PipeStageKind::Accumulate { seed, step } => {
+                                        work.push(CaseExhaustivenessWork::Expr {
+                                            expr: *seed,
+                                            env: env.clone(),
+                                        });
+                                        work.push(CaseExhaustivenessWork::Expr {
+                                            expr: *step,
                                             env: env.clone(),
                                         });
                                         current = None;
@@ -5111,7 +5143,11 @@ impl Validator<'_> {
                 PipeStageKind::Case { .. }
                 | PipeStageKind::Apply { .. }
                 | PipeStageKind::RecurStart { .. }
-                | PipeStageKind::RecurStep { .. } => return None,
+                | PipeStageKind::RecurStep { .. }
+                | PipeStageKind::Validate { .. }
+                | PipeStageKind::Previous { .. }
+                | PipeStageKind::Diff { .. }
+                | PipeStageKind::Accumulate { .. } => return None,
             }
         }
         Some(current)
@@ -5425,7 +5461,11 @@ impl Validator<'_> {
                 PipeStageKind::Case { .. }
                 | PipeStageKind::Apply { .. }
                 | PipeStageKind::RecurStart { .. }
-                | PipeStageKind::RecurStep { .. } => PipeSubjectStepOutcome::Continue {
+                | PipeStageKind::RecurStep { .. }
+                | PipeStageKind::Validate { .. }
+                | PipeStageKind::Previous { .. }
+                | PipeStageKind::Diff { .. }
+                | PipeStageKind::Accumulate { .. } => PipeSubjectStepOutcome::Continue {
                     new_subject: None,
                     advance_by: 1,
                 },
@@ -5526,7 +5566,11 @@ impl Validator<'_> {
                 PipeStageKind::Case { .. }
                 | PipeStageKind::Apply { .. }
                 | PipeStageKind::RecurStart { .. }
-                | PipeStageKind::RecurStep { .. } => PipeSubjectStepOutcome::Continue {
+                | PipeStageKind::RecurStep { .. }
+                | PipeStageKind::Validate { .. }
+                | PipeStageKind::Previous { .. }
+                | PipeStageKind::Diff { .. }
+                | PipeStageKind::Accumulate { .. } => PipeSubjectStepOutcome::Continue {
                     new_subject: None,
                     advance_by: 1,
                 },
@@ -5598,7 +5642,11 @@ impl Validator<'_> {
                 PipeStageKind::Case { .. }
                 | PipeStageKind::Apply { .. }
                 | PipeStageKind::RecurStart { .. }
-                | PipeStageKind::RecurStep { .. } => PipeSubjectStepOutcome::Continue {
+                | PipeStageKind::RecurStep { .. }
+                | PipeStageKind::Validate { .. }
+                | PipeStageKind::Previous { .. }
+                | PipeStageKind::Diff { .. }
+                | PipeStageKind::Accumulate { .. } => PipeSubjectStepOutcome::Continue {
                     new_subject: None,
                     advance_by: 1,
                 },
@@ -12650,7 +12698,11 @@ impl<'a> GateTypeContext<'a> {
                 }
                 PipeStageKind::Apply { .. }
                 | PipeStageKind::RecurStart { .. }
-                | PipeStageKind::RecurStep { .. } => {
+                | PipeStageKind::RecurStep { .. }
+                | PipeStageKind::Validate { .. }
+                | PipeStageKind::Previous { .. }
+                | PipeStageKind::Diff { .. }
+                | PipeStageKind::Accumulate { .. } => {
                     stage_index += 1;
                     GateExprInfo::default()
                 }
@@ -14094,9 +14146,22 @@ pub(crate) fn walk_expr_tree(
                                 | PipeStageKind::Truthy { expr }
                                 | PipeStageKind::Falsy { expr }
                                 | PipeStageKind::RecurStart { expr }
-                                | PipeStageKind::RecurStep { expr } => {
+                                | PipeStageKind::RecurStep { expr }
+                                | PipeStageKind::Validate { expr }
+                                | PipeStageKind::Previous { expr }
+                                | PipeStageKind::Diff { expr } => {
                                     work.push(ExprWalkWork::Expr {
                                         expr: *expr,
+                                        is_root: false,
+                                    });
+                                }
+                                PipeStageKind::Accumulate { seed, step } => {
+                                    work.push(ExprWalkWork::Expr {
+                                        expr: *step,
+                                        is_root: false,
+                                    });
+                                    work.push(ExprWalkWork::Expr {
+                                        expr: *seed,
                                         is_root: false,
                                     });
                                 }
@@ -14319,7 +14384,7 @@ mod tests {
         let mut sources = SourceDatabase::new();
         let file_id = sources.add_file(
             "map-set-literal-types.aivi",
-            "val headers = Map { \"Authorization\": \"Bearer demo\", \"Accept\": \"application/json\" }\nval tags = Set [\"news\", \"featured\"]\n",
+            "value headers = Map { \"Authorization\": \"Bearer demo\", \"Accept\": \"application/json\" }\nvalue tags = Set [\"news\", \"featured\"]\n",
         );
         let parsed = parse_module(&sources[file_id]);
         assert!(
@@ -14377,13 +14442,13 @@ mod tests {
         let file_id = sources.add_file(
             "cluster-types.aivi",
             "type NamePair = NamePair Text Text\n\
-             val first:(Option Text) = Some \"Ada\"\n\
-             val last:(Option Text) = Some \"Lovelace\"\n\
-             val pair =\n\
+             value first:(Option Text) = Some \"Ada\"\n\
+             value last:(Option Text) = Some \"Lovelace\"\n\
+             value pair =\n\
               &|> first\n\
               &|> last\n\
                |> NamePair\n\
-             val tupled =\n\
+             value tupled =\n\
               &|> first\n\
               &|> last\n",
         );
@@ -14541,15 +14606,15 @@ mod tests {
         let file_id = sources.add_file(
             "partial-builtin-clusters.aivi",
             "type NamePair = NamePair Text Text\n\
-             val first = Some \"Ada\"\n\
-             val last = None\n\
-             val maybePair =\n\
+             value first = Some \"Ada\"\n\
+             value last = None\n\
+             value maybePair =\n\
               &|> first\n\
               &|> last\n\
                |> NamePair\n\
-             val okFirst = Ok \"Ada\"\n\
-             val errLast = Err \"missing\"\n\
-             val resultPair =\n\
+             value okFirst = Ok \"Ada\"\n\
+             value errLast = Err \"missing\"\n\
+             value resultPair =\n\
               &|> okFirst\n\
               &|> errLast\n\
                |> NamePair\n",
@@ -14627,8 +14692,8 @@ mod tests {
   | Loading
   | Ready Text
   | Failed Text
-val current:Screen = Loading
-val label =
+value current:Screen = Loading
+value label =
     current
      ||> Loading => "loading"
      ||> Ready title => title
@@ -14675,13 +14740,13 @@ val label =
   | Loading
   | Ready Text
   | Failed Text
-val current:Screen = Loading
-val maybeLabel =
+value current:Screen = Loading
+value maybeLabel =
     current
      ||> Loading => None
      ||> Ready title => Some title
      ||> Failed reason => Some reason
-val resultLabel =
+value resultLabel =
     current
      ||> Loading => Ok "loading"
      ||> Ready title => Ok title
@@ -15016,7 +15081,7 @@ val resultLabel =
     fn regex_literal_validation_reports_hir_diagnostics() {
         let report = validate_text(
             "regex_invalid_quantifier.aivi",
-            "val brokenPattern = rx\"a{2,1}\"\n",
+            "value brokenPattern = rx\"a{2,1}\"\n",
         );
         let diagnostic = report
             .diagnostics()
@@ -15048,7 +15113,7 @@ val resultLabel =
   | Pending
   | Failed Text
 
-fun statusLabel:Text status:Status =>
+value statusLabel:Text status:Status =>
     status
      ||> Paid => "paid"
 "#,
@@ -15079,22 +15144,22 @@ fun statusLabel:Text status:Status =>
     fn case_exhaustiveness_accepts_builtin_case_pairs() {
         let report = validate_resolved_text(
             "builtin_exhaustive_cases.aivi",
-            r#"fun boolLabel:Text ready:Bool =>
+            r#"value boolLabel:Text ready:Bool =>
     ready
      ||> True => "ready"
      ||> False => "waiting"
 
-fun maybeLabel:Text maybeUser:(Option Text) =>
+value maybeLabel:Text maybeUser:(Option Text) =>
     maybeUser
      ||> Some name => name
      ||> None => "login"
 
-fun resultLabel:Text status:(Result Text Text) =>
+value resultLabel:Text status:(Result Text Text) =>
     status
      ||> Ok body => body
      ||> Err message => message
 
-fun validationLabel:Text status:(Validation Text Text) =>
+value validationLabel:Text status:(Validation Text Text) =>
     status
      ||> Valid body => body
      ||> Invalid message => message
@@ -15117,10 +15182,10 @@ fun validationLabel:Text status:(Validation Text Text) =>
   | Ready Text
   | Failed Text
 
-val current:Screen =
+value current:Screen =
     Loading
 
-val screenView =
+value screenView =
     <with value={current} as={screen}>
         <match on={screen}>
             <case pattern={Loading}>
@@ -15458,8 +15523,8 @@ val screenView =
         let mut sources = SourceDatabase::new();
         let file_id = sources.add_file(
             "source-option-concrete-application.aivi",
-            "fun keep:Option Int value:Option Int => value\n\
-             val chosen = keep None\n",
+            "value keep:Option Int opt:Option Int => opt\n\
+             value chosen = keep None\n",
         );
         let parsed = parse_module(&sources[file_id]);
         assert!(
@@ -15697,7 +15762,7 @@ val screenView =
              \x20\x20\x20\x20pair: (1, True),\n\
              \x20\x20\x20\x20config: { value: 1, enabled: True }\n\
              }\n\
-             sig updates : Signal Int\n",
+             signal updates : Signal Int\n",
         );
 
         assert!(
@@ -15721,7 +15786,7 @@ val screenView =
              @source custom.feed with {\n\
              \x20\x20\x20\x20tag: 1tg\n\
              }\n\
-             sig updates : Signal Int\n",
+             signal updates : Signal Int\n",
         );
 
         assert!(
@@ -15745,7 +15810,7 @@ val screenView =
              @source custom.feed with {\n\
              \x20\x20\x20\x20tag: 1tg\n\
              }\n\
-             sig updates : Signal Int\n",
+             signal updates : Signal Int\n",
         );
 
         let diagnostic = report
@@ -15775,13 +15840,13 @@ type Session = {
 type Box A =
   | Box A
 
-val emptyBody =
+value emptyBody =
     Box None
 
 @source http.post "/login" with {
     body: emptyBody
 }
-sig login : Signal (Result HttpError Session)
+signal login : Signal (Result HttpError Session)
 "#,
         );
 
@@ -16591,7 +16656,7 @@ sig login : Signal (Result HttpError Session)
              type Wrap B =\n\
              \x20\x20| Wrap (Tagged Int B) B\n\
              \n\
-             val chosen =\n\
+             value chosen =\n\
              \x20\x20\x20\x20Wrap 1tg True\n",
         );
         let parsed = parse_module(&sources[file_id]);

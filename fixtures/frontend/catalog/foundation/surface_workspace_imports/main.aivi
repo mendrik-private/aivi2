@@ -11,17 +11,17 @@ type WorkspaceSummary = {
     banner: Text
 }
 
-fun readyLabel:Text ready:Bool =>
+value readyLabel:Text ready:Bool =>
     ready
      T|> "ready"
      F|> "waiting"
 
-val primaryGreeting: Text = greetUser "Ada"
-val backupGreeting: Text = greetUser "Grace"
-val ownerRole: Text = defaultRole
-val workspaceBanner: Text = joinLabels primaryGreeting (readyLabel True)
+value primaryGreeting: Text = greetUser "Ada"
+value backupGreeting: Text = greetUser "Grace"
+value ownerRole: Text = defaultRole
+value workspaceBanner: Text = joinLabels primaryGreeting (readyLabel True)
 
-val workspaceSummary: WorkspaceSummary = {
+value workspaceSummary: WorkspaceSummary = {
     primaryGreeting,
     backupGreeting,
     ownerRole,

@@ -1,2 +1,2 @@
-val title = "Primary"
-val title = "Secondary"
+value title = "Primary"
+value title = "Secondary"

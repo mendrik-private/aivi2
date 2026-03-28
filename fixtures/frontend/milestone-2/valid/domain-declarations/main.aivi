@@ -1,12 +1,12 @@
 domain Duration over Int
     literal ms : Int -> Duration
     (+) : Duration -> Duration -> Duration
-    value : Duration -> Int
+    unwrap : Duration -> Int
 
 domain Path over Text
     literal root : Text -> Path
     (/) : Path -> Text -> Path
-    value : Path -> Text
+    unwrap : Path -> Text
 
 domain NonEmpty A over List A
     fromList : List A -> Option (NonEmpty A)

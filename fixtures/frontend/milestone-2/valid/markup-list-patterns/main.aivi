@@ -1,4 +1,4 @@
-val rendered =
+value rendered =
     <match on={[1, 2, 3]}>
         <case pattern={[]}>
             <Label text="empty" />

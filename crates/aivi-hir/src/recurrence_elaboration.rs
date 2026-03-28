@@ -862,7 +862,11 @@ fn infer_recurrence_input_subject(
             PipeStageKind::Case { .. }
             | PipeStageKind::Apply { .. }
             | PipeStageKind::RecurStart { .. }
-            | PipeStageKind::RecurStep { .. } => PipeSubjectStepOutcome::Stop,
+            | PipeStageKind::RecurStep { .. }
+            | PipeStageKind::Validate { .. }
+            | PipeStageKind::Previous { .. }
+            | PipeStageKind::Diff { .. }
+            | PipeStageKind::Accumulate { .. } => PipeSubjectStepOutcome::Stop,
             // Transform and Tap are handled by PipeSubjectWalker before the
             // callback is invoked; they can never reach this arm.
             PipeStageKind::Transform { .. } | PipeStageKind::Tap { .. } => {
@@ -1236,17 +1240,17 @@ mod tests {
         let lowered = lower_text(
             "scan_active_when_source.aivi",
             r#"
-fun step:Int value:Int current:Int =>
-    value
+value step:Int n:Int current:Int =>
+    n
 
-sig enabled = True
+signal enabled = True
 
 @source http.get "/users" with {
     activeWhen: enabled
 }
-sig userEvents : Signal Int
+signal userEvents : Signal Int
 
-sig gated : Signal Int =
+signal gated : Signal Int =
     userEvents
      |> scan 0 step
 "#,
@@ -1296,13 +1300,13 @@ type Cursor = {
     hasNext: Bool
 }
 
-fun keep:Cursor cursor:Cursor =>
+value keep:Cursor cursor:Cursor =>
     cursor
 
-val seed:Cursor = { hasNext: True }
+value seed:Cursor = { hasNext: True }
 
 @recur.timer 1s
-sig cursor : Signal Cursor =
+signal cursor : Signal Cursor =
     seed
      @|> keep
      ?|> .hasNext
@@ -1369,14 +1373,14 @@ sig cursor : Signal Cursor =
 domain Duration over Int
     literal s : Int -> Duration
 
-fun keep value:Int =>
-    value
+value keep n:Int =>
+    n
 
-fun asText value:Int =>
+value asText n:Int =>
     "oops"
 
 @recur.timer 5s
-sig broken : Signal Int =
+signal broken : Signal Int =
     0
      @|> keep
      <|@ asText
@@ -1416,18 +1420,18 @@ sig broken : Signal Int =
 domain Duration over Int
     literal s : Int -> Duration
 
-fun advance:Int pressed:Bool value:Int =>
+value advance:Int pressed:Bool n:Int =>
     pressed
-     T|> value + 1
-     F|> value
+     T|> n + 1
+     F|> n
 
-fun belowLimit:Bool value:Int =>
-    value < 10
+value belowLimit:Bool n:Int =>
+    n < 10
 
-sig ready : Signal Bool = True
+signal ready : Signal Bool = True
 
 @recur.timer 5s
-sig counter : Signal Int =
+signal counter : Signal Int =
     0
      @|> advance ready
      ?|> belowLimit

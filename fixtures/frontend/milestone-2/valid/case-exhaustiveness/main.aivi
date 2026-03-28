@@ -3,41 +3,41 @@ type Screen =
   | Ready Text
   | Failed Text
 
-val current: Screen = Loading
+value current: Screen = Loading
 
-fun boolLabel:Text ready:Bool =>
+value boolLabel:Text ready:Bool =>
     ready
      ||> True  => "ready"
      ||> False => "waiting"
 
-fun maybeLabel:Text maybeUser:(Option Text) =>
+value maybeLabel:Text maybeUser:(Option Text) =>
     maybeUser
      ||> Some name => name
      ||> None      => "login"
 
-fun resultLabel:Text status:(Result Text Text) =>
+value resultLabel:Text status:(Result Text Text) =>
     status
      ||> Ok body     => body
      ||> Err message => message
 
-fun validationLabel:Text status:(Validation Text Text) =>
+value validationLabel:Text status:(Validation Text Text) =>
     status
      ||> Valid body      => body
      ||> Invalid message => message
 
-fun screenLabel:Text screen:Screen =>
+value screenLabel:Text screen:Screen =>
     screen
      ||> Loading       => "loading"
      ||> Ready title   => title
      ||> Failed reason => reason
 
-fun nestedScreenLabel:Text screen:Screen =>
+value nestedScreenLabel:Text screen:Screen =>
     screen
      ||> Loading       => "loading"
      ||> Ready title   => (title == "Inbox" T|> "priority" F|> title)
      ||> Failed reason => reason
 
-val screenView =
+value screenView =
     <with value={current} as={screen}>
         <match on={screen}>
             <case pattern={Loading}>

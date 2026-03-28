@@ -880,7 +880,7 @@ fn prepare_execute_artifact(module: &HirModule) -> Result<ExecuteArtifact, Strin
         rendered
     })?;
     if runtime_assembly.task_by_owner(main_owner).is_none() {
-        return Err("`aivi execute` requires `val main` to be annotated as `Task ...`".to_owned());
+        return Err("`aivi execute` requires `value main` to be annotated as `Task ...`".to_owned());
     }
     Ok(ExecuteArtifact {
         main_owner,
@@ -917,10 +917,10 @@ fn select_execute_main<'a>(module: &'a HirModule) -> Result<&'a ValueItem, Strin
     }
     if let Some(kind) = found_non_value_kind {
         return Err(format!(
-            "`aivi execute` requires a top-level `val main : Task ...`; found top-level `{kind} main` instead"
+            "`aivi execute` requires a top-level `value main : Task ...`; found top-level `{kind} main` instead"
         ));
     }
-    Err("no top-level `val main` found; define `val main : Task ... = ...`".to_owned())
+    Err("no top-level `value main` found; define `value main : Task ... = ...`".to_owned())
 }
 
 fn launch_execute(
@@ -1115,7 +1115,7 @@ fn prepare_run_artifact(
     })?;
     let ExprKind::Markup(_) = &module.exprs()[view.body].kind else {
         return Err(format!(
-            "run view `{}` is not markup; `aivi run` currently requires a top-level markup-valued `val`",
+            "run view `{}` is not markup; `aivi run` currently requires a top-level markup-valued `value`",
             view.name.text()
         ));
     };
@@ -1191,7 +1191,7 @@ fn select_run_view<'a>(
             let available = markup_view_names(&markup_values);
             return Err(if available.is_empty() {
                 format!(
-                    "run view `{requested_view}` does not exist and this module exposes no markup-valued top-level `val`s"
+                    "run view `{requested_view}` does not exist and this module exposes no markup-valued top-level `value`s"
                 )
             } else {
                 format!(
@@ -1204,7 +1204,7 @@ fn select_run_view<'a>(
             Ok(value)
         } else {
             Err(format!(
-                "run view `{requested_view}` exists but is not markup; `aivi run` currently requires a markup-valued top-level `val`"
+                "run view `{requested_view}` exists but is not markup; `aivi run` currently requires a markup-valued top-level `value`"
             ))
         };
     }
@@ -1219,7 +1219,7 @@ fn select_run_view<'a>(
 
     match markup_values.as_slice() {
         [single] => Ok(*single),
-        [] => Err("no markup view found; define `val view = <Window ...>` or pass `--view <name>` for another markup-valued top-level `val`".to_owned()),
+        [] => Err("no markup view found; define `value view = <Window ...>` or pass `--view <name>` for another markup-valued top-level `value`".to_owned()),
         many => Err(format!(
             "multiple markup views are available ({}); rename one to `view` or pass `--view <name>`",
             markup_view_names(many).join(", ")
@@ -3417,15 +3417,19 @@ fn print_usage() {
         "usage:\n  aivi <path>\n  aivi check <path>\n  aivi compile <path> [-o <object>]\n  aivi build <path> -o <bundle> [--view <name>]\n  aivi run [<path>] [--path <path>] [--view <name>]\n  aivi mcp [--path <path>] [--view <name>]\n  aivi execute <path> [-- args...]\n  aivi lex <path>\n  aivi fmt <path>\n  aivi fmt --stdin\n  aivi fmt --check [path...]\n  aivi lsp"
     );
     eprintln!(
-        "commands:\n  check    Lex, parse, lower, and validate a module through HIR\n  compile  Lower through typed core, typed lambda, backend, and Cranelift codegen\n  build    Package a runnable bundle directory around the live GTK/runtime path\n  run      Launch the current live GTK runtime path (implicit `<workspace>/main.aivi` when no path is given)\n  mcp      Start the stdio MCP server for launching and inspecting the current app\n  execute  Evaluate a top-level `val main : Task ...` without GTK\n  lex      Dump the lossless token stream\n  fmt      Canonically format the supported surface subset\n  lsp      Start the language server"
+        "commands:\n  check    Lex, parse, lower, and validate a module through HIR\n  compile  Lower through typed core, typed lambda, backend, and Cranelift codegen\n  build    Package a runnable bundle directory around the live GTK/runtime path\n  run      Launch the current live GTK runtime path (implicit `<workspace>/main.aivi` when no path is given)\n  mcp      Start the stdio MCP server for launching and inspecting the current app\n  execute  Evaluate a top-level `value main : Task ...` without GTK\n  lex      Dump the lossless token stream\n  fmt      Canonically format the supported surface subset\n  lsp      Start the language server"
     );
     eprintln!(
         "milestone-2 surface items: {:?}",
         [
             ItemKind::Type,
+            ItemKind::Data,
             ItemKind::Value,
-            ItemKind::Function,
             ItemKind::Signal,
+            ItemKind::Source,
+            ItemKind::ResultDecl,
+            ItemKind::View,
+            ItemKind::Adapter,
             ItemKind::Class,
             ItemKind::Instance,
             ItemKind::Domain,
@@ -3620,7 +3624,7 @@ mod tests {
         workspace.write("aivi.toml", "");
         let cwd = workspace.path().join("tooling");
         fs::create_dir_all(&cwd).expect("tooling directory should exist");
-        let explicit = workspace.write("apps/demo.aivi", "val demo = 1\n");
+        let explicit = workspace.write("apps/demo.aivi", "value demo = 1\n");
 
         let resolved = super::resolve_run_entrypoint(&cwd, Some(&explicit))
             .expect("explicit path should bypass implicit resolution");
@@ -3632,7 +3636,7 @@ mod tests {
     fn resolve_run_entrypoint_uses_workspace_root_main_when_present() {
         let workspace = TempDir::new("run-entry-implicit");
         workspace.write("aivi.toml", "");
-        let expected = workspace.write("main.aivi", "val view = <Window title=\"AIVI\" />\n");
+        let expected = workspace.write("main.aivi", "value view = <Window title=\"AIVI\" />\n");
         let cwd = workspace.path().join("tooling/nested");
         fs::create_dir_all(&cwd).expect("nested tooling directory should exist");
 
@@ -3684,7 +3688,7 @@ type Screen =
   | Ready (List Item)
   | Failed Text
 
-val view =
+value view =
     <Window title="Users">
         <show when={True} keepMounted={True}>
             <with value={Ready [
@@ -3715,7 +3719,7 @@ val view =
 
     fn planner_window_source() -> &'static str {
         r#"
-val view =
+value view =
     <Window title="Users">
         <show when={True} keepMounted={True}>
             <with value={"Alpha"} as={label}>
@@ -3753,7 +3757,7 @@ val view =
         let artifact = prepare_run_from_text(
             "static-window.aivi",
             r#"
-val screenView =
+value screenView =
     <Window title="AIVI" />
 "#,
             None,
@@ -3779,7 +3783,7 @@ use shared.types (
 
 type Welcome = Greeting
 
-val view =
+value view =
     <Window title="Workspace" />
 "#,
         );
@@ -3850,10 +3854,10 @@ export (Greeting, Farewell)
         let artifact = prepare_run_from_text(
             "named-view.aivi",
             r#"
-val view =
+value view =
     <Window title="Default" />
 
-val alternate =
+value alternate =
     <Window title="Alternate" />
 "#,
             None,
@@ -3867,9 +3871,9 @@ val alternate =
         let artifact = prepare_run_from_text(
             "dynamic-property.aivi",
             r#"
-val title = "AIVI"
+value title = "AIVI"
 
-val view =
+value view =
     <Window title={title} />
         "#,
             None,
@@ -3893,7 +3897,7 @@ val view =
         let artifact = prepare_run_from_text(
             "control-node.aivi",
             r#"
-val view =
+value view =
     <Window title="AIVI">
         <show when={True}>
             <Label text="Visible" />
@@ -4063,9 +4067,9 @@ val view =
         let artifact = prepare_run_from_text(
             "event-hook.aivi",
             r#"
-sig click : Signal Unit
+signal click : Signal Unit
 
-val view =
+value view =
     <Window title="Host">
         <Button label="Save" onClick={click} />
     </Window>
@@ -4099,12 +4103,12 @@ val view =
         let artifact = prepare_run_from_text(
             "expanded-widget-catalog.aivi",
             r#"
-sig submit : Signal Unit
+signal submit : Signal Unit
 
-val entryText = "Draft"
-val canEdit = False
-val isEnabled = True
-val view =
+value entryText = "Draft"
+value canEdit = False
+value isEnabled = True
+value view =
     <Window title="Host">
         <ScrolledWindow>
             <Box>
@@ -4158,10 +4162,10 @@ val view =
         let artifact = prepare_run_from_text(
             "entry-change-events.aivi",
             r#"
-sig changed : Signal Text
+signal changed : Signal Text
 
-val query = "Draft"
-val view =
+value query = "Draft"
+value view =
     <Window title="Host">
         <Entry text={query} onChange={changed} />
     </Window>
@@ -4192,11 +4196,11 @@ val view =
         let artifact = prepare_run_from_text(
             "additional-widget-catalog.aivi",
             r#"
-sig toggled : Signal Bool
+signal toggled : Signal Bool
 
-val showButtons = False
-val isEnabled = True
-val view =
+value showButtons = False
+value isEnabled = True
+value view =
     <Window title="Host">
         <Viewport>
             <Frame label="Controls">
@@ -4257,8 +4261,8 @@ val view =
         let artifact = prepare_run_from_text(
             "named-child-groups.aivi",
             r#"
-val showButtons = False
-val view =
+value showButtons = False
+value view =
     <Window title="Host">
         <Paned orientation="Horizontal">
             <Paned.start>
@@ -4329,7 +4333,7 @@ val view =
         let error = prepare_run_from_text(
             "button-root.aivi",
             r#"
-val view =
+value view =
     <Button label="Save" />
 "#,
             None,
@@ -4344,7 +4348,7 @@ val view =
         let error = prepare_run_from_text(
             "unsupported-widget.aivi",
             r#"
-val view =
+value view =
     <Window title="Host">
         <Notebook />
     </Window>
@@ -4360,7 +4364,7 @@ val view =
         let error = prepare_run_from_text(
             "leaf-children.aivi",
             r#"
-val view =
+value view =
     <Window title="Host">
         <Button label="Save">
             <Label text="Nested" />
@@ -4378,7 +4382,7 @@ val view =
         let error = prepare_run_from_text(
             "window-too-many-children.aivi",
             r#"
-val view =
+value view =
     <Window title="Host">
         <Label text="First" />
         <Label text="Second" />
@@ -4396,7 +4400,7 @@ val view =
         let error = prepare_run_from_text(
             "scrolled-window-too-many-children.aivi",
             r#"
-val view =
+value view =
     <Window title="Host">
         <ScrolledWindow>
             <Label text="First" />
@@ -4417,9 +4421,9 @@ val view =
         let error = prepare_run_from_text(
             "event-payload-mismatch.aivi",
             r#"
-sig click : Signal Int
+signal click : Signal Int
 
-val view =
+value view =
     <Window title="Host">
         <Button label="Save" onClick={click} />
     </Window>
@@ -4436,10 +4440,10 @@ val view =
         let error = prepare_run_from_text(
             "multiple-views.aivi",
             r#"
-val first =
+value first =
     <Window title="First" />
 
-val second =
+value second =
     <Window title="Second" />
 "#,
             None,
@@ -4459,33 +4463,33 @@ use aivi.stdio (
 )
 
 @source process.args
-sig cliArgs : Signal (List Text)
+signal cliArgs : Signal (List Text)
 
 @source process.cwd
-sig cwd : Signal Text
+signal cwd : Signal Text
 
 @source env.get "ACCESS_TOKEN"
-sig token : Signal (Option Text)
+signal token : Signal (Option Text)
 
 @source stdio.read
-sig stdinText : Signal Text
+signal stdinText : Signal Text
 
 @source path.home
-sig homeDir : Signal Text
+signal homeDir : Signal Text
 
 @source path.configHome
-sig configHome : Signal Text
+signal configHome : Signal Text
 
 @source path.dataHome
-sig dataHome : Signal Text
+signal dataHome : Signal Text
 
 @source path.cacheHome
-sig cacheHome : Signal Text
+signal cacheHome : Signal Text
 
 @source path.tempDir
-sig tempDir : Signal Text
+signal tempDir : Signal Text
 
-val main : Task Text Unit =
+value main : Task Text Unit =
     stdoutWrite "{cliArgs}|{cwd}|{token}|{stdinText}|{homeDir}|{configHome}|{dataHome}|{cacheHome}|{tempDir}"
 "#,
         );
@@ -4551,7 +4555,7 @@ use aivi.stdio (
     stderrWrite
 )
 
-val main : Task Text Unit =
+value main : Task Text Unit =
     stderrWrite "problem"
 "#,
         );
@@ -4580,9 +4584,9 @@ use aivi.fs (
 )
 
 @source process.cwd
-sig cwd : Signal Text
+signal cwd : Signal Text
 
-val main : Task Text Unit =
+value main : Task Text Unit =
     writeText "{cwd}/out.txt" "hello from execute"
 "#,
         );
@@ -4620,9 +4624,9 @@ use aivi.fs (
 )
 
 @source process.cwd
-sig cwd : Signal Text
+signal cwd : Signal Text
 
-val main : Task Text Unit =
+value main : Task Text Unit =
     createDirAll "{cwd}/nested/logs"
 "#,
         );
@@ -4634,9 +4638,9 @@ use aivi.fs (
 )
 
 @source process.cwd
-sig cwd : Signal Text
+signal cwd : Signal Text
 
-val main : Task Text Unit =
+value main : Task Text Unit =
     deleteFile "{cwd}/remove-me.txt"
 "#,
         );

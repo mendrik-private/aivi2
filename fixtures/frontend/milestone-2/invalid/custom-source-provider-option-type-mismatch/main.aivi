@@ -8,4 +8,4 @@ provider custom.feed
 @source custom.feed with {
     timeout: 1
 }
-sig updates : Signal Int
+signal updates : Signal Int

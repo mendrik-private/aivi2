@@ -1,2 +1,2 @@
-fun prependCells:List Int head:Int tail:List Int =>
+value prependCells:List Int head:Int tail:List Int =>
     head :: tail

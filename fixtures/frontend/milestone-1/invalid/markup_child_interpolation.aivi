@@ -1,2 +1,2 @@
-val brokenView =
+value brokenView =
     <Label>{current}</Label>

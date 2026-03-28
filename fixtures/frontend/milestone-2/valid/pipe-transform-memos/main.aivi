@@ -1,4 +1,4 @@
-val memoed =
+value memoed =
     20
      |> #before before + 1 #after
      |> after + before

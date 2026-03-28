@@ -1,13 +1,13 @@
 type User = { email: Text }
 
-fun joinEmails:Text items:List Text =>
+value joinEmails:Text items:List Text =>
     "joined"
 
-val users:List User = [
+value users:List User = [
     { email: "ada@example.com" }
 ]
 
-val joinedEmails =
+value joinedEmails =
     users
      *|> .email
      <|* .missing

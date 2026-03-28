@@ -3,6 +3,6 @@ domain Duration over Int
     literal sec : Int -> Duration
     (+) : Duration -> Duration -> Duration
 
-val delay : Duration = 250ms
-val total = 250ms + 3sec
-val applied = wrap 250ms
+value delay : Duration = 250ms
+value total = 250ms + 3sec
+value applied = wrap 250ms

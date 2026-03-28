@@ -8,52 +8,52 @@ type FormError = {
     message: Text
 }
 
-val ready: Bool = True
-val start: Text = "start"
-val wait: Text = "wait"
+value ready: Bool = True
+value start: Text = "start"
+value wait: Text = "wait"
 
-val readyText: Text =
+value readyText: Text =
     ready
      T|> start
      F|> wait
 
-val maybeUser: Option User =
+value maybeUser: Option User =
     Some {
         name: "Ada"
     }
 
-val greeting: Text =
+value greeting: Text =
     maybeUser
      T|> .name
      F|> "guest"
 
-val maybeDisplay: Option Text =
+value maybeDisplay: Option Text =
     maybeUser
      F|> "guest"
      T|> .name
      ?|> True
 
-val loaded: Result LoadError User =
+value loaded: Result LoadError User =
     Err {
         message: "offline"
     }
 
-val rendered: Text =
+value rendered: Text =
     loaded
      T|> .name
      F|> .message
 
-val nestedRendered: Text =
+value nestedRendered: Text =
     ready
      T|> (loaded ||> Ok user => user.name ||> Err loadFail => loadFail.message)
      F|> wait
 
-val submitted: Validation FormError User =
+value submitted: Validation FormError User =
     Valid {
         name: "Grace"
     }
 
-val summary: Text =
+value summary: Text =
     submitted
      T|> .name
      F|> .message

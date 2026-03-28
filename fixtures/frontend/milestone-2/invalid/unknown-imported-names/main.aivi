@@ -3,4 +3,4 @@ use aivi.network (
     mailbox
 )
 
-val importedHttp = http
+value importedHttp = http

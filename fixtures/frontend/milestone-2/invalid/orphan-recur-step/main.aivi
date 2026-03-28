@@ -1,6 +1,6 @@
-fun step value =>
-    value
+value step x =>
+    x
 
-val broken =
+value broken =
     0
      <|@ step

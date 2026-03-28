@@ -69,12 +69,12 @@ fn open_file_reuses_existing_handle_for_the_same_path() {
     let first = SourceFile::new(
         &db,
         PathBuf::from("main.aivi"),
-        "val answer = 42".to_owned(),
+        "value answer = 42".to_owned(),
     );
     let reopened = SourceFile::new(
         &db,
         PathBuf::from("main.aivi"),
-        "val answer = 42".to_owned(),
+        "value answer = 42".to_owned(),
     );
 
     assert_eq!(first, reopened);
@@ -88,7 +88,7 @@ fn parsed_and_hir_queries_reuse_cached_snapshots_until_text_changes() {
     let file = SourceFile::new(
         &db,
         PathBuf::from("main.aivi"),
-        "val answer = 42".to_owned(),
+        "value answer = 42".to_owned(),
     );
 
     let parsed_first = parsed_file(&db, file);
@@ -106,7 +106,7 @@ fn parsed_and_hir_queries_reuse_cached_snapshots_until_text_changes() {
     assert_eq!(hir_first.symbols()[0].name, "answer");
     assert_eq!(exported_names(&db, file).0[0].name, "answer");
 
-    assert!(file.set_text(&db, "val total = 7".to_owned()));
+    assert!(file.set_text(&db, "value total = 7".to_owned()));
 
     let parsed_third = parsed_file(&db, file);
     let hir_third = hir_module(&db, file);
@@ -118,7 +118,7 @@ fn parsed_and_hir_queries_reuse_cached_snapshots_until_text_changes() {
 #[test]
 fn formatting_and_diagnostics_follow_the_current_file_revision() {
     let db = RootDatabase::new();
-    let file = SourceFile::new(&db, PathBuf::from("main.aivi"), "val answer=42".to_owned());
+    let file = SourceFile::new(&db, PathBuf::from("main.aivi"), "value answer=42".to_owned());
 
     let original = file.text(&db);
     let formatted = format_file(&db, file).expect("known files should format");
@@ -164,7 +164,7 @@ fn hir_queries_fallback_to_bundled_stdlib_modules() {
     let workspace = TempDir::new("bundled-stdlib-fallback");
     let main_path = workspace.write(
         "main.aivi",
-        "use aivi.bundledsmoketest (\n    bundledSentinel\n    BundledToken\n)\n\ntype Alias = BundledToken\nval marker = bundledSentinel\n",
+        "use aivi.bundledsmoketest (\n    bundledSentinel\n    BundledToken\n)\n\ntype Alias = BundledToken\nvalue marker = bundledSentinel\n",
     );
 
     let db = RootDatabase::new();
@@ -203,7 +203,7 @@ fn hir_queries_fallback_to_bundled_root_and_prelude_modules() {
     let workspace = TempDir::new("bundled-root-prelude-fallback");
     let main_path = workspace.write(
         "main.aivi",
-        "use aivi (\n    Option\n    Result\n    Validation\n    Signal\n    Task\n    Some\n    None\n    Ok\n    Err\n    Valid\n    Invalid\n)\n\nuse aivi.prelude (\n    Int\n    Bool\n    Text\n    List\n    Eq\n    Default\n    Functor\n    Applicative\n    Monad\n    Foldable\n    getOrElse\n    withDefault\n    length\n    head\n    join\n)\n\ntype NameSignal = Signal Text\ntype CountTask = Task Text Int\ntype CheckedName = Validation Text Text\n\nval maybeName:Option Text = Some \"Ada\"\nval missingName:Option Text = None\nval chosenName:Text = getOrElse \"guest\" missingName\n\nval okCount:Result Text Int = Ok 2\nval errCount:Result Text Int = Err \"missing\"\nval chosenCount:Int = withDefault 0 okCount\n\nval checkedName:CheckedName = Valid \"Ada\"\nval nameCount:Int = length [\"Ada\", \"Grace\"]\nval firstName:Option Text = head [\"Ada\", \"Grace\"]\nval labels:Text = join \", \" [\"Ada\", \"Grace\"]\nval sameCount:Bool = chosenCount == 2\n",
+        "use aivi (\n    Option\n    Result\n    Validation\n    Signal\n    Task\n    Some\n    None\n    Ok\n    Err\n    Valid\n    Invalid\n)\n\nuse aivi.prelude (\n    Int\n    Bool\n    Text\n    List\n    Eq\n    Default\n    Functor\n    Applicative\n    Monad\n    Foldable\n    getOrElse\n    withDefault\n    length\n    head\n    join\n)\n\ntype NameSignal = Signal Text\ntype CountTask = Task Text Int\ntype CheckedName = Validation Text Text\n\nvalue maybeName:Option Text = Some \"Ada\"\nvalue missingName:Option Text = None\nvalue chosenName:Text = getOrElse \"guest\" missingName\n\nvalue okCount:Result Text Int = Ok 2\nvalue errCount:Result Text Int = Err \"missing\"\nvalue chosenCount:Int = withDefault 0 okCount\n\nvalue checkedName:CheckedName = Valid \"Ada\"\nvalue nameCount:Int = length [\"Ada\", \"Grace\"]\nvalue firstName:Option Text = head [\"Ada\", \"Grace\"]\nvalue labels:Text = join \", \" [\"Ada\", \"Grace\"]\nvalue sameCount:Bool = chosenCount == 2\n",
     );
 
     let db = RootDatabase::new();
@@ -284,17 +284,17 @@ type User = {
     name: Text
 }
 
-val headers:HttpHeaders =
+value headers:HttpHeaders =
     Map {
         "Authorization": "Bearer demo"
     }
 
-val query:HttpQuery =
+value query:HttpQuery =
     Map {
         "page": "1"
     }
 
-val decodeMode:DecodeMode =
+value decodeMode:DecodeMode =
     Strict
 
 type RetryBudget = Retry
@@ -303,35 +303,35 @@ type UsersResponse = HttpResponse (List User)
 type UsersTask = HttpTask (List User)
 
 @source http.get "https://api.example.com/users"
-sig users : Signal UsersResponse
+signal users : Signal UsersResponse
 
 @source timer.every 120 with {
     immediate: True,
     coalesce: True
 }
-sig tick : Signal TimerTick
+signal tick : Signal TimerTick
 
 @source timer.after 1000
-sig ready : Signal TimerReady
+signal ready : Signal TimerReady
 
-val timeoutError:HttpError =
+value timeoutError:HttpError =
     Timeout
 
-val decodeError:HttpError =
+value decodeError:HttpError =
     DecodeFailure "bad-json"
 
-val requestError:HttpError =
+value requestError:HttpError =
     RequestFailure "offline"
 
-val level:LogLevel =
+value level:LogLevel =
     Debug
 
-val context:LogContext =
+value context:LogContext =
     Map {
         "module": "query"
     }
 
-val entry:LogEntry = {
+value entry:LogEntry = {
     level: level,
     message: "loaded",
     context: context
@@ -343,7 +343,7 @@ type CurrentLogError = LogError
 
 type PollDelay = Duration
 
-val errorLevel:LogLevel =
+value errorLevel:LogLevel =
     Error
 "#,
     );
@@ -403,11 +403,11 @@ fn hir_queries_prefer_workspace_modules_over_bundled_stdlib_fallback() {
     workspace.write("aivi.toml", "");
     let main_path = workspace.write(
         "main.aivi",
-        "use aivi.bundledsmoketest (\n    workspaceOnly\n    LocalToken\n)\n\ntype Alias = LocalToken\nval marker = workspaceOnly\n",
+        "use aivi.bundledsmoketest (\n    workspaceOnly\n    LocalToken\n)\n\ntype Alias = LocalToken\nvalue marker = workspaceOnly\n",
     );
     let local_module_path = workspace.write(
         "aivi/bundledsmoketest.aivi",
-        "use aivi.bundledsmokesupport (\n    bundledSupportSentinel\n)\n\nval workspaceOnly:Text = bundledSupportSentinel\ntype LocalToken = Text\n\nexport (workspaceOnly, LocalToken)\n",
+        "use aivi.bundledsmokesupport (\n    bundledSupportSentinel\n)\n\nvalue workspaceOnly:Text = bundledSupportSentinel\ntype LocalToken = Text\n\nexport (workspaceOnly, LocalToken)\n",
     );
 
     let db = RootDatabase::new();

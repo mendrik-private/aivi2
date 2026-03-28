@@ -1469,6 +1469,20 @@ impl<'a> GeneralExprElaborator<'a> {
                         ),
                     }]);
                 }
+                PipeStageKind::Validate { .. }
+                | PipeStageKind::Previous { .. }
+                | PipeStageKind::Diff { .. }
+                | PipeStageKind::Accumulate { .. } => {
+                    if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary) {
+                        break;
+                    }
+                    return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
+                        span: stage.span,
+                        kind: GateRuntimeUnsupportedKind::PipeStage(
+                            GateRuntimeUnsupportedPipeStageKind::RecurStart,
+                        ),
+                    }]);
+                }
             }
         }
         Ok(GateRuntimePipeExpr {
@@ -2574,7 +2588,7 @@ mod tests {
     fn elaborates_truthy_falsy_branches_from_expected_result_types() {
         let lowered = lower_text(
             "expected-truthy-falsy-branches.aivi",
-            "fun choose:(List Int) flag:Bool =>\n\
+            "value choose:(List Int) flag:Bool =>\n\
                 flag\n\
                  T|> []\n\
                  F|> [1]\n",
@@ -2607,9 +2621,9 @@ mod tests {
                  nickname: Option Text,\n\
                  bio: Option Text\n\
              }\n\
-             val name = \"Ada\"\n\
-             val nickname = Some \"Countess\"\n\
-             val profile:Profile = { name, nickname }\n",
+             value name = \"Ada\"\n\
+             value nickname = Some \"Countess\"\n\
+             value profile:Profile = { name, nickname }\n",
         );
         assert!(
             !lowered.has_errors(),
@@ -2655,7 +2669,7 @@ mod tests {
 
     #[test]
     fn blocks_regex_literals_in_general_expr_bodies() {
-        let lowered = lower_text("general-expr-blocked-regex.aivi", "val pattern = rx\"a+\"");
+        let lowered = lower_text("general-expr-blocked-regex.aivi", "value pattern = rx\"a+\"");
         assert!(
             !lowered.has_errors(),
             "regex general-expression fixture should lower to HIR: {:?}",
@@ -2690,10 +2704,10 @@ mod tests {
     fn blocks_map_pipe_stages_in_general_expr_bodies() {
         let lowered = lower_text(
             "general-expr-blocked-map-stage.aivi",
-            "fun identity:Int value:Int =>\n\
-             value\n\
+            "value identity:Int x:Int =>\n\
+             x\n\
              \n\
-             fun duplicate:List Int values:List Int =>\n\
+             value duplicate:List Int values:List Int =>\n\
              values\n\
               *|> identity\n",
         );
@@ -2784,7 +2798,7 @@ instance Semigroup Blob
         let lowered = lower_text(
             "general-expr-generic-append.aivi",
             r#"
-fun appendOne:(List A) items:(List A) item:A =>
+value appendOne:(List A) items:(List A) item:A =>
     append items [item]
 "#,
         );
@@ -2851,12 +2865,12 @@ fun appendOne:(List A) items:(List A) item:A =>
         let lowered = lower_text(
             "general-expr-signal-name-direct-call.aivi",
             r#"
-sig direction : Signal Int = 1
+signal direction : Signal Int = 1
 
-fun step:Int value:Int =>
-    value
+value step:Int n:Int =>
+    n
 
-fun current:Int tick:Unit =>
+value current:Int tick:Unit =>
     step direction
 "#,
         );
@@ -2896,10 +2910,10 @@ fun current:Int tick:Unit =>
         let lowered = lower_text(
             "general-expr-generic-reduce.aivi",
             r#"
-fun lengthStep:Int total:Int item:A =>
+value lengthStep:Int total:Int item:A =>
     total + 1
 
-fun length:Int items:(List A) =>
+value length:Int items:(List A) =>
     items
      |> reduce lengthStep 0
 "#,
@@ -2996,12 +3010,12 @@ type TakeAcc A = {
     items: List A
 }
 
-fun takeStep:(TakeAcc A) acc:(TakeAcc A) item:A =>
+value takeStep:(TakeAcc A) acc:(TakeAcc A) item:A =>
     acc.n > 0
      T|> { n: acc.n - 1, items: append acc.items [item] }
      F|> acc
 
-fun take:(List A) n:Int xs:(List A) =>
+value take:(List A) n:Int xs:(List A) =>
     xs
      |> reduce takeStep { n, items: [] }
      |> .items
@@ -3093,12 +3107,12 @@ fun take:(List A) n:Int xs:(List A) =>
         let lowered = lower_text(
             "general-expr-generic-reduce-option-init.aivi",
             r#"
-fun keepFirst:(Option A) found:(Option A) item:A =>
+value keepFirst:(Option A) found:(Option A) item:A =>
     found
      T|> found
      F|> Some item
 
-fun head:(Option A) items:(List A) =>
+value head:(Option A) items:(List A) =>
     items
      |> reduce keepFirst None
 "#,
@@ -3188,12 +3202,12 @@ fun head:(Option A) items:(List A) =>
         let lowered = lower_text(
             "general-expr-generic-reduce-partial-step.aivi",
             r#"
-fun anyStep:Bool predicate:(A -> Bool) found:Bool item:A =>
+value anyStep:Bool predicate:(A -> Bool) found:Bool item:A =>
     found
      T|> True
      F|> predicate item
 
-fun any:Bool predicate:(A -> Bool) items:(List A) =>
+value any:Bool predicate:(A -> Bool) items:(List A) =>
     items
      |> reduce (anyStep predicate) False
 "#,

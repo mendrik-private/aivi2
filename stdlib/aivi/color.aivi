@@ -1,5 +1,5 @@
 domain Color over Int
     argb: Int -> Color
-    value: Color -> Int
+    unwrap: Color -> Int
 
 export Color

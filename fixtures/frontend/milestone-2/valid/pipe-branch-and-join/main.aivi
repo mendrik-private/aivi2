@@ -1,18 +1,18 @@
 type User = { email: Text }
 
-fun collect items =>
+value collect items =>
     items
 
-val ready = True
-val start = "start"
-val wait = "wait"
-val branch =
+value ready = True
+value start = "start"
+value wait = "wait"
+value branch =
     ready
      T|> start
      F|> wait
 
-val users = []
-val emails =
+value users = []
+value emails =
     users
      *|> .email
      <|* collect

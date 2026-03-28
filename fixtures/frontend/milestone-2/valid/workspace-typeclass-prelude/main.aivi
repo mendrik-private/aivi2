@@ -3,5 +3,5 @@ use shared.logic (
     earlier
 )
 
-val lifted:Option Int = liftOne (Some 1)
-val ordered:Bool = earlier "Ada" "Bob"
+value lifted:Option Int = liftOne (Some 1)
+value ordered:Bool = earlier "Ada" "Bob"

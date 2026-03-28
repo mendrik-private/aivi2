@@ -1061,9 +1061,9 @@ mod tests {
         let hir = lower_text(
             "runtime-event-attrs.aivi",
             r#"
-val isVisible = True
-val clickHandler = True
-val view =
+value isVisible = True
+value clickHandler = True
+value view =
     <Button label="Save" visible={isVisible} onClick={clickHandler} />
 "#,
         );

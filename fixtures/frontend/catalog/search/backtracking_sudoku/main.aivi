@@ -29,146 +29,146 @@ type SudokuCatalog = {
     coverage: Text
 }
 
-fun board:SudokuBoard cells:(List Int) =>
+value board:SudokuBoard cells:(List Int) =>
     { cells }
 
-fun isBlank:Bool value:Int =>
-    value == 0
+value isBlank:Bool x:Int =>
+    x == 0
 
-fun advanceCellAt:(Option Int) cells:(List Int) index:Int current:Int =>
+value advanceCellAt:(Option Int) cells:(List Int) index:Int current:Int =>
     index == 0
      T|> Some current
      F|> cellAt (tailOrEmpty cells) (index - 1)
 
-fun cellAt:(Option Int) cells:(List Int) index:Int =>
+value cellAt:(Option Int) cells:(List Int) index:Int =>
     head cells
      ||> Some current => advanceCellAt cells index current
      ||> None         => None
 
-fun valueAt:Int cells:(List Int) index:Int =>
+value valueAt:Int cells:(List Int) index:Int =>
     cellAt cells index
-     ||> Some value => value
+     ||> Some x => x
      ||> None       => 0
 
-fun replaceCurrent:(List Int) current:Int rest:(List Int) index:Int value:Int =>
+value replaceCurrent:(List Int) current:Int rest:(List Int) index:Int x:Int =>
     index == 0
-     T|> append [value] rest
-     F|> append [current] (replaceAt rest (index - 1) value)
+     T|> append [x] rest
+     F|> append [current] (replaceAt rest (index - 1) x)
 
-fun replaceAt:(List Int) cells:(List Int) index:Int value:Int =>
+value replaceAt:(List Int) cells:(List Int) index:Int x:Int =>
     head cells
-     ||> Some current => replaceCurrent current (tailOrEmpty cells) index value
+     ||> Some current => replaceCurrent current (tailOrEmpty cells) index x
      ||> None         => []
 
-fun rowOf:Int index:Int =>
+value rowOf:Int index:Int =>
     index / 4
 
-fun colOf:Int index:Int =>
+value colOf:Int index:Int =>
     index % 4
 
-fun sameRow:Bool left:Int right:Int =>
+value sameRow:Bool left:Int right:Int =>
     rowOf left == rowOf right
 
-fun sameCol:Bool left:Int right:Int =>
+value sameCol:Bool left:Int right:Int =>
     colOf left == colOf right
 
-fun sameBox:Bool left:Int right:Int =>
+value sameBox:Bool left:Int right:Int =>
     rowOf left / 2 == rowOf right / 2 and colOf left / 2 == colOf right / 2
 
-fun relatedCell:Bool left:Int right:Int =>
+value relatedCell:Bool left:Int right:Int =>
     sameRow left right or sameCol left right or sameBox left right
 
-fun conflictAtOther:Bool cells:(List Int) index:Int candidate:Int other:Int =>
+value conflictAtOther:Bool cells:(List Int) index:Int candidate:Int other:Int =>
     valueAt cells other == candidate and relatedCell index other
 
-fun scanMatchOrContinue:Bool cells:(List Int) index:Int candidate:Int other:Int =>
+value scanMatchOrContinue:Bool cells:(List Int) index:Int candidate:Int other:Int =>
     conflictAtOther cells index candidate other
      T|> True
      F|> scanConflicts cells index candidate (other + 1)
 
-fun scanConflictStep:Bool cells:(List Int) index:Int candidate:Int other:Int =>
+value scanConflictStep:Bool cells:(List Int) index:Int candidate:Int other:Int =>
     other == index
      T|> scanConflicts cells index candidate (other + 1)
      F|> scanMatchOrContinue cells index candidate other
 
-fun scanConflicts:Bool cells:(List Int) index:Int candidate:Int other:Int =>
+value scanConflicts:Bool cells:(List Int) index:Int candidate:Int other:Int =>
     other == 16
      T|> False
      F|> scanConflictStep cells index candidate other
 
-fun validPlacement:Bool cells:(List Int) index:Int candidate:Int =>
+value validPlacement:Bool cells:(List Int) index:Int candidate:Int =>
     scanConflicts cells index candidate 0 == False
 
-fun cellConsistent:Bool cells:(List Int) index:Int =>
+value cellConsistent:Bool cells:(List Int) index:Int =>
     valueAt cells index == 0
      T|> True
      F|> validPlacement cells index (valueAt cells index)
 
-fun boardConsistent:Bool cells:(List Int) index:Int =>
+value boardConsistent:Bool cells:(List Int) index:Int =>
     index == 16
      T|> True
      F|> cellConsistent cells index and boardConsistent cells (index + 1)
 
-fun advanceFindEmpty:(Option Int) cells:(List Int) index:Int current:Int =>
+value advanceFindEmpty:(Option Int) cells:(List Int) index:Int current:Int =>
     current == 0
      T|> Some index
      F|> findEmpty (tailOrEmpty cells) (index + 1)
 
-fun findEmpty:(Option Int) cells:(List Int) index:Int =>
+value findEmpty:(Option Int) cells:(List Int) index:Int =>
     head cells
      ||> Some current => advanceFindEmpty cells index current
      ||> None         => None
 
-fun nextCandidate:(Result Text (List Int)) cells:(List Int) index:Int candidate:Int =>
+value nextCandidate:(Result Text (List Int)) cells:(List Int) index:Int candidate:Int =>
     solveMode cells (TryAt index (candidate + 1))
 
-fun continueCandidate:(Result Text (List Int)) cells:(List Int) index:Int candidate:Int attempt:(Result Text (List Int)) =>
+value continueCandidate:(Result Text (List Int)) cells:(List Int) index:Int candidate:Int attempt:(Result Text (List Int)) =>
     attempt
      ||> Ok solved => Ok solved
      ||> Err _     => nextCandidate cells index candidate
 
-fun tryCandidate:(Result Text (List Int)) cells:(List Int) index:Int candidate:Int =>
+value tryCandidate:(Result Text (List Int)) cells:(List Int) index:Int candidate:Int =>
     validPlacement cells index candidate
      T|> continueCandidate cells index candidate (solveMode (replaceAt cells index candidate) FindNext)
      F|> nextCandidate cells index candidate
 
-fun startSearch:(Result Text (List Int)) cells:(List Int) =>
+value startSearch:(Result Text (List Int)) cells:(List Int) =>
     findEmpty cells 0
      ||> Some index => solveMode cells (TryAt index 1)
      ||> None       => Ok cells
 
-fun handleTry:(Result Text (List Int)) cells:(List Int) index:Int candidate:Int =>
+value handleTry:(Result Text (List Int)) cells:(List Int) index:Int candidate:Int =>
     candidate == 5
      T|> Err "unsolved"
      F|> tryCandidate cells index candidate
 
-fun solveMode:(Result Text (List Int)) cells:(List Int) mode:SolveMode =>
+value solveMode:(Result Text (List Int)) cells:(List Int) mode:SolveMode =>
     mode
      ||> FindNext              => startSearch cells
      ||> TryAt index candidate => handleTry cells index candidate
 
-fun wrapSolved:(Result Text SudokuBoard) result:(Result Text (List Int)) =>
+value wrapSolved:(Result Text SudokuBoard) result:(Result Text (List Int)) =>
     result
      ||> Ok cells   => Ok { cells }
      ||> Err reason => Err reason
 
-fun solveIfConsistent:(Result Text SudokuBoard) board:SudokuBoard =>
+value solveIfConsistent:(Result Text SudokuBoard) board:SudokuBoard =>
     boardConsistent board.cells 0
      T|> wrapSolved (solveMode board.cells FindNext)
      F|> Err "invalid-givens"
 
-fun blankCount:Int cells:(List Int) =>
+value blankCount:Int cells:(List Int) =>
     count isBlank cells
 
-fun givenCount:Int cells:(List Int) =>
+value givenCount:Int cells:(List Int) =>
     16 - blankCount cells
 
-fun summaryNote:Text consistent:Bool blanks:Int =>
+value summaryNote:Text consistent:Bool blanks:Int =>
     consistent
      T|> "{blanks} blanks"
      F|> "conflicting givens"
 
-fun summarizeSudoku:SudokuSummary label:Text board:SudokuBoard =>
+value summarizeSudoku:SudokuSummary label:Text board:SudokuBoard =>
     {
         label,
         givens: givenCount board.cells,
@@ -178,7 +178,7 @@ fun summarizeSudoku:SudokuSummary label:Text board:SudokuBoard =>
         note: summaryNote (boardConsistent board.cells 0) (blankCount board.cells)
     }
 
-val classicPuzzle: SudokuBoard =
+value classicPuzzle: SudokuBoard =
     board [
         1,
         0,
@@ -198,7 +198,7 @@ val classicPuzzle: SudokuBoard =
         1
     ]
 
-val nearlySolvedPuzzle: SudokuBoard =
+value nearlySolvedPuzzle: SudokuBoard =
     board [
         1,
         2,
@@ -218,7 +218,7 @@ val nearlySolvedPuzzle: SudokuBoard =
         0
     ]
 
-val invalidPuzzle: SudokuBoard =
+value invalidPuzzle: SudokuBoard =
     board [
         1,
         1,
@@ -238,7 +238,7 @@ val invalidPuzzle: SudokuBoard =
         1
     ]
 
-val emptyPuzzle: SudokuBoard =
+value emptyPuzzle: SudokuBoard =
     board [
         0,
         0,
@@ -258,7 +258,7 @@ val emptyPuzzle: SudokuBoard =
         0
     ]
 
-val sudokuCatalog: SudokuCatalog = {
+value sudokuCatalog: SudokuCatalog = {
     classic: summarizeSudoku "classic" classicPuzzle,
     nearlySolved: summarizeSudoku "nearly-solved" nearlySolvedPuzzle,
     invalid: summarizeSudoku "invalid" invalidPuzzle,
