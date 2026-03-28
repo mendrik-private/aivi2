@@ -72,6 +72,12 @@ pub enum RuntimeTaskPlan {
     FsRename { from: Box<str>, to: Box<str> },
     FsCopy { from: Box<str>, to: Box<str> },
     FsDeleteDir { path: Box<str> },
+    JsonValidate { json: Box<str> },
+    JsonGet { json: Box<str>, key: Box<str> },
+    JsonAt { json: Box<str>, index: i64 },
+    JsonKeys { json: Box<str> },
+    JsonPretty { json: Box<str> },
+    JsonMinify { json: Box<str> },
 }
 
 impl fmt::Display for RuntimeTaskPlan {
@@ -92,6 +98,12 @@ impl fmt::Display for RuntimeTaskPlan {
             Self::FsRename { from, to } => write!(f, "rename({from}, {to})"),
             Self::FsCopy { from, to } => write!(f, "copy({from}, {to})"),
             Self::FsDeleteDir { path } => write!(f, "deleteDir({path})"),
+            Self::JsonValidate { json } => write!(f, "json.validate({json})"),
+            Self::JsonGet { json, key } => write!(f, "json.get({json}, {key})"),
+            Self::JsonAt { json, index } => write!(f, "json.at({json}, {index})"),
+            Self::JsonKeys { json } => write!(f, "json.keys({json})"),
+            Self::JsonPretty { json } => write!(f, "json.pretty({json})"),
+            Self::JsonMinify { json } => write!(f, "json.minify({json})"),
         }
     }
 }
@@ -3349,6 +3361,12 @@ fn intrinsic_value_arity(value: IntrinsicValue) -> usize {
         IntrinsicValue::BytesToText => 1,
         IntrinsicValue::BytesRepeat => 2,
         IntrinsicValue::BytesEmpty => 0,
+        IntrinsicValue::JsonValidate => 1,
+        IntrinsicValue::JsonGet => 2,
+        IntrinsicValue::JsonAt => 2,
+        IntrinsicValue::JsonKeys => 1,
+        IntrinsicValue::JsonPretty => 1,
+        IntrinsicValue::JsonMinify => 1,
     }
 }
 
@@ -3631,6 +3649,32 @@ fn evaluate_intrinsic_value(
             let byte = (b.clamp(0, 255)) as u8;
             let n = (n.max(0)) as usize;
             Ok(RuntimeValue::Bytes(vec![byte; n].into()))
+        }
+        (IntrinsicValue::JsonValidate, [json]) => {
+            let text = expect_intrinsic_text(kernel, expr, value, 0, json)?;
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::JsonValidate { json: text }))
+        }
+        (IntrinsicValue::JsonGet, [json, key]) => {
+            let j = expect_intrinsic_text(kernel, expr, value, 0, json)?;
+            let k = expect_intrinsic_text(kernel, expr, value, 1, key)?;
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::JsonGet { json: j, key: k }))
+        }
+        (IntrinsicValue::JsonAt, [json, index]) => {
+            let j = expect_intrinsic_text(kernel, expr, value, 0, json)?;
+            let i = expect_intrinsic_i64(kernel, expr, value, 1, index)?;
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::JsonAt { json: j, index: i }))
+        }
+        (IntrinsicValue::JsonKeys, [json]) => {
+            let text = expect_intrinsic_text(kernel, expr, value, 0, json)?;
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::JsonKeys { json: text }))
+        }
+        (IntrinsicValue::JsonPretty, [json]) => {
+            let text = expect_intrinsic_text(kernel, expr, value, 0, json)?;
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::JsonPretty { json: text }))
+        }
+        (IntrinsicValue::JsonMinify, [json]) => {
+            let text = expect_intrinsic_text(kernel, expr, value, 0, json)?;
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::JsonMinify { json: text }))
         }
         _ => unreachable!("intrinsic arity should be enforced before evaluation"),
     }

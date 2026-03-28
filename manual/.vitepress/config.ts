@@ -79,6 +79,12 @@ export default defineConfig({
               { text: 'aivi.path', link: '/stdlib/path' },
             ],
           },
+          {
+            text: 'Data',
+            items: [
+              { text: 'aivi.data.json', link: '/stdlib/json' },
+            ],
+          },
         ],
       },
     ],

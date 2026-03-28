@@ -6020,6 +6020,73 @@ fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMeta
             IntrinsicValue::BytesEmpty,
             primitive_import_type(BuiltinType::Bytes),
         )),
+        // JSON intrinsics — async tasks, executed via serde_json in CLI
+        ("aivi.data.json", "validate") => Some(intrinsic_import_value(
+            IntrinsicValue::JsonValidate,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Text),
+                task_import_type(
+                    primitive_import_type(BuiltinType::Text),
+                    primitive_import_type(BuiltinType::Bool),
+                ),
+            ),
+        )),
+        ("aivi.data.json", "get") => Some(intrinsic_import_value(
+            IntrinsicValue::JsonGet,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Text),
+                arrow_import_type(
+                    primitive_import_type(BuiltinType::Text),
+                    task_import_type(
+                        primitive_import_type(BuiltinType::Text),
+                        option_import_type(primitive_import_type(BuiltinType::Text)),
+                    ),
+                ),
+            ),
+        )),
+        ("aivi.data.json", "at") => Some(intrinsic_import_value(
+            IntrinsicValue::JsonAt,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Text),
+                arrow_import_type(
+                    primitive_import_type(BuiltinType::Int),
+                    task_import_type(
+                        primitive_import_type(BuiltinType::Text),
+                        option_import_type(primitive_import_type(BuiltinType::Text)),
+                    ),
+                ),
+            ),
+        )),
+        ("aivi.data.json", "keys") => Some(intrinsic_import_value(
+            IntrinsicValue::JsonKeys,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Text),
+                task_import_type(
+                    primitive_import_type(BuiltinType::Text),
+                    list_import_type(primitive_import_type(BuiltinType::Text)),
+                ),
+            ),
+        )),
+        ("aivi.data.json", "pretty") => Some(intrinsic_import_value(
+            IntrinsicValue::JsonPretty,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Text),
+                task_import_type(
+                    primitive_import_type(BuiltinType::Text),
+                    primitive_import_type(BuiltinType::Text),
+                ),
+            ),
+        )),
+        ("aivi.data.json", "minify") => Some(intrinsic_import_value(
+            IntrinsicValue::JsonMinify,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Text),
+                task_import_type(
+                    primitive_import_type(BuiltinType::Text),
+                    primitive_import_type(BuiltinType::Text),
+                ),
+            ),
+        )),
         _ => None,
     }
 }

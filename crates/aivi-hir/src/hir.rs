@@ -295,6 +295,13 @@ pub enum IntrinsicValue {
     BytesToText,
     BytesRepeat,
     BytesEmpty,
+    // JSON operations (async tasks via serde_json in CLI)
+    JsonValidate,
+    JsonGet,
+    JsonAt,
+    JsonKeys,
+    JsonPretty,
+    JsonMinify,
 }
 
 impl fmt::Display for IntrinsicValue {
@@ -339,6 +346,12 @@ impl fmt::Display for IntrinsicValue {
             Self::BytesToText => f.write_str("aivi.core.bytes.toText"),
             Self::BytesRepeat => f.write_str("aivi.core.bytes.repeat"),
             Self::BytesEmpty => f.write_str("aivi.core.bytes.empty"),
+            Self::JsonValidate => f.write_str("aivi.data.json.validate"),
+            Self::JsonGet => f.write_str("aivi.data.json.get"),
+            Self::JsonAt => f.write_str("aivi.data.json.at"),
+            Self::JsonKeys => f.write_str("aivi.data.json.keys"),
+            Self::JsonPretty => f.write_str("aivi.data.json.pretty"),
+            Self::JsonMinify => f.write_str("aivi.data.json.minify"),
         }
     }
 }

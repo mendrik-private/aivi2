@@ -1095,6 +1095,60 @@ fn execute_runtime_task_plan(
                 .map_err(|error| format!("failed to delete directory {}: {error}", path))?;
             Ok(RuntimeValue::Unit)
         }
+        RuntimeTaskPlan::JsonValidate { json } => {
+            let valid = serde_json::from_str::<serde_json::Value>(&*json).is_ok();
+            Ok(RuntimeValue::Bool(valid))
+        }
+        RuntimeTaskPlan::JsonGet { json, key } => {
+            let parsed: serde_json::Value = serde_json::from_str(&*json)
+                .map_err(|e| format!("json.get: invalid JSON: {e}"))?;
+            Ok(parsed
+                .get(key.as_ref())
+                .map(|v| {
+                    let s: Box<str> = v.to_string().into();
+                    RuntimeValue::OptionSome(Box::new(RuntimeValue::Text(s)))
+                })
+                .unwrap_or(RuntimeValue::OptionNone))
+        }
+        RuntimeTaskPlan::JsonAt { json, index } => {
+            let parsed: serde_json::Value = serde_json::from_str(&*json)
+                .map_err(|e| format!("json.at: invalid JSON: {e}"))?;
+            Ok(usize::try_from(index)
+                .ok()
+                .and_then(|i| parsed.get(i))
+                .map(|v: &serde_json::Value| {
+                    let s: Box<str> = v.to_string().into();
+                    RuntimeValue::OptionSome(Box::new(RuntimeValue::Text(s)))
+                })
+                .unwrap_or(RuntimeValue::OptionNone))
+        }
+        RuntimeTaskPlan::JsonKeys { json } => {
+            let parsed: serde_json::Value = serde_json::from_str(&*json)
+                .map_err(|e| format!("json.keys: invalid JSON: {e}"))?;
+            let keys = parsed
+                .as_object()
+                .map(|obj| {
+                    obj.keys()
+                        .map(|k| RuntimeValue::Text(k.as_str().into()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            Ok(RuntimeValue::List(keys))
+        }
+        RuntimeTaskPlan::JsonPretty { json } => {
+            let parsed: serde_json::Value = serde_json::from_str(&*json)
+                .map_err(|e| format!("json.pretty: invalid JSON: {e}"))?;
+            let pretty = serde_json::to_string_pretty(&parsed)
+                .map_err(|e| format!("json.pretty: serialisation error: {e}"))?;
+            Ok(RuntimeValue::Text(pretty.into()))
+        }
+        RuntimeTaskPlan::JsonMinify { json } => {
+            let parsed: serde_json::Value = serde_json::from_str(&*json)
+                .map_err(|e| format!("json.minify: invalid JSON: {e}"))?;
+            let minified = serde_json::to_string(&parsed)
+                .map_err(|e| format!("json.minify: serialisation error: {e}"))?;
+            Ok(RuntimeValue::Text(minified.into()))
+        }
     }
 }
 

@@ -9818,6 +9818,45 @@ impl<'a> GateTypeContext<'a> {
                 ),
             ),
             IntrinsicValue::BytesEmpty => primitive(BuiltinType::Bytes),
+            IntrinsicValue::JsonValidate => arrow(
+                primitive(BuiltinType::Text),
+                task(primitive(BuiltinType::Text), primitive(BuiltinType::Bool)),
+            ),
+            IntrinsicValue::JsonGet => arrow(
+                primitive(BuiltinType::Text),
+                arrow(
+                    primitive(BuiltinType::Text),
+                    task(
+                        primitive(BuiltinType::Text),
+                        GateType::Option(Box::new(primitive(BuiltinType::Text))),
+                    ),
+                ),
+            ),
+            IntrinsicValue::JsonAt => arrow(
+                primitive(BuiltinType::Text),
+                arrow(
+                    primitive(BuiltinType::Int),
+                    task(
+                        primitive(BuiltinType::Text),
+                        GateType::Option(Box::new(primitive(BuiltinType::Text))),
+                    ),
+                ),
+            ),
+            IntrinsicValue::JsonKeys => arrow(
+                primitive(BuiltinType::Text),
+                task(
+                    primitive(BuiltinType::Text),
+                    GateType::List(Box::new(primitive(BuiltinType::Text))),
+                ),
+            ),
+            IntrinsicValue::JsonPretty => arrow(
+                primitive(BuiltinType::Text),
+                task(primitive(BuiltinType::Text), primitive(BuiltinType::Text)),
+            ),
+            IntrinsicValue::JsonMinify => arrow(
+                primitive(BuiltinType::Text),
+                task(primitive(BuiltinType::Text), primitive(BuiltinType::Text)),
+            ),
         }
     }
 

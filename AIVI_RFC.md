@@ -2933,3 +2933,47 @@ type PathError =
   | PathNotFound Text
 ```
 
+
+### 29.9 `aivi.core.bytes`
+
+Binary buffer intrinsics. All operations are synchronous (no `Task`). Catalog module: `aivi.core.bytes`.
+
+| Intrinsic | Type | Description |
+|---|---|---|
+| `BytesEmpty` | `Bytes` | Empty byte sequence |
+| `BytesLength` | `Bytes -> Int` | Length in bytes |
+| `BytesGet` | `Int -> Bytes -> Option Int` | Byte value at index (0–255) |
+| `BytesSlice` | `Int -> Int -> Bytes -> Bytes` | Slice `[from, to)` |
+| `BytesAppend` | `Bytes -> Bytes -> Bytes` | Concatenation |
+| `BytesFromText` | `Text -> Bytes` | UTF-8 encode |
+| `BytesToText` | `Bytes -> Option Text` | UTF-8 decode (None on invalid UTF-8) |
+| `BytesRepeat` | `Int -> Int -> Bytes` | `BytesRepeat byte n` — repeat byte `n` times |
+
+The `aivi.core.bytes` module exports `BytesDecodeError`:
+
+```aivi
+type BytesDecodeError = InvalidUtf8 | UnexpectedEnd
+```
+
+### 29.10 `aivi.data.json`
+
+JSON intrinsics backed by `serde_json` in the CLI runtime. All operations are async (`Task Text A`).
+Catalog module: `aivi.data.json`.
+
+| Intrinsic | Type | Description |
+|---|---|---|
+| `JsonValidate` | `Text -> Task Text Bool` | Returns `True` for valid JSON; never fails |
+| `JsonGet` | `Text -> Text -> Task Text (Option Text)` | Get object field; result is JSON text |
+| `JsonAt` | `Text -> Int -> Task Text (Option Text)` | Get array element; result is JSON text |
+| `JsonKeys` | `Text -> Task Text (List Text)` | Object keys in insertion order |
+| `JsonPretty` | `Text -> Task Text Text` | Pretty-print with 2-space indent |
+| `JsonMinify` | `Text -> Task Text Text` | Remove insignificant whitespace |
+
+The module file exports the `JsonError` ADT:
+
+```aivi
+type JsonError = InvalidJson | MissingKey | IndexOutOfBounds | WrongType
+```
+
+Values returned by `JsonGet` and `JsonAt` are raw JSON text fragments (not decoded), so callers can
+pipe into further JSON operations or decode with typed helpers.
