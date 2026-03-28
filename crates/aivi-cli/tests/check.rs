@@ -369,6 +369,7 @@ fn check_accepts_stdlib_validation_files() {
         "aivi/core/dict.aivi",
         "aivi/core/range.aivi",
         "aivi/core/bytes.aivi",
+        "aivi/core/set.aivi",
         "aivi/fs.aivi",
         "aivi/path.aivi",
         "tests/foundation-validation/main.aivi",
@@ -622,6 +623,7 @@ fn check_accepts_phase_one_collection_stdlib_modules() {
         "aivi/core/dict.aivi",
         "aivi/core/range.aivi",
         "aivi/core/bytes.aivi",
+        "aivi/core/set.aivi",
     ] {
         let path = stdlib_path(relative);
         let output = Command::new(env!("CARGO_BIN_EXE_aivi"))

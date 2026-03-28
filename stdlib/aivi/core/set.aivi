@@ -1,0 +1,100 @@
+use aivi.list (
+    filter
+    length
+)
+
+type TextSet = {
+    items: List Text
+}
+
+fun notEq: Bool x:Text y:Text =>
+    x == y
+     T|> False
+     F|> True
+
+fun notContains: Bool x:Text items:(List Text) =>
+    items
+     |> filter (notEq x)
+     |> length == length items
+
+fun isEmpty: Bool s:TextSet =>
+    length s.items == 0
+
+fun singleton: TextSet v:Text =>
+    { items: [v] }
+
+fun member: Bool v:Text s:TextSet =>
+    notContains v s.items
+     T|> False
+     F|> True
+
+fun insert: TextSet v:Text s:TextSet =>
+    member v s
+     T|> s
+     F|> { items: append s.items [v] }
+
+fun remove: TextSet v:Text s:TextSet =>
+    {
+        items: s.items
+         |> filter (notEq v)
+    }
+
+fun size: Int s:TextSet =>
+    s.items
+     |> length
+
+fun toList: (List Text) s:TextSet =>
+    s.items
+
+fun insertItem: TextSet acc:TextSet v:Text =>
+    insert v acc
+
+fun fromList: TextSet items:(List Text) =>
+    items
+     |> reduce insertItem { items: [] }
+
+fun unionStep: TextSet acc:TextSet v:Text =>
+    insert v acc
+
+fun union: TextSet a:TextSet b:TextSet =>
+    b.items
+     |> reduce unionStep a
+
+fun keepIfMember: Bool s:TextSet v:Text =>
+    member v s
+
+fun intersection: TextSet a:TextSet b:TextSet =>
+    {
+        items: a.items
+         |> filter (keepIfMember b)
+    }
+
+fun keepIfNotMember: Bool s:TextSet v:Text =>
+    member v s
+     T|> False
+     F|> True
+
+fun difference: TextSet a:TextSet b:TextSet =>
+    {
+        items: a.items
+         |> filter (keepIfNotMember b)
+    }
+
+fun subsetOf: Bool a:TextSet b:TextSet =>
+    a.items
+     |> filter (keepIfMember b)
+     |> length == length a.items
+
+export TextSet
+export isEmpty
+export singleton
+export member
+export insert
+export remove
+export size
+export toList
+export fromList
+export union
+export intersection
+export difference
+export subsetOf
