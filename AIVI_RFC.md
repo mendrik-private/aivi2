@@ -1,6 +1,6 @@
 # AIVI Language Specification
 
-## Draft v0.7 — implementation-facing resolved pass
+## Draft v1.0 — implementation-facing resolved pass
 
 > Status: normative working draft with implementation choices merged. Milestones 1–8 (surface through backend) are substantially complete. Sections §26–§28 cover the CLI, LSP, and pre-stdlib implementation gaps.
 
@@ -146,7 +146,7 @@ HIR responsibilities:
 - pipe clusters represented explicitly
 - surface sugar preserved where useful for diagnostics
 - source metadata and source-lifecycle/decode/fanout/recurrence elaboration reports made explicit
-- body-less annotated `sig` declarations preserved as first-class input signals
+- body-less annotated `signal` declarations preserved as first-class input signals
 
 ### 4.3 Typed core
 
@@ -213,17 +213,17 @@ Responsibilities:
 ## 5. Top-level forms
 
 ```aivi
-type Bool = True | False
+data Bool = True | False
 
 class Eq A
     (==) : A -> A -> Bool
 
-val answer = 42
+value answer = 42
 
-fun add:Int x:Int y:Int =>
+value add:Int x:Int y:Int =>
     x + y
 
-sig counter = 0
+signal counter = 0
 
 use aivi.network (
     http
@@ -234,17 +234,132 @@ use aivi.network (
 Top-level forms:
 
 - `type`
+- `data`
 - `class`
 - `instance`
-- `val`
-- `fun`
-- `sig`
+- `value`
+- `signal`
+- `source`
+- `result`
+- `view`
+- `adapter`
 - `use`
 - `export`
 - `provider`
 - decorators via `@name`
 
-A module may export at most one `main` binding. `main` is the conventional standalone-process entry for future packaging; the current `aivi run` surface does not privilege it over the static view-selection rules in §26.3. A top-level markup-valued `val` named `view` is the preferred unqualified preview entry when no explicit `--view` is given.
+### 5.0.1 Unified `value` declaration
+
+`value` is the single keyword for all pure top-level bindings, replacing the former separate `val` and `fun` keywords.
+
+No-params form (constant binding), uses `=`:
+
+```aivi
+value answer = 42
+value greeting = "hello"
+```
+
+Params form (function binding), uses `=>`:
+
+```aivi
+value add:Int x:Int y:Int =>
+    x + y
+
+value greet:Text name:Text =>
+    "Hello, {name}"
+```
+
+`value` is a **contextual keyword**: it is also a valid identifier and parameter name. The following is valid AIVI — the parameter is named `value`:
+
+```aivi
+value absolute:Int value:Int =>
+    value < 0
+     T|> 0 - value
+     F|> value
+```
+
+The parser disambiguates by position: `value` at the start of a top-level form is a keyword; `value` as a subsequent token after the function name is a parameter.
+
+### 5.0.2 `data` — ADT declarations
+
+`data` declares algebraic data types (sum types and constructor-headed product types):
+
+```aivi
+data Bool = True | False
+
+data Option A =
+  | None
+  | Some A
+
+data Result E A = Err E | Ok A
+```
+
+Plain `type` remains for record type synonyms and other type declarations.
+
+### 5.0.3 `signal` — reactive signal declarations
+
+`signal` declares reactive nodes in the dependency graph:
+
+```aivi
+signal counter = 0
+signal query : Signal Text
+signal fullName = firstName ++ " " ++ lastName
+```
+
+Body-less annotated forms declare **input signals** — externally publishable entry points:
+
+```aivi
+signal clicked : Signal Unit
+signal query   : Signal Text
+```
+
+### 5.0.4 `source` — source-backed signal declarations
+
+`source` declares a signal backed by a runtime source provider:
+
+```aivi
+source users : Signal (Result HttpError (List User)) = http.get "/users"
+source tick  : Signal Unit = timer.every 120
+source keyDown : Signal Key = window.keyDown
+```
+
+The general form is `source name : Signal T = provider.variant args`. The provider and variant are resolved statically. This replaces the former `@source` decorator on a body-less `signal`.
+
+### 5.0.5 `result` — graph-assembly records
+
+`result` defines a named graph-assembly record whose fields are reactive nodes:
+
+```aivi
+result appState
+    users   = fetchedUsers
+    visible = users ?|> .active
+    count   = visible *|> .id |> List.length
+```
+
+Fields form a dependency graph; execution order is dependency-driven, not declaration order.
+
+### 5.0.6 `view` — markup view declarations
+
+`view` declares a named GTK/libadwaita markup fragment:
+
+```aivi
+view mainWindow
+    <Window title="My App">
+        <Box orientation="vertical">
+            <Label text={greeting} />
+        </Box>
+    </Window>
+```
+
+`view` declarations are the canonical entry points for `aivi run --view mainWindow`.
+
+### 5.0.7 `adapter` — adapter declarations
+
+`adapter` declares a named adapter, bridging external data shapes or protocols into the reactive graph.
+
+---
+
+A module may export at most one `main` binding. `main` is the conventional standalone-process entry for future packaging; the current `aivi run` surface does not privilege it over the static view-selection rules in §26.3. A top-level markup-valued `value` named `view` is the preferred unqualified preview entry when no explicit `--view` is given.
 
 Comment syntax:
 
@@ -381,8 +496,8 @@ Every non-record ADT constructor is an ordinary curried value constructor.
 ```aivi
 type Result E A = Err E | Ok A
 
-val ok  = Ok
-val one = Ok 1
+value ok  = Ok
+value one = Ok 1
 ```
 
 Under-application is legal. Exact application constructs the value. Over-application is a type error. Applies to both unary and multi-argument constructors.
@@ -394,7 +509,7 @@ Records are built with record literals, not implicit curried constructors.
 ```aivi
 type User = { name: Text, age: Int }
 
-val u:User = { name: "Ada", age: 36 }
+value u:User = { name: "Ada", age: 36 }
 ```
 
 ### 6.4.3 Opaque and branded types
@@ -591,7 +706,7 @@ Unlike `Result E A`, the applicative instance accumulates independent errors ins
 `Validation` is the canonical carrier for form validation under `&|>` because inputs are independent and all failures must be reported together.
 
 ```aivi
-sig validatedUser =
+signal validatedUser =
  &|> validateName nameText
  &|> validateEmail emailText
  &|> validateAge ageText
@@ -637,13 +752,13 @@ type User = {
 
 use aivi.defaults (Option)
 
-val user:User = { name: "Ada" }
+value user:User = { name: "Ada" }
 ```
 
 Elaborates to:
 
 ```aivi
-val user:User = {
+value user:User = {
     name: "Ada",
     nickname: None,
     email: None
@@ -655,7 +770,7 @@ val user:User = {
 When an expected closed record type is known, a field whose label and in-scope value name coincide may be written in shorthand:
 
 ```aivi
-val game:Game = {
+value game:Game = {
     snake,
     food,
     status,
@@ -731,9 +846,14 @@ Core operators:
 
 - ` |>` transform
 - `?|>` gate
-- `||>` case split
+- `||>` case split / pattern match
+- `!|>` validate
+- `~|>` previous state
+- `+|>` accumulate state
+- `-|>` diff
 - `*|>` map / fan-out
 - `&|>` applicative cluster stage
+- `T|>` / `F|>` boolean branch
 - `@|>` recurrent flow start
 - `<|@` recurrence step
 - ` | ` tap
@@ -751,7 +871,7 @@ Operators at the same binary precedence associate left-to-right. Prefix `not` ap
 
 Pipe operators are **not** part of the binary table. A pipe spine starts from one ordinary expression head, then consumes pipe stages left-to-right. Each stage payload is parsed as an ordinary expression until the next pipe operator boundary.
 
-Reactivity comes from `sig` and `@source`, not from pipe operators. Pipe operators are flow combinators inside reactive or ordinary expressions.
+Reactivity comes from `signal` and `source`, not from pipe operators. Pipe operators are flow combinators inside reactive or ordinary expressions.
 
 ### 11.2 `|>` transform
 
@@ -948,7 +1068,79 @@ Normative rules:
 - each iteration is scheduled and stack-safe; recurrent pipes must not lower to unbounded direct recursion
 - cancellation or owner teardown disposes the pending recurrence immediately
 - recurrent pipes with no valid runtime lowering target are rejected
-- ordinary source-driven signal state accumulation does not use `@|>` / `<|@`; it uses `scan`
+- ordinary source-driven signal state accumulation does not use `@|>` / `<|@`; it uses `+|>`
+
+### 11.8 `!|>` validate
+
+Applies a validation function to the current subject. The validation function must return `Result E B` or `Validation E B`.
+
+```aivi
+formInput
+ !|> validateEmail
+ !|> validateNotEmpty
+  |> submitEmail
+```
+
+`!|>` is for attaching validation stages to a pipe spine. Multiple `!|>` stages on the same carrier type accumulate errors when the carrier is `Validation`; they short-circuit on the first failure when the carrier is `Result`.
+
+Rules:
+
+- the validation function must have shape `A -> Result E B` or `A -> Validation E B`
+- result type carries the validated output type `B`
+- signal semantics: validation is applied pointwise per upstream emission
+
+### 11.9 `~|>` previous state
+
+Reads the previously committed value of the upstream signal. Useful for comparing before/after, detecting transitions, or combining current and prior state.
+
+```aivi
+temperature
+ ~|> prevTemp
+  |> delta prevTemp
+```
+
+Rules:
+
+- `~|>` binds the previous committed value as a named parameter
+- the first emission has no previous value; the stage is suppressed on the first tick (no synthetic prior is invented)
+- `~|>` is read-only over the prior epoch; it does not create mutable state
+
+### 11.10 `+|>` accumulate
+
+Accumulates state across signal emissions. See §13.2.1 for the full normative description.
+
+```aivi
+signal counter : Signal Int =
+    tick +|> 0 (state _ => state + 1)
+
+signal history : Signal (List Text) =
+    message +|> [] (acc msg => acc ++ [msg])
+```
+
+Form: `signal +|> seed (state input => next)`
+
+- `seed` is the initial state value
+- `state` is the previous accumulated value
+- `input` is the current upstream emission
+- `next` is the new state expression
+
+Shorthand: `signal +|> prev + .` where `prev` is the previous state and `.` is the current value.
+
+### 11.11 `-|>` diff
+
+Computes the structural or semantic difference between the current and previous emission. Returns a diff value whose shape depends on the carrier type.
+
+```aivi
+items
+ -|> ListDiff.changes
+  |> applyChanges
+```
+
+Rules:
+
+- the diff function receives `(previous: A, current: A) -> D` where `D` is the diff type
+- the first emission produces a diff from an empty/zero baseline
+- `-|>` is the primary operator for driving localized update pipelines
 
 ---
 
@@ -986,7 +1178,7 @@ Not:
 A leading `&|>` is legal at the start of a pipe spine or multiline body.
 
 ```aivi
-sig validatedUser =
+signal validatedUser =
  &|> validateName nameText
  &|> validateEmail emailText
  &|> validateAge ageText
@@ -1064,7 +1256,7 @@ Inside an unfinished applicative cluster:
 ### Validation
 
 ```aivi
-sig validatedUser =
+signal validatedUser =
  &|> validateName nameText
  &|> validateEmail emailText
  &|> validateAge ageText
@@ -1074,7 +1266,7 @@ sig validatedUser =
 ### Signals
 
 ```aivi
-sig fullName =
+signal fullName =
  &|> firstName
  &|> lastName
   |> joinName
@@ -1083,7 +1275,7 @@ sig fullName =
 ### Result
 
 ```aivi
-val loaded =
+value loaded =
  &|> readConfig path
  &|> readSchema schemaPath
   |> buildRuntimeConfig
@@ -1098,17 +1290,17 @@ For `Signal`, `&|>` builds a derived signal whose dependencies are the union of 
 ## 13. Signals and scheduler semantics
 
 ```aivi
-sig x = 3
-sig y = x + 5
+signal x = 3
+signal y = x + 5
 ```
 
-A signal referenced inside a `sig` is read as its current committed value during evaluation. The enclosing `sig` depends on every **locally provable** signal referenced in its definition.
+A signal referenced inside a `signal` is read as its current committed value during evaluation. The enclosing `signal` depends on every **locally provable** signal referenced in its definition.
 
 ### 13.1 Rules
 
-- `sig` is the reactive boundary
-- `val` must not depend on signals
-- pure helper functions used inside `sig` stay pure
+- `signal` is the reactive boundary
+- `value` must not depend on signals
+- pure helper functions used inside `signal` stay pure
 - signal dependency extraction happens after elaboration
 - ordinary derived-signal dependency graphs are static after elaboration
 - all signals carry explicit local dependency lists for scheduling and diagnostics
@@ -1116,44 +1308,48 @@ A signal referenced inside a `sig` is read as its current committed value during
 
 ### 13.2 Input signals
 
-A body-less annotated `sig` declaration is a first-class input signal — an externally publishable entry point for reactive inputs such as GTK events, tests, and runtime-owned completions.
+A body-less annotated `signal` declaration is a first-class input signal — an externally publishable entry point for reactive inputs such as GTK events, tests, and runtime-owned completions.
 
 ```aivi
-sig clicked : Signal Unit
-sig query   : Signal Text
+signal clicked : Signal Unit
+signal query   : Signal Text
 ```
 
 Type annotation is mandatory. Input signals participate in the signal dependency graph exactly like derived signals; their publication port is owned by the runtime rather than user code.
 
 Input signals are the canonical mechanism for routing GTK event payloads into the reactive graph and the publication target for task completions and other runtime-owned boundaries.
 
-When a `sig` is decorated with `@source`, it must remain body-less. The source owns only the raw
-event stream; stateful accumulation over that stream is expressed separately with `scan`.
+When a `signal` has no body, the source owns only the raw event stream; stateful accumulation over that stream is expressed separately using `+|>`.
 
-### 13.2.1 Stateful signal folds with `scan`
+### 13.2.1 Stateful signal accumulation with `+|>`
+
+`+|>` is the canonical accumulate pipe for building stateful signals:
 
 ```aivi
-sig direction : Signal Direction =
-    keyDown
-     |> scan Right updateDirection
+signal direction : Signal Direction =
+    keyDown +|> Right (direction key => updateDirection key direction)
 
-sig game : Signal Game =
-    tick
-     |> scan initialGame stepOnTick
+signal game : Signal Game =
+    tick +|> initialGame (state _ => stepOnTick state)
 ```
-
-`scan` is the canonical stateful signal combinator.
 
 Normative rules:
 
-- surface form: `upstream |> scan seed step`
-- `upstream` must elaborate to a signal whose payload type is `A`
-- `seed` has state type `S`
-- `step` has type `A -> S -> S`
-- `step` receives the latest upstream payload first and the previous state second
-- the first committed value is `seed`
+- surface form: `signal +|> seed (state input => next)`
+- `signal` must elaborate to a signal whose payload type is `A`
+- `seed` has state type `S` and is the first committed value
+- the lambda `(state input => next)` takes the previous state first and the current upstream value second
 - each later update is scheduled only when the upstream signal publishes a new value in the current scheduler tick
-- `scan` is the intended way to accumulate timer, event, source, and completion signals into state
+- `+|>` is the intended way to accumulate timer, event, source, and completion signals into state
+
+Shorthand form for simple arithmetic accumulation:
+
+```aivi
+signal counter : Signal Int =
+    tick +|> 0 (prev + 1)
+```
+
+`prev` refers to the previous state; `.` refers to the current upstream value.
 
 ### 13.3 Applicative meaning of `Signal`
 
@@ -1189,21 +1385,20 @@ The scheduler is driven from an owned GLib main context. Workers may publish res
 
 ## 14. Sources and decoding
 
-External inputs enter through `@source` on `sig`.
+External inputs are declared with `source`, which combines the provider binding and type annotation into a single declaration:
 
 ```aivi
-@source http.get "/users"
-sig users : Signal (Result HttpError (List User))
+source users : Signal (Result HttpError (List User)) = http.get "/users"
 ```
 
 Source arguments and options are ordinary typed expressions. They may use interpolation and may depend on signals with statically known dependency sets.
 
 ```aivi
-@source http.get "{baseUrl}/users" with {
-    headers: authHeaders,
-    decode: Strict
-}
-sig users : Signal (Result HttpError (List User))
+source users : Signal (Result HttpError (List User)) =
+    http.get "{baseUrl}/users" with {
+        headers: authHeaders,
+        decode: Strict
+    }
 ```
 
 Reactive values in source strings, positional arguments, and options are real dependencies. When committed values change, the runtime rebuilds or retriggers the source per the provider contract while keeping the static graph shape fixed.
@@ -1224,7 +1419,7 @@ Sources may represent:
 - mailboxes/channels
 - GTK/window events
 
-The HIR surface preserves for every `@source` site:
+The HIR surface preserves for every `source` declaration site:
 
 - provider identity: missing / builtin / custom / invalid-shape
 - positional arguments as runtime expressions
@@ -1237,50 +1432,48 @@ The HIR surface preserves for every `@source` site:
 
 ```aivi
 @recur.timer 1000ms
-sig polled : Signal Status
+signal polled : Signal Status
 
 @recur.backoff initialDelay
-sig retried : Signal (Result FetchError Data)
+signal retried : Signal (Result FetchError Data)
 ```
 
 Rules:
 
-- `@recur.timer expr` and `@recur.backoff expr` are the only recurrence decorators for non-`@source` declarations
+- `@recur.timer expr` and `@recur.backoff expr` are the only recurrence decorators for non-`source` declarations
 - neither accepts `with { ... }` options or duplicates
-- not allowed on `@source` signals; source wakeups come from the source contract
+- not allowed on `source` declarations; source wakeups come from the source contract
 - a recurrent pipe is legal only where the compiler can prove a built-in runtime lowering target
 - recurrence lowering produces an explicit scheduler-node handoff; it is not collapsed into opaque self-recursion
 
 ### 14.1.2 Source declaration shape
 
 ```aivi
-@source provider.variant arg1 arg2 with {
+source name : Signal T = provider.variant arg1 arg2 with {
     option1: value1,
     option2: value2
 }
-sig name : Signal T
 ```
 
 The `with { ... }` option record is optional.
 
 ```aivi
-@source timer.every 120
-sig tick : Signal Unit
+source tick : Signal Unit = timer.every 120
 ```
 
 ```aivi
-@source http.get "/users" with {
-    decode: Strict,
-    retry: Retry.times 3,
-    timeout: 5sec
-}
-sig users : Signal (Result HttpError (List User))
+source users : Signal (Result HttpError (List User)) =
+    http.get "/users" with {
+        decode: Strict,
+        retry: Retry.times 3,
+        timeout: 5sec
+    }
 ```
 
 Rules:
 
 - provider and variant are resolved statically
-- `@source` may decorate only a body-less `sig`
+- `source` declarations are the primary form for provider-backed signals
 - positional arguments are provider-defined and typed
 - options are a closed record whose legal fields come from a central provider option catalog
 - unknown options are a compile-time error
@@ -1296,12 +1489,10 @@ Reactive source configuration does not make sources dynamic in the type-theoreti
 Stateful source handling is expressed by deriving from the raw source signal:
 
 ```aivi
-@source timer.every 120
-sig tick : Signal Unit
+source tick : Signal Unit = timer.every 120
 
-sig counter : Signal Int =
-    tick
-     |> scan 0 stepTick
+signal counter : Signal Int =
+    tick +|> 0 (state _ => state + 1)
 ```
 
 ### 14.1.3 Recommended source variants
@@ -1309,16 +1500,15 @@ sig counter : Signal Int =
 #### HTTP
 
 ```aivi
-@source http.get "/users"
-sig users : Signal (Result HttpError (List User))
+source users : Signal (Result HttpError (List User)) = http.get "/users"
 
-@source http.post "/login" with {
-    body: creds,
-    headers: authHeaders,
-    decode: Strict,
-    timeout: 5sec
-}
-sig login : Signal (Result HttpError Session)
+source login : Signal (Result HttpError Session) =
+    http.post "/login" with {
+        body: creds,
+        headers: authHeaders,
+        decode: Strict,
+        timeout: 5sec
+    }
 ```
 
 Recommended HTTP options:
@@ -1347,11 +1537,8 @@ HTTP source semantics:
 #### Timer
 
 ```aivi
-@source timer.every 120
-sig tick : Signal Unit
-
-@source timer.after 1000
-sig ready : Signal Unit
+source tick  : Signal Unit = timer.every 120
+source ready : Signal Unit = timer.after 1000
 ```
 
 Recommended timer options:
@@ -1366,16 +1553,16 @@ Bare integer timer arguments mean milliseconds. Suffixed durations such as `250m
 #### File watching and reading
 
 ```aivi
-@source fs.watch "/tmp/demo.txt" with {
-    events: [Created, Changed, Deleted]
-}
-sig fileEvents : Signal FsEvent
+source fileEvents : Signal FsEvent =
+    fs.watch "/home/user/demo.txt" with {
+        events: [Created, Changed, Deleted]
+    }
 
-@source fs.read "/tmp/demo.txt" with {
-    decode: Strict,
-    reloadOn: fileEvents
-}
-sig fileText : Signal (Result FsError Text)
+source fileText : Signal (Result FsError Text) =
+    fs.read "/home/user/demo.txt" with {
+        decode: Strict,
+        reloadOn: fileEvents
+    }
 ```
 
 `fs.watch` publishes file-system change notifications only; it does **not** implicitly read file contents. `fs.read` performs snapshot loading and decode. This split is normative.
@@ -1389,13 +1576,12 @@ Built-in file sources request best-effort cancellation when superseded, suspende
 #### Socket / mailbox
 
 ```aivi
-@source socket.connect "tcp://localhost:8080" with {
-    decode: Strict
-}
-sig inbox : Signal (Result SocketError Message)
+source inbox : Signal (Result SocketError Message) =
+    socket.connect "tcp://localhost:8080" with {
+        decode: Strict
+    }
 
-@source mailbox.subscribe "jobs"
-sig jobs : Signal Text
+source jobs : Signal Text = mailbox.subscribe "jobs"
 ```
 
 - `socket.connect` is a raw `tcp://` line-stream provider, not a general WebSocket surface
@@ -1405,8 +1591,7 @@ sig jobs : Signal Text
 #### Process events
 
 ```aivi
-@source process.spawn "rg" ["TODO", "."]
-sig grepEvents : Signal ProcessEvent
+source grepEvents : Signal ProcessEvent = process.spawn "rg" ["TODO", "."]
 ```
 
 Recommended process options: `cwd : Path`, `env : Map Text Text`, `stdout : StreamMode`, `stderr : StreamMode`, `restartOn : Signal A`
@@ -1414,10 +1599,7 @@ Recommended process options: `cwd : Path`, `env : Map Text Text`, `stdout : Stre
 #### GTK / window events
 
 ```aivi
-@source window.keyDown with {
-    repeat: False
-}
-sig keyDown : Signal Key
+source keyDown : Signal Key = window.keyDown with { repeat: False }
 ```
 
 Recommended window-event options: `capture : Bool`, `repeat : Bool`, `focusOnly : Bool`
@@ -1427,14 +1609,9 @@ Recommended window-event options: `capture : Bool`, `repeat : Bool`, `focusOnly 
 #### D-Bus
 
 ```aivi
-@source dbus.ownName "org.example.Mail"
-sig busName : Signal BusNameState
-
-@source dbus.signal "org.example.Mail" "/org/example/Mail" "NewMessage"
-sig busEvents : Signal MailBusEvent
-
-@source dbus.method "org.example.Mail" "/org/example/Mail" "ShowWindow"
-sig showWindow : Signal Unit
+source busName   : Signal BusNameState = dbus.ownName "org.example.Mail"
+source busEvents : Signal MailBusEvent = dbus.signal "org.example.Mail" "/org/example/Mail" "NewMessage"
+source showWindow : Signal Unit         = dbus.method "org.example.Mail" "/org/example/Mail" "ShowWindow"
 ```
 
 - `dbus.ownName`: tracks `Owned`, `Queued`, or `Lost`
@@ -1497,7 +1674,7 @@ Regex literals are validated in HIR validation, not delegated to source provider
 
 ### 14.3 Cancellation and lifecycle
 
-Every `@source` site owns one stable runtime instance identity.
+Every `source` declaration owns one stable runtime instance identity.
 
 Lifecycle rules:
 
@@ -1534,12 +1711,12 @@ Implemented declaration rules:
 
 ## 15.1 Purity boundary
 
-Ordinary `val` and `fun` definitions are pure.
+Ordinary `value` definitions are pure.
 
 Effects enter through:
 
 - `Task`
-- `sig` / `@source`
+- `signal` / `source`
 - GTK event boundaries
 - runtime-owned scheduling and source integration
 
@@ -1562,7 +1739,7 @@ Recurrent `@|> ... <|@` tasks are outside the current executable slice and remai
 In v1 live GTK routing:
 
 - markup `on*={handler}` attributes are routing declarations, not arbitrary callback bodies
-- `handler` must resolve to a directly publishable input signal declared as a body-less annotated `sig name : Signal T`
+- `handler` must resolve to a directly publishable input signal declared as a body-less annotated `signal name : Signal T`
 - the concrete GTK host must recognize the exact widget/event pair before the attribute is treated as live event routing
 - the routed input signal payload type must match the concrete GTK event payload type
 - handler resolution is performed once up front; GTK event payloads are then published directly into that input signal
@@ -1681,7 +1858,7 @@ Interpolated markup text is genuinely dynamic. The GTK host routes interpolated 
 Expression-valued markup attributes lower as live GTK event routes only when the widget schema catalog declares that exact widget/event pair.
 
 ```aivi
-sig clicked : Signal Unit
+signal clicked : Signal Unit
 
 <Button label="Click me" onClick={clicked} />
 ```
@@ -2125,7 +2302,7 @@ Diagnostics must:
 
 Examples:
 
-- using a signal in `val` should suggest `sig`
+- using a signal in `value` should suggest `signal`
 - omitting a record field without a `Default` instance should name the missing field and missing instance
 - mixing applicative constructors in one `&|>` cluster should report the first mismatch and the expected common outer constructor
 
@@ -2146,7 +2323,7 @@ The formatter is part of the language contract.
 The formatter preserves and prefers the leading-cluster style when the spine is vertically scanned for independence.
 
 ```aivi
-sig validatedUser =
+signal validatedUser =
  &|> validateName nameText
  &|> validateEmail emailText
  &|> validateAge ageText
@@ -2194,7 +2371,7 @@ Status legend: **COMPLETE** = fully implemented; **PARTIAL** = core slice implem
 - parser ✓
 - CST (lossless for formatting and diagnostics) ✓
 - formatter (canonical pipe, arrow, cluster alignment) ✓
-- syntax for `type`, `class`, `instance`, `val`, `fun`, `sig`, `use`, `export`, `provider`, markup, and pipe operators ✓
+- syntax for `type`, `data`, `class`, `instance`, `value`, `signal`, `source`, `result`, `view`, `adapter`, `use`, `export`, `provider`, markup, and pipe operators (`|>`, `?|>`, `||>`, `!|>`, `~|>`, `+|>`, `-|>`, `*|>`, `&|>`, `T|>`, `F|>`, `@|>`, `<|@`, `<|*`, `|`) ✓
 - line/block/doc comment lexing (`//`, `/* */`, `/** **/`) and trivia retention ✓
 - regex literal lexing plus HIR validation ✓
 - compact suffix literal lexing (`250ms`) ✓
@@ -2204,12 +2381,12 @@ Status legend: **COMPLETE** = fully implemented; **PARTIAL** = core slice implem
 - name resolution ✓
 - import resolution ✓
 - import alias (`use module (x as y)`) ✓
-- decorator attachment (`@source`, `@recur.timer`, `@recur.backoff`) ✓
+- decorator attachment (`@recur.timer`, `@recur.backoff`) ✓
 - explicit HIR nodes for applicative clusters and markup control nodes ✓
 - domain declarations and suffix namespaces ✓
 - `instance` blocks with same-module class resolution ✓
 - provider declarations (`provider qualified.name`) ✓
-- input signal declarations (body-less annotated `sig`) ✓
+- input signal declarations (body-less annotated `signal`) ✓
 - module-aware expression typechecker in `aivi-hir` ✓
 
 ### Milestone 3 — Kinds and core typing — **COMPLETE**
@@ -2366,9 +2543,9 @@ aivi run src/app.aivi --view mainWindow
 
 View selection rules:
 
-1. If `--view <name>` is given, the named top-level markup-valued `val` is used.
-2. Otherwise, if a top-level markup-valued `val` named `view` exists, that is used.
-3. Otherwise, if there is a unique top-level markup-valued `val`, that is used.
+1. If `--view <name>` is given, the named top-level markup-valued `value` is used.
+2. Otherwise, if a top-level markup-valued `value` named `view` exists, that is used.
+3. Otherwise, if there is a unique top-level markup-valued `value`, that is used.
 4. Otherwise, `--view <name>` is required.
 
 The selected root must be a `Window`. The CLI does not auto-wrap arbitrary widgets into windows.
@@ -2411,8 +2588,8 @@ aivi execute src/cli.aivi
 aivi execute src/cli.aivi -- --model gpt-5.4 prompt.txt
 ```
 
-`aivi execute` selects the top-level `val main`. The binding must be annotated as `Task E A`;
-`function main`, `sig main`, and non-task values are rejected.
+`aivi execute` selects the top-level `value main`. The binding must be annotated as `Task E A`;
+`signal main` and non-task values are rejected.
 
 The command links the compiled runtime stack without GTK, settles any startup source activity,
 evaluates `main`, and executes the resulting host task plan directly in the CLI process.
