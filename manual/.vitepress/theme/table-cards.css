@@ -1,0 +1,64 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   Mobile card layout for markdown tables
+   Each <td> gets data-column="Header" from Layout.vue so we can render it
+   as a labelled card row on narrow screens.
+───────────────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 767px) {
+  .vp-doc table {
+    display: block;
+    border: none;
+  }
+
+  /* Hide the original header row */
+  .vp-doc table thead {
+    display: none;
+  }
+
+  .vp-doc table tbody {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  /* Each row becomes a card */
+  .vp-doc table tbody tr {
+    display: grid;
+    grid-template-columns: 1fr;
+    border: 1px solid var(--vp-c-divider);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--vp-c-bg-soft);
+  }
+
+  /* Each cell becomes a labelled row inside the card */
+  .vp-doc table tbody td {
+    display: grid;
+    grid-template-columns: minmax(6rem, 35%) 1fr;
+    align-items: baseline;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--vp-c-divider);
+    border-top: none;
+    border-left: none;
+    border-right: none;
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+
+  .vp-doc table tbody td:last-child {
+    border-bottom: none;
+  }
+
+  /* Column label injected via data-column attribute */
+  .vp-doc table tbody td[data-column]::before {
+    content: attr(data-column);
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--vp-c-text-2);
+    align-self: start;
+    padding-top: 2px;
+  }
+}
