@@ -44,6 +44,22 @@ export default defineConfig({
         text: 'Reference',
         items: [
           { text: 'Standard Library', link: '/stdlib/' },
+          {
+            text: 'Modules',
+            items: [
+              { text: 'aivi.bool', link: '/stdlib/bool' },
+              { text: 'aivi.list', link: '/stdlib/list' },
+              { text: 'aivi.math', link: '/stdlib/math' },
+              { text: 'aivi.nonEmpty', link: '/stdlib/nonEmpty' },
+              { text: 'aivi.option', link: '/stdlib/option' },
+              { text: 'aivi.order', link: '/stdlib/order' },
+              { text: 'aivi.pair', link: '/stdlib/pair' },
+              { text: 'aivi.result', link: '/stdlib/result' },
+              { text: 'aivi.text', link: '/stdlib/text' },
+              { text: 'aivi.validation', link: '/stdlib/validation' },
+              { text: 'aivi.prelude', link: '/stdlib/prelude' },
+            ],
+          },
         ],
       },
     ],

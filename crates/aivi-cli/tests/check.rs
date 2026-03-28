@@ -356,8 +356,16 @@ fn check_accepts_stdlib_validation_files() {
         "aivi/http.aivi",
         "aivi/timer.aivi",
         "aivi/log.aivi",
+        "aivi/list.aivi",
+        "aivi/option.aivi",
+        "aivi/result.aivi",
+        "aivi/bool.aivi",
+        "aivi/pair.aivi",
+        "aivi/math.aivi",
+        "aivi/text.aivi",
         "tests/foundation-validation/main.aivi",
         "tests/boundary-validation/main.aivi",
+        "tests/extended-stdlib-validation/main.aivi",
     ] {
         let path = stdlib_path(relative);
         let output = Command::new(env!("CARGO_BIN_EXE_aivi"))

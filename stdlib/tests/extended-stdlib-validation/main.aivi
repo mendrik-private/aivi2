@@ -1,0 +1,349 @@
+use aivi.bool (
+    not
+    xor
+    implies
+    both
+    either
+    neither
+    fromInt
+)
+
+use aivi.math (
+    abs
+    negate
+    sign
+    isEven
+    isOdd
+    square
+    clamp
+    between
+    divides
+)
+
+use aivi.pair (
+    fst
+    snd
+    swap
+    mapFst
+    mapSnd
+    mapBoth as pairMapBoth
+    fromPair
+    toPair
+    duplicate
+)
+
+use aivi.text (
+    isEmpty
+    nonEmpty
+    join
+    concat
+    surround
+)
+
+use aivi.list (
+    map
+    filter
+    reverse
+    take
+    drop
+    takeWhile
+    dropWhile
+    flatten
+    flatMap
+    zip
+    zipWith
+    unzip
+    intersperse
+    sortBy
+    unique
+    any
+    all
+    count
+    find
+    findMap
+    partition
+    indexOf
+    contains
+    sum
+    product
+    maximum
+    minimum
+    Partition
+    UnzipState
+)
+
+use aivi.option (
+    isSome
+    isNone
+    getOrElse
+    map as optionMap
+    filter as optionFilter
+    zip as optionZip
+    flatMap as optionFlatMap
+    flatten as optionFlatten
+    orElse
+    toList as optionToList
+    toResult as optionToResult
+    fromBool
+)
+
+use aivi.result (
+    isOk
+    isErr
+    withDefault
+    map as resultMap
+    mapBoth
+    mapErr as resultMapErr
+    fold as resultFold
+    flatMap as resultFlatMap
+    flatten as resultFlatten
+    toOption as resultToOption
+    toList as resultToList
+    fromOption as resultFromOption
+    mapBoth as resultMapBoth
+)
+
+use aivi.nonEmpty (
+    NonEmpty
+    NonEmptyList
+    singleton as nelSingleton
+    cons as nelCons
+    head as nelHead
+    toList as nelToList
+    last as nelLast
+    length as nelLength
+    mapNel
+    fromList as nelFromList
+    appendNel
+)
+
+use aivi.order (
+    min
+    max
+    minOf
+    maxOf
+    clamp as orderClamp
+    reversed
+    comparing
+)
+
+// Bool module tests
+
+value notTrue: Bool = not True
+value notFalse: Bool = not False
+value xorTT: Bool = xor True True
+value xorTF: Bool = xor True False
+value impliesTT: Bool = implies True True
+value impliesTF: Bool = implies True False
+value bothTT: Bool = both True True
+value eitherTF: Bool = either True False
+value neitherFF: Bool = neither False False
+value fromZero: Bool = fromInt 0
+value fromOne: Bool = fromInt 1
+
+// Math module tests
+
+value absPositive: Int = abs 5
+value absNegative: Int = abs -3
+value negatePositive: Int = negate 7
+value negateNegative: Int = negate -4
+value signPositive: Int = sign 10
+value signNegative: Int = sign -10
+value signZero: Int = sign 0
+value evenTest: Bool = isEven 4
+value oddTest: Bool = isOdd 3
+value squareTest: Int = square 5
+value clampLow: Int = clamp 0 100 (0 - 5)
+value clampHigh: Int = clamp 0 100 150
+value clampMid: Int = clamp 0 100 50
+value betweenYes: Bool = between 1 10 5
+value betweenNo: Bool = between 1 10 15
+value dividesYes: Bool = divides 3 9
+value dividesNo: Bool = divides 3 7
+
+// Pair module tests
+
+value testPair: (Int, Text) = fromPair 42 "hello"
+value firstItem: Int = fst testPair
+value secondItem: Text = snd testPair
+value swappedPair: (Text, Int) = swap testPair
+value duplicated: (Int, Int) = duplicate 5
+
+fun doubleNum:Int n:Int =>
+    n * 2
+
+fun upperFirst:Text t:Text =>
+    append t "!"
+
+value mappedFst: (Int, Text) = mapFst doubleNum testPair
+value mappedSnd: (Int, Text) = mapSnd upperFirst testPair
+value mappedBoth: (Int, Text) = pairMapBoth doubleNum upperFirst testPair
+
+// Text module tests
+
+value emptyText: Bool = isEmpty ""
+value nonEmptyText: Bool = nonEmpty "hello"
+value joinedText: Text = join ", " ["a", "b", "c"]
+value concatText: Text = concat ["hello", " ", "world"]
+value surroundedText: Text = surround "[" "]" "content"
+
+// List module tests
+
+value numbers: List Int = [1, 2, 3, 4, 5]
+value words: List Text = ["Ada", "Grace", "Hedy"]
+
+fun double:Int n:Int =>
+    n * 2
+
+fun isPositive:Bool n:Int =>
+    n > 0
+
+fun isSmall:Bool n:Int =>
+    n < 4
+
+fun smaller:Bool a:Int b:Int =>
+    a < b
+
+value doubled: List Int = map double numbers
+value positives: List Int = filter isPositive numbers
+value reversed: List Int = reverse numbers
+value firstThree: List Int = take 3 numbers
+value afterTwo: List Int = drop 2 numbers
+value smallOnes: List Int = takeWhile isSmall numbers
+value bigOnes: List Int = dropWhile isSmall numbers
+value total: Int = sum numbers
+value productVal: Int = product numbers
+value maxNum: Option Int = maximum numbers
+value minNum: Option Int = minimum numbers
+value hasThree: Bool = contains 3 numbers
+value threeIndex: Option Int = indexOf 3 numbers
+value anyPos: Bool = any isPositive numbers
+value allPos: Bool = all isPositive numbers
+value countSmall: Int = count isSmall numbers
+value foundSmall: Option Int = find isSmall numbers
+value split: Partition Int = partition isSmall numbers
+value sorted: List Int = sortBy smaller [3, 1, 4, 1, 5]
+value onlyUnique: List Int = unique [1, 2, 1, 3, 2]
+value spacedOut: List Int = intersperse 0 [1, 2, 3]
+
+fun pairUp:Int a:Int b:Int =>
+    a + b
+
+value zipped: List (Int, Int) = zip numbers [10, 20, 30, 40, 50]
+value zipWithSum: List Int = zipWith pairUp numbers [10, 20, 30, 40, 50]
+
+value nested: List (List Int) = [[1, 2], [3, 4], [5]]
+value flattenedList: List Int = flatten nested
+
+fun makeRange:(List Int) n:Int =>
+    [n, n + 1]
+
+value flatMapped: List Int = flatMap makeRange [1, 3, 5]
+
+fun doubleIfSmall:(Option Int) n:Int =>
+    isSmall n
+     T|> Some (double n)
+     F|> None
+
+value foundDoubled: Option Int = findMap doubleIfSmall numbers
+
+// Option module tests
+
+value presentOpt: Option Int = Some 42
+value absentOpt: Option Int = None
+
+value hasSome: Bool = isSome presentOpt
+value hasNone: Bool = isNone absentOpt
+value extracted: Int = getOrElse 0 presentOpt
+value defaulted: Int = getOrElse 0 absentOpt
+value mappedOpt: Option Int = optionMap double presentOpt
+value filteredOpt: Option Int = optionFilter isSmall (Some 2)
+value zippedOpts: Option (Int, Int) = optionZip presentOpt (Some 7)
+value orFallback: Option Int = orElse (Some 99) absentOpt
+value optList: List Int = optionToList presentOpt
+value optResult: Result Text Int = optionToResult "missing" presentOpt
+value fromTrue: Option Int = fromBool 42 True
+value fromFalse: Option Int = fromBool 42 False
+
+fun safeDouble:(Option Int) n:Int =>
+    isSmall n
+     T|> Some (double n)
+     F|> None
+
+value flatMappedOpt: Option Int = optionFlatMap safeDouble (Some 2)
+value nested2: Option (Option Int) = Some (Some 5)
+value flattenedOpt: Option Int = optionFlatten nested2
+
+// Result module tests
+
+value okResult: Result Text Int = Ok 99
+value errResult: Result Text Int = Err "not found"
+
+value okCheck: Bool = isOk okResult
+value errCheck: Bool = isErr errResult
+value defaultResult: Int = withDefault 0 okResult
+value defaultErr: Int = withDefault 0 errResult
+value mappedResult: Result Text Int = resultMap double okResult
+
+fun prefixErr:Text msg:Text =>
+    concat ["error: ", msg]
+
+value mappedErrResult: Result Text Int = resultMapErr prefixErr errResult
+
+fun onOk:Text n:Int =>
+    concat ["value: ", ""]
+
+fun onErr:Text msg:Text =>
+    concat ["error: ", msg]
+
+value foldedOk: Text = resultFold onErr onOk okResult
+value foldedErr: Text = resultFold onErr onOk errResult
+value toOpt: Option Int = resultToOption okResult
+value toList: List Int = resultToList okResult
+value fromOpt: Result Text Int = resultFromOption "missing" (Some 5)
+value fromNone: Result Text Int = resultFromOption "missing" None
+
+fun resultDouble:(Result Text Int) n:Int =>
+    Ok (double n)
+
+value flatMappedResult: Result Text Int = resultFlatMap resultDouble okResult
+
+value nestedResult: Result Text (Result Text Int) = Ok (Ok 7)
+value flattenedResult: Result Text Int = resultFlatten nestedResult
+
+fun swapTypes:(Result Int Text) result:(Result Text Int) =>
+    result
+     ||> Ok n    -> Err n
+     ||> Err msg -> Ok msg
+
+value bothMapped: Result Text Int = resultMapBoth prefixErr double okResult
+
+// NonEmpty module tests
+
+value nelOne: NonEmptyList Int = nelSingleton 1
+value nelTwo: NonEmptyList Int = nelCons 0 nelOne
+value nelFirst: Int = nelHead nelOne
+value nelList: List Int = nelToList nelOne
+value nelLastItem: Int = nelLast nelOne
+value nelLen: Int = nelLength nelTwo
+value nelMapped: NonEmptyList Int = mapNel double nelOne
+value maybeNel: Option (NonEmptyList Int) = nelFromList [1, 2, 3]
+value emptyNel: Option (NonEmptyList Int) = nelFromList []
+value appended: NonEmptyList Int = appendNel nelOne nelTwo
+
+// Order module tests
+
+value smallest: Int = min smaller 4 2
+value largest: Int = max smaller 4 2
+value leastOf: Int = minOf smaller 5 [3, 7, 1, 9]
+value greatestOf: Int = maxOf smaller 5 [3, 7, 1, 9]
+value clamped: Int = orderClamp smaller 2 8 10
+value reversed1: Bool = reversed smaller 4 2
+
+fun getAge:Int person:(Int, Text) =>
+    fst person
+
+value people: List (Int, Text) = [(30, "Ada"), (25, "Grace"), (35, "Hedy")]
+
+fun byAge:Bool a:(Int, Text) b:(Int, Text) =>
+    comparing getAge smaller a b
