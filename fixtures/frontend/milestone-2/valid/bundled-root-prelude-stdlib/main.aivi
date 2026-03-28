@@ -70,18 +70,18 @@ value firstName: Option Text =
         "Grace"
     ]
 
-value smaller:Bool left:Int right:Int =>
+fun smaller:Bool left:Int right:Int =>
     left < right
 
-value keepSmall:(Option Int) x:Int =>
+fun keepSmall:(Option Int) x:Int =>
     x < 3
      T|> Some x
      F|> None
 
-value addOne:Int x:Int =>
+fun addOne:Int x:Int =>
     x + 1
 
-value punctuate:Text x:Text =>
+fun punctuate:Text x:Text =>
     append x "!"
 
 value leastCount: Int = min smaller 4 2

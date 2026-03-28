@@ -46,26 +46,26 @@ use aivi.text (
     surround
 )
 
-value positive:Bool x:Int =>
+fun positive:Bool x:Int =>
     x > 0
 
-value even:Bool x:Int =>
+fun even:Bool x:Int =>
     x == 2 or x == 4
 
-value adminIfAda:(Option Text) name:Text =>
+fun adminIfAda:(Option Text) name:Text =>
     name == "Ada"
      T|> Some "admin"
      F|> None
 
-value prefixError:Text message:Text =>
+fun prefixError:Text message:Text =>
     "error:{message}"
 
-value lessThanTen:(Result Text Int) x:Int =>
+fun lessThanTen:(Result Text Int) x:Int =>
     x < 10
      T|> Ok x
      F|> Err "too-large"
 
-value onlyTwo:(Option Text) x:Int =>
+fun onlyTwo:(Option Text) x:Int =>
     x == 2
      T|> Some "two"
      F|> None

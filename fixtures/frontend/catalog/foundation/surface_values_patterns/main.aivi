@@ -22,27 +22,27 @@ type SurfaceSummary = {
     failedLoad: Text
 }
 
-value displayName:Text profile:Profile =>
+fun displayName:Text profile:Profile =>
     profile
-     ||> { nickname: Some alias } => alias
-     ||> { name, nickname: None } => name
+     ||> { nickname: Some alias } -> alias
+     ||> { name, nickname: None } -> name
 
-value roleLabel:Text role:Role =>
+fun roleLabel:Text role:Role =>
     role
-     ||> Admin  => "admin"
-     ||> Member => "member"
-     ||> Guest  => "guest"
+     ||> Admin  -> "admin"
+     ||> Member -> "member"
+     ||> Guest  -> "guest"
 
-value readyLabel:Text ready:Bool =>
+fun readyLabel:Text ready:Bool =>
     ready
      T|> "ready"
      F|> "waiting"
 
-value loadLabel:Text state:LoadState =>
+fun loadLabel:Text state:LoadState =>
     state
-     ||> NotAsked       => "idle"
-     ||> Loaded profile => displayName profile
-     ||> Failed message => "error:{message}"
+     ||> NotAsked       -> "idle"
+     ||> Loaded profile -> displayName profile
+     ||> Failed message -> "error:{message}"
 
 value sampleProfile: Profile = {
     name: "Ada",

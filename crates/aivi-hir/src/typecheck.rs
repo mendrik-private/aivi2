@@ -3101,7 +3101,7 @@ mod tests {
     fn typecheck_accepts_prelude_functor_map_calls() {
         let report = typecheck_text(
             "prelude-map-call.aivi",
-            "value increment:Int n:Int => n + 1\n\
+            "fun increment:Int n:Int => n + 1\n\
              value mapped:Option Int = map increment (Some 1)\n",
         );
         assert!(
@@ -3115,7 +3115,7 @@ mod tests {
     fn typecheck_accepts_prelude_foldable_reduce_calls() {
         let report = typecheck_text(
             "prelude-reduce-call.aivi",
-            "value add:Int acc:Int item:Int => acc + item\n\
+            "fun add:Int acc:Int item:Int => acc + item\n\
              value joined:Text = reduce append empty [\"hel\", \"lo\"]\n\
              value total:Int = reduce add 10 (Some 2)\n",
         );
@@ -3143,7 +3143,7 @@ mod tests {
     fn typecheck_accepts_function_signature_constraints_at_call_sites() {
         let report = typecheck_text(
             "function-signature-constraints.aivi",
-            "value same:Eq A => Bool x:A => True\n\
+            "fun same:Eq A => Bool x:A => True\n\
              value sameText:Bool = same \"Ada\"\n",
         );
         assert!(
@@ -3197,7 +3197,7 @@ mod tests {
     fn typecheck_accepts_unannotated_function_name_from_expected_arrow() {
         let report = typecheck_text(
             "function-name-expected-arrow.aivi",
-            "value keep x => x\n\
+            "fun keep x => x\n\
              value chosen:(Option Int -> Option Int) = keep\n",
         );
         assert!(
@@ -3211,7 +3211,7 @@ mod tests {
     fn typecheck_accepts_unannotated_function_application_from_expected_result() {
         let report = typecheck_text(
             "function-application-expected-result.aivi",
-            "value keepNone opt:Option Int => None\n\
+            "fun keepNone opt:Option Int => None\n\
              value result:Option Int = keepNone None\n",
         );
         assert!(
@@ -3225,7 +3225,7 @@ mod tests {
     fn typecheck_accepts_function_application_with_expected_builtin_hole_argument() {
         let report = typecheck_text(
             "function-application-expected-hole.aivi",
-            "value keep:Option Int opt:Option Int => opt\n\
+            "fun keep:Option Int opt:Option Int => opt\n\
              value result:Option Int = keep None\n",
         );
         assert!(
@@ -3239,7 +3239,7 @@ mod tests {
     fn typecheck_reports_function_application_result_mismatch() {
         let report = typecheck_text(
             "function-application-result-mismatch.aivi",
-            "value keep:Option Int opt:Option Int => opt\n\
+            "fun keep:Option Int opt:Option Int => opt\n\
              value result:Option Text = keep None\n",
         );
         assert!(
@@ -3432,8 +3432,8 @@ mod tests {
 value current:Screen = Loading
 value broken =
     current
-     ||> Loading => 0
-     ||> Ready title => title
+     ||> Loading -> 0
+     ||> Ready title -> title
 "#,
         );
         assert!(
@@ -3456,14 +3456,14 @@ value broken =
 value current:Screen = Loading
 value maybeLabel:Option Text =
     current
-     ||> Loading => None
-     ||> Ready title => Some title
-     ||> Failed reason => Some reason
+     ||> Loading -> None
+     ||> Ready title -> Some title
+     ||> Failed reason -> Some reason
 value resultLabel:Result Text Text =
     current
-     ||> Loading => Ok "loading"
-     ||> Ready title => Ok title
-     ||> Failed reason => Err reason
+     ||> Loading -> Ok "loading"
+     ||> Ready title -> Ok title
+     ||> Failed reason -> Err reason
 "#,
         );
         assert!(
@@ -3477,11 +3477,11 @@ value resultLabel:Result Text Text =
     fn typecheck_accepts_applied_calls_in_case_branches() {
         let report = typecheck_text(
             "applied-call-case-branches.aivi",
-            r#"value addOne:Int n:Int => n + 1
+            r#"fun addOne:Int n:Int => n + 1
 value x:Int =
     0
-     ||> 0 => addOne 0
-     ||> _ => 1
+     ||> 0 -> addOne 0
+     ||> _ -> 1
 "#,
         );
         assert!(
@@ -3495,7 +3495,7 @@ value x:Int =
     fn typecheck_accepts_applied_calls_in_truthy_falsy_branches() {
         let report = typecheck_text(
             "applied-call-truthy-falsy-branches.aivi",
-            r#"value addOne:Int n:Int => n + 1
+            r#"fun addOne:Int n:Int => n + 1
 value x:Int =
     True
      T|> addOne 0
@@ -3517,8 +3517,8 @@ value x:Int =
     n: Int,
     items: List A
 }
-value remaining:Int acc:(TakeAcc A) => acc.n
-value items:(List A) acc:(TakeAcc A) => acc.items
+fun remaining:Int acc:(TakeAcc A) => acc.n
+fun items:(List A) acc:(TakeAcc A) => acc.items
 "#,
         );
         assert!(
@@ -3911,7 +3911,7 @@ value items:(List A) acc:(TakeAcc A) => acc.items
     fn typecheck_accepts_expected_polymorphic_ambient_helper_application() {
         let report = typecheck_text(
             "expected-polymorphic-ambient-helper-application.aivi",
-            "value even:Bool n:Int => n == 2 or n == 4\n\
+            "fun even:Bool n:Int => n == 2 or n == 4\n\
              value maybeName:Option Text = Some \"Ada\"\n\
              value numbers:List Int = [1, 2, 3, 4]\n\
              value chosenName:Text = __aivi_option_getOrElse \"guest\" maybeName\n\
@@ -3945,7 +3945,7 @@ value items:(List A) acc:(TakeAcc A) => acc.items
     fn typecheck_reports_invalid_pipe_stage_input_for_transforms() {
         let report = typecheck_text(
             "invalid-pipe-stage-transform.aivi",
-            "value describe:Text n:Int => \"count\"\n\
+            "fun describe:Text n:Int => \"count\"\n\
              value broken:Text = \"Ada\" |> describe\n",
         );
         assert!(
@@ -3961,7 +3961,7 @@ value items:(List A) acc:(TakeAcc A) => acc.items
     fn typecheck_reports_invalid_pipe_stage_input_for_taps() {
         let report = typecheck_text(
             "invalid-pipe-stage-tap.aivi",
-            "value describe:Text n:Int => \"count\"\n\
+            "fun describe:Text n:Int => \"count\"\n\
              value broken:Text = \"Ada\" | describe\n",
         );
         assert!(

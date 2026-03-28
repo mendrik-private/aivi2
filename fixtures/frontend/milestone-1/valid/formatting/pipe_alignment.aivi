@@ -12,7 +12,7 @@ signal draft =
  &|> documentBody
     |> Pair
 
-value label:Text state:SaveState =>
+fun label:Text state:SaveState =>
   state
-    ||> Saved => "saved"
-   ||> Dirty message => "dirty {message}"
+    ||> Saved -> "saved"
+   ||> Dirty message -> "dirty {message}"

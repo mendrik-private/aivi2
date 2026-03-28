@@ -1,4 +1,4 @@
-value collect items =>
+fun collect items =>
     items
 
 value users = []

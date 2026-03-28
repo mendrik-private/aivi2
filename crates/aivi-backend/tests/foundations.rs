@@ -433,7 +433,7 @@ fn lowers_item_body_kernels_into_backend_items() {
     let backend = lower_text(
         "backend-item-bodies.aivi",
         r#"
-value addOne:Int n:Int =>
+fun addOne:Int n:Int =>
     n + 1
 
 value answer =
@@ -469,7 +469,7 @@ signal refresh = 0
 signal enabled = True
 signal pollInterval = 5
 
-value addOne:Int n:Int =>
+fun addOne:Int n:Int =>
     n + 1
 
 value answer =
@@ -557,7 +557,7 @@ fn runtime_evaluates_builtin_overloaded_class_members() {
     let backend = lower_text(
         "backend-builtin-class-members.aivi",
         r#"
-value increment:Int n:Int => n + 1
+fun increment:Int n:Int => n + 1
 
 value joined:Text =
     append "hel" "lo"
@@ -672,10 +672,10 @@ fn runtime_evaluates_builtin_foldable_reduce_members() {
     let backend = lower_text(
         "backend-foldable-reduce.aivi",
         r#"
-value add:Int acc:Int item:Int =>
+fun add:Int acc:Int item:Int =>
     acc + item
 
-value joinStep:Text acc:Text item:Text =>
+fun joinStep:Text acc:Text item:Text =>
     append acc item
 
 value maybeInput:Option Int =
@@ -805,15 +805,15 @@ fn runtime_evaluates_extended_builtin_typeclass_members() {
     let backend = lower_text(
         "backend-extended-typeclass-members.aivi",
         r#"
-value addOne:Int n:Int =>
+fun addOne:Int n:Int =>
     n + 1
 
-value keepSmall:(Option Int) n:Int =>
+fun keepSmall:(Option Int) n:Int =>
     n < 3
      T|> Some n
      F|> None
 
-value punctuate:Text s:Text =>
+fun punctuate:Text s:Text =>
     append s "!"
 
 value okOne:Result Text Int =
@@ -1050,7 +1050,7 @@ fn runtime_evaluates_validation_apply_through_backend_runtime() {
         r#"
 type Pair = Pair Text Text
 
-value pair:Pair left:Text right:Text =>
+fun pair:Pair left:Text right:Text =>
     Pair left right
 
 value first:Validation Text Text =
@@ -1113,7 +1113,7 @@ use shared.types (
     Envelope
 )
 
-value increment:Int n:Int =>
+fun increment:Int n:Int =>
     n + 1
 
 value lifted:Envelope (Option Int) =
@@ -1163,7 +1163,7 @@ instance Semigroup Blob
     append left right =
         left
 
-value combine:Blob left:Blob right:Blob =>
+fun combine:Blob left:Blob right:Blob =>
     append left right
 
 value combined:Blob =
@@ -1707,10 +1707,10 @@ fn evaluates_inline_case_pipe_with_pattern_binding_and_parameter_capture() {
         r#"
 value fallback = "guest"
 
-value greet:Text prefix:Text maybeUser:(Option Text) =>
+fun greet:Text prefix:Text maybeUser:(Option Text) =>
     maybeUser
-     ||> Some name => "{prefix}:{name}"
-     ||> None => "{prefix}:{fallback}"
+     ||> Some name -> "{prefix}:{name}"
+     ||> None -> "{prefix}:{fallback}"
 
 value present =
     greet "user" (Some "Ada")
@@ -1766,10 +1766,10 @@ fn evaluates_signal_carried_inline_case_pipes_with_committed_snapshots_and_captu
     let backend = lower_text(
         "backend-signal-inline-case-captures.aivi",
         r#"
-value greetSelected:Signal Text prefix:Text fallback:Text =>
+fun greetSelected:Signal Text prefix:Text fallback:Text =>
     selectedUser
-     ||> Some name => "{prefix}:{name}"
-     ||> None => "{prefix}:{fallback}"
+     ||> Some name -> "{prefix}:{name}"
+     ||> None -> "{prefix}:{fallback}"
 
 signal selectedUser : Signal (Option Text)
 
@@ -1811,7 +1811,7 @@ fn evaluates_signal_carried_inline_truthy_falsy_pipes_with_committed_snapshots()
     let backend = lower_text(
         "backend-signal-inline-truthy-falsy.aivi",
         r#"
-value renderStatus:Signal Text prefix:Text readyText:Text waitText:Text =>
+fun renderStatus:Signal Text prefix:Text readyText:Text waitText:Text =>
     ready
      T|> "{prefix}:{readyText}"
      F|> "{prefix}:{waitText}"
@@ -1861,11 +1861,11 @@ type Status =
 
 signal current : Signal Status
 
-value render:Text status:Status =>
+fun render:Text status:Status =>
     status
-     ||> Idle => "idle"
-     ||> Ready name => name
-     ||> Failed code message => "{code}:{message}"
+     ||> Idle -> "idle"
+     ||> Ready name -> name
+     ||> Failed code message -> "{code}:{message}"
 
 value idleLabel =
     render current
@@ -1946,7 +1946,7 @@ domain Duration over Int
 domain Retry over Int
     literal x : Int -> Retry
 
-value step:Int x:Int =>
+fun step:Int x:Int =>
     x
 
 @recur.timer 5s

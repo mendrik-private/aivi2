@@ -3,6 +3,6 @@ type Status =
   | Pending
   | Failed Text
 
-value statusLabel:Text status:Status =>
+fun statusLabel:Text status:Status =>
     status
-     ||> Paid => "paid"
+     ||> Paid -> "paid"

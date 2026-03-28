@@ -27,44 +27,44 @@ type SuffixCatalog = {
     duplicateCandidates: SuffixSummary
 }
 
-value viewSuffixes:SuffixView items:(List Suffix) =>
+fun viewSuffixes:SuffixView items:(List Suffix) =>
     {
         first: head items,
         rest: tail items
     }
 
-value suffixLabel:Text suffix:Suffix =>
+fun suffixLabel:Text suffix:Suffix =>
     "{suffix.start}:{suffix.value}"
 
-value earlier:Bool left:Suffix right:Suffix =>
+fun earlier:Bool left:Suffix right:Suffix =>
     left.value < right.value or (left.value == right.value and left.start < right.start)
 
-value insertAfterHead:(List Suffix) sorted:(List Suffix) item:Suffix first:Suffix remaining:(List Suffix) =>
+fun insertAfterHead:(List Suffix) sorted:(List Suffix) item:Suffix first:Suffix remaining:(List Suffix) =>
     earlier item first
      T|> append [item] sorted
      F|> append [first] (insertSuffix remaining item)
 
-value insertSuffix:(List Suffix) sorted:(List Suffix) item:Suffix =>
+fun insertSuffix:(List Suffix) sorted:(List Suffix) item:Suffix =>
     viewSuffixes sorted
-     ||> { first: None }                             => [item]
-     ||> { first: Some first, rest: Some remaining } => insertAfterHead sorted item first remaining
+     ||> { first: None }                             -> [item]
+     ||> { first: Some first, rest: Some remaining } -> insertAfterHead sorted item first remaining
 
-value collectLabels:(List Text) labels:(List Text) suffix:Suffix =>
+fun collectLabels:(List Text) labels:(List Text) suffix:Suffix =>
     append labels [
         suffixLabel suffix
     ]
 
-value describeOrder:Text items:(List Suffix) =>
+fun describeOrder:Text items:(List Suffix) =>
     length items == 0
      T|> "empty"
      F|> join " < " (items |> reduce collectLabels [])
 
-value firstLabel:Text items:(List Suffix) =>
+fun firstLabel:Text items:(List Suffix) =>
     viewSuffixes items
-     ||> { first: Some suffix } => suffixLabel suffix
-     ||> { first: None }        => "empty"
+     ||> { first: Some suffix } -> suffixLabel suffix
+     ||> { first: None }        -> "empty"
 
-value summarize:SuffixSummary items:(List Suffix) =>
+fun summarize:SuffixSummary items:(List Suffix) =>
     {
         order: describeOrder items,
         first: firstLabel items,

@@ -1,59 +1,59 @@
-value keepOk:(Result E A) item:A =>
+fun keepOk:(Result E A) item:A =>
     Ok item
 
-value keepErr:(Result E A) error:E =>
+fun keepErr:(Result E A) error:E =>
     Err error
 
-value mapError:(Result E2 A) transform:(E1 -> E2) error:E1 =>
+fun mapError:(Result E2 A) transform:(E1 -> E2) error:E1 =>
     Err (transform error)
 
-value keepSome:(Option A) item:A =>
+fun keepSome:(Option A) item:A =>
     Some item
 
-value singleton:(List A) item:A =>
+fun singleton:(List A) item:A =>
     [item]
 
-value isOk:Bool opt:(Result E A) =>
+fun isOk:Bool opt:(Result E A) =>
     opt
      T|> True
      F|> False
 
-value isErr:Bool opt:(Result E A) =>
+fun isErr:Bool opt:(Result E A) =>
     opt
      F|> True
      T|> False
 
-value mapErr:(Result E2 A) transform:(E1 -> E2) opt:(Result E1 A) =>
+fun mapErr:(Result E2 A) transform:(E1 -> E2) opt:(Result E1 A) =>
     opt
      T|> keepOk
      F|> mapError transform
 
-value withDefault:A fallback:A opt:(Result E A) =>
+fun withDefault:A fallback:A opt:(Result E A) =>
     opt
-     ||> Ok item   => item
-     ||> Err error => fallback
+     ||> Ok item   -> item
+     ||> Err error -> fallback
 
-value orElse:(Result E A) fallback:(Result E A) opt:(Result E A) =>
+fun orElse:(Result E A) fallback:(Result E A) opt:(Result E A) =>
     opt
      T|> keepOk
      F|> fallback
 
-value flatMap:(Result E B) next:(A -> Result E B) opt:(Result E A) =>
+fun flatMap:(Result E B) next:(A -> Result E B) opt:(Result E A) =>
     opt
      T|> next
      F|> keepErr
 
-value flatten:(Result E A) opt:(Result E (Result E A)) =>
+fun flatten:(Result E A) opt:(Result E (Result E A)) =>
     opt
-     ||> Ok nested => nested
-     ||> Err error => Err error
+     ||> Ok nested -> nested
+     ||> Err error -> Err error
 
-value toOption:(Option A) opt:(Result E A) =>
+fun toOption:(Option A) opt:(Result E A) =>
     opt
      T|> keepSome
      F|> None
 
-value toList:(List A) opt:(Result E A) =>
+fun toList:(List A) opt:(Result E A) =>
     opt
      T|> singleton
      F|> []

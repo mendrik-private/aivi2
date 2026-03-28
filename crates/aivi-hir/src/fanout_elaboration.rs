@@ -860,10 +860,10 @@ type User = {
     email: Text
 }
 
-value keepText:Bool email:Text =>
+fun keepText:Bool email:Text =>
     True
 
-value joinEmails:Text items:List Text =>
+fun joinEmails:Text items:List Text =>
     "joined"
 
 value users:List User = [

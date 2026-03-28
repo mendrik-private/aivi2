@@ -1,4 +1,4 @@
-value step x =>
+fun step x =>
     x
 
 signal broken : Signal Int =

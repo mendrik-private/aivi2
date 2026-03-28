@@ -3,13 +3,13 @@ class Eq A
 
 type Blob = Blob Bytes
 
-value blobEquals: Bool left: Blob right: Blob =>
+fun blobEquals: Bool left: Blob right: Blob =>
   True
 
 instance Eq Blob
 (==) left right = blobEquals left right
 
-value sameBlob: Bool left: Blob right: Blob =>
+fun sameBlob: Bool left: Blob right: Blob =>
   left == right
 
 class Compare A

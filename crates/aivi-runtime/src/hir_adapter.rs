@@ -1247,7 +1247,7 @@ mod tests {
 domain Duration over Int
     literal s : Int -> Duration
 
-value keep value =>
+fun keep value =>
     value
 
 signal apiHost = "https://api.example.com"
@@ -1377,7 +1377,7 @@ signal retried : Signal Int =
 domain Retry over Int
     literal x : Int -> Retry
 
-value keep value =>
+fun keep value =>
     value
 
 @recur.backoff 3x
@@ -1424,7 +1424,7 @@ value retried : Task Int Int =
         let lowered = lower_text(
             "runtime-hir-adapter-bodyless-source-scan.aivi",
             r#"
-value step:Int n:Int current:Int =>
+fun step:Int n:Int current:Int =>
     n
 
 signal enabled = True

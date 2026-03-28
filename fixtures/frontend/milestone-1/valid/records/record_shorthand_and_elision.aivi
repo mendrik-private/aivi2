@@ -18,6 +18,6 @@ value minimalProfile:Profile = {
     name: "Grace"
 }
 
-value profileName:Text profile:Profile =>
+fun profileName:Text profile:Profile =>
     profile
-     ||> { name, nickname } => name
+     ||> { name, nickname } -> name

@@ -586,7 +586,7 @@ fn check_reports_trailing_body_tokens_from_syntax() {
         "expected trailing body token diagnostic code, got stderr: {stderr}"
     );
     assert!(
-        stderr.contains("value declaration body must contain exactly one expression"),
+        stderr.contains("fun declaration body must contain exactly one expression"),
         "expected explicit trailing body token message, got stderr: {stderr}"
     );
 }

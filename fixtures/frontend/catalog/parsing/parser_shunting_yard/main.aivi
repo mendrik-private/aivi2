@@ -38,26 +38,26 @@ type ShuntingCatalog = {
     missingClose: RunSummary
 }
 
-value viewTokens:TokenView items:(List Token) =>
+fun viewTokens:TokenView items:(List Token) =>
     {
         top: head items,
         rest: tail items
     }
 
-value pushToken:(List Token) item:Token items:(List Token) =>
+fun pushToken:(List Token) item:Token items:(List Token) =>
     append [item] items
 
-value operatorText:Text operator:Operator =>
+fun operatorText:Text operator:Operator =>
     operator
-     ||> Plus  => "+"
-     ||> Times => "*"
+     ||> Plus  -> "+"
+     ||> Times -> "*"
 
-value emitOperator:(List Text) output:(List Text) operator:Operator =>
+fun emitOperator:(List Text) output:(List Text) operator:Operator =>
     append output [
         operatorText operator
     ]
 
-value continueState:ParseState stack:(List Token) output:(List Text) note:Text =>
+fun continueState:ParseState stack:(List Token) output:(List Text) note:Text =>
     {
         stack,
         output,
@@ -65,7 +65,7 @@ value continueState:ParseState stack:(List Token) output:(List Text) note:Text =
         note
     }
 
-value invalidState:ParseState stack:(List Token) output:(List Text) note:Text =>
+fun invalidState:ParseState stack:(List Token) output:(List Text) note:Text =>
     {
         stack,
         output,
@@ -73,110 +73,110 @@ value invalidState:ParseState stack:(List Token) output:(List Text) note:Text =>
         note
     }
 
-value postfixText:Text output:(List Text) =>
+fun postfixText:Text output:(List Text) =>
     length output == 0
      T|> "empty"
      F|> join " " output
 
-value addLiteral:ParseState state:ParseState x:Int =>
+fun addLiteral:ParseState state:ParseState x:Int =>
     state
-     ||> { stack, output } => continueState stack (append output ["{x}"]) "emit literal"
+     ||> { stack, output } -> continueState stack (append output ["{x}"]) "emit literal"
 
-value pushOperator:ParseState state:ParseState operator:Operator note:Text =>
+fun pushOperator:ParseState state:ParseState operator:Operator note:Text =>
     state
-     ||> { stack, output } => continueState (pushToken (OperatorToken operator) stack) output note
+     ||> { stack, output } -> continueState (pushToken (OperatorToken operator) stack) output note
 
-value precedence:Int operator:Operator =>
+fun precedence:Int operator:Operator =>
     operator
-     ||> Plus  => 1
-     ||> Times => 2
+     ||> Plus  -> 1
+     ||> Times -> 2
 
-value pushNote:Text operator:Operator =>
+fun pushNote:Text operator:Operator =>
     operator
-     ||> Plus  => "push low precedence"
-     ||> Times => "push tight operator"
+     ||> Plus  -> "push low precedence"
+     ||> Times -> "push tight operator"
 
-value popNote:Text stacked:Operator incoming:Operator =>
+fun popNote:Text stacked:Operator incoming:Operator =>
     (stacked, incoming)
-     ||> (Times, Plus)  => "pop tighter operator"
-     ||> (Plus, Plus)   => "pop equal operator"
-     ||> (Times, Times) => "collapse chain"
-     ||> (_, _)         => pushNote incoming
+     ||> (Times, Plus)  -> "pop tighter operator"
+     ||> (Plus, Plus)   -> "pop equal operator"
+     ||> (Times, Times) -> "collapse chain"
+     ||> (_, _)         -> pushNote incoming
 
-value shouldPop:Bool stacked:Operator incoming:Operator =>
+fun shouldPop:Bool stacked:Operator incoming:Operator =>
     ((precedence stacked) > (precedence incoming)) or ((precedence stacked) == (precedence incoming))
 
-value popThenPush:ParseState remaining:(List Token) output:(List Text) stacked:Operator incoming:Operator =>
+fun popThenPush:ParseState remaining:(List Token) output:(List Text) stacked:Operator incoming:Operator =>
     continueState (pushToken (OperatorToken incoming) remaining) (emitOperator output stacked) (popNote stacked incoming)
 
-value handleStackedOperator:ParseState stack:(List Token) output:(List Text) incoming:Operator stacked:Operator remaining:(List Token) =>
+fun handleStackedOperator:ParseState stack:(List Token) output:(List Text) incoming:Operator stacked:Operator remaining:(List Token) =>
     shouldPop stacked incoming
      T|> popThenPush remaining output stacked incoming
      F|> continueState (pushToken (OperatorToken incoming) stack) output (pushNote incoming)
 
-value handleOperatorFrom:ParseState stack:(List Token) output:(List Text) incoming:Operator =>
+fun handleOperatorFrom:ParseState stack:(List Token) output:(List Text) incoming:Operator =>
     viewTokens stack
-     ||> { top: Some (OperatorToken stacked), rest: Some remaining } => handleStackedOperator stack output incoming stacked remaining
-     ||> { top: Some OpenGroup }                                     => continueState (pushToken (OperatorToken incoming) stack) output (pushNote incoming)
-     ||> { top: Some CloseGroup }                                    => invalidState stack output "unexpected close on stack"
-     ||> { top: None }                                               => continueState (pushToken (OperatorToken incoming) stack) output (pushNote incoming)
+     ||> { top: Some (OperatorToken stacked), rest: Some remaining } -> handleStackedOperator stack output incoming stacked remaining
+     ||> { top: Some OpenGroup }                                     -> continueState (pushToken (OperatorToken incoming) stack) output (pushNote incoming)
+     ||> { top: Some CloseGroup }                                    -> invalidState stack output "unexpected close on stack"
+     ||> { top: None }                                               -> continueState (pushToken (OperatorToken incoming) stack) output (pushNote incoming)
 
-value handleOperator:ParseState state:ParseState operator:Operator =>
+fun handleOperator:ParseState state:ParseState operator:Operator =>
     state
-     ||> { stack, output } => handleOperatorFrom stack output operator
+     ||> { stack, output } -> handleOperatorFrom stack output operator
 
-value closeAfterOperator:ParseState output:(List Text) remaining:(List Token) operator:Operator =>
+fun closeAfterOperator:ParseState output:(List Text) remaining:(List Token) operator:Operator =>
     viewTokens remaining
-     ||> { top: Some OpenGroup, rest: Some restAfterOpen } => continueState restAfterOpen (emitOperator output operator) "close grouped operator"
-     ||> { top: Some (OperatorToken nested) }              => invalidState remaining (emitOperator output operator) "group contained too many operators"
-     ||> { top: Some CloseGroup }                          => invalidState remaining (emitOperator output operator) "unexpected nested close"
-     ||> { top: None }                                     => invalidState remaining (emitOperator output operator) "missing open group"
+     ||> { top: Some OpenGroup, rest: Some restAfterOpen } -> continueState restAfterOpen (emitOperator output operator) "close grouped operator"
+     ||> { top: Some (OperatorToken nested) }              -> invalidState remaining (emitOperator output operator) "group contained too many operators"
+     ||> { top: Some CloseGroup }                          -> invalidState remaining (emitOperator output operator) "unexpected nested close"
+     ||> { top: None }                                     -> invalidState remaining (emitOperator output operator) "missing open group"
 
-value closeGroupFrom:ParseState stack:(List Token) output:(List Text) =>
+fun closeGroupFrom:ParseState stack:(List Token) output:(List Text) =>
     viewTokens stack
-     ||> { top: Some (OperatorToken operator), rest: Some remaining } => closeAfterOperator output remaining operator
-     ||> { top: Some OpenGroup, rest: Some remaining }                => continueState remaining output "close empty group"
-     ||> { top: Some CloseGroup }                                     => invalidState stack output "unexpected close group"
-     ||> { top: None }                                                => invalidState stack output "missing open group"
+     ||> { top: Some (OperatorToken operator), rest: Some remaining } -> closeAfterOperator output remaining operator
+     ||> { top: Some OpenGroup, rest: Some remaining }                -> continueState remaining output "close empty group"
+     ||> { top: Some CloseGroup }                                     -> invalidState stack output "unexpected close group"
+     ||> { top: None }                                                -> invalidState stack output "missing open group"
 
-value closeGroup:ParseState state:ParseState =>
+fun closeGroup:ParseState state:ParseState =>
     state
-     ||> { stack, output } => closeGroupFrom stack output
+     ||> { stack, output } -> closeGroupFrom stack output
 
-value pushGroup:ParseState state:ParseState =>
+fun pushGroup:ParseState state:ParseState =>
     state
-     ||> { stack, output } => continueState (pushToken OpenGroup stack) output "push group"
+     ||> { stack, output } -> continueState (pushToken OpenGroup stack) output "push group"
 
-value stepWhenValid:ParseState state:ParseState token:Token =>
+fun stepWhenValid:ParseState state:ParseState token:Token =>
     token
-     ||> Literal x          => addLiteral state x
-     ||> OperatorToken operator => handleOperator state operator
-     ||> OpenGroup              => pushGroup state
-     ||> CloseGroup             => closeGroup state
+     ||> Literal x          -> addLiteral state x
+     ||> OperatorToken operator -> handleOperator state operator
+     ||> OpenGroup              -> pushGroup state
+     ||> CloseGroup             -> closeGroup state
 
-value step:ParseState state:ParseState token:Token =>
+fun step:ParseState state:ParseState token:Token =>
     state
-     ||> { valid: True }  => stepWhenValid state token
-     ||> { valid: False } => state
+     ||> { valid: True }  -> stepWhenValid state token
+     ||> { valid: False } -> state
 
-value finalizeAfterFirst:RunSummary output:(List Text) first:Operator remaining:(List Token) =>
+fun finalizeAfterFirst:RunSummary output:(List Text) first:Operator remaining:(List Token) =>
     viewTokens remaining
-     ||> { top: None }                                             => { postfix: postfixText (emitOperator output first), operatorDepth: 0, status: "ok" }
-     ||> { top: Some (OperatorToken second), rest: Some leftover } => { postfix: postfixText (emitOperator (emitOperator output first) second), operatorDepth: length leftover, status: "ok" }
-     ||> { top: Some OpenGroup }                                   => { postfix: postfixText (emitOperator output first), operatorDepth: length remaining, status: "missing close group" }
-     ||> { top: Some CloseGroup }                                  => { postfix: postfixText (emitOperator output first), operatorDepth: length remaining, status: "unexpected close group" }
+     ||> { top: None }                                             -> { postfix: postfixText (emitOperator output first), operatorDepth: 0, status: "ok" }
+     ||> { top: Some (OperatorToken second), rest: Some leftover } -> { postfix: postfixText (emitOperator (emitOperator output first) second), operatorDepth: length leftover, status: "ok" }
+     ||> { top: Some OpenGroup }                                   -> { postfix: postfixText (emitOperator output first), operatorDepth: length remaining, status: "missing close group" }
+     ||> { top: Some CloseGroup }                                  -> { postfix: postfixText (emitOperator output first), operatorDepth: length remaining, status: "unexpected close group" }
 
-value finalizeStack:RunSummary output:(List Text) stack:(List Token) =>
+fun finalizeStack:RunSummary output:(List Text) stack:(List Token) =>
     viewTokens stack
-     ||> { top: None }                                             => { postfix: postfixText output, operatorDepth: 0, status: "ok" }
-     ||> { top: Some (OperatorToken first), rest: Some remaining } => finalizeAfterFirst output first remaining
-     ||> { top: Some OpenGroup }                                   => { postfix: postfixText output, operatorDepth: length stack, status: "missing close group" }
-     ||> { top: Some CloseGroup }                                  => { postfix: postfixText output, operatorDepth: length stack, status: "unexpected close group" }
+     ||> { top: None }                                             -> { postfix: postfixText output, operatorDepth: 0, status: "ok" }
+     ||> { top: Some (OperatorToken first), rest: Some remaining } -> finalizeAfterFirst output first remaining
+     ||> { top: Some OpenGroup }                                   -> { postfix: postfixText output, operatorDepth: length stack, status: "missing close group" }
+     ||> { top: Some CloseGroup }                                  -> { postfix: postfixText output, operatorDepth: length stack, status: "unexpected close group" }
 
-value finalize:RunSummary state:ParseState =>
+fun finalize:RunSummary state:ParseState =>
     state
-     ||> { valid: True, stack, output }        => finalizeStack output stack
-     ||> { valid: False, stack, output, note } => { postfix: postfixText output, operatorDepth: length stack, status: note }
+     ||> { valid: True, stack, output }        -> finalizeStack output stack
+     ||> { valid: False, stack, output, note } -> { postfix: postfixText output, operatorDepth: length stack, status: note }
 
 value initialState: ParseState = {
     stack: [],

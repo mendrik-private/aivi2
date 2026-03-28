@@ -6,5 +6,5 @@ value current:Screen = Loading
 
 value broken =
     current
-     ||> Loading => 0
-     ||> Ready title => title
+     ||> Loading -> 0
+     ||> Ready title -> title

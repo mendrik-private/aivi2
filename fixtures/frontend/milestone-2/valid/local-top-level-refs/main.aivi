@@ -5,10 +5,10 @@ type Screen =
 value screenTitle = "Milestone 2"
 value refreshStep = 10
 
-value titleFor:Text screen:Screen =>
+fun titleFor:Text screen:Screen =>
     screen
-     ||> Loading => "Loading"
-     ||> Ready title => title
+     ||> Loading -> "Loading"
+     ||> Ready title -> title
 
 value currentScreen = Ready screenTitle
 value pageTitle = titleFor currentScreen

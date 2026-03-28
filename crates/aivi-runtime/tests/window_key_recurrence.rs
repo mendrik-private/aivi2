@@ -86,20 +86,20 @@ type Direction =
   | Left
   | Right
 
-value arrowKey:(Option Direction) key:Key =>
+fun arrowKey:(Option Direction) key:Key =>
     key
-     ||> Key "ArrowUp"    => Some Up
-     ||> Key "ArrowDown"  => Some Down
-     ||> Key "ArrowLeft"  => Some Left
-     ||> Key "ArrowRight" => Some Right
-     ||> _                => None
+     ||> Key "ArrowUp"    -> Some Up
+     ||> Key "ArrowDown"  -> Some Down
+     ||> Key "ArrowLeft"  -> Some Left
+     ||> Key "ArrowRight" -> Some Right
+     ||> _                -> None
 
-value filterDirection:Direction current:Direction opt:(Option Direction) =>
+fun filterDirection:Direction current:Direction opt:(Option Direction) =>
     opt
-     ||> Some dir => dir
-     ||> None     => current
+     ||> Some dir -> dir
+     ||> None     -> current
 
-value updateDirection:Direction key:Key current:Direction =>
+fun updateDirection:Direction key:Key current:Direction =>
     arrowKey key
      |> filterDirection current
 
@@ -191,72 +191,72 @@ value initialGameTickState:GameTickState = {
     seenRestartCount: 0
 }
 
-value arrowKey:(Option Direction) key:Key =>
+fun arrowKey:(Option Direction) key:Key =>
     key
-     ||> Key "ArrowLeft"  => Some Left
-     ||> Key "ArrowRight" => Some Right
-     ||> _                => None
+     ||> Key "ArrowLeft"  -> Some Left
+     ||> Key "ArrowRight" -> Some Right
+     ||> _                -> None
 
-value filterDirection:Direction current:Direction opt:(Option Direction) =>
+fun filterDirection:Direction current:Direction opt:(Option Direction) =>
     opt
-     ||> Some dir => dir
-     ||> None     => current
+     ||> Some dir -> dir
+     ||> None     -> current
 
-value updateDirection:Direction key:Key current:Direction =>
+fun updateDirection:Direction key:Key current:Direction =>
     arrowKey key
      |> filterDirection current
 
-value restartKey:Bool key:Key =>
+fun restartKey:Bool key:Key =>
     key
-     ||> Key "Space" => True
-     ||> _           => False
+     ||> Key "Space" -> True
+     ||> _           -> False
 
-value updateDirectionOrRestart:Direction key:Key current:Direction =>
+fun updateDirectionOrRestart:Direction key:Key current:Direction =>
     restartKey key
      T|> Right
      F|> updateDirection key current
 
-value updateRestartCount:Int key:Key current:Int =>
+fun updateRestartCount:Int key:Key current:Int =>
     restartKey key
      T|> current + 1
      F|> current
 
-value hasPendingRestart:Bool restartCount:Int seenRestartCount:Int =>
+fun hasPendingRestart:Bool restartCount:Int seenRestartCount:Int =>
     restartCount != seenRestartCount
 
-value stepRunning:Game direction:Direction game:Game =>
+fun stepRunning:Game direction:Direction game:Game =>
     direction
-     ||> Left  => { status: GameOver, steps: game.steps + 1 }
-     ||> Right => { status: Running, steps: game.steps + 1 }
+     ||> Left  -> { status: GameOver, steps: game.steps + 1 }
+     ||> Right -> { status: Running, steps: game.steps + 1 }
 
-value restartGame:Game restart:Bool game:Game =>
+fun restartGame:Game restart:Bool game:Game =>
     restart
      T|> initialGame
      F|> game
 
-value stepGame:Game restart:Bool direction:Direction game:Game =>
+fun stepGame:Game restart:Bool direction:Direction game:Game =>
     game.status
-     ||> GameOver => restartGame restart game
-     ||> Running  => stepRunning direction game
+     ||> GameOver -> restartGame restart game
+     ||> Running  -> stepRunning direction game
 
-value stepTickState:GameTickState restartCount:Int direction:Direction state:GameTickState =>
+fun stepTickState:GameTickState restartCount:Int direction:Direction state:GameTickState =>
     {
         game: stepGame (hasPendingRestart restartCount state.seenRestartCount) direction state.game,
         seenRestartCount: restartCount
     }
 
-value stepOnTick:GameTickState tick:Int state:GameTickState =>
+fun stepOnTick:GameTickState tick:Int state:GameTickState =>
     stepTickState restartCount direction state
 
-value gameValue:Game state:GameTickState =>
+fun gameValue:Game state:GameTickState =>
     state.game
 
-value statusText:Text game:Game =>
+fun statusText:Text game:Game =>
     game.status
-     ||> Running  => "Running"
-     ||> GameOver => "GameOver"
+     ||> Running  -> "Running"
+     ||> GameOver -> "GameOver"
 
-value stepCount:Int game:Game =>
+fun stepCount:Int game:Game =>
     game.steps
 
 provider custom.tick

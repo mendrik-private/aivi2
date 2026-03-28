@@ -30,52 +30,52 @@ use aivi.text (
     isEmpty as textIsEmpty
 )
 
-value getOrElse:A fallback:A opt:(Option A) =>
+fun getOrElse:A fallback:A opt:(Option A) =>
     optionGetOrElse fallback opt
 
-value withDefault:A fallback:A opt:(Result E A) =>
+fun withDefault:A fallback:A opt:(Result E A) =>
     resultWithDefault fallback opt
 
-value length:Int items:(List A) =>
+fun length:Int items:(List A) =>
     listLength items
 
-value head:(Option A) items:(List A) =>
+fun head:(Option A) items:(List A) =>
     listHead items
 
-value tailOrEmpty:(List A) items:(List A) =>
+fun tailOrEmpty:(List A) items:(List A) =>
     listTailOrEmpty items
 
-value min:A compare:(A -> A -> Bool) left:A right:A =>
+fun min:A compare:(A -> A -> Bool) left:A right:A =>
     orderMin compare left right
 
-value max:A compare:(A -> A -> Bool) left:A right:A =>
+fun max:A compare:(A -> A -> Bool) left:A right:A =>
     orderMax compare left right
 
-value minOf:A compare:(A -> A -> Bool) first:A rest:(List A) =>
+fun minOf:A compare:(A -> A -> Bool) first:A rest:(List A) =>
     orderMinOf compare first rest
 
-value join:Text separator:Text parts:(List Text) =>
+fun join:Text separator:Text parts:(List Text) =>
     textJoin separator parts
 
-value concat:Text parts:(List Text) =>
+fun concat:Text parts:(List Text) =>
     textConcat parts
 
-value isEmpty:Bool items:(List A) =>
+fun isEmpty:Bool items:(List A) =>
     listIsEmpty items
 
-value nonEmpty:Bool items:(List A) =>
+fun nonEmpty:Bool items:(List A) =>
     listNonEmpty items
 
-value isSome:Bool opt:(Option A) =>
+fun isSome:Bool opt:(Option A) =>
     optionIsSome opt
 
-value isNone:Bool opt:(Option A) =>
+fun isNone:Bool opt:(Option A) =>
     optionIsNone opt
 
-value isOk:Bool opt:(Result E A) =>
+fun isOk:Bool opt:(Result E A) =>
     resultIsOk opt
 
-value isErr:Bool opt:(Result E A) =>
+fun isErr:Bool opt:(Result E A) =>
     resultIsErr opt
 
 export (Int, Float, Decimal, BigInt, Bool, Text, Unit, Ordering, List, Option, Result, Validation, Signal, Task, Eq, Default, Functor, Ord, Semigroup, Monoid, Bifunctor, Traversable, Filterable, Applicative, Monad, Foldable, getOrElse, withDefault, length, head, tailOrEmpty, min, max, minOf, join, concat, isEmpty, nonEmpty, isSome, isNone, isOk, isErr)

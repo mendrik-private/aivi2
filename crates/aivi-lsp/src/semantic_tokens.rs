@@ -32,6 +32,7 @@ fn token_type_index(kind: TokenKind) -> Option<u32> {
         // Keywords
         TokenKind::TypeKw
         | TokenKind::DataKw
+        | TokenKind::FunKw
         | TokenKind::ValueKw
         | TokenKind::SignalKw
         | TokenKind::SourceKw

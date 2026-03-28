@@ -705,6 +705,7 @@ pub struct ErrorItem {
 pub enum Item {
     Type(NamedItem),
     Data(NamedItem),
+    Fun(NamedItem),
     Value(NamedItem),
     Signal(NamedItem),
     Source(NamedItem),
@@ -725,6 +726,7 @@ pub enum Item {
 pub enum ItemKind {
     Type,
     Data,
+    Fun,
     Value,
     Signal,
     Source,
@@ -745,6 +747,7 @@ impl Item {
         match self {
             Item::Type(_) => ItemKind::Type,
             Item::Data(_) => ItemKind::Data,
+            Item::Fun(_) => ItemKind::Fun,
             Item::Value(_) => ItemKind::Value,
             Item::Signal(_) => ItemKind::Signal,
             Item::Source(_) => ItemKind::Source,
@@ -765,6 +768,7 @@ impl Item {
         match self {
             Item::Type(item)
             | Item::Data(item)
+            | Item::Fun(item)
             | Item::Value(item)
             | Item::Signal(item)
             | Item::Source(item)

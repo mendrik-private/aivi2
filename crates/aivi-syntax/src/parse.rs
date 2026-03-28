@@ -55,8 +55,6 @@ const MISSING_PROVIDER_CONTRACT_SCHEMA_NAME: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-provider-contract-schema-name");
 const MISSING_PROVIDER_CONTRACT_SCHEMA_TYPE: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-provider-contract-schema-type");
-const MISSING_FUNCTION_ARROW: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-function-arrow");
 const MISMATCHED_MARKUP_CLOSE: DiagnosticCode =
     DiagnosticCode::new("syntax", "mismatched-markup-close");
 const UNTERMINATED_MARKUP_NODE: DiagnosticCode =
@@ -235,6 +233,9 @@ impl<'a> Parser<'a> {
             }
             TokenKind::DataKw => {
                 Item::Data(self.parse_type_item(base, keyword_index, end, "data declaration"))
+            }
+            TokenKind::FunKw => {
+                Item::Fun(self.parse_fun_item(base, keyword_index, end))
             }
             TokenKind::ValueKw => {
                 Item::Value(self.parse_value_item(base, keyword_index, end))
@@ -509,7 +510,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parse a `value` declaration: no-params form uses `=`, params form uses `=>`.
+    /// Parse a `value` declaration: constant form only, uses `=`.
     fn parse_value_item(
         &mut self,
         base: ItemBase,
@@ -521,44 +522,10 @@ impl<'a> Parser<'a> {
             self.parse_named_item_name(keyword_index, &mut cursor, end, "value declaration");
         let (constraints, annotation) = self.parse_function_signature_annotation(&mut cursor, end);
 
-        let mut parameters = Vec::new();
-        while self.starts_function_param(cursor, end) {
-            let Some(parameter) = self.parse_function_param(&mut cursor, end) else {
-                break;
-            };
-            parameters.push(parameter);
-        }
-
-        let body = if !parameters.is_empty() {
-            // Function form: `value name params => body`
-            if self
-                .consume_kind(&mut cursor, end, TokenKind::Arrow)
-                .is_some()
-            {
-                self.parse_expression_body(
-                    keyword_index,
-                    &mut cursor,
-                    end,
-                    "value declaration",
-                    "value declaration is missing its body after `=>`",
-                    "expected a body expression after `=>`",
-                )
-            } else {
-                self.diagnostics.push(
-                    Diagnostic::error("value declaration with parameters is missing `=>`")
-                        .with_code(MISSING_FUNCTION_ARROW)
-                        .with_primary_label(
-                            self.source_span_of_token(keyword_index),
-                            "expected `=>` after the parameters",
-                        ),
-                );
-                None
-            }
-        } else if self
+        let body = if self
             .consume_kind(&mut cursor, end, TokenKind::Equals)
             .is_some()
         {
-            // Constant form: `value name = body`
             self.parse_expression_body(
                 keyword_index,
                 &mut cursor,
@@ -571,7 +538,60 @@ impl<'a> Parser<'a> {
             self.missing_body_diagnostic(
                 keyword_index,
                 "value declaration is missing its body",
-                "expected `=` followed by an expression, or parameters followed by `=>`",
+                "expected `=` followed by an expression",
+            );
+            None
+        };
+
+        NamedItem {
+            base,
+            keyword_span: self.source_span_of_token(keyword_index),
+            name,
+            type_parameters: Vec::new(),
+            constraints,
+            annotation,
+            parameters: Vec::new(),
+            body,
+        }
+    }
+
+    /// Parse a `fun` declaration: function form with parameters, uses `=>`.
+    fn parse_fun_item(
+        &mut self,
+        base: ItemBase,
+        keyword_index: usize,
+        end: usize,
+    ) -> NamedItem {
+        let mut cursor = keyword_index + 1;
+        let name =
+            self.parse_named_item_name(keyword_index, &mut cursor, end, "fun declaration");
+        let (constraints, annotation) = self.parse_function_signature_annotation(&mut cursor, end);
+
+        let mut parameters = Vec::new();
+        while self.starts_function_param(cursor, end) {
+            let Some(parameter) = self.parse_function_param(&mut cursor, end) else {
+                break;
+            };
+            parameters.push(parameter);
+        }
+
+        let body = if self
+            .consume_kind(&mut cursor, end, TokenKind::Arrow)
+            .is_some()
+        {
+            self.parse_expression_body(
+                keyword_index,
+                &mut cursor,
+                end,
+                "fun declaration",
+                "fun declaration is missing its body after `=>`",
+                "expected a body expression after `=>`",
+            )
+        } else {
+            self.missing_body_diagnostic(
+                keyword_index,
+                "fun declaration is missing its body",
+                "expected parameters followed by `=>`",
             );
             None
         };
@@ -2703,7 +2723,7 @@ impl<'a> Parser<'a> {
     ) -> Option<PipeCaseArm> {
         let start = *cursor;
         let pattern = self.parse_pattern(cursor, end, PatternStop::arrow_context())?;
-        let _ = self.consume_kind(cursor, end, TokenKind::Arrow)?;
+        let _ = self.consume_kind(cursor, end, TokenKind::ThinArrow)?;
         let body = self.parse_expr(cursor, end, outer_stop.with_pipe_stage())?;
         Some(PipeCaseArm {
             pattern,
@@ -3277,7 +3297,8 @@ impl<'a> Parser<'a> {
             TokenKind::RParen => stop.rparen,
             TokenKind::RBrace => stop.rbrace,
             TokenKind::RBracket => stop.rbracket,
-            TokenKind::Arrow => stop.arrow,
+            // Pattern arms use `->` (ThinArrow); `=>` (Arrow) is for lambdas/function bodies.
+            TokenKind::ThinArrow => stop.arrow,
             _ => false,
         }
     }
@@ -4078,7 +4099,7 @@ instance Eq Blob
 domain Duration over Int
     literal ms : Int -> Duration
     (*) : Duration -> Int -> Duration
-signal flow = value |> compute ?|> ready ||> Ready => keep *|> .email &|> build @|> loop <|@ step | debug <|* merge T|> start F|> stop
+signal flow = value |> compute ?|> ready ||> Ready -> keep *|> .email &|> build @|> loop <|@ step | debug <|* merge T|> start F|> stop
 value same = left == right
 value different = left != right
 value quotient = left / right
@@ -4161,7 +4182,7 @@ signal users : Signal User
 
 type Bool = True | False
 value answer = 42
-value add : Int => x : Int => y : Int =>
+fun add : Int => x : Int => y : Int =>
     x + y
 use aivi.network (
     http
@@ -4551,7 +4572,7 @@ export main
             r#"class Eq A
     (==) : A -> A -> Bool
 
-value same:Bool left:Blob right:Blob =>
+fun same:Bool left:Blob right:Blob =>
     True
 
 instance Eq Blob
@@ -4641,7 +4662,7 @@ instance Eq Blob
     map : (A -> B) -> F A -> F B
 class (Functor F, Foldable F) => Traversable F
     traverse : Applicative G => (A -> G B) -> F A -> G (F B)
-value same:Eq A => Bool v:A => v == v
+fun same:Eq A => Bool v:A => v == v
 instance Eq A => Eq (Option A)
     (==) left right = True
 "#,
@@ -4933,7 +4954,7 @@ instance Eq A => Eq (Option A)
     #[test]
     fn parser_reports_trailing_tokens_after_expression_body() {
         let (_, parsed) =
-            load("value prependCells:List Int head:Int tail:List Int =>\n    head :: tail\n");
+            load("fun prependCells:List Int head:Int tail:List Int =>\n    head :: tail\n");
 
         assert!(parsed.has_errors());
         assert!(
@@ -5063,7 +5084,7 @@ value view =
 value projection = .email
 value span = 1..10
 value values = [1..10]
-value ignore:Int _ =>
+fun ignore:Int _ =>
     0
 "#,
         );

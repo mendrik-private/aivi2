@@ -14695,9 +14695,9 @@ mod tests {
 value current:Screen = Loading
 value label =
     current
-     ||> Loading => "loading"
-     ||> Ready title => title
-     ||> Failed reason => reason
+     ||> Loading -> "loading"
+     ||> Ready title -> title
+     ||> Failed reason -> reason
 "#,
         );
         let parsed = parse_module(&sources[file_id]);
@@ -14743,14 +14743,14 @@ value label =
 value current:Screen = Loading
 value maybeLabel =
     current
-     ||> Loading => None
-     ||> Ready title => Some title
-     ||> Failed reason => Some reason
+     ||> Loading -> None
+     ||> Ready title -> Some title
+     ||> Failed reason -> Some reason
 value resultLabel =
     current
-     ||> Loading => Ok "loading"
-     ||> Ready title => Ok title
-     ||> Failed reason => Err reason
+     ||> Loading -> Ok "loading"
+     ||> Ready title -> Ok title
+     ||> Failed reason -> Err reason
 "#,
         );
         let parsed = parse_module(&sources[file_id]);
@@ -15113,9 +15113,9 @@ value resultLabel =
   | Pending
   | Failed Text
 
-value statusLabel:Text status:Status =>
+fun statusLabel:Text status:Status =>
     status
-     ||> Paid => "paid"
+     ||> Paid -> "paid"
 "#,
         );
         let diagnostic = report
@@ -15144,25 +15144,25 @@ value statusLabel:Text status:Status =>
     fn case_exhaustiveness_accepts_builtin_case_pairs() {
         let report = validate_resolved_text(
             "builtin_exhaustive_cases.aivi",
-            r#"value boolLabel:Text ready:Bool =>
+            r#"fun boolLabel:Text ready:Bool =>
     ready
-     ||> True => "ready"
-     ||> False => "waiting"
+     ||> True -> "ready"
+     ||> False -> "waiting"
 
-value maybeLabel:Text maybeUser:(Option Text) =>
+fun maybeLabel:Text maybeUser:(Option Text) =>
     maybeUser
-     ||> Some name => name
-     ||> None => "login"
+     ||> Some name -> name
+     ||> None -> "login"
 
-value resultLabel:Text status:(Result Text Text) =>
+fun resultLabel:Text status:(Result Text Text) =>
     status
-     ||> Ok body => body
-     ||> Err message => message
+     ||> Ok body -> body
+     ||> Err message -> message
 
-value validationLabel:Text status:(Validation Text Text) =>
+fun validationLabel:Text status:(Validation Text Text) =>
     status
-     ||> Valid body => body
-     ||> Invalid message => message
+     ||> Valid body -> body
+     ||> Invalid message -> message
 "#,
         );
 
@@ -15523,7 +15523,7 @@ value screenView =
         let mut sources = SourceDatabase::new();
         let file_id = sources.add_file(
             "source-option-concrete-application.aivi",
-            "value keep:Option Int opt:Option Int => opt\n\
+            "fun keep:Option Int opt:Option Int => opt\n\
              value chosen = keep None\n",
         );
         let parsed = parse_module(&sources[file_id]);

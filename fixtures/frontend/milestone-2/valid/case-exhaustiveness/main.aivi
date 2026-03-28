@@ -5,37 +5,37 @@ type Screen =
 
 value current: Screen = Loading
 
-value boolLabel:Text ready:Bool =>
+fun boolLabel:Text ready:Bool =>
     ready
-     ||> True  => "ready"
-     ||> False => "waiting"
+     ||> True  -> "ready"
+     ||> False -> "waiting"
 
-value maybeLabel:Text maybeUser:(Option Text) =>
+fun maybeLabel:Text maybeUser:(Option Text) =>
     maybeUser
-     ||> Some name => name
-     ||> None      => "login"
+     ||> Some name -> name
+     ||> None      -> "login"
 
-value resultLabel:Text status:(Result Text Text) =>
+fun resultLabel:Text status:(Result Text Text) =>
     status
-     ||> Ok body     => body
-     ||> Err message => message
+     ||> Ok body     -> body
+     ||> Err message -> message
 
-value validationLabel:Text status:(Validation Text Text) =>
+fun validationLabel:Text status:(Validation Text Text) =>
     status
-     ||> Valid body      => body
-     ||> Invalid message => message
+     ||> Valid body      -> body
+     ||> Invalid message -> message
 
-value screenLabel:Text screen:Screen =>
+fun screenLabel:Text screen:Screen =>
     screen
-     ||> Loading       => "loading"
-     ||> Ready title   => title
-     ||> Failed reason => reason
+     ||> Loading       -> "loading"
+     ||> Ready title   -> title
+     ||> Failed reason -> reason
 
-value nestedScreenLabel:Text screen:Screen =>
+fun nestedScreenLabel:Text screen:Screen =>
     screen
-     ||> Loading       => "loading"
-     ||> Ready title   => (title == "Inbox" T|> "priority" F|> title)
-     ||> Failed reason => reason
+     ||> Loading       -> "loading"
+     ||> Ready title   -> (title == "Inbox" T|> "priority" F|> title)
+     ||> Failed reason -> reason
 
 value screenView =
     <with value={current} as={screen}>

@@ -1,6 +1,6 @@
 type User = { email: Text }
 
-value joinEmails:Text items:List Text =>
+fun joinEmails:Text items:List Text =>
     "joined"
 
 value users:List User = [

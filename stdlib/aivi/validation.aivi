@@ -2,37 +2,37 @@ use aivi.nonEmpty (NonEmptyList)
 
 type Errors E = NonEmptyList E
 
-value isValid:Bool opt:(Validation E A) =>
+fun isValid:Bool opt:(Validation E A) =>
     opt
      T|> True
      F|> False
 
-value isInvalid:Bool opt:(Validation E A) =>
+fun isInvalid:Bool opt:(Validation E A) =>
     opt
      F|> True
      T|> False
 
-value getOrElse:A fallback:A opt:(Validation E A) =>
+fun getOrElse:A fallback:A opt:(Validation E A) =>
     opt
-     ||> Valid item => item
-     ||> Invalid _  => fallback
+     ||> Valid item -> item
+     ||> Invalid _  -> fallback
 
-value mapErr:(Validation E2 A) transform:(E1 -> E2) opt:(Validation E1 A) =>
+fun mapErr:(Validation E2 A) transform:(E1 -> E2) opt:(Validation E1 A) =>
     opt
-     ||> Valid item  => Valid item
-     ||> Invalid err => Invalid (transform err)
+     ||> Valid item  -> Valid item
+     ||> Invalid err -> Invalid (transform err)
 
-value toResult:(Result E A) opt:(Validation E A) =>
+fun toResult:(Result E A) opt:(Validation E A) =>
     opt
-     ||> Valid item  => Ok item
-     ||> Invalid err => Err err
+     ||> Valid item  -> Ok item
+     ||> Invalid err -> Err err
 
-value fromResult:(Validation E A) opt:(Result E A) =>
+fun fromResult:(Validation E A) opt:(Result E A) =>
     opt
-     ||> Ok item   => Valid item
-     ||> Err error => Invalid error
+     ||> Ok item   -> Valid item
+     ||> Err error -> Invalid error
 
-value toOption:(Option A) opt:(Validation E A) =>
+fun toOption:(Option A) opt:(Validation E A) =>
     opt
      T|> Some
      F|> None

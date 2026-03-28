@@ -26,97 +26,97 @@ type SortSummary = {
     note: Text
 }
 
-value earlier:Bool left:Int right:Int =>
+fun earlier:Bool left:Int right:Int =>
     left < right or left == right
 
-value mergeNodes:Heap leftValue:Int leftChildren:(List Heap) rightValue:Int rightChildren:(List Heap) =>
+fun mergeNodes:Heap leftValue:Int leftChildren:(List Heap) rightValue:Int rightChildren:(List Heap) =>
     earlier leftValue rightValue
      T|> Node leftValue (append [Node rightValue rightChildren] leftChildren)
      F|> Node rightValue (append [Node leftValue leftChildren] rightChildren)
 
-value mergeHeap:Heap left:Heap right:Heap =>
+fun mergeHeap:Heap left:Heap right:Heap =>
     (left, right)
-     ||> (Empty, other)                                               => other
-     ||> (other, Empty)                                               => other
-     ||> (Node leftValue leftChildren, Node rightValue rightChildren) => mergeNodes leftValue leftChildren rightValue rightChildren
+     ||> (Empty, other)                                               -> other
+     ||> (other, Empty)                                               -> other
+     ||> (Node leftValue leftChildren, Node rightValue rightChildren) -> mergeNodes leftValue leftChildren rightValue rightChildren
 
-value mergePairs:Heap children:(List Heap) =>
+fun mergePairs:Heap children:(List Heap) =>
     children
-     ||> []                            => Empty
-     ||> [first]                       => first
-     ||> [first, second, ...remaining] => mergeHeap (mergeHeap first second) (mergePairs remaining)
+     ||> []                            -> Empty
+     ||> [first]                       -> first
+     ||> [first, second, ...remaining] -> mergeHeap (mergeHeap first second) (mergePairs remaining)
 
-value heapInsert:Heap heap:Heap x:Int =>
+fun heapInsert:Heap heap:Heap x:Int =>
     mergeHeap heap (Node x [])
 
-value heapPop:HeapPop heap:Heap =>
+fun heapPop:HeapPop heap:Heap =>
     heap
-     ||> Empty               => { value: None, rest: Empty }
-     ||> Node x children => { value: Some x, rest: mergePairs children }
+     ||> Empty               -> { value: None, rest: Empty }
+     ||> Node x children -> { value: Some x, rest: mergePairs children }
 
-value heapDrain:(List Int) heap:Heap =>
+fun heapDrain:(List Int) heap:Heap =>
     heapPop heap
-     ||> { value: None }             => []
-     ||> { value: Some x, rest } => append [x] (heapDrain rest)
+     ||> { value: None }             -> []
+     ||> { value: Some x, rest } -> append [x] (heapDrain rest)
 
-value heapSort:(List Int) items:(List Int) =>
+fun heapSort:(List Int) items:(List Int) =>
     items
      |> reduce heapInsert Empty
      |> heapDrain
 
-value insertAfterFirst:(List Int) x:Int first:Int rest:(List Int) =>
+fun insertAfterFirst:(List Int) x:Int first:Int rest:(List Int) =>
     earlier x first
      T|> append [x, first] rest
      F|> append [first] (insertOrdered x rest)
 
-value insertOrdered:(List Int) x:Int items:(List Int) =>
+fun insertOrdered:(List Int) x:Int items:(List Int) =>
     items
-     ||> []               => [x]
-     ||> [first, ...rest] => insertAfterFirst x first rest
+     ||> []               -> [x]
+     ||> [first, ...rest] -> insertAfterFirst x first rest
 
-value insertionSort:(List Int) items:(List Int) =>
+fun insertionSort:(List Int) items:(List Int) =>
     items
      |> reduce insertOrdered []
 
-value lowerThan:Bool pivot:Int x:Int =>
+fun lowerThan:Bool pivot:Int x:Int =>
     x < pivot
 
-value equalTo:Bool pivot:Int x:Int =>
+fun equalTo:Bool pivot:Int x:Int =>
     x == pivot
 
-value classifyRest:Buckets lower:(List Int) pivot:Int rest:(List Int) =>
+fun classifyRest:Buckets lower:(List Int) pivot:Int rest:(List Int) =>
     rest
      |> partition (equalTo pivot)
-     ||> { matched: equal, unmatched: higher } => { lower, equal, higher }
+     ||> { matched: equal, unmatched: higher } -> { lower, equal, higher }
 
-value classify:Buckets pivot:Int items:(List Int) =>
+fun classify:Buckets pivot:Int items:(List Int) =>
     items
      |> partition (lowerThan pivot)
-     ||> { matched: lower, unmatched: rest } => classifyRest lower pivot rest
+     ||> { matched: lower, unmatched: rest } -> classifyRest lower pivot rest
 
-value appendThree:(List Int) left:(List Int) middle:(List Int) right:(List Int) =>
+fun appendThree:(List Int) left:(List Int) middle:(List Int) right:(List Int) =>
     append left (append middle right)
 
-value introsortAfterBase:(List Int) depth:Int items:(List Int) =>
+fun introsortAfterBase:(List Int) depth:Int items:(List Int) =>
     depth == 0
      T|> heapSort items
      F|> introsortAfterDepth depth items
 
-value introsortAfterDepth:(List Int) depth:Int items:(List Int) =>
+fun introsortAfterDepth:(List Int) depth:Int items:(List Int) =>
     length items < 4
      T|> insertionSort items
      F|> introsortPartition depth items
 
-value introsortFromPivot:(List Int) depth:Int pivot:Int items:(List Int) =>
+fun introsortFromPivot:(List Int) depth:Int pivot:Int items:(List Int) =>
     classify pivot items
-     ||> { lower, equal, higher } => appendThree (introsort (depth - 1) lower) equal (introsort (depth - 1) higher)
+     ||> { lower, equal, higher } -> appendThree (introsort (depth - 1) lower) equal (introsort (depth - 1) higher)
 
-value introsortPartition:(List Int) depth:Int items:(List Int) =>
+fun introsortPartition:(List Int) depth:Int items:(List Int) =>
     items
-     ||> []            => []
-     ||> [pivot, ..._] => introsortFromPivot depth pivot items
+     ||> []            -> []
+     ||> [pivot, ..._] -> introsortFromPivot depth pivot items
 
-value introsort:(List Int) depth:Int items:(List Int) =>
+fun introsort:(List Int) depth:Int items:(List Int) =>
     length items < 2
      T|> items
      F|> introsortAfterBase depth items

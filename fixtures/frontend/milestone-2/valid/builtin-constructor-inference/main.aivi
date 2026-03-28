@@ -25,12 +25,12 @@ value current:Screen = Loading
 
 value maybeLabel:Option Text =
     current
-     ||> Loading => None
-     ||> Ready title => Some title
-     ||> Failed reason => Some reason
+     ||> Loading -> None
+     ||> Ready title -> Some title
+     ||> Failed reason -> Some reason
 
 value resultLabel:Result Text Text =
     current
-     ||> Loading => Ok "loading"
-     ||> Ready title => Ok title
-     ||> Failed reason => Err reason
+     ||> Loading -> Ok "loading"
+     ||> Ready title -> Ok title
+     ||> Failed reason -> Err reason

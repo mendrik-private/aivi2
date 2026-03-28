@@ -2,7 +2,7 @@ type User = {
     email: Text
 }
 
-value displayEmail:Text user:User =>
+fun displayEmail:Text user:User =>
     .email
 
 value current = .

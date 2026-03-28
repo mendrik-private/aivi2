@@ -11,10 +11,10 @@ type Result A = Err Text | Ok A
 
 value answer = 42
 
-value add:Int x:Int y:Int =>
+fun add:Int x:Int y:Int =>
     x + y
 
-value defaultResult:Result Int x:Int =>
+fun defaultResult:Result Int x:Int =>
     Ok x
 
 signal counter = 0

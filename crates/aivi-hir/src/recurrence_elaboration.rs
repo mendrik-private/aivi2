@@ -1240,7 +1240,7 @@ mod tests {
         let lowered = lower_text(
             "scan_active_when_source.aivi",
             r#"
-value step:Int n:Int current:Int =>
+fun step:Int n:Int current:Int =>
     n
 
 signal enabled = True
@@ -1300,7 +1300,7 @@ type Cursor = {
     hasNext: Bool
 }
 
-value keep:Cursor cursor:Cursor =>
+fun keep:Cursor cursor:Cursor =>
     cursor
 
 value seed:Cursor = { hasNext: True }
@@ -1373,10 +1373,10 @@ signal cursor : Signal Cursor =
 domain Duration over Int
     literal s : Int -> Duration
 
-value keep n:Int =>
+fun keep n:Int =>
     n
 
-value asText n:Int =>
+fun asText n:Int =>
     "oops"
 
 @recur.timer 5s
@@ -1420,12 +1420,12 @@ signal broken : Signal Int =
 domain Duration over Int
     literal s : Int -> Duration
 
-value advance:Int pressed:Bool n:Int =>
+fun advance:Int pressed:Bool n:Int =>
     pressed
      T|> n + 1
      F|> n
 
-value belowLimit:Bool n:Int =>
+fun belowLimit:Bool n:Int =>
     n < 10
 
 signal ready : Signal Bool = True

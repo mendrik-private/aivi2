@@ -2608,7 +2608,7 @@ value answer = 42
 domain Retry over Int
     literal x : Int -> Retry
 
-value step:Int n:Int =>
+fun step:Int n:Int =>
     n
 
 @recur.backoff 3x
@@ -2648,10 +2648,10 @@ value retried : Task Int Int =
         let lowered = lower_text(
             "runtime-startup-inline-case-helper.aivi",
             r#"
-value choose:Text maybeName:(Option Text) =>
+fun choose:Text maybeName:(Option Text) =>
     maybeName
-     ||> Some name => name
-     ||> None => "guest"
+     ||> Some name -> name
+     ||> None -> "guest"
 
 signal maybeName = Some "Ada"
 signal label = choose maybeName
@@ -2685,10 +2685,10 @@ signal label = choose maybeName
         let lowered = lower_text(
             "runtime-startup-signal-inline-case.aivi",
             r#"
-value greetSelected:Signal Text prefix:Text fallback:Text selected:Signal (Option Text) =>
+fun greetSelected:Signal Text prefix:Text fallback:Text selected:Signal (Option Text) =>
     selected
-     ||> Some name => "{prefix}:{name}"
-     ||> None => "{prefix}:{fallback}"
+     ||> Some name -> "{prefix}:{name}"
+     ||> None -> "{prefix}:{fallback}"
 
 signal selectedUser : Signal (Option Text) = Some "Ada"
 
@@ -2724,7 +2724,7 @@ signal greeting : Signal Text =
         let lowered = lower_text(
             "runtime-startup-signal-inline-truthy-falsy.aivi",
             r#"
-value renderStatus:Signal Text prefix:Text readyText:Text waitText:Text statusReady:Signal Bool =>
+fun renderStatus:Signal Text prefix:Text readyText:Text waitText:Text statusReady:Signal Bool =>
     statusReady
      T|> "{prefix}:{readyText}"
      F|> "{prefix}:{waitText}"
@@ -2894,9 +2894,9 @@ signal current : Signal Status =
 
 signal label : Signal Text =
     current
-     ||> Idle => "idle"
-     ||> Ready name => name
-     ||> Failed code message => "{code}:{message}"
+     ||> Idle -> "idle"
+     ||> Ready name -> name
+     ||> Failed code message -> "{code}:{message}"
 "#,
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
@@ -3033,7 +3033,7 @@ type User = {
     email: Text
 }
 
-value joinEmails:Text items:List Text =>
+fun joinEmails:Text items:List Text =>
     "joined"
 
 signal liveUsers : Signal (List User) = [
@@ -3147,7 +3147,7 @@ signal status : Signal Text =
         let lowered = lower_text(
             "runtime-startup-source-recurrence-steps.aivi",
             r#"
-value bump:Int n:Int =>
+fun bump:Int n:Int =>
     n + 1
 
 provider custom.feed
@@ -3210,7 +3210,7 @@ signal counter : Signal Int =
 domain Retry over Int
     literal x : Int -> Retry
 
-value keep:Int n:Int =>
+fun keep:Int n:Int =>
     n
 
 @recur.backoff 3x
@@ -3232,7 +3232,7 @@ value retried : Task Int Int =
         let lowered = lower_text(
             "runtime-startup-scan-signal.aivi",
             r#"
-value step:Int next:Int current:Int =>
+fun step:Int next:Int current:Int =>
     current + next
 
 provider custom.feed
@@ -3302,10 +3302,10 @@ signal counter : Signal Int =
         let lowered = lower_text(
             "runtime-startup-recurrence-non-wakeup-deps.aivi",
             r#"
-value setDirection:Int next:Int current:Int =>
+fun setDirection:Int next:Int current:Int =>
     next
 
-value stepGame:Int tick:Int current:Int =>
+fun stepGame:Int tick:Int current:Int =>
     current + direction
 
 provider custom.turn

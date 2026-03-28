@@ -2588,7 +2588,7 @@ mod tests {
     fn elaborates_truthy_falsy_branches_from_expected_result_types() {
         let lowered = lower_text(
             "expected-truthy-falsy-branches.aivi",
-            "value choose:(List Int) flag:Bool =>\n\
+            "fun choose:(List Int) flag:Bool =>\n\
                 flag\n\
                  T|> []\n\
                  F|> [1]\n",
@@ -2704,7 +2704,7 @@ mod tests {
     fn blocks_map_pipe_stages_in_general_expr_bodies() {
         let lowered = lower_text(
             "general-expr-blocked-map-stage.aivi",
-            "value identity:Int x:Int =>\n\
+            "fun identity:Int x:Int =>\n\
              x\n\
              \n\
              value duplicate:List Int values:List Int =>\n\
@@ -2798,7 +2798,7 @@ instance Semigroup Blob
         let lowered = lower_text(
             "general-expr-generic-append.aivi",
             r#"
-value appendOne:(List A) items:(List A) item:A =>
+fun appendOne:(List A) items:(List A) item:A =>
     append items [item]
 "#,
         );
@@ -2867,10 +2867,10 @@ value appendOne:(List A) items:(List A) item:A =>
             r#"
 signal direction : Signal Int = 1
 
-value step:Int n:Int =>
+fun step:Int n:Int =>
     n
 
-value current:Int tick:Unit =>
+fun current:Int tick:Unit =>
     step direction
 "#,
         );
@@ -2910,10 +2910,10 @@ value current:Int tick:Unit =>
         let lowered = lower_text(
             "general-expr-generic-reduce.aivi",
             r#"
-value lengthStep:Int total:Int item:A =>
+fun lengthStep:Int total:Int item:A =>
     total + 1
 
-value length:Int items:(List A) =>
+fun length:Int items:(List A) =>
     items
      |> reduce lengthStep 0
 "#,
@@ -3010,12 +3010,12 @@ type TakeAcc A = {
     items: List A
 }
 
-value takeStep:(TakeAcc A) acc:(TakeAcc A) item:A =>
+fun takeStep:(TakeAcc A) acc:(TakeAcc A) item:A =>
     acc.n > 0
      T|> { n: acc.n - 1, items: append acc.items [item] }
      F|> acc
 
-value take:(List A) n:Int xs:(List A) =>
+fun take:(List A) n:Int xs:(List A) =>
     xs
      |> reduce takeStep { n, items: [] }
      |> .items
@@ -3107,12 +3107,12 @@ value take:(List A) n:Int xs:(List A) =>
         let lowered = lower_text(
             "general-expr-generic-reduce-option-init.aivi",
             r#"
-value keepFirst:(Option A) found:(Option A) item:A =>
+fun keepFirst:(Option A) found:(Option A) item:A =>
     found
      T|> found
      F|> Some item
 
-value head:(Option A) items:(List A) =>
+fun head:(Option A) items:(List A) =>
     items
      |> reduce keepFirst None
 "#,
@@ -3202,12 +3202,12 @@ value head:(Option A) items:(List A) =>
         let lowered = lower_text(
             "general-expr-generic-reduce-partial-step.aivi",
             r#"
-value anyStep:Bool predicate:(A -> Bool) found:Bool item:A =>
+fun anyStep:Bool predicate:(A -> Bool) found:Bool item:A =>
     found
      T|> True
      F|> predicate item
 
-value any:Bool predicate:(A -> Bool) items:(List A) =>
+fun any:Bool predicate:(A -> Bool) items:(List A) =>
     items
      |> reduce (anyStep predicate) False
 "#,

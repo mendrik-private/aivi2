@@ -31,48 +31,48 @@ type KmpSummary = {
     missingMatches: List Int
 }
 
-value samePair:Bool pair:(Text, Text) =>
+fun samePair:Bool pair:(Text, Text) =>
     pair
-     ||> (left, right) => left == right
+     ||> (left, right) -> left == right
 
-value pairedTokensMatch:Bool left:(List Text) right:(List Text) =>
+fun pairedTokensMatch:Bool left:(List Text) right:(List Text) =>
     zip left right
      |> all samePair
 
-value sameCount:Bool left:Int right:Int =>
+fun sameCount:Bool left:Int right:Int =>
     left == right
 
-value sameTokens:Bool left:(List Text) right:(List Text) =>
+fun sameTokens:Bool left:(List Text) right:(List Text) =>
     sameCount (length left) (length right)
      T|> pairedTokensMatch left right
      F|> False
 
-value matchedWhenEqual:(Option Int) matched:Int prefix:(List Text) slice:(List Text) =>
+fun matchedWhenEqual:(Option Int) matched:Int prefix:(List Text) slice:(List Text) =>
     sameTokens prefix slice
      T|> Some matched
      F|> None
 
-value matchingLength:(Option Int) candidate:PrefixCandidate =>
+fun matchingLength:(Option Int) candidate:PrefixCandidate =>
     candidate
-     ||> { matched, prefix, slice } => matchedWhenEqual matched prefix slice
+     ||> { matched, prefix, slice } -> matchedWhenEqual matched prefix slice
 
-value matchedLength:Int candidates:(List PrefixCandidate) =>
+fun matchedLength:Int candidates:(List PrefixCandidate) =>
     findMap matchingLength candidates
-     ||> Some matched => matched
-     ||> None         => 0
+     ||> Some matched -> matched
+     ||> None         -> 0
 
-value appendLps:(List Int) values:(List Int) entry:PrefixEntry =>
+fun appendLps:(List Int) values:(List Int) entry:PrefixEntry =>
     entry
-     ||> { candidates } => append values [matchedLength candidates]
+     ||> { candidates } -> append values [matchedLength candidates]
 
-value collectWindowMatch:(List Int) patternTokens:(List Text) matches:(List Int) start:Int tokens:(List Text) =>
+fun collectWindowMatch:(List Int) patternTokens:(List Text) matches:(List Int) start:Int tokens:(List Text) =>
     sameTokens patternTokens tokens
      T|> append matches [start]
      F|> matches
 
-value collectMatch:(List Int) patternTokens:(List Text) matches:(List Int) window:SearchWindow =>
+fun collectMatch:(List Int) patternTokens:(List Text) matches:(List Int) window:SearchWindow =>
     window
-     ||> { start, tokens } => collectWindowMatch patternTokens matches start tokens
+     ||> { start, tokens } -> collectWindowMatch patternTokens matches start tokens
 
 value pattern: Text = "ababc"
 value haystack: Text = "ababcababc"

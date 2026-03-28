@@ -3,9 +3,9 @@ type Banner = Banner Text
 
 @memoized
 @display
-value bannerText:Text banner:Banner =>
+fun bannerText:Text banner:Banner =>
     banner
-     ||> Banner text => text
+     ||> Banner text -> text
 
 @derived
 signal bannerCount = 0

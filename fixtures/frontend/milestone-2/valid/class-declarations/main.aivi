@@ -4,5 +4,5 @@ class Eq A
 class Display A
     display : A -> Text
 
-value equivalent:Bool left:Int right:Int =>
+fun equivalent:Bool left:Int right:Int =>
     left == right and left != 0

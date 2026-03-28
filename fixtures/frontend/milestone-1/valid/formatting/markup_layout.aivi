@@ -1,4 +1,4 @@
-value formatCount:Text count:Int =>
+fun formatCount:Text count:Int =>
     "{count} unread"
 
 value count = 3

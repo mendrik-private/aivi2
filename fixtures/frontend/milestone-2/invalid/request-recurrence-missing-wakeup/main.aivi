@@ -1,4 +1,4 @@
-value step x =>
+fun step x =>
     x
 
 @source http.get "/users"

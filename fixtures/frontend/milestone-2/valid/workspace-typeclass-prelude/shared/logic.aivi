@@ -1,8 +1,8 @@
-value increment:Int x:Int => x + 1
+fun increment:Int x:Int => x + 1
 
-value liftOne:(Option Int) input:Option Int => map increment input
+fun liftOne:(Option Int) input:Option Int => map increment input
 
-value earlier:Bool left:Text right:Text => left < right
+fun earlier:Bool left:Text right:Text => left < right
 
 export liftOne
 export earlier

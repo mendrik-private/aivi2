@@ -12,10 +12,10 @@ type CatalogOutput = {
     label: Text
 }
 
-value sumStep:Int total:Int value:Int =>
+fun sumStep:Int total:Int value:Int =>
     total + value
 
-value chooseLabel:Text user:(Option CatalogUser) =>
+fun chooseLabel:Text user:(Option CatalogUser) =>
     user
      T|> .name
      F|> "guest"

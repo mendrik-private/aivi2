@@ -52,6 +52,7 @@ pub enum TokenKind {
     ThinArrow,
     TypeKw,
     DataKw,
+    FunKw,
     ValueKw,
     SignalKw,
     SourceKw,
@@ -100,6 +101,7 @@ impl TokenKind {
             self,
             TokenKind::TypeKw
                 | TokenKind::DataKw
+                | TokenKind::FunKw
                 | TokenKind::ValueKw
                 | TokenKind::SignalKw
                 | TokenKind::SourceKw
@@ -141,6 +143,7 @@ impl TokenKind {
             self,
             TokenKind::TypeKw
                 | TokenKind::DataKw
+                | TokenKind::FunKw
                 | TokenKind::ValueKw
                 | TokenKind::SignalKw
                 | TokenKind::SourceKw
@@ -580,6 +583,7 @@ fn keyword_kind(text: &str) -> Option<TokenKind> {
     match text {
         "type" => Some(TokenKind::TypeKw),
         "data" => Some(TokenKind::DataKw),
+        "fun" => Some(TokenKind::FunKw),
         "value" => Some(TokenKind::ValueKw),
         "signal" => Some(TokenKind::SignalKw),
         "source" => Some(TokenKind::SourceKw),

@@ -71,7 +71,8 @@ impl Formatter {
         match item {
             Item::Type(item) => lines.extend(self.format_type_item(item)),
             Item::Data(item) => lines.extend(self.format_data_item(item)),
-            Item::Value(item) => lines.extend(self.format_value_item_decl(item)),
+            Item::Fun(item) => lines.extend(self.format_fun_item(item)),
+            Item::Value(item) => lines.extend(self.format_value_item("value", item, true)),
             Item::Signal(item) => lines.extend(self.format_value_item("signal", item, true)),
             Item::Source(item) => lines.extend(self.format_value_item("source", item, true)),
             Item::ResultDecl(item) => lines.extend(self.format_value_item("result", item, true)),
@@ -188,13 +189,9 @@ impl Formatter {
         }
     }
 
-    /// Format a `value` declaration — no-params form uses `=`, params form uses `=>`.
-    fn format_value_item_decl(&self, item: &NamedItem) -> Vec<String> {
-        if item.parameters.is_empty() {
-            return self.format_value_item("value", item, true);
-        }
-        // Function form: `value name params => body`
-        let mut header = format!("value {}", self.item_name(&item.name));
+    /// Format a `fun` declaration: always has parameters, uses `=>` body form.
+    fn format_fun_item(&self, item: &NamedItem) -> Vec<String> {
+        let mut header = format!("fun {}", self.item_name(&item.name));
         if let Some(annotation) = &item.annotation {
             header.push_str(": ");
             header.push_str(&self.format_type_inline(annotation, 0));
@@ -1195,7 +1192,7 @@ impl Formatter {
     fn format_pipe_stage_inline(&self, stage: &PipeStage) -> String {
         match &stage.kind {
             PipeStageKind::Case(arm) => format!(
-                "||> {} => {}",
+                "||> {} -> {}",
                 self.format_pattern_inline(&arm.pattern, 0),
                 self.format_expr_inline(&arm.body, 0)
             ),
@@ -1281,7 +1278,7 @@ impl Formatter {
                 PipeStageKind::Case(arm) => {
                     let padding = spaces(width.saturating_sub(display_width(&pattern)));
                     format!(
-                        " ||> {pattern}{padding} => {}",
+                        " ||> {pattern}{padding} -> {}",
                         self.format_expr_inline(&arm.body, 0)
                     )
                 }
@@ -1796,10 +1793,10 @@ mod tests {
                 "  &|> documentBody\n",
                 "  |> Pair\n",
                 "\n",
-                "value label:Text state:SaveState =>\n",
+                "fun label:Text state:SaveState =>\n",
                 "    state\n",
-                "     ||> Saved         => \"saved\"\n",
-                "     ||> Dirty message => \"dirty {message}\"\n",
+                "     ||> Saved         -> \"saved\"\n",
+                "     ||> Dirty message -> \"dirty {message}\"\n",
             )
         );
     }
@@ -1810,7 +1807,7 @@ mod tests {
         assert_eq!(
             formatted,
             concat!(
-                "value formatCount:Text count:Int =>\n",
+                "fun formatCount:Text count:Int =>\n",
                 "    \"{count} unread\"\n",
                 "\n",
                 "value count = 3\n",
@@ -1837,7 +1834,7 @@ mod tests {
                 "class Eq A\n",
                 "    (==): A -> A -> Bool\n",
                 "\n",
-                "value equivalent:Bool left:Int right:Int =>\n",
+                "fun equivalent:Bool left:Int right:Int =>\n",
                 "    left + 1 == right - 1 and left != right\n",
             )
         );
@@ -1998,17 +1995,17 @@ value view =
     #[test]
     fn formatter_aligns_match_arms_and_top_level_spacing() {
         let formatted = format_text(
-            "type Status=Idle|Failed Text\nvalue label:Text status:Status =>\nstatus||>Idle=>\"idle\"||>Failed reason=>\"failed {reason}\"\n",
+            "type Status=Idle|Failed Text\nfun label:Text status:Status =>\nstatus||>Idle->\"idle\"||>Failed reason->\"failed {reason}\"\n",
         );
         assert_eq!(
             formatted,
             concat!(
                 "type Status = Idle | Failed Text\n",
                 "\n",
-                "value label:Text status:Status =>\n",
+                "fun label:Text status:Status =>\n",
                 "    status\n",
-                "     ||> Idle          => \"idle\"\n",
-                "     ||> Failed reason => \"failed {reason}\"\n",
+                "     ||> Idle          -> \"idle\"\n",
+                "     ||> Failed reason -> \"failed {reason}\"\n",
             )
         );
     }
@@ -2016,11 +2013,11 @@ value view =
     #[test]
     fn formatter_preserves_subject_placeholders_ranges_and_discard_params() {
         let formatted =
-            format_text("value ignore:Int _=>.\nvalue projection=.email\nvalue values=[1..10]\n");
+            format_text("fun ignore:Int _=>.\nvalue projection=.email\nvalue values=[1..10]\n");
         assert_eq!(
             formatted,
             concat!(
-                "value ignore:Int _ =>\n",
+                "fun ignore:Int _ =>\n",
                 "    .\n",
                 "\n",
                 "value projection = .email\n",

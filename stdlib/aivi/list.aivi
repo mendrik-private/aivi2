@@ -13,152 +13,152 @@ type ZipState A B = {
     pairs: List (A, B)
 }
 
-value keepSome:(Option A) item:A =>
+fun keepSome:(Option A) item:A =>
     Some item
 
-value keepFirst:(Option A) found:(Option A) item:A =>
+fun keepFirst:(Option A) found:(Option A) item:A =>
     found
      T|> keepSome
      F|> Some item
 
-value tailState:(TailState A) items:(List A) item:A seenFirst:Bool =>
+fun tailState:(TailState A) items:(List A) item:A seenFirst:Bool =>
     seenFirst
      T|> { seenFirst: True, items: append items [item] }
      F|> { seenFirst: True, items: [] }
 
-value tailStep:(TailState A) state:(TailState A) item:A =>
+fun tailStep:(TailState A) state:(TailState A) item:A =>
     state
-     ||> { seenFirst, items } => tailState items item seenFirst
+     ||> { seenFirst, items } -> tailState items item seenFirst
 
-value tailItems:(Option (List A)) items:(List A) seenFirst:Bool =>
+fun tailItems:(Option (List A)) items:(List A) seenFirst:Bool =>
     seenFirst
      T|> Some items
      F|> None
 
-value tailFromState:(Option (List A)) state:(TailState A) =>
+fun tailFromState:(Option (List A)) state:(TailState A) =>
     state
-     ||> { seenFirst, items } => tailItems items seenFirst
+     ||> { seenFirst, items } -> tailItems items seenFirst
 
-value takeLast:(Option A) current:(Option A) item:A =>
+fun takeLast:(Option A) current:(Option A) item:A =>
     Some item
 
-value lengthStep:Int total:Int item:A =>
+fun lengthStep:Int total:Int item:A =>
     total + 1
 
-value anyStep:Bool predicate:(A -> Bool) found:Bool item:A =>
+fun anyStep:Bool predicate:(A -> Bool) found:Bool item:A =>
     found
      T|> True
      F|> predicate item
 
-value allStep:Bool predicate:(A -> Bool) allMatched:Bool item:A =>
+fun allStep:Bool predicate:(A -> Bool) allMatched:Bool item:A =>
     allMatched
      T|> predicate item
      F|> False
 
-value countStep:Int predicate:(A -> Bool) total:Int item:A =>
+fun countStep:Int predicate:(A -> Bool) total:Int item:A =>
     predicate item
      T|> total + 1
      F|> total
 
-value selectMatch:(Option A) predicate:(A -> Bool) item:A =>
+fun selectMatch:(Option A) predicate:(A -> Bool) item:A =>
     predicate item
      T|> Some item
      F|> None
 
-value findStep:(Option A) predicate:(A -> Bool) found:(Option A) item:A =>
+fun findStep:(Option A) predicate:(A -> Bool) found:(Option A) item:A =>
     found
      T|> keepSome
      F|> selectMatch predicate item
 
-value findMapStep:(Option B) transform:(A -> Option B) found:(Option B) item:A =>
+fun findMapStep:(Option B) transform:(A -> Option B) found:(Option B) item:A =>
     found
      T|> keepSome
      F|> transform item
 
-value partitionItems:(Partition A) matched:(List A) unmatched:(List A) item:A isMatch:Bool =>
+fun partitionItems:(Partition A) matched:(List A) unmatched:(List A) item:A isMatch:Bool =>
     isMatch
      T|> { matched: append matched [item], unmatched }
      F|> { matched, unmatched: append unmatched [item] }
 
-value partitionStep:(Partition A) predicate:(A -> Bool) state:(Partition A) item:A =>
+fun partitionStep:(Partition A) predicate:(A -> Bool) state:(Partition A) item:A =>
     state
-     ||> { matched, unmatched } => partitionItems matched unmatched item (predicate item)
+     ||> { matched, unmatched } -> partitionItems matched unmatched item (predicate item)
 
-value tailOrEmpty:(List A) items:(List A) =>
+fun tailOrEmpty:(List A) items:(List A) =>
     tail items
-     ||> Some remaining => remaining
-     ||> None           => []
+     ||> Some remaining -> remaining
+     ||> None           -> []
 
-value appendZipPair:(ZipState A B) state:(ZipState A B) left:A right:B =>
+fun appendZipPair:(ZipState A B) state:(ZipState A B) left:A right:B =>
     state
-     ||> { remaining, pairs } => { remaining: tailOrEmpty remaining, pairs: append pairs [(left, right)] }
+     ||> { remaining, pairs } -> { remaining: tailOrEmpty remaining, pairs: append pairs [(left, right)] }
 
-value zipHead:(ZipState A B) state:(ZipState A B) left:A headValue:(Option B) =>
+fun zipHead:(ZipState A B) state:(ZipState A B) left:A headValue:(Option B) =>
     headValue
      T|> appendZipPair state left
      F|> state
 
-value zipStep:(ZipState A B) state:(ZipState A B) left:A =>
+fun zipStep:(ZipState A B) state:(ZipState A B) left:A =>
     state
-     ||> { remaining, pairs } => zipHead { remaining, pairs } left (head remaining)
+     ||> { remaining, pairs } -> zipHead { remaining, pairs } left (head remaining)
 
-value zippedPairs:(List (A, B)) state:(ZipState A B) =>
+fun zippedPairs:(List (A, B)) state:(ZipState A B) =>
     state
-     ||> { remaining, pairs } => pairs
+     ||> { remaining, pairs } -> pairs
 
-value isEmpty:Bool items:(List A) =>
+fun isEmpty:Bool items:(List A) =>
     head items
      F|> True
      T|> False
 
-value nonEmpty:Bool items:(List A) =>
+fun nonEmpty:Bool items:(List A) =>
     head items
      T|> True
      F|> False
 
-value length:Int items:(List A) =>
+fun length:Int items:(List A) =>
     items
      |> reduce lengthStep 0
 
-value head:(Option A) items:(List A) =>
+fun head:(Option A) items:(List A) =>
     items
      |> reduce keepFirst None
 
-value tail:(Option (List A)) items:(List A) =>
+fun tail:(Option (List A)) items:(List A) =>
     items
      |> reduce tailStep { seenFirst: False, items: [] }
      |> tailFromState
 
-value last:(Option A) items:(List A) =>
+fun last:(Option A) items:(List A) =>
     items
      |> reduce takeLast None
 
-value zip:(List (A, B)) left:(List A) right:(List B) =>
+fun zip:(List (A, B)) left:(List A) right:(List B) =>
     left
      |> reduce zipStep { remaining: right, pairs: [] }
      |> zippedPairs
 
-value any:Bool predicate:(A -> Bool) items:(List A) =>
+fun any:Bool predicate:(A -> Bool) items:(List A) =>
     items
      |> reduce (anyStep predicate) False
 
-value all:Bool predicate:(A -> Bool) items:(List A) =>
+fun all:Bool predicate:(A -> Bool) items:(List A) =>
     items
      |> reduce (allStep predicate) True
 
-value count:Int predicate:(A -> Bool) items:(List A) =>
+fun count:Int predicate:(A -> Bool) items:(List A) =>
     items
      |> reduce (countStep predicate) 0
 
-value find:(Option A) predicate:(A -> Bool) items:(List A) =>
+fun find:(Option A) predicate:(A -> Bool) items:(List A) =>
     items
      |> reduce (findStep predicate) None
 
-value findMap:(Option B) transform:(A -> Option B) items:(List A) =>
+fun findMap:(Option B) transform:(A -> Option B) items:(List A) =>
     items
      |> reduce (findMapStep transform) None
 
-value partition:(Partition A) predicate:(A -> Bool) items:(List A) =>
+fun partition:(Partition A) predicate:(A -> Bool) items:(List A) =>
     items
      |> reduce (partitionStep predicate) { matched: [], unmatched: [] }
 

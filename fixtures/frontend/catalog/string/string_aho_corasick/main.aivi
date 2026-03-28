@@ -44,30 +44,30 @@ type AhoCatalog = {
     missingTransition: ScanSummary
 }
 
-value stateName:Text state:AutomatonState =>
+fun stateName:Text state:AutomatonState =>
     state
-     ||> Root   => "root"
-     ||> SawS   => "s"
-     ||> SawH   => "h"
-     ||> SawSH  => "sh"
-     ||> SawHE  => "he"
-     ||> SawHER => "her"
+     ||> Root   -> "root"
+     ||> SawS   -> "s"
+     ||> SawH   -> "h"
+     ||> SawSH  -> "sh"
+     ||> SawHE  -> "he"
+     ||> SawHER -> "her"
 
-value defaultNext:AutomatonState symbol:Symbol =>
+fun defaultNext:AutomatonState symbol:Symbol =>
     symbol
-     ||> U => Root
-     ||> S => SawS
-     ||> H => SawH
-     ||> E => Root
-     ||> R => Root
+     ||> U -> Root
+     ||> S -> SawS
+     ||> H -> SawH
+     ||> E -> Root
+     ||> R -> Root
 
-value defaultAdvance:Advance symbol:Symbol =>
+fun defaultAdvance:Advance symbol:Symbol =>
     {
         next: defaultNext symbol,
         emitted: []
     }
 
-value matchingAdvance:(Option Advance) state:AutomatonState symbol:Symbol transition:Transition =>
+fun matchingAdvance:(Option Advance) state:AutomatonState symbol:Symbol transition:Transition =>
     (transition.from == state) and (transition.symbol == symbol)
      T|> Some { next: transition.next, emitted: transition.emitted }
      F|> None
@@ -105,28 +105,28 @@ value specialTransitions: List Transition = [
     }
 ]
 
-value advance:Advance state:AutomatonState symbol:Symbol =>
+fun advance:Advance state:AutomatonState symbol:Symbol =>
     specialTransitions
      |> findMap (matchingAdvance state symbol)
-     ||> Some step => step
-     ||> None      => defaultAdvance symbol
+     ||> Some step -> step
+     ||> None      -> defaultAdvance symbol
 
-value applyAdvance:ScanState trail:(List Text) matches:(List Text) step:Advance =>
+fun applyAdvance:ScanState trail:(List Text) matches:(List Text) step:Advance =>
     step
-     ||> { next, emitted } => { state: next, trail: append trail [stateName next], matches: append matches emitted }
+     ||> { next, emitted } -> { state: next, trail: append trail [stateName next], matches: append matches emitted }
 
-value step:ScanState scan:ScanState symbol:Symbol =>
+fun step:ScanState scan:ScanState symbol:Symbol =>
     scan
-     ||> { state, trail, matches } => applyAdvance trail matches (advance state symbol)
+     ||> { state, trail, matches } -> applyAdvance trail matches (advance state symbol)
 
-value renderList:Text items:(List Text) separator:Text fallback:Text =>
+fun renderList:Text items:(List Text) separator:Text fallback:Text =>
     length items == 0
      T|> fallback
      F|> join separator items
 
-value summarize:ScanSummary scan:ScanState =>
+fun summarize:ScanSummary scan:ScanState =>
     scan
-     ||> { state, trail, matches } => { finalState: stateName state, trail: renderList trail " -> " "root", matches: renderList matches ", " "none" }
+     ||> { state, trail, matches } -> { finalState: stateName state, trail: renderList trail " -> " "root", matches: renderList matches ", " "none" }
 
 value initialScan: ScanState = {
     state: Root,

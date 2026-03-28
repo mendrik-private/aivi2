@@ -83,98 +83,98 @@ value noCandidate: Candidate = {
 
 value unreachableNode: Node = Detached
 
-value nodeLabel:Text node:Node =>
+fun nodeLabel:Text node:Node =>
     node
-     ||> Source   => "source"
-     ||> Relay    => "relay"
-     ||> Scenic   => "scenic"
-     ||> Goal     => "goal"
-     ||> Detached => "detached"
+     ||> Source   -> "source"
+     ||> Relay    -> "relay"
+     ||> Scenic   -> "scenic"
+     ||> Goal     -> "goal"
+     ||> Detached -> "detached"
 
-value appendNodeLabel:(List Text) parts:(List Text) node:Node =>
+fun appendNodeLabel:(List Text) parts:(List Text) node:Node =>
     append parts [
         nodeLabel node
     ]
 
-value orderLabel:Text nodes:(List Node) =>
+fun orderLabel:Text nodes:(List Node) =>
     nodes
      |> reduce appendNodeLabel []
      |> join " -> "
 
-value distanceText:Text distance:Distance =>
+fun distanceText:Text distance:Distance =>
     distance
-     ||> Unreachable => "unreachable"
-     ||> Cost x  => "{x}"
+     ||> Unreachable -> "unreachable"
+     ||> Cost x  -> "{x}"
 
-value distanceOf:Distance distances:Distances node:Node =>
+fun distanceOf:Distance distances:Distances node:Node =>
     node
-     ||> Source   => distances.source
-     ||> Relay    => distances.relay
-     ||> Scenic   => distances.scenic
-     ||> Goal     => distances.goal
-     ||> Detached => distances.detached
+     ||> Source   -> distances.source
+     ||> Relay    -> distances.relay
+     ||> Scenic   -> distances.scenic
+     ||> Goal     -> distances.goal
+     ||> Detached -> distances.detached
 
-value setDistance:Distances distances:Distances node:Node x:Distance =>
+fun setDistance:Distances distances:Distances node:Node x:Distance =>
     node
-     ||> Source   => { source: x, relay: distances.relay, scenic: distances.scenic, goal: distances.goal, detached: distances.detached }
-     ||> Relay    => { source: distances.source, relay: x, scenic: distances.scenic, goal: distances.goal, detached: distances.detached }
-     ||> Scenic   => { source: distances.source, relay: distances.relay, scenic: x, goal: distances.goal, detached: distances.detached }
-     ||> Goal     => { source: distances.source, relay: distances.relay, scenic: distances.scenic, goal: x, detached: distances.detached }
-     ||> Detached => { source: distances.source, relay: distances.relay, scenic: distances.scenic, goal: distances.goal, detached: x }
+     ||> Source   -> { source: x, relay: distances.relay, scenic: distances.scenic, goal: distances.goal, detached: distances.detached }
+     ||> Relay    -> { source: distances.source, relay: x, scenic: distances.scenic, goal: distances.goal, detached: distances.detached }
+     ||> Scenic   -> { source: distances.source, relay: distances.relay, scenic: x, goal: distances.goal, detached: distances.detached }
+     ||> Goal     -> { source: distances.source, relay: distances.relay, scenic: distances.scenic, goal: x, detached: distances.detached }
+     ||> Detached -> { source: distances.source, relay: distances.relay, scenic: distances.scenic, goal: distances.goal, detached: x }
 
-value visitedOf:Bool visited:Visited node:Node =>
+fun visitedOf:Bool visited:Visited node:Node =>
     node
-     ||> Source   => visited.source
-     ||> Relay    => visited.relay
-     ||> Scenic   => visited.scenic
-     ||> Goal     => visited.goal
-     ||> Detached => visited.detached
+     ||> Source   -> visited.source
+     ||> Relay    -> visited.relay
+     ||> Scenic   -> visited.scenic
+     ||> Goal     -> visited.goal
+     ||> Detached -> visited.detached
 
-value setVisited:Visited visited:Visited node:Node x:Bool =>
+fun setVisited:Visited visited:Visited node:Node x:Bool =>
     node
-     ||> Source   => { source: x, relay: visited.relay, scenic: visited.scenic, goal: visited.goal, detached: visited.detached }
-     ||> Relay    => { source: visited.source, relay: x, scenic: visited.scenic, goal: visited.goal, detached: visited.detached }
-     ||> Scenic   => { source: visited.source, relay: visited.relay, scenic: x, goal: visited.goal, detached: visited.detached }
-     ||> Goal     => { source: visited.source, relay: visited.relay, scenic: visited.scenic, goal: x, detached: visited.detached }
-     ||> Detached => { source: visited.source, relay: visited.relay, scenic: visited.scenic, goal: visited.goal, detached: x }
+     ||> Source   -> { source: x, relay: visited.relay, scenic: visited.scenic, goal: visited.goal, detached: visited.detached }
+     ||> Relay    -> { source: visited.source, relay: x, scenic: visited.scenic, goal: visited.goal, detached: visited.detached }
+     ||> Scenic   -> { source: visited.source, relay: visited.relay, scenic: x, goal: visited.goal, detached: visited.detached }
+     ||> Goal     -> { source: visited.source, relay: visited.relay, scenic: visited.scenic, goal: x, detached: visited.detached }
+     ||> Detached -> { source: visited.source, relay: visited.relay, scenic: visited.scenic, goal: visited.goal, detached: x }
 
-value betterDistance:Bool left:Distance right:Distance =>
+fun betterDistance:Bool left:Distance right:Distance =>
     (left, right)
-     ||> (Cost _, Unreachable) => True
-     ||> (Cost l, Cost r)      => l < r
-     ||> (Unreachable, _)      => False
+     ||> (Cost _, Unreachable) -> True
+     ||> (Cost l, Cost r)      -> l < r
+     ||> (Unreachable, _)      -> False
 
-value plusDistance:Distance distance:Distance weight:Int =>
+fun plusDistance:Distance distance:Distance weight:Int =>
     distance
-     ||> Cost x  => Cost (x + weight)
-     ||> Unreachable => Unreachable
+     ||> Cost x  -> Cost (x + weight)
+     ||> Unreachable -> Unreachable
 
-value selectCandidate:Candidate candidate:Candidate node:Node distance:Distance =>
+fun selectCandidate:Candidate candidate:Candidate node:Node distance:Distance =>
     betterDistance distance candidate.distance
      T|> { node: Some node, distance }
      F|> candidate
 
-value chooseCandidate:Candidate state:DijkstraState candidate:Candidate node:Node =>
+fun chooseCandidate:Candidate state:DijkstraState candidate:Candidate node:Node =>
     visitedOf state.visited node
      T|> candidate
      F|> selectCandidate candidate node (distanceOf state.distances node)
 
-value nextNode:(Option Node) graph:WeightedGraph state:DijkstraState =>
+fun nextNode:(Option Node) graph:WeightedGraph state:DijkstraState =>
     graph.nodes
      |> reduce (chooseCandidate state) noCandidate
      |> .node
 
-value relaxTarget:Distances distances:Distances target:Node candidate:Distance =>
+fun relaxTarget:Distances distances:Distances target:Node candidate:Distance =>
     betterDistance candidate (distanceOf distances target)
      T|> setDistance distances target candidate
      F|> distances
 
-value relaxEdge:Distances current:Node currentDistance:Distance distances:Distances edge:WeightedEdge =>
+fun relaxEdge:Distances current:Node currentDistance:Distance distances:Distances edge:WeightedEdge =>
     edge.from == current
      T|> relaxTarget distances edge.to (plusDistance currentDistance edge.weight)
      F|> distances
 
-value visitNode:DijkstraState graph:WeightedGraph state:DijkstraState node:Node =>
+fun visitNode:DijkstraState graph:WeightedGraph state:DijkstraState node:Node =>
     {
         distances: graph.edges
          |> reduce (relaxEdge node (distanceOf state.distances node)) state.distances,
@@ -182,12 +182,12 @@ value visitNode:DijkstraState graph:WeightedGraph state:DijkstraState node:Node 
         order: append state.order [node]
     }
 
-value advance:DijkstraState graph:WeightedGraph state:DijkstraState tick:Node =>
+fun advance:DijkstraState graph:WeightedGraph state:DijkstraState tick:Node =>
     nextNode graph state
-     ||> Some current => visitNode graph state current
-     ||> None         => state
+     ||> Some current -> visitNode graph state current
+     ||> None         -> state
 
-value initialState:DijkstraState graph:WeightedGraph =>
+fun initialState:DijkstraState graph:WeightedGraph =>
     {
         distances: setDistance emptyDistances graph.start (Cost 0),
         visited: noVisited,

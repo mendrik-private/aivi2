@@ -1,4 +1,4 @@
-value add:Int acc:Int x:Int =>
+fun add:Int acc:Int x:Int =>
     acc + x
 
 value maybeInput:Option Int =

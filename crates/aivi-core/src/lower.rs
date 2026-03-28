@@ -3749,7 +3749,7 @@ signal users : Signal Int
             r#"
 value answer = 42
 
-value add:Int x:Int y:Int =>
+fun add:Int x:Int y:Int =>
     x + y
 "#,
         );
@@ -3849,7 +3849,7 @@ domain Duration over Int
 domain Retry over Int
     literal x : Int -> Retry
 
-value step:Int n:Int =>
+fun step:Int n:Int =>
     n
 
 @recur.timer 5s
@@ -3900,7 +3900,7 @@ type Cursor = {
     hasNext: Bool
 }
 
-value keep:Cursor cursor:Cursor =>
+fun keep:Cursor cursor:Cursor =>
     cursor
 
 value seed:Cursor = { hasNext: True }
@@ -4039,10 +4039,10 @@ value combined:Blob =
         let lowered = lower_text(
             "typed-core-foldable-reduce.aivi",
             r#"
-value add:Int acc:Int n:Int =>
+fun add:Int acc:Int n:Int =>
     acc + n
 
-value joinStep:Text acc:Text s:Text =>
+fun joinStep:Text acc:Text s:Text =>
     append acc s
 
 value joined:Text =
@@ -4085,15 +4085,15 @@ value total:Int =
         let lowered = lower_text(
             "typed-core-extended-typeclasses.aivi",
             r#"
-value addOne:Int n:Int =>
+fun addOne:Int n:Int =>
     n + 1
 
-value keepSmall:(Option Int) n:Int =>
+fun keepSmall:(Option Int) n:Int =>
     n < 3
      T|> Some n
      F|> None
 
-value punctuate:Text s:Text =>
+fun punctuate:Text s:Text =>
     append s "!"
 
 value okOne:Result Text Int =
@@ -4303,7 +4303,7 @@ domain Duration over Int
 domain Retry over Int
     literal x : Int -> Retry
 
-value step:Int n:Int =>
+fun step:Int n:Int =>
     n
 
 @recur.timer 5s

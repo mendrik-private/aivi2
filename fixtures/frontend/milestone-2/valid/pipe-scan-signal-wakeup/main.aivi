@@ -1,4 +1,4 @@
-value step:Int tick:Unit current:Int =>
+fun step:Int tick:Unit current:Int =>
     current + 1
 
 @source timer.every 120 with {

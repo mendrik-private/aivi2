@@ -1,4 +1,4 @@
-value step:Int x:Int current:Int =>
+fun step:Int x:Int current:Int =>
     x
 
 signal refresh = 0

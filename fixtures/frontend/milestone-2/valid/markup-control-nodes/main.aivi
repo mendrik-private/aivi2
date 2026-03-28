@@ -8,7 +8,7 @@ type Screen =
   | Ready (List Item)
   | Failed Text
 
-value itemLabel:Text item:Item =>
+fun itemLabel:Text item:Item =>
     item.title
 
 value header = "Users"

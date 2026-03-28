@@ -37,40 +37,40 @@ type EditDistanceSummary = {
     rows: List (List Int)
 }
 
-value earlier:Bool left:Int right:Int =>
+fun earlier:Bool left:Int right:Int =>
     left < right
 
-value substitutionCost:Int left:Text right:Text =>
+fun substitutionCost:Int left:Text right:Text =>
     left == right
      T|> 0
      F|> 1
 
-value firstValue:Int values:(List Int) =>
+fun firstValue:Int values:(List Int) =>
     head values
-     ||> Some x => x
-     ||> None       => 0
+     ||> Some x -> x
+     ||> None       -> 0
 
-value lastValue:Int values:(List Int) =>
+fun lastValue:Int values:(List Int) =>
     last values
-     ||> Some x => x
-     ||> None       => 0
+     ||> Some x -> x
+     ||> None       -> 0
 
-value extendInitialRow:InitialRowState state:InitialRowState token:Text =>
+fun extendInitialRow:InitialRowState state:InitialRowState token:Text =>
     state
-     ||> { next, values } => { next: next + 1, values: append values [next + 1] }
+     ||> { next, values } -> { next: next + 1, values: append values [next + 1] }
 
-value initialRow:(List Int) tokens:(List Text) =>
+fun initialRow:(List Int) tokens:(List Text) =>
     tokens
      |> reduce extendInitialRow { next: 0, values: [0] }
      |> .values
 
-value nextCell:Int sourceToken:Text prevDiagonal:Int leftValue:Int targetToken:Text aboveValue:Int =>
+fun nextCell:Int sourceToken:Text prevDiagonal:Int leftValue:Int targetToken:Text aboveValue:Int =>
     minOf earlier (leftValue + 1) [
         aboveValue + 1,
         prevDiagonal + substitutionCost sourceToken targetToken
     ]
 
-value recordCell:CellState sourceToken:Text aboveValue:Int values:(List Int) x:Int =>
+fun recordCell:CellState sourceToken:Text aboveValue:Int values:(List Int) x:Int =>
     {
         sourceToken,
         prevDiagonal: aboveValue,
@@ -78,24 +78,24 @@ value recordCell:CellState sourceToken:Text aboveValue:Int values:(List Int) x:I
         values: append values [x]
     }
 
-value updatedCell:CellState sourceToken:Text prevDiagonal:Int leftValue:Int values:(List Int) targetToken:Text aboveValue:Int =>
+fun updatedCell:CellState sourceToken:Text prevDiagonal:Int leftValue:Int values:(List Int) targetToken:Text aboveValue:Int =>
     nextCell sourceToken prevDiagonal leftValue targetToken aboveValue
      |> recordCell sourceToken aboveValue values
 
-value advancePair:CellState sourceToken:Text prevDiagonal:Int leftValue:Int values:(List Int) pair:(Text, Int) =>
+fun advancePair:CellState sourceToken:Text prevDiagonal:Int leftValue:Int values:(List Int) pair:(Text, Int) =>
     pair
-     ||> (targetToken, aboveValue) => updatedCell sourceToken prevDiagonal leftValue values targetToken aboveValue
+     ||> (targetToken, aboveValue) -> updatedCell sourceToken prevDiagonal leftValue values targetToken aboveValue
 
-value advanceCell:CellState state:CellState pair:(Text, Int) =>
+fun advanceCell:CellState state:CellState pair:(Text, Int) =>
     state
-     ||> { sourceToken, prevDiagonal, leftValue, values } => advancePair sourceToken prevDiagonal leftValue values pair
+     ||> { sourceToken, prevDiagonal, leftValue, values } -> advancePair sourceToken prevDiagonal leftValue values pair
 
-value nextRow:(List Int) targetTokens:(List Text) rowIndex:Int prevRow:(List Int) sourceToken:Text =>
+fun nextRow:(List Int) targetTokens:(List Text) rowIndex:Int prevRow:(List Int) sourceToken:Text =>
     zip targetTokens (tailOrEmpty prevRow)
      |> reduce advanceCell { sourceToken, prevDiagonal: firstValue prevRow, leftValue: rowIndex, values: [rowIndex] }
      |> .values
 
-value recordRow:MatrixState rowIndex:Int targetTokens:(List Text) rows:(List (List Int)) row:(List Int) =>
+fun recordRow:MatrixState rowIndex:Int targetTokens:(List Text) rows:(List (List Int)) row:(List Int) =>
     {
         rowIndex: rowIndex + 1,
         targetTokens,
@@ -103,7 +103,7 @@ value recordRow:MatrixState rowIndex:Int targetTokens:(List Text) rows:(List (Li
         rows: append rows [row]
     }
 
-value seedRows:MatrixState targetTokens:(List Text) row:(List Int) =>
+fun seedRows:MatrixState targetTokens:(List Text) row:(List Int) =>
     {
         rowIndex: 0,
         targetTokens,
@@ -111,21 +111,21 @@ value seedRows:MatrixState targetTokens:(List Text) row:(List Int) =>
         rows: [row]
     }
 
-value seedMatrix:MatrixState targetTokens:(List Text) =>
+fun seedMatrix:MatrixState targetTokens:(List Text) =>
     seedRows targetTokens (initialRow targetTokens)
 
-value commitRow:MatrixState rowIndex:Int targetTokens:(List Text) rows:(List (List Int)) sourceToken:Text finalRow:(List Int) =>
+fun commitRow:MatrixState rowIndex:Int targetTokens:(List Text) rows:(List (List Int)) sourceToken:Text finalRow:(List Int) =>
     recordRow rowIndex targetTokens rows (nextRow targetTokens (rowIndex + 1) finalRow sourceToken)
 
-value advanceMatrix:MatrixState state:MatrixState sourceToken:Text =>
+fun advanceMatrix:MatrixState state:MatrixState sourceToken:Text =>
     state
-     ||> { rowIndex, targetTokens, finalRow, rows } => commitRow rowIndex targetTokens rows sourceToken finalRow
+     ||> { rowIndex, targetTokens, finalRow, rows } -> commitRow rowIndex targetTokens rows sourceToken finalRow
 
-value buildMatrix:MatrixState sourceTokens:(List Text) targetTokens:(List Text) =>
+fun buildMatrix:MatrixState sourceTokens:(List Text) targetTokens:(List Text) =>
     sourceTokens
      |> reduce advanceMatrix (seedMatrix targetTokens)
 
-value editDistance:Int sourceTokens:(List Text) targetTokens:(List Text) =>
+fun editDistance:Int sourceTokens:(List Text) targetTokens:(List Text) =>
     buildMatrix sourceTokens targetTokens
      |> .finalRow
      |> lastValue
@@ -158,6 +158,6 @@ value blankDistance: Int = editDistance emptyTokens rightTokens
 
 value editDistanceSummary: EditDistanceSummary =
     sampleMatrix
-     ||> { finalRow, rows } => { left: leftText, right: rightText, distance: lastValue finalRow, blankDistance, rowCount: length rows, finalRow, rows }
+     ||> { finalRow, rows } -> { left: leftText, right: rightText, distance: lastValue finalRow, blankDistance, rowCount: length rows, finalRow, rows }
 
 export editDistanceSummary

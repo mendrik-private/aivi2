@@ -198,63 +198,63 @@ type __AiviListTailState A = {
     items: List A
 }
 
-value __aivi_option_getOrElse:A fallback:A opt:(Option A) =>
+fun __aivi_option_getOrElse:A fallback:A opt:(Option A) =>
     opt
-     ||> Some item => item
-     ||> None      => fallback
+     ||> Some item -> item
+     ||> None      -> fallback
 
-value __aivi_list_keepSome:(Option A) item:A =>
+fun __aivi_list_keepSome:(Option A) item:A =>
     Some item
 
-value __aivi_list_keepFirst:(Option A) found:(Option A) item:A =>
+fun __aivi_list_keepFirst:(Option A) found:(Option A) item:A =>
     found
      T|> __aivi_list_keepSome
      F|> Some item
 
-value __aivi_list_lengthStep:Int total:Int item:A =>
+fun __aivi_list_lengthStep:Int total:Int item:A =>
     total + 1
 
-value __aivi_list_length:Int items:(List A) =>
+fun __aivi_list_length:Int items:(List A) =>
     items
      |> reduce __aivi_list_lengthStep 0
 
-value __aivi_list_head:(Option A) items:(List A) =>
+fun __aivi_list_head:(Option A) items:(List A) =>
     items
      |> reduce __aivi_list_keepFirst None
 
-value __aivi_list_tailState:(__AiviListTailState A) items:(List A) item:A seenFirst:Bool =>
+fun __aivi_list_tailState:(__AiviListTailState A) items:(List A) item:A seenFirst:Bool =>
     seenFirst
      T|> { seenFirst: True, items: append items [item] }
      F|> { seenFirst: True, items: [] }
 
-value __aivi_list_tailStep:(__AiviListTailState A) state:(__AiviListTailState A) item:A =>
+fun __aivi_list_tailStep:(__AiviListTailState A) state:(__AiviListTailState A) item:A =>
     state
-     ||> { seenFirst, items } => __aivi_list_tailState items item seenFirst
+     ||> { seenFirst, items } -> __aivi_list_tailState items item seenFirst
 
-value __aivi_list_tailItems:(Option (List A)) items:(List A) seenFirst:Bool =>
+fun __aivi_list_tailItems:(Option (List A)) items:(List A) seenFirst:Bool =>
     seenFirst
      T|> Some items
      F|> None
 
-value __aivi_list_tailFromState:(Option (List A)) state:(__AiviListTailState A) =>
+fun __aivi_list_tailFromState:(Option (List A)) state:(__AiviListTailState A) =>
     state
-     ||> { seenFirst, items } => __aivi_list_tailItems items seenFirst
+     ||> { seenFirst, items } -> __aivi_list_tailItems items seenFirst
 
-value __aivi_list_tail:(Option (List A)) items:(List A) =>
+fun __aivi_list_tail:(Option (List A)) items:(List A) =>
     items
      |> reduce __aivi_list_tailStep { seenFirst: False, items: [] }
      |> __aivi_list_tailFromState
 
-value __aivi_list_anyStep:Bool predicate:(A -> Bool) found:Bool item:A =>
+fun __aivi_list_anyStep:Bool predicate:(A -> Bool) found:Bool item:A =>
     found
      T|> True
      F|> predicate item
 
-value __aivi_list_any:Bool predicate:(A -> Bool) items:(List A) =>
+fun __aivi_list_any:Bool predicate:(A -> Bool) items:(List A) =>
     items
      |> reduce (__aivi_list_anyStep predicate) False
 
-value scan:S seed:S step:(A -> S -> S) input:A =>
+fun scan:S seed:S step:(A -> S -> S) input:A =>
     step input seed
 "#;
 
@@ -386,13 +386,8 @@ impl<'a> Lowerer<'a> {
         let lowered = match item {
             syn::Item::Type(item) => Some(Item::Type(self.lower_type_item(item))),
             syn::Item::Data(item) => Some(Item::Type(self.lower_type_item(item))),
-            syn::Item::Value(item) => {
-                if item.parameters.is_empty() {
-                    Some(Item::Value(self.lower_value_item(item)))
-                } else {
-                    Some(Item::Function(self.lower_function_item(item)))
-                }
-            }
+            syn::Item::Fun(item) => Some(Item::Function(self.lower_function_item(item))),
+            syn::Item::Value(item) => Some(Item::Value(self.lower_value_item(item))),
             syn::Item::Signal(item) | syn::Item::Source(item) => {
                 Some(Item::Signal(self.lower_signal_item(item)))
             }
@@ -6461,7 +6456,7 @@ type User = {
 domain Retry over Int
     literal x : Int -> Retry
 
-value keepCount:Int response:(Result HttpError (List User)) current:Int =>
+fun keepCount:Int response:(Result HttpError (List User)) current:Int =>
     current
 
 @source http.get "/users" with {
@@ -6968,7 +6963,7 @@ domain Duration over Int
 domain Retry over Int
     literal x : Int -> Retry
 
-value step x =>
+fun step x =>
     x
 
 @recur.timer
@@ -7453,7 +7448,7 @@ signal updates : Signal Int
     fn rejects_interpolated_pattern_text() {
         let lowered = lower_text(
             "interpolated-pattern-text.aivi",
-            "value subject = \"Ada\"\nvalue result = subject ||> \"{subject}\" => 1\n",
+            "value subject = \"Ada\"\nvalue result = subject ||> \"{subject}\" -> 1\n",
         );
         assert!(
             lowered.has_errors(),
@@ -7693,7 +7688,7 @@ signal updates : Signal Int
     fn does_not_double_report_followup_recurrence_starts() {
         let lowered = lower_text(
             "duplicate-recurrence-starts.aivi",
-            "value step x => x\nvalue broken = 0 @|> step @|> step <|@ step\n",
+            "fun step x => x\nvalue broken = 0 @|> step @|> step <|@ step\n",
         );
         assert!(
             lowered.has_errors(),
@@ -7729,7 +7724,7 @@ signal updates : Signal Int
     fn exposes_trailing_recurrence_suffix_views() {
         let lowered = lower_text(
             "recurrence-suffix-view.aivi",
-            "value keep x => x\n\
+            "fun keep x => x\n\
              value start x => x\n\
              value step x => x\n\
              signal retried = 0 |> keep | keep @|> start <|@ step <|@ step\n",

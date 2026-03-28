@@ -1759,7 +1759,7 @@ type Receiver A
 type Mailbox A
 ```
 
-Sending expressed through `Task`; receiving expressed through `@source` integration.
+Sending expressed through `Task`; receiving expressed through `source` integration.
 
 ---
 
@@ -1908,7 +1908,7 @@ Rules:
 - the bound signal must be a body-less annotated `Signal Bool` input signal
 - the host publishes `False` immediately at registration, `True` on first `map`, then `True` / `False` on later `map` / `unmap` transitions
 - `map` / `unmap` is used rather than `show` / `hide` because a widget may be shown while not yet mapped through an unshown parent
-- this is the canonical way to drive `@source activeWhen` from visibility state
+- this is the canonical way to drive `source activeWhen` from visibility state
 
 `hideOnClose={True}` on `ApplicationWindow` intercepts the delete event and calls `window.hide()` instead of destroying the window. This keeps the process alive and allows later restoration through normal presentation or D-Bus activation.
 
@@ -2424,7 +2424,7 @@ Status legend: **COMPLETE** = fully implemented; **PARTIAL** = core slice implem
 ### Milestone 6 — Tasks and sources — **PARTIAL**
 
 - `Task` typed IR and scheduler completion ports ✓
-- `@source` runtime contract and instance lifecycle ✓
+- `source` declaration runtime contract and instance lifecycle ✓
 - decode integration (structural decoder, domain parse method resolution) ✓
 - worker/UI publication boundary ✓
 - timer sources (`timer.every`, `timer.after`) — fully working ✓
@@ -2596,15 +2596,15 @@ evaluates `main`, and executes the resulting host task plan directly in the CLI 
 
 The current execute-time host surface includes:
 
-- `@source process.args`
-- `@source process.cwd`
-- `@source env.get "NAME"`
-- `@source stdio.read`
-- `@source path.home`
-- `@source path.configHome`
-- `@source path.dataHome`
-- `@source path.cacheHome`
-- `@source path.tempDir`
+- `source process.args`
+- `source process.cwd`
+- `source env.get "NAME"`
+- `source stdio.read`
+- `source path.home`
+- `source path.configHome`
+- `source path.dataHome`
+- `source path.cacheHome`
+- `source path.tempDir`
 - `aivi.stdio.stdoutWrite`
 - `aivi.stdio.stderrWrite`
 - `aivi.fs.writeText`
@@ -2715,11 +2715,11 @@ Rules:
 
 ### 28.3 D-Bus surface
 
-- `dbus.ownName`: `@source` for name ownership state
+- `dbus.ownName`: `source` for name ownership state
 - `dbus.call`: `Task`
 - `dbus.emit`: `Task`
-- `dbus.signal`: `@source` for inbound signal subscription
-- `dbus.method`: `@source` for fire-and-forget inbound method dispatch with immediate Unit reply semantics on the wire
+- `dbus.signal`: `source` for inbound signal subscription
+- `dbus.method`: `source` for fire-and-forget inbound method dispatch with immediate Unit reply semantics on the wire
 
 Methods returning non-Unit values to the caller are deferred.
 

@@ -18,46 +18,46 @@ type QuickselectSummary = {
     note: Text
 }
 
-value lowerThan:Bool pivot:Int x:Int =>
+fun lowerThan:Bool pivot:Int x:Int =>
     x < pivot
 
-value equalTo:Bool pivot:Int x:Int =>
+fun equalTo:Bool pivot:Int x:Int =>
     x == pivot
 
-value classifyRest:Buckets lower:(List Int) pivot:Int rest:(List Int) =>
+fun classifyRest:Buckets lower:(List Int) pivot:Int rest:(List Int) =>
     rest
      |> partition (equalTo pivot)
-     ||> { matched: equal, unmatched: higher } => { lower, equal, higher }
+     ||> { matched: equal, unmatched: higher } -> { lower, equal, higher }
 
-value classify:Buckets pivot:Int items:(List Int) =>
+fun classify:Buckets pivot:Int items:(List Int) =>
     items
      |> partition (lowerThan pivot)
-     ||> { matched: lower, unmatched: rest } => classifyRest lower pivot rest
+     ||> { matched: lower, unmatched: rest } -> classifyRest lower pivot rest
 
-value withFallback:Int fallback:Int x:(Option Int) =>
+fun withFallback:Int fallback:Int x:(Option Int) =>
     x
-     ||> Some found => found
-     ||> None       => fallback
+     ||> Some found -> found
+     ||> None       -> fallback
 
-value isMissing:Bool x:(Option Int) =>
+fun isMissing:Bool x:(Option Int) =>
     x
-     ||> None   => True
-     ||> Some _ => False
+     ||> None   -> True
+     ||> Some _ -> False
 
-value chooseUpper:(Option Int) rank:Int lower:(List Int) equal:(List Int) higher:(List Int) =>
+fun chooseUpper:(Option Int) rank:Int lower:(List Int) equal:(List Int) higher:(List Int) =>
     rank > length lower + length equal - 1
      T|> quickselect (rank - length lower - length equal) higher
      F|> head equal
 
-value chooseRank:(Option Int) rank:Int lower:(List Int) equal:(List Int) higher:(List Int) =>
+fun chooseRank:(Option Int) rank:Int lower:(List Int) equal:(List Int) higher:(List Int) =>
     rank < length lower
      T|> quickselect rank lower
      F|> chooseUpper rank lower equal higher
 
-value quickselect:(Option Int) rank:Int items:(List Int) =>
+fun quickselect:(Option Int) rank:Int items:(List Int) =>
     head items
-     ||> None       => None
-     ||> Some pivot => (items |> classify pivot ||> { lower, equal, higher } => chooseRank rank lower equal higher)
+     ||> None       -> None
+     ||> Some pivot -> (items |> classify pivot ||> { lower, equal, higher } -> chooseRank rank lower equal higher)
 
 value sample: List Int = [
     7,

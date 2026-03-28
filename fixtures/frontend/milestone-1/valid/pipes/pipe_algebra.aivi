@@ -12,26 +12,26 @@ type Status =
   | Pending
   | Failed Text
 
-value maybeActiveUser:Option User user:User =>
+fun maybeActiveUser:Option User user:User =>
     user
      ?|> (.active and .age > 18)
 
-value statusLabel:Text status:Status =>
+fun statusLabel:Text status:Status =>
     status
-     ||> Paid => "paid"
-     ||> Pending => "pending"
-     ||> Failed reason => "failed {reason}"
+     ||> Paid -> "paid"
+     ||> Pending -> "pending"
+     ||> Failed reason -> "failed {reason}"
 
-value startOrWait:Text ready:Bool =>
+fun startOrWait:Text ready:Bool =>
     ready
      T|> "start"
      F|> "wait"
 
-value observeShipping:Text shipping:Shipping =>
+fun observeShipping:Text shipping:Shipping =>
     shipping
      |> .status
 
-value shippingStatus:Text order:Order =>
+fun shippingStatus:Text order:Order =>
     order
      |> .shipping
      | observeShipping

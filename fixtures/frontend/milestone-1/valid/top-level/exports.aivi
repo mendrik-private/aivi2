@@ -1,9 +1,9 @@
 type Status = Idle | Busy
 
-value statusLabel:Text status:Status =>
+fun statusLabel:Text status:Status =>
     status
-     ||> Idle => "Idle"
-     ||> Busy => "Busy"
+     ||> Idle -> "Idle"
+     ||> Busy -> "Busy"
 
 value main =
     <Window title="Milestone 1">

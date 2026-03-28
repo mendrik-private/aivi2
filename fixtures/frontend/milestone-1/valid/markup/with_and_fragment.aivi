@@ -3,9 +3,9 @@ type User = {
     email: Text
 }
 
-value formatUser:Text user:User =>
+fun formatUser:Text user:User =>
     user
-     ||> { name, email } => "{name} <{email}>"
+     ||> { name, email } -> "{name} <{email}>"
 
 value user:User = {
     name: "Ada",

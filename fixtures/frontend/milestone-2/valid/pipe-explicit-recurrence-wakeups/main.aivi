@@ -4,7 +4,7 @@ domain Duration over Int
 domain Retry over Int
     literal x : Int -> Retry
 
-value step x =>
+fun step x =>
     x
 
 @recur.timer 5s
