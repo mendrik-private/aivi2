@@ -19,7 +19,7 @@ domain Repeat over Int
 
 @source http.get "/users" with {
     decode: Strict,
-    retry: 3rt,
+    retry: 3times,
     timeout: 5sec
 }
 sig users : Signal (Result HttpError (List User))

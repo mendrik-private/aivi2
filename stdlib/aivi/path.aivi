@@ -3,12 +3,12 @@ type PathError =
   | PathNotFound Text
 
 domain Path over Text
-    parse:    Text -> Result PathError Path
-    unwrap:   Path -> Text
-    (/):      Path -> Text -> Path
-    parent:   Path -> Option Path
+    parse: Text -> Result PathError Path
+    unwrap: Path -> Text
+    (/): Path -> Text -> Path
+    parent: Path -> Option Path
     filename: Path -> Option Text
-    stem:     Path -> Option Text
-    ext:      Path -> Option Text
+    stem: Path -> Option Text
+    ext: Path -> Option Text
 
 export (Path, PathError, InvalidPath, PathNotFound)

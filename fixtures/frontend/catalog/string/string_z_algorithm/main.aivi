@@ -26,48 +26,48 @@ type ZSummary = {
     distinctMatches: List Int
 }
 
-fun samePair:Bool pair:(Text, Text) =>
+fun samePair: Bool pair:(Text, Text) =>
     pair
      ||> (left, right) -> left == right
 
-fun pairedTokensMatch:Bool left:(List Text) right:(List Text) =>
+fun pairedTokensMatch: Bool left:(List Text) right:(List Text) =>
     zip left right
      |> all samePair
 
-fun sameCount:Bool left:Int right:Int =>
+fun sameCount: Bool left:Int right:Int =>
     left == right
 
-fun sameTokens:Bool left:(List Text) right:(List Text) =>
+fun sameTokens: Bool left:(List Text) right:(List Text) =>
     sameCount (length left) (length right)
      T|> pairedTokensMatch left right
      F|> False
 
-fun matchedWhenEqual:(Option Int) matched:Int prefix:(List Text) slice:(List Text) =>
+fun matchedWhenEqual: (Option Int) matched:Int prefix:(List Text) slice:(List Text) =>
     sameTokens prefix slice
      T|> Some matched
      F|> None
 
-fun matchingLength:(Option Int) candidate:PrefixCandidate =>
+fun matchingLength: (Option Int) candidate:PrefixCandidate =>
     candidate
      ||> { matched, prefix, slice } -> matchedWhenEqual matched prefix slice
 
-fun matchedLength:Int candidates:(List PrefixCandidate) =>
+fun matchedLength: Int candidates:(List PrefixCandidate) =>
     findMap matchingLength candidates
      ||> Some matched -> matched
      ||> None         -> 0
 
-fun zValue:Int probe:ZProbe =>
+fun zValue: Int probe:ZProbe =>
     probe
      ||> { candidates } -> matchedLength candidates
 
-fun appendZ:(List Int) values:(List Int) probe:ZProbe =>
+fun appendZ: (List Int) values:(List Int) probe:ZProbe =>
     append values [zValue probe]
 
-fun probeMatchIndex:Int patternLength:Int probe:ZProbe =>
+fun probeMatchIndex: Int patternLength:Int probe:ZProbe =>
     probe
      ||> { index } -> index - (patternLength + 1)
 
-fun keepMatch:(List Int) patternLength:Int matches:(List Int) probe:ZProbe =>
+fun keepMatch: (List Int) patternLength:Int matches:(List Int) probe:ZProbe =>
     zValue probe == patternLength
      T|> append matches [probeMatchIndex patternLength probe]
      F|> matches

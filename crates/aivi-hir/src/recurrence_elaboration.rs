@@ -1116,7 +1116,7 @@ mod tests {
                 assert_eq!(plan.wakeup.kind(), RecurrenceWakeupKind::Timer);
                 assert_eq!(plan.start.stage_index, 0);
                 assert!(plan.guards.is_empty());
-                assert!(plan.steps.is_empty());
+                assert_eq!(plan.steps.len(), 1);
                 assert_eq!(
                     plan.start.result_subject,
                     GateType::Primitive(crate::BuiltinType::Int)
@@ -1458,7 +1458,7 @@ signal counter : Signal Int =
                     GateType::Primitive(crate::BuiltinType::Int)
                 );
                 assert_eq!(plan.guards.len(), 1);
-                assert!(plan.steps.is_empty());
+                assert_eq!(plan.steps.len(), 1);
                 assert_eq!(
                     plan.start.result_subject,
                     GateType::Primitive(crate::BuiltinType::Int)

@@ -43,14 +43,14 @@ value initialParents: Parents = {
     d: D
 }
 
-fun nodeLabel:Text node:Node =>
+fun nodeLabel: Text node:Node =>
     node
      ||> A -> "A"
      ||> B -> "B"
      ||> C -> "C"
      ||> D -> "D"
 
-fun edgeLabel:Text edge:Edge =>
+fun edgeLabel: Text edge:Edge =>
     join "" [
         nodeLabel edge.left,
         "-",
@@ -58,46 +58,46 @@ fun edgeLabel:Text edge:Edge =>
         ":{edge.weight}"
     ]
 
-fun appendEdgeLabel:(List Text) parts:(List Text) edge:Edge =>
+fun appendEdgeLabel: (List Text) parts:(List Text) edge:Edge =>
     append parts [
         edgeLabel edge
     ]
 
-fun edgeListLabel:Text edges:(List Edge) =>
+fun edgeListLabel: Text edges:(List Edge) =>
     edges
      |> reduce appendEdgeLabel []
      |> join ", "
 
-fun parentOf:Node parents:Parents node:Node =>
+fun parentOf: Node parents:Parents node:Node =>
     node
      ||> A -> parents.a
      ||> B -> parents.b
      ||> C -> parents.c
      ||> D -> parents.d
 
-fun setParent:Parents parents:Parents node:Node x:Node =>
+fun setParent: Parents parents:Parents node:Node x:Node =>
     node
      ||> A -> { a: x, b: parents.b, c: parents.c, d: parents.d }
      ||> B -> { a: parents.a, b: x, c: parents.c, d: parents.d }
      ||> C -> { a: parents.a, b: parents.b, c: x, d: parents.d }
      ||> D -> { a: parents.a, b: parents.b, c: parents.c, d: x }
 
-fun rootOf:Node parents:Parents node:Node =>
+fun rootOf: Node parents:Parents node:Node =>
     parentOf parents (parentOf parents (parentOf parents (parentOf parents node)))
 
-fun sameComponent:Bool parents:Parents edge:Edge =>
+fun sameComponent: Bool parents:Parents edge:Edge =>
     (rootOf parents edge.left) == (rootOf parents edge.right)
 
-fun unionParents:Parents parents:Parents left:Node right:Node =>
+fun unionParents: Parents parents:Parents left:Node right:Node =>
     setParent parents (rootOf parents left) (rootOf parents right)
 
-fun minusOne:Int x:Int =>
+fun minusOne: Int x:Int =>
     x - 1
 
-fun sameCount:Bool left:Int right:Int =>
+fun sameCount: Bool left:Int right:Int =>
     left == right
 
-fun acceptEdge:KruskalState state:KruskalState edge:Edge =>
+fun acceptEdge: KruskalState state:KruskalState edge:Edge =>
     {
         parents: unionParents state.parents edge.left edge.right,
         chosen: append state.chosen [edge],
@@ -105,7 +105,7 @@ fun acceptEdge:KruskalState state:KruskalState edge:Edge =>
         totalWeight: state.totalWeight + edge.weight
     }
 
-fun rejectEdge:KruskalState state:KruskalState edge:Edge =>
+fun rejectEdge: KruskalState state:KruskalState edge:Edge =>
     {
         parents: state.parents,
         chosen: state.chosen,
@@ -113,7 +113,7 @@ fun rejectEdge:KruskalState state:KruskalState edge:Edge =>
         totalWeight: state.totalWeight
     }
 
-fun step:KruskalState state:KruskalState edge:Edge =>
+fun step: KruskalState state:KruskalState edge:Edge =>
     sameComponent state.parents edge
      T|> rejectEdge state edge
      F|> acceptEdge state edge

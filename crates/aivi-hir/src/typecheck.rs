@@ -218,6 +218,10 @@ struct TypeChecker<'a> {
     diagnostics: Vec<Diagnostic>,
     option_default_in_scope: bool,
     default_record_elisions: Vec<DefaultRecordElision>,
+    /// Type parameters in the currently-checked function that are declared as
+    /// having an `Eq` constraint via `(Eq K) -> ...` in the function annotation.
+    /// Populated on entry to `check_function_item`, cleared on exit.
+    eq_constrained_parameters: HashSet<TypeParameterId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -241,6 +245,7 @@ impl<'a> TypeChecker<'a> {
             diagnostics: Vec::new(),
             option_default_in_scope,
             default_record_elisions: Vec::new(),
+            eq_constrained_parameters: HashSet::new(),
         }
     }
 
@@ -280,6 +285,12 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_function_item(&mut self, item: &FunctionItem) {
+        // Populate the Eq constraint context so that `require_eq` can accept open
+        // type parameters that are declared as `(Eq K) -> ...` in this function.
+        let prev_eq_context = std::mem::replace(
+            &mut self.eq_constrained_parameters,
+            self.typing.eq_constrained_parameters(&item.context),
+        );
         let mut env = GateExprEnv::default();
         for parameter in &item.parameters {
             let Some(annotation) = parameter.annotation else {
@@ -294,6 +305,7 @@ impl<'a> TypeChecker<'a> {
             .annotation
             .and_then(|annotation| self.typing.lower_open_annotation(annotation));
         self.check_expr(item.body, &env, expected.as_ref(), &mut Vec::new());
+        self.eq_constrained_parameters = prev_eq_context;
     }
 
     fn check_signal_item(&mut self, item: &SignalItem) {
@@ -2084,9 +2096,17 @@ impl<'a> TypeChecker<'a> {
                 Err("`Bytes` does not have a compiler-derived `Eq` instance in v1".to_owned())
             }
             GateType::Primitive(_) => Ok(()),
-            GateType::TypeParameter { name, .. } => Err(format!(
-                "open type parameter `{name}` does not have a compiler-derived `Eq` instance in v1"
-            )),
+            GateType::TypeParameter { parameter, name } => {
+                if self.eq_constrained_parameters.contains(parameter) {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "open type parameter `{name}` does not have a compiler-derived `Eq` \
+                         instance in v1; add `(Eq {name}) ->` to the function annotation to \
+                         require it"
+                    ))
+                }
+            }
             GateType::Tuple(elements) => {
                 for element in elements {
                     self.require_eq(element, item_stack)?;
@@ -3042,11 +3062,11 @@ mod tests {
             "class Eq A\n\
              \x20\x20\x20\x20(==) : A -> A -> Bool\n\
              type Blob = Blob Bytes\n\
-             value blobEquals:Bool left:Blob right:Blob =>\n\
+             fun blobEquals:Bool left:Blob right:Blob =>\n\
              \x20\x20\x20\x20True\n\
              instance Eq Blob\n\
              \x20\x20\x20\x20(==) left right = blobEquals left right\n\
-             value compare:Bool left:Blob right:Blob =>\n\
+             fun compare:Bool left:Blob right:Blob =>\n\
              \x20\x20\x20\x20left == right\n",
         );
         assert!(
@@ -3941,8 +3961,8 @@ fun items:(List A) acc:(TakeAcc A) => acc.items
         let report = typecheck_text(
             "signal-name-direct-call.aivi",
             "signal direction : Signal Int = 1\n\
-             value step:Int x:Int => x\n\
-             value current:Int tick:Unit => step direction\n",
+             fun step:Int x:Int => x\n\
+             fun current:Int tick:Unit => step direction\n",
         );
         assert!(
             report.is_ok(),

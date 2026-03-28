@@ -2,7 +2,8 @@ use aivi_base::{Diagnostic, DiagnosticCode, Severity, SourceFile, SourceSpan, Sp
 
 use crate::{
     cst::{
-        BigIntLiteral, BinaryOperator, ClassBody, ClassMember, ClassMemberName, DecimalLiteral,
+        BigIntLiteral, BinaryOperator, ClassBody, ClassMember, ClassMemberName, ClassRequireDecl,
+        ClassWithDecl, DecimalLiteral,
         Decorator, DecoratorArguments, DecoratorPayload, DomainBody, DomainItem, DomainMember,
         DomainMemberName, ErrorItem, ExportItem, Expr, ExprKind, FloatLiteral, FunctionParam,
         Identifier, InstanceBody, InstanceItem, InstanceMember, IntegerLiteral, Item, ItemBase,
@@ -34,6 +35,10 @@ const TRAILING_DECLARATION_BODY_TOKEN: DiagnosticCode =
     DiagnosticCode::new("syntax", "trailing-declaration-body-token");
 const MISSING_CLASS_MEMBER_TYPE: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-class-member-type");
+const MISSING_CLASS_WITH_TYPE: DiagnosticCode =
+    DiagnosticCode::new("syntax", "missing-class-with-type");
+const MISSING_CLASS_REQUIRE_TYPE: DiagnosticCode =
+    DiagnosticCode::new("syntax", "missing-class-require-type");
 const MISSING_INSTANCE_CLASS: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-instance-class");
 const MISSING_INSTANCE_TARGET: DiagnosticCode =
@@ -710,11 +715,32 @@ impl<'a> Parser<'a> {
 
     fn parse_class_body(&mut self, cursor: &mut usize, end: usize) -> Option<ClassBody> {
         let body_start = *cursor;
+        let mut with_decls = Vec::new();
+        let mut require_decls = Vec::new();
         let mut members = Vec::new();
 
         while let Some(index) = self.peek_nontrivia(*cursor, end) {
             if !self.tokens[index].line_start() {
                 break;
+            }
+            // Detect the context-sensitive `with` and `require` soft-keywords.
+            // They are treated as declarations only when NOT immediately followed by `:`,
+            // which disambiguates them from method names (`with: A -> A`).
+            if self.tokens[index].kind() == TokenKind::Identifier {
+                let text = self.tokens[index].text(self.source);
+                if text == "with" && self.peek_kind(index + 1, end) != Some(TokenKind::Colon) {
+                    if let Some(decl) = self.parse_class_with_decl(cursor, end) {
+                        with_decls.push(decl);
+                        continue;
+                    }
+                } else if text == "require"
+                    && self.peek_kind(index + 1, end) != Some(TokenKind::Colon)
+                {
+                    if let Some(decl) = self.parse_class_require_decl(cursor, end) {
+                        require_decls.push(decl);
+                        continue;
+                    }
+                }
             }
             let Some(member) = self.parse_class_member(cursor, end) else {
                 break;
@@ -722,9 +748,85 @@ impl<'a> Parser<'a> {
             members.push(member);
         }
 
-        (!members.is_empty()).then_some(ClassBody {
-            members,
-            span: self.source_span_for_range(body_start, *cursor),
+        (!with_decls.is_empty() || !require_decls.is_empty() || !members.is_empty()).then_some(
+            ClassBody {
+                with_decls,
+                require_decls,
+                members,
+                span: self.source_span_for_range(body_start, *cursor),
+            },
+        )
+    }
+
+    fn parse_class_with_decl(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+    ) -> Option<ClassWithDecl> {
+        let start = *cursor;
+        let with_index = self.peek_nontrivia(*cursor, end)?;
+        // Consume the `with` soft-keyword.
+        *cursor = with_index + 1;
+        // Require the superclass type to start on the same line as `with`.
+        let Some(type_index) = self.peek_nontrivia(*cursor, end) else {
+            *cursor = start;
+            return None;
+        };
+        if self.tokens[type_index].line_start() {
+            *cursor = start;
+            return None;
+        }
+        let Some(superclass) = self.parse_type_expr(cursor, end, TypeStop::default()) else {
+            self.diagnostics.push(
+                Diagnostic::error("`with` declaration is missing its superclass type")
+                    .with_code(MISSING_CLASS_WITH_TYPE)
+                    .with_primary_label(
+                        self.source_span_of_token(with_index),
+                        "expected a superclass type such as `Applicative M`",
+                    ),
+            );
+            *cursor = start;
+            return None;
+        };
+        Some(ClassWithDecl {
+            superclass,
+            span: self.source_span_for_range(start, *cursor),
+        })
+    }
+
+    fn parse_class_require_decl(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+    ) -> Option<ClassRequireDecl> {
+        let start = *cursor;
+        let require_index = self.peek_nontrivia(*cursor, end)?;
+        // Consume the `require` soft-keyword.
+        *cursor = require_index + 1;
+        // Require the constraint type to start on the same line as `require`.
+        let Some(type_index) = self.peek_nontrivia(*cursor, end) else {
+            *cursor = start;
+            return None;
+        };
+        if self.tokens[type_index].line_start() {
+            *cursor = start;
+            return None;
+        }
+        let Some(constraint) = self.parse_type_expr(cursor, end, TypeStop::default()) else {
+            self.diagnostics.push(
+                Diagnostic::error("`require` declaration is missing its constraint type")
+                    .with_code(MISSING_CLASS_REQUIRE_TYPE)
+                    .with_primary_label(
+                        self.source_span_of_token(require_index),
+                        "expected a constraint type such as `Eq K`",
+                    ),
+            );
+            *cursor = start;
+            return None;
+        };
+        Some(ClassRequireDecl {
+            constraint,
+            span: self.source_span_for_range(start, *cursor),
         })
     }
 
@@ -4184,7 +4286,7 @@ signal users : Signal User
 
 type Bool = True | False
 value answer = 42
-fun add : Int => x : Int => y : Int =>
+fun add: Int x:Int y:Int =>
     x + y
 use aivi.network (
     http
@@ -4198,7 +4300,7 @@ export main
         assert_eq!(parsed.module.items[0].kind(), ItemKind::Signal);
         assert_eq!(parsed.module.items[1].kind(), ItemKind::Type);
         assert_eq!(parsed.module.items[2].kind(), ItemKind::Value);
-        assert_eq!(parsed.module.items[3].kind(), ItemKind::Value);
+        assert_eq!(parsed.module.items[3].kind(), ItemKind::Fun);
         assert_eq!(parsed.module.items[4].kind(), ItemKind::Use);
         assert_eq!(parsed.module.items[5].kind(), ItemKind::Export);
 
@@ -4238,14 +4340,14 @@ export main
         }
 
         match &parsed.module.items[3] {
-            Item::Value(item) => {
+            Item::Fun(item) => {
                 assert!(!item.parameters.is_empty());
                 assert!(matches!(
                     item.expr_body().map(|expr| &expr.kind),
                     Some(ExprKind::Binary { .. })
                 ));
             }
-            other => panic!("expected value item with parameters, got {other:?}"),
+            other => panic!("expected fun item with parameters, got {other:?}"),
         }
 
         match &parsed.module.items[4] {
@@ -4425,6 +4527,7 @@ export main
                 }
                 other => panic!("expected `and` root with equality subexpressions, got {other:?}"),
             },
+            Item::Fun(_) => {}
             other => panic!("expected function item, got {other:?}"),
         }
     }
@@ -4682,7 +4785,7 @@ instance Eq A => Eq (Option A)
         let body = traversable.class_body().expect("class body");
         assert_eq!(body.members[0].constraints.len(), 1);
 
-        let Item::Value(function) = &parsed.module.items[2] else {
+        let Item::Fun(function) = &parsed.module.items[2] else {
             panic!("expected constrained function item");
         };
         assert_eq!(function.constraints.len(), 1);
@@ -5131,7 +5234,7 @@ fun ignore:Int _ =>
                 if matches!(elements.as_slice(), [Expr { kind: ExprKind::Range { .. }, .. }])
         ));
 
-        let Item::Value(ignore) = &parsed.module.items[4] else {
+        let Item::Fun(ignore) = &parsed.module.items[4] else {
             panic!("expected ignore function item");
         };
         assert_eq!(ignore.parameters.len(), 1);

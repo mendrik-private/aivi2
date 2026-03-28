@@ -17,7 +17,7 @@ type DecodeMode =
   | Permissive
 
 domain Retry over Int
-    literal rt: Int -> Retry
+    literal times: Int -> Retry
     unwrap: Retry -> Int
 
 export (

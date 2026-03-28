@@ -266,9 +266,29 @@ pub struct ClassMember {
     pub span: SourceSpan,
 }
 
+/// A `with SuperclassName TypeParam` declaration inside a class body.
+/// Maps to a superclass in the HIR; uses the body syntax rather than the
+/// legacy `(SuperclassName TypeParam) -> class Name Param` prefix form.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClassWithDecl {
+    pub superclass: TypeExpr,
+    pub span: SourceSpan,
+}
+
+/// A `require ClassName TypeParam` declaration inside a class body.
+/// Constrains a class type parameter: any type instantiated for it must
+/// satisfy the given class (e.g. `require Eq K` asserts K has Eq).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClassRequireDecl {
+    pub constraint: TypeExpr,
+    pub span: SourceSpan,
+}
+
 /// Body of a `class` declaration.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClassBody {
+    pub with_decls: Vec<ClassWithDecl>,
+    pub require_decls: Vec<ClassRequireDecl>,
     pub members: Vec<ClassMember>,
     pub span: SourceSpan,
 }

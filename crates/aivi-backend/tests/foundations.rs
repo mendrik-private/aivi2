@@ -1944,7 +1944,7 @@ domain Duration over Int
     literal sec : Int -> Duration
 
 domain Retry over Int
-    literal rt : Int -> Retry
+    literal times : Int -> Retry
 
 fun step:Int x:Int =>
     x
@@ -1955,7 +1955,7 @@ signal polled : Signal Int =
      @|> step
      <|@ step
 
-@recur.backoff 3rt
+@recur.backoff 3times
 value retried : Task Int Int =
     0
      @|> step

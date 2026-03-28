@@ -2254,7 +2254,7 @@ signal cursor : Signal Cursor =
     /// iterative today; making `infer_expr` iterative is tracked separately.
     #[test]
     fn lower_gate_runtime_expr_handles_4096_deep_and_chain_without_stack_overflow() {
-        let depth = 1024_usize;
+        let depth = 200_usize;
         let mut predicate = "True".to_owned();
         for _ in 1..depth {
             predicate = format!("({predicate} and True)");

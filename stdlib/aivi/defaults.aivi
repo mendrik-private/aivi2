@@ -1,12 +1,5 @@
-// aivi.defaults: Default/zero values for common scalar types.
-//
-// Useful for initialising accumulators, fallback signal values, and
-// default record fields without repeating magic literals everywhere.
-
-value defaultText : Text = ""
-
-value defaultInt : Int = 0
-
-value defaultBool : Bool = False
+value defaultText: Text = ""
+value defaultInt: Int = 0
+value defaultBool: Bool = False
 
 export (Option, defaultText, defaultInt, defaultBool)

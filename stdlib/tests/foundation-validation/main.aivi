@@ -78,7 +78,8 @@ use aivi.path (
 
 use aivi.color (Color)
 
-type LeadingName = NonEmptyList Text
+type LeadingName =
+  | NonEmptyList Text
 
 type User = {
     name: Text,
@@ -86,7 +87,10 @@ type User = {
     email: Option Text
 }
 
-value user: User = { name: "Ada" }
+value user: User = {
+    name: "Ada"
+}
+
 value ok: Validation (NonEmptyList Text) Text = Valid "Ada"
 value err: Validation (NonEmptyList Text) Text = Invalid (singleton "field required")
 value isOkSentinel: Bool = isValid ok
@@ -111,7 +115,7 @@ value numsHead: Option Int = head numbers
 value numsTail: Option (List Int) = tail numbers
 value numsLast: Option Int = last numbers
 
-fun smaller:Bool left:Int right:Int =>
+fun smaller: Bool left:Int right:Int =>
     left < right
 
 value smallestNumber: Int = min smaller 4 2
@@ -124,12 +128,12 @@ value smallestFromMany: Int =
         2
     ]
 
-fun positive:Bool n:Int =>
+fun positive: Bool n:Int =>
     n > 0
 
 value foundPositive: Option Int = find positive numbers
 
-fun even:Bool n:Int =>
+fun even: Bool n:Int =>
     n == 2
 
 value split: (Partition Int) = partition even numbers
@@ -165,7 +169,7 @@ value ageErr: Bool = isErr errAge
 value ageValue: Int = withDefault 0 okAge
 value ageOption: Option Int = toOption okAge
 
-fun prefixErr:Text msg:Text =>
+fun prefixErr: Text msg:Text =>
     "error:{msg}"
 
 value prefixedErr: Result Text Int = mapErr prefixErr errAge

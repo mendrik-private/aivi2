@@ -1375,12 +1375,12 @@ signal retried : Signal Int =
             "runtime-hir-adapter-task.aivi",
             r#"
 domain Retry over Int
-    literal rt : Int -> Retry
+    literal times : Int -> Retry
 
 fun keep value =>
     value
 
-@recur.backoff 3rt
+@recur.backoff 3times
 value retried : Task Int Int =
     0
      @|> keep

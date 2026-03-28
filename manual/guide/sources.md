@@ -62,7 +62,7 @@ domain Duration over Int
     literal sec: Int -> Duration
 
 domain Retry over Int
-    literal rt: Int -> Retry
+    literal times: Int -> Retry
 
 value authHeaders: Map Text Text = EmptyMap
 
@@ -71,7 +71,7 @@ signal apiHost = "https://api.example.com"
 @source http.get "{apiHost}/users" with {
     headers: authHeaders,
     decode: Strict,
-    retry: 3rt,
+    retry: 3times,
     timeout: 5sec
 }
 signal users: Signal (Result HttpError (List User))

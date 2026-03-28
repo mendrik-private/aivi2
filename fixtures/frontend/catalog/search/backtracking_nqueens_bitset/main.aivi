@@ -34,29 +34,29 @@ type NQueensCatalog = {
     coverage: Text
 }
 
-fun pow2:Int exponent:Int =>
+fun pow2: Int exponent:Int =>
     exponent == 0
      T|> 1
      F|> 2 * pow2 (exponent - 1)
 
-fun bitSet:Bool mask:Int index:Int =>
+fun bitSet: Bool mask:Int index:Int =>
     (mask / (pow2 index)) % 2 == 1
 
-fun setBit:Int mask:Int index:Int =>
+fun setBit: Int mask:Int index:Int =>
     bitSet mask index
      T|> mask
      F|> mask + pow2 index
 
-fun diagUpIndex:Int size:Int row:Int col:Int =>
+fun diagUpIndex: Int size:Int row:Int col:Int =>
     row - col + size - 1
 
-fun bitClear:Bool mask:Int index:Int =>
+fun bitClear: Bool mask:Int index:Int =>
     bitSet mask index == False
 
-fun safeColumn:Bool size:Int row:Int col:Int state:SearchState =>
+fun safeColumn: Bool size:Int row:Int col:Int state:SearchState =>
     bitClear state.columns col and bitClear state.diagDown (row + col) and bitClear state.diagUp (diagUpIndex size row col)
 
-fun placeQueen:SearchState size:Int row:Int col:Int state:SearchState =>
+fun placeQueen: SearchState size:Int row:Int col:Int state:SearchState =>
     {
         columns: setBit state.columns col,
         diagDown: setBit state.diagDown (row + col),
@@ -64,22 +64,22 @@ fun placeQueen:SearchState size:Int row:Int col:Int state:SearchState =>
         placements: append state.placements [col]
     }
 
-fun addSolution:SolveState found:SolveState placements:(List Int) =>
+fun addSolution: SolveState found:SolveState placements:(List Int) =>
     found
      ||> { solutions, first: Some board } -> { solutions: solutions + 1, first: Some board }
      ||> { solutions, first: None }       -> { solutions: solutions + 1, first: Some placements }
 
-fun advanceColumn:SolveState size:Int row:Int col:Int state:SearchState found:SolveState =>
+fun advanceColumn: SolveState size:Int row:Int col:Int state:SearchState found:SolveState =>
     safeColumn size row col state
      T|> search size row (col + 1) state (search size (row + 1) 0 (placeQueen size row col state) found)
      F|> search size row (col + 1) state found
 
-fun continueRow:SolveState size:Int row:Int col:Int state:SearchState found:SolveState =>
+fun continueRow: SolveState size:Int row:Int col:Int state:SearchState found:SolveState =>
     col == size
      T|> found
      F|> advanceColumn size row col state found
 
-fun search:SolveState size:Int row:Int col:Int state:SearchState found:SolveState =>
+fun search: SolveState size:Int row:Int col:Int state:SearchState found:SolveState =>
     row == size
      T|> addSolution found state.placements
      F|> continueRow size row col state found
@@ -96,15 +96,15 @@ value emptySolveState: SolveState = {
     first: None
 }
 
-fun solveQueens:SolveState size:Int =>
+fun solveQueens: SolveState size:Int =>
     search size 0 0 emptySearchState emptySolveState
 
-fun summarizeBoard:(Option BoardSummary) solution:(Option (List Int)) =>
+fun summarizeBoard: (Option BoardSummary) solution:(Option (List Int)) =>
     solution
      ||> Some columns -> Some { columns, depth: length columns }
      ||> None         -> None
 
-fun summarizeQueens:NQueensSummary label:Text size:Int =>
+fun summarizeQueens: NQueensSummary label:Text size:Int =>
     solveQueens size
      ||> { solutions, first } -> { label, size, solutions, first: summarizeBoard first, columnMaskWidth: pow2 size, diagonalMaskWidth: pow2 (size + size - 1) }
 

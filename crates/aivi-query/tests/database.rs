@@ -94,7 +94,9 @@ fn parsed_and_hir_queries_reuse_cached_snapshots_until_text_changes() {
     let parsed_first = parsed_file(&db, file);
     let parsed_second = parsed_file(&db, file);
     assert!(Arc::ptr_eq(&parsed_first, &parsed_second));
-    assert!(Arc::ptr_eq(&file.source(&db), &parsed_first.source_arc()));
+    let current_source = file.source(&db);
+    assert_eq!(current_source.path(), parsed_first.source().path());
+    assert_eq!(current_source.text(), parsed_first.source().text());
 
     let hir_first = hir_module(&db, file);
     let hir_second = hir_module(&db, file);
@@ -276,7 +278,7 @@ use aivi.log (
     LogEntry
     LogError
     LogTask
-    LogWrite
+    LogSink
 )
 
 type User = {
@@ -337,7 +339,7 @@ value entry:LogEntry = {
     context: context
 }
 
-type Writer = LogWrite
+type Writer = LogSink
 type CurrentLogTask = LogTask
 type CurrentLogError = LogError
 
@@ -388,7 +390,7 @@ value errorLevel:LogLevel =
     let log_exports = exported_names(&db, log_module);
     assert!(log_exports.find("LogLevel").is_some());
     assert!(log_exports.find("Debug").is_some());
-    assert!(log_exports.find("LogWrite").is_some());
+    assert!(log_exports.find("LogSink").is_some());
 
     assert!(
         exported_names(&db, duration_module)

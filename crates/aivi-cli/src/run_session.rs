@@ -1359,6 +1359,12 @@ mod tests {
         let driver = harness.control().driver();
         driver.dispatch_window_key_event("ArrowUp", false);
         assert!(
+            pump_until(&context, Duration::from_secs(1), || {
+                text_signal_for(&harness, direction_item) == "Up"
+            }),
+            "dispatching ArrowUp should update the snake direction before waiting for a collision"
+        );
+        assert!(
             pump_until(&context, Duration::from_secs(3), || {
                 text_signal_for(&harness, status_item) == "Game Over"
             }),

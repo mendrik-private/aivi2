@@ -1,14 +1,14 @@
 use std::fmt::Write;
 
 use crate::cst::{
-    BinaryOperator, ClassMember, ClassMemberName, Decorator, DecoratorArguments, DecoratorPayload,
-    DomainItem, DomainMember, DomainMemberName, ExportItem, Expr, ExprKind, FunctionParam,
-    Identifier, InstanceItem, InstanceMember, Item, MapExpr, MarkupAttribute, MarkupAttributeValue,
-    MarkupNode, Module, NamedItem, Pattern, PatternKind, PipeExpr, PipeStage, PipeStageKind,
-    ProjectionPath, QualifiedName, RecordExpr, RecordField, RecordPatternField, SourceDecorator,
-    SourceProviderContractItem, SourceProviderContractMember, SourceProviderContractSchemaMember,
-    SuffixedIntegerLiteral, TextLiteral, TextSegment, TypeDeclBody, TypeExpr, TypeExprKind,
-    TypeField, TypeVariant, UnaryOperator, UseItem,
+    BinaryOperator, ClassMember, ClassMemberName, ClassRequireDecl, ClassWithDecl, Decorator,
+    DecoratorArguments, DecoratorPayload, DomainItem, DomainMember, DomainMemberName, ExportItem,
+    Expr, ExprKind, FunctionParam, Identifier, InstanceItem, InstanceMember, Item, MapExpr,
+    MarkupAttribute, MarkupAttributeValue, MarkupNode, Module, NamedItem, Pattern, PatternKind,
+    PipeExpr, PipeStage, PipeStageKind, ProjectionPath, QualifiedName, RecordExpr, RecordField,
+    RecordPatternField, SourceDecorator, SourceProviderContractItem, SourceProviderContractMember,
+    SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextLiteral, TextSegment,
+    TypeDeclBody, TypeExpr, TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseItem,
 };
 
 const INDENT_WIDTH: usize = 4;
@@ -271,10 +271,41 @@ impl Formatter {
         };
 
         let mut lines = vec![header];
+        // Legacy prefix-style superclasses `(X) -> class Name Param` are rendered
+        // as body-level `with` declarations (canonical form).
+        for constraint in &item.constraints {
+            lines.push(format!(
+                "{}with {}",
+                spaces(INDENT_WIDTH),
+                self.format_type_inline(constraint, 0),
+            ));
+        }
+        for decl in &body.with_decls {
+            lines.extend(self.format_class_with_decl(decl));
+        }
+        for decl in &body.require_decls {
+            lines.extend(self.format_class_require_decl(decl));
+        }
         for member in &body.members {
             lines.extend(self.format_class_member(member));
         }
         lines
+    }
+
+    fn format_class_with_decl(&self, decl: &ClassWithDecl) -> Vec<String> {
+        vec![format!(
+            "{}with {}",
+            spaces(INDENT_WIDTH),
+            self.format_type_inline(&decl.superclass, 0),
+        )]
+    }
+
+    fn format_class_require_decl(&self, decl: &ClassRequireDecl) -> Vec<String> {
+        vec![format!(
+            "{}require {}",
+            spaces(INDENT_WIDTH),
+            self.format_type_inline(&decl.constraint, 0),
+        )]
     }
 
     fn format_instance_item(&self, item: &InstanceItem) -> Vec<String> {
@@ -1808,7 +1839,7 @@ mod tests {
                 "  &|> documentBody\n",
                 "  |> Pair\n",
                 "\n",
-                "fun label:Text state:SaveState =>\n",
+                "fun label: Text state:SaveState =>\n",
                 "    state\n",
                 "     ||> Saved         -> \"saved\"\n",
                 "     ||> Dirty message -> \"dirty {message}\"\n",
@@ -1822,7 +1853,7 @@ mod tests {
         assert_eq!(
             formatted,
             concat!(
-                "fun formatCount:Text count:Int =>\n",
+                "fun formatCount: Text count:Int =>\n",
                 "    \"{count} unread\"\n",
                 "\n",
                 "value count = 3\n",
@@ -1849,7 +1880,7 @@ mod tests {
                 "class Eq A\n",
                 "    (==): A -> A -> Bool\n",
                 "\n",
-                "fun equivalent:Bool left:Int right:Int =>\n",
+                "fun equivalent: Bool left:Int right:Int =>\n",
                 "    left + 1 == right - 1 and left != right\n",
             )
         );
@@ -2017,7 +2048,7 @@ value view =
             concat!(
                 "type Status = Idle | Failed Text\n",
                 "\n",
-                "fun label:Text status:Status =>\n",
+                "fun label: Text status:Status =>\n",
                 "    status\n",
                 "     ||> Idle          -> \"idle\"\n",
                 "     ||> Failed reason -> \"failed {reason}\"\n",
@@ -2056,7 +2087,7 @@ value view =
         assert_eq!(
             formatted,
             concat!(
-                "fun ignore:Int _ =>\n",
+                "fun ignore: Int _ =>\n",
                 "    .\n",
                 "\n",
                 "value projection = .email\n",

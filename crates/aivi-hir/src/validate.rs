@@ -5390,7 +5390,7 @@ impl Validator<'_> {
                         "this recurrent pipe needs an explicit timer, backoff policy, source event, or provider-defined trigger",
                     )
                     .with_note(
-                        "add a compiler-known non-source wakeup witness such as `@recur.timer 5sec` or `@recur.backoff 3rt`, or use a compiler-known `@source` provider with explicit wakeup proof",
+                        "add a compiler-known non-source wakeup witness such as `@recur.timer 5sec` or `@recur.backoff 3times`, or use a compiler-known `@source` provider with explicit wakeup proof",
                     );
             }
         }
@@ -10139,7 +10139,7 @@ impl<'a> GateTypeContext<'a> {
         })
     }
 
-    fn class_constraint_parts(&self, constraint: TypeId) -> Option<(ItemId, TypeId)> {
+    pub(crate) fn class_constraint_parts(&self, constraint: TypeId) -> Option<(ItemId, TypeId)> {
         let ty = self.module.types().get(constraint)?;
         match &ty.kind {
             TypeKind::Apply { callee, arguments } if arguments.len() == 1 => {
@@ -10156,6 +10156,38 @@ impl<'a> GateTypeContext<'a> {
             }
             _ => None,
         }
+    }
+
+    /// Returns the set of type parameters in `context` that are constrained by `Eq`.
+    /// Used by the typechecker to satisfy `require_eq` for open type parameters in
+    /// functions whose annotations carry `(Eq K) ->` constraints.
+    pub(crate) fn eq_constrained_parameters(
+        &self,
+        context: &[TypeId],
+    ) -> HashSet<TypeParameterId> {
+        let mut result = HashSet::new();
+        let Some(eq_class_id) = self.module.items().iter().find_map(|(id, item)| {
+            matches!(item, Item::Class(c) if c.name.text() == "Eq").then_some(id)
+        }) else {
+            return result;
+        };
+        for &constraint in context {
+            let Some((class_id, subject_id)) = self.class_constraint_parts(constraint) else {
+                continue;
+            };
+            if class_id != eq_class_id {
+                continue;
+            }
+            // Check if the subject resolves to a type parameter.
+            if let TypeKind::Name(ref reference) = self.module.types()[subject_id].kind {
+                if let ResolutionState::Resolved(TypeResolution::TypeParameter(param_id)) =
+                    reference.resolution.as_ref()
+                {
+                    result.insert(*param_id);
+                }
+            }
+        }
+        result
     }
 
     fn select_domain_member_candidate<T>(

@@ -622,15 +622,28 @@ impl<'a> Lowerer<'a> {
         }
         let parameters = crate::NonEmpty::from_vec(parameters)
             .expect("class fallback parameter list should be non-empty");
-        let superclasses = item
+        // Superclasses: legacy prefix syntax `(X) -> class Name Param` (item.constraints)
+        // plus new body-level `with X Param` declarations (body.with_decls).
+        let mut superclasses: Vec<TypeId> = item
             .constraints
             .iter()
             .map(|constraint| self.lower_type_expr(constraint))
             .collect();
-        let members = item
+        let (param_constraints, members) = item
             .class_body()
             .map(|body| {
-                body.members
+                superclasses.extend(
+                    body.with_decls
+                        .iter()
+                        .map(|w| self.lower_type_expr(&w.superclass)),
+                );
+                let param_constraints: Vec<TypeId> = body
+                    .require_decls
+                    .iter()
+                    .map(|r| self.lower_type_expr(&r.constraint))
+                    .collect();
+                let members = body
+                    .members
                     .iter()
                     .map(|member| ClassMember {
                         span: member.span,
@@ -654,7 +667,8 @@ impl<'a> Lowerer<'a> {
                                 self.placeholder_type(member.span)
                             }),
                     })
-                    .collect()
+                    .collect();
+                (param_constraints, members)
             })
             .unwrap_or_else(|| {
                 self.emit_error(
@@ -662,7 +676,7 @@ impl<'a> Lowerer<'a> {
                     "class declaration is missing a body",
                     code("missing-class-body"),
                 );
-                Vec::new()
+                (Vec::new(), Vec::new())
             });
 
         ClassItem {
@@ -670,6 +684,7 @@ impl<'a> Lowerer<'a> {
             name,
             parameters,
             superclasses,
+            param_constraints,
             members,
         }
     }
@@ -6838,13 +6853,13 @@ type User = {
 }
 
 domain Retry over Int
-    literal rt : Int -> Retry
+    literal times : Int -> Retry
 
 fun keepCount:Int response:(Result HttpError (List User)) current:Int =>
     current
 
 @source http.get "/users" with {
-    retry: 3rt
+    retry: 3times
 }
 signal responses : Signal (Result HttpError (List User))
 
@@ -7345,7 +7360,7 @@ domain Duration over Int
     literal sec : Int -> Duration
 
 domain Retry over Int
-    literal rt : Int -> Retry
+    literal times : Int -> Retry
 
 fun step x =>
     x
@@ -7357,14 +7372,14 @@ signal bare : Signal Int =
      <|@ step
 
 @source http.get "/users"
-@recur.backoff 3rt
+@recur.backoff 3times
 signal mixed : Signal Int =
     0
      @|> step
      <|@ step
 
 @recur.timer 5sec
-@recur.backoff 3rt
+@recur.backoff 3times
 value duplicate : Task Int Int =
     0
      @|> step
@@ -7719,7 +7734,7 @@ signal updates : Signal Int
             "signal-helper-dependencies.aivi",
             "signal direction : Signal Int = 1\n\
              signal tick : Signal Int = 0\n\
-             value stepOnTick:Int tick:Int => direction\n\
+             fun stepOnTick:Int tick:Int => direction\n\
              signal game : Signal Int = stepOnTick tick\n",
         );
         assert!(
@@ -8109,8 +8124,8 @@ signal updates : Signal Int
         let lowered = lower_text(
             "recurrence-suffix-view.aivi",
             "fun keep x => x\n\
-             value start x => x\n\
-             value step x => x\n\
+             fun start x => x\n\
+             fun step x => x\n\
              signal retried = 0 |> keep | keep @|> start <|@ step <|@ step\n",
         );
         assert!(
@@ -8169,7 +8184,7 @@ signal updates : Signal Int
             "domain Duration over Int\n\
              \tliteral sec : Int -> Duration\n\
              type Cursor = { hasNext: Bool }\n\
-             value keep:Cursor cursor:Cursor => cursor\n\
+             fun keep:Cursor cursor:Cursor => cursor\n\
              value seed:Cursor = { hasNext: True }\n\
              @recur.timer 1sec\n\
              signal cursor : Signal Cursor =\n\
@@ -8205,8 +8220,8 @@ signal updates : Signal Int
         let lowered = lower_text(
             "fanout-filter-before-join.aivi",
             "type User = { email: Text }\n\
-             value keepText:Bool email:Text => True\n\
-             value joinEmails:Text items:List Text => \"joined\"\n\
+             fun keepText:Bool email:Text => True\n\
+             fun joinEmails:Text items:List Text => \"joined\"\n\
              value users:List User = [{ email: \"ada@example.com\" }]\n\
              value joinedEmails:Text =\n\
               users\n\

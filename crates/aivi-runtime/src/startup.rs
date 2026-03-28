@@ -2512,7 +2512,7 @@ value answer = 42
         let lowered = lower_text(
             "runtime-startup-manual-task-error.aivi",
             r#"
-value total = 1.0 + 2.0
+value total:Int = 1 / 0
 "#,
         );
         let mut linked = manual_task_linked_runtime(&lowered, "total");
@@ -2529,7 +2529,8 @@ value total = 1.0 + 2.0
             .expect("task worker thread should join cleanly");
         assert!(matches!(
             result,
-            Err(LinkedTaskWorkerError::Evaluation { instance, .. }) if instance == binding.instance
+            Err(LinkedTaskWorkerError::Evaluation { instance, owner, .. })
+                if instance == binding.instance && owner == binding.owner
         ));
         let outcome = linked
             .tick()
@@ -2606,12 +2607,12 @@ value answer = 42
             "runtime-startup-task-body-gap.aivi",
             r#"
 domain Retry over Int
-    literal rt : Int -> Retry
+    literal times : Int -> Retry
 
 fun step:Int n:Int =>
     n
 
-@recur.backoff 3rt
+@recur.backoff 3times
 value retried : Task Int Int =
     0
      @|> step
@@ -3208,12 +3209,12 @@ signal counter : Signal Int =
             "runtime-startup-task-parameters-invariant.aivi",
             r#"
 domain Retry over Int
-    literal rt : Int -> Retry
+    literal times : Int -> Retry
 
 fun keep:Int n:Int =>
     n
 
-@recur.backoff 3rt
+@recur.backoff 3times
 value retried : Task Int Int =
     0
      @|> keep

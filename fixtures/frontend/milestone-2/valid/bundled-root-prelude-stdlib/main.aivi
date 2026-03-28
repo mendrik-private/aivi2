@@ -43,9 +43,11 @@ use aivi.prelude (
     join
 )
 
-type NameSignal = Signal Text
+type NameSignal =
+  | Signal Text
 
-type CountTask = Task Text Int
+type CountTask =
+  | Task Text Int
 
 type CheckedName =
   | Validation Text Text
@@ -70,18 +72,18 @@ value firstName: Option Text =
         "Grace"
     ]
 
-fun smaller:Bool left:Int right:Int =>
+fun smaller: Bool left:Int right:Int =>
     left < right
 
-fun keepSmall:(Option Int) x:Int =>
+fun keepSmall: (Option Int) x:Int =>
     x < 3
      T|> Some x
      F|> None
 
-fun addOne:Int x:Int =>
+fun addOne: Int x:Int =>
     x + 1
 
-fun punctuate:Text x:Text =>
+fun punctuate: Text x:Text =>
     append x "!"
 
 value leastCount: Int = min smaller 4 2

@@ -15,11 +15,11 @@ domain Duration over Int
     literal sec : Int -> Duration
 
 domain Repeat over Int
-    literal x : Int -> Repeat
+    literal times : Int -> Repeat
 
 @source http.get "/users" with {
     decode: Strict,
-    retry: 3rt,
+    retry: 3times,
     timeout: 5sec
 }
 signal users : Signal (Result HttpError (List User))

@@ -23,11 +23,12 @@ class Display A
 When a type already has an instance, you can use the operator directly:
 
 ```aivi
-fun equivalent: Bool left:Int right:Int =>
+fun equivalent:Bool left:Int right:Int =>
     left == right and left != 0
 
 value sameNumber = equivalent 4 4
 ```
+
 
 ## Declaring an instance
 
@@ -40,12 +41,13 @@ class Eq A
 data Blob =
   | Blob Bytes
 
-fun blobEquals: Bool left:Blob right:Blob =>
+fun blobEquals:Bool left:Blob right:Blob =>
     True
 
 instance Eq Blob
     (==) left right = blobEquals left right
 ```
+
 
 ## Named class methods
 

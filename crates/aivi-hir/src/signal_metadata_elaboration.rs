@@ -154,18 +154,25 @@ fn resolve_custom_source_contract(
     provider: &SourceProviderRef,
 ) -> Option<CustomSourceContractMetadata> {
     let key = provider.custom_key()?;
-    let item = module.items().iter().find_map(|(_, item)| {
-        if let Item::SourceProviderContract(contract) = item {
-            if contract.provider.custom_key().as_deref() == Some(key) {
-                Some(contract)
+    let matches = module
+        .items()
+        .iter()
+        .filter_map(|(_, item)| {
+            if let Item::SourceProviderContract(contract) = item {
+                if contract.provider.custom_key().as_deref() == Some(key) {
+                    Some(contract)
+                } else {
+                    None
+                }
             } else {
                 None
             }
-        } else {
-            None
-        }
-    })?;
-    Some(item.contract.clone())
+        })
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [item] => Some(item.contract.clone()),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Copy)]

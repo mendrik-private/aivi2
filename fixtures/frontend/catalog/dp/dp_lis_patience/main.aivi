@@ -24,14 +24,14 @@ type LisSummary = {
     note: Text
 }
 
-fun keepOpenPile:Placement value:Int piles:(List Pile) pile:Pile =>
+fun keepOpenPile: Placement value:Int piles:(List Pile) pile:Pile =>
     {
         value,
         placed: False,
         piles: append piles [pile]
     }
 
-fun replaceOpenPile:Placement value:Int piles:(List Pile) pile:Pile =>
+fun replaceOpenPile: Placement value:Int piles:(List Pile) pile:Pile =>
     {
         value,
         placed: True,
@@ -43,41 +43,41 @@ fun replaceOpenPile:Placement value:Int piles:(List Pile) pile:Pile =>
         ]
     }
 
-fun placeAvailable:Placement value:Int piles:(List Pile) pile:Pile =>
+fun placeAvailable: Placement value:Int piles:(List Pile) pile:Pile =>
     pile.top < value
      T|> keepOpenPile value piles pile
      F|> replaceOpenPile value piles pile
 
-fun stepPlacement:Placement value:Int placed:Bool piles:(List Pile) pile:Pile =>
+fun stepPlacement: Placement value:Int placed:Bool piles:(List Pile) pile:Pile =>
     placed
      T|> { value, placed: True, piles: append piles [pile] }
      F|> placeAvailable value piles pile
 
-fun placeStep:Placement state:Placement pile:Pile =>
+fun placeStep: Placement state:Placement pile:Pile =>
     state
      ||> { value, placed, piles } -> stepPlacement value placed piles pile
 
-fun finishPlaced:(List Pile) value:Int placed:Bool piles:(List Pile) =>
+fun finishPlaced: (List Pile) value:Int placed:Bool piles:(List Pile) =>
     placed
      T|> piles
      F|> append piles [{ top: value, cards: [value] }]
 
-fun finishPlacement:(List Pile) state:Placement =>
+fun finishPlacement: (List Pile) state:Placement =>
     state
      ||> { value, placed, piles } -> finishPlaced value placed piles
 
-fun placeCard:(List Pile) value:Int piles:(List Pile) =>
+fun placeCard: (List Pile) value:Int piles:(List Pile) =>
     piles
      |> reduce placeStep { value, placed: False, piles: [] }
      |> finishPlacement
 
-fun patienceStep:(List Pile) piles:(List Pile) value:Int =>
+fun patienceStep: (List Pile) piles:(List Pile) value:Int =>
     placeCard value piles
 
-fun appendTopText:(List Text) parts:(List Text) pile:Pile =>
+fun appendTopText: (List Text) parts:(List Text) pile:Pile =>
     append parts ["{pile.top}"]
 
-fun pileTops:Text piles:(List Pile) =>
+fun pileTops: Text piles:(List Pile) =>
     isEmpty piles
      T|> "none"
      F|> join " | " (reduce appendTopText [] piles)

@@ -2710,7 +2710,7 @@ mod tests {
             "fun identity:Int x:Int =>\n\
              x\n\
              \n\
-             value duplicate:List Int values:List Int =>\n\
+             fun duplicate:List Int values:List Int =>\n\
              values\n\
               *|> identity\n",
         );

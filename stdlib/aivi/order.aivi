@@ -1,41 +1,41 @@
-fun chooseMin:A compare:(A -> A -> Bool) best:A candidate:A =>
+fun chooseMin: A compare:(A -> A -> Bool) best:A candidate:A =>
     compare candidate best
      T|> candidate
      F|> best
 
-fun chooseMax:A compare:(A -> A -> Bool) best:A candidate:A =>
+fun chooseMax: A compare:(A -> A -> Bool) best:A candidate:A =>
     compare best candidate
      T|> candidate
      F|> best
 
-fun min:A compare:(A -> A -> Bool) left:A right:A =>
+fun min: A compare:(A -> A -> Bool) left:A right:A =>
     chooseMin compare left right
 
-fun max:A compare:(A -> A -> Bool) left:A right:A =>
+fun max: A compare:(A -> A -> Bool) left:A right:A =>
     chooseMax compare left right
 
-fun minOf:A compare:(A -> A -> Bool) first:A rest:(List A) =>
+fun minOf: A compare:(A -> A -> Bool) first:A rest:(List A) =>
     rest
      |> reduce (chooseMin compare) first
 
-fun maxOf:A compare:(A -> A -> Bool) first:A rest:(List A) =>
+fun maxOf: A compare:(A -> A -> Bool) first:A rest:(List A) =>
     rest
      |> reduce (chooseMax compare) first
 
-fun clampToMax:A compare:(A -> A -> Bool) high:A value:A =>
+fun clampToMax: A compare:(A -> A -> Bool) high:A value:A =>
     compare high value
      T|> high
      F|> value
 
-fun clamp:A compare:(A -> A -> Bool) low:A high:A value:A =>
+fun clamp: A compare:(A -> A -> Bool) low:A high:A value:A =>
     compare value low
      T|> low
      F|> clampToMax compare high value
 
-fun reversed:Bool compare:(A -> A -> Bool) left:A right:A =>
+fun reversed: Bool compare:(A -> A -> Bool) left:A right:A =>
     compare right left
 
-fun comparing:Bool project:(A -> B) compare:(B -> B -> Bool) left:A right:A =>
+fun comparing: Bool project:(A -> B) compare:(B -> B -> Bool) left:A right:A =>
     compare (project left) (project right)
 
 export min

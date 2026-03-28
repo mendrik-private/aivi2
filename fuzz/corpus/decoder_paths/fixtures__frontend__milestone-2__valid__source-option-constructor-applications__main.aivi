@@ -17,12 +17,12 @@ domain Duration over Int
     literal sec : Int -> Duration
 
 domain Retry over Int
-    literal rt : Int -> Retry
+    literal times : Int -> Retry
 
 @source http.get "/users" with {
     headers: Entry "Authorization" "Bearer demo" EmptyMap,
     decode: Strict,
-    retry: 3rt,
+    retry: 3times,
     timeout: 5sec
 }
 sig users : Signal (Result HttpError (List User))

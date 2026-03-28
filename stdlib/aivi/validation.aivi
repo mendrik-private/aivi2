@@ -1,87 +1,81 @@
-// aivi.validation: Applicative validation with error accumulation.
-//
-// Unlike Result, which short-circuits on the first error (monadic / sequential),
-// Validation accumulates all errors using a NonEmptyList.  Use zipValidation to
-// run independent checks in parallel and collect every failure at once.
-//
-// When to use Validation vs Result:
-//   Validation — report all problems at once (form validation, config parsing)
-//   Result     — each step depends on the previous one (sequential pipeline)
+use aivi.nonEmpty (
+    NonEmptyList
+    appendNel
+)
 
-use aivi.nonEmpty (NonEmptyList, appendNel)
+type Errors E =
+  | NonEmptyList E
 
-type Errors E = NonEmptyList E
-
-fun zipBothInvalid:(Validation (NonEmptyList E) (A, B)) le:(NonEmptyList E) re:(NonEmptyList E) =>
+fun zipBothInvalid: (Validation (NonEmptyList E) (A, B)) le:(NonEmptyList E) re:(NonEmptyList E) =>
     Invalid (appendNel le re)
 
-fun zipInvalidLeft:(Validation (NonEmptyList E) (A, B)) le:(NonEmptyList E) right:(Validation (NonEmptyList E) B) =>
+fun zipInvalidLeft: (Validation (NonEmptyList E) (A, B)) le:(NonEmptyList E) right:(Validation (NonEmptyList E) B) =>
     right
      ||> Invalid re -> zipBothInvalid le re
      ||> Valid _    -> Invalid le
 
-fun zipValidRight:(Validation (NonEmptyList E) (A, B)) a:A b:B =>
+fun zipValidRight: (Validation (NonEmptyList E) (A, B)) a:A b:B =>
     Valid (a, b)
 
-fun zipValidLeft:(Validation (NonEmptyList E) (A, B)) a:A right:(Validation (NonEmptyList E) B) =>
+fun zipValidLeft: (Validation (NonEmptyList E) (A, B)) a:A right:(Validation (NonEmptyList E) B) =>
     right
      ||> Invalid re -> Invalid re
      ||> Valid b    -> zipValidRight a b
 
-fun isValid:Bool opt:(Validation E A) =>
+fun isValid: Bool opt:(Validation E A) =>
     opt
      T|> True
      F|> False
 
-fun isInvalid:Bool opt:(Validation E A) =>
+fun isInvalid: Bool opt:(Validation E A) =>
     opt
      F|> True
      T|> False
 
-fun getOrElse:A fallback:A opt:(Validation E A) =>
+fun getOrElse: A fallback:A opt:(Validation E A) =>
     opt
      ||> Valid item -> item
      ||> Invalid _  -> fallback
 
-fun mapErr:(Validation E2 A) transform:(E1 -> E2) opt:(Validation E1 A) =>
+fun mapErr: (Validation E2 A) transform:(E1 -> E2) opt:(Validation E1 A) =>
     opt
      ||> Valid item  -> Valid item
      ||> Invalid err -> Invalid (transform err)
 
-fun toResult:(Result E A) opt:(Validation E A) =>
+fun toResult: (Result E A) opt:(Validation E A) =>
     opt
      ||> Valid item  -> Ok item
      ||> Invalid err -> Err err
 
-fun fromResult:(Validation E A) opt:(Result E A) =>
+fun fromResult: (Validation E A) opt:(Result E A) =>
     opt
      ||> Ok item   -> Valid item
      ||> Err error -> Invalid error
 
-fun toOption:(Option A) opt:(Validation E A) =>
+fun toOption: (Option A) opt:(Validation E A) =>
     opt
      T|> Some
      F|> None
 
-fun map:(Validation E B) transform:(A -> B) opt:(Validation E A) =>
+fun map: (Validation E B) transform:(A -> B) opt:(Validation E A) =>
     opt
-     ||> Invalid e   -> Invalid e
-     ||> Valid item  -> Valid (transform item)
+     ||> Invalid e  -> Invalid e
+     ||> Valid item -> Valid (transform item)
 
-fun andThen:(Validation E B) next:(A -> Validation E B) opt:(Validation E A) =>
+fun andThen: (Validation E B) next:(A -> Validation E B) opt:(Validation E A) =>
     opt
-     ||> Invalid e   -> Invalid e
-     ||> Valid item  -> next item
+     ||> Invalid e  -> Invalid e
+     ||> Valid item -> next item
 
-fun zipValidation:(Validation (NonEmptyList E) (A, B)) left:(Validation (NonEmptyList E) A) right:(Validation (NonEmptyList E) B) =>
+fun zipValidation: (Validation (NonEmptyList E) (A, B)) left:(Validation (NonEmptyList E) A) right:(Validation (NonEmptyList E) B) =>
     left
      ||> Invalid le -> zipInvalidLeft le right
      ||> Valid a    -> zipValidLeft a right
 
-fun fold:B onInvalid:(E -> B) onValid:(A -> B) opt:(Validation E A) =>
+fun fold: B onInvalid:(E -> B) onValid:(A -> B) opt:(Validation E A) =>
     opt
-     ||> Invalid e   -> onInvalid e
-     ||> Valid item  -> onValid item
+     ||> Invalid e  -> onInvalid e
+     ||> Valid item -> onValid item
 
 export Errors
 export isValid

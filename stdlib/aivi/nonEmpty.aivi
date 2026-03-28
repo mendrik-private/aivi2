@@ -1,70 +1,67 @@
-// NonEmptyList A is a list guaranteed to have at least one element.
-// The head element is stored separately from the tail to enforce non-emptiness
-// at the type level without wrapping in Option.
 type NonEmptyList A =
   | MkNEL A (List A)
 
-fun singleton:(NonEmptyList A) item:A =>
+fun singleton: (NonEmptyList A) item:A =>
     MkNEL item []
 
-fun cons:(NonEmptyList A) item:A nel:(NonEmptyList A) =>
+fun cons: (NonEmptyList A) item:A nel:(NonEmptyList A) =>
     nel
      ||> MkNEL h t -> MkNEL item (append [h] t)
 
-fun head:A nel:(NonEmptyList A) =>
+fun head: A nel:(NonEmptyList A) =>
     nel
      ||> MkNEL h ignored -> h
 
-fun toList:(List A) nel:(NonEmptyList A) =>
+fun toList: (List A) nel:(NonEmptyList A) =>
     nel
      ||> MkNEL h t -> append [h] t
 
-fun lastStep:A prev:A item:A =>
+fun lastStep: A prev:A item:A =>
     item
 
-fun lastOfTail:A h:A t:(List A) =>
-    t |> reduce lastStep h
+fun lastOfTail: A h:A t:(List A) =>
+    t
+     |> reduce lastStep h
 
-fun last:A nel:(NonEmptyList A) =>
+fun last: A nel:(NonEmptyList A) =>
     nel
      ||> MkNEL h t -> lastOfTail h t
 
-fun nelLengthStep:Int acc:Int ignored:A =>
+fun nelLengthStep: Int acc:Int ignored:A =>
     acc + 1
 
-fun tailLength:Int t:(List A) =>
-    t |> reduce nelLengthStep 1
+fun tailLength: Int t:(List A) =>
+    t
+     |> reduce nelLengthStep 1
 
-fun length:Int nel:(NonEmptyList A) =>
+fun length: Int nel:(NonEmptyList A) =>
     nel
      ||> MkNEL ignored t -> tailLength t
 
-fun mapNelStep:(List B) transform:(A -> B) acc:(List B) item:A =>
+fun mapNelStep: (List B) transform:(A -> B) acc:(List B) item:A =>
     append acc [transform item]
 
-fun mappedTail:(List B) transform:(A -> B) t:(List A) =>
-    t |> reduce (mapNelStep transform) []
+fun mappedTail: (List B) transform:(A -> B) t:(List A) =>
+    t
+     |> reduce (mapNelStep transform) []
 
-fun mapNel:(NonEmptyList B) transform:(A -> B) nel:(NonEmptyList A) =>
+fun mapNel: (NonEmptyList B) transform:(A -> B) nel:(NonEmptyList A) =>
     nel
      ||> MkNEL h t -> MkNEL (transform h) (mappedTail transform t)
 
-fun fromListStep:(Option (NonEmptyList A)) acc:(Option (NonEmptyList A)) item:A =>
+fun fromListStep: (Option (NonEmptyList A)) acc:(Option (NonEmptyList A)) item:A =>
     acc
      ||> None             -> Some (MkNEL item [])
      ||> Some (MkNEL h t) -> Some (MkNEL h (append t [item]))
 
-fun fromList:(Option (NonEmptyList A)) items:(List A) =>
+fun fromList: (Option (NonEmptyList A)) items:(List A) =>
     items
      |> reduce fromListStep None
 
-fun appendNel:(NonEmptyList A) left:(NonEmptyList A) right:(NonEmptyList A) =>
+fun appendNel: (NonEmptyList A) left:(NonEmptyList A) right:(NonEmptyList A) =>
     left
      ||> MkNEL h t -> MkNEL h (append t (toList right))
 
-// NonEmpty is kept for compatibility; prefer NonEmptyList for new code.
-// The conversion helper fromNonEmpty has been removed — destructure with
-// ||> MkNonEmpty h t -> MkNEL h t when migration is needed.
 type NonEmpty A =
   | MkNonEmpty A (List A)
 
