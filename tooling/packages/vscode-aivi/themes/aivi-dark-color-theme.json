@@ -231,6 +231,14 @@
       "scope": "support.type.builtin.aivi",
       "settings": { "foreground": "#81A2BE" } },
 
+    { "name": "Type annotations outside records",
+      "scope": "meta.type.annotation.aivi",
+      "settings": { "foreground": "#4B4F55" } },
+
+    { "name": "Type annotation separator outside records",
+      "scope": "punctuation.separator.type.annotation.declaration.aivi",
+      "settings": { "foreground": "#4B4F55" } },
+
     { "name": "Labeled parameter #name",
       "scope": "variable.parameter.labeled.aivi",
       "settings": { "foreground": "#B294BB" } },

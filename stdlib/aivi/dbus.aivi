@@ -8,18 +8,17 @@ type DbusValue =
 
 type DbusCall = {
     destination: Text,
-    path:        Text,
-    interface:   Text,
-    member:      Text,
-    body:        List DbusValue
+    path: Text,
+    interface: Text,
+    member: Text,
+    body: List DbusValue
 }
 
-// DbusSignal is emitted by the dbus.signal source for each matching D-Bus signal.
 type DbusSignal = {
-    path:      Text,
+    path: Text,
     interface: Text,
-    member:    Text,
-    body:      List DbusValue
+    member: Text,
+    body: List DbusValue
 }
 
 type BusNameFlag =
@@ -40,25 +39,14 @@ type DbusError =
   | InvalidArgs Text
   | DbusProtocolError Text
 
-// DbusCallResult is the return type of an outgoing method call.
 type DbusCallResult = (Result DbusError (List DbusValue))
 
-// DbusTask A is the return type of an async D-Bus operation yielding A on success.
 type DbusTask A = (Task DbusError A)
 
-// DbusMatchRule filters incoming signals; None fields act as wildcards.
 type DbusMatchRule = {
-    path:      Option Text,
+    path: Option Text,
     interface: Option Text,
-    member:    Option Text
+    member: Option Text
 }
 
-export (
-  DbusValue, DbusString, DbusInt, DbusBool, DbusList, DbusStruct, DbusVariant,
-  DbusCall,
-  DbusSignal,
-  BusNameFlag, AllowReplacement, ReplaceExisting, DoNotQueue,
-  BusNameState, Owned, Queued, Lost,
-  DbusError, NameNotOwned, ServiceUnknown, NoReply, AccessDenied, InvalidArgs, DbusProtocolError,
-  DbusCallResult, DbusTask, DbusMatchRule
-)
+export (DbusValue, DbusString, DbusInt, DbusBool, DbusList, DbusStruct, DbusVariant, DbusCall, DbusSignal, BusNameFlag, AllowReplacement, ReplaceExisting, DoNotQueue, BusNameState, Owned, Queued, Lost, DbusError, NameNotOwned, ServiceUnknown, NoReply, AccessDenied, InvalidArgs, DbusProtocolError, DbusCallResult, DbusTask, DbusMatchRule)

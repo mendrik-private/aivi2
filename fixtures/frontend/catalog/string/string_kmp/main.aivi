@@ -31,51 +31,42 @@ type KmpSummary = {
     missingMatches: List Int
 }
 
-fun samePair: Bool pair:(Text, Text) =>
-    pair
-     ||> (left, right) -> left == right
+fun samePair:Bool pair:(Text, Text) => pair
+  ||> (left, right) -> left == right
 
-fun pairedTokensMatch: Bool left:(List Text) right:(List Text) =>
-    zip left right
-     |> all samePair
+fun pairedTokensMatch:Bool left: (List Text) right: (List Text) => zip left right
+  |> all samePair
 
-fun sameCount: Bool left:Int right:Int =>
+fun sameCount:Bool left:Int right:Int =>
     left == right
 
-fun sameTokens: Bool left:(List Text) right:(List Text) =>
-    sameCount (length left) (length right)
-     T|> pairedTokensMatch left right
-     F|> False
+fun sameTokens:Bool left: (List Text) right: (List Text) => sameCount (length left) (length right)
+  T|> pairedTokensMatch left right
+  F|> False
 
-fun matchedWhenEqual: (Option Int) matched:Int prefix:(List Text) slice:(List Text) =>
-    sameTokens prefix slice
-     T|> Some matched
-     F|> None
+fun matchedWhenEqual: (Option Int) matched:Int prefix: (List Text) slice: (List Text) => sameTokens prefix slice
+  T|> Some matched
+  F|> None
 
-fun matchingLength: (Option Int) candidate:PrefixCandidate =>
-    candidate
-     ||> { matched, prefix, slice } -> matchedWhenEqual matched prefix slice
+fun matchingLength: (Option Int) candidate:PrefixCandidate => candidate
+  ||> { matched, prefix, slice } -> matchedWhenEqual matched prefix slice
 
-fun matchedLength: Int candidates:(List PrefixCandidate) =>
-    findMap matchingLength candidates
-     ||> Some matched -> matched
-     ||> None         -> 0
+fun matchedLength:Int candidates: (List PrefixCandidate) => findMap matchingLength candidates
+  ||> Some matched -> matched
+  ||> None         -> 0
 
-fun appendLps: (List Int) values:(List Int) entry:PrefixEntry =>
-    entry
-     ||> { candidates } -> append values [matchedLength candidates]
+fun appendLps: (List Int) values: (List Int) entry:PrefixEntry => entry
+  ||> { candidates } -> append values [matchedLength candidates]
 
-fun collectWindowMatch: (List Int) patternTokens:(List Text) matches:(List Int) start:Int tokens:(List Text) =>
-    sameTokens patternTokens tokens
-     T|> append matches [start]
-     F|> matches
+fun collectWindowMatch: (List Int) patternTokens: (List Text) matches: (List Int) start:Int tokens: (List Text) => sameTokens patternTokens tokens
+  T|> append matches [start]
+  F|> matches
 
-fun collectMatch: (List Int) patternTokens:(List Text) matches:(List Int) window:SearchWindow =>
-    window
-     ||> { start, tokens } -> collectWindowMatch patternTokens matches start tokens
+fun collectMatch: (List Int) patternTokens: (List Text) matches: (List Int) window:SearchWindow => window
+  ||> { start, tokens } -> collectWindowMatch patternTokens matches start tokens
 
-value pattern: Text = "ababc"
-value haystack: Text = "ababcababc"
+value pattern:Text = "ababc"
+value haystack:Text = "ababcababc"
 
 value patternTokens: List Text = [
     "a",
@@ -212,7 +203,7 @@ value missingMatches: List Int =
     missingWindows
      |> reduce (collectMatch patternTokens) []
 
-value kmpSummary: KmpSummary = {
+value kmpSummary:KmpSummary = {
     pattern,
     haystack,
     lpsTable,

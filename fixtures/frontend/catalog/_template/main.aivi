@@ -15,27 +15,26 @@ type CatalogOutput = {
 fun sumStep:Int total:Int value:Int =>
     total + value
 
-fun chooseLabel:Text user:(Option CatalogUser) =>
-    user
-     T|> .name
-     F|> "guest"
+fun chooseLabel:Text user: (Option CatalogUser) => user
+  T|> .name
+  F|> "guest"
 
-value sample: CatalogInput = {
+value sample:CatalogInput = {
     values: [1, 2, 3],
     user: Some { name: "Ada" }
 }
 
-value sampleTotal: Int =
+value sampleTotal:Int =
     sample
      |> .values
      |> reduce sumStep 0
 
-value sampleLabel: Text =
+value sampleLabel:Text =
     sample
      |> .user
      |> chooseLabel
 
-value catalogResult: CatalogOutput = {
+value catalogResult:CatalogOutput = {
     total: sampleTotal,
     label: sampleLabel
 }

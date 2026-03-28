@@ -2,15 +2,15 @@ type UrlError = Text
 
 domain Url over Text
     parse: Text -> Result UrlError Url
-    unwrap: Url -> Text
+    unwrap:Url -> Text
     scheme: Url -> Option Text
     host: Url -> Option Text
     port: Url -> Option Int
-    path: Url -> Text
+    path:Url -> Text
     query: Url -> Option Text
     fragment: Url -> Option Text
-    withPath: Url -> Text -> Url
-    withQuery: Url -> Text -> Url
+    withPath:Url -> Text -> Url
+    withQuery:Url -> Text -> Url
 
 export UrlError
 export Url

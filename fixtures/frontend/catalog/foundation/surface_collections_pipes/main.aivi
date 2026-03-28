@@ -30,10 +30,10 @@ type CollectionSummary = {
     note: Text
 }
 
-fun add: Int total:Int x:Int =>
+fun add:Int total:Int x:Int =>
     total + x
 
-fun even: Bool x:Int =>
+fun even:Bool x:Int =>
     x == 2 or x == 4
 
 value numbers: List Int = [
@@ -47,11 +47,11 @@ value emptyNumbers: List Int = []
 value maybeName: Option Text = Some "Ada"
 value missingName: Option Text = None
 
-value countFromPipe: Int =
+value countFromPipe:Int =
     numbers
      |> length
 
-value totalFromReduce: Int =
+value totalFromReduce:Int =
     numbers
      |> reduce add 0
 
@@ -63,7 +63,7 @@ value restFromPipe: Option (List Int) =
     numbers
      |> tail
 
-value hasEvenFromPipe: Bool =
+value hasEvenFromPipe:Bool =
     numbers
      |> any even
 
@@ -71,7 +71,7 @@ value splitNumbers: (Partition Int) =
     numbers
      |> partition even
 
-value displayNameFromPipe: Text =
+value displayNameFromPipe:Text =
     missingName
      |> getOrElse "guest"
 
@@ -83,7 +83,7 @@ value nameResult: Result Text Text =
     maybeName
      |> toResult "missing"
 
-value recoveredName: Text =
+value recoveredName:Text =
     nameResult
      |> withDefault "guest"
 
@@ -95,10 +95,10 @@ value emptyFirst: Option Int =
     emptyNumbers
      |> head
 
-value collectionNote: Text = ["{countFromPipe} items", "total {totalFromReduce}", displayNameFromPipe, recoveredName]
+value collectionNote:Text = ["{countFromPipe} items", "total {totalFromReduce}", displayNameFromPipe, recoveredName]
  |> join ", "
 
-value collectionSummary: CollectionSummary = {
+value collectionSummary:CollectionSummary = {
     count: countFromPipe,
     total: totalFromReduce,
     first: firstFromPipe,

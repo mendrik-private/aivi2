@@ -4,42 +4,30 @@ type ImapError =
   | FolderNotFound Text
   | ImapProtocolError Text
 
-// SyncState is emitted by an imap.sync source on each synchronisation tick.
 type SyncState = {
     lastSyncedAt: Option Int,
-    inProgress:   Bool,
-    error:        Option ImapError
+    inProgress: Bool,
+    error: Option ImapError
 }
 
-// ImapFolder summarises a mailbox folder as seen by the last sync.
 type ImapFolder = {
-    name:         Text,
+    name: Text,
     messageCount: Int,
-    unreadCount:  Int
+    unreadCount: Int
 }
 
-// Standard IMAP message flags.
 type ImapFlag =
   | Seen
   | Answered
   | Flagged
   | Draft
 
-// ImapEvent is emitted by the imap.sync source for each discrete mail event.
 type ImapEvent =
-  | NewMessage Int            // message UID
+  | NewMessage Int
   | MessageFlagChanged Int ImapFlag
-  | FolderChanged Text        // folder name
+  | FolderChanged Text
   | SyncCompleted
 
-// ImapTask A is the return type of an async IMAP operation yielding A.
 type ImapTask A = (Task ImapError A)
 
-export (
-  ImapError, ImapAuthFailed, ImapConnectionFailed, FolderNotFound, ImapProtocolError,
-  SyncState,
-  ImapFolder,
-  ImapFlag, Seen, Answered, Flagged, Draft,
-  ImapEvent, NewMessage, MessageFlagChanged, FolderChanged, SyncCompleted,
-  ImapTask
-)
+export (ImapError, ImapAuthFailed, ImapConnectionFailed, FolderNotFound, ImapProtocolError, SyncState, ImapFolder, ImapFlag, Seen, Answered, Flagged, Draft, ImapEvent, NewMessage, MessageFlagChanged, FolderChanged, SyncCompleted, ImapTask)

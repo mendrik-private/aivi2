@@ -1,20 +1,17 @@
-fun abs:Int n:Int =>
-    n < 0
-     T|> 0 - n
-     F|> n
+fun abs:Int n:Int => n < 0
+  T|> 0 - n
+  F|> n
 
 fun negate:Int n:Int =>
     0 - n
 
-fun negOrZero:Int n:Int =>
-    n < 0
-     T|> 0 - 1
-     F|> 0
+fun negOrZero:Int n:Int => n < 0
+  T|> 0 - 1
+  F|> 0
 
-fun sign:Int n:Int =>
-    n > 0
-     T|> 1
-     F|> negOrZero n
+fun sign:Int n:Int => n > 0
+  T|> 1
+  F|> negOrZero n
 
 fun isEven:Bool n:Int =>
     n % 2 == 0
@@ -25,15 +22,13 @@ fun isOdd:Bool n:Int =>
 fun square:Int n:Int =>
     n * n
 
-fun clampTop:Int high:Int n:Int =>
-    n > high
-     T|> high
-     F|> n
+fun clampTop:Int high:Int n:Int => n > high
+  T|> high
+  F|> n
 
-fun clamp:Int low:Int high:Int n:Int =>
-    n < low
-     T|> low
-     F|> clampTop high n
+fun clamp:Int low:Int high:Int n:Int => n < low
+  T|> low
+  F|> clampTop high n
 
 fun between:Bool low:Int high:Int n:Int =>
     n >= low and n <= high

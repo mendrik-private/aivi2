@@ -11,6 +11,7 @@
     { "include": "#line-comment" },
     { "include": "#string" },
     { "include": "#decorator" },
+    { "include": "#annotated-signatures" },
     { "include": "#declaration" },
     { "include": "#markup" },
     { "include": "#record-key" },
@@ -119,6 +120,180 @@
           "captures": {
             "1": { "name": "punctuation.definition.decorator.aivi" },
             "2": { "name": "entity.name.label.decorator.aivi" }
+          }
+        }
+      ]
+    },
+
+    "annotated-signatures": {
+      "patterns": [
+        { "include": "#fun-signature" },
+        { "include": "#value-signature" },
+        { "include": "#signal-signature" },
+        { "include": "#source-signature" },
+        { "include": "#result-signature" },
+        { "include": "#view-signature" },
+        { "include": "#adapter-signature" },
+        { "include": "#class-annotation-block" },
+        { "include": "#domain-annotation-block" },
+        { "include": "#provider-annotation-block" }
+      ]
+    },
+
+    "fun-signature": {
+      "begin": "\\b(fun)\\s+([a-z_][a-zA-Z0-9_]*)",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration.fun.aivi" },
+        "2": { "name": "entity.name.function.aivi" }
+      },
+      "end": "(?=\\s*=>|$)",
+      "patterns": [
+        { "include": "#fun-type-annotation" }
+      ]
+    },
+
+    "fun-type-annotation": {
+      "begin": ":",
+      "beginCaptures": {
+        "0": { "name": "punctuation.separator.type.annotation.declaration.aivi" }
+      },
+      "end": "(?=\\s+[a-z_][a-zA-Z0-9_]*\\s*:(?!:)|\\s*=>|$)",
+      "contentName": "meta.type.annotation.aivi"
+    },
+
+    "assignment-type-annotation": {
+      "begin": ":",
+      "beginCaptures": {
+        "0": { "name": "punctuation.separator.type.annotation.declaration.aivi" }
+      },
+      "end": "(?=\\s*=|$)",
+      "contentName": "meta.type.annotation.aivi"
+    },
+
+    "value-signature": {
+      "begin": "\\b(value)\\s+([a-z_][a-zA-Z0-9_]*)",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration.value.aivi" },
+        "2": { "name": "entity.name.variable.aivi" }
+      },
+      "end": "(?=\\s*=|$)",
+      "patterns": [
+        { "include": "#assignment-type-annotation" }
+      ]
+    },
+
+    "signal-signature": {
+      "begin": "\\b(signal)\\s+([a-z_][a-zA-Z0-9_]*)",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration.signal.aivi" },
+        "2": { "name": "entity.name.variable.signal.aivi" }
+      },
+      "end": "(?=\\s*=|$)",
+      "patterns": [
+        { "include": "#assignment-type-annotation" }
+      ]
+    },
+
+    "source-signature": {
+      "begin": "\\b(source)\\s+([a-z_][a-zA-Z0-9_]*)",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration.source.aivi" },
+        "2": { "name": "entity.name.variable.source.aivi" }
+      },
+      "end": "(?=\\s*=|$)",
+      "patterns": [
+        { "include": "#assignment-type-annotation" }
+      ]
+    },
+
+    "result-signature": {
+      "begin": "\\b(result)\\s+([a-z_][a-zA-Z0-9_]*)",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration.result.aivi" },
+        "2": { "name": "entity.name.variable.aivi" }
+      },
+      "end": "(?=\\s*=|$)",
+      "patterns": [
+        { "include": "#assignment-type-annotation" }
+      ]
+    },
+
+    "view-signature": {
+      "begin": "\\b(view)\\s+([A-Z][a-zA-Z0-9_]*)",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration.view.aivi" },
+        "2": { "name": "entity.name.type.aivi" }
+      },
+      "end": "(?=\\s*=|$)",
+      "patterns": [
+        { "include": "#assignment-type-annotation" }
+      ]
+    },
+
+    "adapter-signature": {
+      "begin": "\\b(adapter)\\s+([a-z_][a-zA-Z0-9_]*)",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration.adapter.aivi" },
+        "2": { "name": "entity.name.function.aivi" }
+      },
+      "end": "(?=\\s*=|$)",
+      "patterns": [
+        { "include": "#assignment-type-annotation" }
+      ]
+    },
+
+    "class-annotation-block": {
+      "begin": "\\b(class)\\b(?:\\s+[^\\n]+?=>\\s+)?([A-Z][a-zA-Z0-9_]*)",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration.class.aivi" },
+        "2": { "name": "entity.name.class.aivi" }
+      },
+      "end": "(?=\\n(?![ \\t])|\\z)",
+      "patterns": [
+        { "include": "#line-comment" },
+        {
+          "match": "^([ \\t]+(?:\\([^\\n]+?\\)|[a-z_][a-zA-Z0-9_]*))(\\s*:\\s*)([^\\n]+)$",
+          "captures": {
+            "2": { "name": "punctuation.separator.type.annotation.declaration.aivi" },
+            "3": { "name": "meta.type.annotation.aivi" }
+          }
+        }
+      ]
+    },
+
+    "domain-annotation-block": {
+      "begin": "\\b(domain)\\s+([A-Z][a-zA-Z0-9_]*)",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration.domain.aivi" },
+        "2": { "name": "entity.name.type.aivi" }
+      },
+      "end": "(?=\\n(?![ \\t])|\\z)",
+      "patterns": [
+        { "include": "#line-comment" },
+        {
+          "match": "^([ \\t]+(?:literal\\s+[a-z_][a-zA-Z0-9_]*|\\([^\\n]+?\\)|[a-z_][a-zA-Z0-9_]*))(\\s*:\\s*)([^\\n]+)$",
+          "captures": {
+            "2": { "name": "punctuation.separator.type.annotation.declaration.aivi" },
+            "3": { "name": "meta.type.annotation.aivi" }
+          }
+        }
+      ]
+    },
+
+    "provider-annotation-block": {
+      "begin": "\\b(provider)\\s+([a-z][a-zA-Z0-9_.]*)",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration.provider.aivi" },
+        "2": { "name": "entity.name.label.provider.aivi" }
+      },
+      "end": "(?=\\n(?![ \\t])|\\z)",
+      "patterns": [
+        { "include": "#line-comment" },
+        {
+          "match": "^([ \\t]+(?:option|argument)\\s+[a-z_][a-zA-Z0-9_]*)(\\s*:\\s*)([^\\n]+)$",
+          "captures": {
+            "2": { "name": "punctuation.separator.type.annotation.declaration.aivi" },
+            "3": { "name": "meta.type.annotation.aivi" }
           }
         }
       ]

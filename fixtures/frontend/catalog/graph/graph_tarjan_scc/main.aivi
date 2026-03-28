@@ -60,7 +60,7 @@ type TarjanSummary = {
     stackCleared: Bool
 }
 
-value initialIndexes: Indexes = {
+value initialIndexes:Indexes = {
     a: None,
     b: None,
     c: None,
@@ -68,7 +68,7 @@ value initialIndexes: Indexes = {
     e: None
 }
 
-value initialLowlinks: Lowlinks = {
+value initialLowlinks:Lowlinks = {
     a: 0,
     b: 0,
     c: 0,
@@ -76,7 +76,7 @@ value initialLowlinks: Lowlinks = {
     e: 0
 }
 
-value initialFlags: StackFlags = {
+value initialFlags:StackFlags = {
     a: False,
     b: False,
     c: False,
@@ -84,105 +84,94 @@ value initialFlags: StackFlags = {
     e: False
 }
 
-value cycleEdge: DirectedEdge = {
+value cycleEdge:DirectedEdge = {
     from: A,
     to: B
 }
 
-fun nodeLabel: Text node:Node =>
-    node
-     ||> A -> "A"
-     ||> B -> "B"
-     ||> C -> "C"
-     ||> D -> "D"
-     ||> E -> "E"
+fun nodeLabel:Text node:Node => node
+  ||> A -> "A"
+  ||> B -> "B"
+  ||> C -> "C"
+  ||> D -> "D"
+  ||> E -> "E"
 
-fun appendNodeLabel: (List Text) parts:(List Text) node:Node =>
+fun appendNodeLabel: (List Text) parts: (List Text) node:Node =>
     append parts [
         nodeLabel node
     ]
 
-fun nodeListLabel: Text nodes:(List Node) =>
-    nodes
-     |> reduce appendNodeLabel []
-     |> join ", "
+fun nodeListLabel:Text nodes: (List Node) => nodes
+  |> reduce appendNodeLabel []
+  |> join ", "
 
-fun componentText: Text component:(List Node) =>
+fun componentText:Text component: (List Node) =>
     join "" [
         "[",
         nodeListLabel component,
         "]"
     ]
 
-fun appendComponentLabel: (List Text) parts:(List Text) component:(List Node) =>
+fun appendComponentLabel: (List Text) parts: (List Text) component: (List Node) =>
     append parts [
         componentText component
     ]
 
-fun componentsLabel: Text components:(List (List Node)) =>
-    components
-     |> reduce appendComponentLabel []
-     |> join " | "
+fun componentsLabel:Text components: (List (List Node)) => components
+  |> reduce appendComponentLabel []
+  |> join " | "
 
-fun indexOf: (Option Int) indexes:Indexes node:Node =>
-    node
-     ||> A -> indexes.a
-     ||> B -> indexes.b
-     ||> C -> indexes.c
-     ||> D -> indexes.d
-     ||> E -> indexes.e
+fun indexOf: (Option Int) indexes:Indexes node:Node => node
+  ||> A -> indexes.a
+  ||> B -> indexes.b
+  ||> C -> indexes.c
+  ||> D -> indexes.d
+  ||> E -> indexes.e
 
-fun setIndex: Indexes indexes:Indexes node:Node x:(Option Int) =>
-    node
-     ||> A -> { a: x, b: indexes.b, c: indexes.c, d: indexes.d, e: indexes.e }
-     ||> B -> { a: indexes.a, b: x, c: indexes.c, d: indexes.d, e: indexes.e }
-     ||> C -> { a: indexes.a, b: indexes.b, c: x, d: indexes.d, e: indexes.e }
-     ||> D -> { a: indexes.a, b: indexes.b, c: indexes.c, d: x, e: indexes.e }
-     ||> E -> { a: indexes.a, b: indexes.b, c: indexes.c, d: indexes.d, e: x }
+fun setIndex:Indexes indexes:Indexes node:Node x: (Option Int) => node
+  ||> A -> { a: x, b: indexes.b, c: indexes.c, d: indexes.d, e: indexes.e }
+  ||> B -> { a: indexes.a, b: x, c: indexes.c, d: indexes.d, e: indexes.e }
+  ||> C -> { a: indexes.a, b: indexes.b, c: x, d: indexes.d, e: indexes.e }
+  ||> D -> { a: indexes.a, b: indexes.b, c: indexes.c, d: x, e: indexes.e }
+  ||> E -> { a: indexes.a, b: indexes.b, c: indexes.c, d: indexes.d, e: x }
 
-fun indexValue: Int indexes:Indexes node:Node =>
-    indexOf indexes node
-     ||> Some x -> x
-     ||> None   -> 0
+fun indexValue:Int indexes:Indexes node:Node => indexOf indexes node
+  ||> Some x -> x
+  ||> None   -> 0
 
-fun lowOf: Int lowlinks:Lowlinks node:Node =>
-    node
-     ||> A -> lowlinks.a
-     ||> B -> lowlinks.b
-     ||> C -> lowlinks.c
-     ||> D -> lowlinks.d
-     ||> E -> lowlinks.e
+fun lowOf:Int lowlinks:Lowlinks node:Node => node
+  ||> A -> lowlinks.a
+  ||> B -> lowlinks.b
+  ||> C -> lowlinks.c
+  ||> D -> lowlinks.d
+  ||> E -> lowlinks.e
 
-fun setLow: Lowlinks lowlinks:Lowlinks node:Node x:Int =>
-    node
-     ||> A -> { a: x, b: lowlinks.b, c: lowlinks.c, d: lowlinks.d, e: lowlinks.e }
-     ||> B -> { a: lowlinks.a, b: x, c: lowlinks.c, d: lowlinks.d, e: lowlinks.e }
-     ||> C -> { a: lowlinks.a, b: lowlinks.b, c: x, d: lowlinks.d, e: lowlinks.e }
-     ||> D -> { a: lowlinks.a, b: lowlinks.b, c: lowlinks.c, d: x, e: lowlinks.e }
-     ||> E -> { a: lowlinks.a, b: lowlinks.b, c: lowlinks.c, d: lowlinks.d, e: x }
+fun setLow:Lowlinks lowlinks:Lowlinks node:Node x:Int => node
+  ||> A -> { a: x, b: lowlinks.b, c: lowlinks.c, d: lowlinks.d, e: lowlinks.e }
+  ||> B -> { a: lowlinks.a, b: x, c: lowlinks.c, d: lowlinks.d, e: lowlinks.e }
+  ||> C -> { a: lowlinks.a, b: lowlinks.b, c: x, d: lowlinks.d, e: lowlinks.e }
+  ||> D -> { a: lowlinks.a, b: lowlinks.b, c: lowlinks.c, d: x, e: lowlinks.e }
+  ||> E -> { a: lowlinks.a, b: lowlinks.b, c: lowlinks.c, d: lowlinks.d, e: x }
 
-fun flagOf: Bool flags:StackFlags node:Node =>
-    node
-     ||> A -> flags.a
-     ||> B -> flags.b
-     ||> C -> flags.c
-     ||> D -> flags.d
-     ||> E -> flags.e
+fun flagOf:Bool flags:StackFlags node:Node => node
+  ||> A -> flags.a
+  ||> B -> flags.b
+  ||> C -> flags.c
+  ||> D -> flags.d
+  ||> E -> flags.e
 
-fun setFlag: StackFlags flags:StackFlags node:Node x:Bool =>
-    node
-     ||> A -> { a: x, b: flags.b, c: flags.c, d: flags.d, e: flags.e }
-     ||> B -> { a: flags.a, b: x, c: flags.c, d: flags.d, e: flags.e }
-     ||> C -> { a: flags.a, b: flags.b, c: x, d: flags.d, e: flags.e }
-     ||> D -> { a: flags.a, b: flags.b, c: flags.c, d: x, e: flags.e }
-     ||> E -> { a: flags.a, b: flags.b, c: flags.c, d: flags.d, e: x }
+fun setFlag:StackFlags flags:StackFlags node:Node x:Bool => node
+  ||> A -> { a: x, b: flags.b, c: flags.c, d: flags.d, e: flags.e }
+  ||> B -> { a: flags.a, b: x, c: flags.c, d: flags.d, e: flags.e }
+  ||> C -> { a: flags.a, b: flags.b, c: x, d: flags.d, e: flags.e }
+  ||> D -> { a: flags.a, b: flags.b, c: flags.c, d: x, e: flags.e }
+  ||> E -> { a: flags.a, b: flags.b, c: flags.c, d: flags.d, e: x }
 
-fun minInt: Int left:Int right:Int =>
-    left < right
-     T|> left
-     F|> right
+fun minInt:Int left:Int right:Int => left < right
+  T|> left
+  F|> right
 
-fun discover: TarjanState state:TarjanState node:Node index:Int =>
+fun discover:TarjanState state:TarjanState node:Node index:Int =>
     {
         indexes: setIndex state.indexes node (Some index),
         lowlinks: setLow state.lowlinks node index,
@@ -191,7 +180,7 @@ fun discover: TarjanState state:TarjanState node:Node index:Int =>
         components: state.components
     }
 
-fun backEdge: TarjanState state:TarjanState from:Node to:Node =>
+fun backEdge:TarjanState state:TarjanState from:Node to:Node =>
     {
         indexes: state.indexes,
         lowlinks: setLow state.lowlinks from (minInt (lowOf state.lowlinks from) (indexValue state.indexes to)),
@@ -200,7 +189,7 @@ fun backEdge: TarjanState state:TarjanState from:Node to:Node =>
         components: state.components
     }
 
-fun mergeLow: TarjanState state:TarjanState parent:Node child:Node =>
+fun mergeLow:TarjanState state:TarjanState parent:Node child:Node =>
     {
         indexes: state.indexes,
         lowlinks: setLow state.lowlinks parent (minInt (lowOf state.lowlinks parent) (lowOf state.lowlinks child)),
@@ -209,14 +198,13 @@ fun mergeLow: TarjanState state:TarjanState parent:Node child:Node =>
         components: state.components
     }
 
-fun clearMemberFlags: StackFlags flags:StackFlags node:Node =>
+fun clearMemberFlags:StackFlags flags:StackFlags node:Node =>
     setFlag flags node False
 
-fun clearMembers: StackFlags flags:StackFlags members:(List Node) =>
-    members
-     |> reduce clearMemberFlags flags
+fun clearMembers:StackFlags flags:StackFlags members: (List Node) => members
+  |> reduce clearMemberFlags flags
 
-fun emitComponent: TarjanState state:TarjanState members:(List Node) remaining:(List Node) =>
+fun emitComponent:TarjanState state:TarjanState members: (List Node) remaining: (List Node) =>
     {
         indexes: state.indexes,
         lowlinks: state.lowlinks,
@@ -225,17 +213,16 @@ fun emitComponent: TarjanState state:TarjanState members:(List Node) remaining:(
         components: append state.components [members]
     }
 
-fun isZero: Bool x:Int =>
+fun isZero:Bool x:Int =>
     x == 0
 
-fun step: TarjanState state:TarjanState action:Action =>
-    action
-     ||> Discover node index         -> discover state node index
-     ||> BackEdge from to            -> backEdge state from to
-     ||> MergeLow parent child       -> mergeLow state parent child
-     ||> EmitComponent members stack -> emitComponent state members stack
+fun step:TarjanState state:TarjanState action:Action => action
+  ||> Discover node index         -> discover state node index
+  ||> BackEdge from to            -> backEdge state from to
+  ||> MergeLow parent child       -> mergeLow state parent child
+  ||> EmitComponent members stack -> emitComponent state members stack
 
-value tarjanGraph: DirectedGraph = {
+value tarjanGraph:DirectedGraph = {
     nodes: [A, B, C, D, E],
     edges: [
         cycleEdge,
@@ -263,7 +250,7 @@ value tarjanTrace: List Action = [
     EmitComponent [A, B] []
 ]
 
-value initialState: TarjanState = {
+value initialState:TarjanState = {
     indexes: initialIndexes,
     lowlinks: initialLowlinks,
     onStack: initialFlags,
@@ -271,11 +258,11 @@ value initialState: TarjanState = {
     components: []
 }
 
-value tarjanState: TarjanState =
+value tarjanState:TarjanState =
     tarjanTrace
      |> reduce step initialState
 
-value tarjanSummary: TarjanSummary = {
+value tarjanSummary:TarjanSummary = {
     components: componentsLabel tarjanState.components,
     edgeCount: length tarjanGraph.edges,
     aLow: lowOf tarjanState.lowlinks A,

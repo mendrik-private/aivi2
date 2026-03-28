@@ -87,16 +87,16 @@ type User = {
     email: Option Text
 }
 
-value user: User = {
+value user:User = {
     name: "Ada"
 }
 
 value ok: Validation (NonEmptyList Text) Text = Valid "Ada"
 value err: Validation (NonEmptyList Text) Text = Invalid (singleton "field required")
-value isOkSentinel: Bool = isValid ok
-value isErrSentinel: Bool = isInvalid err
+value isOkSentinel:Bool = isValid ok
+value isErrSentinel:Bool = isInvalid err
 value names: NonEmptyList Text = singleton "Ada"
-value nameHead: Text = nelHead names
+value nameHead:Text = nelHead names
 value nameList: List Text = nelToList names
 value longerNames: NonEmptyList Text = nelCons "Grace" names
 value errors: Errors Text = singleton "field required"
@@ -108,43 +108,43 @@ value numbers: List Int = [
 ]
 
 value emptyList: List Int = []
-value numsEmpty: Bool = isEmpty emptyList
-value numsPresent: Bool = nonEmpty numbers
-value numsLength: Int = length numbers
+value numsEmpty:Bool = isEmpty emptyList
+value numsPresent:Bool = nonEmpty numbers
+value numsLength:Int = length numbers
 value numsHead: Option Int = head numbers
 value numsTail: Option (List Int) = tail numbers
 value numsLast: Option Int = last numbers
 
-fun smaller: Bool left:Int right:Int =>
+fun smaller:Bool left:Int right:Int =>
     left < right
 
-value smallestNumber: Int = min smaller 4 2
-value largestNumber: Int = max smaller 4 2
+value smallestNumber:Int = min smaller 4 2
+value largestNumber:Int = max smaller 4 2
 
-value smallestFromMany: Int =
+value smallestFromMany:Int =
     minOf smaller 6 [
         4,
         9,
         2
     ]
 
-fun positive: Bool n:Int =>
+fun positive:Bool n:Int =>
     n > 0
 
 value foundPositive: Option Int = find positive numbers
 
-fun even: Bool n:Int =>
+fun even:Bool n:Int =>
     n == 2
 
 value split: (Partition Int) = partition even numbers
 
-value greeting: Text =
+value greeting:Text =
     join ", " [
         "Hello",
         "World"
     ]
 
-value combined: Text =
+value combined:Text =
     concat [
         "a",
         "i",
@@ -152,24 +152,24 @@ value combined: Text =
         "i"
     ]
 
-value wrapped: Text = surround "[" "]" greeting
-value emptyStr: Bool = textIsEmpty ""
-value nonEmptyStr: Bool = textNonEmpty "aivi"
+value wrapped:Text = surround "[" "]" greeting
+value emptyStr:Bool = textIsEmpty ""
+value nonEmptyStr:Bool = textNonEmpty "aivi"
 value maybeId: Option Int = Some 42
-value hasId: Bool = isSome maybeId
+value hasId:Bool = isSome maybeId
 value noId: Option Int = None
-value missingId: Bool = isNone noId
-value idValue: Int = getOrElse 0 maybeId
+value missingId:Bool = isNone noId
+value idValue:Int = getOrElse 0 maybeId
 value idItems: List Int = optionToList maybeId
 value idResult: Result Text Int = toResult "no-id" maybeId
 value okAge: Result Text Int = Ok 30
 value errAge: Result Text Int = Err "missing"
-value ageOk: Bool = isOk okAge
-value ageErr: Bool = isErr errAge
-value ageValue: Int = withDefault 0 okAge
+value ageOk:Bool = isOk okAge
+value ageErr:Bool = isErr errAge
+value ageValue:Int = withDefault 0 okAge
 value ageOption: Option Int = toOption okAge
 
-fun prefixErr: Text msg:Text =>
+fun prefixErr:Text msg:Text =>
     "error:{msg}"
 
 value prefixedErr: Result Text Int = mapErr prefixErr errAge

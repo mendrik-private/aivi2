@@ -1,5 +1,5 @@
-value defaultText: Text = ""
-value defaultInt: Int = 0
-value defaultBool: Bool = False
+value defaultText:Text = ""
+value defaultInt:Int = 0
+value defaultBool:Bool = False
 
 export (Option, defaultText, defaultInt, defaultBool)

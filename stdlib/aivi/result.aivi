@@ -13,70 +13,57 @@ fun keepSome: (Option A) item:A =>
 fun singleton: (List A) item:A =>
     [item]
 
-fun isOk: Bool opt:(Result E A) =>
-    opt
-     T|> True
-     F|> False
+fun isOk:Bool opt: (Result E A) => opt
+  T|> True
+  F|> False
 
-fun isErr: Bool opt:(Result E A) =>
-    opt
-     F|> True
-     T|> False
+fun isErr:Bool opt: (Result E A) => opt
+  F|> True
+  T|> False
 
-fun mapErr: (Result E2 A) transform:(E1 -> E2) opt:(Result E1 A) =>
-    opt
-     T|> keepOk
-     F|> mapError transform
+fun mapErr: (Result E2 A) transform:(E1 -> E2) opt: (Result E1 A) => opt
+  T|> keepOk
+  F|> mapError transform
 
-fun withDefault: A fallback:A opt:(Result E A) =>
-    opt
-     ||> Ok item -> item
-     ||> Err _   -> fallback
+fun withDefault:A fallback:A opt: (Result E A) => opt
+  ||> Ok item -> item
+  ||> Err _   -> fallback
 
-fun orElse: (Result E A) fallback:(Result E A) opt:(Result E A) =>
-    opt
-     ||> Ok item -> Ok item
-     ||> Err _   -> fallback
+fun orElse: (Result E A) fallback: (Result E A) opt: (Result E A) => opt
+  ||> Ok item -> Ok item
+  ||> Err _   -> fallback
 
-fun flatMap: (Result E B) next:(A -> Result E B) opt:(Result E A) =>
-    opt
-     T|> next
-     F|> keepErr
+fun flatMap: (Result E B) next: (A -> Result E B) opt: (Result E A) => opt
+  T|> next
+  F|> keepErr
 
-fun flatten: (Result E A) opt:(Result E (Result E A)) =>
-    opt
-     ||> Ok nested -> nested
-     ||> Err error -> Err error
+fun flatten: (Result E A) opt: (Result E (Result E A)) => opt
+  ||> Ok nested -> nested
+  ||> Err error -> Err error
 
-fun toOption: (Option A) opt:(Result E A) =>
-    opt
-     T|> keepSome
-     F|> None
+fun toOption: (Option A) opt: (Result E A) => opt
+  T|> keepSome
+  F|> None
 
-fun toList: (List A) opt:(Result E A) =>
-    opt
-     T|> singleton
-     F|> []
+fun toList: (List A) opt: (Result E A) => opt
+  T|> singleton
+  F|> []
 
-fun map: (Result E B) transform:(A -> B) opt:(Result E A) =>
-    opt
-     ||> Err e   -> Err e
-     ||> Ok item -> Ok (transform item)
+fun map: (Result E B) transform:(A -> B) opt: (Result E A) => opt
+  ||> Err e   -> Err e
+  ||> Ok item -> Ok (transform item)
 
-fun mapBoth: (Result E2 B) onErr:(E1 -> E2) onOk:(A -> B) opt:(Result E1 A) =>
-    opt
-     ||> Err e   -> Err (onErr e)
-     ||> Ok item -> Ok (onOk item)
+fun mapBoth: (Result E2 B) onErr:(E1 -> E2) onOk:(A -> B) opt: (Result E1 A) => opt
+  ||> Err e   -> Err (onErr e)
+  ||> Ok item -> Ok (onOk item)
 
-fun fold: B onErr:(E -> B) onOk:(A -> B) opt:(Result E A) =>
-    opt
-     ||> Err e   -> onErr e
-     ||> Ok item -> onOk item
+fun fold:B onErr:(E -> B) onOk:(A -> B) opt: (Result E A) => opt
+  ||> Err e   -> onErr e
+  ||> Ok item -> onOk item
 
-fun fromOption: (Result E A) error:E opt:(Option A) =>
-    opt
-     ||> Some item -> Ok item
-     ||> None      -> Err error
+fun fromOption: (Result E A) error:E opt: (Option A) => opt
+  ||> Some item -> Ok item
+  ||> None      -> Err error
 
 export isOk
 export isErr

@@ -54,13 +54,13 @@ type CheckedName =
 
 value maybeName: Option Text = Some "Ada"
 value missingName: Option Text = None
-value chosenName: Text = getOrElse "guest" missingName
+value chosenName:Text = getOrElse "guest" missingName
 value okCount: Result Text Int = Ok 2
 value errCount: Result Text Int = Err "missing"
-value chosenCount: Int = withDefault 0 okCount
-value checkedName: CheckedName = Valid "Ada"
+value chosenCount:Int = withDefault 0 okCount
+value checkedName:CheckedName = Valid "Ada"
 
-value nameCount: Int =
+value nameCount:Int =
     length [
         "Ada",
         "Grace"
@@ -72,39 +72,38 @@ value firstName: Option Text =
         "Grace"
     ]
 
-fun smaller: Bool left:Int right:Int =>
+fun smaller:Bool left:Int right:Int =>
     left < right
 
-fun keepSmall: (Option Int) x:Int =>
-    x < 3
-     T|> Some x
-     F|> None
+fun keepSmall: (Option Int) x:Int => x < 3
+  T|> Some x
+  F|> None
 
-fun addOne: Int x:Int =>
+fun addOne:Int x:Int =>
     x + 1
 
-fun punctuate: Text x:Text =>
+fun punctuate:Text x:Text =>
     append x "!"
 
-value leastCount: Int = min smaller 4 2
-value greatestCount: Int = max smaller 4 2
-value explicitLess: Ordering = Less
+value leastCount:Int = min smaller 4 2
+value greatestCount:Int = max smaller 4 2
+value explicitLess:Ordering = Less
 
-value leastOfCounts: Int =
+value leastOfCounts:Int =
     minOf smaller 5 [
         3,
         4
     ]
 
-value labels: Text =
+value labels:Text =
     join ", " [
         "Ada",
         "Grace"
     ]
 
-value orderedCount: Ordering = compare 1 2
-value combinedLabel: Text = append "Ada" " Lovelace"
-value emptyLabels: Text = empty
+value orderedCount:Ordering = compare 1 2
+value combinedLabel:Text = append "Ada" " Lovelace"
+value emptyLabels:Text = empty
 value mappedOk: Result Text Int = bimap punctuate addOne (Ok 1)
 
 value traversedCounts: Option (List Int) =
@@ -120,4 +119,4 @@ value filteredCounts: List Int =
         2
     ]
 
-value sameCount: Bool = chosenCount == 2
+value sameCount:Bool = chosenCount == 2

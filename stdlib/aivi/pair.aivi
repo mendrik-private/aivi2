@@ -1,26 +1,20 @@
-fun fst:A pair:(A, B) =>
-    pair
-     ||> (a, _) -> a
+fun fst:A pair:(A, B) => pair
+  ||> (a, _) -> a
 
-fun snd:B pair:(A, B) =>
-    pair
-     ||> (_, b) -> b
+fun snd:B pair:(A, B) => pair
+  ||> (_, b) -> b
 
-fun swap:(B, A) pair:(A, B) =>
-    pair
-     ||> (a, b) -> (b, a)
+fun swap:(B, A) pair:(A, B) => pair
+  ||> (a, b) -> (b, a)
 
-fun mapFst:(C, B) transform:(A -> C) pair:(A, B) =>
-    pair
-     ||> (a, b) -> (transform a, b)
+fun mapFst:(C, B) transform:(A -> C) pair:(A, B) => pair
+  ||> (a, b) -> (transform a, b)
 
-fun mapSnd:(A, C) transform:(B -> C) pair:(A, B) =>
-    pair
-     ||> (a, b) -> (a, transform b)
+fun mapSnd:(A, C) transform:(B -> C) pair:(A, B) => pair
+  ||> (a, b) -> (a, transform b)
 
-fun mapBoth:(C, D) transformFst:(A -> C) transformSnd:(B -> D) pair:(A, B) =>
-    pair
-     ||> (a, b) -> (transformFst a, transformSnd b)
+fun mapBoth:(C, D) transformFst:(A -> C) transformSnd:(B -> D) pair:(A, B) => pair
+  ||> (a, b) -> (transformFst a, transformSnd b)
 
 fun fromPair:(A, B) a:A b:B =>
     (a, b)

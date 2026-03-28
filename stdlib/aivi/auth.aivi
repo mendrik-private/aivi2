@@ -1,17 +1,17 @@
 use aivi.url (Url)
 
 type PkceConfig = {
-    clientId:      Text,
-    authEndpoint:  Url,
+    clientId: Text,
+    authEndpoint: Url,
     tokenEndpoint: Url,
-    scopes:        List Text,
-    redirectPort:  Int
+    scopes: List Text,
+    redirectPort: Int
 }
 
 type PkceToken = {
-    accessToken:  Text,
+    accessToken: Text,
     refreshToken: Option Text,
-    expiresAt:    Option Int
+    expiresAt: Option Int
 }
 
 type PkceError =
@@ -20,16 +20,10 @@ type PkceError =
   | InvalidResponse Text
   | PkceTimeout
 
-// PkceState tracks the lifecycle of an in-flight PKCE flow.
-// Wire an auth.pkce source to receive PkceState transitions.
 type PkceState =
   | PkceIdle
   | PkceInProgress
   | PkceComplete PkceToken
   | PkceFailed PkceError
 
-export (
-  PkceConfig, PkceToken,
-  PkceError, UserCancelled, NetworkError, InvalidResponse, PkceTimeout,
-  PkceState, PkceIdle, PkceInProgress, PkceComplete, PkceFailed
-)
+export (PkceConfig, PkceToken, PkceError, UserCancelled, NetworkError, InvalidResponse, PkceTimeout, PkceState, PkceIdle, PkceInProgress, PkceComplete, PkceFailed)

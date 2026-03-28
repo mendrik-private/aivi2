@@ -2,8 +2,6 @@ type XdgError =
   | XdgHomeUnset
   | XdgRuntimeDirUnavailable
 
-// Standard XDG user directories.  Pass to an xdg.userDir source to resolve
-// the absolute path at runtime.
 type XdgUserDir =
   | XdgHome
   | XdgDesktop
@@ -15,13 +13,6 @@ type XdgUserDir =
   | XdgTemplates
   | XdgPublicShare
 
-// XdgTask is the return type of an xdg.userDir intrinsic call.
 type XdgTask = (Task XdgError Text)
 
-export (
-  XdgError, XdgHomeUnset, XdgRuntimeDirUnavailable,
-  XdgUserDir,
-    XdgHome, XdgDesktop, XdgDocuments, XdgDownloads, XdgMusic,
-    XdgPictures, XdgVideos, XdgTemplates, XdgPublicShare,
-  XdgTask
-)
+export (XdgError, XdgHomeUnset, XdgRuntimeDirUnavailable, XdgUserDir, XdgHome, XdgDesktop, XdgDocuments, XdgDownloads, XdgMusic, XdgPictures, XdgVideos, XdgTemplates, XdgPublicShare, XdgTask)

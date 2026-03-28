@@ -14,16 +14,16 @@ type GoaAccount = {
 }
 
 type AccessToken = {
-    token:     Text,
+    token: Text,
     tokenType: Text,
     expiresAt: Option Int
 }
 
 type OAuthToken = {
-    accessToken:  Text,
+    accessToken: Text,
     refreshToken: Option Text,
-    tokenType:    Text,
-    expiresAt:    Option Int
+    tokenType: Text,
+    expiresAt: Option Int
 }
 
 type GoaError =
@@ -32,23 +32,14 @@ type GoaError =
   | AttentionRequired Text
   | GoaProtocolError Text
 
-// GoaAccountState reflects whether an account is healthy and usable.
 type GoaAccountState =
   | AccountActive
   | AccountNeedsAttention
   | AccountDisabled
 
-// GoaEvent is emitted by the gnome.accounts source when account state changes.
 type GoaEvent =
   | AccountAdded GoaAccountId
   | AccountRemoved GoaAccountId
   | AccountChanged GoaAccountId
 
-export (
-  GoaAccountId, GoaCapability, Mail, Calendar, Contacts, Files, Photos,
-  GoaProvider, GoaAccount,
-  AccessToken, OAuthToken,
-  GoaError, AccountNotFound, CredentialUnavailable, AttentionRequired, GoaProtocolError,
-  GoaAccountState, AccountActive, AccountNeedsAttention, AccountDisabled,
-  GoaEvent, AccountAdded, AccountRemoved, AccountChanged
-)
+export (GoaAccountId, GoaCapability, Mail, Calendar, Contacts, Files, Photos, GoaProvider, GoaAccount, AccessToken, OAuthToken, GoaError, AccountNotFound, CredentialUnavailable, AttentionRequired, GoaProtocolError, GoaAccountState, AccountActive, AccountNeedsAttention, AccountDisabled, GoaEvent, AccountAdded, AccountRemoved, AccountChanged)

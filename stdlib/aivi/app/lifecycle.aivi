@@ -1,5 +1,3 @@
-// Application lifecycle state.  Wire an app.lifecycle source to get a
-// Signal AppLifecycle that transitions through these states at runtime.
 type AppLifecycle =
   | Starting
   | Running
@@ -7,38 +5,38 @@ type AppLifecycle =
   | Stopping
   | Stopped
 
-// Result of an app action or command.
 type AppActionResult A =
   | ActionOk A
   | ActionFailed Text
   | ActionCancelled
 
-// A labelled command that can be surfaced in menus or command palettes.
-type AppCommand = { label : Text, description : Text, shortcut : Option Text }
+type AppCommand = {
+    label: Text,
+    description: Text,
+    shortcut: Option Text
+}
 
-// Undo/redo history state.
-type UndoState = { canUndo : Bool, canRedo : Bool, depth : Int }
+type UndoState = {
+    canUndo: Bool,
+    canRedo: Bool,
+    depth: Int
+}
 
-// Severity level for in-app notification banners.
-// Prefixed with Note to avoid conflicts with LogLevel constructors Info/Error.
-type NotificationLevel = NoteInfo | NoteWarning | NoteError | NoteSuccess
+type NotificationLevel =
+  | NoteInfo
+  | NoteWarning
+  | NoteError
+  | NoteSuccess
 
-// A notification issued by the app.
-type AppNotification = { level : NotificationLevel, title : Text, body : Option Text }
+type AppNotification = {
+    level: NotificationLevel,
+    title: Text,
+    body: Option Text
+}
 
-// AppEvent unifies the discrete events an app emits during its lifetime.
-// Useful as the value type of a top-level event signal.
 type AppEvent =
   | LifecycleChanged AppLifecycle
   | CommandRequested AppCommand
   | NotificationIssued AppNotification
 
-export (
-  AppLifecycle, Starting, Running, Suspended, Stopping, Stopped,
-  AppActionResult, ActionOk, ActionFailed, ActionCancelled,
-  AppCommand,
-  UndoState,
-  NotificationLevel, NoteInfo, NoteWarning, NoteError, NoteSuccess,
-  AppNotification,
-  AppEvent, LifecycleChanged, CommandRequested, NotificationIssued
-)
+export (AppLifecycle, Starting, Running, Suspended, Stopping, Stopped, AppActionResult, ActionOk, ActionFailed, ActionCancelled, AppCommand, UndoState, NotificationLevel, NoteInfo, NoteWarning, NoteError, NoteSuccess, AppNotification, AppEvent, LifecycleChanged, CommandRequested, NotificationIssued)

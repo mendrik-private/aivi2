@@ -3,35 +3,32 @@ type JoinState = {
     value: Text
 }
 
-fun joinStep: JoinState separator:Text state:JoinState part:Text =>
-    state.first
-     T|> { first: False, value: part }
-     F|> { first: False, value: "{state.value}{separator}{part}" }
+fun joinStep:JoinState separator:Text state:JoinState part:Text => state.first
+  T|> { first: False, value: part }
+  F|> { first: False, value: "{state.value}{separator}{part}" }
 
-fun finishJoin: Text state:JoinState =>
+fun finishJoin:Text state:JoinState =>
     state.value
 
-fun isEmpty: Bool opt:Text =>
+fun isEmpty:Bool opt:Text =>
     opt == ""
 
-fun nonEmpty: Bool opt:Text =>
+fun nonEmpty:Bool opt:Text =>
     opt != ""
 
-fun join: Text separator:Text parts:(List Text) =>
-    parts
-     |> reduce (joinStep separator) { first: True, value: "" }
-     |> finishJoin
+fun join:Text separator:Text parts: (List Text) => parts
+  |> reduce (joinStep separator) { first: True, value: "" }
+  |> finishJoin
 
-fun concat: Text parts:(List Text) =>
+fun concat:Text parts: (List Text) =>
     join "" parts
 
-fun surround: Text prefix:Text suffix:Text opt:Text =>
+fun surround:Text prefix:Text suffix:Text opt:Text =>
     "{prefix}{opt}{suffix}"
 
-fun withDefault: Text fallback:Text s:Text =>
-    s == ""
-     T|> fallback
-     F|> s
+fun withDefault:Text fallback:Text s:Text => s == ""
+  T|> fallback
+  F|> s
 
 export isEmpty
 export nonEmpty

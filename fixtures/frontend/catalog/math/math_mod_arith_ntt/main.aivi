@@ -35,69 +35,64 @@ type NttCatalog = {
     coverage: Text
 }
 
-fun poly4: Poly4 c0:Int c1:Int c2:Int c3:Int =>
+fun poly4:Poly4 c0:Int c1:Int c2:Int c3:Int =>
     { c0, c1, c2, c3 }
 
-fun normalizeNonNegative: Int modulus:Int x:Int =>
-    x > modulus - 1
-     T|> normalize modulus (x - modulus)
-     F|> x
+fun normalizeNonNegative:Int modulus:Int x:Int => x > modulus - 1
+  T|> normalize modulus (x - modulus)
+  F|> x
 
-fun normalize: Int modulus:Int x:Int =>
-    x < 0
-     T|> normalize modulus (x + modulus)
-     F|> normalizeNonNegative modulus x
+fun normalize:Int modulus:Int x:Int => x < 0
+  T|> normalize modulus (x + modulus)
+  F|> normalizeNonNegative modulus x
 
-fun addMod: Int modulus:Int left:Int right:Int =>
+fun addMod:Int modulus:Int left:Int right:Int =>
     normalize modulus (left + right)
 
-fun subMod: Int modulus:Int left:Int right:Int =>
+fun subMod:Int modulus:Int left:Int right:Int =>
     normalize modulus (left - right)
 
-fun mulMod: Int modulus:Int left:Int right:Int =>
+fun mulMod:Int modulus:Int left:Int right:Int =>
     normalize modulus (left * right)
 
-fun powMod: Int modulus:Int base:Int exponent:Int =>
-    exponent == 0
-     T|> 1
-     F|> mulMod modulus base (powMod modulus base (exponent - 1))
+fun powMod:Int modulus:Int base:Int exponent:Int => exponent == 0
+  T|> 1
+  F|> mulMod modulus base (powMod modulus base (exponent - 1))
 
-fun butterfly2: (Int, Int) modulus:Int left:Int right:Int =>
+fun butterfly2:(Int, Int) modulus:Int left:Int right:Int =>
     (
         addMod modulus left right,
         subMod modulus left right
     )
 
-fun combineOdd: Spectrum4 modulus:Int twiddle:Int even0:Int even1:Int odd:(Int, Int) =>
-    odd
-     ||> (odd0, odd1) -> { k0: addMod modulus even0 odd0, k1: addMod modulus even1 (mulMod modulus twiddle odd1), k2: subMod modulus even0 odd0, k3: subMod modulus even1 (mulMod modulus twiddle odd1) }
+fun combineOdd:Spectrum4 modulus:Int twiddle:Int even0:Int even1:Int odd:(Int, Int) => odd
+  ||> (odd0, odd1) -> { k0: addMod modulus even0 odd0, k1: addMod modulus even1 (mulMod modulus twiddle odd1), k2: subMod modulus even0 odd0, k3: subMod modulus even1 (mulMod modulus twiddle odd1) }
 
-fun combineSpectrum: Spectrum4 modulus:Int twiddle:Int even:(Int, Int) odd:(Int, Int) =>
-    even
-     ||> (even0, even1) -> combineOdd modulus twiddle even0 even1 odd
+fun combineSpectrum:Spectrum4 modulus:Int twiddle:Int even:(Int, Int) odd:(Int, Int) => even
+  ||> (even0, even1) -> combineOdd modulus twiddle even0 even1 odd
 
-fun normalizePoly: Poly4 modulus:Int values:Poly4 =>
+fun normalizePoly:Poly4 modulus:Int values:Poly4 =>
     poly4 (normalize modulus values.c0) (normalize modulus values.c1) (normalize modulus values.c2) (normalize modulus values.c3)
 
-fun ntt4WithRoot: Spectrum4 modulus:Int twiddle:Int values:Poly4 =>
+fun ntt4WithRoot:Spectrum4 modulus:Int twiddle:Int values:Poly4 =>
     combineSpectrum modulus twiddle (butterfly2 modulus values.c0 values.c2) (butterfly2 modulus values.c1 values.c3)
 
-fun spectrumToPoly: Poly4 spectrum:Spectrum4 =>
+fun spectrumToPoly:Poly4 spectrum:Spectrum4 =>
     poly4 spectrum.k0 spectrum.k1 spectrum.k2 spectrum.k3
 
-fun scalePoly: Poly4 modulus:Int factor:Int values:Poly4 =>
+fun scalePoly:Poly4 modulus:Int factor:Int values:Poly4 =>
     poly4 (mulMod modulus factor values.c0) (mulMod modulus factor values.c1) (mulMod modulus factor values.c2) (mulMod modulus factor values.c3)
 
-fun forwardNtt: Spectrum4 params:NttParams values:Poly4 =>
+fun forwardNtt:Spectrum4 params:NttParams values:Poly4 =>
     ntt4WithRoot params.modulus params.root (normalizePoly params.modulus values)
 
-fun inverseNtt: Poly4 params:NttParams spectrum:Spectrum4 =>
+fun inverseNtt:Poly4 params:NttParams spectrum:Spectrum4 =>
     scalePoly params.modulus params.inverseLength (spectrumToPoly (ntt4WithRoot params.modulus params.inverseRoot (spectrumToPoly spectrum)))
 
-fun preservedInput: Bool params:NttParams input:Poly4 spectrum:Spectrum4 =>
+fun preservedInput:Bool params:NttParams input:Poly4 spectrum:Spectrum4 =>
     inverseNtt params spectrum == normalizePoly params.modulus input
 
-fun summarizeForward: NttSummary label:Text params:NttParams input:Poly4 spectrum:Spectrum4 =>
+fun summarizeForward:NttSummary label:Text params:NttParams input:Poly4 spectrum:Spectrum4 =>
     {
         label,
         spectrum,
@@ -106,22 +101,22 @@ fun summarizeForward: NttSummary label:Text params:NttParams input:Poly4 spectru
         rootSquared: powMod params.modulus params.root 2
     }
 
-fun summarizeNtt: NttSummary label:Text params:NttParams input:Poly4 =>
+fun summarizeNtt:NttSummary label:Text params:NttParams input:Poly4 =>
     summarizeForward label params input (forwardNtt params input)
 
-value params: NttParams = {
+value params:NttParams = {
     modulus: 17,
     root: 4,
     inverseRoot: 13,
     inverseLength: 13
 }
 
-value canonicalCoeffs: Poly4 = poly4 1 2 3 4
-value wrappedCoeffs: Poly4 = poly4 16 17 18 (0 - 1)
-value deltaCoeffs: Poly4 = poly4 1 0 0 0
-value zeroCoeffs: Poly4 = poly4 0 0 0 0
+value canonicalCoeffs:Poly4 = poly4 1 2 3 4
+value wrappedCoeffs:Poly4 = poly4 16 17 18 (0 - 1)
+value deltaCoeffs:Poly4 = poly4 1 0 0 0
+value zeroCoeffs:Poly4 = poly4 0 0 0 0
 
-value nttCatalog: NttCatalog = {
+value nttCatalog:NttCatalog = {
     canonical: summarizeNtt "canonical" params canonicalCoeffs,
     wrapped: summarizeNtt "wrapped" params wrappedCoeffs,
     delta: summarizeNtt "delta" params deltaCoeffs,

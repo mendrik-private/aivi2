@@ -1,17 +1,14 @@
-fun not:Bool b:Bool =>
-    b
-     T|> False
-     F|> True
+fun not:Bool b:Bool => b
+  T|> False
+  F|> True
 
-fun xor:Bool a:Bool b:Bool =>
-    a == b
-     T|> False
-     F|> True
+fun xor:Bool a:Bool b:Bool => a == b
+  T|> False
+  F|> True
 
-fun implies:Bool a:Bool b:Bool =>
-    a
-     T|> b
-     F|> True
+fun implies:Bool a:Bool b:Bool => a
+  T|> b
+  F|> True
 
 fun both:Bool a:Bool b:Bool =>
     a and b

@@ -1,12 +1,10 @@
-fun filterHelp: (Option A) item:A keep:Bool =>
-    keep
-     T|> Some item
-     F|> None
+fun filterHelp: (Option A) item:A keep:Bool => keep
+  T|> Some item
+  F|> None
 
-fun zipHelp: (Option (A, B)) a:A right:(Option B) =>
-    right
-     ||> None   -> None
-     ||> Some b -> Some (a, b)
+fun zipHelp: (Option (A, B)) a:A right: (Option B) => right
+  ||> None   -> None
+  ||> Some b -> Some (a, b)
 
 fun keepSome: (Option A) item:A =>
     Some item
@@ -17,65 +15,53 @@ fun singleton: (List A) item:A =>
 fun okValue: (Result E A) item:A =>
     Ok item
 
-fun isSome: Bool opt:(Option A) =>
-    opt
-     T|> True
-     F|> False
+fun isSome:Bool opt: (Option A) => opt
+  T|> True
+  F|> False
 
-fun isNone: Bool opt:(Option A) =>
-    opt
-     F|> True
-     T|> False
+fun isNone:Bool opt: (Option A) => opt
+  F|> True
+  T|> False
 
-fun getOrElse: A fallback:A opt:(Option A) =>
-    opt
-     ||> Some item -> item
-     ||> None      -> fallback
+fun getOrElse:A fallback:A opt: (Option A) => opt
+  ||> Some item -> item
+  ||> None      -> fallback
 
-fun orElse: (Option A) fallback:(Option A) opt:(Option A) =>
-    opt
-     T|> keepSome
-     F|> fallback
+fun orElse: (Option A) fallback: (Option A) opt: (Option A) => opt
+  T|> keepSome
+  F|> fallback
 
-fun flatMap: (Option B) next:(A -> Option B) opt:(Option A) =>
-    opt
-     T|> next
-     F|> None
+fun flatMap: (Option B) next: (A -> Option B) opt: (Option A) => opt
+  T|> next
+  F|> None
 
-fun flatten: (Option A) opt:(Option (Option A)) =>
-    opt
-     ||> Some nested -> nested
-     ||> None        -> None
+fun flatten: (Option A) opt: (Option (Option A)) => opt
+  ||> Some nested -> nested
+  ||> None        -> None
 
-fun toList: (List A) opt:(Option A) =>
-    opt
-     T|> singleton
-     F|> []
+fun toList: (List A) opt: (Option A) => opt
+  T|> singleton
+  F|> []
 
-fun toResult: (Result E A) error:E opt:(Option A) =>
-    opt
-     T|> okValue
-     F|> Err error
+fun toResult: (Result E A) error:E opt: (Option A) => opt
+  T|> okValue
+  F|> Err error
 
-fun map: (Option B) transform:(A -> B) opt:(Option A) =>
-    opt
-     ||> Some item -> Some (transform item)
-     ||> None      -> None
+fun map: (Option B) transform:(A -> B) opt: (Option A) => opt
+  ||> Some item -> Some (transform item)
+  ||> None      -> None
 
-fun filter: (Option A) predicate:(A -> Bool) opt:(Option A) =>
-    opt
-     ||> None      -> None
-     ||> Some item -> filterHelp item (predicate item)
+fun filter: (Option A) predicate:(A -> Bool) opt: (Option A) => opt
+  ||> None      -> None
+  ||> Some item -> filterHelp item (predicate item)
 
-fun zip: (Option (A, B)) left:(Option A) right:(Option B) =>
-    left
-     ||> None   -> None
-     ||> Some a -> zipHelp a right
+fun zip: (Option (A, B)) left: (Option A) right: (Option B) => left
+  ||> None   -> None
+  ||> Some a -> zipHelp a right
 
-fun fromBool: (Option A) item:A b:Bool =>
-    b
-     T|> Some item
-     F|> None
+fun fromBool: (Option A) item:A b:Bool => b
+  T|> Some item
+  F|> None
 
 export isSome
 export isNone

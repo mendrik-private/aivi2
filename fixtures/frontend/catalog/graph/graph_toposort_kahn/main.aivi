@@ -60,7 +60,7 @@ type ToposortCatalog = {
     cycle: ToposortSummary
 }
 
-value zeroIncoming: Incoming = {
+value zeroIncoming:Incoming = {
     fetch: 0,
     parse: 0,
     analyze: 0,
@@ -68,7 +68,7 @@ value zeroIncoming: Incoming = {
     publish: 0
 }
 
-value initialEmitted: Emitted = {
+value initialEmitted:Emitted = {
     fetch: False,
     parse: False,
     analyze: False,
@@ -76,87 +76,78 @@ value initialEmitted: Emitted = {
     publish: False
 }
 
-fun choosePhase: A phase:Phase fetch:A parse:A analyze:A package:A publish:A =>
-    phase
-     ||> Fetch   -> fetch
-     ||> Parse   -> parse
-     ||> Analyze -> analyze
-     ||> Package -> package
-     ||> Publish -> publish
+fun choosePhase:A phase:Phase fetch:A parse:A analyze:A package:A publish:A => phase
+  ||> Fetch   -> fetch
+  ||> Parse   -> parse
+  ||> Analyze -> analyze
+  ||> Package -> package
+  ||> Publish -> publish
 
-fun phaseLabel: Text phase:Phase =>
+fun phaseLabel:Text phase:Phase =>
     choosePhase phase "fetch" "parse" "analyze" "package" "publish"
 
-fun appendPhaseLabel: (List Text) parts:(List Text) phase:Phase =>
+fun appendPhaseLabel: (List Text) parts: (List Text) phase:Phase =>
     append parts [
         phaseLabel phase
     ]
 
-fun orderLabel: Text order:(List Phase) =>
-    order
-     |> reduce appendPhaseLabel []
-     |> join " -> "
+fun orderLabel:Text order: (List Phase) => order
+  |> reduce appendPhaseLabel []
+  |> join " -> "
 
-fun incomingOf: Int incoming:Incoming phase:Phase =>
+fun incomingOf:Int incoming:Incoming phase:Phase =>
     choosePhase phase incoming.fetch incoming.parse incoming.analyze incoming.package incoming.publish
 
-fun setIncoming: Incoming incoming:Incoming phase:Phase x:Int =>
-    phase
-     ||> Fetch   -> { fetch: x, parse: incoming.parse, analyze: incoming.analyze, package: incoming.package, publish: incoming.publish }
-     ||> Parse   -> { fetch: incoming.fetch, parse: x, analyze: incoming.analyze, package: incoming.package, publish: incoming.publish }
-     ||> Analyze -> { fetch: incoming.fetch, parse: incoming.parse, analyze: x, package: incoming.package, publish: incoming.publish }
-     ||> Package -> { fetch: incoming.fetch, parse: incoming.parse, analyze: incoming.analyze, package: x, publish: incoming.publish }
-     ||> Publish -> { fetch: incoming.fetch, parse: incoming.parse, analyze: incoming.analyze, package: incoming.package, publish: x }
+fun setIncoming:Incoming incoming:Incoming phase:Phase x:Int => phase
+  ||> Fetch   -> { fetch: x, parse: incoming.parse, analyze: incoming.analyze, package: incoming.package, publish: incoming.publish }
+  ||> Parse   -> { fetch: incoming.fetch, parse: x, analyze: incoming.analyze, package: incoming.package, publish: incoming.publish }
+  ||> Analyze -> { fetch: incoming.fetch, parse: incoming.parse, analyze: x, package: incoming.package, publish: incoming.publish }
+  ||> Package -> { fetch: incoming.fetch, parse: incoming.parse, analyze: incoming.analyze, package: x, publish: incoming.publish }
+  ||> Publish -> { fetch: incoming.fetch, parse: incoming.parse, analyze: incoming.analyze, package: incoming.package, publish: x }
 
-fun incrementIncoming: Incoming incoming:Incoming phase:Phase =>
+fun incrementIncoming:Incoming incoming:Incoming phase:Phase =>
     setIncoming incoming phase ((incomingOf incoming phase) + 1)
 
-fun decrementIncoming: Incoming incoming:Incoming phase:Phase =>
+fun decrementIncoming:Incoming incoming:Incoming phase:Phase =>
     setIncoming incoming phase ((incomingOf incoming phase) - 1)
 
-fun emittedOf: Bool emitted:Emitted phase:Phase =>
+fun emittedOf:Bool emitted:Emitted phase:Phase =>
     choosePhase phase emitted.fetch emitted.parse emitted.analyze emitted.package emitted.publish
 
-fun setEmitted: Emitted emitted:Emitted phase:Phase x:Bool =>
-    phase
-     ||> Fetch   -> { fetch: x, parse: emitted.parse, analyze: emitted.analyze, package: emitted.package, publish: emitted.publish }
-     ||> Parse   -> { fetch: emitted.fetch, parse: x, analyze: emitted.analyze, package: emitted.package, publish: emitted.publish }
-     ||> Analyze -> { fetch: emitted.fetch, parse: emitted.parse, analyze: x, package: emitted.package, publish: emitted.publish }
-     ||> Package -> { fetch: emitted.fetch, parse: emitted.parse, analyze: emitted.analyze, package: x, publish: emitted.publish }
-     ||> Publish -> { fetch: emitted.fetch, parse: emitted.parse, analyze: emitted.analyze, package: emitted.package, publish: x }
+fun setEmitted:Emitted emitted:Emitted phase:Phase x:Bool => phase
+  ||> Fetch   -> { fetch: x, parse: emitted.parse, analyze: emitted.analyze, package: emitted.package, publish: emitted.publish }
+  ||> Parse   -> { fetch: emitted.fetch, parse: x, analyze: emitted.analyze, package: emitted.package, publish: emitted.publish }
+  ||> Analyze -> { fetch: emitted.fetch, parse: emitted.parse, analyze: x, package: emitted.package, publish: emitted.publish }
+  ||> Package -> { fetch: emitted.fetch, parse: emitted.parse, analyze: emitted.analyze, package: x, publish: emitted.publish }
+  ||> Publish -> { fetch: emitted.fetch, parse: emitted.parse, analyze: emitted.analyze, package: emitted.package, publish: x }
 
-fun isPhase: Bool expected:Phase candidate:Phase =>
+fun isPhase:Bool expected:Phase candidate:Phase =>
     candidate == expected
 
-fun queuedContains: Bool queued:(List Phase) phase:Phase =>
-    queued
-     |> any (isPhase phase)
+fun queuedContains:Bool queued: (List Phase) phase:Phase => queued
+  |> any (isPhase phase)
 
-fun readyPhase: Bool state:KahnState phase:Phase =>
+fun readyPhase:Bool state:KahnState phase:Phase =>
     ((incomingOf state.incoming phase) == 0) and ((emittedOf state.emitted phase) == False) and ((queuedContains state.queued phase) == False)
 
-fun enqueueReady: KahnState state:KahnState phase:Phase =>
-    readyPhase state phase
-     T|> { incoming: state.incoming, queued: append state.queued [phase], emitted: state.emitted, order: state.order }
-     F|> state
+fun enqueueReady:KahnState state:KahnState phase:Phase => readyPhase state phase
+  T|> { incoming: state.incoming, queued: append state.queued [phase], emitted: state.emitted, order: state.order }
+  F|> state
 
-fun replenish: KahnState graph:DependencyGraph state:KahnState =>
-    graph.nodes
-     |> reduce enqueueReady state
+fun replenish:KahnState graph:DependencyGraph state:KahnState => graph.nodes
+  |> reduce enqueueReady state
 
-fun countIncoming: Incoming incoming:Incoming edge:Dependency =>
+fun countIncoming:Incoming incoming:Incoming edge:Dependency =>
     incrementIncoming incoming edge.to
 
-fun decrementOutgoing: Incoming current:Phase incoming:Incoming edge:Dependency =>
-    edge.from == current
-     T|> decrementIncoming incoming edge.to
-     F|> incoming
+fun decrementOutgoing:Incoming current:Phase incoming:Incoming edge:Dependency => edge.from == current
+  T|> decrementIncoming incoming edge.to
+  F|> incoming
 
-fun computeInitialIncoming: Incoming graph:DependencyGraph =>
-    graph.edges
-     |> reduce countIncoming zeroIncoming
+fun computeInitialIncoming:Incoming graph:DependencyGraph => graph.edges
+  |> reduce countIncoming zeroIncoming
 
-fun initialState: KahnState graph:DependencyGraph =>
+fun initialState:KahnState graph:DependencyGraph =>
     replenish graph {
         incoming: computeInitialIncoming graph,
         queued: [],
@@ -164,16 +155,14 @@ fun initialState: KahnState graph:DependencyGraph =>
         order: []
     }
 
-fun decrementedIncoming: Incoming graph:DependencyGraph state:KahnState current:Phase =>
-    graph.edges
-     |> reduce (decrementOutgoing current) state.incoming
+fun decrementedIncoming:Incoming graph:DependencyGraph state:KahnState current:Phase => graph.edges
+  |> reduce (decrementOutgoing current) state.incoming
 
-fun remainingQueued: (List Phase) state:KahnState =>
-    state.queued
-     |> tail
-     |> getOrElse []
+fun remainingQueued: (List Phase) state:KahnState => state.queued
+  |> tail
+  |> getOrElse []
 
-fun emitReady: KahnState graph:DependencyGraph state:KahnState current:Phase =>
+fun emitReady:KahnState graph:DependencyGraph state:KahnState current:Phase =>
     replenish graph {
         incoming: decrementedIncoming graph state current,
         queued: remainingQueued state,
@@ -181,25 +170,23 @@ fun emitReady: KahnState graph:DependencyGraph state:KahnState current:Phase =>
         order: append state.order [current]
     }
 
-fun consume: KahnState graph:DependencyGraph state:KahnState tick:Phase =>
-    state.queued
-     |> head
-     ||> Some current -> emitReady graph state current
-     ||> None         -> state
+fun consume:KahnState graph:DependencyGraph state:KahnState tick:Phase => state.queued
+  |> head
+  ||> Some current -> emitReady graph state current
+  ||> None         -> state
 
-fun hasCycle: Bool graph:DependencyGraph state:KahnState =>
-    length state.order == length graph.nodes
-     T|> False
-     F|> True
+fun hasCycle:Bool graph:DependencyGraph state:KahnState => length state.order == length graph.nodes
+  T|> False
+  F|> True
 
-fun summarize: ToposortSummary graph:DependencyGraph state:KahnState =>
+fun summarize:ToposortSummary graph:DependencyGraph state:KahnState =>
     {
         order: orderLabel state.order,
         emittedCount: length state.order,
         hasCycle: hasCycle graph state
     }
 
-value dagGraph: DependencyGraph = {
+value dagGraph:DependencyGraph = {
     nodes: [
         Fetch,
         Parse,
@@ -216,12 +203,12 @@ value dagGraph: DependencyGraph = {
     ]
 }
 
-value cycleBackEdge: Dependency = {
+value cycleBackEdge:Dependency = {
     from: Analyze,
     to: Fetch
 }
 
-value cyclicGraph: DependencyGraph = {
+value cyclicGraph:DependencyGraph = {
     nodes: [Fetch, Parse, Analyze],
     edges: [
         { from: Fetch, to: Parse },
@@ -230,15 +217,15 @@ value cyclicGraph: DependencyGraph = {
     ]
 }
 
-value dagState: KahnState =
+value dagState:KahnState =
     dagGraph.nodes
      |> reduce (consume dagGraph) (initialState dagGraph)
 
-value cycleState: KahnState =
+value cycleState:KahnState =
     cyclicGraph.nodes
      |> reduce (consume cyclicGraph) (initialState cyclicGraph)
 
-value toposortCatalog: ToposortCatalog = {
+value toposortCatalog:ToposortCatalog = {
     dag: summarize dagGraph dagState,
     cycle: summarize cyclicGraph cycleState
 }

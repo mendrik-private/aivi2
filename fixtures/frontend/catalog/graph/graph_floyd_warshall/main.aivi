@@ -38,104 +38,92 @@ type FloydWarshallSummary = {
     dToA: Text
 }
 
-value negativeEdge: WeightedEdge = {
+value negativeEdge:WeightedEdge = {
     from: B,
     to: C,
     weight: 0 - 2
 }
 
-value unreachablePair: (Node, Node) = (
+value unreachablePair:(Node, Node) = (
     D,
     A
 )
 
-fun nodeLabel: Text node:Node =>
-    node
-     ||> A -> "A"
-     ||> B -> "B"
-     ||> C -> "C"
-     ||> D -> "D"
+fun nodeLabel:Text node:Node => node
+  ||> A -> "A"
+  ||> B -> "B"
+  ||> C -> "C"
+  ||> D -> "D"
 
-fun appendNodeLabel: (List Text) parts:(List Text) node:Node =>
+fun appendNodeLabel: (List Text) parts: (List Text) node:Node =>
     append parts [
         nodeLabel node
     ]
 
-fun orderLabel: Text nodes:(List Node) =>
-    nodes
-     |> reduce appendNodeLabel []
-     |> join " -> "
+fun orderLabel:Text nodes: (List Node) => nodes
+  |> reduce appendNodeLabel []
+  |> join " -> "
 
-fun distanceText: Text distance:Distance =>
-    distance
-     ||> Unreachable -> "unreachable"
-     ||> Cost x      -> "{x}"
+fun distanceText:Text distance:Distance => distance
+  ||> Unreachable -> "unreachable"
+  ||> Cost x      -> "{x}"
 
-fun betterDistance: Bool left:Distance right:Distance =>
-    (left, right)
-     ||> (Cost _, Unreachable) -> True
-     ||> (Cost l, Cost r)      -> l < r
-     ||> (Unreachable, _)      -> False
+fun betterDistance:Bool left:Distance right:Distance => (left, right)
+  ||> (Cost _, Unreachable) -> True
+  ||> (Cost l, Cost r)      -> l < r
+  ||> (Unreachable, _)      -> False
 
-fun minDistance: Distance left:Distance right:Distance =>
-    betterDistance left right
-     T|> left
-     F|> right
+fun minDistance:Distance left:Distance right:Distance => betterDistance left right
+  T|> left
+  F|> right
 
-fun composeDistance: Distance left:Distance right:Distance =>
-    (left, right)
-     ||> (Cost l, Cost r) -> Cost (l + r)
-     ||> (_, _)           -> Unreachable
+fun composeDistance:Distance left:Distance right:Distance => (left, right)
+  ||> (Cost l, Cost r) -> Cost (l + r)
+  ||> (_, _)           -> Unreachable
 
-fun rowOf: Row matrix:Matrix node:Node =>
-    node
-     ||> A -> matrix.a
-     ||> B -> matrix.b
-     ||> C -> matrix.c
-     ||> D -> matrix.d
+fun rowOf:Row matrix:Matrix node:Node => node
+  ||> A -> matrix.a
+  ||> B -> matrix.b
+  ||> C -> matrix.c
+  ||> D -> matrix.d
 
-fun setRow: Matrix matrix:Matrix node:Node row:Row =>
-    node
-     ||> A -> { a: row, b: matrix.b, c: matrix.c, d: matrix.d }
-     ||> B -> { a: matrix.a, b: row, c: matrix.c, d: matrix.d }
-     ||> C -> { a: matrix.a, b: matrix.b, c: row, d: matrix.d }
-     ||> D -> { a: matrix.a, b: matrix.b, c: matrix.c, d: row }
+fun setRow:Matrix matrix:Matrix node:Node row:Row => node
+  ||> A -> { a: row, b: matrix.b, c: matrix.c, d: matrix.d }
+  ||> B -> { a: matrix.a, b: row, c: matrix.c, d: matrix.d }
+  ||> C -> { a: matrix.a, b: matrix.b, c: row, d: matrix.d }
+  ||> D -> { a: matrix.a, b: matrix.b, c: matrix.c, d: row }
 
-fun distanceInRow: Distance row:Row node:Node =>
-    node
-     ||> A -> row.a
-     ||> B -> row.b
-     ||> C -> row.c
-     ||> D -> row.d
+fun distanceInRow:Distance row:Row node:Node => node
+  ||> A -> row.a
+  ||> B -> row.b
+  ||> C -> row.c
+  ||> D -> row.d
 
-fun setRowDistance: Row row:Row node:Node x:Distance =>
-    node
-     ||> A -> { a: x, b: row.b, c: row.c, d: row.d }
-     ||> B -> { a: row.a, b: x, c: row.c, d: row.d }
-     ||> C -> { a: row.a, b: row.b, c: x, d: row.d }
-     ||> D -> { a: row.a, b: row.b, c: row.c, d: x }
+fun setRowDistance:Row row:Row node:Node x:Distance => node
+  ||> A -> { a: x, b: row.b, c: row.c, d: row.d }
+  ||> B -> { a: row.a, b: x, c: row.c, d: row.d }
+  ||> C -> { a: row.a, b: row.b, c: x, d: row.d }
+  ||> D -> { a: row.a, b: row.b, c: row.c, d: x }
 
-fun distanceBetween: Distance matrix:Matrix from:Node to:Node =>
+fun distanceBetween:Distance matrix:Matrix from:Node to:Node =>
     distanceInRow (rowOf matrix from) to
 
-fun setDistance: Matrix matrix:Matrix from:Node to:Node x:Distance =>
+fun setDistance:Matrix matrix:Matrix from:Node to:Node x:Distance =>
     setRow matrix from (setRowDistance (rowOf matrix from) to x)
 
-fun bestDistance: Distance matrix:Matrix from:Node to:Node via:Node =>
+fun bestDistance:Distance matrix:Matrix from:Node to:Node via:Node =>
     minDistance (distanceBetween matrix from to) (composeDistance (distanceBetween matrix from via) (distanceBetween matrix via to))
 
-fun updatePairVia: Matrix via:Node matrix:Matrix pair:(Node, Node) =>
-    pair
-     ||> (from, to) -> setDistance matrix from to (bestDistance matrix from to via)
+fun updatePairVia:Matrix via:Node matrix:Matrix pair:(Node, Node) => pair
+  ||> (from, to) -> setDistance matrix from to (bestDistance matrix from to via)
 
-fun runVia: Matrix matrix:Matrix via:Node =>
-    allPairs
-     |> reduce (updatePairVia via) matrix
+fun runVia:Matrix matrix:Matrix via:Node => allPairs
+  |> reduce (updatePairVia via) matrix
 
-fun addEdge: Matrix matrix:Matrix edge:WeightedEdge =>
+fun addEdge:Matrix matrix:Matrix edge:WeightedEdge =>
     setDistance matrix edge.from edge.to (Cost edge.weight)
 
-value baseMatrix: Matrix = {
+value baseMatrix:Matrix = {
     a: {
         a: Cost 0,
         b: Unreachable,
@@ -181,7 +169,7 @@ value allPairs: List (Node, Node) = [
     (D, D)
 ]
 
-value floydWarshallGraph: WeightedGraph = {
+value floydWarshallGraph:WeightedGraph = {
     nodes: [A, B, C, D],
     edges: [
         { from: A, to: B, weight: 3 },
@@ -191,15 +179,15 @@ value floydWarshallGraph: WeightedGraph = {
     ]
 }
 
-value initialMatrix: Matrix =
+value initialMatrix:Matrix =
     floydWarshallGraph.edges
      |> reduce addEdge baseMatrix
 
-value finalMatrix: Matrix =
+value finalMatrix:Matrix =
     floydWarshallGraph.nodes
      |> reduce runVia initialMatrix
 
-value floydWarshallSummary: FloydWarshallSummary = {
+value floydWarshallSummary:FloydWarshallSummary = {
     viaOrder: orderLabel floydWarshallGraph.nodes,
     aToC: distanceText (distanceBetween finalMatrix A C),
     aToD: distanceText (distanceBetween finalMatrix A D),

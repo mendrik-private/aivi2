@@ -1,19 +1,20 @@
 use std::fmt::Write;
 
 use crate::cst::{
-    BinaryOperator, ClassMember, ClassMemberName, ClassRequireDecl, ClassWithDecl, Decorator,
-    DecoratorArguments, DecoratorPayload, DomainItem, DomainMember, DomainMemberName, ExportItem,
-    Expr, ExprKind, FunctionParam, Identifier, InstanceItem, InstanceMember, Item, MapExpr,
-    MarkupAttribute, MarkupAttributeValue, MarkupNode, Module, NamedItem, Pattern, PatternKind,
-    PipeExpr, PipeStage, PipeStageKind, ProjectionPath, QualifiedName, RecordExpr, RecordField,
-    RecordPatternField, SourceDecorator, SourceProviderContractItem, SourceProviderContractMember,
-    SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextLiteral, TextSegment,
-    TypeDeclBody, TypeExpr, TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseItem,
+    BinaryOperator, ClassMember, ClassMemberName, Decorator, DecoratorArguments, DecoratorPayload,
+    DomainItem, DomainMember, DomainMemberName, ExportItem, Expr, ExprKind, FunctionParam,
+    Identifier, InstanceItem, InstanceMember, Item, MapExpr, MarkupAttribute, MarkupAttributeValue,
+    MarkupNode, Module, NamedItem, Pattern, PatternKind, PipeExpr, PipeStage, PipeStageKind,
+    ProjectionPath, QualifiedName, RecordExpr, RecordField, RecordPatternField, SourceDecorator,
+    SourceProviderContractItem, SourceProviderContractMember, SourceProviderContractSchemaMember,
+    SuffixedIntegerLiteral, TextLiteral, TextSegment, TypeDeclBody, TypeExpr, TypeExprKind,
+    TypeField, TypeVariant, UnaryOperator, UseItem,
 };
 
 const INDENT_WIDTH: usize = 4;
 const INLINE_LIMIT: usize = 32;
 const TYPE_VARIANT_INDENT: usize = 2;
+const PIPE_STAGE_INDENT: usize = 1;
 
 const EXPR_PIPE_PREC: u8 = 0;
 const EXPR_RANGE_PREC: u8 = 1;
@@ -72,12 +73,12 @@ impl Formatter {
             Item::Type(item) => lines.extend(self.format_type_item(item)),
             Item::Data(item) => lines.extend(self.format_data_item(item)),
             Item::Fun(item) => lines.extend(self.format_fun_item(item)),
-            Item::Value(item) => lines.extend(self.format_value_item("value", item, true)),
-            Item::Signal(item) => lines.extend(self.format_value_item("signal", item, true)),
-            Item::Source(item) => lines.extend(self.format_value_item("source", item, true)),
-            Item::ResultDecl(item) => lines.extend(self.format_value_item("result", item, true)),
-            Item::View(item) => lines.extend(self.format_value_item("view", item, true)),
-            Item::Adapter(item) => lines.extend(self.format_value_item("adapter", item, true)),
+            Item::Value(item) => lines.extend(self.format_value_item("value", item)),
+            Item::Signal(item) => lines.extend(self.format_value_item("signal", item)),
+            Item::Source(item) => lines.extend(self.format_value_item("source", item)),
+            Item::ResultDecl(item) => lines.extend(self.format_value_item("result", item)),
+            Item::View(item) => lines.extend(self.format_value_item("view", item)),
+            Item::Adapter(item) => lines.extend(self.format_value_item("adapter", item)),
             Item::Class(item) => lines.extend(self.format_class_item(item)),
             Item::Instance(item) => lines.extend(self.format_instance_item(item)),
             Item::Domain(item) => lines.extend(self.format_domain_item(item)),
@@ -156,16 +157,12 @@ impl Formatter {
         }
     }
 
-    fn format_value_item(
-        &self,
-        keyword: &str,
-        item: &NamedItem,
-        spaced_annotation: bool,
-    ) -> Vec<String> {
+    fn format_value_item(&self, keyword: &str, item: &NamedItem) -> Vec<String> {
         let mut header = format!("{keyword} {}", self.item_name(&item.name));
         if let Some(annotation) = &item.annotation {
-            header.push_str(if spaced_annotation { ": " } else { ":" });
-            header.push_str(&self.format_type_inline(annotation, 0));
+            header.push_str(self.type_annotation_separator(&item.constraints, annotation));
+            header
+                .push_str(&self.format_signature_annotation_inline(&item.constraints, annotation));
         }
 
         let Some(body) = item.expr_body() else {
@@ -184,7 +181,7 @@ impl Formatter {
             block.prefixed(&format!("{header} = ")).into_lines()
         } else {
             let indent = if matches!(&body.kind, ExprKind::Pipe(pipe) if pipe.head.is_none()) {
-                1
+                PIPE_STAGE_INDENT
             } else {
                 INDENT_WIDTH
             };
@@ -198,8 +195,9 @@ impl Formatter {
     fn format_fun_item(&self, item: &NamedItem) -> Vec<String> {
         let mut header = format!("fun {}", self.item_name(&item.name));
         if let Some(annotation) = &item.annotation {
-            header.push_str(": ");
-            header.push_str(&self.format_type_inline(annotation, 0));
+            header.push_str(self.type_annotation_separator(&item.constraints, annotation));
+            header
+                .push_str(&self.format_signature_annotation_inline(&item.constraints, annotation));
         }
         for parameter in &item.parameters {
             header.push(' ');
@@ -210,6 +208,21 @@ impl Formatter {
         let Some(body) = item.expr_body() else {
             return vec![header];
         };
+
+        if let ExprKind::Pipe(pipe) = &body.kind {
+            if let Some(head) = &pipe.head {
+                let mut lines = vec![format!("{header} {}", self.format_expr_inline(head, 0))];
+                let stage_lines = self.format_pipe_stage_lines(&pipe.stages);
+                if !stage_lines.is_empty() {
+                    lines.extend(
+                        Block::from_lines(stage_lines)
+                            .indented(PIPE_STAGE_INDENT)
+                            .into_lines(),
+                    );
+                }
+                return lines;
+            }
+        }
 
         let force_break = self.should_force_expr_break(INDENT_WIDTH, body);
         let block = self.format_expr_block(body, force_break);
@@ -260,7 +273,12 @@ impl Formatter {
     }
 
     fn format_class_item(&self, item: &NamedItem) -> Vec<String> {
-        let mut header = format!("class {}", self.item_name(&item.name));
+        let mut header = "class ".to_owned();
+        if !item.constraints.is_empty() {
+            header.push_str(&self.format_constraint_list_inline(&item.constraints));
+            header.push_str(" => ");
+        }
+        header.push_str(self.item_name(&item.name));
         for parameter in &item.type_parameters {
             header.push(' ');
             header.push_str(&parameter.text);
@@ -271,50 +289,24 @@ impl Formatter {
         };
 
         let mut lines = vec![header];
-        // Legacy prefix-style superclasses `(X) -> class Name Param` are rendered
-        // as body-level `with` declarations (canonical form).
-        for constraint in &item.constraints {
-            lines.push(format!(
-                "{}with {}",
-                spaces(INDENT_WIDTH),
-                self.format_type_inline(constraint, 0),
-            ));
-        }
-        for decl in &body.with_decls {
-            lines.extend(self.format_class_with_decl(decl));
-        }
-        for decl in &body.require_decls {
-            lines.extend(self.format_class_require_decl(decl));
-        }
         for member in &body.members {
             lines.extend(self.format_class_member(member));
         }
         lines
     }
 
-    fn format_class_with_decl(&self, decl: &ClassWithDecl) -> Vec<String> {
-        vec![format!(
-            "{}with {}",
-            spaces(INDENT_WIDTH),
-            self.format_type_inline(&decl.superclass, 0),
-        )]
-    }
-
-    fn format_class_require_decl(&self, decl: &ClassRequireDecl) -> Vec<String> {
-        vec![format!(
-            "{}require {}",
-            spaces(INDENT_WIDTH),
-            self.format_type_inline(&decl.constraint, 0),
-        )]
-    }
-
     fn format_instance_item(&self, item: &InstanceItem) -> Vec<String> {
+        let mut header = "instance ".to_owned();
+        if !item.context.is_empty() {
+            header.push_str(&self.format_constraint_list_inline(&item.context));
+            header.push_str(" => ");
+        }
         let class = item
             .class
             .as_ref()
             .map(|class| self.format_qualified_name(class))
             .unwrap_or_else(|| "_".to_owned());
-        let mut header = format!("instance {class}");
+        header.push_str(&class);
         if let Some(target) = &item.target {
             header.push(' ');
             header.push_str(&self.format_type_inline(target, 0));
@@ -455,14 +447,20 @@ impl Formatter {
         keyword: &str,
         member: &SourceProviderContractSchemaMember,
     ) -> Vec<String> {
-        let prefix = format!(
-            "{}{keyword} {}: ",
-            spaces(INDENT_WIDTH),
-            self.item_name(&member.name)
-        );
         let Some(annotation) = &member.annotation else {
-            return vec![prefix.trim_end().to_owned()];
+            return vec![format!(
+                "{}{keyword} {}:",
+                spaces(INDENT_WIDTH),
+                self.item_name(&member.name)
+            )];
         };
+        let separator = self.type_annotation_separator(&[], annotation);
+        let prefix = format!(
+            "{}{keyword} {}{}",
+            spaces(INDENT_WIDTH),
+            self.item_name(&member.name),
+            separator
+        );
         let force_break = self.should_force_type_break(display_width(&prefix), annotation);
         let block = self.format_type_block(annotation, force_break);
         if block.is_inline() {
@@ -476,35 +474,46 @@ impl Formatter {
     }
 
     fn format_class_member(&self, member: &ClassMember) -> Vec<String> {
-        let prefix = format!(
-            "{}{}: ",
-            spaces(INDENT_WIDTH),
-            self.format_class_member_name(&member.name)
-        );
         let Some(annotation) = &member.annotation else {
-            return vec![prefix.trim_end().to_owned()];
+            return vec![format!(
+                "{}{}:",
+                spaces(INDENT_WIDTH),
+                self.format_class_member_name(&member.name)
+            )];
         };
+        let prefix = format!(
+            "{}{}{}",
+            spaces(INDENT_WIDTH),
+            self.format_class_member_name(&member.name),
+            self.type_annotation_separator(&member.constraints, annotation)
+        );
         let force_break = self.should_force_type_break(display_width(&prefix), annotation);
-        let block = self.format_type_block(annotation, force_break);
-        if block.is_inline() {
+        let signature =
+            self.format_signature_annotation_block(&member.constraints, annotation, force_break);
+        if signature.is_inline() {
             vec![format!(
                 "{prefix}{}",
-                block.inline_text().expect("inline block")
+                signature.inline_text().expect("inline block")
             )]
         } else {
-            block.prefixed(&prefix).into_lines()
+            signature.prefixed(&prefix).into_lines()
         }
     }
 
     fn format_domain_member(&self, member: &DomainMember) -> Vec<String> {
-        let prefix = format!(
-            "{}{}: ",
-            spaces(INDENT_WIDTH),
-            self.format_domain_member_name(&member.name)
-        );
         let Some(annotation) = &member.annotation else {
-            return vec![prefix.trim_end().to_owned()];
+            return vec![format!(
+                "{}{}:",
+                spaces(INDENT_WIDTH),
+                self.format_domain_member_name(&member.name)
+            )];
         };
+        let prefix = format!(
+            "{}{}{}",
+            spaces(INDENT_WIDTH),
+            self.format_domain_member_name(&member.name),
+            self.type_annotation_separator(&[], annotation)
+        );
         let force_break = self.should_force_type_break(display_width(&prefix), annotation);
         let block = self.format_type_block(annotation, force_break);
         if block.is_inline() {
@@ -596,10 +605,79 @@ impl Formatter {
     fn format_function_param(&self, parameter: &FunctionParam) -> String {
         let mut rendered = self.item_name(&parameter.name).to_owned();
         if let Some(annotation) = &parameter.annotation {
-            rendered.push(':');
+            rendered.push_str(self.type_annotation_separator(&[], annotation));
             rendered.push_str(&self.format_type_inline(annotation, 0));
         }
         rendered
+    }
+
+    fn format_signature_annotation_inline(
+        &self,
+        constraints: &[TypeExpr],
+        annotation: &TypeExpr,
+    ) -> String {
+        let mut rendered = String::new();
+        if !constraints.is_empty() {
+            rendered.push_str(&self.format_constraint_list_inline(constraints));
+            rendered.push_str(" => ");
+        }
+        rendered.push_str(&self.format_type_inline(annotation, 0));
+        rendered
+    }
+
+    fn format_signature_annotation_block(
+        &self,
+        constraints: &[TypeExpr],
+        annotation: &TypeExpr,
+        force_multiline: bool,
+    ) -> Block {
+        if constraints.is_empty() {
+            return self.format_type_block(annotation, force_multiline);
+        }
+
+        Block::inline(self.format_signature_annotation_inline(constraints, annotation))
+    }
+
+    fn format_constraint_list_inline(&self, constraints: &[TypeExpr]) -> String {
+        match constraints {
+            [] => String::new(),
+            [constraint] => self.format_type_inline(constraint, 0),
+            _ => format!(
+                "({})",
+                constraints
+                    .iter()
+                    .map(|constraint| self.format_type_inline(constraint, 0))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        }
+    }
+
+    fn type_annotation_separator(
+        &self,
+        constraints: &[TypeExpr],
+        annotation: &TypeExpr,
+    ) -> &'static str {
+        if !constraints.is_empty() || self.annotation_contains_type_application(annotation) {
+            ": "
+        } else {
+            ":"
+        }
+    }
+
+    fn annotation_contains_type_application(&self, ty: &TypeExpr) -> bool {
+        match &ty.kind {
+            TypeExprKind::Name(_) | TypeExprKind::Record(_) => false,
+            TypeExprKind::Group(inner) => self.annotation_contains_type_application(inner),
+            TypeExprKind::Tuple(elements) => elements
+                .iter()
+                .any(|element| self.annotation_contains_type_application(element)),
+            TypeExprKind::Arrow { parameter, result } => {
+                self.annotation_contains_type_application(parameter)
+                    || self.annotation_contains_type_application(result)
+            }
+            TypeExprKind::Apply { .. } => true,
+        }
     }
 
     fn format_sum_inline(&self, variants: &[TypeVariant]) -> String {
@@ -1200,23 +1278,28 @@ impl Formatter {
             lines.push(self.format_expr_inline(head, 0));
         }
 
+        lines.extend(self.format_pipe_stage_lines(&pipe.stages));
+
+        Block::from_lines(lines)
+    }
+
+    fn format_pipe_stage_lines(&self, stages: &[PipeStage]) -> Vec<String> {
+        let mut lines = Vec::new();
         let mut index = 0usize;
-        while index < pipe.stages.len() {
-            if matches!(pipe.stages[index].kind, PipeStageKind::Case(_)) {
+        while index < stages.len() {
+            if matches!(stages[index].kind, PipeStageKind::Case(_)) {
                 let start = index;
-                while index < pipe.stages.len()
-                    && matches!(pipe.stages[index].kind, PipeStageKind::Case(_))
-                {
+                while index < stages.len() && matches!(stages[index].kind, PipeStageKind::Case(_)) {
                     index += 1;
                 }
-                lines.extend(self.format_pipe_case_group(&pipe.stages[start..index]));
+                lines.extend(self.format_pipe_case_group(&stages[start..index]));
             } else {
-                lines.push(self.format_pipe_stage_line(&pipe.stages[index]));
+                lines.push(self.format_pipe_stage_line(&stages[index]));
                 index += 1;
             }
         }
 
-        Block::from_lines(lines)
+        lines
     }
 
     fn format_pipe_inline(&self, pipe: &PipeExpr) -> String {
@@ -1276,19 +1359,13 @@ impl Formatter {
             PipeStageKind::RecurStart { expr } => {
                 self.format_aligned_pipe_stage("@|>", stage, expr)
             }
-            PipeStageKind::RecurStep { expr } => {
-                self.format_aligned_pipe_stage("<|@", stage, expr)
-            }
+            PipeStageKind::RecurStep { expr } => self.format_aligned_pipe_stage("<|@", stage, expr),
             PipeStageKind::Tap { expr } => self.format_aligned_pipe_stage("|", stage, expr),
             PipeStageKind::FanIn { expr } => self.format_aligned_pipe_stage("<|*", stage, expr),
             PipeStageKind::Truthy { expr } => self.format_aligned_pipe_stage("T|>", stage, expr),
             PipeStageKind::Falsy { expr } => self.format_aligned_pipe_stage("F|>", stage, expr),
-            PipeStageKind::Validate { expr } => {
-                self.format_aligned_pipe_stage("!|>", stage, expr)
-            }
-            PipeStageKind::Previous { expr } => {
-                self.format_aligned_pipe_stage("~|>", stage, expr)
-            }
+            PipeStageKind::Validate { expr } => self.format_aligned_pipe_stage("!|>", stage, expr),
+            PipeStageKind::Previous { expr } => self.format_aligned_pipe_stage("~|>", stage, expr),
             PipeStageKind::Accumulate { seed, step } => {
                 let seed_str = self.format_expr_inline(seed, EXPR_PIPE_PREC + 1);
                 let step_str = self.format_expr_inline(step, EXPR_PIPE_PREC + 1);
@@ -1839,10 +1916,9 @@ mod tests {
                 "  &|> documentBody\n",
                 "  |> Pair\n",
                 "\n",
-                "fun label: Text state:SaveState =>\n",
-                "    state\n",
-                "     ||> Saved         -> \"saved\"\n",
-                "     ||> Dirty message -> \"dirty {message}\"\n",
+                "fun label:Text state:SaveState => state\n",
+                "  ||> Saved         -> \"saved\"\n",
+                "  ||> Dirty message -> \"dirty {message}\"\n",
             )
         );
     }
@@ -1853,7 +1929,7 @@ mod tests {
         assert_eq!(
             formatted,
             concat!(
-                "fun formatCount: Text count:Int =>\n",
+                "fun formatCount:Text count:Int =>\n",
                 "    \"{count} unread\"\n",
                 "\n",
                 "value count = 3\n",
@@ -1878,9 +1954,9 @@ mod tests {
             formatted,
             concat!(
                 "class Eq A\n",
-                "    (==): A -> A -> Bool\n",
+                "    (==):A -> A -> Bool\n",
                 "\n",
-                "fun equivalent: Bool left:Int right:Int =>\n",
+                "fun equivalent:Bool left:Int right:Int =>\n",
                 "    left + 1 == right - 1 and left != right\n",
             )
         );
@@ -1918,14 +1994,14 @@ value view =
             formatted,
             concat!(
                 "domain Duration over Int\n",
-                "    literal ms: Int -> Duration\n",
-                "    (*): Duration -> Int -> Duration\n",
-                "    unwrap: Duration -> Int\n",
+                "    literal ms:Int -> Duration\n",
+                "    (*):Duration -> Int -> Duration\n",
+                "    unwrap:Duration -> Int\n",
                 "\n",
                 "domain Path over Text\n",
-                "    literal root: Text -> Path\n",
-                "    (/): Path -> Text -> Path\n",
-                "    unwrap: Path -> Text\n",
+                "    literal root:Text -> Path\n",
+                "    (/):Path -> Text -> Path\n",
+                "    unwrap:Path -> Text\n",
             )
         );
     }
@@ -1939,7 +2015,7 @@ value view =
             formatted,
             concat!(
                 "class Eq A\n",
-                "    (==): A -> A -> Bool\n",
+                "    (==):A -> A -> Bool\n",
                 "\n",
                 "instance Eq Blob\n",
                 "    (==) left right = same left right\n",
@@ -1954,8 +2030,8 @@ value view =
             formatted,
             concat!(
                 "provider custom.feed\n",
-                "    argument path: Text\n",
-                "    option timeout: Duration\n",
+                "    argument path:Text\n",
+                "    option timeout:Duration\n",
                 "    wakeup: providerTrigger\n",
                 "\n",
                 "provider custom.timer\n",
@@ -1981,7 +2057,7 @@ value view =
             formatted,
             concat!(
                 "domain Bucket over Int\n",
-                "    (%): Bucket -> Int -> Bucket\n",
+                "    (%):Bucket -> Int -> Bucket\n",
             )
         );
     }
@@ -1995,9 +2071,9 @@ value view =
             formatted,
             concat!(
                 "domain Duration over Int\n",
-                "    literal ms: Int -> Duration\n",
+                "    literal ms:Int -> Duration\n",
                 "\n",
-                "value delay: Duration = 250ms\n",
+                "value delay:Duration = 250ms\n",
                 "value applied = wrap 250ms\n",
             )
         );
@@ -2011,10 +2087,10 @@ value view =
         assert_eq!(
             formatted,
             concat!(
-                "value pi: Float = 3.14\n",
-                "value amount: Decimal = 19.25d\n",
-                "value whole: Decimal = 19d\n",
-                "value count: BigInt = 123n\n",
+                "value pi:Float = 3.14\n",
+                "value amount:Decimal = 19.25d\n",
+                "value whole:Decimal = 19d\n",
+                "value count:BigInt = 123n\n",
             )
         );
     }
@@ -2048,10 +2124,9 @@ value view =
             concat!(
                 "type Status = Idle | Failed Text\n",
                 "\n",
-                "fun label: Text status:Status =>\n",
-                "    status\n",
-                "     ||> Idle          -> \"idle\"\n",
-                "     ||> Failed reason -> \"failed {reason}\"\n",
+                "fun label:Text status:Status => status\n",
+                "  ||> Idle          -> \"idle\"\n",
+                "  ||> Failed reason -> \"failed {reason}\"\n",
             )
         );
     }
@@ -2059,25 +2134,13 @@ value view =
     #[test]
     fn formatter_keeps_single_variant_type_sums_block_shaped() {
         let formatted = format_text("type Map K V =\n  | EmptyMap\n");
-        assert_eq!(
-            formatted,
-            concat!(
-                "type Map K V =\n",
-                "  | EmptyMap\n",
-            )
-        );
+        assert_eq!(formatted, concat!("type Map K V =\n", "  | EmptyMap\n",));
     }
 
     #[test]
     fn formatter_keeps_single_variant_data_sums_block_shaped() {
         let formatted = format_text("data Mode =\n  | Stream\n");
-        assert_eq!(
-            formatted,
-            concat!(
-                "data Mode =\n",
-                "  | Stream\n",
-            )
-        );
+        assert_eq!(formatted, concat!("data Mode =\n", "  | Stream\n",));
     }
 
     #[test]
@@ -2087,7 +2150,7 @@ value view =
         assert_eq!(
             formatted,
             concat!(
-                "fun ignore: Int _ =>\n",
+                "fun ignore:Int _ =>\n",
                 "    .\n",
                 "\n",
                 "value projection = .email\n",
@@ -2097,8 +2160,47 @@ value view =
     }
 
     #[test]
+    fn formatter_keeps_record_type_fields_spaced_while_other_annotations_are_compact() {
+        let formatted = format_text(
+            "fun project:{name:Text,age:Int} profile:{name:Text,age:Int}=>profile\nvalue profile:{name:Text,age:Int}={name:\"Ada\",age:37}\n",
+        );
+        assert_eq!(
+            formatted,
+            concat!(
+                "fun project:{ name: Text, age: Int } profile:{ name: Text, age: Int } =>\n",
+                "    profile\n",
+                "\n",
+                "value profile:{ name: Text, age: Int } = {\n",
+                "    name: \"Ada\",\n",
+                "    age: 37\n",
+                "}\n",
+            )
+        );
+    }
+
+    #[test]
+    fn formatter_spaces_applied_and_constrained_annotations() {
+        let formatted = format_text(
+            "fun wrap:Result Text Int value:(Result Text Int)=>value\nvalue active:Signal Bool=True\nclass Functor F\n    map:Applicative G=>(A -> G B) -> F A -> G (F B)\n",
+        );
+        assert_eq!(
+            formatted,
+            concat!(
+                "fun wrap: Result Text Int value: (Result Text Int) =>\n",
+                "    value\n",
+                "\n",
+                "value active: Signal Bool = True\n",
+                "\n",
+                "class Functor F\n",
+                "    map: Applicative G => (A -> G B) -> F A -> G (F B)\n",
+            )
+        );
+    }
+
+    #[test]
     fn formatter_normalizes_text_interpolation_holes() {
-        let formatted = format_text("value greeting=\"Hello { name }, use \\{literal\\} braces\"\n");
+        let formatted =
+            format_text("value greeting=\"Hello { name }, use \\{literal\\} braces\"\n");
         assert_eq!(
             formatted,
             "value greeting = \"Hello {name}, use \\{literal\\} braces\"\n",
@@ -2123,7 +2225,7 @@ value view =
                 "    socket\n",
                 ")\n",
                 "\n",
-                "value profile: Profile = {\n",
+                "value profile:Profile = {\n",
                 "    name,\n",
                 "    nickname\n",
                 "}\n",

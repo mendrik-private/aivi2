@@ -30,64 +30,56 @@ type VmCatalog = {
     haltedEarly: VmSummary
 }
 
-fun pushStack: (List Int) stack:(List Int) x:Int =>
+fun pushStack: (List Int) stack: (List Int) x:Int =>
     append stack [x]
 
-fun pop: (Option (Int, List Int)) stack:(List Int) =>
-    head stack
-     ||> Some x -> Some (x, tailOrEmpty stack)
-     ||> None   -> None
+fun pop: (Option (Int, List Int)) stack: (List Int) => head stack
+  ||> Some x -> Some (x, tailOrEmpty stack)
+  ||> None   -> None
 
-fun stateWithLog: VmState stack:(List Int) halted:Bool log:(List Text) entry:Text =>
+fun stateWithLog:VmState stack: (List Int) halted:Bool log: (List Text) entry:Text =>
     {
         stack,
         halted,
         log: append log [entry]
     }
 
-fun underflowState: VmState stack:(List Int) log:(List Text) =>
+fun underflowState:VmState stack: (List Int) log: (List Text) =>
     stateWithLog stack True log "underflow"
 
-fun finishAdd: VmState log:(List Text) right:Int afterRight:(List Int) leftStep:(Option (Int, List Int)) =>
-    leftStep
-     ||> Some (left, afterLeft) -> stateWithLog (pushStack afterLeft (left + right)) False log "add"
-     ||> None                   -> underflowState afterRight log
+fun finishAdd:VmState log: (List Text) right:Int afterRight: (List Int) leftStep: (Option (Int, List Int)) => leftStep
+  ||> Some (left, afterLeft) -> stateWithLog (pushStack afterLeft (left + right)) False log "add"
+  ||> None                   -> underflowState afterRight log
 
-fun applyAdd: VmState log:(List Text) stack:(List Int) =>
-    pop stack
-     ||> Some (right, afterRight) -> finishAdd log right afterRight (pop afterRight)
-     ||> None                     -> underflowState stack log
+fun applyAdd:VmState log: (List Text) stack: (List Int) => pop stack
+  ||> Some (right, afterRight) -> finishAdd log right afterRight (pop afterRight)
+  ||> None                     -> underflowState stack log
 
-fun applyNegate: VmState log:(List Text) stack:(List Int) =>
-    pop stack
-     ||> Some (x, remaining) -> stateWithLog (pushStack remaining (0 - x)) False log "negate"
-     ||> None                -> underflowState stack log
+fun applyNegate:VmState log: (List Text) stack: (List Int) => pop stack
+  ||> Some (x, remaining) -> stateWithLog (pushStack remaining (0 - x)) False log "negate"
+  ||> None                -> underflowState stack log
 
-fun continueStep: VmState stack:(List Int) log:(List Text) instruction:Instruction =>
-    instruction
-     ||> Push x    -> stateWithLog (pushStack stack x) False log "push {x}"
-     ||> Add       -> applyAdd log stack
-     ||> Negate    -> applyNegate log stack
-     ||> Mark note -> stateWithLog stack False log note
+fun continueStep:VmState stack: (List Int) log: (List Text) instruction:Instruction => instruction
+  ||> Push x    -> stateWithLog (pushStack stack x) False log "push {x}"
+  ||> Add       -> applyAdd log stack
+  ||> Negate    -> applyNegate log stack
+  ||> Mark note -> stateWithLog stack False log note
 
-fun step: VmState state:VmState instruction:Instruction =>
-    state
-     ||> { halted: True }              -> state
-     ||> { stack, log, halted: False } -> continueStep stack log instruction
+fun step:VmState state:VmState instruction:Instruction => state
+  ||> { halted: True }              -> state
+  ||> { stack, log, halted: False } -> continueStep stack log instruction
 
-fun summarize: VmSummary state:VmState =>
-    state
-     ||> { stack, log, halted } -> { top: head stack, depth: length stack, halted, log: join " -> " log }
+fun summarize:VmSummary state:VmState => state
+  ||> { stack, log, halted } -> { top: head stack, depth: length stack, halted, log: join " -> " log }
 
-value initialState: VmState = {
+value initialState:VmState = {
     stack: [],
     log: [],
     halted: False
 }
 
-fun runProgram: VmState program:(List Instruction) =>
-    program
-     |> reduce step initialState
+fun runProgram:VmState program: (List Instruction) => program
+  |> reduce step initialState
 
 value balancedProgram: List Instruction = [
     Push 7,
@@ -104,7 +96,7 @@ value brokenProgram: List Instruction = [
     Add
 ]
 
-value vmCatalog: VmCatalog = {
+value vmCatalog:VmCatalog = {
     completed: summarize (runProgram balancedProgram),
     haltedEarly: summarize (runProgram brokenProgram)
 }

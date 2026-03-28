@@ -1,77 +1,44 @@
-// aivi.core.float: IEEE 754 double-precision floating-point helpers
-//
-// The built-in Float type supports +  -  *  /  <  >  <=  >=  ==  !=
-// operators directly. This module adds commonly needed pure functions
-// built on top of those operators.
-//
-// The low-level intrinsics (floor, ceil, round, sqrt, abs, toInt,
-// fromInt, toText, parseText) are resolved directly from the compiler
-// catalog when you import them via:
-//
-//   use aivi.core.float (floor, ceil, round, sqrt, abs, toInt, fromInt,
-//                        toText, parseText)
-
-// Constants — scientific notation is not supported in AIVI literals;
-// use only the decimal forms that fit in AIVI's Float lexer.
-value pi:Float  = 3.141592653589793
-value e:Float   = 2.718281828459045
+value pi:Float = 3.141592653589793
+value e:Float = 2.718281828459045
 value tau:Float = 6.283185307179586
 
-// Negate a Float (AIVI has no prefix-minus on literals)
 fun negate:Float n:Float =>
     0.0 - n
 
-// Absolute value using arithmetic (prefer the `abs` intrinsic for speed)
-fun absHelper:Float n:Float =>
-    n < 0.0
-     T|> 0.0 - n
-     F|> n
+fun absHelper:Float n:Float => n < 0.0
+  T|> 0.0 - n
+  F|> n
 
-// Return the larger of two values
-fun max:Float a:Float b:Float =>
-    a >= b
-     T|> a
-     F|> b
+fun max:Float a:Float b:Float => a >= b
+  T|> a
+  F|> b
 
-// Return the smaller of two values
-fun min:Float a:Float b:Float =>
-    a <= b
-     T|> a
-     F|> b
+fun min:Float a:Float b:Float => a <= b
+  T|> a
+  F|> b
 
-// Internal helper: clamp to upper bound only
-fun clampHigh:Float hi:Float n:Float =>
-    n > hi
-     T|> hi
-     F|> n
+fun clampHigh:Float hi:Float n:Float => n > hi
+  T|> hi
+  F|> n
 
-// Clamp n to the inclusive range [lo, hi]
-fun clamp:Float lo:Float hi:Float n:Float =>
-    n < lo
-     T|> lo
-     F|> clampHigh hi n
+fun clamp:Float lo:Float hi:Float n:Float => n < lo
+  T|> lo
+  F|> clampHigh hi n
 
-// Linear interpolation: lerp a b 0.0 == a, lerp a b 1.0 == b
 fun lerp:Float a:Float b:Float t:Float =>
     a + (b - a) * t
 
-// Internal helper for sign when n >= 0.0
-fun signNonNeg:Float n:Float =>
-    n > 0.0
-     T|> 1.0
-     F|> 0.0
+fun signNonNeg:Float n:Float => n > 0.0
+  T|> 1.0
+  F|> 0.0
 
-// Sign: returns -1.0, 0.0, or 1.0
-fun sign:Float n:Float =>
-    n < 0.0
-     T|> 0.0 - 1.0
-     F|> signNonNeg n
+fun sign:Float n:Float => n < 0.0
+  T|> 0.0 - 1.0
+  F|> signNonNeg n
 
-// True if n is in the closed interval [lo, hi]
 fun between:Bool lo:Float hi:Float n:Float =>
     n >= lo and n <= hi
 
-// Predicates
 fun isZero:Bool n:Float =>
     n == 0.0
 
@@ -81,15 +48,12 @@ fun isPositive:Bool n:Float =>
 fun isNegative:Bool n:Float =>
     n < 0.0
 
-// Square (n * n)
 fun square:Float n:Float =>
     n * n
 
-// Degrees to radians
 fun toRadians:Float degrees:Float =>
     degrees * pi / 180.0
 
-// Radians to degrees
 fun toDegrees:Float radians:Float =>
     radians * 180.0 / pi
 

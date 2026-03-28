@@ -5,32 +5,20 @@ type HttpError =
   | DecodeFailure Text
   | RequestFailure Text
 
-// Dict-backed header and query maps (replaces the previous Map Text Text aliases).
 type HttpHeaders = (Dict Text Text)
-type HttpQuery   = (Dict Text Text)
+
+type HttpQuery = (Dict Text Text)
 
 type HttpResponse A = (Result HttpError A)
-type HttpTask A     = (Task HttpError A)
+
+type HttpTask A = (Task HttpError A)
 
 type DecodeMode =
   | Strict
   | Permissive
 
 domain Retry over Int
-    literal times: Int -> Retry
-    unwrap: Retry -> Int
+    literal times:Int -> Retry
+    unwrap:Retry -> Int
 
-export (
-  HttpError,
-  Timeout,
-  DecodeFailure,
-  RequestFailure,
-  HttpHeaders,
-  HttpQuery,
-  HttpResponse,
-  HttpTask,
-  DecodeMode,
-  Strict,
-  Permissive,
-  Retry
-)
+export (HttpError, Timeout, DecodeFailure, RequestFailure, HttpHeaders, HttpQuery, HttpResponse, HttpTask, DecodeMode, Strict, Permissive, Retry)

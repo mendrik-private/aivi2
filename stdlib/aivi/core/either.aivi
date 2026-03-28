@@ -1,95 +1,73 @@
-// aivi.core.either: disjoint union (sum) type
-//
-// Either L R represents a value that is either a Left L or a Right R.
-// By convention, Left holds an error or secondary value, and Right
-// holds the primary/success value.
-
 type Either L R =
-    | Left L
-    | Right R
+  | Left L
+  | Right R
 
 type EitherPartition L R = {
     lefts: List L,
     rights: List R
 }
 
-fun isLeft:Bool either:(Either L R) =>
-    either
-     ||> Left _  -> True
-     ||> Right _ -> False
+fun isLeft:Bool either: (Either L R) => either
+  ||> Left _  -> True
+  ||> Right _ -> False
 
-fun isRight:Bool either:(Either L R) =>
-    either
-     ||> Left _  -> False
-     ||> Right _ -> True
+fun isRight:Bool either: (Either L R) => either
+  ||> Left _  -> False
+  ||> Right _ -> True
 
-fun fromLeft:(Option L) either:(Either L R) =>
-    either
-     ||> Left v  -> Some v
-     ||> Right _ -> None
+fun fromLeft: (Option L) either: (Either L R) => either
+  ||> Left v  -> Some v
+  ||> Right _ -> None
 
-fun fromRight:(Option R) either:(Either L R) =>
-    either
-     ||> Left _  -> None
-     ||> Right v -> Some v
+fun fromRight: (Option R) either: (Either L R) => either
+  ||> Left _  -> None
+  ||> Right v -> Some v
 
-fun mapLeft:(Either L2 R) f:(L1 -> L2) either:(Either L1 R) =>
-    either
-     ||> Left v  -> Left (f v)
-     ||> Right v -> Right v
+fun mapLeft: (Either L2 R) f:(L1 -> L2) either: (Either L1 R) => either
+  ||> Left v  -> Left (f v)
+  ||> Right v -> Right v
 
-fun mapRight:(Either L R2) f:(R1 -> R2) either:(Either L R1) =>
-    either
-     ||> Left v  -> Left v
-     ||> Right v -> Right (f v)
+fun mapRight: (Either L R2) f:(R1 -> R2) either: (Either L R1) => either
+  ||> Left v  -> Left v
+  ||> Right v -> Right (f v)
 
-fun mapBoth:(Either L2 R2) onLeft:(L1 -> L2) onRight:(R1 -> R2) either:(Either L1 R1) =>
-    either
-     ||> Left v  -> Left (onLeft v)
-     ||> Right v -> Right (onRight v)
+fun mapBoth: (Either L2 R2) onLeft:(L1 -> L2) onRight:(R1 -> R2) either: (Either L1 R1) => either
+  ||> Left v  -> Left (onLeft v)
+  ||> Right v -> Right (onRight v)
 
-fun fold:C onLeft:(L -> C) onRight:(R -> C) either:(Either L R) =>
-    either
-     ||> Left v  -> onLeft v
-     ||> Right v -> onRight v
+fun fold:C onLeft:(L -> C) onRight:(R -> C) either: (Either L R) => either
+  ||> Left v  -> onLeft v
+  ||> Right v -> onRight v
 
-fun swap:(Either R L) either:(Either L R) =>
-    either
-     ||> Left v  -> Right v
-     ||> Right v -> Left v
+fun swap: (Either R L) either: (Either L R) => either
+  ||> Left v  -> Right v
+  ||> Right v -> Left v
 
-fun toOption:(Option R) either:(Either L R) =>
-    either
-     ||> Left _  -> None
-     ||> Right v -> Some v
+fun toOption: (Option R) either: (Either L R) => either
+  ||> Left _  -> None
+  ||> Right v -> Some v
 
-fun toResult:(Result L R) either:(Either L R) =>
-    either
-     ||> Left e  -> Err e
-     ||> Right v -> Ok v
+fun toResult: (Result L R) either: (Either L R) => either
+  ||> Left e  -> Err e
+  ||> Right v -> Ok v
 
-fun fromResult:(Either E A) result:(Result E A) =>
-    result
-     ||> Ok v  -> Right v
-     ||> Err e -> Left e
+fun fromResult: (Either E A) result: (Result E A) => result
+  ||> Ok v  -> Right v
+  ||> Err e -> Left e
 
-fun addLeftItem:(EitherPartition L R) acc:(EitherPartition L R) v:L =>
-    acc
-     ||> { lefts, rights } -> { lefts: append lefts [v], rights }
+fun addLeftItem: (EitherPartition L R) acc: (EitherPartition L R) v:L => acc
+  ||> { lefts, rights } -> { lefts: append lefts [v], rights }
 
-fun addRightItem:(EitherPartition L R) acc:(EitherPartition L R) v:R =>
-    acc
-     ||> { lefts, rights } -> { lefts, rights: append rights [v] }
+fun addRightItem: (EitherPartition L R) acc: (EitherPartition L R) v:R => acc
+  ||> { lefts, rights } -> { lefts, rights: append rights [v] }
 
-fun partitionStep:(EitherPartition L R) acc:(EitherPartition L R) item:(Either L R) =>
-    item
-     ||> Left v  -> addLeftItem acc v
-     ||> Right v -> addRightItem acc v
+fun partitionStep: (EitherPartition L R) acc: (EitherPartition L R) item: (Either L R) => item
+  ||> Left v  -> addLeftItem acc v
+  ||> Right v -> addRightItem acc v
 
-fun partitionEithers:((List L, List R)) items:(List (Either L R)) =>
-    items
-     |> reduce partitionStep { lefts: [], rights: [] }
-     ||> { lefts, rights } -> (lefts, rights)
+fun partitionEithers: ((List L, List R)) items: (List (Either L R)) => items
+  |> reduce partitionStep { lefts: [], rights: [] }
+  ||> { lefts, rights } -> (lefts, rights)
 
 export Either
 export Left

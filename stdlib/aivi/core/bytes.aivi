@@ -1,19 +1,11 @@
-// aivi.core.bytes: Binary data types.
-//
-// The Bytes type is a compiler builtin.  The intrinsics bytesFromText and
-// bytesToText handle encoding/decoding; slice, concat, and length are also
-// available as intrinsics without source-level declarations.
-
 type BytesDecodeError =
   | InvalidUtf8
 
-// Encoding used when converting between Bytes and Text.
 type BytesEncoding =
   | Utf8
   | Base64
   | Hex
 
-// Convenience alias for async byte operations that can fail with a decode error.
 type BytesTask = (Task BytesDecodeError Bytes)
 
 export (BytesDecodeError, InvalidUtf8, BytesEncoding, Utf8, Base64, Hex, BytesTask)

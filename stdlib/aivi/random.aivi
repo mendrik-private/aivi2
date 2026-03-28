@@ -1,18 +1,6 @@
-// aivi.random: secure entropy tasks.
-//
-// `randomInt` and `randomBytes` are resolved through the compiler's intrinsic
-// catalog (IntrinsicValue::RandomInt / IntrinsicValue::RandomBytes).  No
-// source-level declarations are needed; the import metadata is injected
-// directly at import-resolution time.
-//
-// There is no long-lived @source for randomness in the first wave.
-// Seeded or replayable PRNG surfaces are deferred to a later phase.
-
-// RandomError is emitted when the system entropy pool is unavailable.
 type RandomError =
   | InsufficientEntropy
 
-// RandomTask is the return type of the randomBytes intrinsic.
 type RandomTask = (Task RandomError Bytes)
 
 export (RandomError, InsufficientEntropy, RandomTask)
