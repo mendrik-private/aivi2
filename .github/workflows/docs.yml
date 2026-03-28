@@ -5,8 +5,7 @@ on:
     branches: [main]
     paths:
       - 'manual/**'
-      - 'tooling/packages/vscode-aivi/syntaxes/**'
-      - 'tooling/packages/vscode-aivi/themes/**'
+      - '.github/workflows/docs.yml'
   workflow_dispatch:
 
 permissions:
@@ -26,32 +25,20 @@ jobs:
 
       - uses: pnpm/action-setup@v3
         with:
-          version: 9
+          version: 10
 
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: pnpm
-          cache-dependency-path: manual/pnpm-lock.yaml
+          cache-dependency-path: tooling/pnpm-lock.yaml
 
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-
-      - name: Build aivi compiler
-        run: cargo build --release --bin aivi
-
-      - name: Install aivi binary
-        run: |
-          mkdir -p ~/.local/bin
-          cp target/release/aivi ~/.local/bin/aivi
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: Install docs dependencies
+      - name: Install dependencies
         run: pnpm install
-        working-directory: manual
+        working-directory: tooling
 
       - name: Build docs
-        run: pnpm docs:build
+        run: pnpm build
         working-directory: manual
 
       - name: Upload artifact
