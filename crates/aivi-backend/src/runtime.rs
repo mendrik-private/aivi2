@@ -68,6 +68,10 @@ pub enum RuntimeTaskPlan {
     FsReadText { path: Box<str> },
     FsReadDir { path: Box<str> },
     FsExists { path: Box<str> },
+    FsReadBytes { path: Box<str> },
+    FsRename { from: Box<str>, to: Box<str> },
+    FsCopy { from: Box<str>, to: Box<str> },
+    FsDeleteDir { path: Box<str> },
 }
 
 impl fmt::Display for RuntimeTaskPlan {
@@ -84,6 +88,10 @@ impl fmt::Display for RuntimeTaskPlan {
             Self::FsReadText { path } => write!(f, "readText({path})"),
             Self::FsReadDir { path } => write!(f, "readDir({path})"),
             Self::FsExists { path } => write!(f, "exists({path})"),
+            Self::FsReadBytes { path } => write!(f, "readBytes({path})"),
+            Self::FsRename { from, to } => write!(f, "rename({from}, {to})"),
+            Self::FsCopy { from, to } => write!(f, "copy({from}, {to})"),
+            Self::FsDeleteDir { path } => write!(f, "deleteDir({path})"),
         }
     }
 }
@@ -3322,6 +3330,17 @@ fn intrinsic_value_arity(value: IntrinsicValue) -> usize {
         IntrinsicValue::FsReadText => 1,
         IntrinsicValue::FsReadDir => 1,
         IntrinsicValue::FsExists => 1,
+        IntrinsicValue::FsReadBytes => 1,
+        IntrinsicValue::FsRename => 2,
+        IntrinsicValue::FsCopy => 2,
+        IntrinsicValue::FsDeleteDir => 1,
+        IntrinsicValue::PathParent => 1,
+        IntrinsicValue::PathFilename => 1,
+        IntrinsicValue::PathStem => 1,
+        IntrinsicValue::PathExtension => 1,
+        IntrinsicValue::PathJoin => 2,
+        IntrinsicValue::PathIsAbsolute => 1,
+        IntrinsicValue::PathNormalize => 1,
     }
 }
 
@@ -3473,6 +3492,89 @@ fn evaluate_intrinsic_value(
             Ok(RuntimeValue::Task(RuntimeTaskPlan::FsExists {
                 path: expect_intrinsic_text(kernel, expr, value, 0, path)?,
             }))
+        }
+        (IntrinsicValue::FsReadBytes, [path]) => {
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::FsReadBytes {
+                path: expect_intrinsic_text(kernel, expr, value, 0, path)?,
+            }))
+        }
+        (IntrinsicValue::FsRename, [from, to]) => {
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::FsRename {
+                from: expect_intrinsic_text(kernel, expr, value, 0, from)?,
+                to: expect_intrinsic_text(kernel, expr, value, 1, to)?,
+            }))
+        }
+        (IntrinsicValue::FsCopy, [from, to]) => {
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::FsCopy {
+                from: expect_intrinsic_text(kernel, expr, value, 0, from)?,
+                to: expect_intrinsic_text(kernel, expr, value, 1, to)?,
+            }))
+        }
+        (IntrinsicValue::FsDeleteDir, [path]) => {
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::FsDeleteDir {
+                path: expect_intrinsic_text(kernel, expr, value, 0, path)?,
+            }))
+        }
+        (IntrinsicValue::PathParent, [path]) => {
+            let s = expect_intrinsic_text(kernel, expr, value, 0, path)?;
+            let p = std::path::Path::new(&*s);
+            Ok(p.parent()
+                .and_then(|p| p.to_str())
+                .map(|s| RuntimeValue::OptionSome(Box::new(RuntimeValue::Text(s.into()))))
+                .unwrap_or(RuntimeValue::OptionNone))
+        }
+        (IntrinsicValue::PathFilename, [path]) => {
+            let s = expect_intrinsic_text(kernel, expr, value, 0, path)?;
+            let p = std::path::Path::new(&*s);
+            Ok(p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|s| RuntimeValue::OptionSome(Box::new(RuntimeValue::Text(s.into()))))
+                .unwrap_or(RuntimeValue::OptionNone))
+        }
+        (IntrinsicValue::PathStem, [path]) => {
+            let s = expect_intrinsic_text(kernel, expr, value, 0, path)?;
+            let p = std::path::Path::new(&*s);
+            Ok(p.file_stem()
+                .and_then(|n| n.to_str())
+                .map(|s| RuntimeValue::OptionSome(Box::new(RuntimeValue::Text(s.into()))))
+                .unwrap_or(RuntimeValue::OptionNone))
+        }
+        (IntrinsicValue::PathExtension, [path]) => {
+            let s = expect_intrinsic_text(kernel, expr, value, 0, path)?;
+            let p = std::path::Path::new(&*s);
+            Ok(p.extension()
+                .and_then(|n| n.to_str())
+                .map(|s| RuntimeValue::OptionSome(Box::new(RuntimeValue::Text(s.into()))))
+                .unwrap_or(RuntimeValue::OptionNone))
+        }
+        (IntrinsicValue::PathJoin, [base, segment]) => {
+            let b = expect_intrinsic_text(kernel, expr, value, 0, base)?;
+            let s = expect_intrinsic_text(kernel, expr, value, 1, segment)?;
+            let joined = std::path::Path::new(&*b).join(&*s);
+            Ok(RuntimeValue::Text(
+                joined.to_string_lossy().into_owned().into(),
+            ))
+        }
+        (IntrinsicValue::PathIsAbsolute, [path]) => {
+            let p = expect_intrinsic_text(kernel, expr, value, 0, path)?;
+            Ok(RuntimeValue::Bool(std::path::Path::new(&*p).is_absolute()))
+        }
+        (IntrinsicValue::PathNormalize, [path]) => {
+            let p = expect_intrinsic_text(kernel, expr, value, 0, path)?;
+            // Lexical normalization only — resolves `.` and `..` without I/O.
+            let mut components: Vec<&str> = Vec::new();
+            for component in std::path::Path::new(&*p).components() {
+                match component {
+                    std::path::Component::CurDir => {}
+                    std::path::Component::ParentDir => { components.pop(); }
+                    other => {
+                        if let Some(s) = other.as_os_str().to_str() {
+                            components.push(s);
+                        }
+                    }
+                }
+            }
+            Ok(RuntimeValue::Text(components.join("/").into()))
         }
         _ => unreachable!("intrinsic arity should be enforced before evaluation"),
     }

@@ -269,10 +269,23 @@ pub enum IntrinsicValue {
     FloatFromInt,
     FloatToText,
     FloatParseText,
-    // FS reads
+    // FS reads (added: readText/readDir/exists)
     FsReadText,
     FsReadDir,
     FsExists,
+    // FS extended (async tasks)
+    FsReadBytes,
+    FsRename,
+    FsCopy,
+    FsDeleteDir,
+    // Path operations (pure/synchronous)
+    PathParent,
+    PathFilename,
+    PathStem,
+    PathExtension,
+    PathJoin,
+    PathIsAbsolute,
+    PathNormalize,
 }
 
 impl fmt::Display for IntrinsicValue {
@@ -298,6 +311,17 @@ impl fmt::Display for IntrinsicValue {
             Self::FsReadText => f.write_str("aivi.fs.readText"),
             Self::FsReadDir => f.write_str("aivi.fs.readDir"),
             Self::FsExists => f.write_str("aivi.fs.exists"),
+            Self::FsReadBytes => f.write_str("aivi.fs.readBytes"),
+            Self::FsRename => f.write_str("aivi.fs.rename"),
+            Self::FsCopy => f.write_str("aivi.fs.copy"),
+            Self::FsDeleteDir => f.write_str("aivi.fs.deleteDir"),
+            Self::PathParent => f.write_str("aivi.path.parent"),
+            Self::PathFilename => f.write_str("aivi.path.filename"),
+            Self::PathStem => f.write_str("aivi.path.stem"),
+            Self::PathExtension => f.write_str("aivi.path.extension"),
+            Self::PathJoin => f.write_str("aivi.path.join"),
+            Self::PathIsAbsolute => f.write_str("aivi.path.isAbsolute"),
+            Self::PathNormalize => f.write_str("aivi.path.normalize"),
         }
     }
 }

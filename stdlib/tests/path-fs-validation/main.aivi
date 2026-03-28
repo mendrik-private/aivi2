@@ -1,0 +1,48 @@
+// Validation tests for aivi.path and aivi.fs type exports.
+// The path intrinsics (parent, filename, etc.) are catalog-resolved;
+// this file validates that the types exported from path.aivi and fs.aivi
+// typecheck correctly as aliases and ADT members.
+
+use aivi.path (
+    Path
+    PathError
+    InvalidPath
+    PathNotFound
+)
+
+use aivi.fs (
+    FsError
+    FsEvent
+    NotFound
+    PermissionDenied
+    ReadFailed
+    WriteFailed
+    FsProtocolError
+    Created
+    Changed
+    Deleted
+)
+
+// Path is a type alias for Text
+value homePath:Path = "/home/user"
+
+// PathError is an ADT
+value badPath:PathError = InvalidPath "/not/valid/\000"
+value missingPath:PathError = PathNotFound "/etc/missing"
+
+// FsError constructors
+value notFound:FsError = NotFound "/tmp/missing.txt"
+value permDenied:FsError = PermissionDenied "/etc/shadow"
+value readFail:FsError = ReadFailed "/dev/broken"
+value writeFail:FsError = WriteFailed "/read-only/file.txt"
+value protoErr:FsError = FsProtocolError "unexpected EOF"
+
+// FsEvent constructors
+value createdEvt:FsEvent = Created
+value changedEvt:FsEvent = Changed
+value deletedEvt:FsEvent = Deleted
+
+// Demonstrate path type alias usage in a record
+type FileRef = { path: Path, label: Text }
+
+value configFile:FileRef = { path: "/etc/app.conf", label: "config" }

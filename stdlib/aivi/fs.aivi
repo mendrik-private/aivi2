@@ -1,9 +1,3 @@
-// aivi.fs: filesystem domains plus headless CLI task intrinsics.
-//
-// `writeText`, `writeBytes`, `createDirAll`, and `deleteFile` are resolved
-// through the compiler's intrinsic catalog. The concrete runtime behavior is
-// currently provided by `aivi execute`.
-
 type FsError =
   | NotFound Text
   | PermissionDenied Text

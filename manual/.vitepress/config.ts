@@ -51,6 +51,7 @@ export default defineConfig({
               { text: 'aivi.core.either', link: '/stdlib/either' },
               { text: 'aivi.core.float', link: '/stdlib/float' },
               { text: 'aivi.core.dict', link: '/stdlib/dict' },
+              { text: 'aivi.core.range', link: '/stdlib/range' },
             ],
           },
           {
@@ -67,6 +68,13 @@ export default defineConfig({
               { text: 'aivi.text', link: '/stdlib/text' },
               { text: 'aivi.validation', link: '/stdlib/validation' },
               { text: 'aivi.prelude', link: '/stdlib/prelude' },
+            ],
+          },
+          {
+            text: 'I/O & Platform',
+            items: [
+              { text: 'aivi.fs', link: '/stdlib/fs' },
+              { text: 'aivi.path', link: '/stdlib/path' },
             ],
           },
         ],

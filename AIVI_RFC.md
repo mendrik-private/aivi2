@@ -2883,3 +2883,53 @@ The following constraints apply when writing `.aivi` files. Violating any of the
 - **Nested `T|>/F|>`** must use helper functions. `T|>` and `F|>` must be an adjacent pair in the same pipe spine — nesting them requires extracting the inner branch into a named helper.
 - **`value` declarations** are monomorphic. Type variables in a `value` annotation (`value x:(Dict V)`) are rejected. Use a concrete type or promote the definition to a `fun` with a `Unit` parameter.
 - **Parameterized `type` aliases** are supported: `type Dict V = { entries: List (DictEntry V) }`.
+
+### 29.6 `aivi.core.range`
+
+Pure AIVI integer range type.
+
+```aivi
+type RangeInt = { start: Int, end: Int }
+use aivi.core.range (RangeInt, make, isEmpty, contains, length, overlaps,
+                     clampTo, startOf, endOf, shift, intersect)
+```
+
+A range where `start > end` is considered empty. All operations are O(1). The `intersect` of two non-overlapping ranges is an empty range.
+
+### 29.7 Extended filesystem intrinsics
+
+The following `IntrinsicValue` variants and `RuntimeTaskPlan` entries were added:
+
+| Intrinsic | Type | Plan variant |
+|---|---|---|
+| `FsReadBytes` | `Text -> Task Text Bytes` | `FsReadBytes { path }` |
+| `FsRename` | `Text -> Text -> Task Text Unit` | `FsRename { from, to }` |
+| `FsCopy` | `Text -> Text -> Task Text Unit` | `FsCopy { from, to }` |
+| `FsDeleteDir` | `Text -> Task Text Unit` | `FsDeleteDir { path }` |
+
+All catalog entries are under `aivi.fs`.
+
+### 29.8 Path intrinsics
+
+Synchronous, pure path-string intrinsics (no I/O, no `Task`). All catalog entries are under `aivi.path`:
+
+| Intrinsic | Type |
+|---|---|
+| `PathParent` | `Text -> Option Text` |
+| `PathFilename` | `Text -> Option Text` |
+| `PathStem` | `Text -> Option Text` |
+| `PathExtension` | `Text -> Option Text` |
+| `PathJoin` | `Text -> Text -> Text` |
+| `PathIsAbsolute` | `Text -> Bool` |
+| `PathNormalize` | `Text -> Text` |
+
+`PathNormalize` resolves `.` and `..` lexically without filesystem I/O.
+
+The `aivi.path` module exports `Path = Text` (a type alias for documentation clarity) and the `PathError` ADT:
+
+```aivi
+type PathError =
+  | InvalidPath Text
+  | PathNotFound Text
+```
+

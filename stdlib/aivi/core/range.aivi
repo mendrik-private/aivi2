@@ -1,0 +1,76 @@
+type RangeInt = {
+    start: Int,
+    end: Int
+}
+
+fun make: (RangeInt) s:Int e:Int =>
+    { start: s, end: e }
+
+fun isEmpty: Bool r:RangeInt =>
+    r.start > r.end
+
+fun contains: Bool r:RangeInt n:Int =>
+    n >= r.start and n <= r.end
+
+fun length: Int r:RangeInt =>
+    r.start > r.end
+     T|> 0
+     F|> r.end - r.start + 1
+
+fun overlapsHelper: Bool a:RangeInt b:RangeInt =>
+    a.start <= b.end and b.start <= a.end
+
+fun overlaps: Bool a:RangeInt b:RangeInt =>
+    isEmpty a
+     T|> False
+     F|> overlapsHelper a b
+
+fun clampTo: Int r:RangeInt n:Int =>
+    n < r.start
+     T|> r.start
+     F|> clampHigh r.end n
+
+fun clampHigh: Int hi:Int n:Int =>
+    n > hi
+     T|> hi
+     F|> n
+
+fun startOf: Int r:RangeInt =>
+    r.start
+
+fun endOf: Int r:RangeInt =>
+    r.end
+
+fun shift: (RangeInt) delta:Int r:RangeInt =>
+    {
+        start: r.start + delta,
+        end: r.end + delta
+    }
+
+fun intersect: (RangeInt) a:RangeInt b:RangeInt =>
+    intersectBounds (max a.start b.start) (min a.end b.end)
+
+fun intersectBounds: (RangeInt) s:Int e:Int =>
+    { start: s, end: e }
+
+fun max: Int a:Int b:Int =>
+    a >= b
+     T|> a
+     F|> b
+
+fun min: Int a:Int b:Int =>
+    a <= b
+     T|> a
+     F|> b
+
+export RangeInt
+export make
+export isEmpty
+export contains
+export length
+export overlaps
+export clampTo
+export startOf
+export endOf
+export shift
+export intersect

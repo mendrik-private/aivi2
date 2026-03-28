@@ -9721,6 +9721,59 @@ impl<'a> GateTypeContext<'a> {
                 primitive(BuiltinType::Text),
                 task(primitive(BuiltinType::Text), primitive(BuiltinType::Bool)),
             ),
+            IntrinsicValue::FsReadBytes => arrow(
+                primitive(BuiltinType::Text),
+                task(primitive(BuiltinType::Text), primitive(BuiltinType::Bytes)),
+            ),
+            IntrinsicValue::FsRename => arrow(
+                primitive(BuiltinType::Text),
+                arrow(
+                    primitive(BuiltinType::Text),
+                    task(primitive(BuiltinType::Text), primitive(BuiltinType::Unit)),
+                ),
+            ),
+            IntrinsicValue::FsCopy => arrow(
+                primitive(BuiltinType::Text),
+                arrow(
+                    primitive(BuiltinType::Text),
+                    task(primitive(BuiltinType::Text), primitive(BuiltinType::Unit)),
+                ),
+            ),
+            IntrinsicValue::FsDeleteDir => arrow(
+                primitive(BuiltinType::Text),
+                task(primitive(BuiltinType::Text), primitive(BuiltinType::Unit)),
+            ),
+            IntrinsicValue::PathParent => arrow(
+                primitive(BuiltinType::Text),
+                GateType::Option(Box::new(primitive(BuiltinType::Text))),
+            ),
+            IntrinsicValue::PathFilename => arrow(
+                primitive(BuiltinType::Text),
+                GateType::Option(Box::new(primitive(BuiltinType::Text))),
+            ),
+            IntrinsicValue::PathStem => arrow(
+                primitive(BuiltinType::Text),
+                GateType::Option(Box::new(primitive(BuiltinType::Text))),
+            ),
+            IntrinsicValue::PathExtension => arrow(
+                primitive(BuiltinType::Text),
+                GateType::Option(Box::new(primitive(BuiltinType::Text))),
+            ),
+            IntrinsicValue::PathJoin => arrow(
+                primitive(BuiltinType::Text),
+                arrow(
+                    primitive(BuiltinType::Text),
+                    primitive(BuiltinType::Text),
+                ),
+            ),
+            IntrinsicValue::PathIsAbsolute => arrow(
+                primitive(BuiltinType::Text),
+                primitive(BuiltinType::Bool),
+            ),
+            IntrinsicValue::PathNormalize => arrow(
+                primitive(BuiltinType::Text),
+                primitive(BuiltinType::Text),
+            ),
         }
     }
 

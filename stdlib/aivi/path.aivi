@@ -1,9 +1,7 @@
-type PathError = Text
+type Path = Text
 
-domain Path over Text
-    parse: Text -> Result PathError Path
-    (/): Path -> Text -> Path
-    unwrap: Path -> Text
+type PathError =
+  | InvalidPath Text
+  | PathNotFound Text
 
-export PathError
-export Path
+export (Path, PathError, InvalidPath, PathNotFound)

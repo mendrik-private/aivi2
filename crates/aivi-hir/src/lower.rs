@@ -5852,6 +5852,105 @@ fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMeta
                 ),
             ),
         )),
+        ("aivi.fs", "readBytes") => Some(intrinsic_import_value(
+            IntrinsicValue::FsReadBytes,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Text),
+                task_import_type(
+                    primitive_import_type(BuiltinType::Text),
+                    primitive_import_type(BuiltinType::Bytes),
+                ),
+            ),
+        )),
+        ("aivi.fs", "rename") => Some(intrinsic_import_value(
+            IntrinsicValue::FsRename,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Text),
+                arrow_import_type(
+                    primitive_import_type(BuiltinType::Text),
+                    task_import_type(
+                        primitive_import_type(BuiltinType::Text),
+                        primitive_import_type(BuiltinType::Unit),
+                    ),
+                ),
+            ),
+        )),
+        ("aivi.fs", "copy") => Some(intrinsic_import_value(
+            IntrinsicValue::FsCopy,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Text),
+                arrow_import_type(
+                    primitive_import_type(BuiltinType::Text),
+                    task_import_type(
+                        primitive_import_type(BuiltinType::Text),
+                        primitive_import_type(BuiltinType::Unit),
+                    ),
+                ),
+            ),
+        )),
+        ("aivi.fs", "deleteDir") => Some(intrinsic_import_value(
+            IntrinsicValue::FsDeleteDir,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Text),
+                task_import_type(
+                    primitive_import_type(BuiltinType::Text),
+                    primitive_import_type(BuiltinType::Unit),
+                ),
+            ),
+        )),
+        // Path intrinsics — synchronous, operate on Text path strings
+        ("aivi.path", "parent") => Some(intrinsic_import_value(
+            IntrinsicValue::PathParent,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Text),
+                option_import_type(primitive_import_type(BuiltinType::Text)),
+            ),
+        )),
+        ("aivi.path", "filename") => Some(intrinsic_import_value(
+            IntrinsicValue::PathFilename,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Text),
+                option_import_type(primitive_import_type(BuiltinType::Text)),
+            ),
+        )),
+        ("aivi.path", "stem") => Some(intrinsic_import_value(
+            IntrinsicValue::PathStem,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Text),
+                option_import_type(primitive_import_type(BuiltinType::Text)),
+            ),
+        )),
+        ("aivi.path", "extension") => Some(intrinsic_import_value(
+            IntrinsicValue::PathExtension,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Text),
+                option_import_type(primitive_import_type(BuiltinType::Text)),
+            ),
+        )),
+        ("aivi.path", "join") => Some(intrinsic_import_value(
+            IntrinsicValue::PathJoin,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Text),
+                arrow_import_type(
+                    primitive_import_type(BuiltinType::Text),
+                    primitive_import_type(BuiltinType::Text),
+                ),
+            ),
+        )),
+        ("aivi.path", "isAbsolute") => Some(intrinsic_import_value(
+            IntrinsicValue::PathIsAbsolute,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Text),
+                primitive_import_type(BuiltinType::Bool),
+            ),
+        )),
+        ("aivi.path", "normalize") => Some(intrinsic_import_value(
+            IntrinsicValue::PathNormalize,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Text),
+                primitive_import_type(BuiltinType::Text),
+            ),
+        )),
         _ => None,
     }
 }

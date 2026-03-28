@@ -1075,6 +1075,26 @@ fn execute_runtime_task_plan(
         RuntimeTaskPlan::FsExists { path } => {
             Ok(RuntimeValue::Bool(Path::new(path.as_ref()).exists()))
         }
+        RuntimeTaskPlan::FsReadBytes { path } => {
+            let bytes = fs::read(Path::new(path.as_ref()))
+                .map_err(|error| format!("failed to read bytes from {}: {error}", path))?;
+            Ok(RuntimeValue::Bytes(bytes.into()))
+        }
+        RuntimeTaskPlan::FsRename { from, to } => {
+            fs::rename(Path::new(from.as_ref()), Path::new(to.as_ref()))
+                .map_err(|error| format!("failed to rename {} to {}: {error}", from, to))?;
+            Ok(RuntimeValue::Unit)
+        }
+        RuntimeTaskPlan::FsCopy { from, to } => {
+            fs::copy(Path::new(from.as_ref()), Path::new(to.as_ref()))
+                .map_err(|error| format!("failed to copy {} to {}: {error}", from, to))?;
+            Ok(RuntimeValue::Unit)
+        }
+        RuntimeTaskPlan::FsDeleteDir { path } => {
+            fs::remove_dir_all(Path::new(path.as_ref()))
+                .map_err(|error| format!("failed to delete directory {}: {error}", path))?;
+            Ok(RuntimeValue::Unit)
+        }
     }
 }
 
