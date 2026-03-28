@@ -2,6 +2,22 @@ use aivi.nonEmpty (NonEmptyList, appendNel)
 
 type Errors E = NonEmptyList E
 
+fun zipBothInvalid:(Validation (NonEmptyList E) (A, B)) le:(NonEmptyList E) re:(NonEmptyList E) =>
+    Invalid (appendNel le re)
+
+fun zipInvalidLeft:(Validation (NonEmptyList E) (A, B)) le:(NonEmptyList E) right:(Validation (NonEmptyList E) B) =>
+    right
+     ||> Invalid re -> zipBothInvalid le re
+     ||> Valid _    -> Invalid le
+
+fun zipValidRight:(Validation (NonEmptyList E) (A, B)) a:A b:B =>
+    Valid (a, b)
+
+fun zipValidLeft:(Validation (NonEmptyList E) (A, B)) a:A right:(Validation (NonEmptyList E) B) =>
+    right
+     ||> Invalid re -> Invalid re
+     ||> Valid b    -> zipValidRight a b
+
 fun isValid:Bool opt:(Validation E A) =>
     opt
      T|> True
@@ -49,12 +65,8 @@ fun andThen:(Validation E B) next:(A -> Validation E B) opt:(Validation E A) =>
 
 fun zipValidation:(Validation (NonEmptyList E) (A, B)) left:(Validation (NonEmptyList E) A) right:(Validation (NonEmptyList E) B) =>
     left
-     ||> Invalid le -> right
-                       ||> Invalid re -> Invalid (appendNel le re)
-                       ||> Valid _    -> Invalid le
-     ||> Valid a    -> right
-                       ||> Invalid re -> Invalid re
-                       ||> Valid b    -> Valid (a, b)
+     ||> Invalid le -> zipInvalidLeft le right
+     ||> Valid a    -> zipValidLeft a right
 
 fun fold:B onInvalid:(E -> B) onValid:(A -> B) opt:(Validation E A) =>
     opt

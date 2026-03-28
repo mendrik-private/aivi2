@@ -521,7 +521,10 @@ impl<'a> CraneliftCompiler<'a> {
                                     errors.push(error);
                                 }
                             }
-                            BinaryOperator::GreaterThan | BinaryOperator::LessThan => {
+                            BinaryOperator::GreaterThan
+                            | BinaryOperator::LessThan
+                            | BinaryOperator::GreaterThanOrEqual
+                            | BinaryOperator::LessThanOrEqual => {
                                 if let Err(error) = self.require_int_expression(
                                     kernel_id,
                                     *left,
@@ -1184,6 +1187,50 @@ impl<'a> CraneliftCompiler<'a> {
                                 "comparison result",
                             )?;
                             builder.ins().icmp(IntCC::SignedLessThan, lhs, rhs)
+                        }
+                        BinaryOperator::GreaterThanOrEqual => {
+                            self.require_int_expression(
+                                kernel_id,
+                                *left,
+                                kernel.exprs()[*left].layout,
+                                "comparison lhs",
+                            )?;
+                            self.require_int_expression(
+                                kernel_id,
+                                *right,
+                                kernel.exprs()[*right].layout,
+                                "comparison rhs",
+                            )?;
+                            self.require_bool_expression(
+                                kernel_id,
+                                expr_id,
+                                expr.layout,
+                                "comparison result",
+                            )?;
+                            builder
+                                .ins()
+                                .icmp(IntCC::SignedGreaterThanOrEqual, lhs, rhs)
+                        }
+                        BinaryOperator::LessThanOrEqual => {
+                            self.require_int_expression(
+                                kernel_id,
+                                *left,
+                                kernel.exprs()[*left].layout,
+                                "comparison lhs",
+                            )?;
+                            self.require_int_expression(
+                                kernel_id,
+                                *right,
+                                kernel.exprs()[*right].layout,
+                                "comparison rhs",
+                            )?;
+                            self.require_bool_expression(
+                                kernel_id,
+                                expr_id,
+                                expr.layout,
+                                "comparison result",
+                            )?;
+                            builder.ins().icmp(IntCC::SignedLessThanOrEqual, lhs, rhs)
                         }
                         BinaryOperator::Equals => {
                             self.require_equatable_expression_pair(

@@ -34,6 +34,8 @@ pub(crate) fn select_domain_binary_operator(
             | BinaryOperator::Modulo
             | BinaryOperator::GreaterThan
             | BinaryOperator::LessThan
+            | BinaryOperator::GreaterThanOrEqual
+            | BinaryOperator::LessThanOrEqual
     ) {
         return Ok(None);
     }

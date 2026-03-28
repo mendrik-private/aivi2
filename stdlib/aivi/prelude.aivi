@@ -141,90 +141,12 @@ fun flatMapResult:(Result E B) next:(A -> Result E B) opt:(Result E A) =>
 
 // Exports 
 
-export isSome
-export isNone
 export getOrElse
 export mapOption
 export filterOption
 export flatMapOption
 export zipOptions
 export fromBool
-
-export withDefault
-export isOk
-export isErr
 export mapResult
 export foldResult
 export flatMapResult
-
-export length
-export head
-export last
-export tailOrEmpty
-export isEmpty
-export nonEmpty
-export listMap
-export listFilter
-export flatten
-export listConcat
-export listFlatMap
-export reverse
-export take
-export drop
-export takeWhile
-export dropWhile
-export contains
-export indexOf
-export sum
-export product
-export maximum
-export minimum
-export intersperse
-export zip
-export zipWith
-export unzip
-export unique
-export sortBy
-export any
-export all
-export count
-export find
-export findMap
-export partition
-
-export min
-export max
-export minOf
-export maxOf
-export clampBy
-export reverseOrder
-export comparing
-
-export join
-export textConcat
-export textIsEmpty
-export textNonEmpty
-export surround
-
-export abs
-export negate
-export sign
-export isEven
-export isOdd
-export square
-export clamp
-export between
-export divides
-
-export not
-export xor
-export implies
-export boolFromInt
-
-export fst
-export snd
-export swap
-export mapFst
-export mapSnd
-export mapPair
-export duplicate

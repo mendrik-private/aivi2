@@ -1,3 +1,13 @@
+fun filterHelp:(Option A) item:A keep:Bool =>
+    keep
+     T|> Some item
+     F|> None
+
+fun zipHelp:(Option (A, B)) a:A right:(Option B) =>
+    right
+     ||> None   -> None
+     ||> Some b -> Some (a, b)
+
 fun keepSome:(Option A) item:A =>
     Some item
 
@@ -55,16 +65,12 @@ fun map:(Option B) transform:(A -> B) opt:(Option A) =>
 fun filter:(Option A) predicate:(A -> Bool) opt:(Option A) =>
     opt
      ||> None      -> None
-     ||> Some item -> predicate item
-                      T|> Some item
-                      F|> None
+     ||> Some item -> filterHelp item (predicate item)
 
 fun zip:(Option (A, B)) left:(Option A) right:(Option B) =>
     left
      ||> None   -> None
-     ||> Some a -> right
-                   ||> None   -> None
-                   ||> Some b -> Some (a, b)
+     ||> Some a -> zipHelp a right
 
 fun fromBool:(Option A) item:A b:Bool =>
     b

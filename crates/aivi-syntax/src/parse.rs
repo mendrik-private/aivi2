@@ -3331,14 +3331,9 @@ impl<'a> Parser<'a> {
         missing_message: &str,
         missing_label: &str,
     ) -> Option<NamedItemBody> {
-        let cursor_before = *cursor;
         let expr = self
             .parse_expr(cursor, end, ExprStop::default())
             .or_else(|| {
-                eprintln!(
-                    "DEBUG parse_expr returned None: cursor={cursor_before}, end={end}, kw={keyword_index}, next_tok={:?}",
-                    self.tokens.get(cursor_before).map(|t| t.kind())
-                );
                 self.missing_body_diagnostic(keyword_index, missing_message, missing_label);
                 None
             })?;

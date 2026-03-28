@@ -3035,6 +3035,8 @@ fn map_binary_operator(operator: HirBinaryOperator) -> BinaryOperator {
         HirBinaryOperator::Modulo => BinaryOperator::Modulo,
         HirBinaryOperator::GreaterThan => BinaryOperator::GreaterThan,
         HirBinaryOperator::LessThan => BinaryOperator::LessThan,
+        HirBinaryOperator::GreaterThanOrEqual => BinaryOperator::GreaterThanOrEqual,
+        HirBinaryOperator::LessThanOrEqual => BinaryOperator::LessThanOrEqual,
         HirBinaryOperator::Equals => BinaryOperator::Equals,
         HirBinaryOperator::NotEquals => BinaryOperator::NotEquals,
         HirBinaryOperator::And => BinaryOperator::And,

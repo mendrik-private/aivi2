@@ -1174,7 +1174,10 @@ impl<'a> GeneralExprElaborator<'a> {
                     | crate::BinaryOperator::Multiply
                     | crate::BinaryOperator::Divide
                     | crate::BinaryOperator::Modulo => Some(ty.clone()),
-                    crate::BinaryOperator::GreaterThan | crate::BinaryOperator::LessThan => None,
+                    crate::BinaryOperator::GreaterThan
+                    | crate::BinaryOperator::LessThan
+                    | crate::BinaryOperator::GreaterThanOrEqual
+                    | crate::BinaryOperator::LessThanOrEqual => None,
                     crate::BinaryOperator::Equals | crate::BinaryOperator::NotEquals => None,
                 };
                 GateRuntimeExprKind::Binary {

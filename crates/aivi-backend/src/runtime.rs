@@ -3034,6 +3034,32 @@ impl<'a> KernelEvaluator<'a> {
                     |left, right| left < right,
                 ),
             },
+            BinaryOperator::GreaterThanOrEqual => match (&left, &right) {
+                (RuntimeValue::Int(left), RuntimeValue::Int(right)) => {
+                    Ok(RuntimeValue::Bool(left >= right))
+                }
+                _ => apply_i64_like_comparison(
+                    kernel_id,
+                    expr,
+                    operator,
+                    &left,
+                    &right,
+                    |left, right| left >= right,
+                ),
+            },
+            BinaryOperator::LessThanOrEqual => match (&left, &right) {
+                (RuntimeValue::Int(left), RuntimeValue::Int(right)) => {
+                    Ok(RuntimeValue::Bool(left <= right))
+                }
+                _ => apply_i64_like_comparison(
+                    kernel_id,
+                    expr,
+                    operator,
+                    &left,
+                    &right,
+                    |left, right| left <= right,
+                ),
+            },
             BinaryOperator::And => match (&left, &right) {
                 (RuntimeValue::Bool(left), RuntimeValue::Bool(right)) => {
                     Ok(RuntimeValue::Bool(*left && *right))
@@ -3661,6 +3687,8 @@ fn domain_member_binary_operator(member_name: &str) -> Option<BinaryOperator> {
         "%" => Some(BinaryOperator::Modulo),
         ">" => Some(BinaryOperator::GreaterThan),
         "<" => Some(BinaryOperator::LessThan),
+        ">=" => Some(BinaryOperator::GreaterThanOrEqual),
+        "<=" => Some(BinaryOperator::LessThanOrEqual),
         _ => None,
     }
 }

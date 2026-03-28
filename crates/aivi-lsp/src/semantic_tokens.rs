@@ -64,6 +64,8 @@ fn token_type_index(kind: TokenKind) -> Option<u32> {
         | TokenKind::Percent
         | TokenKind::Less
         | TokenKind::Greater
+        | TokenKind::LessEqual
+        | TokenKind::GreaterEqual
         | TokenKind::Equals
         | TokenKind::EqualEqual
         | TokenKind::BangEqual

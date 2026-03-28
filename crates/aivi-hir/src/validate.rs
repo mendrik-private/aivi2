@@ -11263,6 +11263,8 @@ impl<'a> GateTypeContext<'a> {
                     }
                     (Some(left), Some(right), crate::hir::BinaryOperator::GreaterThan)
                     | (Some(left), Some(right), crate::hir::BinaryOperator::LessThan)
+                    | (Some(left), Some(right), crate::hir::BinaryOperator::GreaterThanOrEqual)
+                    | (Some(left), Some(right), crate::hir::BinaryOperator::LessThanOrEqual)
                         if is_numeric_gate_type(left) && left.same_shape(right) =>
                     {
                         Some(GateType::Primitive(BuiltinType::Bool))
