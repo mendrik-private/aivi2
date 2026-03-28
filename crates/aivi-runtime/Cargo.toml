@@ -10,7 +10,7 @@ aivi-backend = { path = "../aivi-backend" }
 aivi-core = { path = "../aivi-core" }
 aivi-hir.workspace = true
 aivi-typing.workspace = true
-glib = "0.20.12"
+glib = "0.22.3"
 serde_json = "1.0"
 url = "2.5"
 

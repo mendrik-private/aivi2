@@ -1,16 +1,26 @@
 type NotificationAction = {
     label: Text,
-    id: Text
+    id:    Text
 }
 
 type Notification = {
     summary: Text,
-    body: Option Text,
-    icon: Option Text,
+    body:    Option Text,
+    icon:    Option Text,
     actions: List NotificationAction
 }
 
 type NotificationError =
   | NotificationFailed Text
 
-export (NotificationAction, Notification, NotificationError, NotificationFailed)
+// NotificationResponse is emitted when the user interacts with a notification.
+// Wire a gnome.notification.actions source to receive these events.
+type NotificationResponse =
+  | ActionTriggered Text   // id of the action button the user clicked
+  | Dismissed
+
+export (
+  NotificationAction, Notification,
+  NotificationError, NotificationFailed,
+  NotificationResponse, ActionTriggered, Dismissed
+)

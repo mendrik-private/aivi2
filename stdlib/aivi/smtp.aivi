@@ -1,7 +1,7 @@
 type Attachment = {
-    filename: Text,
+    filename:    Text,
     contentType: Text,
-    data: Bytes
+    data:        Bytes
 }
 
 type SmtpConfig = {
@@ -10,13 +10,13 @@ type SmtpConfig = {
 }
 
 type SmtpMessage = {
-    from: Text,
-    to: List Text,
-    cc: List Text,
-    bcc: List Text,
-    subject: Text,
-    bodyText: Text,
-    bodyHtml: Option Text,
+    from:        Text,
+    to:          List Text,
+    cc:          List Text,
+    bcc:         List Text,
+    subject:     Text,
+    bodyText:    Text,
+    bodyHtml:    Option Text,
     attachments: List Attachment
 }
 
@@ -27,4 +27,11 @@ type SmtpError =
   | MessageTooLarge
   | SmtpProtocolError Text
 
-export (Attachment, SmtpConfig, SmtpMessage, SmtpError, SmtpAuthFailed, SmtpConnectionFailed, RecipientRejected, MessageTooLarge, SmtpProtocolError)
+// SmtpTask is the return type of an smtp.send source or intrinsic.
+type SmtpTask = (Task SmtpError Unit)
+
+export (
+  Attachment, SmtpConfig, SmtpMessage,
+  SmtpError, SmtpAuthFailed, SmtpConnectionFailed, RecipientRejected, MessageTooLarge, SmtpProtocolError,
+  SmtpTask
+)

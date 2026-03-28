@@ -1,3 +1,5 @@
+use aivi.core.dict (Dict)
+
 type DbError =
   | SchemaMismatch Text
   | QueryFailed Text
@@ -7,4 +9,20 @@ type DbError =
 
 type SortDir = Asc | Desc
 
-export (DbError, SchemaMismatch, QueryFailed, ConstraintViolation, NestedTransaction, ConnectionFailed, SortDir, Asc, Desc)
+// DbRow represents a single result row as a text-keyed map of column values.
+type DbRow = (Dict Text)
+
+// DbPageOpts controls offset-based pagination for query sources.
+type DbPageOpts = {
+    limit:  Int,
+    offset: Int
+}
+
+// DbTask A is the return type of a database operation yielding A on success.
+type DbTask A = (Task DbError A)
+
+export (
+  DbError, SchemaMismatch, QueryFailed, ConstraintViolation, NestedTransaction, ConnectionFailed,
+  SortDir, Asc, Desc,
+  DbRow, DbPageOpts, DbTask
+)

@@ -74,3 +74,44 @@ export startOf
 export endOf
 export shift
 export intersect
+
+// ── Float ranges ─────────────────────────────────────────────────────────────
+
+type RangeFloat = {
+    start: Float,
+    end: Float
+}
+
+fun makeFloat: (RangeFloat) s:Float e:Float =>
+    { start: s, end: e }
+
+fun isEmptyFloat: Bool r:RangeFloat =>
+    r.start > r.end
+
+fun containsFloat: Bool r:RangeFloat n:Float =>
+    n >= r.start and n <= r.end
+
+fun clampToFloat: Float r:RangeFloat n:Float =>
+    n < r.start
+     T|> r.start
+     F|> clampHighFloat r.end n
+
+fun clampHighFloat: Float hi:Float n:Float =>
+    n > hi
+     T|> hi
+     F|> n
+
+fun shiftFloat: (RangeFloat) delta:Float r:RangeFloat =>
+    { start: r.start + delta, end: r.end + delta }
+
+// Linearly interpolate within the range: t=0.0 → start, t=1.0 → end.
+fun lerpFloat: Float r:RangeFloat t:Float =>
+    r.start + (r.end - r.start) * t
+
+export RangeFloat
+export makeFloat
+export isEmptyFloat
+export containsFloat
+export clampToFloat
+export shiftFloat
+export lerpFloat

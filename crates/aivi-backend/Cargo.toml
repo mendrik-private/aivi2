@@ -10,11 +10,11 @@ aivi-core = { path = "../aivi-core" }
 aivi-hir.workspace = true
 aivi-lambda.workspace = true
 aivi-typing.workspace = true
-cranelift-codegen = "0.126.2"
-cranelift-frontend = "0.126.2"
-cranelift-module = "0.126.2"
-cranelift-native = "0.126.2"
-cranelift-object = "0.126.2"
+cranelift-codegen = "0.127.4"
+cranelift-frontend = "0.127.4"
+cranelift-module = "0.127.4"
+cranelift-native = "0.127.4"
+cranelift-object = "0.127.4"
 num-bigint = "0.4.6"
 rust_decimal = "1.40.0"
 

@@ -1,4 +1,5 @@
-// Application lifecycle state for AIVI apps.
+// Application lifecycle state.  Wire an app.lifecycle source to get a
+// Signal AppLifecycle that transitions through these states at runtime.
 type AppLifecycle =
   | Starting
   | Running
@@ -12,14 +13,32 @@ type AppActionResult A =
   | ActionFailed Text
   | ActionCancelled
 
-// An application command that carries a label and a description.
+// A labelled command that can be surfaced in menus or command palettes.
 type AppCommand = { label : Text, description : Text, shortcut : Option Text }
 
 // Undo/redo history state.
 type UndoState = { canUndo : Bool, canRedo : Bool, depth : Int }
 
-// Application notification level.
-type NotificationLevel = Info | Warning | Error | Success
+// Severity level for in-app notification banners.
+// Prefixed with Note to avoid conflicts with LogLevel constructors Info/Error.
+type NotificationLevel = NoteInfo | NoteWarning | NoteError | NoteSuccess
 
 // A notification issued by the app.
 type AppNotification = { level : NotificationLevel, title : Text, body : Option Text }
+
+// AppEvent unifies the discrete events an app emits during its lifetime.
+// Useful as the value type of a top-level event signal.
+type AppEvent =
+  | LifecycleChanged AppLifecycle
+  | CommandRequested AppCommand
+  | NotificationIssued AppNotification
+
+export (
+  AppLifecycle, Starting, Running, Suspended, Stopping, Stopped,
+  AppActionResult, ActionOk, ActionFailed, ActionCancelled,
+  AppCommand,
+  UndoState,
+  NotificationLevel, NoteInfo, NoteWarning, NoteError, NoteSuccess,
+  AppNotification,
+  AppEvent, LifecycleChanged, CommandRequested, NotificationIssued
+)

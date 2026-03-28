@@ -1,1 +1,26 @@
-type JsonError = InvalidJson | MissingKey | IndexOutOfBounds | WrongType
+use aivi.core.dict (Dict)
+
+type JsonError =
+  | InvalidJson Text
+  | MissingKey Text
+  | IndexOutOfBounds Int
+  | WrongType Text
+
+// Recursive JSON value type.  Parse Text into Json with the compiler-
+// intrinsic jsonParse, and decode fields with the intrinsic jsonGet.
+type Json =
+  | JsonNull
+  | JsonBool Bool
+  | JsonNumber Float
+  | JsonString Text
+  | JsonArray (List Json)
+  | JsonObject (Dict Json)
+
+// A sequence of keys for reaching a nested field, e.g. ["user", "address", "city"].
+type JsonPath = (List Text)
+
+export (
+  JsonError, InvalidJson, MissingKey, IndexOutOfBounds, WrongType,
+  Json, JsonNull, JsonBool, JsonNumber, JsonString, JsonArray, JsonObject,
+  JsonPath
+)

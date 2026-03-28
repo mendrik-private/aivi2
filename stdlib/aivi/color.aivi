@@ -1,5 +1,15 @@
 domain Color over Int
-    argb: Int -> Color
-    unwrap: Color -> Int
+    argb:      Int -> Color
+    unwrap:    Color -> Int
+    red:       Color -> Int
+    green:     Color -> Int
+    blue:      Color -> Int
+    alpha:     Color -> Int
+    withAlpha: Color -> Int -> Color
+    withRed:   Color -> Int -> Color
+    withGreen: Color -> Int -> Color
+    withBlue:  Color -> Int -> Color
+    // blend a b t returns a mixed toward b by factor t in [0.0, 1.0].
+    blend:     Color -> Color -> Float -> Color
 
 export Color

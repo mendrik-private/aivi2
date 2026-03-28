@@ -78,7 +78,7 @@ use aivi.path (
 
 use aivi.color (Color)
 
-type LeadingName = NonEmpty Text
+type LeadingName = NonEmptyList Text
 
 type User = {
     name: Text,

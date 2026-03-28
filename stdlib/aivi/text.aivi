@@ -28,8 +28,34 @@ fun concat:Text parts:(List Text) =>
 fun surround:Text prefix:Text suffix:Text opt:Text =>
     "{prefix}{opt}{suffix}"
 
+// Returns the fallback string when s is empty.
+fun withDefault:Text fallback:Text s:Text =>
+    s == ""
+     T|> fallback
+     F|> s
+
+// The following operations are backed by compiler intrinsics.  They are
+// available on any Text value without an explicit import:
+//
+//   length     : Text -> Int
+//   contains   : Text -> Text -> Bool         (needle, haystack)
+//   startsWith : Text -> Text -> Bool         (prefix, text)
+//   endsWith   : Text -> Text -> Bool         (suffix, text)
+//   split      : Text -> Text -> List Text    (separator, text)
+//   trim       : Text -> Text
+//   trimLeft   : Text -> Text
+//   trimRight  : Text -> Text
+//   toUpper    : Text -> Text
+//   toLower    : Text -> Text
+//   replace    : Text -> Text -> Text -> Text (pattern, replacement, text)
+//   slice      : Int -> Int -> Text -> Text   (start, end, text)
+//   indexOf    : Text -> Text -> Option Int   (needle, haystack)
+//   toInt      : Text -> Option Int
+//   toFloat    : Text -> Option Float
+
 export isEmpty
 export nonEmpty
 export join
 export concat
 export surround
+export withDefault

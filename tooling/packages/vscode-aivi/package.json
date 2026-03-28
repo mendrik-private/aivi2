@@ -9,10 +9,17 @@
   },
   "categories": ["Programming Languages", "Formatters", "Linters"],
   "keywords": ["aivi", "functional", "reactive", "gtk", "linux"],
-  "license": "MIT",
+  "license": "GPL-3.0-only",
   "icon": "icons/aivi-a.png",
   "main": "./dist/extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:aivi",
+    "onCommand:aivi.restartServer",
+    "onCommand:aivi.showOutputChannel",
+    "onCommand:aivi.formatDocument",
+    "onCommand:aivi.checkFile",
+    "onCommand:aivi.openCompilerLog"
+  ],
   "contributes": {
     "languages": [
       {

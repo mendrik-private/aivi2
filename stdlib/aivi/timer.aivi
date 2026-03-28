@@ -1,5 +1,11 @@
+// Event types emitted by the timer.every and timer.after sources.
 type TimerTick  = Unit
 type TimerReady = Unit
 
-export TimerTick
-export TimerReady
+// TimerMode controls whether the source fires on every interval or only once.
+// Pass via the @source timer.every / timer.after option block.
+type TimerMode =
+  | Repeating
+  | OneShot
+
+export (TimerTick, TimerReady, TimerMode, Repeating, OneShot)

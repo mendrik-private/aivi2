@@ -1,3 +1,13 @@
+// aivi.validation: Applicative validation with error accumulation.
+//
+// Unlike Result, which short-circuits on the first error (monadic / sequential),
+// Validation accumulates all errors using a NonEmptyList.  Use zipValidation to
+// run independent checks in parallel and collect every failure at once.
+//
+// When to use Validation vs Result:
+//   Validation — report all problems at once (form validation, config parsing)
+//   Result     — each step depends on the previous one (sequential pipeline)
+
 use aivi.nonEmpty (NonEmptyList, appendNel)
 
 type Errors E = NonEmptyList E

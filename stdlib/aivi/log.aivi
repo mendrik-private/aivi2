@@ -1,20 +1,25 @@
+use aivi.core.dict (Dict)
+
 type LogLevel =
   | Debug
   | Info
   | Warn
   | Error
 
-type LogContext = (Map Text Text)
+type LogContext = (Dict Text)
 
 type LogEntry = {
-  level: LogLevel
+  level:   LogLevel
   message: Text
   context: LogContext
 }
 
 type LogError = Text
 type LogTask  = (Task LogError Unit)
-type LogWrite = (LogEntry -> LogTask)
+
+// LogSink is the function type expected by a logging backend.
+// Wire it with @source or pass it as a dependency to pipes that emit entries.
+type LogSink = (LogEntry -> LogTask)
 
 export (
   LogLevel,
@@ -26,5 +31,5 @@ export (
   LogEntry,
   LogError,
   LogTask,
-  LogWrite
+  LogSink
 )

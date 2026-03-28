@@ -799,7 +799,7 @@ use aivi.log (
     LogEntry
     LogError
     LogTask
-    LogWrite
+    LogSink
 )
 
 type User = {
@@ -860,7 +860,7 @@ value entry:LogEntry = {
     context: context
 }
 
-type Writer = LogWrite
+type Writer = LogSink
 type CurrentLogTask = LogTask
 type CurrentLogError = LogError
 

@@ -35,7 +35,7 @@ export function createClient(
   };
 
   const clientOptions: LanguageClientOptions = {
-    documentSelector: [{ scheme: "file", language: "aivi" }],
+    documentSelector: [{ language: "aivi" }],
     synchronize: {
       fileEvents: vscode.workspace.createFileSystemWatcher("**/*.aivi"),
     },

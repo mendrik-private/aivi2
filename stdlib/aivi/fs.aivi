@@ -5,9 +5,18 @@ type FsError =
   | WriteFailed Text
   | FsProtocolError Text
 
+// FsEvent is emitted by the fs.watch source for each filesystem change.
 type FsEvent =
   | Created
   | Changed
   | Deleted
 
-export (FsError, NotFound, PermissionDenied, ReadFailed, WriteFailed, FsProtocolError, FsEvent, Created, Changed, Deleted)
+// Convenience task aliases for common file operations.
+type FsReadTask  = (Task FsError Text)
+type FsWriteTask = (Task FsError Unit)
+
+export (
+  FsError, NotFound, PermissionDenied, ReadFailed, WriteFailed, FsProtocolError,
+  FsEvent, Created, Changed, Deleted,
+  FsReadTask, FsWriteTask
+)

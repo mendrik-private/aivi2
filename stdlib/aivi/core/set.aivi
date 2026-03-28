@@ -1,3 +1,12 @@
+// aivi.core.set: text-keyed set.
+//
+// TextSet is backed by an unordered list of Text values.  All operations
+// are O(n) — keep sets small.
+//
+// Note: generalising to Set A would require an Eq constraint on A.
+// AIVI v1 does not yet support per-parameter typeclass constraints on open type
+// variables, so the element type is fixed at Text for now.
+
 use aivi.list (
     filter
     length

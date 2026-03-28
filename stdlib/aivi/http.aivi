@@ -1,10 +1,14 @@
+use aivi.core.dict (Dict)
+
 type HttpError =
   | Timeout
   | DecodeFailure Text
   | RequestFailure Text
 
-type HttpHeaders    = (Map Text Text)
-type HttpQuery      = (Map Text Text)
+// Dict-backed header and query maps (replaces the previous Map Text Text aliases).
+type HttpHeaders = (Dict Text)
+type HttpQuery   = (Dict Text)
+
 type HttpResponse A = (Result HttpError A)
 type HttpTask A     = (Task HttpError A)
 
@@ -13,7 +17,8 @@ type DecodeMode =
   | Permissive
 
 domain Retry over Int
-literal rt: Int -> Retry
+    literal rt: Int -> Retry
+    unwrap: Retry -> Int
 
 export (
   HttpError,
