@@ -1,6 +1,6 @@
 # aivi.core.dict
 
-Text-keyed dictionary. `Dict V` is an ordered association map backed by a list of entries. All operations are `O(n)`. For small to medium-sized dicts this is practical and requires no additional runtime support.
+Association map keyed by any `Eq` type. `Dict K V` is an ordered association map backed by a list of entries. All operations are `O(n)`. For small to medium-sized dicts this is practical and requires no additional runtime support.
 
 The empty dict is written as the record literal `{ entries: [] }`.
 
@@ -15,16 +15,16 @@ use aivi.core.dict (Dict, singleton, insert, insertWith, get, getWithDefault,
 ## Dict
 
 ```
-type Dict V = { entries: List (DictEntry V) }
-type DictEntry V = { key: Text, value: V }
+type Dict K V = { entries: List (DictEntry K V) }
+type DictEntry K V = { key: K, value: V }
 ```
 
-A `Dict V` is a record with a single field `entries` holding an association list. You can construct an empty dict with the record literal directly:
+A `Dict K V` is a record with a single field `entries` holding an association list. The key type `K` can be any type that supports equality. You can construct an empty dict with the record literal directly:
 
 ```aivi
 use aivi.core.dict (Dict)
 
-value emptyScores:(Dict Int) = { entries: [] }
+value emptyScores:(Dict Text Int) = { entries: [] }
 ```
 
 ---
@@ -34,13 +34,13 @@ value emptyScores:(Dict Int) = { entries: [] }
 Creates a dict with exactly one entry.
 
 ```
-singleton : Text -> V -> Dict V
+singleton : K -> V -> Dict K V
 ```
 
 ```aivi
 use aivi.core.dict (singleton)
 
-value greeting:(Dict Text) = singleton "hello" "world"
+value greeting:(Dict Text Text) = singleton "hello" "world"
 ```
 
 ---
@@ -50,13 +50,13 @@ value greeting:(Dict Text) = singleton "hello" "world"
 Inserts or replaces a key. If the key already exists, the old value is discarded.
 
 ```
-insert : Text -> V -> Dict V -> Dict V
+insert : K -> V -> Dict K V -> Dict K V
 ```
 
 ```aivi
 use aivi.core.dict (Dict, insert)
 
-value scores:(Dict Int) =
+value scores:(Dict Text Int) =
     { entries: [] }
      |> insert "alice" 100
      |> insert "bob" 85
@@ -69,13 +69,13 @@ value scores:(Dict Int) =
 Inserts a key, combining the new value with the existing one using `merge` if the key is already present.
 
 ```
-insertWith : (V -> V -> V) -> Text -> V -> Dict V -> Dict V
+insertWith : (V -> V -> V) -> K -> V -> Dict K V -> Dict K V
 ```
 
 ```aivi
 use aivi.core.dict (Dict, insertWith)
 
-fun addScore:(Dict Int) key:Text n:Int d:(Dict Int) =>
+fun addScore:(Dict Text Int) key:Text n:Int d:(Dict Text Int) =>
     insertWith (fun total:Int old:Int new:Int => old + new) key n d
 ```
 
@@ -86,13 +86,13 @@ fun addScore:(Dict Int) key:Text n:Int d:(Dict Int) =>
 Looks up a key. Returns `None` when the key is absent.
 
 ```
-get : Text -> Dict V -> Option V
+get : K -> Dict K V -> Option V
 ```
 
 ```aivi
 use aivi.core.dict (Dict, insert, get)
 
-value d:(Dict Int) = insert "x" 42 { entries: [] }
+value d:(Dict Text Int) = insert "x" 42 { entries: [] }
 value found:(Option Int) = get "x" d
 ```
 
@@ -103,13 +103,13 @@ value found:(Option Int) = get "x" d
 Looks up a key, returning a fallback value when the key is absent.
 
 ```
-getWithDefault : V -> Text -> Dict V -> V
+getWithDefault : V -> K -> Dict K V -> V
 ```
 
 ```aivi
 use aivi.core.dict (Dict, insert, getWithDefault)
 
-value d:(Dict Int) = insert "level" 5 { entries: [] }
+value d:(Dict Text Int) = insert "level" 5 { entries: [] }
 value level:Int = getWithDefault 1 "level" d
 ```
 
@@ -120,13 +120,13 @@ value level:Int = getWithDefault 1 "level" d
 Returns `True` if the key exists in the dict.
 
 ```
-member : Text -> Dict V -> Bool
+member : K -> Dict K V -> Bool
 ```
 
 ```aivi
 use aivi.core.dict (Dict, insert, member)
 
-value d:(Dict Int) = insert "exists" 1 { entries: [] }
+value d:(Dict Text Int) = insert "exists" 1 { entries: [] }
 value hasIt:Bool = member "exists" d
 ```
 
@@ -137,14 +137,14 @@ value hasIt:Bool = member "exists" d
 Removes a key. Has no effect if the key is absent.
 
 ```
-remove : Text -> Dict V -> Dict V
+remove : K -> Dict K V -> Dict K V
 ```
 
 ```aivi
 use aivi.core.dict (Dict, insert, remove)
 
-value d:(Dict Int) = insert "temp" 0 { entries: [] }
-value cleaned:(Dict Int) = remove "temp" d
+value d:(Dict Text Int) = insert "temp" 0 { entries: [] }
+value cleaned:(Dict Text Int) = remove "temp" d
 ```
 
 ---
@@ -154,13 +154,13 @@ value cleaned:(Dict Int) = remove "temp" d
 Returns the number of entries.
 
 ```
-size : Dict V -> Int
+size : Dict K V -> Int
 ```
 
 ```aivi
 use aivi.core.dict (Dict, insert, size)
 
-value d:(Dict Int) =
+value d:(Dict Text Int) =
     { entries: [] }
      |> insert "a" 1
      |> insert "b" 2
@@ -174,14 +174,14 @@ value count:Int = size d
 Return the keys or values as a list, in insertion order.
 
 ```
-keys   : Dict V -> List Text
-values : Dict V -> List V
+keys   : Dict K V -> List K
+values : Dict K V -> List V
 ```
 
 ```aivi
 use aivi.core.dict (Dict, insert, keys, values)
 
-value d:(Dict Int) = insert "score" 99 { entries: [] }
+value d:(Dict Text Int) = insert "score" 99 { entries: [] }
 value ks:(List Text) = keys d
 value vs:(List Int)  = values d
 ```
@@ -190,18 +190,18 @@ value vs:(List Int)  = values d
 
 ## toList / fromList
 
-Convert between a `Dict V` and a list of `(Text, V)` pairs.
+Convert between a `Dict K V` and a list of `(K, V)` pairs.
 
 ```
-toList   : Dict V -> List (Text, V)
-fromList : List (Text, V) -> Dict V
+toList   : Dict K V -> List (K, V)
+fromList : List (K, V) -> Dict K V
 ```
 
 ```aivi
 use aivi.core.dict (Dict, fromList, toList)
 
 value pairs:(List (Text, Int)) = [("a", 1), ("b", 2)]
-value d:(Dict Int) = fromList pairs
+value d:(Dict Text Int) = fromList pairs
 value back:(List (Text, Int)) = toList d
 ```
 
@@ -212,14 +212,14 @@ value back:(List (Text, Int)) = toList d
 Applies a function to every value, preserving keys.
 
 ```
-mapValues : (V1 -> V2) -> Dict V1 -> Dict V2
+mapValues : (V1 -> V2) -> Dict K V1 -> Dict K V2
 ```
 
 ```aivi
 use aivi.core.dict (Dict, insert, mapValues)
 
-value d:(Dict Int) = insert "pts" 5 { entries: [] }
-value doubled:(Dict Int) = mapValues (fun n:Int x:Int => x * 2) d
+value d:(Dict Text Int) = insert "pts" 5 { entries: [] }
+value doubled:(Dict Text Int) = mapValues (fun n:Int x:Int => x * 2) d
 ```
 
 ---
@@ -229,17 +229,17 @@ value doubled:(Dict Int) = mapValues (fun n:Int x:Int => x * 2) d
 Keeps only entries whose value satisfies a predicate.
 
 ```
-filterValues : (V -> Bool) -> Dict V -> Dict V
+filterValues : (V -> Bool) -> Dict K V -> Dict K V
 ```
 
 ```aivi
 use aivi.core.dict (Dict, insert, filterValues)
 
-value d:(Dict Int) =
+value d:(Dict Text Int) =
     { entries: [] }
      |> insert "low" 3
      |> insert "high" 99
-value highOnly:(Dict Int) = filterValues (fun b:Bool n:Int => n > 10) d
+value highOnly:(Dict Text Int) = filterValues (fun b:Bool n:Int => n > 10) d
 ```
 
 ---
@@ -249,15 +249,15 @@ value highOnly:(Dict Int) = filterValues (fun b:Bool n:Int => n > 10) d
 Merges two dicts. When both contain the same key, `combine` is called with the left and right values to produce the merged value.
 
 ```
-mergeWith : (V -> V -> V) -> Dict V -> Dict V -> Dict V
+mergeWith : (V -> V -> V) -> Dict K V -> Dict K V -> Dict K V
 ```
 
 ```aivi
 use aivi.core.dict (Dict, insert, mergeWith)
 
-value left:(Dict Int) = insert "a" 1 { entries: [] }
-value right:(Dict Int) = insert "a" 10 { entries: [] }
-value merged:(Dict Int) = mergeWith (fun sum:Int x:Int y:Int => x + y) left right
+value left:(Dict Text Int) = insert "a" 1 { entries: [] }
+value right:(Dict Text Int) = insert "a" 10 { entries: [] }
+value merged:(Dict Text Int) = mergeWith (fun sum:Int x:Int y:Int => x + y) left right
 ```
 
 ---
@@ -267,13 +267,13 @@ value merged:(Dict Int) = mergeWith (fun sum:Int x:Int y:Int => x + y) left righ
 Merges two dicts. When a key exists in both, the **right** dict wins.
 
 ```
-union : Dict V -> Dict V -> Dict V
+union : Dict K V -> Dict K V -> Dict K V
 ```
 
 ```aivi
 use aivi.core.dict (Dict, insert, union)
 
-value defaults:(Dict Int) = insert "timeout" 30 { entries: [] }
-value overrides:(Dict Int) = insert "timeout" 60 { entries: [] }
-value config:(Dict Int) = union defaults overrides
+value defaults:(Dict Text Int) = insert "timeout" 30 { entries: [] }
+value overrides:(Dict Text Int) = insert "timeout" 60 { entries: [] }
+value config:(Dict Text Int) = union defaults overrides
 ```

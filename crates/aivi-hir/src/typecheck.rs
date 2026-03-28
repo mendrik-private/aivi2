@@ -2102,7 +2102,7 @@ impl<'a> TypeChecker<'a> {
                 } else {
                     Err(format!(
                         "open type parameter `{name}` does not have a compiler-derived `Eq` \
-                         instance in v1; add `(Eq {name}) ->` to the function annotation to \
+                         instance in v1; add `(Eq {name}) =>` to the function annotation to \
                          require it"
                     ))
                 }

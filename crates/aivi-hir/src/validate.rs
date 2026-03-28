@@ -10161,33 +10161,65 @@ impl<'a> GateTypeContext<'a> {
     /// Returns the set of type parameters in `context` that are constrained by `Eq`.
     /// Used by the typechecker to satisfy `require_eq` for open type parameters in
     /// functions whose annotations carry `(Eq K) ->` constraints.
+    ///
+    /// Matching is done by NAME ("Eq") rather than by resolved class item, so that
+    /// the constraint works even when the `Eq` class is not explicitly imported in
+    /// the current module (e.g. it may be a builtin or not yet defined in user stdlib).
     pub(crate) fn eq_constrained_parameters(
         &self,
         context: &[TypeId],
     ) -> HashSet<TypeParameterId> {
         let mut result = HashSet::new();
-        let Some(eq_class_id) = self.module.items().iter().find_map(|(id, item)| {
-            matches!(item, Item::Class(c) if c.name.text() == "Eq").then_some(id)
-        }) else {
-            return result;
-        };
         for &constraint in context {
-            let Some((class_id, subject_id)) = self.class_constraint_parts(constraint) else {
-                continue;
-            };
-            if class_id != eq_class_id {
-                continue;
-            }
-            // Check if the subject resolves to a type parameter.
-            if let TypeKind::Name(ref reference) = self.module.types()[subject_id].kind {
-                if let ResolutionState::Resolved(TypeResolution::TypeParameter(param_id)) =
-                    reference.resolution.as_ref()
-                {
-                    result.insert(*param_id);
-                }
+            if let Some(param_id) = self.extract_eq_constrained_parameter(constraint) {
+                result.insert(param_id);
             }
         }
         result
+    }
+
+    /// Returns the TypeParameterId if `type_id` represents an `Eq K` application
+    /// where K is an open type parameter.  Works for both resolved and unresolved `Eq`.
+    fn extract_eq_constrained_parameter(&self, type_id: TypeId) -> Option<TypeParameterId> {
+        let ty = self.module.types().get(type_id)?;
+        let TypeKind::Apply { callee, arguments } = &ty.kind else {
+            return None;
+        };
+        if arguments.len() != 1 {
+            return None;
+        }
+        // Accept `Eq K` both when Eq is resolved to a class item and when it is not yet
+        // resolved (e.g. builtin or not explicitly imported).
+        let callee_is_eq = match &self.module.types()[*callee].kind {
+            TypeKind::Name(reference) => {
+                match reference.resolution.as_ref() {
+                    // Fully resolved to a class named "Eq".
+                    ResolutionState::Resolved(TypeResolution::Item(item_id)) => {
+                        matches!(&self.module.items()[*item_id], Item::Class(c) if c.name.text() == "Eq")
+                    }
+                    // Unresolved but spelled "Eq" — accept as an Eq constraint annotation.
+                    ResolutionState::Unresolved => {
+                        reference.path.segments().last().text() == "Eq"
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        };
+        if !callee_is_eq {
+            return None;
+        }
+        // The single argument must resolve to a type parameter.
+        if let TypeKind::Name(ref reference) =
+            self.module.types()[*arguments.first()].kind
+        {
+            if let ResolutionState::Resolved(TypeResolution::TypeParameter(param_id)) =
+                reference.resolution.as_ref()
+            {
+                return Some(*param_id);
+            }
+        }
+        None
     }
 
     fn select_domain_member_candidate<T>(

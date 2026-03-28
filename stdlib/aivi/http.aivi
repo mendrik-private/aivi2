@@ -6,8 +6,8 @@ type HttpError =
   | RequestFailure Text
 
 // Dict-backed header and query maps (replaces the previous Map Text Text aliases).
-type HttpHeaders = (Dict Text)
-type HttpQuery   = (Dict Text)
+type HttpHeaders = (Dict Text Text)
+type HttpQuery   = (Dict Text Text)
 
 type HttpResponse A = (Result HttpError A)
 type HttpTask A     = (Task HttpError A)

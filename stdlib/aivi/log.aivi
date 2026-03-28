@@ -6,7 +6,7 @@ type LogLevel =
   | Warn
   | Error
 
-type LogContext = (Dict Text)
+type LogContext = (Dict Text Text)
 
 type LogEntry = {
   level:   LogLevel

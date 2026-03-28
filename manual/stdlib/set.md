@@ -1,10 +1,10 @@
 # aivi.core.set
 
-An ordered set of unique `Text` values backed by a deduplicated list. All operations are O(n). Use for small membership collections; for large sets prefer index-backed structures.
+Unordered set for any `Eq` type. `Set A` is backed by a deduplicated list. All operations are O(n). Use for small membership collections; for large sets prefer index-backed structures.
 
 ```aivi
 use aivi.core.set (
-    TextSet
+    Set
     isEmpty
     singleton
     member
@@ -24,25 +24,25 @@ use aivi.core.set (
 
 ## Type
 
-### `TextSet`
+### `Set`
 
 ```aivi
-type TextSet = { items: List Text }
+type Set A = { items: List A }
 ```
 
-An ordered, deduplicated sequence of `Text` values. The empty set is the literal `{ items: [] }`.
+An unordered, deduplicated collection of `A` values. The element type `A` can be any type that supports equality. The empty set is the literal `{ items: [] }`.
 
 ---
 
 ## Construction
 
-### `singleton : Text -> TextSet`
+### `singleton : A -> Set A`
 
 ```aivi
-singleton "apple"  // TextSet with one item
+singleton "apple"  // Set Text with one item
 ```
 
-### `fromList : List Text -> TextSet`
+### `fromList : List A -> Set A`
 
 Build a set from a list, discarding duplicates (first occurrence wins).
 
@@ -54,14 +54,14 @@ fromList ["a", "b", "a", "c"]  // { items: ["a", "b", "c"] }
 
 ## Querying
 
-### `isEmpty : TextSet -> Bool`
+### `isEmpty : Set A -> Bool`
 
 ```aivi
 isEmpty { items: [] }   // True
 isEmpty (singleton "x") // False
 ```
 
-### `member : Text -> TextSet -> Bool`
+### `member : A -> Set A -> Bool`
 
 ```aivi
 let s = fromList ["a", "b", "c"] in
@@ -69,13 +69,13 @@ member "b" s  // True
 member "z" s  // False
 ```
 
-### `size : TextSet -> Int`
+### `size : Set A -> Int`
 
 ```aivi
 fromList ["x", "y", "z"] |> size  // 3
 ```
 
-### `toList : TextSet -> List Text`
+### `toList : Set A -> List A`
 
 Returns the items in insertion order.
 
@@ -87,7 +87,7 @@ fromList ["b", "a"] |> toList  // ["b", "a"]
 
 ## Modification
 
-### `insert : Text -> TextSet -> TextSet`
+### `insert : A -> Set A -> Set A`
 
 Add a value. If already present, the set is unchanged.
 
@@ -95,7 +95,7 @@ Add a value. If already present, the set is unchanged.
 singleton "a" |> insert "b" |> insert "a"  // { items: ["a", "b"] }
 ```
 
-### `remove : Text -> TextSet -> TextSet`
+### `remove : A -> Set A -> Set A`
 
 Remove a value. No-op if not present.
 
@@ -107,7 +107,7 @@ fromList ["a", "b", "c"] |> remove "b"  // { items: ["a", "c"] }
 
 ## Set algebra
 
-### `union : TextSet -> TextSet -> TextSet`
+### `union : Set A -> Set A -> Set A`
 
 All items from both sets (items from `b` appended when not already in `a`).
 
@@ -116,7 +116,7 @@ union (fromList ["a", "b"]) (fromList ["b", "c"])
 // { items: ["a", "b", "c"] }
 ```
 
-### `intersection : TextSet -> TextSet -> TextSet`
+### `intersection : Set A -> Set A -> Set A`
 
 Items that appear in both sets.
 
@@ -125,7 +125,7 @@ intersection (fromList ["a", "b", "c"]) (fromList ["b", "c", "d"])
 // { items: ["b", "c"] }
 ```
 
-### `difference : TextSet -> TextSet -> TextSet`
+### `difference : Set A -> Set A -> Set A`
 
 Items in `a` that are not in `b`.
 
@@ -134,7 +134,7 @@ difference (fromList ["a", "b", "c"]) (fromList ["b"])
 // { items: ["a", "c"] }
 ```
 
-### `subsetOf : TextSet -> TextSet -> Bool`
+### `subsetOf : Set A -> Set A -> Bool`
 
 `True` when every item in `a` is also in `b`.
 
@@ -148,9 +148,9 @@ subsetOf (fromList ["a", "d"]) (fromList ["a", "b", "c"])  // False
 ## Real-world example
 
 ```aivi
-use aivi.core.set (TextSet, fromList, member, union, difference, toList)
+use aivi.core.set (Set, fromList, member, union, difference, toList)
 
-type TagFilter = { required: TextSet, excluded: TextSet }
+type TagFilter = { required: Set Text, excluded: Set Text }
 
 fun matchesTags:Bool filter:TagFilter tags:(List Text) =>
     let tagSet = fromList tags in

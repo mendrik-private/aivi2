@@ -10,7 +10,7 @@ type DbError =
 type SortDir = Asc | Desc
 
 // DbRow represents a single result row as a text-keyed map of column values.
-type DbRow = (Dict Text)
+type DbRow = (Dict Text Text)
 
 // DbPageOpts controls offset-based pagination for query sources.
 type DbPageOpts = {

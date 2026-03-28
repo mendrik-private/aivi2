@@ -1,42 +1,39 @@
-// aivi.core.dict: text-keyed ordered association map.
+// aivi.core.dict: ordered association map keyed by any Eq type.
 //
-// Dict V is a Text-keyed association map backed by an ordered association list.
+// Dict K V is an association map backed by an ordered association list.
+// The key type K may be any type that supports equality (Eq).
 // All operations are O(n).  For performance-critical paths keep dicts small or
 // prefer index-backed structures.
-//
-// Note: generalising Dict to Dict K V would require an Eq constraint on K.
-// AIVI v1 does not yet support per-parameter typeclass constraints on open type
-// variables, so the key type is fixed at Text for now.
 
 use aivi.list (filter, find, map, length)
 
-type DictEntry V = {
-    key: Text,
+type DictEntry K V = {
+    key: K,
     value: V
 }
 
-type Dict V = {
-    entries: List (DictEntry V)
+type Dict K V = {
+    entries: List (DictEntry K V)
 }
 
-fun singleton:(Dict V) k:Text v:V =>
+fun singleton: (Dict K V) k:K v:V =>
     { entries: [{ key: k, value: v }] }
 
-fun matchesKey:Bool k:Text entry:(DictEntry V) =>
+fun matchesKey: Eq K => Bool k:K entry:(DictEntry K V) =>
     entry.key == k
 
-fun notMatchesKey:Bool k:Text entry:(DictEntry V) =>
+fun notMatchesKey: Eq K => Bool k:K entry:(DictEntry K V) =>
     entry.key == k
      T|> False
      F|> True
 
-fun filterOldKey:(List (DictEntry V)) k:Text d:(Dict V) =>
+fun filterOldKey: (List (DictEntry K V)) k:K d:(Dict K V) =>
     d.entries |> filter (notMatchesKey k)
 
-fun insert:(Dict V) k:Text v:V d:(Dict V) =>
+fun insert: (Dict K V) k:K v:V d:(Dict K V) =>
     { entries: append [{ key: k, value: v }] (filterOldKey k d) }
 
-fun insertWith:(Dict V) merge:(V -> V -> V) k:Text v:V d:(Dict V) =>
+fun insertWith: (Dict K V) merge:(V -> V -> V) k:K v:V d:(Dict K V) =>
     d.entries
      |> find (matchesKey k)
      ||> None ->
@@ -44,83 +41,83 @@ fun insertWith:(Dict V) merge:(V -> V -> V) k:Text v:V d:(Dict V) =>
      ||> Some existing ->
         insert k (merge existing.value v) d
 
-fun get:(Option V) k:Text d:(Dict V) =>
+fun get: (Option V) k:K d:(Dict K V) =>
     d.entries
      |> find (matchesKey k)
      ||> None -> None
      ||> Some entry -> Some entry.value
 
-fun getWithDefault:V default:V k:Text d:(Dict V) =>
+fun getWithDefault: V default:V k:K d:(Dict K V) =>
     d.entries
      |> find (matchesKey k)
      ||> None -> default
      ||> Some entry -> entry.value
 
-fun member:Bool k:Text d:(Dict V) =>
+fun member: Bool k:K d:(Dict K V) =>
     d.entries
      |> find (matchesKey k)
      ||> Some _ -> True
      ||> None   -> False
 
-fun remove:(Dict V) k:Text d:(Dict V) =>
+fun remove: (Dict K V) k:K d:(Dict K V) =>
     { entries: filterOldKey k d }
 
-fun size:Int d:(Dict V) =>
+fun size: Int d:(Dict K V) =>
     d.entries |> length
 
-fun extractKey:Text entry:(DictEntry V) =>
+fun extractKey: K entry:(DictEntry K V) =>
     entry.key
 
-fun keys:(List Text) d:(Dict V) =>
+fun keys: (List K) d:(Dict K V) =>
     d.entries |> map extractKey
 
-fun extractValue:V entry:(DictEntry V) =>
+fun extractValue: V entry:(DictEntry K V) =>
     entry.value
 
-fun values:(List V) d:(Dict V) =>
+fun values: (List V) d:(Dict K V) =>
     d.entries |> map extractValue
 
-fun toPair:((Text, V)) entry:(DictEntry V) =>
+fun toPair: ((K, V)) entry:(DictEntry K V) =>
     (entry.key, entry.value)
 
-fun toList:(List (Text, V)) d:(Dict V) =>
+fun toList: (List (K, V)) d:(Dict K V) =>
     d.entries |> map toPair
 
-fun insertPair:(Dict V) acc:(Dict V) pair:(Text, V) =>
+fun insertPair: (Dict K V) acc:(Dict K V) pair:(K, V) =>
     pair
      ||> (k, v) -> insert k v acc
 
-fun fromList:(Dict V) items:(List (Text, V)) =>
+fun fromList: (Dict K V) items:(List (K, V)) =>
     items |> reduce insertPair { entries: [] }
 
-fun mapEntryValue:(DictEntry V2) f:(V1 -> V2) entry:(DictEntry V1) =>
+fun mapEntryValue: (DictEntry K V2) f:(V1 -> V2) entry:(DictEntry K V1) =>
     { key: entry.key, value: f entry.value }
 
-fun mappedEntries:(List (DictEntry V2)) f:(V1 -> V2) d:(Dict V1) =>
+fun mappedEntries: (List (DictEntry K V2)) f:(V1 -> V2) d:(Dict K V1) =>
     d.entries |> map (mapEntryValue f)
 
-fun mapValues:(Dict V2) f:(V1 -> V2) d:(Dict V1) =>
+fun mapValues: (Dict K V2) f:(V1 -> V2) d:(Dict K V1) =>
     { entries: mappedEntries f d }
 
-fun entryMatchesPredicate:Bool predicate:(V -> Bool) entry:(DictEntry V) =>
+fun entryMatchesPredicate: Bool predicate:(V -> Bool) entry:(DictEntry K V) =>
     predicate entry.value
 
-fun filteredValueEntries:(List (DictEntry V)) predicate:(V -> Bool) d:(Dict V) =>
+fun filteredValueEntries: (List (DictEntry K V)) predicate:(V -> Bool) d:(Dict K V) =>
     d.entries |> filter (entryMatchesPredicate predicate)
 
-fun filterValues:(Dict V) predicate:(V -> Bool) d:(Dict V) =>
+fun filterValues: (Dict K V) predicate:(V -> Bool) d:(Dict K V) =>
     { entries: filteredValueEntries predicate d }
 
-fun mergeStep:(Dict V) combine:(V -> V -> V) acc:(Dict V) entry:(DictEntry V) =>
+fun mergeStep: (Dict K V) combine:(V -> V -> V) acc:(Dict K V) entry:(DictEntry K V) =>
     insertWith combine entry.key entry.value acc
 
-fun mergeWith:(Dict V) combine:(V -> V -> V) left:(Dict V) right:(Dict V) =>
+fun mergeWith: (Dict K V) combine:(V -> V -> V) left:(Dict K V) right:(Dict K V) =>
     right.entries |> reduce (mergeStep combine) left
 
-fun insertEntry:(Dict V) acc:(Dict V) entry:(DictEntry V) =>
+fun insertEntry: (Dict K V) acc:(Dict K V) entry:(DictEntry K V) =>
     insert entry.key entry.value acc
 
-fun union:(Dict V) left:(Dict V) right:(Dict V) =>
+fun union: (Dict K V) left:(Dict K V) right:(Dict K V) =>
     right.entries |> reduce insertEntry left
 
 export Dict

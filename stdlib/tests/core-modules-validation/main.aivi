@@ -148,22 +148,22 @@ value floatToDeg: Float = toDegrees pi
 // aivi.core.dict
 // ============================================================
 
-value dictSingle:(Dict Int) = singleton "a" 1
-value dictInsert:(Dict Int) = insert "b" 2 dictSingle
+value dictSingle:(Dict Text Int) = singleton "a" 1
+value dictInsert:(Dict Text Int) = insert "b" 2 dictSingle
 value dictGet:(Option Int) = get "a" dictSingle
 value dictGetMissing:(Option Int) = get "z" dictSingle
 value dictGetDefault: Int = getWithDefault 0 "z" dictSingle
 value dictGetDefaultFound: Int = getWithDefault 0 "a" dictSingle
 value dictMemberYes: Bool = member "a" dictSingle
 value dictMemberNo: Bool = member "z" dictSingle
-value dictRemove:(Dict Int) = remove "a" dictSingle
+value dictRemove:(Dict Text Int) = remove "a" dictSingle
 value dictRemovedSize: Int = size (remove "a" dictSingle)
 value dictSize: Int = size dictInsert
 value dictKeys:(List Text) = keys dictSingle
 value dictValues:(List Int) = values dictSingle
 
 value dictPairs:(List (Text, Int)) = [("x", 10), ("y", 20)]
-value dictFromList:(Dict Int) = fromList dictPairs
+value dictFromList:(Dict Text Int) = fromList dictPairs
 value dictToList:(List (Text, Int)) = toList dictFromList
 
 fun doubleVal:Int n:Int => n * 2
@@ -171,14 +171,14 @@ fun isAboveZero:Bool n:Int => n > 0
 fun isAboveFive:Bool n:Int => n > 5
 fun sumValues:Int x:Int y:Int => x + y
 
-value dictMapped:(Dict Int) = mapValues doubleVal dictSingle
-value dictFiltered:(Dict Int) = filterValues isAboveZero dictSingle
-value dictFiltered0:(Dict Int) = filterValues isAboveFive dictSingle
+value dictMapped:(Dict Text Int) = mapValues doubleVal dictSingle
+value dictFiltered:(Dict Text Int) = filterValues isAboveZero dictSingle
+value dictFiltered0:(Dict Text Int) = filterValues isAboveFive dictSingle
 
-value dictLeft:(Dict Int) = insert "a" 1 { entries: [] }
-value dictRight:(Dict Int) = insert "a" 10 { entries: [] }
-value dictMerged:(Dict Int) = mergeWith sumValues dictLeft dictRight
-value dictUnion:(Dict Int) = union dictLeft dictRight
+value dictLeft:(Dict Text Int) = insert "a" 1 { entries: [] }
+value dictRight:(Dict Text Int) = insert "a" 10 { entries: [] }
+value dictMerged:(Dict Text Int) = mergeWith sumValues dictLeft dictRight
+value dictUnion:(Dict Text Int) = union dictLeft dictRight
 
 export fnIdentity
 export fnConst

@@ -14,7 +14,7 @@ type Json =
   | JsonNumber Float
   | JsonString Text
   | JsonArray (List Json)
-  | JsonObject (Dict Json)
+  | JsonObject (Dict Text Json)
 
 // A sequence of keys for reaching a nested field, e.g. ["user", "address", "city"].
 type JsonPath = (List Text)
