@@ -1294,7 +1294,7 @@ signal gated : Signal Int =
             "recurrence-guard.aivi",
             r#"
 domain Duration over Int
-    literal s : Int -> Duration
+    literal sec : Int -> Duration
 
 type Cursor = {
     hasNext: Bool
@@ -1305,7 +1305,7 @@ fun keep:Cursor cursor:Cursor =>
 
 value seed:Cursor = { hasNext: True }
 
-@recur.timer 1s
+@recur.timer 1sec
 signal cursor : Signal Cursor =
     seed
      @|> keep
@@ -1371,7 +1371,7 @@ signal cursor : Signal Cursor =
             "recurrence-step-chain-mismatch.aivi",
             r#"
 domain Duration over Int
-    literal s : Int -> Duration
+    literal sec : Int -> Duration
 
 fun keep n:Int =>
     n
@@ -1379,7 +1379,7 @@ fun keep n:Int =>
 fun asText n:Int =>
     "oops"
 
-@recur.timer 5s
+@recur.timer 5sec
 signal broken : Signal Int =
     0
      @|> keep
@@ -1418,7 +1418,7 @@ signal broken : Signal Int =
             "recurrence-signal-reads-in-update-stages.aivi",
             r#"
 domain Duration over Int
-    literal s : Int -> Duration
+    literal sec : Int -> Duration
 
 fun advance:Int pressed:Bool n:Int =>
     pressed
@@ -1430,7 +1430,7 @@ fun belowLimit:Bool n:Int =>
 
 signal ready : Signal Bool = True
 
-@recur.timer 5s
+@recur.timer 5sec
 signal counter : Signal Int =
     0
      @|> advance ready

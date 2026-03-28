@@ -3844,21 +3844,21 @@ fun add:Int x:Int y:Int =>
             "typed-core-recurrence.aivi",
             r#"
 domain Duration over Int
-    literal s : Int -> Duration
+    literal sec : Int -> Duration
 
 domain Retry over Int
-    literal x : Int -> Retry
+    literal rt : Int -> Retry
 
 fun step:Int n:Int =>
     n
 
-@recur.timer 5s
+@recur.timer 5sec
 signal polled : Signal Int =
     0
      @|> step
      <|@ step
 
-@recur.backoff 3x
+@recur.backoff 3rt
 value retried : Task Int Int =
     0
      @|> step
@@ -3894,7 +3894,7 @@ value retried : Task Int Int =
             "typed-core-recurrence-guard.aivi",
             r#"
 domain Duration over Int
-    literal s : Int -> Duration
+    literal sec : Int -> Duration
 
 type Cursor = {
     hasNext: Bool
@@ -3905,7 +3905,7 @@ fun keep:Cursor cursor:Cursor =>
 
 value seed:Cursor = { hasNext: True }
 
-@recur.timer 1s
+@recur.timer 1sec
 signal cursor : Signal Cursor =
     seed
      @|> keep
@@ -4298,21 +4298,21 @@ signal timeout : Signal Duration
             "typed-core-recurrence.aivi",
             r#"
 domain Duration over Int
-    literal s : Int -> Duration
+    literal sec : Int -> Duration
 
 domain Retry over Int
-    literal x : Int -> Retry
+    literal rt : Int -> Retry
 
 fun step:Int n:Int =>
     n
 
-@recur.timer 5s
+@recur.timer 5sec
 signal polled : Signal Int =
     0
      @|> step
      <|@ step
 
-@recur.backoff 3x
+@recur.backoff 3rt
 value retried : Task Int Int =
     0
      @|> step

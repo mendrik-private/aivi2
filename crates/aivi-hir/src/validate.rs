@@ -5390,7 +5390,7 @@ impl Validator<'_> {
                         "this recurrent pipe needs an explicit timer, backoff policy, source event, or provider-defined trigger",
                     )
                     .with_note(
-                        "add a compiler-known non-source wakeup witness such as `@recur.timer 5s` or `@recur.backoff 3x`, or use a compiler-known `@source` provider with explicit wakeup proof",
+                        "add a compiler-known non-source wakeup witness such as `@recur.timer 5sec` or `@recur.backoff 3rt`, or use a compiler-known `@source` provider with explicit wakeup proof",
                     );
             }
         }

@@ -1245,7 +1245,7 @@ mod tests {
             "runtime-hir-adapter-positive.aivi",
             r#"
 domain Duration over Int
-    literal s : Int -> Duration
+    literal sec : Int -> Duration
 
 fun keep value =>
     value
@@ -1253,7 +1253,7 @@ fun keep value =>
 signal apiHost = "https://api.example.com"
 signal refresh = 0
 signal enabled = True
-signal pollInterval : Signal Duration = 5s
+signal pollInterval : Signal Duration = 5sec
 
 @source http.get "{apiHost}/users" with {
     refreshOn: refresh,
@@ -1266,7 +1266,7 @@ signal gatedUsers : Signal Int =
     users
      ?|> True
 
-@recur.timer 5s
+@recur.timer 5sec
 signal retried : Signal Int =
     0
      @|> keep
@@ -1375,12 +1375,12 @@ signal retried : Signal Int =
             "runtime-hir-adapter-task.aivi",
             r#"
 domain Retry over Int
-    literal x : Int -> Retry
+    literal rt : Int -> Retry
 
 fun keep value =>
     value
 
-@recur.backoff 3x
+@recur.backoff 3rt
 value retried : Task Int Int =
     0
      @|> keep

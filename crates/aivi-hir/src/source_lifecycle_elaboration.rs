@@ -450,12 +450,12 @@ mod tests {
             "request_source_lifecycle.aivi",
             r#"
 domain Duration over Int
-    literal s : Int -> Duration
+    literal sec : Int -> Duration
 
 signal apiHost = "https://api.example.com"
 signal refresh = 0
 signal enabled = True
-signal pollInterval : Signal Duration = 5s
+signal pollInterval : Signal Duration = 5sec
 
 @source http.get "{apiHost}/users" with {
     refreshOn: refresh,

@@ -1941,21 +1941,21 @@ fn lowers_recurrence_targets_and_witnesses() {
         "backend-recurrence.aivi",
         r#"
 domain Duration over Int
-    literal s : Int -> Duration
+    literal sec : Int -> Duration
 
 domain Retry over Int
-    literal x : Int -> Retry
+    literal rt : Int -> Retry
 
 fun step:Int x:Int =>
     x
 
-@recur.timer 5s
+@recur.timer 5sec
 signal polled : Signal Int =
     0
      @|> step
      <|@ step
 
-@recur.backoff 3x
+@recur.backoff 3rt
 value retried : Task Int Int =
     0
      @|> step

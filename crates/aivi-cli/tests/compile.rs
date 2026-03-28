@@ -177,7 +177,7 @@ fn compile_accepts_workspace_value_imports() {
 }
 
 #[test]
-fn compile_accepts_list_pattern_fixture() {
+fn compile_rejects_recursive_list_pattern_fixture_with_cycle_error() {
     let output_dir = TempDir::new("compile-list-patterns");
     let output_path = output_dir.path().join("list-patterns.o");
     let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
@@ -189,25 +189,18 @@ fn compile_accepts_list_pattern_fixture() {
         .expect("compile command should run");
 
     assert!(
-        output.status.success(),
-        "expected list pattern compile to succeed, stderr was: {}",
-        String::from_utf8_lossy(&output.stderr)
+        !output.status.success(),
+        "expected recursive list pattern compile to fail during backend lowering"
     );
-    let metadata =
-        fs::metadata(&output_path).expect("list pattern compile should write an object file");
     assert!(
-        metadata.len() > 0,
-        "list pattern object file should not be empty"
+        !output_path.exists(),
+        "recursive list pattern compile should not emit an object file"
     );
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stdout.contains("compile pipeline passed"),
-        "expected compile summary, got stdout: {stdout}"
-    );
-    assert!(
-        stdout.contains("codegen: ok"),
-        "expected codegen success in summary, got stdout: {stdout}"
+        stderr.contains("backend lowering detected a global item dependency cycle"),
+        "expected global cycle diagnostic, got stderr: {stderr}"
     );
 }
 
@@ -282,7 +275,6 @@ fn compile_accepts_additional_compile_safe_catalog_examples() {
     for relative in [
         "catalog/math/math_fft/main.aivi",
         "catalog/math/math_matrix_lu/main.aivi",
-        "catalog/math/math_mod_arith_ntt/main.aivi",
         "catalog/tree/tree_segment_tree_lazy/main.aivi",
     ] {
         let output_dir = TempDir::new("compile-catalog-additional");

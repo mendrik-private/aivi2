@@ -6838,13 +6838,13 @@ type User = {
 }
 
 domain Retry over Int
-    literal x : Int -> Retry
+    literal rt : Int -> Retry
 
 fun keepCount:Int response:(Result HttpError (List User)) current:Int =>
     current
 
 @source http.get "/users" with {
-    retry: 3x
+    retry: 3rt
 }
 signal responses : Signal (Result HttpError (List User))
 
@@ -6874,13 +6874,13 @@ signal retried : Signal Int =
             "reactive_source_option_payloads.aivi",
             r#"
 domain Duration over Int
-    literal s : Int -> Duration
+    literal sec : Int -> Duration
 
 signal enabled : Signal Bool =
     True
 
 signal jitterValue : Signal Duration =
-    5s
+    5sec
 
 @source timer.every 120 with {
     immediate: enabled,
@@ -7342,10 +7342,10 @@ provider custom.feed
             "invalid_recurrence_wakeup_decorators.aivi",
             r#"
 domain Duration over Int
-    literal s : Int -> Duration
+    literal sec : Int -> Duration
 
 domain Retry over Int
-    literal x : Int -> Retry
+    literal rt : Int -> Retry
 
 fun step x =>
     x
@@ -7357,14 +7357,14 @@ signal bare : Signal Int =
      <|@ step
 
 @source http.get "/users"
-@recur.backoff 3x
+@recur.backoff 3rt
 signal mixed : Signal Int =
     0
      @|> step
      <|@ step
 
-@recur.timer 5s
-@recur.backoff 3x
+@recur.timer 5sec
+@recur.backoff 3rt
 value duplicate : Task Int Int =
     0
      @|> step
@@ -7489,7 +7489,7 @@ value duplicate : Task Int Int =
             "source_lifecycle_dependency_roles.aivi",
             r#"
 domain Duration over Int
-    literal s : Int -> Duration
+    literal sec : Int -> Duration
 
 provider custom.feed
     argument path: Text
@@ -7498,7 +7498,7 @@ provider custom.feed
 signal apiHost = "https://api.example.com"
 signal refresh = 0
 signal enabled = True
-signal pollInterval : Signal Duration = 5s
+signal pollInterval : Signal Duration = 5sec
 signal path = "/tmp/demo.txt"
 
 @source http.get "{apiHost}/users" with {
@@ -8167,11 +8167,11 @@ signal updates : Signal Int
         let lowered = lower_text(
             "recurrence-guard-view.aivi",
             "domain Duration over Int\n\
-             \tliteral s : Int -> Duration\n\
+             \tliteral sec : Int -> Duration\n\
              type Cursor = { hasNext: Bool }\n\
              value keep:Cursor cursor:Cursor => cursor\n\
              value seed:Cursor = { hasNext: True }\n\
-             @recur.timer 1s\n\
+             @recur.timer 1sec\n\
              signal cursor : Signal Cursor =\n\
               seed\n\
                @|> keep\n\

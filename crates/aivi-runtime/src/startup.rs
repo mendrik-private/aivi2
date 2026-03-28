@@ -2606,12 +2606,12 @@ value answer = 42
             "runtime-startup-task-body-gap.aivi",
             r#"
 domain Retry over Int
-    literal x : Int -> Retry
+    literal rt : Int -> Retry
 
 fun step:Int n:Int =>
     n
 
-@recur.backoff 3x
+@recur.backoff 3rt
 value retried : Task Int Int =
     0
      @|> step
@@ -3208,12 +3208,12 @@ signal counter : Signal Int =
             "runtime-startup-task-parameters-invariant.aivi",
             r#"
 domain Retry over Int
-    literal x : Int -> Retry
+    literal rt : Int -> Retry
 
 fun keep:Int n:Int =>
     n
 
-@recur.backoff 3x
+@recur.backoff 3rt
 value retried : Task Int Int =
     0
      @|> keep

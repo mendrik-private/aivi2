@@ -2172,7 +2172,7 @@ value joinedEmails:Text =
             "gate-inside-recurrence.aivi",
             r#"
 domain Duration over Int
-    literal s : Int -> Duration
+    literal sec : Int -> Duration
 
 type Cursor = {
     hasNext: Bool
@@ -2183,7 +2183,7 @@ fun keep:Cursor cursor:Cursor =>
 
 value seed:Cursor = { hasNext: True }
 
-@recur.timer 5s
+@recur.timer 5sec
 signal cursor : Signal Cursor =
     seed
      @|> keep

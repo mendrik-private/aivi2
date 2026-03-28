@@ -15,7 +15,7 @@ aivi-query.workspace = true
 aivi-runtime = { path = "../aivi-runtime" }
 aivi-syntax.workspace = true
 aivi-lsp = { path = "../aivi-lsp" }
-gtk = { package = "gtk4", version = "0.9.5" }
+gtk = { package = "gtk4", version = "0.11.1" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"
