@@ -76,14 +76,15 @@ pub use hir::{
     PatchBlock, PatchEntry, PatchInstruction, PatchInstructionKind, PatchSelector,
     PatchSelectorSegment, Pattern, PatternKind, PipeExpr, PipeFanoutSegment,
     PipeRecurrenceShapeError, PipeRecurrenceSuffix, PipeStage, PipeStageKind, PipeTransformMode,
-    ProjectionBase, RecordExpr, RecordExprField, RecordFieldSurface, RecordPatternField,
-    RecordRowRename, RecordRowTransform, RecurrenceWakeupDecorator, RecurrenceWakeupDecoratorKind,
-    RegexLiteral, ResolutionState, RootItemError, ShowControl, SignalItem, SourceDecorator,
-    SourceLifecycleDependencies, SourceMetadata, SourceProviderContractItem, SourceProviderRef,
-    SuffixedIntegerLiteral, SumConstructorHandle, TermReference, TermResolution, TestDecorator,
-    TextFragment, TextInterpolation, TextLiteral, TextSegment, TupleConstructorArity, TypeField,
-    TypeItem, TypeItemBody, TypeKind, TypeNode, TypeParameter, TypeReference, TypeResolution,
-    TypeVariant, UnaryOperator, UseItem, ValueItem, WithControl,
+    ProjectionBase, ReactiveUpdateClause, RecordExpr, RecordExprField, RecordFieldSurface,
+    RecordPatternField, RecordRowRename, RecordRowTransform, RecurrenceWakeupDecorator,
+    RecurrenceWakeupDecoratorKind, RegexLiteral, ResolutionState, RootItemError, ShowControl,
+    SignalItem, SourceDecorator, SourceLifecycleDependencies, SourceMetadata,
+    SourceProviderContractItem, SourceProviderRef, SuffixedIntegerLiteral, SumConstructorHandle,
+    TermReference, TermResolution, TestDecorator, TextFragment, TextInterpolation, TextLiteral,
+    TextSegment, TupleConstructorArity, TypeField, TypeItem, TypeItemBody, TypeKind, TypeNode,
+    TypeParameter, TypeReference, TypeResolution, TypeVariant, UnaryOperator, UseItem, ValueItem,
+    WithControl,
 };
 pub use ids::{
     BindingId, ClusterId, ControlNodeId, DecoratorId, ExprId, ImportId, ItemId, MarkupNodeId,
@@ -99,7 +100,10 @@ pub use recurrence_elaboration::{
 };
 pub use resolver::{ImportCycle, ImportModuleResolution, ImportResolver, NullImportResolver};
 pub use sequence::{AtLeastTwo, NonEmpty, SequenceError};
-pub use signal_metadata_elaboration::populate_signal_metadata;
+pub use signal_metadata_elaboration::{
+    collect_signal_dependencies_for_expr, collect_signal_dependencies_for_exprs,
+    populate_signal_metadata,
+};
 pub use source_contract_resolution::{
     ResolvedSourceContractType, ResolvedSourceTypeConstructor, SourceContractResolutionError,
     SourceContractResolutionErrorKind, SourceContractTypeResolver,

@@ -32,6 +32,24 @@ pub fn populate_signal_metadata(module: &mut Module) {
     }
 }
 
+pub fn collect_signal_dependencies_for_expr(module: &Module, expr: ExprId) -> Vec<ItemId> {
+    collect_signal_dependencies(module, vec![DependencyWork::Expr(expr)])
+}
+
+pub fn collect_signal_dependencies_for_exprs(
+    module: &Module,
+    exprs: impl IntoIterator<Item = ExprId>,
+) -> Vec<ItemId> {
+    collect_signal_dependencies(module, exprs.into_iter().map(DependencyWork::Expr).collect())
+}
+
+pub(crate) fn expr_signal_dependencies<I>(module: &Module, roots: I) -> Vec<ItemId>
+where
+    I: IntoIterator<Item = ExprId>,
+{
+    collect_signal_dependencies_for_exprs(module, roots)
+}
+
 fn compute_signal_metadata(
     module: &Module,
     item: &SignalItem,
@@ -46,6 +64,10 @@ fn compute_signal_metadata(
     let mut work = Vec::new();
     if let Some(body) = item.body {
         work.push(DependencyWork::Expr(body));
+    }
+    for update in &item.reactive_updates {
+        work.push(DependencyWork::Expr(update.guard));
+        work.push(DependencyWork::Expr(update.body));
     }
     let source_dependencies = source.map(|source| {
         let mut roots = source

@@ -70,6 +70,55 @@ impl Drop for TempDir {
 }
 
 #[test]
+fn compile_accepts_reactive_update_programs() {
+    let input = TempFile::new(
+        "compile-reactive-update",
+        "aivi",
+        concat!(
+            "signal left = 20\n",
+            "signal right = 22\n",
+            "signal total = 0\n",
+            "signal ready = True\n",
+            "signal enabled = False\n",
+            "\n",
+            "when ready => total <- left + right\n",
+            "when ready and enabled => total <- left + right + 1\n",
+        ),
+    );
+    let output_dir = TempDir::new("compile-reactive-update");
+    let output_path = output_dir.path().join("reactive-update.o");
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("compile")
+        .arg(input.path())
+        .arg("-o")
+        .arg(&output_path)
+        .output()
+        .expect("compile command should run");
+
+    assert!(
+        output.status.success(),
+        "expected reactive update compile to succeed, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let metadata = fs::metadata(&output_path).expect("reactive update compile should write an object file");
+    assert!(metadata.len() > 0, "reactive update object file should not be empty");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("compile pipeline passed"),
+        "expected compile summary, got stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("codegen: ok"),
+        "expected codegen success in summary, got stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("runtime startup/link integration is not available yet"),
+        "expected explicit runtime/link boundary, got stdout: {stdout}"
+    );
+}
+
+#[test]
 fn compile_writes_object_and_reports_codegen_boundary() {
     let output_dir = TempDir::new("compile-success");
     let output_path = output_dir.path().join("fixture.o");

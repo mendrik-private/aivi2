@@ -10,7 +10,7 @@ use crate::{
         MarkupAttributeValue, MarkupNode, Module, NamedItem, NamedItemBody, OperatorName,
         PatchBlock, PatchEntry, PatchInstruction, PatchInstructionKind, PatchSelector,
         PatchSelectorSegment, Pattern, PatternKind, PipeCaseArm, PipeExpr, PipeStage,
-        PipeStageKind, ProjectionPath, QualifiedName, RecordExpr, RecordField,
+        PipeStageKind, ProjectionPath, QualifiedName, ReactiveUpdateItem, RecordExpr, RecordField,
         RecordPatternField, RegexLiteral, ResultBinding, ResultBlockExpr, SourceDecorator,
         SourceProviderContractBody, SourceProviderContractFieldValue, SourceProviderContractItem,
         SourceProviderContractMember, SourceProviderContractSchemaMember, SuffixedIntegerLiteral,
@@ -81,6 +81,16 @@ const MISSING_RESULT_BINDING_EXPR: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-result-binding-expr");
 const MISSING_RESULT_BLOCK_TAIL: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-result-block-tail");
+const MISSING_REACTIVE_UPDATE_GUARD: DiagnosticCode =
+    DiagnosticCode::new("syntax", "missing-reactive-update-guard");
+const MISSING_REACTIVE_UPDATE_TARGET: DiagnosticCode =
+    DiagnosticCode::new("syntax", "missing-reactive-update-target");
+const MISSING_REACTIVE_UPDATE_BODY: DiagnosticCode =
+    DiagnosticCode::new("syntax", "missing-reactive-update-body");
+const MISSING_REACTIVE_UPDATE_ARROW: DiagnosticCode =
+    DiagnosticCode::new("syntax", "missing-reactive-update-arrow");
+const MISSING_REACTIVE_UPDATE_LEFT_ARROW: DiagnosticCode =
+    DiagnosticCode::new("syntax", "missing-reactive-update-left-arrow");
 const PARSE_DEPTH_EXCEEDED: DiagnosticCode = DiagnosticCode::new("syntax", "parse-depth-exceeded");
 
 const MAX_PARSE_DEPTH: usize = 256;
@@ -175,6 +185,9 @@ impl<'a> Parser<'a> {
             let item = match self.tokens[start].kind() {
                 TokenKind::At => self.parse_decorated_item(start),
                 kind if kind.is_top_level_keyword() => self.parse_item_without_decorators(start),
+                TokenKind::Identifier if self.is_top_level_when(start) => {
+                    self.parse_item_without_decorators(start)
+                }
                 _ => self.parse_error_item(start),
             };
             let next_cursor = item.token_range().end();
@@ -241,6 +254,9 @@ impl<'a> Parser<'a> {
     ) -> Item {
         let base = self.make_base(start, end, decorators);
         match self.tokens[keyword_index].kind() {
+            TokenKind::Identifier if self.is_identifier_text(keyword_index, "when") => {
+                Item::ReactiveUpdate(self.parse_reactive_update_item(base, keyword_index, end))
+            }
             TokenKind::TypeKw => {
                 Item::Type(self.parse_type_item(base, keyword_index, end, "type declaration"))
             }
@@ -616,6 +632,113 @@ impl<'a> Parser<'a> {
             constraints: Vec::new(),
             annotation,
             parameters: Vec::new(),
+            body,
+        }
+    }
+
+    fn parse_reactive_update_item(
+        &mut self,
+        base: ItemBase,
+        keyword_index: usize,
+        end: usize,
+    ) -> ReactiveUpdateItem {
+        let mut cursor = keyword_index + 1;
+        let item_span = base.span;
+        let keyword_span = self.source_span_of_token(keyword_index);
+        let guard = self
+            .parse_expr(
+                &mut cursor,
+                end,
+                ExprStop {
+                    arrow: true,
+                    ..ExprStop::default()
+                },
+            )
+            .or_else(|| {
+                self.diagnostics.push(
+                    Diagnostic::error("reactive update is missing its guard expression")
+                        .with_code(MISSING_REACTIVE_UPDATE_GUARD)
+                        .with_primary_label(
+                            keyword_span,
+                            "expected a guard expression after `when`",
+                        ),
+                );
+                None
+            });
+
+        let arrow_anchor = guard.as_ref().map(|expr| expr.span).unwrap_or(keyword_span);
+        let arrow_present = self.consume_kind(&mut cursor, end, TokenKind::Arrow).is_some();
+        if !arrow_present {
+            self.diagnostics.push(
+                Diagnostic::error("reactive update is missing `=>` before its target signal")
+                    .with_code(MISSING_REACTIVE_UPDATE_ARROW)
+                    .with_primary_label(
+                        arrow_anchor,
+                        "expected `=>` followed by the target signal name",
+                    ),
+            );
+        }
+
+        let target = if arrow_present {
+            self.parse_identifier(&mut cursor, end).or_else(|| {
+                self.diagnostics.push(
+                    Diagnostic::error("reactive update is missing its target signal name")
+                        .with_code(MISSING_REACTIVE_UPDATE_TARGET)
+                        .with_primary_label(
+                            arrow_anchor,
+                            "expected a target signal name after `=>`",
+                        ),
+                );
+                None
+            })
+        } else {
+            None
+        };
+
+        let target_anchor = target.as_ref().map(|name| name.span).unwrap_or(arrow_anchor);
+        let left_arrow_present = if target.is_some() {
+            self.consume_kind(&mut cursor, end, TokenKind::LeftArrow)
+                .is_some()
+        } else {
+            false
+        };
+        if target.is_some() && !left_arrow_present {
+            self.diagnostics.push(
+                Diagnostic::error("reactive update is missing `<-` before its body")
+                    .with_code(MISSING_REACTIVE_UPDATE_LEFT_ARROW)
+                    .with_primary_label(
+                        target_anchor,
+                        "expected `<-` followed by the update expression",
+                    ),
+            );
+        }
+
+        let body = if left_arrow_present {
+            self.parse_expr(&mut cursor, end, ExprStop::default())
+                .or_else(|| {
+                    self.diagnostics.push(
+                        Diagnostic::error("reactive update is missing its body expression")
+                            .with_code(MISSING_REACTIVE_UPDATE_BODY)
+                            .with_primary_label(
+                                target_anchor,
+                                "expected an update expression after `<-`",
+                            ),
+                    );
+                    None
+                })
+        } else {
+            None
+        };
+
+        ReactiveUpdateItem {
+            base: ItemBase {
+                span: item_span,
+                token_range: base.token_range,
+                decorators: base.decorators,
+            },
+            keyword_span,
+            guard,
+            target,
             body,
         }
     }
@@ -4238,6 +4361,14 @@ impl<'a> Parser<'a> {
                             offending: None,
                         };
                     }
+                    TokenKind::Identifier
+                        if self.is_top_level_when(index) && self.is_at_column_zero(index) =>
+                    {
+                        return DecoratorSearch {
+                            keyword: Some(index),
+                            offending: None,
+                        };
+                    }
                     TokenKind::At => {}
                     _ if index != start => {
                         return DecoratorSearch {
@@ -4285,7 +4416,9 @@ impl<'a> Parser<'a> {
             if !token.kind().is_trivia()
                 && token.line_start()
                 && depth == 0
-                && (token.kind() == TokenKind::At || token.kind().is_top_level_keyword())
+                && (token.kind() == TokenKind::At
+                    || token.kind().is_top_level_keyword()
+                    || self.is_top_level_when(index))
                 && self.is_at_column_zero(index)
             {
                 return Some(index);
@@ -4355,6 +4488,12 @@ impl<'a> Parser<'a> {
     fn is_identifier_text(&self, index: usize, expected: &str) -> bool {
         self.tokens[index].kind() == TokenKind::Identifier
             && self.tokens[index].text(self.source) == expected
+    }
+
+    fn is_top_level_when(&self, index: usize) -> bool {
+        self.is_identifier_text(index, "when")
+            && self.tokens[index].line_start()
+            && self.is_at_column_zero(index)
     }
 
     fn starts_prefixed_collection_literal(
@@ -4873,7 +5012,7 @@ export main
     fn parser_builds_result_blocks_with_bindings_and_tail() {
         let (_, parsed) = load(
             r#"value total =
-    result {
+result {
         left <- Ok 20
         right <- Ok 22
         left + right
@@ -4898,6 +5037,40 @@ export main
         assert!(matches!(
             block.tail.as_deref().map(|expr| &expr.kind),
             Some(ExprKind::Binary { .. })
+        ));
+    }
+
+    #[test]
+    fn parser_builds_top_level_reactive_update_items() {
+        let (_, parsed) = load(
+            r#"signal total : Signal Int
+when ready => total <- result {
+    next <- Ok left
+    next + right
+}
+"#,
+        );
+
+        assert!(
+            !parsed.has_errors(),
+            "{:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+        assert_eq!(parsed.module.items.len(), 2);
+        assert_eq!(parsed.module.items[0].kind(), ItemKind::Signal);
+        assert_eq!(parsed.module.items[1].kind(), ItemKind::ReactiveUpdate);
+
+        let Item::ReactiveUpdate(item) = &parsed.module.items[1] else {
+            panic!("expected reactive update item");
+        };
+        assert_eq!(item.target.as_ref().map(|target| target.text.as_str()), Some("total"));
+        assert!(matches!(
+            item.guard.as_ref().map(|expr| &expr.kind),
+            Some(ExprKind::Name(identifier)) if identifier.text == "ready"
+        ));
+        assert!(matches!(
+            item.body.as_ref().map(|expr| &expr.kind),
+            Some(ExprKind::ResultBlock(_))
         ));
     }
 

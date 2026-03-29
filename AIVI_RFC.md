@@ -310,6 +310,33 @@ signal clicked : Signal Unit
 signal query   : Signal Text
 ```
 
+Top-level reactive update clauses may target an already-declared signal:
+
+```aivi
+signal left = 20
+signal right = 22
+signal total = 0
+signal ready = True
+signal enabled = True
+
+when ready => total <- left + right
+when ready and enabled => total <- result {
+    next <- Ok left
+    next + right
+}
+```
+
+Normative rules for `when`:
+
+- canonical surface: `when <guard> => <target> <- <expr>`
+- `<guard>` is an ordinary expression that must type-check as `Bool`
+- `<target>` must resolve to a previously declared local `signal`
+- `<expr>` is an ordinary expression; unlike pipe stages, it has no ambient subject value
+- when the clause is triggered and the guard is `False`, the target keeps its previous committed value
+- multiple `when` clauses may target the same signal; within one scheduler tick, later firing clauses win by source order
+
+`when` is a dedicated reactive-update surface, not pipe syntax and not `result`-block binding sugar. Member-access guards such as `ready.done` are valid only when ordinary expression typing already proves them to be `Bool`; there is no extra guard-only desugaring.
+
 ### 5.0.4 `@source` — source-backed signal decorators
 
 `@source` attaches a runtime source provider to a body-less `signal` declaration:
@@ -1484,6 +1511,31 @@ Normative rules:
 - stateful accumulation over timer, event, source, and completion signals uses the same scheduler-owned recurrence node regardless of whether the source spelling was `+|>` or `scan`
 
 The shorthand accumulation forms from older drafts are not current executable surface.
+
+### 13.2.2 Reactive update clauses with `when`
+
+Reactive update clauses attach event-driven commits to an existing signal:
+
+```aivi
+signal left = 20
+signal right = 22
+signal total = 0
+signal ready = True
+signal enabled = True
+
+when ready => total <- left + right
+when ready and enabled => total <- left + right
+```
+
+Scheduler-facing rules:
+
+- the compiler records the signal dependencies referenced by each clause guard and body
+- a clause evaluates against the tick's stable upstream values; its body does not receive an ambient subject
+- if the clause guard evaluates to `False`, no new value is committed for that clause and the target keeps its previous committed value
+- if multiple clauses for the same target produce commits in one tick, source order breaks ties and the last firing clause wins
+- recurrence and self-reference must be validated explicitly; they are not accepted by accident
+
+Current implementation status: the frontend parses, formats, lowers, and exposes `when` clauses through HIR/editor surfaces, but runtime execution and full semantic validation are not wired end to end yet. The current runtime adapter therefore rejects signals carrying reactive updates instead of silently dropping them.
 
 ### 13.3 Applicative meaning of `Signal`
 

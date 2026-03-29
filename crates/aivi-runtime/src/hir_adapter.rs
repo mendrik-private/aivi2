@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     fmt,
 };
 
@@ -15,8 +15,8 @@ use crate::{
         TaskSourceRuntimeError,
     },
     graph::{
-        DerivedHandle, GraphBuildError, InputHandle, OwnerHandle, SignalGraph, SignalGraphBuilder,
-        SignalHandle,
+        DerivedHandle, GraphBuildError, InputHandle, OwnerHandle, ReactiveClauseBuilderSpec,
+        ReactiveClauseHandle, SignalGraph, SignalGraphBuilder, SignalHandle,
     },
 };
 
@@ -154,6 +154,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
         let mut owners = Vec::new();
         let mut signals = Vec::new();
         let mut public_signals = BTreeMap::<hir::ItemId, SignalHandle>::new();
+        let mut public_signal_names = BTreeMap::<String, SignalHandle>::new();
         let mut source_inputs = BTreeMap::<hir::ItemId, InputHandle>::new();
 
         for (item_id, item) in self.module.items().iter() {
@@ -165,6 +166,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
             };
             let has_source = signal.source_metadata.is_some();
             let has_body = signal.body.is_some();
+            let has_reactive_updates = !signal.reactive_updates.is_empty();
 
             let owner = match graph_builder.add_owner(signal.name.text(), None) {
                 Ok(owner) => owner,
@@ -180,7 +182,39 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                 handle: owner,
             });
 
-            let (kind, source_input) = if has_body {
+            let (kind, source_input) = if has_reactive_updates {
+                let reactive = match graph_builder.add_reactive(signal.name.text(), Some(owner)) {
+                    Ok(signal) => signal,
+                    Err(err) => {
+                        errors.push(HirRuntimeAdapterError::GraphBuild(err));
+                        continue;
+                    }
+                };
+                let source_input = if has_source {
+                    match graph_builder
+                        .add_input(format!("{}#source", signal.name.text()), Some(owner))
+                    {
+                        Ok(input) => Some(input),
+                        Err(err) => {
+                            errors.push(HirRuntimeAdapterError::GraphBuild(err));
+                            continue;
+                        }
+                    }
+                } else {
+                    None
+                };
+                public_signals.insert(item_id, reactive);
+                public_signal_names.insert(signal.name.text().to_owned(), reactive);
+                (
+                    HirSignalBindingKind::Reactive {
+                        signal: reactive,
+                        dependencies: Vec::new().into_boxed_slice(),
+                        seed_dependencies: Vec::new().into_boxed_slice(),
+                        clauses: Vec::new().into_boxed_slice(),
+                    },
+                    source_input,
+                )
+            } else if has_body {
                 let derived = match graph_builder.add_derived(signal.name.text(), Some(owner)) {
                     Ok(derived) => derived,
                     Err(err) => {
@@ -202,6 +236,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                     None
                 };
                 public_signals.insert(item_id, derived.as_signal());
+                public_signal_names.insert(signal.name.text().to_owned(), derived.as_signal());
                 (
                     HirSignalBindingKind::Derived {
                         signal: derived,
@@ -218,6 +253,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                     }
                 };
                 public_signals.insert(item_id, input.as_signal());
+                public_signal_names.insert(signal.name.text().to_owned(), input.as_signal());
                 (HirSignalBindingKind::Input { signal: input }, Some(input))
             };
 
@@ -234,63 +270,150 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
             });
         }
 
+        let mut next_reactive_clause_raw = 0u32;
         for binding in &mut signals {
             let Some(hir::Item::Signal(signal)) = self.module.items().get(binding.item) else {
                 continue;
             };
-            let HirSignalBindingKind::Derived {
-                signal: derived,
-                dependencies,
-            } = &mut binding.kind
-            else {
-                continue;
-            };
+            match &mut binding.kind {
+                HirSignalBindingKind::Input { .. } => {}
+                HirSignalBindingKind::Derived {
+                    signal: derived,
+                    dependencies,
+                } => {
+                    let mut resolved = resolve_signal_dependencies(
+                        self.module,
+                        binding.item,
+                        &signal.signal_dependencies,
+                        &public_signals,
+                        &mut errors,
+                    );
+                    if let Some(source_input) = binding.source_input {
+                        push_unique_signal(&mut resolved, source_input.as_signal());
+                    }
+                    if let Err(err) = graph_builder.define_derived(*derived, resolved.iter().copied()) {
+                        errors.push(HirRuntimeAdapterError::GraphBuild(err));
+                        continue;
+                    }
+                    *dependencies = resolved.into_boxed_slice();
+                }
+                HirSignalBindingKind::Reactive {
+                    signal: reactive,
+                    dependencies,
+                    seed_dependencies,
+                    clauses,
+                } => {
+                    let merged_signal_dependencies = resolve_signal_dependencies(
+                        self.module,
+                        binding.item,
+                        &signal.signal_dependencies,
+                        &public_signals,
+                        &mut errors,
+                    );
+                    let mut resolved_seed_dependencies = signal
+                        .body
+                        .map(|body| {
+                            let mut dependencies = resolve_signal_dependencies(
+                                self.module,
+                                binding.item,
+                                &hir::collect_signal_dependencies_for_expr(self.module, body),
+                                &public_signals,
+                                &mut errors,
+                            );
+                            if dependencies.is_empty() {
+                                dependencies = collect_direct_signal_dependencies(
+                                    self.module,
+                                    body,
+                                    &public_signal_names,
+                                );
+                            }
+                            dependencies
+                        })
+                        .unwrap_or_default();
+                    let mut reactive_dependencies = merged_signal_dependencies.clone();
+                    for dependency in &resolved_seed_dependencies {
+                        push_unique_signal(&mut reactive_dependencies, *dependency);
+                    }
 
-            let mut resolved = Vec::with_capacity(signal.signal_dependencies.len());
-            let mut blocked = false;
-            for dependency in &signal.signal_dependencies {
-                match self.module.items().get(*dependency) {
-                    Some(hir::Item::Signal(_)) => match public_signals.get(dependency).copied() {
-                        Some(handle) => resolved.push(handle),
-                        None => {
-                            errors.push(HirRuntimeAdapterError::UnknownSignalDependency {
-                                owner: binding.item,
-                                dependency: *dependency,
-                            });
-                            blocked = true;
+                    let mut clause_bindings = Vec::with_capacity(signal.reactive_updates.len());
+                    let mut clause_specs = Vec::with_capacity(signal.reactive_updates.len());
+                    for update in &signal.reactive_updates {
+                        let mut guard_dependencies = resolve_signal_dependencies(
+                            self.module,
+                            binding.item,
+                            &hir::collect_signal_dependencies_for_expr(self.module, update.guard),
+                            &public_signals,
+                            &mut errors,
+                        );
+                        if guard_dependencies.is_empty() {
+                            guard_dependencies = collect_direct_signal_dependencies(
+                                self.module,
+                                update.guard,
+                                &public_signal_names,
+                            );
                         }
-                    },
-                    Some(item) => {
-                        errors.push(HirRuntimeAdapterError::DependencyIsNotSignal {
-                            owner: binding.item,
-                            dependency: *dependency,
-                            kind: item.kind(),
+                        if guard_dependencies.is_empty() && !merged_signal_dependencies.is_empty() {
+                            guard_dependencies = merged_signal_dependencies.clone();
+                        }
+                        let mut body_dependencies = resolve_signal_dependencies(
+                            self.module,
+                            binding.item,
+                            &hir::collect_signal_dependencies_for_expr(self.module, update.body),
+                            &public_signals,
+                            &mut errors,
+                        );
+                        if body_dependencies.is_empty() {
+                            body_dependencies = collect_direct_signal_dependencies(
+                                self.module,
+                                update.body,
+                                &public_signal_names,
+                            );
+                        }
+                        if body_dependencies.is_empty() && !merged_signal_dependencies.is_empty() {
+                            body_dependencies = merged_signal_dependencies.clone();
+                        }
+                        for dependency in guard_dependencies
+                            .iter()
+                            .chain(body_dependencies.iter())
+                            .copied()
+                        {
+                            push_unique_signal(&mut reactive_dependencies, dependency);
+                        }
+                        clause_bindings.push(HirReactiveUpdateBinding {
+                            span: update.span,
+                            keyword_span: update.keyword_span,
+                            target_span: update.target_span,
+                            guard: update.guard,
+                            body: update.body,
+                            clause: ReactiveClauseHandle::from_raw(next_reactive_clause_raw),
+                            guard_dependencies: guard_dependencies.clone().into_boxed_slice(),
+                            body_dependencies: body_dependencies.clone().into_boxed_slice(),
                         });
-                        blocked = true;
+                        next_reactive_clause_raw = next_reactive_clause_raw.wrapping_add(1);
+                        clause_specs.push(ReactiveClauseBuilderSpec::new(
+                            guard_dependencies,
+                            body_dependencies,
+                        ));
                     }
-                    None => {
-                        errors.push(HirRuntimeAdapterError::UnknownSignalDependency {
-                            owner: binding.item,
-                            dependency: *dependency,
-                        });
-                        blocked = true;
+                    if let Some(source_input) = binding.source_input {
+                        let source_signal = source_input.as_signal();
+                        push_unique_signal(&mut reactive_dependencies, source_signal);
+                        push_unique_signal(&mut resolved_seed_dependencies, source_signal);
                     }
+
+                    if let Err(err) = graph_builder.define_reactive(
+                        *reactive,
+                        resolved_seed_dependencies.iter().copied(),
+                        clause_specs,
+                    ) {
+                        errors.push(HirRuntimeAdapterError::GraphBuild(err));
+                        continue;
+                    }
+                    *dependencies = reactive_dependencies.into_boxed_slice();
+                    *seed_dependencies = resolved_seed_dependencies.into_boxed_slice();
+                    *clauses = clause_bindings.into_boxed_slice();
                 }
             }
-            if blocked {
-                continue;
-            }
-
-            // For source-backed derived signals, also depend on the source input signal.
-            if let Some(source_input) = binding.source_input {
-                resolved.push(source_input.as_signal());
-            }
-
-            if let Err(err) = graph_builder.define_derived(*derived, resolved.iter().copied()) {
-                errors.push(HirRuntimeAdapterError::GraphBuild(err));
-                continue;
-            }
-            *dependencies = resolved.into_boxed_slice();
         }
 
         let mut task_wakeups = BTreeMap::new();
@@ -723,19 +846,20 @@ impl HirSignalBinding {
         match self.kind {
             HirSignalBindingKind::Input { signal } => signal.as_signal(),
             HirSignalBindingKind::Derived { signal, .. } => signal.as_signal(),
+            HirSignalBindingKind::Reactive { signal, .. } => signal,
         }
     }
 
     pub fn input(&self) -> Option<InputHandle> {
         match self.kind {
             HirSignalBindingKind::Input { signal } => Some(signal),
-            HirSignalBindingKind::Derived { .. } => None,
+            HirSignalBindingKind::Derived { .. } | HirSignalBindingKind::Reactive { .. } => None,
         }
     }
 
     pub fn derived(&self) -> Option<DerivedHandle> {
         match self.kind {
-            HirSignalBindingKind::Input { .. } => None,
+            HirSignalBindingKind::Input { .. } | HirSignalBindingKind::Reactive { .. } => None,
             HirSignalBindingKind::Derived { signal, .. } => Some(signal),
         }
     }
@@ -744,6 +868,30 @@ impl HirSignalBinding {
         match &self.kind {
             HirSignalBindingKind::Input { .. } => &[],
             HirSignalBindingKind::Derived { dependencies, .. } => dependencies,
+            HirSignalBindingKind::Reactive { dependencies, .. } => dependencies,
+        }
+    }
+
+    pub fn reactive_updates(&self) -> &[HirReactiveUpdateBinding] {
+        match &self.kind {
+            HirSignalBindingKind::Reactive { clauses, .. } => clauses,
+            HirSignalBindingKind::Input { .. } | HirSignalBindingKind::Derived { .. } => &[],
+        }
+    }
+
+    pub fn reactive_seed_dependencies(&self) -> &[SignalHandle] {
+        match &self.kind {
+            HirSignalBindingKind::Reactive {
+                seed_dependencies, ..
+            } => seed_dependencies,
+            HirSignalBindingKind::Input { .. } | HirSignalBindingKind::Derived { .. } => &[],
+        }
+    }
+
+    pub fn reactive_signal(&self) -> Option<SignalHandle> {
+        match self.kind {
+            HirSignalBindingKind::Reactive { signal, .. } => Some(signal),
+            HirSignalBindingKind::Input { .. } | HirSignalBindingKind::Derived { .. } => None,
         }
     }
 }
@@ -757,6 +905,24 @@ pub enum HirSignalBindingKind {
         signal: DerivedHandle,
         dependencies: Box<[SignalHandle]>,
     },
+    Reactive {
+        signal: SignalHandle,
+        dependencies: Box<[SignalHandle]>,
+        seed_dependencies: Box<[SignalHandle]>,
+        clauses: Box<[HirReactiveUpdateBinding]>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HirReactiveUpdateBinding {
+    pub span: SourceSpan,
+    pub keyword_span: SourceSpan,
+    pub target_span: SourceSpan,
+    pub guard: hir::ExprId,
+    pub body: hir::ExprId,
+    pub clause: ReactiveClauseHandle,
+    pub guard_dependencies: Box<[SignalHandle]>,
+    pub body_dependencies: Box<[SignalHandle]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1157,9 +1323,28 @@ fn type_head_with_arity(
                     hir::ResolutionState::Unresolved => None,
                 };
             }
-            hir::TypeKind::Tuple(_) | hir::TypeKind::Record(_) | hir::TypeKind::Arrow { .. } => {
+            hir::TypeKind::Tuple(_)
+            | hir::TypeKind::Record(_)
+            | hir::TypeKind::RecordTransform { .. }
+            | hir::TypeKind::Arrow { .. } => {
                 return None;
             }
+        }
+    }
+}
+
+fn queue_patch_block_exprs(patch: &hir::PatchBlock, work: &mut VecDeque<hir::ExprId>) {
+    for entry in &patch.entries {
+        for segment in &entry.selector.segments {
+            if let hir::PatchSelectorSegment::BracketExpr { expr, .. } = segment {
+                work.push_back(*expr);
+            }
+        }
+        match &entry.instruction.kind {
+            hir::PatchInstructionKind::Replace(expr) | hir::PatchInstructionKind::Store(expr) => {
+                work.push_back(*expr);
+            }
+            hir::PatchInstructionKind::Remove => {}
         }
     }
 }
@@ -1206,6 +1391,116 @@ fn resolve_signal_dependencies(
             }),
         }
     }
+    resolved
+}
+
+fn push_unique_signal(signals: &mut Vec<SignalHandle>, signal: SignalHandle) {
+    if !signals.contains(&signal) {
+        signals.push(signal);
+    }
+}
+
+fn collect_direct_signal_dependencies(
+    module: &hir::Module,
+    expr: hir::ExprId,
+    public_signal_names: &BTreeMap<String, SignalHandle>,
+) -> Vec<SignalHandle> {
+    let mut resolved = Vec::new();
+    let mut seen = HashSet::new();
+    let mut work = VecDeque::from([expr]);
+
+    while let Some(expr) = work.pop_front() {
+        if !seen.insert(expr) {
+            continue;
+        }
+        match &module.exprs()[expr].kind {
+            hir::ExprKind::Name(reference) => {
+                if let Some(signal) = public_signal_names.get(&reference.path.to_string()).copied() {
+                    push_unique_signal(&mut resolved, signal);
+                }
+            }
+            hir::ExprKind::Text(text) => {
+                for segment in &text.segments {
+                    if let hir::TextSegment::Interpolation(interpolation) = segment {
+                        work.push_back(interpolation.expr);
+                    }
+                }
+            }
+            hir::ExprKind::Tuple(elements) => {
+                work.extend(elements.iter().copied());
+            }
+            hir::ExprKind::List(elements) | hir::ExprKind::Set(elements) => {
+                work.extend(elements.iter().copied());
+            }
+            hir::ExprKind::Map(map) => {
+                for entry in &map.entries {
+                    work.push_back(entry.key);
+                    work.push_back(entry.value);
+                }
+            }
+            hir::ExprKind::Record(record) => {
+                work.extend(record.fields.iter().map(|field| field.value));
+            }
+            hir::ExprKind::Projection { base, .. } => {
+                if let hir::ProjectionBase::Expr(base) = base {
+                    work.push_back(*base);
+                }
+            }
+            hir::ExprKind::Apply { callee, arguments } => {
+                work.push_back(*callee);
+                work.extend(arguments.iter().copied());
+            }
+            hir::ExprKind::Unary { expr, .. } => work.push_back(*expr),
+            hir::ExprKind::Binary { left, right, .. } => {
+                work.push_back(*left);
+                work.push_back(*right);
+            }
+            hir::ExprKind::PatchApply { target, patch } => {
+                work.push_back(*target);
+                queue_patch_block_exprs(patch, &mut work);
+            }
+            hir::ExprKind::PatchLiteral(patch) => {
+                queue_patch_block_exprs(patch, &mut work);
+            }
+            hir::ExprKind::Pipe(pipe) => {
+                work.push_back(pipe.head);
+                for stage in pipe.stages.iter() {
+                    match &stage.kind {
+                        hir::PipeStageKind::Transform { expr }
+                        | hir::PipeStageKind::Gate { expr }
+                        | hir::PipeStageKind::Map { expr }
+                        | hir::PipeStageKind::Apply { expr }
+                        | hir::PipeStageKind::Tap { expr }
+                        | hir::PipeStageKind::FanIn { expr }
+                        | hir::PipeStageKind::Truthy { expr }
+                        | hir::PipeStageKind::Falsy { expr }
+                        | hir::PipeStageKind::RecurStart { expr }
+                        | hir::PipeStageKind::RecurStep { expr }
+                        | hir::PipeStageKind::Validate { expr }
+                        | hir::PipeStageKind::Previous { expr }
+                        | hir::PipeStageKind::Diff { expr } => work.push_back(*expr),
+                        hir::PipeStageKind::Accumulate { seed, step } => {
+                            work.push_back(*seed);
+                            work.push_back(*step);
+                        }
+                        hir::PipeStageKind::Case { body, .. } => {
+                            work.push_back(*body);
+                        }
+                    }
+                }
+            }
+            hir::ExprKind::Integer(_)
+            | hir::ExprKind::Float(_)
+            | hir::ExprKind::Decimal(_)
+            | hir::ExprKind::BigInt(_)
+            | hir::ExprKind::SuffixedInteger(_)
+            | hir::ExprKind::AmbientSubject
+            | hir::ExprKind::Regex(_)
+            | hir::ExprKind::Cluster(_)
+            | hir::ExprKind::Markup(_) => {}
+        }
+    }
+
     resolved
 }
 
@@ -1582,6 +1877,123 @@ signal gated : Signal Int =
             Some(user_events_id),
             "scan recurrence handoff should preserve its upstream wakeup signal"
         );
+    }
+
+    #[test]
+    fn assembles_reactive_signal_clauses_into_runtime_bindings() {
+        let lowered = lower_text(
+            "runtime-hir-adapter-reactive-updates.aivi",
+            r#"
+signal left = 20
+signal right = 22
+signal total : Signal Int
+signal ready = True
+signal enabled = True
+signal doubled = total + total
+
+when ready => total <- left + right
+when ready and enabled => total <- left + right
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "reactive-update fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let assembly = assemble_hir_runtime(lowered.module())
+            .expect("reactive-update fixture should assemble into runtime bindings");
+        let left = assembly
+            .signal(item_id(lowered.module(), "left"))
+            .expect("left signal binding should exist");
+        let right = assembly
+            .signal(item_id(lowered.module(), "right"))
+            .expect("right signal binding should exist");
+        let ready = assembly
+            .signal(item_id(lowered.module(), "ready"))
+            .expect("ready signal binding should exist");
+        let enabled = assembly
+            .signal(item_id(lowered.module(), "enabled"))
+            .expect("enabled signal binding should exist");
+        let total = assembly
+            .signal(item_id(lowered.module(), "total"))
+            .expect("total signal binding should exist");
+        let doubled = assembly
+            .signal(item_id(lowered.module(), "doubled"))
+            .expect("doubled signal binding should exist");
+
+        assert!(matches!(total.kind, HirSignalBindingKind::Reactive { .. }));
+        assert_eq!(total.dependencies().len(), 4);
+        assert!(total.dependencies().contains(&left.signal()));
+        assert!(total.dependencies().contains(&right.signal()));
+        assert!(total.dependencies().contains(&ready.signal()));
+        assert!(total.dependencies().contains(&enabled.signal()));
+        assert!(
+            total.reactive_seed_dependencies().is_empty(),
+            "constant seed should not introduce signal dependencies"
+        );
+        assert_eq!(total.reactive_updates().len(), 2);
+        assert!(
+            total.reactive_updates()[0]
+                .guard_dependencies
+                .contains(&ready.signal())
+        );
+        assert!(
+            total.reactive_updates()[0]
+                .body_dependencies
+                .contains(&left.signal())
+        );
+        assert!(
+            total.reactive_updates()[0]
+                .body_dependencies
+                .contains(&right.signal())
+        );
+        assert!(
+            total.reactive_updates()[1]
+                .guard_dependencies
+                .contains(&ready.signal())
+        );
+        assert!(
+            total.reactive_updates()[1]
+                .guard_dependencies
+                .contains(&enabled.signal())
+        );
+        assert!(
+            total.reactive_updates()[1]
+                .body_dependencies
+                .contains(&left.signal())
+        );
+        assert!(
+            total.reactive_updates()[1]
+                .body_dependencies
+                .contains(&right.signal())
+        );
+        let reactive = assembly
+            .graph()
+            .reactive(total.signal())
+            .expect("graph should expose reactive signal metadata");
+        assert_eq!(reactive.clauses().len(), 2);
+        assert_eq!(
+            assembly.graph().batches()[0].signals(),
+            &[
+                left.signal(),
+                right.signal(),
+                ready.signal(),
+                enabled.signal()
+            ]
+        );
+        assert_eq!(assembly.graph().batches()[1].signals(), &[total.signal()]);
+        assert_eq!(assembly.graph().batches()[2].signals(), &[doubled.signal()]);
+        for clause in total.reactive_updates() {
+            assert_eq!(
+                assembly
+                    .graph()
+                    .reactive_clause(clause.clause)
+                    .expect("reactive clause handle should resolve")
+                    .target(),
+                total.signal()
+            );
+        }
     }
 
     #[test]

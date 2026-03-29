@@ -127,6 +127,28 @@ This is especially useful when a later step should only run for values that pass
 
 For `Signal A`, the same operator keeps the `Signal A` carrier and filters out updates whose predicate fails.
 
+## `when` is not a pipe
+
+Reactive update clauses use a separate top-level form:
+
+```aivi
+signal left = 20
+signal right = 22
+signal total = 0
+signal ready = True
+
+when ready => total <- left + right
+```
+
+This is different from `?|>` and the rest of pipe algebra:
+
+- `when` does not live inside a pipe spine
+- `when` targets an existing signal explicitly
+- the body has no ambient subject such as `.`
+- `when` is for event-driven commits, while pipes are for left-to-right expression flow
+
+If you can describe the logic as “take this current value and keep transforming it”, use pipes. If you mean “when this guard fires, commit a value into that signal”, use `when`.
+
 ## Previous-value pipe `~|>`
 
 `~|>` pairs the current value with a previous one. The argument supplies the initial previous value:

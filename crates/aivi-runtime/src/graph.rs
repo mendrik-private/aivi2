@@ -29,6 +29,7 @@ macro_rules! define_handle {
 
 define_handle!(SignalHandle);
 define_handle!(OwnerHandle);
+define_handle!(ReactiveClauseHandle);
 
 impl SignalHandle {
     pub const fn as_input(self) -> InputHandle {
@@ -109,7 +110,8 @@ pub struct SignalGraph {
     owners: Vec<OwnerSpec>,
     signals: Vec<SignalSpec>,
     batches: Vec<TopologyBatch>,
-    dependents: Vec<Box<[DerivedHandle]>>,
+    dependents: Vec<Box<[SignalHandle]>>,
+    reactive_clauses: Vec<ReactiveClauseSpec>,
 }
 
 impl SignalGraph {
@@ -151,16 +153,33 @@ impl SignalGraph {
         self.signal(handle.as_signal())?.kind().as_derived()
     }
 
+    pub fn reactive(&self, handle: SignalHandle) -> Option<&ReactiveSignalSpec> {
+        self.signal(handle)?.kind().as_reactive()
+    }
+
     pub fn dependencies(&self, handle: DerivedHandle) -> Option<&[SignalHandle]> {
         Some(self.derived(handle)?.dependencies())
     }
 
-    pub fn dependents(&self, handle: SignalHandle) -> Option<&[DerivedHandle]> {
+    pub fn signal_dependencies(&self, handle: SignalHandle) -> Option<&[SignalHandle]> {
+        let spec = self.signal(handle)?;
+        Some(match spec.kind() {
+            SignalKind::Input => &[],
+            SignalKind::Derived(spec) => spec.dependencies(),
+            SignalKind::Reactive(spec) => spec.dependencies(),
+        })
+    }
+
+    pub fn dependents(&self, handle: SignalHandle) -> Option<&[SignalHandle]> {
         Some(self.dependents.get(handle.index())?)
     }
 
     pub fn batches(&self) -> &[TopologyBatch] {
         &self.batches
+    }
+
+    pub fn reactive_clause(&self, handle: ReactiveClauseHandle) -> Option<&ReactiveClauseSpec> {
+        self.reactive_clauses.get(handle.index())
     }
 
     pub(crate) fn contains_signal(&self, handle: SignalHandle) -> bool {
@@ -180,9 +199,11 @@ impl SignalGraph {
     pub fn validate_input(&self, input: InputHandle) -> Result<(), InputValidationError> {
         match self.signal(input.as_signal()).map(|s| s.kind()) {
             Some(SignalKind::Input) => Ok(()),
-            Some(SignalKind::Derived(_)) => Err(InputValidationError::NotAnInput {
+            Some(SignalKind::Derived(_)) | Some(SignalKind::Reactive(_)) => {
+                Err(InputValidationError::NotAnInput {
                 raw: input.as_raw(),
-            }),
+                })
+            }
             None => Err(InputValidationError::UnknownHandle {
                 raw: input.as_raw(),
             }),
@@ -243,12 +264,17 @@ impl SignalSpec {
     pub fn is_derived(&self) -> bool {
         matches!(self.kind, SignalKind::Derived(_))
     }
+
+    pub fn is_reactive(&self) -> bool {
+        matches!(self.kind, SignalKind::Reactive(_))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SignalKind {
     Input,
     Derived(DerivedSpec),
+    Reactive(ReactiveSignalSpec),
 }
 
 impl SignalKind {
@@ -256,6 +282,14 @@ impl SignalKind {
         match self {
             Self::Input => None,
             Self::Derived(spec) => Some(spec),
+            Self::Reactive(_) => None,
+        }
+    }
+
+    pub fn as_reactive(&self) -> Option<&ReactiveSignalSpec> {
+        match self {
+            Self::Input | Self::Derived(_) => None,
+            Self::Reactive(spec) => Some(spec),
         }
     }
 }
@@ -277,9 +311,61 @@ impl DerivedSpec {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReactiveSignalSpec {
+    dependencies: Box<[SignalHandle]>,
+    seed_dependencies: Box<[SignalHandle]>,
+    clauses: Box<[ReactiveClauseHandle]>,
+    batch: usize,
+}
+
+impl ReactiveSignalSpec {
+    pub fn dependencies(&self) -> &[SignalHandle] {
+        &self.dependencies
+    }
+
+    pub fn seed_dependencies(&self) -> &[SignalHandle] {
+        &self.seed_dependencies
+    }
+
+    pub fn clauses(&self) -> &[ReactiveClauseHandle] {
+        &self.clauses
+    }
+
+    pub fn batch(&self) -> usize {
+        self.batch
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReactiveClauseSpec {
+    target: SignalHandle,
+    source_order: usize,
+    guard_dependencies: Box<[SignalHandle]>,
+    body_dependencies: Box<[SignalHandle]>,
+}
+
+impl ReactiveClauseSpec {
+    pub fn target(&self) -> SignalHandle {
+        self.target
+    }
+
+    pub fn source_order(&self) -> usize {
+        self.source_order
+    }
+
+    pub fn guard_dependencies(&self) -> &[SignalHandle] {
+        &self.guard_dependencies
+    }
+
+    pub fn body_dependencies(&self) -> &[SignalHandle] {
+        &self.body_dependencies
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TopologyBatch {
     index: usize,
-    signals: Box<[DerivedHandle]>,
+    signals: Box<[SignalHandle]>,
 }
 
 impl TopologyBatch {
@@ -287,7 +373,7 @@ impl TopologyBatch {
         self.index
     }
 
-    pub fn signals(&self) -> &[DerivedHandle] {
+    pub fn signals(&self) -> &[SignalHandle] {
         &self.signals
     }
 }
@@ -312,8 +398,14 @@ pub enum GraphBuildError {
     SignalIsNotDerived {
         signal: u32,
     },
+    SignalIsNotReactive {
+        signal: u32,
+    },
     DerivedAlreadyDefined {
         signal: DerivedHandle,
+    },
+    ReactiveAlreadyDefined {
+        signal: SignalHandle,
     },
     UndefinedDerivedSignals {
         signals: Vec<DerivedHandle>,
@@ -334,6 +426,24 @@ pub enum GraphBuildError {
 pub struct SignalGraphBuilder {
     owners: Vec<OwnerBuilderEntry>,
     signals: Vec<SignalBuilderEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReactiveClauseBuilderSpec {
+    pub guard_dependencies: Box<[SignalHandle]>,
+    pub body_dependencies: Box<[SignalHandle]>,
+}
+
+impl ReactiveClauseBuilderSpec {
+    pub fn new(
+        guard_dependencies: impl IntoIterator<Item = SignalHandle>,
+        body_dependencies: impl IntoIterator<Item = SignalHandle>,
+    ) -> Self {
+        Self {
+            guard_dependencies: guard_dependencies.into_iter().collect(),
+            body_dependencies: body_dependencies.into_iter().collect(),
+        }
+    }
 }
 
 impl SignalGraphBuilder {
@@ -411,6 +521,29 @@ impl SignalGraphBuilder {
         Ok(handle)
     }
 
+    pub fn add_reactive(
+        &mut self,
+        name: impl Into<Box<str>>,
+        owner: Option<OwnerHandle>,
+    ) -> Result<SignalHandle, GraphBuildError> {
+        if let Some(owner) = owner {
+            self.validate_owner(owner)?;
+        }
+
+        let handle = SignalHandle::from_raw(self.signals.len() as u32);
+        self.signals.push(SignalBuilderEntry {
+            name: name.into(),
+            owner,
+            kind: PendingSignalKind::Reactive { spec: None },
+        });
+
+        if let Some(owner) = owner {
+            self.owners[owner.index()].signals.push(handle);
+        }
+
+        Ok(handle)
+    }
+
     pub fn define_derived(
         &mut self,
         signal: DerivedHandle,
@@ -455,6 +588,78 @@ impl SignalGraphBuilder {
         Ok(())
     }
 
+    pub fn define_reactive(
+        &mut self,
+        signal: SignalHandle,
+        seed_dependencies: impl IntoIterator<Item = SignalHandle>,
+        clauses: impl IntoIterator<Item = ReactiveClauseBuilderSpec>,
+    ) -> Result<(), GraphBuildError> {
+        let Some(entry) = self.signals.get(signal.index()) else {
+            return Err(GraphBuildError::UnknownSignalHandle {
+                signal: signal.as_raw(),
+            });
+        };
+
+        let PendingSignalKind::Reactive { spec } = &entry.kind else {
+            return Err(GraphBuildError::SignalIsNotReactive {
+                signal: signal.as_raw(),
+            });
+        };
+
+        if spec.is_some() {
+            return Err(GraphBuildError::ReactiveAlreadyDefined { signal });
+        }
+
+        let mut merged = BTreeSet::new();
+        let seed_dependencies = seed_dependencies
+            .into_iter()
+            .map(|dependency| {
+                self.validate_signal(dependency)?;
+                if dependency == signal {
+                    return Err(GraphBuildError::SelfDependency {
+                        signal: signal.as_derived(),
+                    });
+                }
+                merged.insert(dependency);
+                Ok(dependency)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let clauses = clauses
+            .into_iter()
+            .map(|clause| {
+                for dependency in clause
+                    .guard_dependencies
+                    .iter()
+                    .chain(clause.body_dependencies.iter())
+                    .copied()
+                {
+                    self.validate_signal(dependency)?;
+                    if dependency == signal {
+                        return Err(GraphBuildError::SelfDependency {
+                            signal: signal.as_derived(),
+                        });
+                    }
+                    merged.insert(dependency);
+                }
+                Ok(PendingReactiveClause {
+                    guard_dependencies: clause.guard_dependencies,
+                    body_dependencies: clause.body_dependencies,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let PendingSignalKind::Reactive { spec } = &mut self.signals[signal.index()].kind else {
+            unreachable!("validated reactive signal kind changed unexpectedly");
+        };
+        *spec = Some(PendingReactiveSpec {
+            dependencies: merged.into_iter().collect(),
+            seed_dependencies: seed_dependencies.into_boxed_slice(),
+            clauses,
+        });
+        Ok(())
+    }
+
     pub fn build(self) -> Result<SignalGraph, GraphBuildError> {
         let signal_count = self.signals.len() as u32;
         let undefined = self
@@ -475,6 +680,16 @@ impl SignalGraphBuilder {
                 PendingSignalKind::Derived {
                     dependencies: Some(_),
                 } => None,
+                PendingSignalKind::Reactive { spec: None } => {
+                    debug_assert!(
+                        (index as u32) < signal_count,
+                        "Handle::from_raw: raw index {} out of bounds (signals len {})",
+                        index,
+                        signal_count
+                    );
+                    Some(SignalHandle::from_raw(index as u32).as_derived())
+                }
+                PendingSignalKind::Reactive { spec: Some(_) } => None,
             })
             .collect::<Vec<_>>();
         if !undefined.is_empty() {
@@ -482,11 +697,12 @@ impl SignalGraphBuilder {
         }
 
         let mut signals = Vec::with_capacity(self.signals.len());
+        let mut reactive_clauses = Vec::new();
         let mut dependents = (0..self.signals.len())
             .map(|_| Vec::new())
-            .collect::<Vec<Vec<DerivedHandle>>>();
+            .collect::<Vec<Vec<SignalHandle>>>();
         let mut indegree = vec![0usize; self.signals.len()];
-        let mut derived_batches = vec![0usize; self.signals.len()];
+        let mut signal_batches = vec![0usize; self.signals.len()];
 
         for (index, entry) in self.signals.into_iter().enumerate() {
             let kind = match entry.kind {
@@ -503,7 +719,7 @@ impl SignalGraphBuilder {
                     );
                     let derived = DerivedHandle::from_raw(index as u32);
                     for &dependency in &dependencies {
-                        dependents[dependency.index()].push(derived);
+                        dependents[dependency.index()].push(derived.as_signal());
                     }
                     SignalKind::Derived(DerivedSpec {
                         dependencies,
@@ -511,6 +727,35 @@ impl SignalGraphBuilder {
                     })
                 }
                 PendingSignalKind::Derived { dependencies: None } => unreachable!(),
+                PendingSignalKind::Reactive { spec: Some(spec) } => {
+                    indegree[index] = spec.dependencies.len();
+                    let signal = SignalHandle::from_raw(index as u32);
+                    for &dependency in &spec.dependencies {
+                        dependents[dependency.index()].push(signal);
+                    }
+                    let clause_handles = spec
+                        .clauses
+                        .into_iter()
+                        .enumerate()
+                        .map(|(source_order, clause)| {
+                            let handle = ReactiveClauseHandle::from_raw(reactive_clauses.len() as u32);
+                            reactive_clauses.push(ReactiveClauseSpec {
+                                target: signal,
+                                source_order,
+                                guard_dependencies: clause.guard_dependencies,
+                                body_dependencies: clause.body_dependencies,
+                            });
+                            handle
+                        })
+                        .collect::<Vec<_>>();
+                    SignalKind::Reactive(ReactiveSignalSpec {
+                        dependencies: spec.dependencies.into_boxed_slice(),
+                        seed_dependencies: spec.seed_dependencies,
+                        clauses: clause_handles.into_boxed_slice(),
+                        batch: 0,
+                    })
+                }
+                PendingSignalKind::Reactive { spec: None } => unreachable!(),
             };
 
             signals.push(SignalSpec {
@@ -532,12 +777,12 @@ impl SignalGraphBuilder {
             processed += 1;
             let next_batch = match signals[index].kind {
                 SignalKind::Input => 0,
-                SignalKind::Derived(_) => derived_batches[index] + 1,
+                SignalKind::Derived(_) | SignalKind::Reactive(_) => signal_batches[index] + 1,
             };
 
             for &dependent in &dependents[index] {
                 let dependent_index = dependent.index();
-                derived_batches[dependent_index] = derived_batches[dependent_index].max(next_batch);
+                signal_batches[dependent_index] = signal_batches[dependent_index].max(next_batch);
                 indegree[dependent_index] -= 1;
                 if indegree[dependent_index] == 0 {
                     ready.push_back(dependent_index);
@@ -564,23 +809,30 @@ impl SignalGraphBuilder {
             return Err(GraphBuildError::DependencyCycle { signals: cycle });
         }
 
-        let mut batches = Vec::<Vec<DerivedHandle>>::new();
+        let mut batches = Vec::<Vec<SignalHandle>>::new();
         for (index, signal) in signals.iter_mut().enumerate() {
-            let SignalKind::Derived(spec) = &mut signal.kind else {
-                continue;
+            let batch = match &mut signal.kind {
+                SignalKind::Input => continue,
+                SignalKind::Derived(spec) => {
+                    spec.batch = signal_batches[index];
+                    spec.batch
+                }
+                SignalKind::Reactive(spec) => {
+                    spec.batch = signal_batches[index];
+                    spec.batch
+                }
             };
-            spec.batch = derived_batches[index];
-            if batches.len() <= spec.batch {
-                batches.resize_with(spec.batch + 1, Vec::new);
+            if batches.len() <= batch {
+                batches.resize_with(batch + 1, Vec::new);
             }
-            batches[spec.batch].push({
+            batches[batch].push({
                 debug_assert!(
                     (index as u32) < signal_count,
                     "Handle::from_raw: raw index {} out of bounds (signals len {})",
                     index,
                     signal_count
                 );
-                DerivedHandle::from_raw(index as u32)
+                SignalHandle::from_raw(index as u32)
             });
         }
         for batch in &mut batches {
@@ -615,6 +867,7 @@ impl SignalGraphBuilder {
             signals,
             batches,
             dependents,
+            reactive_clauses,
         })
     }
 
@@ -660,6 +913,22 @@ enum PendingSignalKind {
     Derived {
         dependencies: Option<Box<[SignalHandle]>>,
     },
+    Reactive {
+        spec: Option<PendingReactiveSpec>,
+    },
+}
+
+#[derive(Clone, Debug)]
+struct PendingReactiveSpec {
+    dependencies: Vec<SignalHandle>,
+    seed_dependencies: Box<[SignalHandle]>,
+    clauses: Vec<PendingReactiveClause>,
+}
+
+#[derive(Clone, Debug)]
+struct PendingReactiveClause {
+    guard_dependencies: Box<[SignalHandle]>,
+    body_dependencies: Box<[SignalHandle]>,
 }
 
 #[cfg(test)]
@@ -689,8 +958,11 @@ mod tests {
 
         assert_eq!(graph.signal_count(), 5);
         assert_eq!(graph.batches().len(), 2);
-        assert_eq!(graph.batches()[0].signals(), &[left, right]);
-        assert_eq!(graph.batches()[1].signals(), &[join]);
+        assert_eq!(
+            graph.batches()[0].signals(),
+            &[left.as_signal(), right.as_signal()]
+        );
+        assert_eq!(graph.batches()[1].signals(), &[join.as_signal()]);
         assert_eq!(
             graph.dependencies(join).unwrap(),
             &[left.as_signal(), right.as_signal()]
@@ -712,5 +984,44 @@ mod tests {
                 signals: vec![first.as_signal(), second.as_signal()],
             })
         );
+    }
+
+    #[test]
+    fn graph_batches_reactive_signals_with_other_evaluable_nodes() {
+        let mut builder = SignalGraphBuilder::new();
+        let trigger = builder.add_input("trigger", None).unwrap();
+        let total = builder.add_reactive("total", None).unwrap();
+        let doubled = builder.add_derived("doubled", None).unwrap();
+
+        builder
+            .define_reactive(
+                total,
+                [],
+                [ReactiveClauseBuilderSpec::new(
+                    [trigger.as_signal()],
+                    [trigger.as_signal()],
+                )],
+            )
+            .unwrap();
+        builder
+            .define_derived(doubled, [total])
+            .unwrap();
+
+        let graph = builder.build().unwrap();
+        let reactive = graph
+            .reactive(total)
+            .expect("reactive signal should be lowered into the graph");
+        let clause = graph
+            .reactive_clause(reactive.clauses()[0])
+            .expect("reactive clause should be addressable");
+
+        assert_eq!(graph.batches().len(), 2);
+        assert_eq!(graph.batches()[0].signals(), &[total]);
+        assert_eq!(graph.batches()[1].signals(), &[doubled.as_signal()]);
+        assert_eq!(graph.dependents(trigger.as_signal()).unwrap(), &[total]);
+        assert_eq!(graph.dependents(total).unwrap(), &[doubled.as_signal()]);
+        assert_eq!(reactive.dependencies(), &[trigger.as_signal()]);
+        assert_eq!(clause.guard_dependencies(), &[trigger.as_signal()]);
+        assert_eq!(clause.body_dependencies(), &[trigger.as_signal()]);
     }
 }

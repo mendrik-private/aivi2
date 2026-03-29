@@ -52,6 +52,48 @@ impl Drop for TempFile {
 }
 
 #[test]
+fn fmt_normalizes_reactive_update_items() {
+    let input = TempFile::new(
+        "fmt-reactive-update",
+        concat!(
+            "signal total:Signal Int\n",
+            "signal ready:Signal Bool\n",
+            "when   ready=>total<-signal1+signal2\n",
+            "when ready and True=>total<-result{\n",
+            "next<-Ok signal1\n",
+            "next+signal2\n",
+            "}\n",
+        ),
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("fmt")
+        .arg(input.path())
+        .output()
+        .expect("fmt command should run");
+
+    assert!(
+        output.status.success(),
+        "fmt should succeed for reactive update items, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout should be utf-8"),
+        concat!(
+            "signal total: Signal Int\n",
+            "signal ready: Signal Bool\n",
+            "\n",
+            "when ready => total <- signal1 + signal2\n",
+            "when ready and True => total <-\n",
+            "    result {\n",
+            "        next <- Ok signal1\n",
+            "        next + signal2\n",
+            "    }\n",
+        )
+    );
+}
+
+#[test]
 fn fmt_normalizes_markup_layout() {
     let input = TempFile::new(
         "fmt-normalize",

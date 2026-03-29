@@ -24,14 +24,16 @@ pub use glib_adapter::{
 };
 pub use graph::{
     DerivedHandle, DerivedSpec, GraphBuildError, InputHandle, InputValidationError, OwnerHandle,
-    OwnerSpec, SignalGraph, SignalGraphBuilder, SignalHandle, SignalKind, SignalSpec,
+    OwnerSpec, ReactiveClauseBuilderSpec, ReactiveClauseHandle, ReactiveClauseSpec,
+    ReactiveSignalSpec, SignalGraph, SignalGraphBuilder, SignalHandle, SignalKind, SignalSpec,
     TopologyBatch,
 };
 pub use hir_adapter::{
-    HirGateStageBinding, HirGateStageId, HirOwnerBinding, HirRecurrenceBinding,
-    HirRecurrenceNodeId, HirRuntimeAdapterError, HirRuntimeAdapterErrors, HirRuntimeAssembly,
-    HirRuntimeAssemblyBuilder, HirRuntimeGatePlan, HirRuntimeInstantiationError, HirSignalBinding,
-    HirSignalBindingKind, HirSourceBinding, HirTaskBinding, assemble_hir_runtime,
+    HirGateStageBinding, HirGateStageId, HirOwnerBinding, HirReactiveUpdateBinding,
+    HirRecurrenceBinding, HirRecurrenceNodeId, HirRuntimeAdapterError, HirRuntimeAdapterErrors,
+    HirRuntimeAssembly, HirRuntimeAssemblyBuilder, HirRuntimeGatePlan,
+    HirRuntimeInstantiationError, HirSignalBinding, HirSignalBindingKind, HirSourceBinding,
+    HirTaskBinding, assemble_hir_runtime,
     assemble_hir_runtime_with_items,
 };
 pub use providers::{

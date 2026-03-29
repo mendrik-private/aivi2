@@ -3651,7 +3651,8 @@ fn evaluate_intrinsic_value(
     value: IntrinsicValue,
     arguments: Vec<RuntimeValue>,
 ) -> Result<RuntimeValue, EvaluationError> {
-    if matches!(value, IntrinsicValue::TupleConstructor { .. }) {
+    if let IntrinsicValue::TupleConstructor { arity } = value {
+        debug_assert_eq!(arguments.len(), arity);
         return Ok(RuntimeValue::Tuple(arguments));
     }
     match (value, arguments.as_slice()) {

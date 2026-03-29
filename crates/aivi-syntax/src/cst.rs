@@ -704,6 +704,16 @@ impl NamedItem {
     }
 }
 
+/// Top-level `when <guard> => <target> <- <expr>` reactive signal update clause.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReactiveUpdateItem {
+    pub base: ItemBase,
+    pub keyword_span: SourceSpan,
+    pub guard: Option<Expr>,
+    pub target: Option<Identifier>,
+    pub body: Option<Expr>,
+}
+
 /// `instance` declaration.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InstanceItem {
@@ -804,6 +814,7 @@ pub enum Item {
     Fun(NamedItem),
     Value(NamedItem),
     Signal(NamedItem),
+    ReactiveUpdate(ReactiveUpdateItem),
     Class(NamedItem),
     Instance(InstanceItem),
     Domain(DomainItem),
@@ -820,6 +831,7 @@ pub enum ItemKind {
     Fun,
     Value,
     Signal,
+    ReactiveUpdate,
     Class,
     Instance,
     Domain,
@@ -836,6 +848,7 @@ impl Item {
             Item::Fun(_) => ItemKind::Fun,
             Item::Value(_) => ItemKind::Value,
             Item::Signal(_) => ItemKind::Signal,
+            Item::ReactiveUpdate(_) => ItemKind::ReactiveUpdate,
             Item::Class(_) => ItemKind::Class,
             Item::Instance(_) => ItemKind::Instance,
             Item::Domain(_) => ItemKind::Domain,
@@ -853,6 +866,7 @@ impl Item {
             | Item::Value(item)
             | Item::Signal(item)
             | Item::Class(item) => &item.base,
+            Item::ReactiveUpdate(item) => &item.base,
             Item::Instance(item) => &item.base,
             Item::Domain(item) => &item.base,
             Item::SourceProviderContract(item) => &item.base,

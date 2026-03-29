@@ -702,8 +702,18 @@ pub struct SignalItem {
     pub name: Name,
     pub annotation: Option<TypeId>,
     pub body: Option<ExprId>,
+    pub reactive_updates: Vec<ReactiveUpdateClause>,
     pub signal_dependencies: Vec<ItemId>,
     pub source_metadata: Option<SourceMetadata>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReactiveUpdateClause {
+    pub span: SourceSpan,
+    pub keyword_span: SourceSpan,
+    pub target_span: SourceSpan,
+    pub guard: ExprId,
+    pub body: ExprId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

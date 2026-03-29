@@ -2300,6 +2300,7 @@ fn type_is_builtin(module: &HirModule, ty: aivi_hir::TypeId, builtin: BuiltinTyp
         ),
         TypeKind::Tuple(_)
         | TypeKind::Record(_)
+        | TypeKind::RecordTransform { .. }
         | TypeKind::Arrow { .. }
         | TypeKind::Apply { .. } => false,
     }

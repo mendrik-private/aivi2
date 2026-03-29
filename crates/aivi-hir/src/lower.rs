@@ -18,7 +18,7 @@ use crate::{
     MarkupElement, MarkupNode, MarkupNodeId, MarkupNodeKind, MatchControl, MockDecorator, Module,
     Name, NamePath, PatchBlock, PatchEntry, PatchInstruction, PatchInstructionKind, PatchSelector,
     PatchSelectorSegment, Pattern, PatternId, PatternKind, PipeExpr, PipeStage, PipeStageKind,
-    ProjectionBase, RecordExpr, RecordExprField, RecordFieldSurface, RecordPatternField,
+    ProjectionBase, ReactiveUpdateClause, RecordExpr, RecordExprField, RecordFieldSurface, RecordPatternField,
     RecordRowRename, RecordRowTransform, RecurrenceWakeupDecorator, RecurrenceWakeupDecoratorKind,
     RegexLiteral, ResolutionState, ShowControl, SignalItem, SourceDecorator,
     SourceProviderContractItem, SourceProviderRef, SuffixedIntegerLiteral, TermReference,
@@ -403,6 +403,10 @@ impl<'a> Lowerer<'a> {
             }
             return;
         }
+        if let syn::Item::ReactiveUpdate(item) = item {
+            self.attach_reactive_update_clause(item);
+            return;
+        }
 
         let lowered = match item {
             syn::Item::Type(item) => Some(Item::Type(self.lower_type_item(item))),
@@ -418,6 +422,9 @@ impl<'a> Lowerer<'a> {
             syn::Item::Use(item) => Some(Item::Use(self.lower_use_item(item))),
             syn::Item::Export(_) => {
                 unreachable!("export items are handled before single-item lowering")
+            }
+            syn::Item::ReactiveUpdate(_) => {
+                unreachable!("reactive updates are attached before ordinary item lowering")
             }
             syn::Item::Error(item) => {
                 self.emit_error(
@@ -615,9 +622,88 @@ impl<'a> Lowerer<'a> {
             name,
             annotation,
             body,
+            reactive_updates: Vec::new(),
             signal_dependencies: Vec::new(),
             source_metadata: None,
         }
+    }
+
+    fn attach_reactive_update_clause(&mut self, item: &syn::ReactiveUpdateItem) {
+        let Some(guard) = item.guard.as_ref() else {
+            self.emit_error(
+                item.base.span,
+                "reactive update is missing its guard expression",
+                code("reactive-update-missing-guard"),
+            );
+            return;
+        };
+        let Some(target) = item.target.as_ref() else {
+            self.emit_error(
+                item.base.span,
+                "reactive update is missing its target signal name",
+                code("reactive-update-missing-target"),
+            );
+            return;
+        };
+        let Some(body) = item.body.as_ref() else {
+            self.emit_error(
+                item.base.span,
+                "reactive update is missing its body expression",
+                code("reactive-update-missing-body"),
+            );
+            return;
+        };
+
+        let Some(target_item) = self.find_predeclared_named_item(target.text.as_str()) else {
+            self.emit_error(
+                target.span,
+                format!(
+                    "reactive update target `{}` must name a previously declared signal",
+                    target.text
+                ),
+                code("reactive-update-unknown-target"),
+            );
+            return;
+        };
+
+        let guard = self.lower_expr(guard);
+        let body = self.lower_expr(body);
+        let Some(Item::Signal(signal)) = self.module.arenas.items.get_mut(target_item) else {
+            self.emit_error(
+                target.span,
+                format!(
+                    "reactive update target `{}` must refer to a previously declared signal",
+                    target.text
+                ),
+                code("reactive-update-target-not-signal"),
+            );
+            return;
+        };
+
+        signal.reactive_updates.push(ReactiveUpdateClause {
+            span: item.base.span,
+            keyword_span: item.keyword_span,
+            target_span: target.span,
+            guard,
+            body,
+        });
+    }
+
+    fn find_predeclared_named_item(&self, name: &str) -> Option<ItemId> {
+        self.module
+            .root_items()
+            .iter()
+            .rev()
+            .copied()
+            .find(|item_id| match &self.module.items()[*item_id] {
+                Item::Type(item) => item.name.text() == name,
+                Item::Value(item) => item.name.text() == name,
+                Item::Function(item) => item.name.text() == name,
+                Item::Signal(item) => item.name.text() == name,
+                Item::Class(item) => item.name.text() == name,
+                Item::Domain(item) => item.name.text() == name,
+                Item::SourceProviderContract(_) | Item::Instance(_) | Item::Use(_) | Item::Export(_) => false,
+            })
     }
 
     fn lower_class_item(&mut self, item: &syn::NamedItem) -> ClassItem {
@@ -4681,6 +4767,10 @@ impl<'a> Lowerer<'a> {
                 if let Some(body) = item.body {
                     self.resolve_expr(body, namespaces, &env);
                 }
+                for update in &item.reactive_updates {
+                    self.resolve_expr(update.guard, namespaces, &env);
+                    self.resolve_expr(update.body, namespaces, &env);
+                }
                 Item::Signal(item)
             }
             Item::Class(item) => {
@@ -7296,6 +7386,76 @@ mod tests {
             codes.contains(&super::code("invalid-record-row-transform")),
             "expected malformed transforms to report invalid-record-row-transform, got {:?}",
             lowered.diagnostics()
+        );
+    }
+
+    #[test]
+    fn lowers_reactive_updates_onto_predeclared_target_signals() {
+        let lowered = lower_text(
+            "reactive_updates.aivi",
+            r#"signal total : Signal Int
+signal ready : Signal Bool
+signal left : Signal Int
+signal right : Signal Int
+
+when ready => total <- left + right
+when right > 0 => total <- result {
+    next <- Ok left
+    next
+}
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "expected reactive updates to lower cleanly, got diagnostics: {:?}",
+            lowered.diagnostics()
+        );
+
+        let module = lowered.module();
+        let total = find_signal(module, "total");
+        assert_eq!(total.reactive_updates.len(), 2);
+        assert_eq!(
+            signal_dependency_names(module, total),
+            vec!["ready".to_owned(), "left".to_owned(), "right".to_owned()]
+        );
+        assert!(matches!(
+            module.exprs()[total.reactive_updates[0].guard].kind,
+            ExprKind::Name(_)
+        ));
+        assert!(matches!(
+            module.exprs()[total.reactive_updates[0].body].kind,
+            ExprKind::Binary { .. }
+        ));
+        assert!(matches!(
+            module.exprs()[total.reactive_updates[1].guard].kind,
+            ExprKind::Binary { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_reactive_updates_that_target_later_signals() {
+        let lowered = lower_text(
+            "reactive_updates_late_target.aivi",
+            r#"signal ready : Signal Bool
+when ready => total <- 1
+signal total : Signal Int
+"#,
+        );
+        assert!(
+            lowered.has_errors(),
+            "expected late reactive update target to fail lowering"
+        );
+        assert!(lowered.diagnostics().iter().any(|diagnostic| {
+            diagnostic.severity == Severity::Error
+                && diagnostic
+                    .message
+                    .contains("must name a previously declared signal")
+        }));
+
+        let total = find_signal(lowered.module(), "total");
+        assert!(
+            total.reactive_updates.is_empty(),
+            "invalid updates should not attach to later signals"
         );
     }
 

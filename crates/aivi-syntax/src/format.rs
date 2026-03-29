@@ -6,8 +6,8 @@ use crate::cst::{
     Identifier, InstanceItem, InstanceMember, Item, MapExpr, MarkupAttribute, MarkupAttributeValue,
     MarkupNode, Module, NamedItem, PatchBlock, PatchEntry, PatchInstruction,
     PatchInstructionKind, PatchSelector, PatchSelectorSegment, Pattern, PatternKind, PipeExpr,
-    PipeStage, PipeStageKind, ProjectionPath, QualifiedName, RecordExpr, RecordField,
-    RecordPatternField, ResultBinding, ResultBlockExpr, SourceDecorator,
+    PipeStage, PipeStageKind, ProjectionPath, QualifiedName, ReactiveUpdateItem, RecordExpr,
+    RecordField, RecordPatternField, ResultBinding, ResultBlockExpr, SourceDecorator,
     SourceProviderContractItem, SourceProviderContractMember,
     SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextLiteral, TextSegment,
     TypeDeclBody, TypeExpr, TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseItem,
@@ -77,6 +77,7 @@ impl Formatter {
             Item::Fun(item) => lines.extend(self.format_fun_item(item)),
             Item::Value(item) => lines.extend(self.format_value_item("value", item)),
             Item::Signal(item) => lines.extend(self.format_value_item("signal", item)),
+            Item::ReactiveUpdate(item) => lines.extend(self.format_reactive_update_item(item)),
             Item::Class(item) => lines.extend(self.format_class_item(item)),
             Item::Instance(item) => lines.extend(self.format_instance_item(item)),
             Item::Domain(item) => lines.extend(self.format_domain_item(item)),
@@ -100,6 +101,14 @@ impl Formatter {
         right_item: &Item,
         right_lines: &[String],
     ) -> bool {
+        if matches!(
+            (left_item, right_item),
+            (Item::ReactiveUpdate(_), Item::ReactiveUpdate(_))
+        ) && left_item.decorators().is_empty()
+            && right_item.decorators().is_empty()
+        {
+            return false;
+        }
         !self.compacts_with_next_item(left_item, left_lines)
             || !self.compacts_with_next_item(right_item, right_lines)
             || left_item.kind() != right_item.kind()
@@ -108,7 +117,10 @@ impl Formatter {
     fn compacts_with_next_item(&self, item: &Item, lines: &[String]) -> bool {
         item.decorators().is_empty()
             && lines.len() == 1
-            && matches!(item, Item::Value(_) | Item::Signal(_) | Item::Export(_))
+            && matches!(
+                item,
+                Item::Value(_) | Item::Signal(_) | Item::ReactiveUpdate(_) | Item::Export(_)
+            )
     }
 
     fn format_type_item(&self, item: &NamedItem) -> Vec<String> {
@@ -188,6 +200,38 @@ impl Formatter {
             };
             let mut lines = vec![format!("{header} =")];
             lines.extend(block.indented(indent).into_lines());
+            lines
+        }
+    }
+
+    fn format_reactive_update_item(&self, item: &ReactiveUpdateItem) -> Vec<String> {
+        let guard = item
+            .guard
+            .as_ref()
+            .map(|expr| self.format_expr_inline(expr, 0))
+            .unwrap_or_else(|| "_".to_owned());
+        let target = item
+            .target
+            .as_ref()
+            .map(|target| target.text.clone())
+            .unwrap_or_else(|| "_".to_owned());
+        let header = format!("when {guard} => {target}");
+        let Some(body) = &item.body else {
+            return vec![format!("{header} <-")];
+        };
+
+        let force_break = self.should_force_expr_break(display_width(&format!("{header} <- ")), body);
+        let block = self.format_expr_block(body, force_break);
+        if block.is_inline() {
+            vec![format!(
+                "{header} <- {}",
+                block.inline_text().expect("inline reactive update body")
+            )]
+        } else if block.starts_with_delimiter() {
+            block.prefixed(&format!("{header} <- ")).into_lines()
+        } else {
+            let mut lines = vec![format!("{header} <-")];
+            lines.extend(block.indented(INDENT_WIDTH).into_lines());
             lines
         }
     }
@@ -2527,6 +2571,27 @@ value view =
             concat!(
                 "export (bundledSupportSentinel, BundledSupportToken)\n",
                 "export main\n",
+            )
+        );
+    }
+
+    #[test]
+    fn formatter_normalizes_reactive_update_items() {
+        let formatted = format_text(
+            "signal total:Signal Int\nsignal ready:Signal Bool\nwhen   ready=>total<-signal1+signal2\nwhen ready.done=>total<-result{\nnext<-Ok signal1\nnext+signal2\n}\n",
+        );
+        assert_eq!(
+            formatted,
+            concat!(
+                "signal total: Signal Int\n",
+                "signal ready: Signal Bool\n",
+                "\n",
+                "when ready => total <- signal1 + signal2\n",
+                "when ready.done => total <-\n",
+                "    result {\n",
+                "        next <- Ok signal1\n",
+                "        next + signal2\n",
+                "    }\n",
             )
         );
     }

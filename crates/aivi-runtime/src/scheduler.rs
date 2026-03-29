@@ -6,7 +6,9 @@ use std::{
 
 use aivi_backend::{CommittedValueStore, InlineCommittedValueStore};
 
-use crate::graph::{DerivedHandle, InputHandle, OwnerHandle, SignalGraph, SignalHandle};
+use crate::graph::{
+    DerivedHandle, InputHandle, OwnerHandle, ReactiveClauseHandle, SignalGraph, SignalHandle,
+};
 
 pub trait DerivedNodeEvaluator<V> {
     fn evaluate(
@@ -14,6 +16,34 @@ pub trait DerivedNodeEvaluator<V> {
         signal: DerivedHandle,
         inputs: DependencyValues<'_, V>,
     ) -> DerivedSignalUpdate<V>;
+
+    fn evaluate_reactive_seed(
+        &mut self,
+        signal: SignalHandle,
+        _inputs: DependencyValues<'_, V>,
+    ) -> DerivedSignalUpdate<V> {
+        missing_reactive_evaluator(signal, None)
+    }
+
+    fn evaluate_reactive_guard(
+        &mut self,
+        signal: SignalHandle,
+        clause: ReactiveClauseHandle,
+        inputs: DependencyValues<'_, V>,
+    ) -> bool {
+        let _ = inputs;
+        missing_reactive_evaluator(signal, Some(clause))
+    }
+
+    fn evaluate_reactive_body(
+        &mut self,
+        signal: SignalHandle,
+        clause: ReactiveClauseHandle,
+        inputs: DependencyValues<'_, V>,
+    ) -> DerivedSignalUpdate<V> {
+        let _ = inputs;
+        missing_reactive_evaluator(signal, Some(clause))
+    }
 }
 
 impl<V, F, R> DerivedNodeEvaluator<V> for F
@@ -38,6 +68,35 @@ pub trait TryDerivedNodeEvaluator<V> {
         signal: DerivedHandle,
         inputs: DependencyValues<'_, V>,
     ) -> Result<DerivedSignalUpdate<V>, Self::Error>;
+
+    fn try_evaluate_reactive_seed(
+        &mut self,
+        signal: SignalHandle,
+        inputs: DependencyValues<'_, V>,
+    ) -> Result<DerivedSignalUpdate<V>, Self::Error> {
+        let _ = inputs;
+        missing_reactive_evaluator(signal, None)
+    }
+
+    fn try_evaluate_reactive_guard(
+        &mut self,
+        signal: SignalHandle,
+        clause: ReactiveClauseHandle,
+        inputs: DependencyValues<'_, V>,
+    ) -> Result<bool, Self::Error> {
+        let _ = inputs;
+        missing_reactive_evaluator(signal, Some(clause))
+    }
+
+    fn try_evaluate_reactive_body(
+        &mut self,
+        signal: SignalHandle,
+        clause: ReactiveClauseHandle,
+        inputs: DependencyValues<'_, V>,
+    ) -> Result<DerivedSignalUpdate<V>, Self::Error> {
+        let _ = inputs;
+        missing_reactive_evaluator(signal, Some(clause))
+    }
 }
 
 impl<V, E, F, R> TryDerivedNodeEvaluator<V> for F
@@ -53,6 +112,62 @@ where
         inputs: DependencyValues<'_, V>,
     ) -> Result<DerivedSignalUpdate<V>, Self::Error> {
         self(signal, inputs).map(Into::into)
+    }
+}
+
+struct InfallibleDerivedEvaluator<'a, E>(&'a mut E);
+
+impl<V, E> TryDerivedNodeEvaluator<V> for InfallibleDerivedEvaluator<'_, E>
+where
+    E: DerivedNodeEvaluator<V>,
+{
+    type Error = Infallible;
+
+    fn try_evaluate(
+        &mut self,
+        signal: DerivedHandle,
+        inputs: DependencyValues<'_, V>,
+    ) -> Result<DerivedSignalUpdate<V>, Self::Error> {
+        Ok(self.0.evaluate(signal, inputs))
+    }
+
+    fn try_evaluate_reactive_seed(
+        &mut self,
+        signal: SignalHandle,
+        inputs: DependencyValues<'_, V>,
+    ) -> Result<DerivedSignalUpdate<V>, Self::Error> {
+        Ok(self.0.evaluate_reactive_seed(signal, inputs))
+    }
+
+    fn try_evaluate_reactive_guard(
+        &mut self,
+        signal: SignalHandle,
+        clause: ReactiveClauseHandle,
+        inputs: DependencyValues<'_, V>,
+    ) -> Result<bool, Self::Error> {
+        Ok(self.0.evaluate_reactive_guard(signal, clause, inputs))
+    }
+
+    fn try_evaluate_reactive_body(
+        &mut self,
+        signal: SignalHandle,
+        clause: ReactiveClauseHandle,
+        inputs: DependencyValues<'_, V>,
+    ) -> Result<DerivedSignalUpdate<V>, Self::Error> {
+        Ok(self.0.evaluate_reactive_body(signal, clause, inputs))
+    }
+}
+
+fn missing_reactive_evaluator(signal: SignalHandle, clause: Option<ReactiveClauseHandle>) -> ! {
+    match clause {
+        Some(clause) => panic!(
+            "signal {:?} owns reactive clause {:?}, but the evaluator does not implement reactive update execution",
+            signal, clause
+        ),
+        None => panic!(
+            "signal {:?} is reactive, but the evaluator does not implement reactive update execution",
+            signal
+        ),
     }
 }
 
@@ -401,7 +516,8 @@ where
     where
         E: DerivedNodeEvaluator<V>,
     {
-        self.tick_with::<_, Infallible>(|signal, inputs| Ok(evaluator.evaluate(signal, inputs)))
+        let mut evaluator = InfallibleDerivedEvaluator(evaluator);
+        self.tick_with(&mut evaluator)
             .unwrap_or_else(|never| match never {})
     }
 
@@ -409,12 +525,12 @@ where
     where
         E: TryDerivedNodeEvaluator<V>,
     {
-        self.tick_with(|signal, inputs| evaluator.try_evaluate(signal, inputs))
+        self.tick_with(evaluator)
     }
 
-    fn tick_with<E, X>(&mut self, mut evaluate: E) -> Result<TickOutcome, X>
+    fn tick_with<E>(&mut self, evaluator: &mut E) -> Result<TickOutcome, E::Error>
     where
-        E: FnMut(DerivedHandle, DependencyValues<'_, V>) -> Result<DerivedSignalUpdate<V>, X>,
+        E: TryDerivedNodeEvaluator<V>,
     {
         self.drain_worker_publications();
         let tick = self.next_tick;
@@ -486,7 +602,7 @@ where
         } else {
             for batch in self.graph.batches() {
                 for &signal in batch.signals() {
-                    if self.signal_active(signal.as_signal()) {
+                    if self.signal_active(signal) {
                         dirty[signal.index()] = true;
                     }
                 }
@@ -501,24 +617,37 @@ where
                 .collect::<Vec<_>>();
             for batch in self.graph.batches() {
                 for &signal in batch.signals() {
-                    if !dirty[signal.index()] || !self.signal_active(signal.as_signal()) {
+                    if !dirty[signal.index()] || !self.signal_active(signal) {
                         continue;
                     }
 
-                    let dependencies = self
+                    let next = match self
                         .graph
-                        .dependencies(signal)
-                        .expect("topology batches only contain derived signals");
-                    let inputs = DependencyValues {
-                        dependencies,
-                        pending: &pending,
-                        committed: &committed_values,
+                        .signal(signal)
+                        .expect("topology batches only contain graph signals")
+                        .kind()
+                    {
+                        crate::graph::SignalKind::Input => continue,
+                        crate::graph::SignalKind::Derived(spec) => {
+                            let inputs = DependencyValues {
+                                dependencies: spec.dependencies(),
+                                pending: &pending,
+                                committed: &committed_values,
+                            };
+                            pending_value_from_update(
+                                evaluator.try_evaluate(signal.as_derived(), inputs)?,
+                            )
+                        }
+                        crate::graph::SignalKind::Reactive(spec) => self
+                            .evaluate_reactive_signal(
+                                evaluator,
+                                signal,
+                                spec,
+                                &committed_values,
+                                &pending,
+                            )?,
                     };
-                    pending[signal.index()] = match evaluate(signal, inputs)? {
-                        DerivedSignalUpdate::Unchanged => PendingValue::Unchanged,
-                        DerivedSignalUpdate::Clear => PendingValue::NextNone,
-                        DerivedSignalUpdate::Value(value) => PendingValue::NextSome(value),
-                    };
+                    pending[signal.index()] = next;
                 }
             }
         }
@@ -647,14 +776,14 @@ where
             if dirty[signal.index()] {
                 continue;
             }
-            if !self.signal_active(signal.as_signal()) && pending[signal.index()].is_unchanged() {
+            if !self.signal_active(signal) && pending[signal.index()].is_unchanged() {
                 continue;
             }
 
             dirty[signal.index()] = true;
             for &dependent in self
                 .graph
-                .dependents(signal.as_signal())
+                .dependents(signal)
                 .expect("dirty worklist only contains graph signals")
             {
                 worklist.push_back(dependent);
@@ -733,6 +862,69 @@ where
             .as_mut()
             .expect("validated input handle must have runtime state"))
     }
+
+    fn evaluate_reactive_signal<E>(
+        &self,
+        evaluator: &mut E,
+        signal: SignalHandle,
+        spec: &crate::graph::ReactiveSignalSpec,
+        committed: &[Option<&V>],
+        pending: &[PendingValue<V>],
+    ) -> Result<PendingValue<V>, E::Error>
+    where
+        E: TryDerivedNodeEvaluator<V>,
+    {
+        let mut next = if self.initialized {
+            PendingValue::Unchanged
+        } else {
+            pending_value_from_update(evaluator.try_evaluate_reactive_seed(
+                signal,
+                DependencyValues {
+                    dependencies: spec.seed_dependencies(),
+                    pending,
+                    committed,
+                },
+            )?)
+        };
+
+        for &clause in spec.clauses() {
+            let clause_spec = self
+                .graph
+                .reactive_clause(clause)
+                .expect("reactive signal clauses are built from the same graph");
+            let should_commit = evaluator.try_evaluate_reactive_guard(
+                signal,
+                clause,
+                DependencyValues {
+                    dependencies: clause_spec.guard_dependencies(),
+                    pending,
+                    committed,
+                },
+            )?;
+            if !should_commit {
+                continue;
+            }
+            next = pending_value_from_update(evaluator.try_evaluate_reactive_body(
+                signal,
+                clause,
+                DependencyValues {
+                    dependencies: clause_spec.body_dependencies(),
+                    pending,
+                    committed,
+                },
+            )?);
+        }
+
+        Ok(next)
+    }
+}
+
+fn pending_value_from_update<V>(update: DerivedSignalUpdate<V>) -> PendingValue<V> {
+    match update {
+        DerivedSignalUpdate::Unchanged => PendingValue::Unchanged,
+        DerivedSignalUpdate::Clear => PendingValue::NextNone,
+        DerivedSignalUpdate::Value(value) => PendingValue::NextSome(value),
+    }
 }
 
 /// Read-only dependency view for one derived evaluation within a transactional scheduler tick.
@@ -778,11 +970,23 @@ impl<'a, V> DependencyValues<'a, V> {
         self.get(index)?.value
     }
 
+    pub fn contains_signal(&self, signal: SignalHandle) -> bool {
+        self.dependencies.contains(&signal)
+    }
+
+    pub fn value_for(&self, signal: SignalHandle) -> Option<&'a V> {
+        self.contains_signal(signal).then(|| self.resolve(signal)).flatten()
+    }
+
     pub fn updated(&self, index: usize) -> bool {
         let Some(signal) = self.dependencies.get(index).copied() else {
             return false;
         };
         self.pending[signal.index()].is_updated()
+    }
+
+    pub fn updated_signal(&self, signal: SignalHandle) -> bool {
+        self.contains_signal(signal) && self.pending[signal.index()].is_updated()
     }
 
     fn resolve(&self, signal: SignalHandle) -> Option<&'a V> {
@@ -846,17 +1050,98 @@ mod tests {
     use aivi_backend::{MovingRuntimeValueStore, RuntimeValue};
 
     use crate::{
-        graph::SignalGraphBuilder,
+        graph::{
+            DerivedHandle, ReactiveClauseBuilderSpec, ReactiveClauseHandle, SignalGraphBuilder,
+            SignalHandle,
+        },
         scheduler::{Publication, PublicationDropReason, Scheduler, SchedulerAccessError},
     };
 
-    use super::{DependencyValues, DroppedPublication};
+    use super::{DependencyValues, DerivedNodeEvaluator, DerivedSignalUpdate, DroppedPublication};
 
     fn text_ptr(value: &RuntimeValue) -> *const u8 {
         let RuntimeValue::Text(text) = value else {
             panic!("expected text runtime value");
         };
         text.as_ptr()
+    }
+
+    struct ReactiveTestEvaluator {
+        total: SignalHandle,
+        doubled: DerivedHandle,
+        left: SignalHandle,
+        right: SignalHandle,
+        ready: SignalHandle,
+        enabled: SignalHandle,
+        first_clause: ReactiveClauseHandle,
+        second_clause: ReactiveClauseHandle,
+    }
+
+    impl DerivedNodeEvaluator<i32> for ReactiveTestEvaluator {
+        fn evaluate(
+            &mut self,
+            signal: DerivedHandle,
+            inputs: DependencyValues<'_, i32>,
+        ) -> DerivedSignalUpdate<i32> {
+            if signal == self.doubled {
+                if !inputs.updated_signal(self.total) {
+                    return DerivedSignalUpdate::Unchanged;
+                }
+                return inputs
+                    .value_for(self.total)
+                    .copied()
+                    .map(|value| value * 2)
+                    .into();
+            }
+            DerivedSignalUpdate::Unchanged
+        }
+
+        fn evaluate_reactive_seed(
+            &mut self,
+            signal: SignalHandle,
+            _inputs: DependencyValues<'_, i32>,
+        ) -> DerivedSignalUpdate<i32> {
+            assert_eq!(signal, self.total);
+            DerivedSignalUpdate::Value(0)
+        }
+
+        fn evaluate_reactive_guard(
+            &mut self,
+            signal: SignalHandle,
+            clause: ReactiveClauseHandle,
+            inputs: DependencyValues<'_, i32>,
+        ) -> bool {
+            assert_eq!(signal, self.total);
+            if clause == self.first_clause {
+                return inputs.value_for(self.ready).copied() == Some(1);
+            }
+            if clause == self.second_clause {
+                return inputs.value_for(self.ready).copied() == Some(1)
+                    && inputs.value_for(self.enabled).copied() == Some(1);
+            }
+            panic!("unexpected reactive clause {:?}", clause);
+        }
+
+        fn evaluate_reactive_body(
+            &mut self,
+            signal: SignalHandle,
+            clause: ReactiveClauseHandle,
+            inputs: DependencyValues<'_, i32>,
+        ) -> DerivedSignalUpdate<i32> {
+            assert_eq!(signal, self.total);
+            let left = inputs.value_for(self.left).copied().expect("left should be present");
+            let right = inputs
+                .value_for(self.right)
+                .copied()
+                .expect("right should be present");
+            if clause == self.first_clause {
+                return DerivedSignalUpdate::Value(left + right);
+            }
+            if clause == self.second_clause {
+                return DerivedSignalUpdate::Value(left + right + 100);
+            }
+            panic!("unexpected reactive clause {:?}", clause);
+        }
     }
 
     #[test]
@@ -973,6 +1258,160 @@ mod tests {
             })
             .expect_err("fallible scheduler tick should surface evaluator errors");
         assert_eq!(error, "boom");
+    }
+
+    #[test]
+    fn scheduler_executes_reactive_updates_in_source_order() {
+        let mut builder = SignalGraphBuilder::new();
+        let left = builder.add_input("left", None).unwrap();
+        let right = builder.add_input("right", None).unwrap();
+        let ready = builder.add_input("ready", None).unwrap();
+        let enabled = builder.add_input("enabled", None).unwrap();
+        let total = builder.add_reactive("total", None).unwrap();
+        let doubled = builder.add_derived("doubled", None).unwrap();
+        builder
+            .define_reactive(
+                total,
+                [],
+                [
+                    ReactiveClauseBuilderSpec::new(
+                        [ready.as_signal()],
+                        [left.as_signal(), right.as_signal()],
+                    ),
+                    ReactiveClauseBuilderSpec::new(
+                        [ready.as_signal(), enabled.as_signal()],
+                        [left.as_signal(), right.as_signal()],
+                    ),
+                ],
+            )
+            .unwrap();
+        builder.define_derived(doubled, [total]).unwrap();
+
+        let graph = builder.build().unwrap();
+        let clauses = graph
+            .reactive(total)
+            .expect("reactive signal spec should exist")
+            .clauses()
+            .to_vec();
+        let mut scheduler = Scheduler::new(graph);
+
+        for (input, value) in [(left, 2), (right, 3), (ready, 1), (enabled, 1)] {
+            let stamp = scheduler.current_stamp(input).unwrap();
+            scheduler
+                .queue_publication(Publication::new(stamp, value))
+                .unwrap();
+        }
+
+        let mut evaluator = ReactiveTestEvaluator {
+            total,
+            doubled,
+            left: left.as_signal(),
+            right: right.as_signal(),
+            ready: ready.as_signal(),
+            enabled: enabled.as_signal(),
+            first_clause: clauses[0],
+            second_clause: clauses[1],
+        };
+        let outcome = scheduler.tick(&mut evaluator);
+
+        assert_eq!(
+            outcome.committed(),
+            &[
+                left.as_signal(),
+                right.as_signal(),
+                ready.as_signal(),
+                enabled.as_signal(),
+                total,
+                doubled.as_signal()
+            ]
+        );
+        assert_eq!(scheduler.current_value(total).unwrap().copied(), Some(105));
+        assert_eq!(
+            scheduler.current_value(doubled.as_signal()).unwrap().copied(),
+            Some(210)
+        );
+    }
+
+    #[test]
+    fn scheduler_keeps_previous_committed_value_when_reactive_guard_is_false() {
+        let mut builder = SignalGraphBuilder::new();
+        let left = builder.add_input("left", None).unwrap();
+        let right = builder.add_input("right", None).unwrap();
+        let ready = builder.add_input("ready", None).unwrap();
+        let enabled = builder.add_input("enabled", None).unwrap();
+        let total = builder.add_reactive("total", None).unwrap();
+        let doubled = builder.add_derived("doubled", None).unwrap();
+        builder
+            .define_reactive(
+                total,
+                [],
+                [
+                    ReactiveClauseBuilderSpec::new(
+                        [ready.as_signal()],
+                        [left.as_signal(), right.as_signal()],
+                    ),
+                    ReactiveClauseBuilderSpec::new(
+                        [ready.as_signal(), enabled.as_signal()],
+                        [left.as_signal(), right.as_signal()],
+                    ),
+                ],
+            )
+            .unwrap();
+        builder.define_derived(doubled, [total]).unwrap();
+
+        let graph = builder.build().unwrap();
+        let clauses = graph
+            .reactive(total)
+            .expect("reactive signal spec should exist")
+            .clauses()
+            .to_vec();
+        let mut scheduler = Scheduler::new(graph);
+        let mut evaluator = ReactiveTestEvaluator {
+            total,
+            doubled,
+            left: left.as_signal(),
+            right: right.as_signal(),
+            ready: ready.as_signal(),
+            enabled: enabled.as_signal(),
+            first_clause: clauses[0],
+            second_clause: clauses[1],
+        };
+
+        for (input, value) in [(left, 4), (right, 6), (ready, 1), (enabled, 0)] {
+            let stamp = scheduler.current_stamp(input).unwrap();
+            scheduler
+                .queue_publication(Publication::new(stamp, value))
+                .unwrap();
+        }
+        scheduler.tick(&mut evaluator);
+        assert_eq!(scheduler.current_value(total).unwrap().copied(), Some(10));
+        assert_eq!(
+            scheduler.current_value(doubled.as_signal()).unwrap().copied(),
+            Some(20)
+        );
+
+        for (input, value) in [(left, 7), (right, 9), (ready, 0), (enabled, 1)] {
+            let stamp = scheduler.current_stamp(input).unwrap();
+            scheduler
+                .queue_publication(Publication::new(stamp, value))
+                .unwrap();
+        }
+        let outcome = scheduler.tick(&mut evaluator);
+
+        assert_eq!(
+            outcome.committed(),
+            &[
+                left.as_signal(),
+                right.as_signal(),
+                ready.as_signal(),
+                enabled.as_signal()
+            ]
+        );
+        assert_eq!(scheduler.current_value(total).unwrap().copied(), Some(10));
+        assert_eq!(
+            scheduler.current_value(doubled.as_signal()).unwrap().copied(),
+            Some(20)
+        );
     }
 
     #[test]

@@ -64,6 +64,39 @@ signal activeUsers: Signal User = sessions
 
 For ordinary non-signal values, the same operator returns `Option A`.
 
+## Reactive update clauses with `when`
+
+You can also attach top-level reactive updates to an already declared signal:
+
+```aivi
+signal left = 20
+signal right = 22
+signal total = 0
+signal ready = True
+signal enabled = True
+
+when ready => total <- left + right
+when ready and enabled => total <- result {
+    next <- Ok left
+    next + right
+}
+```
+
+This form means:
+
+- the guard is an ordinary boolean expression
+- the target must be a previously declared signal
+- the right-hand side is an ordinary expression with direct signal references
+- unlike a pipe, there is no ambient subject value
+- if the guard is false when the clause fires, the target keeps its previous committed value
+- if multiple `when` clauses write the same signal in one tick, later clauses win by source order
+
+Guards like `status.done` are fine too, but only when ordinary expression typing already proves that member access is a `Bool`.
+
+Use `when` when you want event-shaped reactive commits into an existing signal. Use pipes when you want to transform the current subject flowing through one expression spine.
+
+At the moment, this surface is documented and partially wired through the frontend/tooling, but runtime execution is still incomplete, so end-to-end programs using `when` are not yet fully supported.
+
 ## Previous and diff
 
 The language has dedicated pipes for time-oriented signal transformations:

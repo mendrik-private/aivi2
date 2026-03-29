@@ -42,9 +42,8 @@ fn token_type_index(kind: TokenKind) -> Option<u32> {
         | TokenKind::ExportKw
         | TokenKind::PatchKw => Some(IDX_KEYWORD),
 
-        // Identifiers — emitted as variable; callers relying on type info
-        // should use the HIR-backed `document_symbol` instead.
-        TokenKind::Identifier => Some(IDX_VARIABLE),
+        // Soft keywords are handled separately; other identifiers remain variables.
+        TokenKind::Identifier => None,
 
         // Literals
         TokenKind::StringLiteral | TokenKind::RegexLiteral => Some(IDX_STRING),
@@ -126,7 +125,7 @@ pub async fn semantic_tokens_full(
     let mut prev_char: u32 = 0;
 
     for token in lexed.tokens() {
-        let Some(type_index) = token_type_index(token.kind()) else {
+        let Some(type_index) = soft_or_hard_token_type_index(*token, source) else {
             continue;
         };
 
@@ -169,15 +168,40 @@ pub async fn semantic_tokens_full(
     }))
 }
 
+fn soft_or_hard_token_type_index(token: aivi_syntax::Token, source: &aivi_base::SourceFile) -> Option<u32> {
+    match token.kind() {
+        TokenKind::Identifier if token.text(source) == "when" => Some(IDX_KEYWORD),
+        TokenKind::Identifier => Some(IDX_VARIABLE),
+        kind => token_type_index(kind),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{IDX_KEYWORD, IDX_OPERATOR, token_type_index};
-    use aivi_syntax::TokenKind;
+    use super::{IDX_KEYWORD, IDX_OPERATOR, soft_or_hard_token_type_index, token_type_index};
+    use aivi_base::{FileId, SourceFile};
+    use aivi_syntax::{TokenKind, lex_module};
 
     #[test]
     fn classifies_patch_surface_tokens() {
         assert_eq!(token_type_index(TokenKind::PatchKw), Some(IDX_KEYWORD));
         assert_eq!(token_type_index(TokenKind::PatchApply), Some(IDX_OPERATOR));
         assert_eq!(token_type_index(TokenKind::ColonEquals), Some(IDX_OPERATOR));
+    }
+
+    #[test]
+    fn classifies_when_as_soft_keyword() {
+        let source = SourceFile::new(FileId::new(0), "test.aivi", "when ready => total <- 1\n");
+        let lexed = lex_module(&source);
+        let when = lexed
+            .tokens()
+            .iter()
+            .find(|token| token.kind() == TokenKind::Identifier && token.text(&source) == "when")
+            .copied()
+            .expect("expected `when` token");
+        assert_eq!(
+            soft_or_hard_token_type_index(when, &source),
+            Some(IDX_KEYWORD)
+        );
     }
 }

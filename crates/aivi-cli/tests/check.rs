@@ -59,6 +59,71 @@ impl Drop for TempDir {
 }
 
 #[test]
+fn check_accepts_reactive_update_programs() {
+    let dir = TempDir::new("check-reactive-update");
+    let path = dir.write(
+        "main.aivi",
+        concat!(
+            "signal left = 20\n",
+            "signal right = 22\n",
+            "signal total = 0\n",
+            "signal ready = True\n",
+            "signal enabled = False\n",
+            "\n",
+            "when ready => total <- left + right\n",
+            "when ready and enabled => total <- left + right + 1\n",
+        ),
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        output.status.success(),
+        "expected reactive update program to pass check, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("syntax + HIR passed"),
+        "expected success output for reactive update program, got stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
+fn check_reports_reactive_update_self_reference_from_hir() {
+    let dir = TempDir::new("check-reactive-update-self-reference");
+    let path = dir.write(
+        "main.aivi",
+        concat!(
+            "signal total = 0\n",
+            "when total > 0 => total <- 1\n",
+        ),
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        !output.status.success(),
+        "expected reactive update self-reference fixture to fail check"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("hir::reactive-update-self-reference"),
+        "expected reactive update self-reference diagnostic code, got stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("reactive update guard for `total` cannot read the target signal itself"),
+        "expected explicit reactive update self-reference message, got stderr: {stderr}"
+    );
+}
+
+#[test]
 fn check_accepts_valid_hir_fixtures() {
     for relative in [
         "milestone-2/valid/local-top-level-refs/main.aivi",

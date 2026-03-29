@@ -208,6 +208,13 @@ fn signal_name_payload_type<'a>(
         })
 }
 
+fn signal_annotation_payload(annotation: Option<&GateType>) -> Option<&GateType> {
+    match annotation {
+        Some(GateType::Signal(payload)) => Some(payload.as_ref()),
+        _ => None,
+    }
+}
+
 pub(crate) fn resolve_class_member_dispatch(
     module: &Module,
     reference: &TermReference,
@@ -390,46 +397,110 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_signal_item(&mut self, item: &SignalItem) {
-        let Some(body) = item.body else {
-            return;
-        };
         let expected = item
             .annotation
             .and_then(|annotation| self.typing.lower_annotation(annotation));
-        match expected.as_ref() {
-            Some(annotation @ GateType::Signal(payload)) => {
-                let checkpoint = self.diagnostics.len();
-                if self.check_expr(
-                    body,
-                    &GateExprEnv::default(),
-                    Some(annotation),
-                    &mut Vec::new(),
-                ) {
-                    return;
+        if let Some(body) = item.body {
+            match expected.as_ref() {
+                Some(annotation @ GateType::Signal(payload)) => {
+                    let checkpoint = self.diagnostics.len();
+                    if self.check_expr(
+                        body,
+                        &GateExprEnv::default(),
+                        Some(annotation),
+                        &mut Vec::new(),
+                    ) {
+                        self.check_signal_reactive_updates(item, Some(payload.as_ref()));
+                        return;
+                    }
+                    self.diagnostics.truncate(checkpoint);
+                    self.check_expr(
+                        body,
+                        &GateExprEnv::default(),
+                        Some(payload.as_ref()),
+                        &mut Vec::new(),
+                    );
+                    self.check_signal_reactive_updates(item, Some(payload.as_ref()));
                 }
-                self.diagnostics.truncate(checkpoint);
-                self.check_expr(
-                    body,
-                    &GateExprEnv::default(),
-                    Some(payload.as_ref()),
-                    &mut Vec::new(),
-                );
+                Some(annotation) => {
+                    self.diagnostics.push(
+                        Diagnostic::error(format!(
+                            "signal bodies require a `Signal A` annotation, found `{annotation}`"
+                        ))
+                        .with_code(code("invalid-signal-annotation"))
+                        .with_primary_label(
+                            self.module.exprs()[body].span,
+                            "this signal body is checked against the payload type of `Signal A`",
+                        ),
+                    );
+                    self.check_signal_reactive_updates(item, None);
+                }
+                None => {
+                    self.check_inferred_expr(body, &GateExprEnv::default(), None);
+                    let inferred_payload = self.inferred_expr_type(body, &GateExprEnv::default());
+                    self.check_signal_reactive_updates(item, inferred_payload.as_ref());
+                }
             }
-            Some(annotation) => {
+            return;
+        }
+        self.check_signal_reactive_updates(item, signal_annotation_payload(expected.as_ref()));
+    }
+
+    fn check_signal_reactive_updates(
+        &mut self,
+        item: &SignalItem,
+        expected_payload: Option<&GateType>,
+    ) {
+        if item.reactive_updates.is_empty() {
+            return;
+        }
+        let Some(expected_payload) = expected_payload else {
+            if let Some(annotation) = item
+                .annotation
+                .and_then(|annotation| self.typing.lower_annotation(annotation))
+                && !annotation.is_signal()
+            {
+                let update = &item.reactive_updates[0];
                 self.diagnostics.push(
                     Diagnostic::error(format!(
-                        "signal bodies require a `Signal A` annotation, found `{annotation}`"
+                        "reactive update targets require a `Signal A` annotation, found `{annotation}`"
                     ))
-                    .with_code(code("invalid-signal-annotation"))
+                    .with_code(code("invalid-reactive-update-target-type"))
                     .with_primary_label(
-                        self.module.exprs()[body].span,
-                        "this signal body is checked against the payload type of `Signal A`",
+                        self.module.exprs()[update.body].span,
+                        "this reactive update body is checked against the payload type of `Signal A`",
+                    ),
+                );
+            } else {
+                let update = &item.reactive_updates[0];
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "reactive update target `{}` needs a known payload type",
+                        item.name.text()
+                    ))
+                    .with_code(code("missing-reactive-update-target-type"))
+                    .with_primary_label(
+                        self.module.exprs()[update.body].span,
+                        "declare the target as `Signal A` or give it an initial body before updating it",
                     ),
                 );
             }
-            None => {
-                self.check_inferred_expr(body, &GateExprEnv::default(), None);
-            }
+            return;
+        };
+        let bool_ty = GateType::Primitive(BuiltinType::Bool);
+        for update in &item.reactive_updates {
+            self.check_expr(
+                update.guard,
+                &GateExprEnv::default(),
+                Some(&bool_ty),
+                &mut Vec::new(),
+            );
+            self.check_expr(
+                update.body,
+                &GateExprEnv::default(),
+                Some(expected_payload),
+                &mut Vec::new(),
+            );
         }
     }
 
@@ -4157,6 +4228,56 @@ mod tests {
                 diagnostic.code == Some(DiagnosticCode::new("hir", "type-mismatch"))
             }),
             "expected type mismatch diagnostic, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_accepts_reactive_update_guards_and_bodies_against_signal_payloads() {
+        let report = typecheck_text(
+            "reactive-update-valid.aivi",
+            "signal total : Signal Int\n\
+             signal ready : Signal Bool\n\
+             signal left : Signal Int\n\
+             signal right : Signal Int\n\
+             when ready => total <- left + right\n",
+        );
+        assert!(
+            report.is_ok(),
+            "expected reactive update typing to accept direct signal references, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_reports_non_bool_reactive_update_guard() {
+        let report = typecheck_text(
+            "reactive-update-guard-not-bool.aivi",
+            "signal total : Signal Int\n\
+             when 1 => total <- 2\n",
+        );
+        assert!(
+            report.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code == Some(DiagnosticCode::new("hir", "type-mismatch"))
+            }),
+            "expected non-bool reactive update guard to report a type mismatch, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_reports_reactive_update_body_payload_mismatch() {
+        let report = typecheck_text(
+            "reactive-update-body-mismatch.aivi",
+            "signal total : Signal Int\n\
+             signal ready : Signal Bool\n\
+             when ready => total <- \"oops\"\n",
+        );
+        assert!(
+            report.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code == Some(DiagnosticCode::new("hir", "type-mismatch"))
+            }),
+            "expected reactive update body mismatch to report a type mismatch, got diagnostics: {:?}",
             report.diagnostics()
         );
     }

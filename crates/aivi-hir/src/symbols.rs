@@ -241,7 +241,19 @@ fn item_to_lsp_symbol(item: &Item, module: &Module) -> Option<LspSymbol> {
             span: s.header.span,
             selection_span: s.name.span(),
             detail: s.annotation.map(|id| format_type(module, id)),
-            children: Vec::new(),
+            children: s
+                .reactive_updates
+                .iter()
+                .enumerate()
+                .map(|(index, update)| LspSymbol {
+                    name: format!("when #{}", index + 1),
+                    kind: LspSymbolKind::Event,
+                    span: update.span,
+                    selection_span: update.keyword_span,
+                    detail: Some("reactive update".to_owned()),
+                    children: Vec::new(),
+                })
+                .collect(),
         }),
         Item::Class(c) => {
             let children = c
@@ -297,5 +309,51 @@ fn item_to_lsp_symbol(item: &Item, module: &Module) -> Option<LspSymbol> {
         Item::Instance(_) | Item::Use(_) | Item::Export(_) | Item::SourceProviderContract(_) => {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use aivi_base::SourceDatabase;
+    use aivi_syntax::parse_module;
+
+    use super::{LspSymbolKind, extract_symbols};
+
+    fn lower_symbols(input: &str) -> Vec<super::LspSymbol> {
+        let mut sources = SourceDatabase::new();
+        let file_id = sources.add_file("symbols.aivi", input.to_owned());
+        let parsed = parse_module(&sources[file_id]);
+        assert!(
+            !parsed.has_errors(),
+            "symbol test input should parse cleanly: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+        let lowered = crate::lower_module(&parsed.module);
+        assert!(
+            !lowered.has_errors(),
+            "symbol test input should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+        extract_symbols(lowered.module())
+    }
+
+    #[test]
+    fn signal_symbols_include_reactive_update_children() {
+        let symbols = lower_symbols(
+            r#"signal total : Signal Int
+signal ready : Signal Bool
+
+when ready => total <- 1
+"#,
+        );
+
+        let total = symbols
+            .iter()
+            .find(|symbol| symbol.name == "total")
+            .expect("expected total signal symbol");
+        assert_eq!(total.kind, LspSymbolKind::Event);
+        assert_eq!(total.children.len(), 1);
+        assert_eq!(total.children[0].name, "when #1");
+        assert_eq!(total.children[0].kind, LspSymbolKind::Event);
     }
 }
