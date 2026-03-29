@@ -47,7 +47,7 @@ use aivi.core.set (
 value tags: (Set Text) = singleton "urgent"
 ```
 
-### `fromList : List A -> Set A`
+### `fromList : Eq A -> List A -> Set A`
 
 Build a set from a list, discarding duplicates (first occurrence wins).
 
@@ -80,7 +80,7 @@ use aivi.core.set (
 value noTags:Bool = isEmpty (fromList [])
 ```
 
-### `member : A -> Set A -> Bool`
+### `member : Eq A -> A -> Set A -> Bool`
 
 ```aivi
 use aivi.core.set (
@@ -139,7 +139,7 @@ value items: (List Text) =
 
 ## Modification
 
-### `insert : A -> Set A -> Set A`
+### `insert : Eq A -> A -> Set A -> Set A`
 
 Add a value. If already present, the set is unchanged.
 
@@ -157,7 +157,7 @@ value tags: (Set Text) =
     )
 ```
 
-### `remove : A -> Set A -> Set A`
+### `remove : Eq A -> A -> Set A -> Set A`
 
 Remove a value. No-op if not present.
 
@@ -180,7 +180,7 @@ value tags: (Set Text) =
 
 ## Set algebra
 
-### `union : Set A -> Set A -> Set A`
+### `union : Eq A -> Set A -> Set A -> Set A`
 
 All items from both sets (items from `b` appended when not already in `a`).
 
@@ -199,7 +199,7 @@ value merged: (Set Text) =
     )
 ```
 
-### `intersection : Set A -> Set A -> Set A`
+### `intersection : Eq A -> Set A -> Set A -> Set A`
 
 Items that appear in both sets.
 
@@ -218,7 +218,7 @@ value shared: (Set Text) =
     )
 ```
 
-### `difference : Set A -> Set A -> Set A`
+### `difference : Eq A -> Set A -> Set A -> Set A`
 
 Items in `a` that are not in `b`.
 
@@ -236,7 +236,7 @@ value remaining: (Set Text) =
     )
 ```
 
-### `subsetOf : Set A -> Set A -> Bool`
+### `subsetOf : Eq A -> Set A -> Set A -> Bool`
 
 `True` when every item in `a` is also in `b`.
 

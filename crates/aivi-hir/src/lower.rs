@@ -4118,6 +4118,9 @@ impl<'a> Lowerer<'a> {
                 for superclass in &item.superclasses {
                     self.resolve_type(*superclass, namespaces, &mut env);
                 }
+                for constraint in &item.param_constraints {
+                    self.resolve_type(*constraint, namespaces, &mut env);
+                }
                 let mut item = item;
                 for member in &mut item.members {
                     let mut member_env = env.clone();

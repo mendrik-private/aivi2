@@ -13,13 +13,6 @@ use aivi_query::{
 use serde::Serialize;
 
 #[derive(Clone, Debug)]
-struct Config {
-    root: PathBuf,
-    todo_path: PathBuf,
-    write: bool,
-}
-
-#[derive(Clone, Debug)]
 struct MarkdownDocument {
     path: PathBuf,
     text: String,
@@ -286,7 +279,7 @@ fn analyze_current_file(db: &RootDatabase, file: QuerySourceFile) -> AnalysisRes
         ValidationMode::Structural
     };
     let validation = hir.module().validate(validation_mode);
-    let mut source_db = db.source_database();
+    let source_db = db.source_database();
     let mut diagnostics = Vec::new();
 
     for diagnostic in parsed.diagnostics() {

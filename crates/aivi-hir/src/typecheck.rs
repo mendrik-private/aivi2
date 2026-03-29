@@ -11,7 +11,7 @@ use crate::{
         ResolutionState, SignalItem, TermReference, TermResolution, TypeItemBody, TypeResolution,
         UnaryOperator, ValueItem,
     },
-    ids::{ExprId, ItemId, TypeParameterId},
+    ids::{ExprId, ItemId, TypeId, TypeParameterId},
     validate::{
         ClassConstraintBinding, ClassMemberCallMatch, DomainMemberSelection, GateExprEnv,
         GateIssue, GateRecordField, GateType, GateTypeContext, PolyTypeBindings, TypeBinding,
@@ -218,10 +218,10 @@ struct TypeChecker<'a> {
     diagnostics: Vec<Diagnostic>,
     option_default_in_scope: bool,
     default_record_elisions: Vec<DefaultRecordElision>,
-    /// Type parameters in the currently-checked function that are declared as
-    /// having an `Eq` constraint via `(Eq K) -> ...` in the function annotation.
-    /// Populated on entry to `check_function_item`, cleared on exit.
+    /// Eq-like constraints available in the current checking scope after expanding
+    /// any in-scope class evidence through `with` / `require`.
     eq_constrained_parameters: HashSet<TypeParameterId>,
+    in_scope_class_constraints: Vec<ClassConstraintBinding>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -246,6 +246,7 @@ impl<'a> TypeChecker<'a> {
             option_default_in_scope,
             default_record_elisions: Vec::new(),
             eq_constrained_parameters: HashSet::new(),
+            in_scope_class_constraints: Vec::new(),
         }
     }
 
@@ -285,27 +286,23 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_function_item(&mut self, item: &FunctionItem) {
-        // Populate the Eq constraint context so that `require_eq` can accept open
-        // type parameters that are declared as `(Eq K) -> ...` in this function.
-        let prev_eq_context = std::mem::replace(
-            &mut self.eq_constrained_parameters,
-            self.typing.eq_constrained_parameters(&item.context),
-        );
-        let mut env = GateExprEnv::default();
-        for parameter in &item.parameters {
-            let Some(annotation) = parameter.annotation else {
-                continue;
-            };
-            let Some(parameter_ty) = self.typing.lower_open_annotation(annotation) else {
-                continue;
-            };
-            env.locals.insert(parameter.binding, parameter_ty);
-        }
-        let expected = item
-            .annotation
-            .and_then(|annotation| self.typing.lower_open_annotation(annotation));
-        self.check_expr(item.body, &env, expected.as_ref(), &mut Vec::new());
-        self.eq_constrained_parameters = prev_eq_context;
+        let context = self.constraint_bindings(&item.context, &PolyTypeBindings::new());
+        self.with_class_constraint_scope(context, |this| {
+            let mut env = GateExprEnv::default();
+            for parameter in &item.parameters {
+                let Some(annotation) = parameter.annotation else {
+                    continue;
+                };
+                let Some(parameter_ty) = this.typing.lower_open_annotation(annotation) else {
+                    continue;
+                };
+                env.locals.insert(parameter.binding, parameter_ty);
+            }
+            let expected = item
+                .annotation
+                .and_then(|annotation| this.typing.lower_open_annotation(annotation));
+            this.check_expr(item.body, &env, expected.as_ref(), &mut Vec::new());
+        });
     }
 
     fn check_signal_item(&mut self, item: &SignalItem) {
@@ -359,26 +356,46 @@ impl<'a> TypeChecker<'a> {
         let Some(argument_bindings) = self.instance_argument_bindings(class_item_id, item) else {
             return;
         };
-        let Item::Class(class_item) = &self.module.items()[class_item_id] else {
-            return;
+        let expected_members = match &self.module.items()[class_item_id] {
+            Item::Class(class_item) => class_item
+                .members
+                .iter()
+                .map(|member| (member.name.text().to_owned(), member.annotation))
+                .collect::<HashMap<_, _>>(),
+            _ => return,
         };
-        let expected_members = class_item
-            .members
-            .iter()
-            .map(|member| (member.name.text().to_owned(), member.annotation))
-            .collect::<HashMap<_, _>>();
-        for member in &item.members {
-            let Some(annotation) = expected_members.get(member.name.text()).copied() else {
-                continue;
-            };
-            let Some(expected) = self
-                .typing
-                .instantiate_poly_hir_type(annotation, &argument_bindings)
-            else {
-                continue;
-            };
-            self.check_instance_member(member, &expected);
-        }
+        let instance_context = self.constraint_bindings(&item.context, &PolyTypeBindings::new());
+        let class_requirement_seeds =
+            self.class_requirement_bindings(class_item_id, &argument_bindings);
+        let class_requirements = self.expand_class_constraint_bindings(class_requirement_seeds);
+        self.with_class_constraint_scope(instance_context.clone(), |this| {
+            for requirement in &class_requirements {
+                if let Err(reason) = this.require_class_binding(requirement) {
+                    this.emit_missing_instance_requirement(
+                        item.header.span,
+                        class_item_id,
+                        requirement,
+                        &reason,
+                    );
+                }
+            }
+        });
+        let mut body_constraints = instance_context;
+        body_constraints.extend(class_requirements);
+        self.with_class_constraint_scope(body_constraints, |this| {
+            for member in &item.members {
+                let Some(annotation) = expected_members.get(member.name.text()).copied() else {
+                    continue;
+                };
+                let Some(expected) = this
+                    .typing
+                    .instantiate_poly_hir_type(annotation, &argument_bindings)
+                else {
+                    continue;
+                };
+                this.check_instance_member(member, &expected);
+            }
+        });
     }
 
     fn check_instance_member(&mut self, member: &InstanceMember, expected: &GateType) {
@@ -408,6 +425,115 @@ impl<'a> TypeChecker<'a> {
             current = *result;
         }
         self.check_expr(member.body, &env, Some(&current), &mut Vec::new());
+    }
+
+    fn with_class_constraint_scope<T>(
+        &mut self,
+        seeds: Vec<ClassConstraintBinding>,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let expanded = self.expand_class_constraint_bindings(seeds);
+        let eq_context = self.eq_constrained_parameters_from_bindings(&expanded);
+        let prev_constraints =
+            std::mem::replace(&mut self.in_scope_class_constraints, expanded.clone());
+        let prev_eq_context = std::mem::replace(&mut self.eq_constrained_parameters, eq_context);
+        let result = f(self);
+        self.eq_constrained_parameters = prev_eq_context;
+        self.in_scope_class_constraints = prev_constraints;
+        result
+    }
+
+    fn constraint_bindings(
+        &mut self,
+        constraints: &[TypeId],
+        bindings: &PolyTypeBindings,
+    ) -> Vec<ClassConstraintBinding> {
+        constraints
+            .iter()
+            .filter_map(|constraint| {
+                self.typing
+                    .open_class_constraint_binding(*constraint, bindings)
+            })
+            .collect()
+    }
+
+    fn class_requirement_bindings(
+        &mut self,
+        class_item_id: ItemId,
+        bindings: &PolyTypeBindings,
+    ) -> Vec<ClassConstraintBinding> {
+        let Item::Class(class_item) = &self.module.items()[class_item_id] else {
+            return Vec::new();
+        };
+        class_item
+            .superclasses
+            .iter()
+            .chain(class_item.param_constraints.iter())
+            .filter_map(|constraint| {
+                self.typing
+                    .open_class_constraint_binding(*constraint, bindings)
+            })
+            .collect()
+    }
+
+    fn expand_class_constraint_bindings(
+        &mut self,
+        seeds: Vec<ClassConstraintBinding>,
+    ) -> Vec<ClassConstraintBinding> {
+        let mut expanded = Vec::new();
+        let mut pending = seeds;
+        while let Some(binding) = pending.pop() {
+            if expanded.contains(&binding) {
+                continue;
+            }
+            for implied in self.implied_class_constraints(&binding) {
+                if !expanded.contains(&implied) && !pending.contains(&implied) {
+                    pending.push(implied);
+                }
+            }
+            expanded.push(binding);
+        }
+        expanded
+    }
+
+    fn implied_class_constraints(
+        &mut self,
+        binding: &ClassConstraintBinding,
+    ) -> Vec<ClassConstraintBinding> {
+        let Item::Class(class_item) = &self.module.items()[binding.class_item] else {
+            return Vec::new();
+        };
+        let substitutions =
+            std::iter::once((*class_item.parameters.first(), binding.subject.clone()))
+                .collect::<PolyTypeBindings>();
+        class_item
+            .superclasses
+            .iter()
+            .chain(class_item.param_constraints.iter())
+            .filter_map(|constraint| {
+                self.typing
+                    .open_class_constraint_binding(*constraint, &substitutions)
+            })
+            .collect()
+    }
+
+    fn eq_constrained_parameters_from_bindings(
+        &self,
+        bindings: &[ClassConstraintBinding],
+    ) -> HashSet<TypeParameterId> {
+        bindings
+            .iter()
+            .filter(|binding| {
+                matches!(
+                    self.class_name(binding.class_item),
+                    Some("Eq") | Some("Setoid")
+                )
+            })
+            .filter_map(|binding| match &binding.subject {
+                TypeBinding::Type(GateType::TypeParameter { parameter, .. }) => Some(*parameter),
+                _ => None,
+            })
+            .collect()
     }
 
     fn check_expr(
@@ -2228,6 +2354,28 @@ impl<'a> TypeChecker<'a> {
         format!("{class_name} {}", self.type_binding_label(&binding.subject))
     }
 
+    fn emit_missing_instance_requirement(
+        &mut self,
+        span: SourceSpan,
+        class_item_id: ItemId,
+        requirement: &ClassConstraintBinding,
+        reason: &str,
+    ) {
+        let class_name = self.class_name(class_item_id).unwrap_or("<class>");
+        self.diagnostics.push(
+            Diagnostic::error(format!(
+                "instance for `{class_name}` is missing required `{}` evidence",
+                self.class_constraint_binding_label(requirement)
+            ))
+            .with_code(code("missing-instance-requirement"))
+            .with_primary_label(
+                span,
+                "add this constraint to the instance context or provide matching evidence",
+            )
+            .with_note(reason.to_owned()),
+        );
+    }
+
     fn type_binding_label(&self, binding: &TypeBinding) -> String {
         match binding {
             TypeBinding::Type(ty) => ty.to_string(),
@@ -2310,6 +2458,9 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn require_class_binding(&mut self, binding: &ClassConstraintBinding) -> Result<(), String> {
+        if self.in_scope_class_constraints.contains(binding) {
+            return Ok(());
+        }
         let Some(class_name) = self.class_name(binding.class_item).map(str::to_owned) else {
             return Err("constraint does not reference a class item".to_owned());
         };
@@ -3092,6 +3243,42 @@ mod tests {
     }
 
     #[test]
+    fn typecheck_accepts_class_requirements_in_generic_instance_bodies() {
+        let report = typecheck_text(
+            "class-require-instance-context.aivi",
+            "class Container A\n\
+             \x20\x20\x20\x20require Eq A\n\
+             \x20\x20\x20\x20same : A -> A -> Bool\n\
+             instance Eq A -> Container A\n\
+             \x20\x20\x20\x20same left right = left == right\n",
+        );
+        assert!(
+            report.is_ok(),
+            "expected class `require` constraints to typecheck inside generic instance bodies, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_reports_missing_instance_requirement_for_class_requirements() {
+        let report = typecheck_text(
+            "class-require-missing-instance.aivi",
+            "class Container A\n\
+             \x20\x20\x20\x20require Eq A\n\
+             \x20\x20\x20\x20same : A -> A -> Bool\n\
+             instance Container Bytes\n\
+             \x20\x20\x20\x20same left right = True\n",
+        );
+        assert!(
+            report.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code == Some(DiagnosticCode::new("hir", "missing-instance-requirement"))
+            }),
+            "expected class `require` constraints to reject unsatisfied instances, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
     fn typecheck_reports_instance_member_operator_operand_mismatch() {
         let report = typecheck_text(
             "instance-member-operator-mismatch.aivi",
@@ -3178,6 +3365,64 @@ mod tests {
             report.is_ok(),
             "expected signature constraints to solve at call sites, got diagnostics: {:?}",
             report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_accepts_class_requirements_in_function_contexts() {
+        let report = typecheck_text(
+            "class-require-function-context.aivi",
+            "class Container A\n\
+             \x20\x20\x20\x20require Eq A\n\
+             \x20\x20\x20\x20same : A -> A -> Bool\n\
+             fun delegated:Container A -> Bool left:A right:A =>\n\
+             \x20\x20\x20\x20left == right\n\
+             instance Container Text\n\
+             \x20\x20\x20\x20same left right = left == right\n\
+             value sameText:Bool = delegated \"Ada\" \"Grace\"\n",
+        );
+        assert!(
+            report.is_ok(),
+            "expected class `require` constraints to propagate through function contexts, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_expands_class_requirements_into_eq_bindings() {
+        let module = lowered_module_text(
+            "class-require-expansion.aivi",
+            "class Container A\n\
+             \x20\x20\x20\x20require Eq A\n\
+             \x20\x20\x20\x20same : A -> A -> Bool\n\
+             fun delegated:Container A -> Bool left:A right:A =>\n\
+             \x20\x20\x20\x20left == right\n",
+        );
+        let function = module
+            .items()
+            .iter()
+            .find_map(|(_, item)| match item {
+                Item::Function(item) if item.name.text() == "delegated" => Some(item.clone()),
+                _ => None,
+            })
+            .expect("delegated function should lower");
+        let mut checker = TypeChecker::new(&module);
+        let bindings = checker.constraint_bindings(&function.context, &PolyTypeBindings::new());
+        let expanded = checker.expand_class_constraint_bindings(bindings);
+        let labels = expanded
+            .iter()
+            .map(|binding| checker.class_constraint_binding_label(binding))
+            .collect::<Vec<_>>();
+        let context_kinds = function
+            .context
+            .iter()
+            .map(|constraint| format!("{:?}", module.types()[*constraint].kind))
+            .collect::<Vec<_>>();
+        assert!(
+            labels.iter().any(|label| label == "Eq A"),
+            "expected `Container A` to imply `Eq A`, got context len {} kinds {:?} and labels {labels:?}",
+            function.context.len(),
+            context_kinds
         );
     }
 

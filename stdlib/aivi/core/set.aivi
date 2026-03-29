@@ -9,7 +9,7 @@ fun notEq: Eq A -> Bool x:A y:A => x == y
   T|> False
   F|> True
 
-fun notContains:Bool x:A items: (List A) => items
+fun notContains: Eq A -> Bool x:A items: (List A) => items
   |> filter (notEq x)
   |> length == length items
 
@@ -19,18 +19,18 @@ fun isEmpty:Bool s: (Set A) =>
 fun singleton: (Set A) v:A =>
     { items: [v] }
 
-fun member:Bool v:A s: (Set A) => notContains v s.items
+fun member: Eq A -> Bool v:A s: (Set A) => notContains v s.items
   T|> False
   F|> True
 
-fun insert: (Set A) v:A s: (Set A) => member v s
+fun insert: Eq A -> (Set A) v:A s: (Set A) => member v s
   T|> s
   F|> { items: append s.items [v] }
 
 fun filteredItems: (List A) pred:(A -> Bool) s: (Set A) => s.items
   |> filter pred
 
-fun remove: (Set A) v:A s: (Set A) =>
+fun remove: Eq A -> (Set A) v:A s: (Set A) =>
     {
         items: filteredItems (notEq v) s
     }
@@ -41,42 +41,42 @@ fun size:Int s: (Set A) => s.items
 fun toList: (List A) s: (Set A) =>
     s.items
 
-fun insertItem: (Set A) acc: (Set A) v:A =>
+fun insertItem: Eq A -> (Set A) acc: (Set A) v:A =>
     insert v acc
 
-fun fromList: (Set A) items: (List A) => items
+fun fromList: Eq A -> (Set A) items: (List A) => items
   |> reduce insertItem { items: [] }
 
-fun unionStep: (Set A) acc: (Set A) v:A =>
+fun unionStep: Eq A -> (Set A) acc: (Set A) v:A =>
     insert v acc
 
-fun union: (Set A) a: (Set A) b: (Set A) => b.items
+fun union: Eq A -> (Set A) a: (Set A) b: (Set A) => b.items
   |> reduce unionStep a
 
-fun keepIfMember:Bool s: (Set A) v:A =>
+fun keepIfMember: Eq A -> Bool s: (Set A) v:A =>
     member v s
 
-fun intersectionItems: (List A) a: (Set A) b: (Set A) => a.items
+fun intersectionItems: Eq A -> (List A) a: (Set A) b: (Set A) => a.items
   |> filter (keepIfMember b)
 
-fun intersection: (Set A) a: (Set A) b: (Set A) =>
+fun intersection: Eq A -> (Set A) a: (Set A) b: (Set A) =>
     {
         items: intersectionItems a b
     }
 
-fun keepIfNotMember:Bool s: (Set A) v:A => member v s
+fun keepIfNotMember: Eq A -> Bool s: (Set A) v:A => member v s
   T|> False
   F|> True
 
-fun differenceItems: (List A) a: (Set A) b: (Set A) => a.items
+fun differenceItems: Eq A -> (List A) a: (Set A) b: (Set A) => a.items
   |> filter (keepIfNotMember b)
 
-fun difference: (Set A) a: (Set A) b: (Set A) =>
+fun difference: Eq A -> (Set A) a: (Set A) b: (Set A) =>
     {
         items: differenceItems a b
     }
 
-fun subsetOf:Bool a: (Set A) b: (Set A) => a.items
+fun subsetOf: Eq A -> Bool a: (Set A) b: (Set A) => a.items
   |> filter (keepIfMember b)
   |> length == length a.items
 

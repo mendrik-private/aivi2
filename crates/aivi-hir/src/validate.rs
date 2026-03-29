@@ -830,6 +830,14 @@ impl Validator<'_> {
                             *superclass,
                         );
                     }
+                    for constraint in &item.param_constraints {
+                        self.require_type(
+                            item.header.span,
+                            "class item",
+                            "parameter constraint",
+                            *constraint,
+                        );
+                    }
                     for member in &item.members {
                         self.check_span("class member", member.span);
                         self.check_name(&member.name);
@@ -1175,6 +1183,13 @@ impl Validator<'_> {
                     let parameters = item.parameters.iter().copied().collect::<Vec<_>>();
                     for superclass in &item.superclasses {
                         self.check_expected_type_kind(*superclass, &parameters, "class superclass");
+                    }
+                    for constraint in &item.param_constraints {
+                        self.check_expected_type_kind(
+                            *constraint,
+                            &parameters,
+                            "class parameter constraint",
+                        );
                     }
                     for member in &item.members {
                         let mut member_parameters = parameters.clone();
@@ -9235,6 +9250,23 @@ impl<'a> GateTypeContext<'a> {
             .map(TypeBinding::Constructor)
     }
 
+    pub(crate) fn open_poly_type_binding(
+        &mut self,
+        ty: TypeId,
+        bindings: &PolyTypeBindings,
+    ) -> Option<TypeBinding> {
+        self.instantiate_poly_type_binding(ty, bindings)
+            .or_else(|| {
+                self.lower_open_annotation(ty)
+                    .map(TypeBinding::Type)
+                    .or_else(|| {
+                        let mut item_stack = Vec::new();
+                        self.partial_type_constructor_binding(ty, &mut item_stack)
+                            .map(TypeBinding::Constructor)
+                    })
+            })
+    }
+
     pub(crate) fn instantiate_poly_hir_type(
         &mut self,
         ty: TypeId,
@@ -10091,11 +10123,14 @@ impl<'a> GateTypeContext<'a> {
             return None;
         };
         let member = class_item.members.get(resolution.member_index)?;
-        Some((
-            *class_item.parameters.first(),
-            member.annotation,
-            member.context.clone(),
-        ))
+        let context = class_item
+            .superclasses
+            .iter()
+            .chain(class_item.param_constraints.iter())
+            .chain(member.context.iter())
+            .copied()
+            .collect();
+        Some((*class_item.parameters.first(), member.annotation, context))
     }
 
     fn class_member_label(&self, resolution: ClassMemberResolution) -> Option<String> {
@@ -10118,6 +10153,18 @@ impl<'a> GateTypeContext<'a> {
         })
     }
 
+    pub(crate) fn open_class_constraint_binding(
+        &mut self,
+        constraint: TypeId,
+        bindings: &PolyTypeBindings,
+    ) -> Option<ClassConstraintBinding> {
+        let (class_item, subject) = self.class_constraint_parts(constraint)?;
+        Some(ClassConstraintBinding {
+            class_item,
+            subject: self.open_poly_type_binding(subject, bindings)?,
+        })
+    }
+
     pub(crate) fn class_constraint_parts(&self, constraint: TypeId) -> Option<(ItemId, TypeId)> {
         let ty = self.module.types().get(constraint)?;
         match &ty.kind {
@@ -10135,63 +10182,6 @@ impl<'a> GateTypeContext<'a> {
             }
             _ => None,
         }
-    }
-
-    /// Returns the set of type parameters in `context` that are constrained by `Eq`.
-    /// Used by the typechecker to satisfy `require_eq` for open type parameters in
-    /// functions whose annotations carry `(Eq K) ->` constraints.
-    ///
-    /// Matching is done by NAME ("Eq") rather than by resolved class item, so that
-    /// the constraint works even when the `Eq` class is not explicitly imported in
-    /// the current module (e.g. it may be a builtin or not yet defined in user stdlib).
-    pub(crate) fn eq_constrained_parameters(&self, context: &[TypeId]) -> HashSet<TypeParameterId> {
-        let mut result = HashSet::new();
-        for &constraint in context {
-            if let Some(param_id) = self.extract_eq_constrained_parameter(constraint) {
-                result.insert(param_id);
-            }
-        }
-        result
-    }
-
-    /// Returns the TypeParameterId if `type_id` represents an `Eq K` application
-    /// where K is an open type parameter.  Works for both resolved and unresolved `Eq`.
-    fn extract_eq_constrained_parameter(&self, type_id: TypeId) -> Option<TypeParameterId> {
-        let ty = self.module.types().get(type_id)?;
-        let TypeKind::Apply { callee, arguments } = &ty.kind else {
-            return None;
-        };
-        if arguments.len() != 1 {
-            return None;
-        }
-        // Accept `Eq K` both when Eq is resolved to a class item and when it is not yet
-        // resolved (e.g. builtin or not explicitly imported).
-        let callee_is_eq = match &self.module.types()[*callee].kind {
-            TypeKind::Name(reference) => {
-                match reference.resolution.as_ref() {
-                    // Fully resolved to a class named "Eq".
-                    ResolutionState::Resolved(TypeResolution::Item(item_id)) => {
-                        matches!(&self.module.items()[*item_id], Item::Class(c) if c.name.text() == "Eq")
-                    }
-                    // Unresolved but spelled "Eq" — accept as an Eq constraint annotation.
-                    ResolutionState::Unresolved => reference.path.segments().last().text() == "Eq",
-                    _ => false,
-                }
-            }
-            _ => false,
-        };
-        if !callee_is_eq {
-            return None;
-        }
-        // The single argument must resolve to a type parameter.
-        if let TypeKind::Name(ref reference) = self.module.types()[*arguments.first()].kind {
-            if let ResolutionState::Resolved(TypeResolution::TypeParameter(param_id)) =
-                reference.resolution.as_ref()
-            {
-                return Some(*param_id);
-            }
-        }
-        None
     }
 
     fn select_domain_member_candidate<T>(
@@ -15722,6 +15712,23 @@ value screenView =
         assert!(
             report.is_ok(),
             "unexpected diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn resolved_validation_accepts_class_body_require_constraints() {
+        let report = validate_resolved_text(
+            "class_require_constraints.aivi",
+            r#"class Container A
+    require Eq A
+    same : A -> A -> Bool
+"#,
+        );
+
+        assert!(
+            report.is_ok(),
+            "expected class body `require` constraints to validate cleanly, got {:?}",
             report.diagnostics()
         );
     }

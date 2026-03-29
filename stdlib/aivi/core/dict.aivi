@@ -26,35 +26,35 @@ fun notMatchesKey: Eq K -> Bool k:K entry: (DictEntry K V) => entry.key == k
   T|> False
   F|> True
 
-fun filterOldKey: (List (DictEntry K V)) k:K d: (Dict K V) => d.entries
+fun filterOldKey: Eq K -> (List (DictEntry K V)) k:K d: (Dict K V) => d.entries
   |> filter (notMatchesKey k)
 
-fun insert: (Dict K V) k:K v:V d: (Dict K V) =>
+fun insert: Eq K -> (Dict K V) k:K v:V d: (Dict K V) =>
     {
         entries: append [{ key: k, value: v }] (filterOldKey k d)
     }
 
-fun insertWith: (Dict K V) merge:(V -> V -> V) k:K v:V d: (Dict K V) => d.entries
+fun insertWith: Eq K -> (Dict K V) merge:(V -> V -> V) k:K v:V d: (Dict K V) => d.entries
   |> find (matchesKey k)
   ||> None          -> { entries: append d.entries [{ key: k, value: v }] }
   ||> Some existing -> insert k (merge existing.value v) d
 
-fun get: (Option V) k:K d: (Dict K V) => d.entries
+fun get: Eq K -> (Option V) k:K d: (Dict K V) => d.entries
   |> find (matchesKey k)
   ||> None       -> None
   ||> Some entry -> Some entry.value
 
-fun getWithDefault:V default:V k:K d: (Dict K V) => d.entries
+fun getWithDefault: Eq K -> V default:V k:K d: (Dict K V) => d.entries
   |> find (matchesKey k)
   ||> None       -> default
   ||> Some entry -> entry.value
 
-fun member:Bool k:K d: (Dict K V) => d.entries
+fun member: Eq K -> Bool k:K d: (Dict K V) => d.entries
   |> find (matchesKey k)
   ||> Some _ -> True
   ||> None   -> False
 
-fun remove: (Dict K V) k:K d: (Dict K V) =>
+fun remove: Eq K -> (Dict K V) k:K d: (Dict K V) =>
     {
         entries: filterOldKey k d
     }
@@ -80,10 +80,10 @@ fun toPair:((K, V)) entry: (DictEntry K V) =>
 fun toList: (List (K, V)) d: (Dict K V) => d.entries
   |> map toPair
 
-fun insertPair: (Dict K V) acc: (Dict K V) pair:(K, V) => pair
+fun insertPair: Eq K -> (Dict K V) acc: (Dict K V) pair:(K, V) => pair
   ||> (k, v) -> insert k v acc
 
-fun fromList: (Dict K V) items: (List (K, V)) => items
+fun fromList: Eq K -> (Dict K V) items: (List (K, V)) => items
   |> reduce insertPair { entries: [] }
 
 fun mapEntryValue: (DictEntry K V2) f:(V1 -> V2) entry: (DictEntry K V1) =>
@@ -111,16 +111,16 @@ fun filterValues: (Dict K V) predicate:(V -> Bool) d: (Dict K V) =>
         entries: filteredValueEntries predicate d
     }
 
-fun mergeStep: (Dict K V) combine:(V -> V -> V) acc: (Dict K V) entry: (DictEntry K V) =>
+fun mergeStep: Eq K -> (Dict K V) combine:(V -> V -> V) acc: (Dict K V) entry: (DictEntry K V) =>
     insertWith combine entry.key entry.value acc
 
-fun mergeWith: (Dict K V) combine:(V -> V -> V) left: (Dict K V) right: (Dict K V) => right.entries
+fun mergeWith: Eq K -> (Dict K V) combine:(V -> V -> V) left: (Dict K V) right: (Dict K V) => right.entries
   |> reduce (mergeStep combine) left
 
-fun insertEntry: (Dict K V) acc: (Dict K V) entry: (DictEntry K V) =>
+fun insertEntry: Eq K -> (Dict K V) acc: (Dict K V) entry: (DictEntry K V) =>
     insert entry.key entry.value acc
 
-fun union: (Dict K V) left: (Dict K V) right: (Dict K V) => right.entries
+fun union: Eq K -> (Dict K V) left: (Dict K V) right: (Dict K V) => right.entries
   |> reduce insertEntry left
 
 export Dict

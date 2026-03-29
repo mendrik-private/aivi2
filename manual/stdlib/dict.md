@@ -71,7 +71,7 @@ value greeting: (Dict Text Text) = singleton "hello" "world"
 Inserts or replaces a key. If the key already exists, the old value is discarded.
 
 ```
-insert : K -> V -> Dict K V -> Dict K V
+insert : Eq K -> K -> V -> Dict K V -> Dict K V
 ```
 
 ```aivi
@@ -92,7 +92,7 @@ value scores: (Dict Text Int) = { entries: [] }
 Inserts a key, combining the new value with the existing one using `merge` if the key is already present.
 
 ```
-insertWith : (V -> V -> V) -> K -> V -> Dict K V -> Dict K V
+insertWith : Eq K -> (V -> V -> V) -> K -> V -> Dict K V -> Dict K V
 ```
 
 ```aivi
@@ -115,7 +115,7 @@ fun addScore: (Dict Text Int) key:Text n:Int d: (Dict Text Int) =>
 Looks up a key. Returns `None` when the key is absent.
 
 ```
-get : K -> Dict K V -> Option V
+get : Eq K -> K -> Dict K V -> Option V
 ```
 
 ```aivi
@@ -140,7 +140,7 @@ value found: (Option Int) = get "x" d
 Looks up a key, returning a fallback value when the key is absent.
 
 ```
-getWithDefault : V -> K -> Dict K V -> V
+getWithDefault : Eq K -> V -> K -> Dict K V -> V
 ```
 
 ```aivi
@@ -165,7 +165,7 @@ value level:Int = getWithDefault 1 "level" d
 Returns `True` if the key exists in the dict.
 
 ```
-member : K -> Dict K V -> Bool
+member : Eq K -> K -> Dict K V -> Bool
 ```
 
 ```aivi
@@ -190,7 +190,7 @@ value hasIt:Bool = member "exists" d
 Removes a key. Has no effect if the key is absent.
 
 ```
-remove : K -> Dict K V -> Dict K V
+remove : Eq K -> K -> Dict K V -> Dict K V
 ```
 
 ```aivi
@@ -268,7 +268,7 @@ Convert between a `Dict K V` and a list of `(K, V)` pairs.
 
 ```
 toList   : Dict K V -> List (K, V)
-fromList : List (K, V) -> Dict K V
+fromList : Eq K -> List (K, V) -> Dict K V
 ```
 
 ```aivi
@@ -349,7 +349,7 @@ value highOnly: (Dict Text Int) = filterValues isHigh d
 Merges two dicts. When both contain the same key, `combine` is called with the left and right values to produce the merged value.
 
 ```
-mergeWith : (V -> V -> V) -> Dict K V -> Dict K V -> Dict K V
+mergeWith : Eq K -> (V -> V -> V) -> Dict K V -> Dict K V -> Dict K V
 ```
 
 ```aivi
@@ -382,7 +382,7 @@ value merged: (Dict Text Int) = mergeWith addScores left right
 Merges two dicts. When a key exists in both, the **right** dict wins.
 
 ```
-union : Dict K V -> Dict K V -> Dict K V
+union : Eq K -> Dict K V -> Dict K V -> Dict K V
 ```
 
 ```aivi

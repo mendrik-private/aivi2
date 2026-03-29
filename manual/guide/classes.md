@@ -49,7 +49,7 @@ class CacheKey A
 
 Use `require` inside the class body to constrain a type parameter. This documents that any type substituted for that parameter must satisfy the given class.
 
-```
+```aivi
 class Container A
     require Eq A
     contains: A -> List A -> Bool
