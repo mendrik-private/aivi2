@@ -1,10 +1,13 @@
-name: Deploy Docs
+name: Deploy Manual
 
 on:
   push:
     branches: [main]
     paths:
       - 'manual/**'
+      - 'tooling/pnpm-lock.yaml'
+      - 'tooling/pnpm-workspace.yaml'
+      - 'tooling/packages/vscode-aivi/syntaxes/**'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -23,6 +26,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/configure-pages@v5
+
       - uses: pnpm/action-setup@v3
         with:
           version: 10
@@ -34,12 +39,25 @@ jobs:
           cache-dependency-path: tooling/pnpm-lock.yaml
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
         working-directory: tooling
+
+      - name: Compute manual base path
+        id: manual-base
+        shell: bash
+        run: |
+          repo_name="${GITHUB_REPOSITORY#*/}"
+          if [[ "${repo_name}" == *.github.io ]]; then
+            echo "base=/" >> "${GITHUB_OUTPUT}"
+          else
+            echo "base=/${repo_name}/" >> "${GITHUB_OUTPUT}"
+          fi
 
       - name: Build docs
         run: pnpm build
         working-directory: manual
+        env:
+          AIVI_MANUAL_BASE: ${{ steps.manual-base.outputs.base }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

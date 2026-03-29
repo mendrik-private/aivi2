@@ -3,10 +3,23 @@ import aiviGrammar from '../../tooling/packages/vscode-aivi/syntaxes/aivi.tmLang
 import aiviDarkTheme from './theme/aivi-dark-theme.json'
 import { nav, sidebar } from './navigation'
 
+function manualBase(): string {
+  const configured = process.env.AIVI_MANUAL_BASE?.trim()
+  if (!configured) {
+    return '/'
+  }
+
+  let normalized = configured.startsWith('/') ? configured : `/${configured}`
+  if (!normalized.endsWith('/')) {
+    normalized = `${normalized}/`
+  }
+  return normalized
+}
+
 export default defineConfig({
   title: 'AIVI',
   description: 'AIVI Language Manual — a reactive, functional, GTK-first language',
-  base: '/',
+  base: manualBase(),
 
   head: [
     ['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
