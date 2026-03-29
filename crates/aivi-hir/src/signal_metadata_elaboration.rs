@@ -291,6 +291,41 @@ fn collect_signal_dependencies(module: &Module, mut work: Vec<DependencyWork>) -
                         work.push(DependencyWork::Expr(*left));
                         work.push(DependencyWork::Expr(*right));
                     }
+                    ExprKind::PatchApply { target, patch } => {
+                        work.push(DependencyWork::Expr(*target));
+                        for entry in patch.entries.iter().rev() {
+                            match entry.instruction.kind {
+                                crate::PatchInstructionKind::Replace(expr)
+                                | crate::PatchInstructionKind::Store(expr) => {
+                                    work.push(DependencyWork::Expr(expr))
+                                }
+                                crate::PatchInstructionKind::Remove => {}
+                            }
+                            for segment in entry.selector.segments.iter().rev() {
+                                if let crate::PatchSelectorSegment::BracketExpr { expr, .. } = segment
+                                {
+                                    work.push(DependencyWork::Expr(*expr));
+                                }
+                            }
+                        }
+                    }
+                    ExprKind::PatchLiteral(patch) => {
+                        for entry in patch.entries.iter().rev() {
+                            match entry.instruction.kind {
+                                crate::PatchInstructionKind::Replace(expr)
+                                | crate::PatchInstructionKind::Store(expr) => {
+                                    work.push(DependencyWork::Expr(expr))
+                                }
+                                crate::PatchInstructionKind::Remove => {}
+                            }
+                            for segment in entry.selector.segments.iter().rev() {
+                                if let crate::PatchSelectorSegment::BracketExpr { expr, .. } = segment
+                                {
+                                    work.push(DependencyWork::Expr(*expr));
+                                }
+                            }
+                        }
+                    }
                     ExprKind::Pipe(pipe) => {
                         work.push(DependencyWork::Expr(pipe.head));
                         for stage in pipe.stages.iter() {

@@ -17,7 +17,10 @@ use std::{
 use aivi_backend::{DetachedRuntimeValue, RuntimeCallable, RuntimeValue};
 use aivi_hir as hir;
 use aivi_typing::BuiltinSourceProvider;
-use gio::{BusNameOwnerFlags, BusType, DBusMessageType, DBusSendMessageFlags, DBusSignalFlags};
+use gio::{
+    BusNameOwnerFlags, BusType, DBusConnection, DBusConnectionFlags, DBusMessageType,
+    DBusSendMessageFlags, DBusSignalFlags,
+};
 use glib::{ControlFlow, MainContext, MainLoop, Variant, VariantClass};
 use url::Url;
 
@@ -2239,6 +2242,7 @@ struct DbusOwnNamePlan {
     instance: SourceInstanceId,
     name: Box<str>,
     bus: DbusBus,
+    address: Option<Box<str>>,
     flags: BusNameOwnerFlags,
     output: DbusNameStateOutputPlan,
 }
@@ -2252,6 +2256,7 @@ impl DbusOwnNamePlan {
         validate_argument_count(instance, provider, config, 1)?;
         let name = parse_text_argument(instance, provider, 0, &config.arguments[0])?;
         let mut bus = DbusBus::Session;
+        let mut address = None;
         let mut flags = BusNameOwnerFlags::NONE;
         for option in &config.options {
             match option.option_name.as_ref() {
@@ -2262,6 +2267,14 @@ impl DbusOwnNamePlan {
                         &option.option_name,
                         &option.value,
                     )?;
+                }
+                "address" => {
+                    address = Some(parse_text_option(
+                        instance,
+                        provider,
+                        &option.option_name,
+                        &option.value,
+                    )?);
                 }
                 "flags" => {
                     for flag in parse_named_variants(
@@ -2301,6 +2314,7 @@ impl DbusOwnNamePlan {
             instance,
             name,
             bus,
+            address,
             flags,
             output: DbusNameStateOutputPlan::parse(instance, config)?,
         })
@@ -2311,9 +2325,10 @@ impl DbusOwnNamePlan {
 struct DbusSignalPlan {
     instance: SourceInstanceId,
     bus: DbusBus,
+    address: Option<Box<str>>,
     path: Box<str>,
-    interface: Box<str>,
-    member: Box<str>,
+    interface: Option<Box<str>>,
+    member: Option<Box<str>>,
     output: DbusMessageOutputPlan,
 }
 
@@ -2323,11 +2338,12 @@ impl DbusSignalPlan {
         config: &EvaluatedSourceConfig,
     ) -> Result<Self, SourceProviderExecutionError> {
         let provider = BuiltinSourceProvider::DbusSignal;
-        validate_argument_count(instance, provider, config, 3)?;
+        validate_argument_count(instance, provider, config, 1)?;
         let path = parse_text_argument(instance, provider, 0, &config.arguments[0])?;
-        let interface = parse_text_argument(instance, provider, 1, &config.arguments[1])?;
-        let member = parse_text_argument(instance, provider, 2, &config.arguments[2])?;
         let mut bus = DbusBus::Session;
+        let mut address = None;
+        let mut interface = None;
+        let mut member = None;
         for option in &config.options {
             match option.option_name.as_ref() {
                 "bus" => {
@@ -2337,6 +2353,30 @@ impl DbusSignalPlan {
                         &option.option_name,
                         &option.value,
                     )?;
+                }
+                "address" => {
+                    address = Some(parse_text_option(
+                        instance,
+                        provider,
+                        &option.option_name,
+                        &option.value,
+                    )?);
+                }
+                "interface" => {
+                    interface = Some(parse_text_option(
+                        instance,
+                        provider,
+                        &option.option_name,
+                        &option.value,
+                    )?);
+                }
+                "member" => {
+                    member = Some(parse_text_option(
+                        instance,
+                        provider,
+                        &option.option_name,
+                        &option.value,
+                    )?);
                 }
                 _ => {
                     return Err(SourceProviderExecutionError::UnsupportedOption {
@@ -2350,6 +2390,7 @@ impl DbusSignalPlan {
         Ok(Self {
             instance,
             bus,
+            address,
             path,
             interface,
             member,
@@ -2362,10 +2403,11 @@ impl DbusSignalPlan {
 struct DbusMethodPlan {
     instance: SourceInstanceId,
     bus: DbusBus,
+    address: Option<Box<str>>,
     destination: Box<str>,
-    path: Box<str>,
-    interface: Box<str>,
-    member: Box<str>,
+    path: Option<Box<str>>,
+    interface: Option<Box<str>>,
+    member: Option<Box<str>>,
     output: DbusMessageOutputPlan,
 }
 
@@ -2375,12 +2417,13 @@ impl DbusMethodPlan {
         config: &EvaluatedSourceConfig,
     ) -> Result<Self, SourceProviderExecutionError> {
         let provider = BuiltinSourceProvider::DbusMethod;
-        validate_argument_count(instance, provider, config, 4)?;
+        validate_argument_count(instance, provider, config, 1)?;
         let destination = parse_text_argument(instance, provider, 0, &config.arguments[0])?;
-        let path = parse_text_argument(instance, provider, 1, &config.arguments[1])?;
-        let interface = parse_text_argument(instance, provider, 2, &config.arguments[2])?;
-        let member = parse_text_argument(instance, provider, 3, &config.arguments[3])?;
         let mut bus = DbusBus::Session;
+        let mut address = None;
+        let mut path = None;
+        let mut interface = None;
+        let mut member = None;
         for option in &config.options {
             match option.option_name.as_ref() {
                 "bus" => {
@@ -2390,6 +2433,38 @@ impl DbusMethodPlan {
                         &option.option_name,
                         &option.value,
                     )?;
+                }
+                "address" => {
+                    address = Some(parse_text_option(
+                        instance,
+                        provider,
+                        &option.option_name,
+                        &option.value,
+                    )?);
+                }
+                "path" => {
+                    path = Some(parse_text_option(
+                        instance,
+                        provider,
+                        &option.option_name,
+                        &option.value,
+                    )?);
+                }
+                "interface" => {
+                    interface = Some(parse_text_option(
+                        instance,
+                        provider,
+                        &option.option_name,
+                        &option.value,
+                    )?);
+                }
+                "member" => {
+                    member = Some(parse_text_option(
+                        instance,
+                        provider,
+                        &option.option_name,
+                        &option.value,
+                    )?);
                 }
                 _ => {
                     return Err(SourceProviderExecutionError::UnsupportedOption {
@@ -2403,6 +2478,7 @@ impl DbusMethodPlan {
         Ok(Self {
             instance,
             bus,
+            address,
             destination,
             path,
             interface,
@@ -2487,10 +2563,17 @@ enum DbusMessageShape {
     Method,
 }
 
+#[derive(Clone, Copy)]
+enum DbusMessageBodyMode {
+    Text,
+    Structured,
+}
+
 #[derive(Clone)]
 struct DbusMessageOutputPlan {
     decode: hir::SourceDecodeProgram,
     shape: DbusMessageShape,
+    body_mode: DbusMessageBodyMode,
 }
 
 impl DbusMessageOutputPlan {
@@ -2567,6 +2650,7 @@ impl DbusMessageOutputPlan {
                 .into_boxed_str(),
             });
         }
+        let mut body_mode = None;
         for field_name in expected {
             let Some(field) = fields
                 .iter()
@@ -2590,11 +2674,21 @@ impl DbusMessageOutputPlan {
                         scalar: aivi_typing::PrimitiveType::Text,
                     }
                 ),
-                "body" => matches!(
-                    decode.step(field.step),
+                "body" => match decode.step(field.step) {
+                    hir::DecodeProgramStep::Scalar {
+                        scalar: aivi_typing::PrimitiveType::Text,
+                    } => {
+                        body_mode = Some(DbusMessageBodyMode::Text);
+                        true
+                    }
                     hir::DecodeProgramStep::List { element }
-                        if dbus_value_step_supported(&decode, *element, &mut HashSet::new())
-                ),
+                        if dbus_value_step_supported(&decode, *element, &mut HashSet::new()) =>
+                    {
+                        body_mode = Some(DbusMessageBodyMode::Structured);
+                        true
+                    }
+                    _ => false,
+                },
                 _ => false,
             };
             if !valid {
@@ -2602,13 +2696,17 @@ impl DbusMessageOutputPlan {
                     instance,
                     provider,
                     detail: match shape {
-                        DbusMessageShape::Signal => "dbus.signal outputs must use `Text` header fields and `List DbusValue` bodies".into(),
-                        DbusMessageShape::Method => "dbus.method outputs must use `Text` header fields and `List DbusValue` bodies".into(),
+                        DbusMessageShape::Signal => "dbus.signal outputs must use `Text` header fields and either a `Text` body or `List DbusValue` body".into(),
+                        DbusMessageShape::Method => "dbus.method outputs must use `Text` header fields and either a `Text` body or `List DbusValue` body".into(),
                     },
                 });
             }
         }
-        Ok(Self { decode, shape })
+        Ok(Self {
+            decode,
+            shape,
+            body_mode: body_mode.expect("dbus output bodies should set a body mode"),
+        })
     }
 
     fn signal_value(
@@ -2657,8 +2755,15 @@ impl DbusMessageOutputPlan {
         record.insert("member".into(), ExternalSourceValue::Text(member.into()));
         record.insert(
             "body".into(),
-            dbus_body_external(parameters)
-                .map_err(|detail| SourceDecodeError::InvalidJson { detail })?,
+            match self.body_mode {
+                DbusMessageBodyMode::Text => ExternalSourceValue::Text(
+                    parameters
+                        .map(|value| value.print(false).to_string().into_boxed_str())
+                        .unwrap_or_else(|| "".into()),
+                ),
+                DbusMessageBodyMode::Structured => dbus_body_external(parameters)
+                    .map_err(|detail| SourceDecodeError::InvalidJson { detail })?,
+            },
         );
         Ok(ExternalSourceValue::Record(record))
     }
@@ -2853,6 +2958,21 @@ fn dbus_int_value(value: i64) -> Result<ExternalSourceValue, Box<str>> {
     ))
 }
 
+fn open_dbus_connection(bus: DbusBus, address: Option<&str>) -> Result<DBusConnection, Box<str>> {
+    match address {
+        Some(address) => DBusConnection::for_address_sync(
+            address,
+            DBusConnectionFlags::AUTHENTICATION_CLIENT
+                | DBusConnectionFlags::MESSAGE_BUS_CONNECTION,
+            None::<&gio::DBusAuthObserver>,
+            None::<&gio::Cancellable>,
+        )
+        .map_err(|error| error.to_string().into_boxed_str()),
+        None => gio::bus_get_sync(bus.bus_type(), None::<&gio::Cancellable>)
+            .map_err(|error| error.to_string().into_boxed_str()),
+    }
+}
+
 fn spawn_dbus_own_name_worker(
     port: DetachedRuntimePublicationPort,
     plan: DbusOwnNamePlan,
@@ -2866,40 +2986,76 @@ fn spawn_dbus_own_name_worker(
         let main_loop = MainLoop::new(Some(&context), false);
         let startup = context.with_thread_default(|| {
             install_dbus_stop_timer(&main_loop, &stop, &port);
-            let queued_port = port.clone();
-            let queued_output = plan.output.clone();
-            let queue_enabled = !plan.flags.contains(BusNameOwnerFlags::DO_NOT_QUEUE);
             let owned_port = port.clone();
             let owned_output = plan.output.clone();
             let lost_port = port.clone();
             let lost_output = plan.output.clone();
-            let owner_id = gio::bus_own_name(
-                plan.bus.bus_type(),
-                plan.name.as_ref(),
-                plan.flags,
-                move |_, _| {
-                    if queue_enabled && let Ok(value) = queued_output.value_for_state("Queued") {
-                        let _ =
-                            queued_port.publish(DetachedRuntimeValue::from_runtime_owned(value));
-                    }
-                },
-                move |_, _| {
-                    if let Ok(value) = owned_output.value_for_state("Owned") {
-                        let _ = owned_port.publish(DetachedRuntimeValue::from_runtime_owned(value));
-                    }
-                },
-                move |_, _| {
-                    if let Ok(value) = lost_output.value_for_state("Lost") {
-                        let _ = lost_port.publish(DetachedRuntimeValue::from_runtime_owned(value));
-                    }
-                },
-            );
+            let owned_connection = plan
+                .address
+                .as_deref()
+                .map(|address| open_dbus_connection(plan.bus, Some(address)))
+                .transpose()?;
+            let owner_id = if let Some(connection) = owned_connection.as_ref() {
+                gio::bus_own_name_on_connection(
+                    connection,
+                    plan.name.as_ref(),
+                    plan.flags,
+                    move |_, _| {
+                        if let Ok(value) = owned_output.value_for_state("Owned") {
+                            let _ =
+                                owned_port.publish(DetachedRuntimeValue::from_runtime_owned(value));
+                        }
+                    },
+                    move |_, _| {
+                        if let Ok(value) = lost_output.value_for_state("Lost") {
+                            let _ =
+                                lost_port.publish(DetachedRuntimeValue::from_runtime_owned(value));
+                        }
+                    },
+                )
+            } else {
+                let queued_port = port.clone();
+                let queued_output = plan.output.clone();
+                let queue_enabled = !plan.flags.contains(BusNameOwnerFlags::DO_NOT_QUEUE);
+                gio::bus_own_name(
+                    plan.bus.bus_type(),
+                    plan.name.as_ref(),
+                    plan.flags,
+                    move |_, _| {
+                        if queue_enabled && let Ok(value) = queued_output.value_for_state("Queued")
+                        {
+                            let _ = queued_port
+                                .publish(DetachedRuntimeValue::from_runtime_owned(value));
+                        }
+                    },
+                    move |_, _| {
+                        if let Ok(value) = owned_output.value_for_state("Owned") {
+                            let _ =
+                                owned_port.publish(DetachedRuntimeValue::from_runtime_owned(value));
+                        }
+                    },
+                    move |_, _| {
+                        if let Ok(value) = lost_output.value_for_state("Lost") {
+                            let _ =
+                                lost_port.publish(DetachedRuntimeValue::from_runtime_owned(value));
+                        }
+                    },
+                )
+            };
             let _ = startup_tx.send(Ok(()));
             main_loop.run();
             gio::bus_unown_name(owner_id);
+            drop(owned_connection);
+            Ok::<(), Box<str>>(())
         });
-        if let Err(error) = startup {
-            let _ = startup_tx.send(Err(error.to_string().into_boxed_str()));
+        match startup {
+            Ok(Ok(())) => {}
+            Ok(Err(detail)) => {
+                let _ = startup_tx.send(Err(detail));
+            }
+            Err(error) => {
+                let _ = startup_tx.send(Err(error.to_string().into_boxed_str()));
+            }
         }
     });
     finish_dbus_startup(instance, provider, handle, startup_rx)
@@ -2918,15 +3074,14 @@ fn spawn_dbus_signal_worker(
         let main_loop = MainLoop::new(Some(&context), false);
         let startup = context.with_thread_default(|| {
             install_dbus_stop_timer(&main_loop, &stop, &port);
-            let connection = gio::bus_get_sync(plan.bus.bus_type(), None::<&gio::Cancellable>)
-                .map_err(|error| error.to_string().into_boxed_str())?;
+            let connection = open_dbus_connection(plan.bus, plan.address.as_deref())?;
             let output = plan.output.clone();
             let publish_port = port.clone();
             #[allow(deprecated)]
             let subscription_id = connection.signal_subscribe(
                 None,
-                Some(plan.interface.as_ref()),
-                Some(plan.member.as_ref()),
+                plan.interface.as_deref(),
+                plan.member.as_deref(),
                 Some(plan.path.as_ref()),
                 None,
                 DBusSignalFlags::NONE,
@@ -2945,8 +3100,14 @@ fn spawn_dbus_signal_worker(
             connection.signal_unsubscribe(subscription_id);
             Ok::<(), Box<str>>(())
         });
-        if let Err(error) = startup {
-            let _ = startup_tx.send(Err(error.to_string().into_boxed_str()));
+        match startup {
+            Ok(Ok(())) => {}
+            Ok(Err(detail)) => {
+                let _ = startup_tx.send(Err(detail));
+            }
+            Err(error) => {
+                let _ = startup_tx.send(Err(error.to_string().into_boxed_str()));
+            }
         }
     });
     finish_dbus_startup(instance, provider, handle, startup_rx)
@@ -2965,8 +3126,7 @@ fn spawn_dbus_method_worker(
         let main_loop = MainLoop::new(Some(&context), false);
         let startup = context.with_thread_default(|| {
             install_dbus_stop_timer(&main_loop, &stop, &port);
-            let connection = gio::bus_get_sync(plan.bus.bus_type(), None::<&gio::Cancellable>)
-                .map_err(|error| error.to_string().into_boxed_str())?;
+            let connection = open_dbus_connection(plan.bus, plan.address.as_deref())?;
             let output = plan.output.clone();
             let publish_port = port.clone();
             let destination = plan.destination.clone();
@@ -2977,21 +3137,30 @@ fn spawn_dbus_method_worker(
                 if !incoming
                     || message.message_type() != DBusMessageType::MethodCall
                     || message.destination().as_deref() != Some(destination.as_ref())
-                    || message.path().as_deref() != Some(path.as_ref())
-                    || message.interface().as_deref() != Some(interface.as_ref())
-                    || message.member().as_deref() != Some(member.as_ref())
+                    || path
+                        .as_deref()
+                        .is_some_and(|expected| message.path().as_deref() != Some(expected))
+                    || interface
+                        .as_deref()
+                        .is_some_and(|expected| message.interface().as_deref() != Some(expected))
+                    || member
+                        .as_deref()
+                        .is_some_and(|expected| message.member().as_deref() != Some(expected))
                 {
                     return Some(message.clone());
                 }
                 let reply = message.new_method_reply();
                 let _ = connection.send_message(&reply, DBusSendMessageFlags::NONE);
-                if let Ok(value) = output.method_value(
-                    destination.as_ref(),
-                    path.as_ref(),
-                    interface.as_ref(),
-                    member.as_ref(),
-                    message.body().as_ref(),
-                ) {
+                if let (Some(path), Some(interface), Some(member)) =
+                    (message.path(), message.interface(), message.member())
+                    && let Ok(value) = output.method_value(
+                        destination.as_ref(),
+                        path.as_str(),
+                        interface.as_str(),
+                        member.as_str(),
+                        message.body().as_ref(),
+                    )
+                {
                     let _ = publish_port.publish(DetachedRuntimeValue::from_runtime_owned(value));
                 }
                 None
@@ -3001,8 +3170,14 @@ fn spawn_dbus_method_worker(
             connection.remove_filter(filter_id);
             Ok::<(), Box<str>>(())
         });
-        if let Err(error) = startup {
-            let _ = startup_tx.send(Err(error.to_string().into_boxed_str()));
+        match startup {
+            Ok(Ok(())) => {}
+            Ok(Err(detail)) => {
+                let _ = startup_tx.send(Err(detail));
+            }
+            Err(error) => {
+                let _ = startup_tx.send(Err(error.to_string().into_boxed_str()));
+            }
         }
     });
     finish_dbus_startup(instance, provider, handle, startup_rx)
@@ -4092,6 +4267,7 @@ mod tests {
     use aivi_hir::{Item, lower_module as lower_hir_module};
     use aivi_lambda::lower_module as lower_lambda_module;
     use aivi_syntax::parse_module;
+    use glib::prelude::ToVariant;
 
     use super::*;
     use crate::{BackendLinkedRuntime, assemble_hir_runtime, link_backend_runtime};
@@ -4205,6 +4381,24 @@ mod tests {
             "aivi-runtime-{prefix}-{}-{unique}",
             std::process::id()
         ))
+    }
+
+    fn record_field<'a>(
+        fields: &'a [aivi_backend::RuntimeRecordField],
+        name: &str,
+    ) -> &'a RuntimeValue {
+        fields
+            .iter()
+            .find(|field| field.label.as_ref() == name)
+            .map(|field| &field.value)
+            .unwrap_or_else(|| panic!("expected record field `{name}`"))
+    }
+
+    fn expect_text(value: &RuntimeValue, expected: &str) {
+        match value {
+            RuntimeValue::Text(found) => assert_eq!(found.as_ref(), expected),
+            other => panic!("expected text `{expected}`, found {other:?}"),
+        }
     }
 
     #[test]
@@ -4692,6 +4886,189 @@ signal events : Signal ProcessEvent
         let value = spin_until(&mut linked, signal, Duration::from_secs(1))
             .expect("process source should publish at least one event");
         assert!(matches!(value, RuntimeValue::Sum(_)));
+    }
+
+    #[test]
+    fn dbus_signal_source_publishes_structured_bus_messages() {
+        if env::var("DBUS_SESSION_BUS_ADDRESS").is_err() {
+            return;
+        }
+        let lowered = lower_text(
+            "runtime-provider-dbus-signal.aivi",
+            &format!(
+                r#"
+type DbusSignal = {{
+    path: Text,
+    interface: Text,
+    member: Text,
+    body: Text
+}}
+
+@source dbus.signal "/org/aivi/Test" with {{
+    interface: "org.aivi.Test"
+    member: "Ping"
+}}
+signal inbound : Signal DbusSignal
+"#,
+            ),
+        );
+        let assembly =
+            assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("startup link should succeed");
+        let actions = linked
+            .tick_with_source_lifecycle()
+            .expect("linked runtime tick should succeed");
+        let mut providers = SourceProviderManager::new();
+        providers
+            .apply_actions(actions.source_actions())
+            .expect("dbus.signal source should execute");
+
+        let connection = gio::bus_get_sync(BusType::Session, None::<&gio::Cancellable>)
+            .expect("session bus should be reachable");
+        let payload =
+            Variant::tuple_from_iter(["hello".to_variant(), 7_i32.to_variant(), true.to_variant()]);
+        connection
+            .emit_signal(
+                None,
+                "/org/aivi/Test",
+                "org.aivi.Test",
+                "Ping",
+                Some(&payload),
+            )
+            .expect("test signal should emit");
+
+        let inbound_signal = linked
+            .assembly()
+            .signal(item_id(lowered.hir.module(), "inbound"))
+            .expect("inbound signal binding should exist")
+            .signal();
+        let value = spin_until(&mut linked, inbound_signal, Duration::from_secs(1))
+            .expect("dbus.signal source should publish");
+        let RuntimeValue::Record(fields) = value else {
+            panic!("dbus.signal should decode to a record");
+        };
+        expect_text(record_field(&fields, "path"), "/org/aivi/Test");
+        expect_text(record_field(&fields, "interface"), "org.aivi.Test");
+        expect_text(record_field(&fields, "member"), "Ping");
+        expect_text(record_field(&fields, "body"), "('hello', 7, true)");
+    }
+
+    #[test]
+    fn dbus_method_source_replies_unit_and_publishes_calls() {
+        if env::var("DBUS_SESSION_BUS_ADDRESS").is_err() {
+            return;
+        }
+        let service_name = format!("org.aivi.RuntimeTest{}", std::process::id());
+        let lowered = lower_text(
+            "runtime-provider-dbus-method.aivi",
+            &format!(
+                r#"
+type BusNameFlag =
+  | AllowReplacement
+  | ReplaceExisting
+  | DoNotQueue
+
+type BusNameState =
+  | Owned
+  | Queued
+  | Lost
+
+type DbusCall = {{
+    destination: Text,
+    path: Text,
+    interface: Text,
+    member: Text,
+    body: Text
+}}
+
+@source dbus.ownName "{service_name}"
+signal busState : Signal BusNameState
+
+@source dbus.method "{service_name}" with {{
+    path: "/org/aivi/Test"
+    interface: "org.aivi.Test"
+    member: "ShowWindow"
+}}
+signal incoming : Signal DbusCall
+"#,
+                service_name = service_name,
+            ),
+        );
+        let assembly =
+            assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("startup link should succeed");
+        let actions = linked
+            .tick_with_source_lifecycle()
+            .expect("linked runtime tick should succeed");
+        let mut providers = SourceProviderManager::new();
+        providers
+            .apply_actions(actions.source_actions())
+            .expect("dbus providers should execute");
+
+        let bus_state_signal = linked
+            .assembly()
+            .signal(item_id(lowered.hir.module(), "busState"))
+            .expect("busState signal binding should exist")
+            .signal();
+        let owned_deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            let bus_state = spin_until(&mut linked, bus_state_signal, Duration::from_millis(50))
+                .expect("dbus.ownName should publish");
+            if matches!(&bus_state, RuntimeValue::Sum(sum) if sum.variant_name.as_ref() == "Owned")
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < owned_deadline,
+                "dbus.ownName should eventually acquire the requested name"
+            );
+        }
+
+        let connection = gio::bus_get_sync(BusType::Session, None::<&gio::Cancellable>)
+            .expect("session bus should be reachable");
+        let reply = connection
+            .call_sync(
+                Some(service_name.as_ref()),
+                "/org/aivi/Test",
+                "org.aivi.Test",
+                "ShowWindow",
+                Some(&Variant::tuple_from_iter([
+                    "hello".to_variant(),
+                    5_i32.to_variant(),
+                ])),
+                None::<&glib::VariantTy>,
+                gio::DBusCallFlags::NONE,
+                1_000,
+                None::<&gio::Cancellable>,
+            )
+            .expect("dbus.method source should reply immediately");
+        assert_eq!(reply.n_children(), 0, "dbus.method should reply with Unit");
+
+        let incoming_signal = linked
+            .assembly()
+            .signal(item_id(lowered.hir.module(), "incoming"))
+            .expect("incoming signal binding should exist")
+            .signal();
+        let value = spin_until(&mut linked, incoming_signal, Duration::from_secs(1))
+            .expect("dbus.method source should publish one call");
+        let RuntimeValue::Record(fields) = value else {
+            panic!("dbus.method should decode to a record");
+        };
+        expect_text(record_field(&fields, "destination"), service_name.as_ref());
+        expect_text(record_field(&fields, "path"), "/org/aivi/Test");
+        expect_text(record_field(&fields, "interface"), "org.aivi.Test");
+        expect_text(record_field(&fields, "member"), "ShowWindow");
+        expect_text(record_field(&fields, "body"), "('hello', 5)");
     }
 
     #[test]

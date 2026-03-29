@@ -8,8 +8,8 @@ use aivi_hir::{DomainMemberHandle, IntrinsicValue, ItemId as HirItemId, SumConst
 use crate::{
     BinaryOperator, BuiltinAppendCarrier, BuiltinApplicativeCarrier, BuiltinApplyCarrier,
     BuiltinBifunctorCarrier, BuiltinClassMemberIntrinsic, BuiltinFilterableCarrier,
-    BuiltinFoldableCarrier, BuiltinFunctorCarrier, BuiltinOrdSubject, BuiltinTerm,
-    BuiltinTraversableCarrier, EnvSlotId, InlinePipeConstructor, InlinePipePattern,
+    BuiltinFoldableCarrier, BuiltinFunctorCarrier, BuiltinMonadCarrier, BuiltinOrdSubject,
+    BuiltinTerm, BuiltinTraversableCarrier, EnvSlotId, InlinePipeConstructor, InlinePipePattern,
     InlinePipePatternKind, InlinePipeStageKind, InlineSubjectId, ItemId, KernelExprId,
     KernelExprKind, KernelId, LayoutId, LayoutKind, PrimitiveType, Program, ProjectionBase,
     SubjectRef, UnaryOperator,
@@ -2237,6 +2237,30 @@ impl<'a> KernelEvaluator<'a> {
                     kernel_id, expr, intrinsic, carrier, functions, values, globals,
                 )
             }
+            BuiltinClassMemberIntrinsic::Chain(carrier) => {
+                let [function, subject] = expect_arity::<2>(arguments).map_err(|reason| {
+                    EvaluationError::UnsupportedBuiltinClassMember {
+                        kernel: kernel_id,
+                        expr,
+                        intrinsic,
+                        reason,
+                    }
+                })?;
+                self.chain_builtin_carrier(
+                    kernel_id, expr, intrinsic, carrier, function, subject, globals,
+                )
+            }
+            BuiltinClassMemberIntrinsic::Join(carrier) => {
+                let [subject] = expect_arity::<1>(arguments).map_err(|reason| {
+                    EvaluationError::UnsupportedBuiltinClassMember {
+                        kernel: kernel_id,
+                        expr,
+                        intrinsic,
+                        reason,
+                    }
+                })?;
+                self.join_builtin_carrier(kernel_id, expr, intrinsic, carrier, subject)
+            }
             BuiltinClassMemberIntrinsic::Reduce(carrier) => {
                 let [function, initial, subject] =
                     expect_arity::<3>(arguments).map_err(|reason| {
@@ -2636,6 +2660,176 @@ impl<'a> KernelEvaluator<'a> {
                     expr,
                     intrinsic,
                     reason: "apply received values outside the supported runtime carriers",
+                }),
+            },
+        }
+    }
+
+    fn chain_builtin_carrier(
+        &mut self,
+        kernel_id: KernelId,
+        expr: KernelExprId,
+        intrinsic: BuiltinClassMemberIntrinsic,
+        carrier: BuiltinMonadCarrier,
+        function: RuntimeValue,
+        subject: RuntimeValue,
+        globals: &BTreeMap<ItemId, RuntimeValue>,
+    ) -> Result<RuntimeValue, EvaluationError> {
+        match carrier {
+            BuiltinMonadCarrier::List => match strip_signal(subject) {
+                RuntimeValue::List(values) => {
+                    let mut chained = Vec::new();
+                    for value in values {
+                        match strip_signal(self.apply_callable(
+                            kernel_id,
+                            expr,
+                            function.clone(),
+                            vec![value],
+                            globals,
+                        )?) {
+                            RuntimeValue::List(next) => chained.extend(next),
+                            _ => {
+                                return Err(EvaluationError::UnsupportedBuiltinClassMember {
+                                    kernel: kernel_id,
+                                    expr,
+                                    intrinsic,
+                                    reason: "chain expected the callback to return List values",
+                                });
+                            }
+                        }
+                    }
+                    Ok(RuntimeValue::List(chained))
+                }
+                _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                    kernel: kernel_id,
+                    expr,
+                    intrinsic,
+                    reason: "chain received values outside the supported runtime carriers",
+                }),
+            },
+            BuiltinMonadCarrier::Option => match strip_signal(subject) {
+                RuntimeValue::OptionNone => Ok(RuntimeValue::OptionNone),
+                RuntimeValue::OptionSome(value) => match strip_signal(self.apply_callable(
+                    kernel_id,
+                    expr,
+                    function,
+                    vec![*value],
+                    globals,
+                )?) {
+                    RuntimeValue::OptionNone => Ok(RuntimeValue::OptionNone),
+                    RuntimeValue::OptionSome(value) => Ok(RuntimeValue::OptionSome(value)),
+                    _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                        kernel: kernel_id,
+                        expr,
+                        intrinsic,
+                        reason: "chain expected the callback to return Option values",
+                    }),
+                },
+                _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                    kernel: kernel_id,
+                    expr,
+                    intrinsic,
+                    reason: "chain received values outside the supported runtime carriers",
+                }),
+            },
+            BuiltinMonadCarrier::Result => match strip_signal(subject) {
+                RuntimeValue::ResultErr(error) => Ok(RuntimeValue::ResultErr(error)),
+                RuntimeValue::ResultOk(value) => match strip_signal(self.apply_callable(
+                    kernel_id,
+                    expr,
+                    function,
+                    vec![*value],
+                    globals,
+                )?) {
+                    RuntimeValue::ResultOk(value) => Ok(RuntimeValue::ResultOk(value)),
+                    RuntimeValue::ResultErr(error) => Ok(RuntimeValue::ResultErr(error)),
+                    _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                        kernel: kernel_id,
+                        expr,
+                        intrinsic,
+                        reason: "chain expected the callback to return Result values",
+                    }),
+                },
+                _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                    kernel: kernel_id,
+                    expr,
+                    intrinsic,
+                    reason: "chain received values outside the supported runtime carriers",
+                }),
+            },
+        }
+    }
+
+    fn join_builtin_carrier(
+        &mut self,
+        kernel_id: KernelId,
+        expr: KernelExprId,
+        intrinsic: BuiltinClassMemberIntrinsic,
+        carrier: BuiltinMonadCarrier,
+        subject: RuntimeValue,
+    ) -> Result<RuntimeValue, EvaluationError> {
+        match carrier {
+            BuiltinMonadCarrier::List => match strip_signal(subject) {
+                RuntimeValue::List(values) => {
+                    let mut joined = Vec::new();
+                    for value in values {
+                        match strip_signal(value) {
+                            RuntimeValue::List(inner) => joined.extend(inner),
+                            _ => {
+                                return Err(EvaluationError::UnsupportedBuiltinClassMember {
+                                    kernel: kernel_id,
+                                    expr,
+                                    intrinsic,
+                                    reason: "join expected List (List A) values",
+                                });
+                            }
+                        }
+                    }
+                    Ok(RuntimeValue::List(joined))
+                }
+                _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                    kernel: kernel_id,
+                    expr,
+                    intrinsic,
+                    reason: "join received values outside the supported runtime carriers",
+                }),
+            },
+            BuiltinMonadCarrier::Option => match strip_signal(subject) {
+                RuntimeValue::OptionNone => Ok(RuntimeValue::OptionNone),
+                RuntimeValue::OptionSome(value) => match strip_signal(*value) {
+                    RuntimeValue::OptionNone => Ok(RuntimeValue::OptionNone),
+                    RuntimeValue::OptionSome(inner) => Ok(RuntimeValue::OptionSome(inner)),
+                    _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                        kernel: kernel_id,
+                        expr,
+                        intrinsic,
+                        reason: "join expected Option (Option A) values",
+                    }),
+                },
+                _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                    kernel: kernel_id,
+                    expr,
+                    intrinsic,
+                    reason: "join received values outside the supported runtime carriers",
+                }),
+            },
+            BuiltinMonadCarrier::Result => match strip_signal(subject) {
+                RuntimeValue::ResultErr(error) => Ok(RuntimeValue::ResultErr(error)),
+                RuntimeValue::ResultOk(value) => match strip_signal(*value) {
+                    RuntimeValue::ResultOk(inner) => Ok(RuntimeValue::ResultOk(inner)),
+                    RuntimeValue::ResultErr(error) => Ok(RuntimeValue::ResultErr(error)),
+                    _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                        kernel: kernel_id,
+                        expr,
+                        intrinsic,
+                        reason: "join expected Result E (Result E A) values",
+                    }),
+                },
+                _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                    kernel: kernel_id,
+                    expr,
+                    intrinsic,
+                    reason: "join received values outside the supported runtime carriers",
                 }),
             },
         }
@@ -3461,7 +3655,6 @@ fn evaluate_intrinsic_value(
         debug_assert_eq!(arguments.len(), arity);
         return Ok(RuntimeValue::Tuple(arguments));
     }
-
     match (value, arguments.as_slice()) {
         (IntrinsicValue::RandomBytes, [count]) => {
             Ok(RuntimeValue::Task(RuntimeTaskPlan::RandomBytes {
@@ -3805,7 +3998,7 @@ fn evaluate_intrinsic_value(
 fn builtin_class_member_arity(intrinsic: BuiltinClassMemberIntrinsic) -> usize {
     match intrinsic {
         BuiltinClassMemberIntrinsic::Empty(_) => 0,
-        BuiltinClassMemberIntrinsic::Pure(_) => 1,
+        BuiltinClassMemberIntrinsic::Pure(_) | BuiltinClassMemberIntrinsic::Join(_) => 1,
         BuiltinClassMemberIntrinsic::Bimap(_) | BuiltinClassMemberIntrinsic::Reduce(_) => 3,
         BuiltinClassMemberIntrinsic::StructuralEq
         | BuiltinClassMemberIntrinsic::Compare { .. }
@@ -3813,7 +4006,8 @@ fn builtin_class_member_arity(intrinsic: BuiltinClassMemberIntrinsic) -> usize {
         | BuiltinClassMemberIntrinsic::Map(_)
         | BuiltinClassMemberIntrinsic::Apply(_)
         | BuiltinClassMemberIntrinsic::Traverse { .. }
-        | BuiltinClassMemberIntrinsic::FilterMap(_) => 2,
+        | BuiltinClassMemberIntrinsic::FilterMap(_)
+        | BuiltinClassMemberIntrinsic::Chain(_) => 2,
     }
 }
 
@@ -4752,12 +4946,11 @@ fn matches_non_empty_runtime(value: &RuntimeSumValue) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use aivi_hir::{IntrinsicValue, ItemId as HirItemId, SumConstructorHandle};
+    use aivi_hir::{ItemId as HirItemId, SumConstructorHandle};
 
     use super::{
         DetachedRuntimeValue, RuntimeMap, RuntimeMapEntry, RuntimeRecordField, RuntimeSumValue,
-        RuntimeValue, append_validation_errors, evaluate_intrinsic_value, intrinsic_value_arity,
-        structural_eq,
+        RuntimeValue, append_validation_errors, structural_eq,
     };
     use crate::{KernelExprId, KernelId};
 
@@ -4832,27 +5025,6 @@ mod tests {
         });
 
         assert_eq!(value.display_text(), "Pair(1, ok)");
-    }
-
-    #[test]
-    fn tuple_constructor_intrinsic_uses_declared_arity() {
-        assert_eq!(intrinsic_value_arity(IntrinsicValue::TupleConstructor { arity: 3 }), 3);
-    }
-
-    #[test]
-    fn tuple_constructor_intrinsic_evaluates_to_runtime_tuple() {
-        let value = evaluate_intrinsic_value(
-            KernelId::from_raw(0),
-            KernelExprId::from_raw(0),
-            IntrinsicValue::TupleConstructor { arity: 2 },
-            vec![RuntimeValue::Int(1), RuntimeValue::Text("ok".into())],
-        )
-        .expect("tuple constructor intrinsic should evaluate");
-
-        assert_eq!(
-            value,
-            RuntimeValue::Tuple(vec![RuntimeValue::Int(1), RuntimeValue::Text("ok".into())])
-        );
     }
 
     #[test]

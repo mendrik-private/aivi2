@@ -39,9 +39,10 @@ fn token_type_index(kind: TokenKind) -> Option<u32> {
         | TokenKind::DomainKw
         | TokenKind::ProviderKw
         | TokenKind::UseKw
-        | TokenKind::ExportKw => Some(IDX_KEYWORD),
+        | TokenKind::ExportKw
+        | TokenKind::PatchKw => Some(IDX_KEYWORD),
 
-        // Soft keywords first; other identifiers remain variables.
+        // Soft keywords are handled separately; other identifiers remain variables.
         TokenKind::Identifier => None,
 
         // Literals
@@ -67,6 +68,7 @@ fn token_type_index(kind: TokenKind) -> Option<u32> {
         | TokenKind::Arrow
         | TokenKind::ThinArrow
         | TokenKind::LeftArrow
+        | TokenKind::ColonEquals
         | TokenKind::PipeTransform
         | TokenKind::PipeGate
         | TokenKind::PipeCase
@@ -76,6 +78,7 @@ fn token_type_index(kind: TokenKind) -> Option<u32> {
         | TokenKind::PipeRecurStep
         | TokenKind::PipeTap
         | TokenKind::PipeFanIn
+        | TokenKind::PatchApply
         | TokenKind::TruthyBranch
         | TokenKind::FalsyBranch
         | TokenKind::PipeValidate
@@ -170,5 +173,35 @@ fn soft_or_hard_token_type_index(token: aivi_syntax::Token, source: &aivi_base::
         TokenKind::Identifier if token.text(source) == "when" => Some(IDX_KEYWORD),
         TokenKind::Identifier => Some(IDX_VARIABLE),
         kind => token_type_index(kind),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{IDX_KEYWORD, IDX_OPERATOR, soft_or_hard_token_type_index, token_type_index};
+    use aivi_base::{FileId, SourceFile};
+    use aivi_syntax::{TokenKind, lex_module};
+
+    #[test]
+    fn classifies_patch_surface_tokens() {
+        assert_eq!(token_type_index(TokenKind::PatchKw), Some(IDX_KEYWORD));
+        assert_eq!(token_type_index(TokenKind::PatchApply), Some(IDX_OPERATOR));
+        assert_eq!(token_type_index(TokenKind::ColonEquals), Some(IDX_OPERATOR));
+    }
+
+    #[test]
+    fn classifies_when_as_soft_keyword() {
+        let source = SourceFile::new(FileId::new(0), "test.aivi", "when ready => total <- 1\n");
+        let lexed = lex_module(&source);
+        let when = lexed
+            .tokens()
+            .iter()
+            .find(|token| token.kind() == TokenKind::Identifier && token.text(&source) == "when")
+            .copied()
+            .expect("expected `when` token");
+        assert_eq!(
+            soft_or_hard_token_type_index(when, &source),
+            Some(IDX_KEYWORD)
+        );
     }
 }

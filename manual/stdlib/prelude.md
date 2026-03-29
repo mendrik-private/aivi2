@@ -52,13 +52,15 @@ These types are always available and can be imported from `aivi.prelude`:
 | `Default A` | A default value |
 | `Functor F` | Mappable container |
 | `Applicative F` | Applicative functor |
-| `Monad F` | Monadic chaining |
+| `Monad F` | Monadic chaining (`List`, `Option`, and `Result` are the builtin executable carriers today) |
 | `Foldable F` | Foldable container |
 | `Traversable F` | Traversable container |
 | `Filterable F` | Filterable container |
 | `Semigroup A` | Associative combination |
 | `Monoid A` | Semigroup with identity |
 | `Bifunctor F` | Mappable over both type parameters |
+
+For the current higher-kinded hierarchy, the executable builtin carrier matrix, and the current same-module-only limits for user-authored higher-kinded classes and instances, see [Typeclasses & Higher-Kinded Support](/guide/typeclasses). Parser or checker acceptance alone does not imply executable runtime support.
 
 ## Option Functions
 

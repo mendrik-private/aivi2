@@ -167,9 +167,18 @@ impl BuiltinSourceProvider {
             Self::DbusOwnName => {
                 SourceContract::new(self, dbus_name_options(), DBUS_RECURRENCE, STREAM_LIFECYCLE)
             }
-            Self::DbusSignal | Self::DbusMethod => {
-                SourceContract::new(self, dbus_bus_options(), DBUS_RECURRENCE, STREAM_LIFECYCLE)
-            }
+            Self::DbusSignal => SourceContract::new(
+                self,
+                dbus_signal_options(),
+                DBUS_RECURRENCE,
+                STREAM_LIFECYCLE,
+            ),
+            Self::DbusMethod => SourceContract::new(
+                self,
+                dbus_method_options(),
+                DBUS_RECURRENCE,
+                STREAM_LIFECYCLE,
+            ),
             Self::WindowKeyDown => {
                 SourceContract::new(self, &WINDOW_OPTIONS, WINDOW_RECURRENCE, STREAM_LIFECYCLE)
             }
@@ -763,6 +772,7 @@ fn dbus_name_options() -> &'static [SourceOptionContract] {
     DBUS_NAME_OPTIONS_STORAGE.get_or_init(|| {
         vec![
             SourceOptionContract::new("bus", SourceContractType::text()),
+            SourceOptionContract::new("address", SourceContractType::text()),
             SourceOptionContract::new(
                 "flags",
                 SourceContractType::list(SourceTypeAtom::nominal(SourceNominalType::BusNameFlag)),
@@ -773,9 +783,29 @@ fn dbus_name_options() -> &'static [SourceOptionContract] {
 
 static DBUS_BUS_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
 
-fn dbus_bus_options() -> &'static [SourceOptionContract] {
-    DBUS_BUS_OPTIONS_STORAGE
-        .get_or_init(|| vec![SourceOptionContract::new("bus", SourceContractType::text())])
+fn dbus_signal_options() -> &'static [SourceOptionContract] {
+    DBUS_BUS_OPTIONS_STORAGE.get_or_init(|| {
+        vec![
+            SourceOptionContract::new("bus", SourceContractType::text()),
+            SourceOptionContract::new("address", SourceContractType::text()),
+            SourceOptionContract::new("interface", SourceContractType::text()),
+            SourceOptionContract::new("member", SourceContractType::text()),
+        ]
+    })
+}
+
+static DBUS_METHOD_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
+
+fn dbus_method_options() -> &'static [SourceOptionContract] {
+    DBUS_METHOD_OPTIONS_STORAGE.get_or_init(|| {
+        vec![
+            SourceOptionContract::new("bus", SourceContractType::text()),
+            SourceOptionContract::new("address", SourceContractType::text()),
+            SourceOptionContract::new("path", SourceContractType::text()),
+            SourceOptionContract::new("interface", SourceContractType::text()),
+            SourceOptionContract::new("member", SourceContractType::text()),
+        ]
+    })
 }
 
 static WINDOW_OPTIONS: [SourceOptionContract; 3] = [

@@ -8,4 +8,4 @@ signal updateEvents : Signal Int
 
 signal updates : Signal Int =
     updateEvents
-     |> scan 0 step
+     +|> 0 step

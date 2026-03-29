@@ -405,8 +405,11 @@ The following ambient classes and builtin carrier paths are wired through the cu
 | `Semigroup A` | `<>` | `Text`, `List` |
 | `Monoid A` | `empty` | `Text`, `List` |
 | `Foldable F` | `reduce` | `List`, `Option`, `Result`, `Validation` |
-| `Filterable F` | `filter` | `List`, `Option` |
+| `Filterable F` | `filterMap` | `List`, `Option` |
 | `Apply F` | `apply` | `Option`, `Result`, `List`, `Validation`, `Signal` |
 | `Applicative F` | `pure` | `Option`, `Result`, `List`, `Validation`, `Signal`, `Task` (executable applicative slice) |
+| `Monad F` | `chain`, `join` | `List`, `Option`, `Result` |
 | `Bifunctor F` | `bimap` | `Result`, `Validation` |
 | `Traversable F` | `traverse` | `List`, `Option`, `Result`, `Validation` |
+
+This table describes the current executable builtin slice. For the full higher-kinded hierarchy, support boundaries, and the current same-module-only limits for user-authored higher-kinded classes and instances, see [Typeclasses & Higher-Kinded Support](/guide/typeclasses).

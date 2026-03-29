@@ -3,14 +3,14 @@ use std::{collections::BTreeMap, fs, path::PathBuf};
 use aivi_backend::{
     BuiltinAppendCarrier, BuiltinApplicativeCarrier, BuiltinApplyCarrier, BuiltinBifunctorCarrier,
     BuiltinClassMemberIntrinsic, BuiltinFilterableCarrier, BuiltinFoldableCarrier,
-    BuiltinFunctorCarrier, BuiltinOrdSubject, BuiltinTraversableCarrier, CodegenError,
-    DecodeStepKind, DomainDecodeSurfaceKind, EvaluationError, GateStage as BackendGateStage,
-    InlinePipeConstructor, InlinePipePatternKind, InlinePipeStageKind, ItemKind as BackendItemKind,
-    KernelEvaluator, KernelExprKind, KernelOriginKind, LayoutKind, LoweringError,
-    NonSourceWakeupCause, RecurrenceTarget, RuntimeBigInt, RuntimeDecimal, RuntimeFloat,
-    RuntimeRecordField, RuntimeSumValue, RuntimeTaskPlan, RuntimeValue, SourceProvider,
-    StageKind as BackendStageKind, ValidationError, compile_program,
-    lower_module as lower_backend_module, validate_program,
+    BuiltinFunctorCarrier, BuiltinMonadCarrier, BuiltinOrdSubject, BuiltinTraversableCarrier,
+    CodegenError, DecodeStepKind, DomainDecodeSurfaceKind, EvaluationError,
+    GateStage as BackendGateStage, InlinePipeConstructor, InlinePipePatternKind,
+    InlinePipeStageKind, ItemKind as BackendItemKind, KernelEvaluator, KernelExprKind,
+    KernelOriginKind, LayoutKind, LoweringError, NonSourceWakeupCause, RecurrenceTarget,
+    RuntimeBigInt, RuntimeDecimal, RuntimeFloat, RuntimeRecordField, RuntimeSumValue,
+    RuntimeTaskPlan, RuntimeValue, SourceProvider, StageKind as BackendStageKind, ValidationError,
+    compile_program, lower_module as lower_backend_module, validate_program,
 };
 use aivi_base::{SourceDatabase, SourceSpan};
 use aivi_core::{
@@ -696,6 +696,146 @@ value none:List Int =
             .evaluate_item(none, &globals)
             .expect("empty should evaluate"),
         RuntimeValue::List(Vec::new())
+    );
+}
+
+#[test]
+fn runtime_evaluates_builtin_monad_members() {
+    let backend = lower_text(
+        "backend-builtin-monad-members.aivi",
+        r#"
+fun nextOption:(Option Int) n:Int =>
+    Some (n + 1)
+
+fun nextResult:(Result Text Int) n:Int =>
+    Ok (n + 2)
+
+value okSeed:Result Text Int =
+    Ok 4
+
+value chainedOption:Option Int =
+    chain nextOption (Some 2)
+
+value joinedOption:Option Int =
+    join (Some (Some 3))
+
+value chainedResult:Result Text Int =
+    chain nextResult okSeed
+
+value joinedList:List Int =
+    join [[1, 2], [3]]
+"#,
+    );
+
+    let chained_option = find_item(&backend, "chainedOption");
+    let joined_option = find_item(&backend, "joinedOption");
+    let chained_result = find_item(&backend, "chainedResult");
+    let joined_list = find_item(&backend, "joinedList");
+
+    let chained_option_kernel = backend.kernels()[backend.items()[chained_option]
+        .body
+        .expect("chainedOption should carry a body")]
+    .clone();
+    match &chained_option_kernel.exprs()[chained_option_kernel.root].kind {
+        KernelExprKind::Apply { callee, arguments } => {
+            assert_eq!(arguments.len(), 2);
+            assert!(matches!(
+                &chained_option_kernel.exprs()[*callee].kind,
+                KernelExprKind::BuiltinClassMember(BuiltinClassMemberIntrinsic::Chain(
+                    BuiltinMonadCarrier::Option
+                ))
+            ));
+        }
+        other => panic!("expected chain body to lower into an apply tree, found {other:?}"),
+    }
+
+    let joined_option_kernel = backend.kernels()[backend.items()[joined_option]
+        .body
+        .expect("joinedOption should carry a body")]
+    .clone();
+    match &joined_option_kernel.exprs()[joined_option_kernel.root].kind {
+        KernelExprKind::Apply { callee, arguments } => {
+            assert_eq!(arguments.len(), 1);
+            assert!(matches!(
+                &joined_option_kernel.exprs()[*callee].kind,
+                KernelExprKind::BuiltinClassMember(BuiltinClassMemberIntrinsic::Join(
+                    BuiltinMonadCarrier::Option
+                ))
+            ));
+        }
+        other => panic!("expected join body to lower into an apply tree, found {other:?}"),
+    }
+
+    let mut evaluator = KernelEvaluator::new(&backend);
+    let globals = BTreeMap::new();
+    assert_eq!(
+        evaluator
+            .evaluate_item(chained_option, &globals)
+            .expect("option chain should evaluate"),
+        RuntimeValue::OptionSome(Box::new(RuntimeValue::Int(3)))
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(joined_option, &globals)
+            .expect("option join should evaluate"),
+        RuntimeValue::OptionSome(Box::new(RuntimeValue::Int(3)))
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(chained_result, &globals)
+            .expect("result chain should evaluate"),
+        RuntimeValue::ResultOk(Box::new(RuntimeValue::Int(6)))
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(joined_list, &globals)
+            .expect("list join should evaluate"),
+        RuntimeValue::List(vec![
+            RuntimeValue::Int(1),
+            RuntimeValue::Int(2),
+            RuntimeValue::Int(3),
+        ])
+    );
+}
+
+#[test]
+fn runtime_evaluates_applicative_clusters() {
+    let backend = lower_text(
+        "backend-applicative-clusters.aivi",
+        r#"
+fun add:Int left:Int right:Int =>
+    left + right
+
+value combinedOption:Option Int =
+ &|> Some 2
+ &|> Some 3
+  |> add
+
+value tupledOption:Option (Int, Int) =
+ &|> Some 2
+ &|> Some 3
+"#,
+    );
+
+    let combined_option = find_item(&backend, "combinedOption");
+    let tupled_option = find_item(&backend, "tupledOption");
+
+    let mut evaluator = KernelEvaluator::new(&backend);
+    let globals = BTreeMap::new();
+    assert_eq!(
+        evaluator
+            .evaluate_item(combined_option, &globals)
+            .expect("cluster finalizer should evaluate"),
+        RuntimeValue::OptionSome(Box::new(RuntimeValue::Int(5)))
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(tupled_option, &globals)
+            .expect("implicit tuple cluster should evaluate"),
+        RuntimeValue::OptionSome(Box::new(RuntimeValue::Tuple(vec![
+            RuntimeValue::Int(2),
+            RuntimeValue::Int(3),
+        ])))
     );
 }
 

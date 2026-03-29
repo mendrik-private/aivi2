@@ -4,6 +4,8 @@ Sources are how AIVI connects the reactive graph to the outside world. Timers, H
 
 Current limitation: source syntax and provider contracts are implemented, but scheduler-owned recurrence execution is still only partially wired. The forms in this guide reflect what the parser/compiler accept today; more advanced recurrence wakeup behavior is still an explicit work item in the runtime/compiler pipeline.
 
+For the current compiler-and-runtime-backed reference, including every built-in source kind and option-level support notes, see the [Built-in Source Catalog](/guide/source-catalog).
+
 ## Source-backed signals with `@source`
 
 Today, built-in sources are attached with the `@source` decorator immediately before the signal declaration:
@@ -165,3 +167,4 @@ value view =
 | `@source fs.watch ...` | File watch signal |
 | `@source process.spawn ...` | Process-backed signal |
 | `provider custom.feed` | Custom source contract |
+| [Built-in Source Catalog](/guide/source-catalog) | Current source-kind and option reference |

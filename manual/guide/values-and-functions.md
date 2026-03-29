@@ -143,6 +143,63 @@ value shownStatus = " ready "
 
 That style gives each step a reusable name and stays inside the current language surface.
 
+## Structural patches
+
+Use `<|` to produce an updated value without mutating the original:
+
+```aivi
+type User = {
+    name: Text,
+    isAdmin: Bool
+}
+
+value user:User = {
+    name: "Ada",
+    isAdmin: False
+}
+
+value promoted:User = user <| {
+    .name: "Grace"
+    .isAdmin: True
+}
+```
+
+`patch { ... }` builds a reusable same-shape update function:
+
+```aivi
+value promote:(User -> User) = patch {
+    .isAdmin: True
+}
+```
+
+Selectors are relative to the current focus:
+
+- `.<field>` follows record fields
+- `[*]` traverses `List` elements or `Map` values
+- `[predicate]` filters `List` elements
+- `["key"]` or `[.key == "id-1"]` selects `Map` entries
+
+Inside patch predicates, use dot-prefixed projections such as `.active`, `.price`, `.key`, and `.value`.
+
+The current checked slice also accepts constructor focus through `Some`, `Ok`, `Err`, `Valid`, `Invalid`, and same-module constructors with exactly one payload field.
+
+`:=` stores a function value as data instead of applying it during patch execution.
+
+```aivi
+fun increment:Int n:Int =>
+    n + 1
+
+type Counter = {
+    step: Int -> Int
+}
+
+value keepCounter:(Counter -> Counter) = patch {
+    .step: := increment
+}
+```
+
+Current limitation: structural removal syntax (`.field: -`) is parsed but still rejected later in the compiler pipeline because result-type-changing patch elaboration is not wired through the executable slice yet.
+
 ## Type annotations
 
 Both `value` and `fun` use `:` for type annotations:
@@ -162,3 +219,4 @@ fun negate:Int n:Int =>
 | Function | `fun add:Int x:Int y:Int => x + y` |
 | Function call | `add 3 4` |
 | Partial application | `value double = multiply 2` |
+| Patch apply | `value promoted = user <| { .isAdmin: True }` |

@@ -9,4 +9,4 @@ signal retryEvents : Signal Int
 
 signal retried : Signal Int =
     retryEvents
-     |> scan 0 step
+     +|> 0 step

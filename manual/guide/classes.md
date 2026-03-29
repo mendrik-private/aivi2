@@ -1,6 +1,7 @@
 # Classes
 
 Classes are AIVI's typeclass-style abstraction mechanism. A class describes a set of operations that a type must provide.
+For the current higher-kinded hierarchy, builtin executable support matrix, and user-authored instance limits, see [Typeclasses & Higher-Kinded Support](/guide/typeclasses).
 
 ## Declaring a class
 

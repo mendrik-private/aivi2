@@ -27,6 +27,7 @@ pub enum TokenKind {
     At,
     Hash,
     Colon,
+    ColonEquals,
     Equals,
     EqualEqual,
     BangEqual,
@@ -53,6 +54,7 @@ pub enum TokenKind {
     SelfCloseTagEnd,
     Arrow,
     ThinArrow,
+    PatchKw,
     TypeKw,
     FunKw,
     ValueKw,
@@ -64,6 +66,7 @@ pub enum TokenKind {
     UseKw,
     ExportKw,
     Star,
+    PatchApply,
     PipeTransform,
     PipeGate,
     PipeCase,
@@ -97,7 +100,8 @@ impl TokenKind {
     pub const fn is_top_level_keyword(self) -> bool {
         matches!(
             self,
-            TokenKind::TypeKw
+            TokenKind::PatchKw
+                | TokenKind::TypeKw
                 | TokenKind::FunKw
                 | TokenKind::ValueKw
                 | TokenKind::SignalKw
@@ -134,7 +138,8 @@ impl TokenKind {
     pub const fn is_keyword(self) -> bool {
         matches!(
             self,
-            TokenKind::TypeKw
+            TokenKind::PatchKw
+                | TokenKind::TypeKw
                 | TokenKind::FunKw
                 | TokenKind::ValueKw
                 | TokenKind::SignalKw
@@ -533,11 +538,13 @@ fn lex_range(source: &SourceFile, range: std::ops::Range<usize>) -> LexedModule 
 
 fn match_compound(bytes: &[u8], cursor: usize, end: usize) -> Option<(TokenKind, usize)> {
     // Patterns ordered longest-first so no short prefix shadows a longer match.
-    const PATTERNS: [(&[u8], TokenKind); 24] = [
+    const PATTERNS: [(&[u8], TokenKind); 26] = [
         (b"<|@", TokenKind::PipeRecurStep),
         (b"<|*", TokenKind::PipeFanIn),
+        (b"<|", TokenKind::PatchApply),
         (b"</", TokenKind::CloseTagStart),
         (b"/>", TokenKind::SelfCloseTagEnd),
+        (b":=", TokenKind::ColonEquals),
         (b"@|>", TokenKind::PipeRecurStart),
         (b"&|>", TokenKind::PipeApply),
         (b"||>", TokenKind::PipeCase),
@@ -572,6 +579,7 @@ fn match_compound(bytes: &[u8], cursor: usize, end: usize) -> Option<(TokenKind,
 
 fn keyword_kind(text: &str) -> Option<TokenKind> {
     match text {
+        "patch" => Some(TokenKind::PatchKw),
         "type" => Some(TokenKind::TypeKw),
         "fun" => Some(TokenKind::FunKw),
         "value" => Some(TokenKind::ValueKw),

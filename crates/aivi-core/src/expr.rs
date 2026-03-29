@@ -78,6 +78,8 @@ pub enum BuiltinClassMemberIntrinsic {
     Bimap(BuiltinBifunctorCarrier),
     Pure(BuiltinApplicativeCarrier),
     Apply(BuiltinApplyCarrier),
+    Chain(BuiltinMonadCarrier),
+    Join(BuiltinMonadCarrier),
     Reduce(BuiltinFoldableCarrier),
     Traverse {
         traversable: BuiltinTraversableCarrier,
@@ -118,6 +120,13 @@ pub enum BuiltinApplyCarrier {
     Result,
     Validation,
     Signal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuiltinMonadCarrier {
+    List,
+    Option,
+    Result,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

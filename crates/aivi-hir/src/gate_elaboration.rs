@@ -126,6 +126,7 @@ pub enum GateRuntimeUnsupportedKind {
     BigIntLiteral,
     ApplicativeCluster,
     Markup,
+    PatchExpr,
     NestedGate,
     NestedFanout,
     PipeStage(GateRuntimeUnsupportedPipeStageKind),
@@ -152,6 +153,7 @@ impl fmt::Display for GateRuntimeUnsupportedKind {
             Self::BigIntLiteral => f.write_str("BigInt literal"),
             Self::ApplicativeCluster => f.write_str("applicative cluster"),
             Self::Markup => f.write_str("markup expression"),
+            Self::PatchExpr => f.write_str("patch expression"),
             Self::NestedGate => f.write_str("nested gate expression"),
             Self::NestedFanout => f.write_str("nested fan-out expression"),
             Self::PipeStage(kind) => write!(f, "{kind}"),
@@ -1119,6 +1121,12 @@ fn lower_gate_runtime_expr_with_purity(
                         return Err(GateElaborationBlocker::UnsupportedRuntimeExpr {
                             span: expr.span,
                             kind: GateRuntimeUnsupportedKind::Markup,
+                        });
+                    }
+                    ExprKind::PatchApply { .. } | ExprKind::PatchLiteral(_) => {
+                        return Err(GateElaborationBlocker::UnsupportedRuntimeExpr {
+                            span: expr.span,
+                            kind: GateRuntimeUnsupportedKind::PatchExpr,
                         });
                     }
                     // --- Pipe: bounded number of stages (not deep in practice) ---

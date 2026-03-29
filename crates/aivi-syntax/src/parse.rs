@@ -7,14 +7,15 @@ use crate::{
         DomainItem, DomainMember, DomainMemberName, ErrorItem, ExportItem, Expr, ExprKind,
         FloatLiteral, FunctionParam, Identifier, InstanceBody, InstanceItem, InstanceMember,
         IntegerLiteral, Item, ItemBase, MapExpr, MapExprEntry, MarkupAttribute,
-        MarkupAttributeValue, MarkupNode, Module, NamedItem, NamedItemBody, OperatorName, Pattern,
-        PatternKind, PipeCaseArm, PipeExpr, PipeStage, PipeStageKind, ProjectionPath,
-        QualifiedName, ReactiveUpdateItem, RecordExpr, RecordField, RecordPatternField,
-        RegexLiteral, ResultBinding, ResultBlockExpr, SourceDecorator, SourceProviderContractBody,
-        SourceProviderContractFieldValue, SourceProviderContractItem, SourceProviderContractMember,
-        SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextFragment,
-        TextInterpolation, TextLiteral, TextSegment, TokenRange, TypeDeclBody, TypeExpr,
-        TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseImport, UseItem,
+        MarkupAttributeValue, MarkupNode, Module, NamedItem, NamedItemBody, OperatorName,
+        PatchBlock, PatchEntry, PatchInstruction, PatchInstructionKind, PatchSelector,
+        PatchSelectorSegment, Pattern, PatternKind, PipeCaseArm, PipeExpr, PipeStage,
+        PipeStageKind, ProjectionPath, QualifiedName, ReactiveUpdateItem, RecordExpr, RecordField,
+        RecordPatternField, RegexLiteral, ResultBinding, ResultBlockExpr, SourceDecorator,
+        SourceProviderContractBody, SourceProviderContractFieldValue, SourceProviderContractItem,
+        SourceProviderContractMember, SourceProviderContractSchemaMember, SuffixedIntegerLiteral,
+        TextFragment, TextInterpolation, TextLiteral, TextSegment, TokenRange, TypeDeclBody,
+        TypeExpr, TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseImport, UseItem,
     },
     lex::{LexedModule, Token, TokenKind, lex_fragment, lex_module},
 };
@@ -274,7 +275,7 @@ impl<'a> Parser<'a> {
             ),
             TokenKind::UseKw => Item::Use(self.parse_use_item(base, keyword_index, end)),
             TokenKind::ExportKw => Item::Export(self.parse_export_item(base, keyword_index, end)),
-            _ => unreachable!("finish_item only accepts supported top-level item starters"),
+            _ => unreachable!("finish_item only accepts top-level declaration keywords"),
         }
     }
 
@@ -1620,9 +1621,7 @@ impl<'a> Parser<'a> {
         let checkpoint = *cursor;
         if let Some(constraints) = self.parse_constraint_list(cursor, end)
             && constraints.iter().all(Self::is_constraint_expr)
-            && self
-                .consume_kind(cursor, end, TokenKind::ThinArrow)
-                .is_some()
+            && self.consume_constraint_separator(cursor, end)
         {
             return (
                 constraints,
@@ -1680,9 +1679,7 @@ impl<'a> Parser<'a> {
         let checkpoint = *cursor;
         if let Some(constraints) = self.parse_constraint_list(cursor, end)
             && constraints.iter().all(Self::is_constraint_expr)
-            && self
-                .consume_kind(cursor, end, TokenKind::ThinArrow)
-                .is_some()
+            && self.consume_constraint_separator(cursor, end)
         {
             return constraints;
         }
@@ -1768,7 +1765,9 @@ impl<'a> Parser<'a> {
         }
         if self.tokens[index].kind() == TokenKind::Identifier {
             let identifier = self.identifier_from_token(index);
-            if identifier.is_uppercase_initial() {
+            if identifier.is_uppercase_initial()
+                && !is_record_row_transform_name(&identifier.text)
+            {
                 if let Some(next_index) = self.peek_nontrivia(index + 1, end) {
                     if self.tokens[next_index].kind() == TokenKind::PipeTap
                         || (self.starts_type_atom(next_index)
@@ -1833,8 +1832,38 @@ impl<'a> Parser<'a> {
         if !self.depth_enter(cursor) {
             return None;
         }
+        let result = self.parse_type_pipe_expr(cursor, end, stop);
+        self.depth_exit();
+        result
+    }
+
+    fn parse_type_pipe_expr(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+        stop: TypeStop,
+    ) -> Option<TypeExpr> {
+        let mut ty = self.parse_type_arrow_expr(cursor, end, stop.with_pipe_transform())?;
+        while let Some(index) = self.peek_nontrivia(*cursor, end) {
+            if self.type_should_stop(index, stop) || self.tokens[index].kind() != TokenKind::PipeTransform
+            {
+                break;
+            }
+            *cursor = index + 1;
+            let stage = self.parse_type_arrow_expr(cursor, end, stop.with_pipe_transform())?;
+            ty = self.make_type_apply(stage, ty);
+        }
+        Some(ty)
+    }
+
+    fn parse_type_arrow_expr(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+        stop: TypeStop,
+    ) -> Option<TypeExpr> {
         let parameter = self.parse_type_application_expr(cursor, end, stop);
-        let result = parameter.and_then(|parameter| {
+        parameter.and_then(|parameter| {
             let Some(index) = self.peek_nontrivia(*cursor, end) else {
                 return Some(parameter);
             };
@@ -1846,9 +1875,7 @@ impl<'a> Parser<'a> {
             *cursor = index + 1;
             let result = self.parse_type_expr(cursor, end, stop)?;
             Some(self.make_type_arrow(parameter, result))
-        });
-        self.depth_exit();
-        result
+        })
     }
 
     fn parse_type_application_expr(
@@ -1979,9 +2006,38 @@ impl<'a> Parser<'a> {
         if !self.depth_enter(cursor) {
             return None;
         }
-        let result = self.parse_pipe_expr(cursor, end, stop);
+        let result = self.parse_patch_apply_expr(cursor, end, stop);
         self.depth_exit();
         result
+    }
+
+    fn parse_patch_apply_expr(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+        stop: ExprStop,
+    ) -> Option<Expr> {
+        let mut expr = self.parse_pipe_expr(cursor, end, stop)?;
+        loop {
+            let Some(index) = self.peek_nontrivia(*cursor, end) else {
+                break;
+            };
+            if self.expr_should_stop(index, stop) || self.tokens[index].kind() != TokenKind::PatchApply
+            {
+                break;
+            }
+            *cursor = index + 1;
+            let patch = self.parse_patch_block(cursor, end)?;
+            let span = self.join_spans(expr.span, patch.span);
+            expr = Expr {
+                span,
+                kind: ExprKind::PatchApply {
+                    target: Box::new(expr),
+                    patch,
+                },
+            };
+        }
+        Some(expr)
     }
 
     fn parse_pipe_expr(&mut self, cursor: &mut usize, end: usize, stop: ExprStop) -> Option<Expr> {
@@ -2127,10 +2183,12 @@ impl<'a> Parser<'a> {
                 TokenKind::PipeAccumulate => {
                     // `signal +|> seed (state input => next)`
                     // The seed expression comes first, then the step function expression.
+                    // Parse the seed with atomic-expression boundaries so an adjacent step name
+                    // does not get swallowed as an application (`+|> 0 step`).
                     cluster_active = false;
                     let subject_memo = self.parse_optional_pipe_memo(cursor, end);
                     let seed =
-                        self.parse_range_expr(cursor, end, stop.with_pipe_stage().with_hash())?;
+                        self.parse_atomic_expr(cursor, end, stop.with_pipe_stage().with_hash())?;
                     let step =
                         self.parse_range_expr(cursor, end, stop.with_pipe_stage().with_hash())?;
                     let result_memo = self.parse_optional_pipe_memo(cursor, end);
@@ -2371,6 +2429,7 @@ impl<'a> Parser<'a> {
         }
 
         match self.tokens[index].kind() {
+            TokenKind::PatchKw => self.parse_patch_literal_expr(cursor, end),
             TokenKind::Identifier => {
                 if self.is_identifier_text(index, "result")
                     && self
@@ -2460,6 +2519,141 @@ impl<'a> Parser<'a> {
             }
             _ => None,
         }
+    }
+
+    fn parse_patch_literal_expr(&mut self, cursor: &mut usize, end: usize) -> Option<Expr> {
+        let start = self.consume_kind(cursor, end, TokenKind::PatchKw)?;
+        let patch = self.parse_patch_block(cursor, end)?;
+        Some(Expr {
+            span: self.source_span_for_range(start, *cursor),
+            kind: ExprKind::PatchLiteral(patch),
+        })
+    }
+
+    fn parse_patch_block(&mut self, cursor: &mut usize, end: usize) -> Option<PatchBlock> {
+        let start = self.consume_kind(cursor, end, TokenKind::LBrace)?;
+        let mut entries = Vec::new();
+        loop {
+            if self.consume_kind(cursor, end, TokenKind::RBrace).is_some() {
+                break;
+            }
+            let selector = self.parse_patch_selector(cursor, end)?;
+            let _ = self.consume_kind(cursor, end, TokenKind::Colon)?;
+            let instruction = self.parse_patch_instruction(cursor, end)?;
+            let span = self.join_spans(selector.span, instruction.span);
+            entries.push(PatchEntry {
+                selector,
+                instruction,
+                span,
+            });
+            if self.consume_kind(cursor, end, TokenKind::Comma).is_some() {
+                continue;
+            }
+            if let Some(index) = self.peek_nontrivia(*cursor, end) {
+                if self.tokens[index].kind() == TokenKind::RBrace {
+                    let _ = self.consume_kind(cursor, end, TokenKind::RBrace);
+                    break;
+                }
+                if self.tokens[index].line_start() && self.token_starts_patch_selector(index) {
+                    continue;
+                }
+            }
+            break;
+        }
+
+        Some(PatchBlock {
+            entries,
+            span: self.source_span_for_range(start, *cursor),
+        })
+    }
+
+    fn parse_patch_selector(&mut self, cursor: &mut usize, end: usize) -> Option<PatchSelector> {
+        let start_index = self.peek_nontrivia(*cursor, end)?;
+        let mut segments = Vec::new();
+        loop {
+            if let Some(start) = self.consume_kind(cursor, end, TokenKind::Dot) {
+                let name = self.parse_identifier(cursor, end)?;
+                let span = self.source_span_for_range(start, *cursor);
+                segments.push(PatchSelectorSegment::Named {
+                    name,
+                    dotted: true,
+                    span,
+                });
+                continue;
+            }
+            if self.peek_kind(*cursor, end) == Some(TokenKind::LBracket) {
+                segments.push(self.parse_patch_bracket_selector(cursor, end)?);
+                continue;
+            }
+            if segments.is_empty() {
+                if let Some(name) = self.parse_identifier(cursor, end) {
+                    let span = name.span;
+                    segments.push(PatchSelectorSegment::Named {
+                        name,
+                        dotted: false,
+                        span,
+                    });
+                    continue;
+                }
+            }
+            break;
+        }
+        if segments.is_empty() {
+            return None;
+        }
+        let end_span = patch_selector_segment_span(segments.last().expect("non-empty segments"));
+        Some(PatchSelector {
+            segments,
+            span: SourceSpan::new(
+                self.source.id(),
+                Span::new(self.tokens[start_index].span().start(), end_span.span().end()),
+            ),
+        })
+    }
+
+    fn parse_patch_bracket_selector(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+    ) -> Option<PatchSelectorSegment> {
+        let start = self.consume_kind(cursor, end, TokenKind::LBracket)?;
+        if self.consume_kind(cursor, end, TokenKind::Star).is_some() {
+            let close = self.consume_kind(cursor, end, TokenKind::RBracket)?;
+            return Some(PatchSelectorSegment::BracketTraverse {
+                span: self.source_span_for_range(start, close + 1),
+            });
+        }
+        let expr = self.parse_expr(cursor, end, ExprStop::list_context())?;
+        let _ = self.consume_kind(cursor, end, TokenKind::RBracket)?;
+        Some(PatchSelectorSegment::BracketExpr {
+            span: self.source_span_for_range(start, *cursor),
+            expr: Box::new(expr),
+        })
+    }
+
+    fn parse_patch_instruction(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+    ) -> Option<PatchInstruction> {
+        if let Some(start) = self.consume_kind(cursor, end, TokenKind::ColonEquals) {
+            let expr = self.parse_expr(cursor, end, ExprStop::patch_entry_context())?;
+            return Some(PatchInstruction {
+                span: self.source_span_for_range(start, *cursor),
+                kind: PatchInstructionKind::Store(Box::new(expr)),
+            });
+        }
+        if let Some(start) = self.consume_kind(cursor, end, TokenKind::Minus) {
+            return Some(PatchInstruction {
+                span: self.source_span_of_token(start),
+                kind: PatchInstructionKind::Remove,
+            });
+        }
+        let expr = self.parse_expr(cursor, end, ExprStop::patch_entry_context())?;
+        Some(PatchInstruction {
+            span: expr.span,
+            kind: PatchInstructionKind::Replace(Box::new(expr)),
+        })
     }
 
     fn parse_result_block_expr(&mut self, cursor: &mut usize, end: usize) -> Option<Expr> {
@@ -2634,10 +2828,7 @@ impl<'a> Parser<'a> {
                 let Some(next) = self.peek_nontrivia(index + 1, close_brace) else {
                     return close_brace;
                 };
-                if self
-                    .result_block_binding_start(next, close_brace)
-                    .is_some()
-                {
+                if self.result_block_binding_start(next, close_brace).is_some() {
                     return next;
                 }
                 if !self.tokens[next].kind().is_pipe_operator() {
@@ -3688,6 +3879,12 @@ impl<'a> Parser<'a> {
     }
 
     fn expr_should_stop(&self, index: usize, stop: ExprStop) -> bool {
+        if stop.patch_entry
+            && self.tokens[index].line_start()
+            && self.token_starts_patch_selector(index)
+        {
+            return true;
+        }
         match self.tokens[index].kind() {
             TokenKind::Comma => stop.comma,
             TokenKind::RParen => stop.rparen,
@@ -3698,6 +3895,18 @@ impl<'a> Parser<'a> {
             kind if kind.is_pipe_operator() => stop.pipe_stage,
             _ => false,
         }
+    }
+
+    fn token_starts_patch_selector(&self, index: usize) -> bool {
+        matches!(
+            self.tokens[index].kind(),
+            TokenKind::Dot | TokenKind::LBracket | TokenKind::Identifier
+        ) || self.tokens[index].kind().is_keyword()
+    }
+
+    fn consume_constraint_separator(&self, cursor: &mut usize, end: usize) -> bool {
+        self.consume_kind(cursor, end, TokenKind::Arrow).is_some()
+            || self.consume_kind(cursor, end, TokenKind::ThinArrow).is_some()
     }
 
     fn negative_numeric_literal_token(&self, minus_index: usize, end: usize) -> Option<usize> {
@@ -3781,7 +3990,9 @@ impl<'a> Parser<'a> {
             TokenKind::Comma => stop.comma,
             TokenKind::RParen => stop.rparen,
             TokenKind::RBrace => stop.rbrace,
+            TokenKind::Arrow => stop.arrow,
             TokenKind::ThinArrow => stop.thin_arrow,
+            TokenKind::PipeTransform => stop.pipe_transform,
             _ => false,
         }
     }
@@ -4314,6 +4525,7 @@ struct ExprStop {
     arrow: bool,
     pipe_stage: bool,
     hash: bool,
+    patch_entry: bool,
 }
 
 impl ExprStop {
@@ -4356,6 +4568,23 @@ impl ExprStop {
             rbrace: true,
             ..Self::default()
         }
+    }
+
+    fn patch_entry_context() -> Self {
+        Self {
+            comma: true,
+            rbrace: true,
+            patch_entry: true,
+            ..Self::default()
+        }
+    }
+}
+
+fn patch_selector_segment_span(segment: &PatchSelectorSegment) -> SourceSpan {
+    match segment {
+        PatchSelectorSegment::Named { span, .. }
+        | PatchSelectorSegment::BracketTraverse { span }
+        | PatchSelectorSegment::BracketExpr { span, .. } => *span,
     }
 }
 
@@ -4413,7 +4642,9 @@ struct TypeStop {
     comma: bool,
     rparen: bool,
     rbrace: bool,
+    arrow: bool,
     thin_arrow: bool,
+    pipe_transform: bool,
 }
 
 impl TypeStop {
@@ -4435,10 +4666,23 @@ impl TypeStop {
 
     fn constraint_attempt() -> Self {
         Self {
+            arrow: true,
             thin_arrow: true,
             ..Self::default()
         }
     }
+
+    fn with_pipe_transform(mut self) -> Self {
+        self.pipe_transform = true;
+        self
+    }
+}
+
+fn is_record_row_transform_name(name: &str) -> bool {
+    matches!(
+        name,
+        "Pick" | "Omit" | "Optional" | "Required" | "Defaulted" | "Rename"
+    )
 }
 
 fn text_escape_end(text: &str, start: usize, end: usize) -> usize {
@@ -4768,7 +5012,7 @@ export main
     fn parser_builds_result_blocks_with_bindings_and_tail() {
         let (_, parsed) = load(
             r#"value total =
-    result {
+result {
         left <- Ok 20
         right <- Ok 22
         left + right
@@ -5312,6 +5556,82 @@ instance Eq A -> Eq (Option A)
             panic!("expected constrained instance item");
         };
         assert_eq!(instance.context.len(), 1);
+    }
+
+    #[test]
+    fn parser_desugars_type_level_record_row_pipes_into_nested_applications() {
+        let (_, parsed) = load(
+            concat!(
+                "type User = { id: Int, name: Text, createdAt: Text }\n",
+                "type Public = User |> Pick (id, createdAt) |> Rename { createdAt: created_at }\n",
+            ),
+        );
+        assert!(
+            !parsed.has_errors(),
+            "record row transform types should parse cleanly: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+
+        let Item::Type(item) = &parsed.module.items[1] else {
+            panic!("expected second item to be a type alias");
+        };
+        let Some(TypeDeclBody::Alias(alias)) = item.type_body() else {
+            panic!("expected type alias body");
+        };
+
+        let TypeExprKind::Apply { callee, arguments } = &alias.kind else {
+            panic!("expected piped transform to desugar into an application");
+        };
+        let TypeExprKind::Name(name) = &callee.kind else {
+            panic!("expected outer transform callee to be a name");
+        };
+        assert_eq!(name.text, "Rename");
+        assert_eq!(arguments.len(), 2);
+        assert!(matches!(arguments[0].kind, TypeExprKind::Record(_)));
+
+        let TypeExprKind::Apply {
+            callee: inner_callee,
+            arguments: inner_arguments,
+        } = &arguments[1].kind
+        else {
+            panic!("expected inner piped transform to stay nested");
+        };
+        let TypeExprKind::Name(inner_name) = &inner_callee.kind else {
+            panic!("expected inner transform callee to be a name");
+        };
+        assert_eq!(inner_name.text, "Pick");
+        assert_eq!(inner_arguments.len(), 2);
+        assert!(matches!(inner_arguments[0].kind, TypeExprKind::Tuple(_)));
+        assert!(matches!(
+            &inner_arguments[1].kind,
+            TypeExprKind::Name(name) if name.text == "User"
+        ));
+    }
+
+    #[test]
+    fn parser_tracks_constraint_prefixes_on_class_members() {
+        let (_, parsed) = load(
+            r#"class Functor F
+    map:Applicative G=>(A -> G B) -> F A -> G (F B)
+"#,
+        );
+        assert!(
+            !parsed.has_errors(),
+            "expected constrained class member to parse cleanly, got diagnostics: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+
+        let Item::Class(class_item) = &parsed.module.items[0] else {
+            panic!("expected class item");
+        };
+        let body = class_item.class_body().expect("class item should have a body");
+        assert_eq!(body.members.len(), 1);
+        assert_eq!(body.members[0].constraints.len(), 1);
+        assert!(
+            body.members[0].annotation.is_some(),
+            "expected class member annotation, got {:?}",
+            body.members[0]
+        );
     }
 
     #[test]

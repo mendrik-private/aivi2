@@ -34,6 +34,35 @@ value scaled = 5
 
 `multiply 3` produces a function waiting for the final argument, so the pipeline stays compact.
 
+## Type-level record row pipes
+
+The same `|>` surface is also available in type position for record row transforms.
+
+In a type pipeline, the type on the left becomes the final argument to the transform on the right:
+
+```aivi
+type User = {
+    id: Int,
+    name: Text,
+    createdAt: Text,
+    isAdmin: Bool
+}
+
+type UserPublic =
+    User
+    |> Omit (isAdmin)
+    |> Rename { createdAt: created_at }
+```
+
+That is equivalent to:
+
+```aivi
+type UserPublic =
+    Rename { createdAt: created_at } (Omit (isAdmin) User)
+```
+
+Type-level pipes are currently limited to record row transforms such as `Pick`, `Omit`, `Optional`, `Required`, `Defaulted`, and `Rename`.
+
 ## Pattern matching with `||>`
 
 `||>` is the branching pipe:
@@ -51,6 +80,13 @@ fun statusLabel:Text status:Status => status
 
 value currentLabel = statusLabel Published
 ```
+
+Inside pipe stages, `.` names the ambient subject. `_` is only a discard pattern or discard
+binder; it never means “the current subject”.
+
+Today `||>` supports patterns only. Case-stage guard syntax is not implemented end to end yet,
+so the current workaround is to match the shape first and then compute a `Bool` in the arm body
+or a helper, branching with `T|>` / `F|>` if needed.
 
 ## Boolean branches with `T|>` and `F|>`
 
@@ -150,7 +186,7 @@ The current parser/compiler also accept these pipe-stage forms:
 | `@\|>` | Explicit recurrence start |
 | `<\|@` | Explicit recurrence step |
 
-Some of these advanced stages still have narrower validation/runtime coverage than the core `|>`, `||>`, `?|>`, `T|>`, `F|>`, `~|>`, and `-|>` forms. In particular, `+|>` is still not a stable end-to-end checked surface even though parser/HIR support exists.
+Some of these advanced stages still have narrower validation/runtime coverage than the core `|>`, `||>`, `?|>`, `T|>`, `F|>`, `~|>`, and `-|>` forms. In particular, `+|>` now lowers through the recurrence path for signal accumulation, while more exotic applicative/validation combinations still have the narrower executable slice documented in the RFC.
 
 ## One important rule: no nested pipes
 

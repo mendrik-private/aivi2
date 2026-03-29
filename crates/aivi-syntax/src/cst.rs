@@ -393,6 +393,60 @@ pub struct ResultBlockExpr {
     pub span: SourceSpan,
 }
 
+/// Reusable structural patch block.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PatchBlock {
+    pub entries: Vec<PatchEntry>,
+    pub span: SourceSpan,
+}
+
+/// One structural patch entry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PatchEntry {
+    pub selector: PatchSelector,
+    pub instruction: PatchInstruction,
+    pub span: SourceSpan,
+}
+
+/// Selector path preserved before typing resolves whether named segments focus fields or constructors.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PatchSelector {
+    pub segments: Vec<PatchSelectorSegment>,
+    pub span: SourceSpan,
+}
+
+/// One selector segment inside a patch selector.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PatchSelectorSegment {
+    Named {
+        name: Identifier,
+        dotted: bool,
+        span: SourceSpan,
+    },
+    BracketTraverse {
+        span: SourceSpan,
+    },
+    BracketExpr {
+        expr: Box<Expr>,
+        span: SourceSpan,
+    },
+}
+
+/// Terminal patch instruction preserved before later typing/lowering.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PatchInstruction {
+    pub kind: PatchInstructionKind,
+    pub span: SourceSpan,
+}
+
+/// Patch instruction forms from the surface grammar.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PatchInstructionKind {
+    Replace(Box<Expr>),
+    Store(Box<Expr>),
+    Remove,
+}
+
 /// Surface expression forms exercised by the Milestone 1 fixture corpus.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExprKind {
@@ -434,6 +488,11 @@ pub enum ExprKind {
         right: Box<Expr>,
     },
     ResultBlock(ResultBlockExpr),
+    PatchApply {
+        target: Box<Expr>,
+        patch: PatchBlock,
+    },
+    PatchLiteral(PatchBlock),
     Pipe(PipeExpr),
     Markup(MarkupNode),
 }

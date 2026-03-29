@@ -41,6 +41,7 @@ const guideSections: DocGroup[] = [
       { text: 'Pipes & Operators', link: '/guide/pipes' },
       { text: 'Signals', link: '/guide/signals' },
       { text: 'Sources', link: '/guide/sources' },
+      { text: 'Source Catalog', link: '/guide/source-catalog' },
     ],
   },
   {
@@ -50,6 +51,7 @@ const guideSections: DocGroup[] = [
       { text: 'Markup & UI', link: '/guide/markup' },
       { text: 'Domains', link: '/guide/domains' },
       { text: 'Classes', link: '/guide/classes' },
+      { text: 'Typeclasses & HKTs', link: '/guide/typeclasses' },
       { text: 'Modules', link: '/guide/modules' },
     ],
   },

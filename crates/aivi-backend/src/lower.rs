@@ -29,6 +29,7 @@ use crate::{
     BuiltinFilterableCarrier as BackendBuiltinFilterableCarrier,
     BuiltinFoldableCarrier as BackendBuiltinFoldableCarrier,
     BuiltinFunctorCarrier as BackendBuiltinFunctorCarrier,
+    BuiltinMonadCarrier as BackendBuiltinMonadCarrier,
     BuiltinOrdSubject as BackendBuiltinOrdSubject, BuiltinTerm,
     BuiltinTraversableCarrier as BackendBuiltinTraversableCarrier, CallingConvention,
     CallingConventionKind, DecimalLiteral, DecodeExtraFieldPolicy, DecodeField,
@@ -2925,6 +2926,12 @@ fn map_builtin_class_member_intrinsic(
         core::BuiltinClassMemberIntrinsic::Apply(carrier) => {
             BackendBuiltinClassMemberIntrinsic::Apply(map_builtin_apply_carrier(carrier))
         }
+        core::BuiltinClassMemberIntrinsic::Chain(carrier) => {
+            BackendBuiltinClassMemberIntrinsic::Chain(map_builtin_monad_carrier(carrier))
+        }
+        core::BuiltinClassMemberIntrinsic::Join(carrier) => {
+            BackendBuiltinClassMemberIntrinsic::Join(map_builtin_monad_carrier(carrier))
+        }
         core::BuiltinClassMemberIntrinsic::Reduce(carrier) => {
             BackendBuiltinClassMemberIntrinsic::Reduce(map_builtin_foldable_carrier(carrier))
         }
@@ -2982,6 +2989,14 @@ fn map_builtin_apply_carrier(carrier: core::BuiltinApplyCarrier) -> BackendBuilt
         core::BuiltinApplyCarrier::Result => BackendBuiltinApplyCarrier::Result,
         core::BuiltinApplyCarrier::Validation => BackendBuiltinApplyCarrier::Validation,
         core::BuiltinApplyCarrier::Signal => BackendBuiltinApplyCarrier::Signal,
+    }
+}
+
+fn map_builtin_monad_carrier(carrier: core::BuiltinMonadCarrier) -> BackendBuiltinMonadCarrier {
+    match carrier {
+        core::BuiltinMonadCarrier::List => BackendBuiltinMonadCarrier::List,
+        core::BuiltinMonadCarrier::Option => BackendBuiltinMonadCarrier::Option,
+        core::BuiltinMonadCarrier::Result => BackendBuiltinMonadCarrier::Result,
     }
 }
 

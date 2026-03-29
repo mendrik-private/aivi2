@@ -1323,9 +1323,28 @@ fn type_head_with_arity(
                     hir::ResolutionState::Unresolved => None,
                 };
             }
-            hir::TypeKind::Tuple(_) | hir::TypeKind::Record(_) | hir::TypeKind::Arrow { .. } => {
+            hir::TypeKind::Tuple(_)
+            | hir::TypeKind::Record(_)
+            | hir::TypeKind::RecordTransform { .. }
+            | hir::TypeKind::Arrow { .. } => {
                 return None;
             }
+        }
+    }
+}
+
+fn queue_patch_block_exprs(patch: &hir::PatchBlock, work: &mut VecDeque<hir::ExprId>) {
+    for entry in &patch.entries {
+        for segment in &entry.selector.segments {
+            if let hir::PatchSelectorSegment::BracketExpr { expr, .. } = segment {
+                work.push_back(*expr);
+            }
+        }
+        match &entry.instruction.kind {
+            hir::PatchInstructionKind::Replace(expr) | hir::PatchInstructionKind::Store(expr) => {
+                work.push_back(*expr);
+            }
+            hir::PatchInstructionKind::Remove => {}
         }
     }
 }
@@ -1435,6 +1454,13 @@ fn collect_direct_signal_dependencies(
             hir::ExprKind::Binary { left, right, .. } => {
                 work.push_back(*left);
                 work.push_back(*right);
+            }
+            hir::ExprKind::PatchApply { target, patch } => {
+                work.push_back(*target);
+                queue_patch_block_exprs(patch, &mut work);
+            }
+            hir::ExprKind::PatchLiteral(patch) => {
+                queue_patch_block_exprs(patch, &mut work);
             }
             hir::ExprKind::Pipe(pipe) => {
                 work.push_back(pipe.head);
@@ -1789,7 +1815,7 @@ signal userEvents : Signal Int
 
 signal gated : Signal Int =
     userEvents
-     |> scan 0 step
+     +|> 0 step
 "#,
         );
         assert!(
@@ -1975,23 +2001,11 @@ when ready and enabled => total <- left + right
         let lowered = lower_text(
             "runtime-hir-adapter-dbus.aivi",
             r#"
-type DbusValue =
-  | DbusString Text
-  | DbusInt Int
-  | DbusBool Bool
-  | DbusList (List DbusValue)
-  | DbusStruct (List DbusValue)
-  | DbusVariant DbusValue
-
-type DbusSignal = {
-    path: Text,
-    interface: Text,
-    member: Text,
-    body: List DbusValue
+@source dbus.signal "/org/aivi/Test" with {
+    interface: "org.aivi.Test"
+    member: "Ping"
 }
-
-@source dbus.signal "/org/aivi/Test" "org.aivi.Test" "Ping"
-signal inbound : Signal DbusSignal
+signal inbound : Signal Text
 "#,
         );
         assert!(

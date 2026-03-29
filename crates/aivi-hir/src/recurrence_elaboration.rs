@@ -368,14 +368,18 @@ fn scan_stage(module: &Module, pipe: &PipeExpr) -> Option<ScanStage> {
         return None;
     }
     let stage = pipe.stages.first();
-    let PipeStageKind::Transform { expr } = stage.kind else {
-        return None;
+    let (stage_expr, seed_expr, step_expr) = match stage.kind {
+        PipeStageKind::Transform { expr } => {
+            let (seed_expr, step_expr) = parse_scan_expr(module, expr)?;
+            (expr, seed_expr, step_expr)
+        }
+        PipeStageKind::Accumulate { seed, step } => (step, seed, step),
+        _ => return None,
     };
-    let (seed_expr, step_expr) = parse_scan_expr(module, expr)?;
     Some(ScanStage {
         stage_index: 0,
         stage_span: stage.span,
-        stage_expr: expr,
+        stage_expr,
         seed_expr,
         step_expr,
     })
@@ -1250,7 +1254,7 @@ signal userEvents : Signal Int
 
 signal gated : Signal Int =
     userEvents
-     |> scan 0 step
+     +|> 0 step
 "#,
         );
         assert!(

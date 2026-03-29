@@ -3244,7 +3244,7 @@ signal next : Signal Int
 
 signal counter : Signal Int =
     next
-     |> scan 0 step
+     +|> 0 step
 "#,
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
@@ -3320,14 +3320,14 @@ signal turn : Signal Int
 
 signal direction : Signal Int =
     turn
-     |> scan 1 setDirection
+     +|> 1 setDirection
 
 @source custom.tick
 signal tick : Signal Int
 
 signal game : Signal Int =
     tick
-     |> scan 0 stepGame
+     +|> 0 stepGame
 "#,
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())

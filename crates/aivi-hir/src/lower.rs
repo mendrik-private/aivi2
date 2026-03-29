@@ -16,14 +16,15 @@ use crate::{
     InstanceMember, IntegerLiteral, IntrinsicValue, Item, ItemHeader, ItemId, ItemKind,
     LiteralSuffixResolution, MapExpr, MapExprEntry, MarkupAttribute, MarkupAttributeValue,
     MarkupElement, MarkupNode, MarkupNodeId, MarkupNodeKind, MatchControl, MockDecorator, Module,
-    Name, NamePath, Pattern, PatternId, PatternKind, PipeExpr, PipeStage, PipeStageKind,
-    ProjectionBase, ReactiveUpdateClause, RecordExpr, RecordExprField, RecordFieldSurface,
-    RecordPatternField, RecurrenceWakeupDecorator, RecurrenceWakeupDecoratorKind, RegexLiteral,
-    ResolutionState, ShowControl, SignalItem, SourceDecorator, SourceProviderContractItem, SourceProviderRef,
-    SuffixedIntegerLiteral, TermReference, TermResolution, TestDecorator, TextFragment,
-    TextInterpolation, TextLiteral, TextSegment, TypeField, TypeId, TypeItem, TypeItemBody,
-    TypeKind, TypeNode, TypeParameter, TypeParameterId, TypeReference, TypeResolution, TypeVariant,
-    UnaryOperator, UseItem, ValueItem, WithControl,
+    Name, NamePath, PatchBlock, PatchEntry, PatchInstruction, PatchInstructionKind, PatchSelector,
+    PatchSelectorSegment, Pattern, PatternId, PatternKind, PipeExpr, PipeStage, PipeStageKind,
+    ProjectionBase, ReactiveUpdateClause, RecordExpr, RecordExprField, RecordFieldSurface, RecordPatternField,
+    RecordRowRename, RecordRowTransform, RecurrenceWakeupDecorator, RecurrenceWakeupDecoratorKind,
+    RegexLiteral, ResolutionState, ShowControl, SignalItem, SourceDecorator,
+    SourceProviderContractItem, SourceProviderRef, SuffixedIntegerLiteral, TermReference,
+    TermResolution, TestDecorator, TextFragment, TextInterpolation, TextLiteral, TextSegment,
+    TypeField, TypeId, TypeItem, TypeItemBody, TypeKind, TypeNode, TypeParameter, TypeParameterId,
+    TypeReference, TypeResolution, TypeVariant, UnaryOperator, UseItem, ValueItem, WithControl,
 };
 
 pub struct LoweringResult {
@@ -653,8 +654,7 @@ impl<'a> Lowerer<'a> {
             return;
         };
 
-        let target_item = self.find_predeclared_named_item(target.text.as_str());
-        let Some(target_item) = target_item else {
+        let Some(target_item) = self.find_predeclared_named_item(target.text.as_str()) else {
             self.emit_error(
                 target.span,
                 format!(
@@ -665,6 +665,7 @@ impl<'a> Lowerer<'a> {
             );
             return;
         };
+
         let guard = self.lower_expr(guard);
         let body = self.lower_expr(body);
         let Some(Item::Signal(signal)) = self.module.arenas.items.get_mut(target_item) else {
@@ -1978,6 +1979,21 @@ impl<'a> Lowerer<'a> {
                 })
             }
             syn::ExprKind::ResultBlock(block) => self.lower_result_block_expr(block),
+            syn::ExprKind::PatchApply { target, patch } => {
+                let target = self.lower_expr(target);
+                let patch = self.lower_patch_block(patch);
+                self.alloc_expr(Expr {
+                    span: expr.span,
+                    kind: ExprKind::PatchApply { target, patch },
+                })
+            }
+            syn::ExprKind::PatchLiteral(patch) => {
+                let patch = self.lower_patch_block(patch);
+                self.alloc_expr(Expr {
+                    span: expr.span,
+                    kind: ExprKind::PatchLiteral(patch),
+                })
+            }
             syn::ExprKind::Pipe(pipe) => self.lower_pipe_expr(pipe),
             syn::ExprKind::Markup(markup) => {
                 let markup = self.lower_markup_node(markup, MarkupPlacement::Renderable);
@@ -1988,6 +2004,63 @@ impl<'a> Lowerer<'a> {
                     kind: ExprKind::Markup(markup),
                 })
             }
+        }
+    }
+
+    fn lower_patch_block(&mut self, patch: &syn::PatchBlock) -> PatchBlock {
+        PatchBlock {
+            entries: patch
+                .entries
+                .iter()
+                .map(|entry| PatchEntry {
+                    span: entry.span,
+                    selector: self.lower_patch_selector(&entry.selector),
+                    instruction: self.lower_patch_instruction(&entry.instruction),
+                })
+                .collect(),
+        }
+    }
+
+    fn lower_patch_selector(&mut self, selector: &syn::PatchSelector) -> PatchSelector {
+        PatchSelector {
+            span: selector.span,
+            segments: selector
+                .segments
+                .iter()
+                .map(|segment| match segment {
+                    syn::PatchSelectorSegment::Named { name, dotted, span } => {
+                        PatchSelectorSegment::Named {
+                            name: self.make_name(&name.text, name.span),
+                            dotted: *dotted,
+                            span: *span,
+                        }
+                    }
+                    syn::PatchSelectorSegment::BracketTraverse { span } => {
+                        PatchSelectorSegment::BracketTraverse { span: *span }
+                    }
+                    syn::PatchSelectorSegment::BracketExpr { expr, span } => {
+                        PatchSelectorSegment::BracketExpr {
+                            expr: self.lower_expr(expr),
+                            span: *span,
+                        }
+                    }
+                })
+                .collect(),
+        }
+    }
+
+    fn lower_patch_instruction(&mut self, instruction: &syn::PatchInstruction) -> PatchInstruction {
+        PatchInstruction {
+            span: instruction.span,
+            kind: match &instruction.kind {
+                syn::PatchInstructionKind::Replace(expr) => {
+                    PatchInstructionKind::Replace(self.lower_expr(expr))
+                }
+                syn::PatchInstructionKind::Store(expr) => {
+                    PatchInstructionKind::Store(self.lower_expr(expr))
+                }
+                syn::PatchInstructionKind::Remove => PatchInstructionKind::Remove,
+            },
         }
     }
 
@@ -3091,6 +3164,9 @@ impl<'a> Lowerer<'a> {
                 })
             }
             syn::TypeExprKind::Apply { callee, arguments } => {
+                if let Some(transform) = self.lower_record_row_transform(ty, callee, arguments) {
+                    return transform;
+                }
                 let callee = self.lower_type_expr(callee);
                 let arguments = arguments
                     .iter()
@@ -3113,6 +3189,153 @@ impl<'a> Lowerer<'a> {
                 })
             }
         }
+    }
+
+    fn lower_record_row_transform(
+        &mut self,
+        ty: &syn::TypeExpr,
+        callee: &syn::TypeExpr,
+        arguments: &[syn::TypeExpr],
+    ) -> Option<TypeId> {
+        let syn::TypeExprKind::Name(name) = &callee.kind else {
+            return None;
+        };
+        let transform = match name.text.as_str() {
+            "Pick" => Some("Pick"),
+            "Omit" => Some("Omit"),
+            "Optional" => Some("Optional"),
+            "Required" => Some("Required"),
+            "Defaulted" => Some("Defaulted"),
+            "Rename" => Some("Rename"),
+            _ => None,
+        }?;
+        if arguments.len() != 2 {
+            self.emit_error(
+                ty.span,
+                format!("record row transform `{transform}` expects exactly two arguments"),
+                code("invalid-record-row-transform"),
+            );
+            return Some(self.placeholder_type(ty.span));
+        }
+        let source = self.lower_type_expr(&arguments[1]);
+        let transform = match transform {
+            "Pick" => RecordRowTransform::Pick(self.lower_record_row_labels(
+                ty.span,
+                &arguments[0],
+                "Pick",
+            )),
+            "Omit" => RecordRowTransform::Omit(self.lower_record_row_labels(
+                ty.span,
+                &arguments[0],
+                "Omit",
+            )),
+            "Optional" => RecordRowTransform::Optional(self.lower_record_row_labels(
+                ty.span,
+                &arguments[0],
+                "Optional",
+            )),
+            "Required" => RecordRowTransform::Required(self.lower_record_row_labels(
+                ty.span,
+                &arguments[0],
+                "Required",
+            )),
+            "Defaulted" => RecordRowTransform::Defaulted(self.lower_record_row_labels(
+                ty.span,
+                &arguments[0],
+                "Defaulted",
+            )),
+            "Rename" => {
+                RecordRowTransform::Rename(self.lower_record_row_renames(ty.span, &arguments[0]))
+            }
+            _ => unreachable!("checked transform names should stay exhaustive"),
+        };
+        Some(self.alloc_type(TypeNode {
+            span: ty.span,
+            kind: TypeKind::RecordTransform { transform, source },
+        }))
+    }
+
+    fn lower_record_row_labels(
+        &mut self,
+        transform_span: SourceSpan,
+        labels: &syn::TypeExpr,
+        transform_name: &str,
+    ) -> Vec<Name> {
+        match &labels.kind {
+            syn::TypeExprKind::Group(inner) => {
+                self.lower_record_row_labels(transform_span, inner, transform_name)
+            }
+            syn::TypeExprKind::Name(name) => vec![self.make_name(&name.text, name.span)],
+            syn::TypeExprKind::Tuple(elements) => elements
+                .iter()
+                .flat_map(|element| self.lower_record_row_labels(transform_span, element, transform_name))
+                .collect(),
+            _ => {
+                self.emit_error(
+                    labels.span,
+                    format!(
+                        "record row transform `{transform_name}` expects a tuple of field labels"
+                    ),
+                    code("invalid-record-row-transform"),
+                );
+                vec![self.make_name("invalid", transform_span)]
+            }
+        }
+    }
+
+    fn lower_record_row_renames(
+        &mut self,
+        transform_span: SourceSpan,
+        mapping: &syn::TypeExpr,
+    ) -> Vec<RecordRowRename> {
+        let syn::TypeExprKind::Record(fields) = &mapping.kind else {
+            self.emit_error(
+                mapping.span,
+                "record row transform `Rename` expects a record-shaped mapping",
+                code("invalid-record-row-transform"),
+            );
+            return vec![RecordRowRename {
+                span: transform_span,
+                from: self.make_name("invalid", transform_span),
+                to: self.make_name("invalid", transform_span),
+            }];
+        };
+        let mut renames = Vec::with_capacity(fields.len());
+        for field in fields {
+            let Some(target) = field.ty.as_ref() else {
+                self.emit_error(
+                    field.span,
+                    "rename mappings must use `old: new` field pairs",
+                    code("invalid-record-row-transform"),
+                );
+                continue;
+            };
+            let target = match &target.kind {
+                syn::TypeExprKind::Group(inner) => inner.as_ref(),
+                _ => target,
+            };
+            let syn::TypeExprKind::Name(target_name) = &target.kind else {
+                self.emit_error(
+                    target.span,
+                    "rename mapping values must be field labels",
+                    code("invalid-record-row-transform"),
+                );
+                continue;
+            };
+            renames.push(RecordRowRename {
+                span: field.span,
+                from: self.make_name(&field.label.text, field.label.span),
+                to: self.make_name(&target_name.text, target_name.span),
+            });
+        }
+        if renames.is_empty() {
+            renames.push(RecordRowRename {
+                span: transform_span,
+                from: self.make_name("invalid", transform_span),
+                to: self.make_name("invalid", transform_span),
+            });
+        }
+        renames
     }
 
     fn lower_markup_node(
@@ -4231,6 +4454,56 @@ impl<'a> Lowerer<'a> {
                             ambient_allowed,
                         });
                     }
+                    ExprKind::PatchApply { target, patch } => {
+                        for entry in patch.entries.iter().rev() {
+                            match entry.instruction.kind {
+                                crate::PatchInstructionKind::Replace(expr)
+                                | crate::PatchInstructionKind::Store(expr) => {
+                                    work.push(AmbientProjectionWork::Expr {
+                                        expr,
+                                        ambient_allowed,
+                                    });
+                                }
+                                crate::PatchInstructionKind::Remove => {}
+                            }
+                            for segment in entry.selector.segments.iter().rev() {
+                                if let crate::PatchSelectorSegment::BracketExpr { expr, .. } = segment
+                                {
+                                    work.push(AmbientProjectionWork::Expr {
+                                        expr: *expr,
+                                        ambient_allowed,
+                                    });
+                                }
+                            }
+                        }
+                        work.push(AmbientProjectionWork::Expr {
+                            expr: *target,
+                            ambient_allowed,
+                        });
+                    }
+                    ExprKind::PatchLiteral(patch) => {
+                        for entry in patch.entries.iter().rev() {
+                            match entry.instruction.kind {
+                                crate::PatchInstructionKind::Replace(expr)
+                                | crate::PatchInstructionKind::Store(expr) => {
+                                    work.push(AmbientProjectionWork::Expr {
+                                        expr,
+                                        ambient_allowed,
+                                    });
+                                }
+                                crate::PatchInstructionKind::Remove => {}
+                            }
+                            for segment in entry.selector.segments.iter().rev() {
+                                if let crate::PatchSelectorSegment::BracketExpr { expr, .. } = segment
+                                {
+                                    work.push(AmbientProjectionWork::Expr {
+                                        expr: *expr,
+                                        ambient_allowed,
+                                    });
+                                }
+                            }
+                        }
+                    }
                     ExprKind::Pipe(pipe) => {
                         for stage in pipe.stages.iter().rev() {
                             match &stage.kind {
@@ -4786,6 +5059,47 @@ impl<'a> Lowerer<'a> {
                     },
                 }
             }
+            ExprKind::PatchApply { target, patch } => {
+                self.resolve_expr(target, namespaces, env);
+                for entry in &patch.entries {
+                    for segment in &entry.selector.segments {
+                        if let crate::PatchSelectorSegment::BracketExpr { expr, .. } = segment {
+                            self.resolve_expr(*expr, namespaces, env);
+                        }
+                    }
+                    match entry.instruction.kind {
+                        crate::PatchInstructionKind::Replace(expr)
+                        | crate::PatchInstructionKind::Store(expr) => {
+                            self.resolve_expr(expr, namespaces, env);
+                        }
+                        crate::PatchInstructionKind::Remove => {}
+                    }
+                }
+                Expr {
+                    span: expr.span,
+                    kind: ExprKind::PatchApply { target, patch },
+                }
+            }
+            ExprKind::PatchLiteral(patch) => {
+                for entry in &patch.entries {
+                    for segment in &entry.selector.segments {
+                        if let crate::PatchSelectorSegment::BracketExpr { expr, .. } = segment {
+                            self.resolve_expr(*expr, namespaces, env);
+                        }
+                    }
+                    match entry.instruction.kind {
+                        crate::PatchInstructionKind::Replace(expr)
+                        | crate::PatchInstructionKind::Store(expr) => {
+                            self.resolve_expr(expr, namespaces, env);
+                        }
+                        crate::PatchInstructionKind::Remove => {}
+                    }
+                }
+                Expr {
+                    span: expr.span,
+                    kind: ExprKind::PatchLiteral(patch),
+                }
+            }
             ExprKind::Pipe(pipe) => {
                 self.resolve_expr(pipe.head, namespaces, env);
                 let mut pipe_env = env.clone();
@@ -5089,6 +5403,13 @@ impl<'a> Lowerer<'a> {
                 TypeNode {
                     span: ty.span,
                     kind: TypeKind::Record(fields),
+                }
+            }
+            TypeKind::RecordTransform { transform, source } => {
+                self.resolve_type(source, namespaces, env);
+                TypeNode {
+                    span: ty.span,
+                    kind: TypeKind::RecordTransform { transform, source },
                 }
             }
             TypeKind::Arrow { parameter, result } => {
@@ -5645,6 +5966,9 @@ impl<'a> Lowerer<'a> {
                 }
                 TypeKind::Record(fields) => {
                     stack.extend(fields.iter().map(|field| field.ty));
+                }
+                TypeKind::RecordTransform { source, .. } => {
+                    stack.push(*source);
                 }
                 TypeKind::Arrow { parameter, result } => {
                     stack.push(*parameter);
@@ -6812,8 +7136,9 @@ mod tests {
         ApplicativeSpineHead, BuiltinTerm, BuiltinType, ClusterFinalizer, ClusterPresentation,
         DecoratorPayload, DomainMemberKind, ExportResolution, ExprKind, ImportBindingMetadata,
         ImportBundleKind, ImportValueType, Item, LiteralSuffixResolution, PipeStageKind,
-        RecurrenceWakeupDecoratorKind, ResolutionState, SourceProviderRef, TermResolution,
-        TextSegment, TypeKind, TypeResolution, ValidationMode, exports,
+        RecordRowTransform, RecurrenceWakeupDecoratorKind, ResolutionState, SourceProviderRef,
+        TermResolution, TextSegment, TypeItemBody, TypeKind, TypeResolution, ValidationMode,
+        exports,
     };
 
     fn fixture_root() -> PathBuf {
@@ -6961,6 +7286,107 @@ mod tests {
                 report.diagnostics()
             );
         }
+    }
+
+    #[test]
+    fn lowers_record_row_transform_aliases_into_explicit_hir_types() {
+        let lowered = lower_text(
+            "record-row-transforms.aivi",
+            concat!(
+                "type User = { id: Int, name: Text, nickname: Option Text, createdAt: Text }\n",
+                "type Public = Pick (id, name) User\n",
+                "type Patch = User |> Omit (createdAt) |> Optional (name, nickname)\n",
+                "type Snake = Rename { createdAt: created_at } User\n",
+            ),
+        );
+        assert!(
+            !lowered.has_errors(),
+            "record row transform aliases should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let module = lowered.module();
+
+        let Item::Type(public) = find_named_item(module, "Public") else {
+            panic!("expected `Public` to be a type item");
+        };
+        let TypeItemBody::Alias(public_alias) = public.body else {
+            panic!("expected `Public` to be an alias");
+        };
+        match &module.types()[public_alias].kind {
+            TypeKind::RecordTransform { transform, source } => {
+                assert!(matches!(transform, RecordRowTransform::Pick(labels) if labels.len() == 2));
+                assert!(matches!(
+                    &module.types()[*source].kind,
+                    TypeKind::Name(reference)
+                        if reference.path.to_string() == "User"
+                ));
+            }
+            other => panic!("expected `Public` to lower to a record transform, found {other:?}"),
+        }
+
+        let Item::Type(patch) = find_named_item(module, "Patch") else {
+            panic!("expected `Patch` to be a type item");
+        };
+        let TypeItemBody::Alias(patch_alias) = patch.body else {
+            panic!("expected `Patch` to be an alias");
+        };
+        match &module.types()[patch_alias].kind {
+            TypeKind::RecordTransform { transform, source } => {
+                assert!(matches!(
+                    transform,
+                    RecordRowTransform::Optional(labels) if labels.len() == 2
+                ));
+                assert!(matches!(
+                    &module.types()[*source].kind,
+                    TypeKind::RecordTransform {
+                        transform: RecordRowTransform::Omit(labels),
+                        ..
+                    } if labels.len() == 1
+                ));
+            }
+            other => panic!("expected `Patch` to lower to a nested record transform, found {other:?}"),
+        }
+
+        let Item::Type(snake) = find_named_item(module, "Snake") else {
+            panic!("expected `Snake` to be a type item");
+        };
+        let TypeItemBody::Alias(snake_alias) = snake.body else {
+            panic!("expected `Snake` to be an alias");
+        };
+        match &module.types()[snake_alias].kind {
+            TypeKind::RecordTransform {
+                transform: RecordRowTransform::Rename(renames),
+                ..
+            } => {
+                assert_eq!(renames.len(), 1);
+                assert_eq!(renames[0].from.text(), "createdAt");
+                assert_eq!(renames[0].to.text(), "created_at");
+            }
+            other => panic!("expected `Snake` to lower to a rename transform, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lowering_reports_malformed_record_row_transform_shapes() {
+        let lowered = lower_text(
+            "invalid-record-row-transform.aivi",
+            concat!(
+                "type User = { id: Int, name: Text }\n",
+                "type BrokenPick = Pick id User\n",
+                "type BrokenRename = Rename (id) User\n",
+            ),
+        );
+        let codes = lowered
+            .diagnostics()
+            .iter()
+            .filter_map(|diagnostic| diagnostic.code)
+            .collect::<Vec<_>>();
+        assert!(
+            codes.contains(&super::code("invalid-record-row-transform")),
+            "expected malformed transforms to report invalid-record-row-transform, got {:?}",
+            lowered.diagnostics()
+        );
     }
 
     #[test]

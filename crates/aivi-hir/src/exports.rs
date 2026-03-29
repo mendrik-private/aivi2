@@ -374,6 +374,10 @@ fn import_value_type(module: &Module, ty: TypeId) -> Option<ImportValueType> {
                 })
                 .collect::<Option<Vec<_>>>()?,
         )),
+        TypeKind::RecordTransform { transform, source } => {
+            let source = import_value_type(module, *source)?;
+            apply_record_row_transform_import_value_type(transform, source)
+        }
         TypeKind::Arrow { parameter, result } => Some(ImportValueType::Arrow {
             parameter: Box::new(import_value_type(module, *parameter)?),
             result: Box::new(import_value_type(module, *result)?),
@@ -486,7 +490,104 @@ fn flatten_type_application(
         TypeKind::Name(reference) => {
             Some((resolve_type_constructor(module, reference)?, Vec::new()))
         }
-        TypeKind::Tuple(_) | TypeKind::Record(_) | TypeKind::Arrow { .. } => None,
+        TypeKind::Tuple(_)
+        | TypeKind::Record(_)
+        | TypeKind::RecordTransform { .. }
+        | TypeKind::Arrow { .. } => None,
+    }
+}
+
+fn apply_record_row_transform_import_value_type(
+    transform: &crate::RecordRowTransform,
+    source: ImportValueType,
+) -> Option<ImportValueType> {
+    let ImportValueType::Record(fields) = source else {
+        return None;
+    };
+    let field_index = fields
+        .iter()
+        .enumerate()
+        .map(|(index, field)| (field.name.as_ref(), index))
+        .collect::<std::collections::HashMap<_, _>>();
+    match transform {
+        crate::RecordRowTransform::Pick(labels) => labels
+            .iter()
+            .map(|label| fields.get(*field_index.get(label.text())?).cloned())
+            .collect::<Option<Vec<_>>>()
+            .map(ImportValueType::Record),
+        crate::RecordRowTransform::Omit(labels) => {
+            let omitted = labels
+                .iter()
+                .map(|label| field_index.get(label.text()).copied())
+                .collect::<Option<std::collections::HashSet<_>>>()?;
+            Some(ImportValueType::Record(
+                fields
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| !omitted.contains(index))
+                    .map(|(_, field)| field.clone())
+                    .collect(),
+            ))
+        }
+        crate::RecordRowTransform::Optional(labels)
+        | crate::RecordRowTransform::Defaulted(labels) => Some(ImportValueType::Record(
+            fields
+                .iter()
+                .map(|field| {
+                    if labels.iter().any(|label| label.text() == field.name.as_ref()) {
+                        ImportRecordField {
+                            name: field.name.clone(),
+                            ty: match &field.ty {
+                                ImportValueType::Option(_) => field.ty.clone(),
+                                other => ImportValueType::Option(Box::new(other.clone())),
+                            },
+                        }
+                    } else {
+                        field.clone()
+                    }
+                })
+                .collect(),
+        )),
+        crate::RecordRowTransform::Required(labels) => Some(ImportValueType::Record(
+            fields
+                .iter()
+                .map(|field| {
+                    if labels.iter().any(|label| label.text() == field.name.as_ref()) {
+                        ImportRecordField {
+                            name: field.name.clone(),
+                            ty: match &field.ty {
+                                ImportValueType::Option(inner) => inner.as_ref().clone(),
+                                other => other.clone(),
+                            },
+                        }
+                    } else {
+                        field.clone()
+                    }
+                })
+                .collect(),
+        )),
+        crate::RecordRowTransform::Rename(renames) => {
+            let renamed = renames
+                .iter()
+                .map(|rename| Some((field_index.get(rename.from.text()).copied()?, rename)))
+                .collect::<Option<std::collections::HashMap<_, _>>>()?;
+            let mut result = Vec::with_capacity(fields.len());
+            let mut seen = std::collections::HashSet::with_capacity(fields.len());
+            for (index, field) in fields.iter().enumerate() {
+                let name = renamed
+                    .get(&index)
+                    .map(|rename| rename.to.text().to_owned().into_boxed_str())
+                    .unwrap_or_else(|| field.name.clone());
+                if !seen.insert(name.clone()) {
+                    return None;
+                }
+                result.push(ImportRecordField {
+                    name,
+                    ty: field.ty.clone(),
+                });
+            }
+            Some(ImportValueType::Record(result))
+        }
     }
 }
 

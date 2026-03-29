@@ -4,12 +4,13 @@ use crate::cst::{
     BinaryOperator, ClassMember, ClassMemberName, Decorator, DecoratorArguments, DecoratorPayload,
     DomainItem, DomainMember, DomainMemberName, ExportItem, Expr, ExprKind, FunctionParam,
     Identifier, InstanceItem, InstanceMember, Item, MapExpr, MarkupAttribute, MarkupAttributeValue,
-    MarkupNode, Module, NamedItem, Pattern, PatternKind, PipeExpr, PipeStage, PipeStageKind,
-    ProjectionPath, QualifiedName, ReactiveUpdateItem, RecordExpr, RecordField,
-    RecordPatternField, ResultBinding, ResultBlockExpr, SourceDecorator,
-    SourceProviderContractItem, SourceProviderContractMember, SourceProviderContractSchemaMember,
-    SuffixedIntegerLiteral, TextLiteral, TextSegment, TypeDeclBody, TypeExpr, TypeExprKind,
-    TypeField, TypeVariant, UnaryOperator, UseItem,
+    MarkupNode, Module, NamedItem, PatchBlock, PatchEntry, PatchInstruction,
+    PatchInstructionKind, PatchSelector, PatchSelectorSegment, Pattern, PatternKind, PipeExpr,
+    PipeStage, PipeStageKind, ProjectionPath, QualifiedName, ReactiveUpdateItem, RecordExpr,
+    RecordField, RecordPatternField, ResultBinding, ResultBlockExpr, SourceDecorator,
+    SourceProviderContractItem, SourceProviderContractMember,
+    SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextLiteral, TextSegment,
+    TypeDeclBody, TypeExpr, TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseItem,
 };
 
 const INDENT_WIDTH: usize = 4;
@@ -28,6 +29,7 @@ const EXPR_APPLY_PREC: u8 = 7;
 const EXPR_PROJECTION_PREC: u8 = 8;
 const EXPR_PREFIX_PREC: u8 = 9;
 const TYPE_ARROW_PREC: u8 = 0;
+const TYPE_PIPE_PREC: u8 = 0;
 const TYPE_APPLY_PREC: u8 = 1;
 const PATTERN_APPLY_PREC: u8 = 1;
 
@@ -202,37 +204,6 @@ impl Formatter {
         }
     }
 
-    /// Format a `fun` declaration: always has parameters, uses `=>` body form.
-    fn format_fun_item(&self, item: &NamedItem) -> Vec<String> {
-        let mut header = format!("fun {}", self.item_name(&item.name));
-        if let Some(annotation) = &item.annotation {
-            header.push_str(self.type_annotation_separator(&item.constraints, annotation));
-            header
-                .push_str(&self.format_signature_annotation_inline(&item.constraints, annotation));
-        }
-        for parameter in &item.parameters {
-            header.push(' ');
-            header.push_str(&self.format_function_param(parameter));
-        }
-        header.push_str(" =>");
-
-        let Some(body) = item.expr_body() else {
-            return vec![header];
-        };
-
-        if let ExprKind::Pipe(pipe) = &body.kind {
-            if let Some(lines) = self.format_pipe_with_head_lines(&header, pipe) {
-                return lines;
-            }
-        }
-
-        let force_break = self.should_force_expr_break(INDENT_WIDTH, body);
-        let block = self.format_expr_block(body, force_break);
-        let mut lines = vec![header];
-        lines.extend(block.indented(INDENT_WIDTH).into_lines());
-        lines
-    }
-
     fn format_reactive_update_item(&self, item: &ReactiveUpdateItem) -> Vec<String> {
         let guard = item
             .guard
@@ -263,6 +234,37 @@ impl Formatter {
             lines.extend(block.indented(INDENT_WIDTH).into_lines());
             lines
         }
+    }
+
+    /// Format a `fun` declaration: always has parameters, uses `=>` body form.
+    fn format_fun_item(&self, item: &NamedItem) -> Vec<String> {
+        let mut header = format!("fun {}", self.item_name(&item.name));
+        if let Some(annotation) = &item.annotation {
+            header.push_str(self.type_annotation_separator(&item.constraints, annotation));
+            header
+                .push_str(&self.format_signature_annotation_inline(&item.constraints, annotation));
+        }
+        for parameter in &item.parameters {
+            header.push(' ');
+            header.push_str(&self.format_function_param(parameter));
+        }
+        header.push_str(" =>");
+
+        let Some(body) = item.expr_body() else {
+            return vec![header];
+        };
+
+        if let ExprKind::Pipe(pipe) = &body.kind {
+            if let Some(lines) = self.format_pipe_with_head_lines(&header, pipe) {
+                return lines;
+            }
+        }
+
+        let force_break = self.should_force_expr_break(INDENT_WIDTH, body);
+        let block = self.format_expr_block(body, force_break);
+        let mut lines = vec![header];
+        lines.extend(block.indented(INDENT_WIDTH).into_lines());
+        lines
     }
 
     fn format_class_item(&self, item: &NamedItem) -> Vec<String> {
@@ -727,6 +729,9 @@ impl Formatter {
             }
             TypeExprKind::Arrow { .. } => Block::inline(self.format_type_inline(ty, 0)),
             TypeExprKind::Apply { callee, arguments } => {
+                if self.record_row_pipeline_parts(ty).is_some() {
+                    return Block::inline(self.format_type_inline(ty, 0));
+                }
                 self.format_type_apply_block(callee, arguments, force_multiline)
             }
             TypeExprKind::Group(inner) => self.format_type_group_block(inner, force_multiline),
@@ -735,6 +740,17 @@ impl Formatter {
     }
 
     fn format_type_inline(&self, ty: &TypeExpr, parent_prec: u8) -> String {
+        if let Some((source, stages)) = self.record_row_pipeline_parts(ty) {
+            let mut rendered = self.format_type_inline(source, TYPE_PIPE_PREC + 1);
+            for (name, argument) in stages {
+                rendered.push_str(" |> ");
+                rendered.push_str(name);
+                rendered.push(' ');
+                rendered.push_str(&self.format_type_inline(argument, TYPE_APPLY_PREC + 1));
+            }
+            return wrap_if_needed(rendered, TYPE_PIPE_PREC, parent_prec);
+        }
+
         match &ty.kind {
             TypeExprKind::Name(name) => name.text.clone(),
             TypeExprKind::Group(inner) => format!("({})", self.format_type_inline(inner, 0)),
@@ -743,8 +759,8 @@ impl Formatter {
             TypeExprKind::Arrow { parameter, result } => wrap_if_needed(
                 format!(
                     "{} -> {}",
-                    self.format_type_inline(parameter, TYPE_ARROW_PREC + 1),
-                    self.format_type_inline(result, TYPE_ARROW_PREC)
+                    self.format_type_arrow_operand(parameter, true),
+                    self.format_type_arrow_operand(result, false)
                 ),
                 TYPE_ARROW_PREC,
                 parent_prec,
@@ -799,6 +815,63 @@ impl Formatter {
             rendered.push_str(&self.format_type_inline(argument, TYPE_APPLY_PREC + 1));
         }
         rendered
+    }
+
+    fn format_type_arrow_operand(&self, ty: &TypeExpr, parameter: bool) -> String {
+        if self.record_row_pipeline_parts(ty).is_some() {
+            return format!("({})", self.format_type_inline(ty, 0));
+        }
+        let parent_prec = if parameter {
+            TYPE_ARROW_PREC + 1
+        } else {
+            TYPE_ARROW_PREC
+        };
+        self.format_type_inline(ty, parent_prec)
+    }
+
+    fn record_row_pipeline_parts<'a>(
+        &self,
+        ty: &'a TypeExpr,
+    ) -> Option<(&'a TypeExpr, Vec<(&'a str, &'a TypeExpr)>)> {
+        let mut stages = Vec::new();
+        let mut current = self.ungroup_type(ty);
+        while let Some((name, argument, source)) = self.record_row_transform_stage(current) {
+            stages.push((name, argument));
+            current = self.ungroup_type(source);
+        }
+        if stages.is_empty() {
+            return None;
+        }
+        stages.reverse();
+        Some((current, stages))
+    }
+
+    fn record_row_transform_stage<'a>(
+        &self,
+        ty: &'a TypeExpr,
+    ) -> Option<(&'a str, &'a TypeExpr, &'a TypeExpr)> {
+        let TypeExprKind::Apply { callee, arguments } = &ty.kind else {
+            return None;
+        };
+        if arguments.len() != 2 {
+            return None;
+        }
+        let TypeExprKind::Name(name) = &callee.kind else {
+            return None;
+        };
+        matches!(
+            name.text.as_str(),
+            "Pick" | "Omit" | "Optional" | "Required" | "Defaulted" | "Rename"
+        )
+        .then_some((name.text.as_str(), &arguments[0], &arguments[1]))
+    }
+
+    fn ungroup_type<'a>(&self, ty: &'a TypeExpr) -> &'a TypeExpr {
+        let mut current = ty;
+        while let TypeExprKind::Group(inner) = &current.kind {
+            current = inner;
+        }
+        current
     }
 
     fn format_type_group_block(&self, inner: &TypeExpr, force_multiline: bool) -> Block {
@@ -915,6 +988,10 @@ impl Formatter {
             ExprKind::Map(map) => self.format_map_block(map, force_multiline),
             ExprKind::Set(elements) => self.format_set_block(elements, force_multiline),
             ExprKind::Record(record) => self.format_record_block(record, force_multiline),
+            ExprKind::PatchApply { target, patch } => {
+                self.format_patch_apply_block(target, patch, force_multiline)
+            }
+            ExprKind::PatchLiteral(patch) => self.format_patch_literal_block(patch),
             ExprKind::Apply { callee, arguments } => {
                 self.format_expr_apply_block(callee, arguments, force_multiline)
             }
@@ -941,6 +1018,16 @@ impl Formatter {
             ExprKind::Record(record) => self.format_record_inline(record),
             ExprKind::SubjectPlaceholder => ".".to_owned(),
             ExprKind::AmbientProjection(path) => self.format_projection_path(path),
+            ExprKind::PatchApply { target, patch } => wrap_if_needed(
+                format!(
+                    "{} <| {}",
+                    self.format_expr_inline(target, EXPR_PIPE_PREC + 1),
+                    self.format_patch_block_inline(patch)
+                ),
+                EXPR_PIPE_PREC,
+                parent_prec,
+            ),
+            ExprKind::PatchLiteral(patch) => self.format_patch_literal_inline(patch),
             ExprKind::Range { start, end } => wrap_if_needed(
                 format!(
                     "{}..{}",
@@ -995,6 +1082,96 @@ impl Formatter {
                 wrap_if_needed(self.format_pipe_inline(pipe), EXPR_PIPE_PREC, parent_prec)
             }
             ExprKind::Markup(node) => self.format_markup_inline(node),
+        }
+    }
+
+    fn format_patch_apply_block(
+        &self,
+        target: &Expr,
+        patch: &PatchBlock,
+        force_multiline: bool,
+    ) -> Block {
+        let target = self.format_expr_inline(target, EXPR_PIPE_PREC + 1);
+        let patch_block = self.format_patch_block(patch, force_multiline);
+        patch_block.prefixed(&format!("{target} <| "))
+    }
+
+    fn format_patch_literal_block(&self, patch: &PatchBlock) -> Block {
+        self.format_patch_block(patch, true).prefixed("patch ")
+    }
+
+    fn format_patch_literal_inline(&self, patch: &PatchBlock) -> String {
+        format!("patch {}", self.format_patch_block_inline(patch))
+    }
+
+    fn format_patch_block_inline(&self, patch: &PatchBlock) -> String {
+        let entries = patch
+            .entries
+            .iter()
+            .map(|entry| self.format_patch_entry_inline(entry))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("{{ {entries} }}")
+    }
+
+    fn format_patch_block(&self, patch: &PatchBlock, force_multiline: bool) -> Block {
+        if !force_multiline
+            && patch.entries.len() <= 1
+            && patch
+                .entries
+                .iter()
+                .all(|entry| self.format_patch_entry_inline(entry).len() <= 60)
+        {
+            return Block::inline(self.format_patch_block_inline(patch));
+        }
+        let mut lines = vec!["{".to_owned()];
+        for entry in &patch.entries {
+            lines.push(format!(
+                "{}{},",
+                " ".repeat(INDENT_WIDTH),
+                self.format_patch_entry_inline(entry)
+            ));
+        }
+        lines.push("}".to_owned());
+        Block::from_lines(lines)
+    }
+
+    fn format_patch_entry_inline(&self, entry: &PatchEntry) -> String {
+        format!(
+            "{}: {}",
+            self.format_patch_selector(&entry.selector),
+            self.format_patch_instruction(&entry.instruction)
+        )
+    }
+
+    fn format_patch_selector(&self, selector: &PatchSelector) -> String {
+        let mut rendered = String::new();
+        for segment in &selector.segments {
+            match segment {
+                PatchSelectorSegment::Named { name, dotted, .. } => {
+                    if *dotted {
+                        rendered.push('.');
+                    }
+                    rendered.push_str(&name.text);
+                }
+                PatchSelectorSegment::BracketTraverse { .. } => rendered.push_str("[*]"),
+                PatchSelectorSegment::BracketExpr { expr, .. } => {
+                    rendered.push('[');
+                    rendered.push_str(&self.format_expr_inline(expr, 0));
+                    rendered.push(']');
+                }
+            }
+        }
+        rendered
+    }
+
+    fn format_patch_instruction(&self, instruction: &PatchInstruction) -> String {
+        match &instruction.kind {
+            PatchInstructionKind::Replace(expr) => self.format_expr_inline(expr, 0),
+            PatchInstructionKind::Store(expr) => {
+                format!(":= {}", self.format_expr_inline(expr, 0))
+            }
+            PatchInstructionKind::Remove => "-".to_owned(),
         }
     }
 
@@ -2278,6 +2455,19 @@ value view =
     }
 
     #[test]
+    fn formatter_preserves_result_blocks() {
+        let input = concat!(
+            "value total =\n",
+            "    result {\n",
+            "        left <- Ok 20\n",
+            "        right <- Ok 22\n",
+            "        left + right\n",
+            "    }\n",
+        );
+        assert_eq!(format_text(input), input);
+    }
+
+    #[test]
     fn formatter_spaces_applied_and_constrained_annotations() {
         let formatted = format_text(
             "fun wrap:Result Text Int value:(Result Text Int)=>value\nvalue active:Signal Bool=True\nclass Functor F\n    map:Applicative G=>(A -> G B) -> F A -> G (F B)\n",
@@ -2297,22 +2487,27 @@ value view =
     }
 
     #[test]
-    fn formatter_normalizes_reactive_update_items() {
+    fn formatter_preserves_record_row_transform_pipelines() {
         let formatted = format_text(
-            "signal total:Signal Int\nsignal ready:Signal Bool\nwhen   ready=>total<-signal1+signal2\nwhen ready.done=>total<-result{\nnext<-Ok signal1\nnext+signal2\n}\n",
+            concat!(
+                "type User={id:Int,name:Text,nickname:Option Text,createdAt:Text}\n",
+                "type Patch = User |> Omit (createdAt) |> Optional (name,nickname)\n",
+                "type Public = Rename {createdAt:created_at} (Pick (id,name,createdAt) User)\n",
+            ),
         );
         assert_eq!(
             formatted,
             concat!(
-                "signal total: Signal Int\n",
-                "signal ready: Signal Bool\n",
+                "type User = {\n",
+                "    id: Int,\n",
+                "    name: Text,\n",
+                "    nickname: Option Text,\n",
+                "    createdAt: Text\n",
+                "}\n",
                 "\n",
-                "when ready => total <- signal1 + signal2\n",
-                "when ready.done => total <-\n",
-                "    result {\n",
-                "        next <- Ok signal1\n",
-                "        next + signal2\n",
-                "    }\n",
+                "type Patch = User |> Omit (createdAt) |> Optional (name, nickname)\n",
+                "\n",
+                "type Public = User |> Pick (id, name, createdAt) |> Rename { createdAt: created_at }\n",
             )
         );
     }
@@ -2376,6 +2571,27 @@ value view =
             concat!(
                 "export (bundledSupportSentinel, BundledSupportToken)\n",
                 "export main\n",
+            )
+        );
+    }
+
+    #[test]
+    fn formatter_normalizes_reactive_update_items() {
+        let formatted = format_text(
+            "signal total:Signal Int\nsignal ready:Signal Bool\nwhen   ready=>total<-signal1+signal2\nwhen ready.done=>total<-result{\nnext<-Ok signal1\nnext+signal2\n}\n",
+        );
+        assert_eq!(
+            formatted,
+            concat!(
+                "signal total: Signal Int\n",
+                "signal ready: Signal Bool\n",
+                "\n",
+                "when ready => total <- signal1 + signal2\n",
+                "when ready.done => total <-\n",
+                "    result {\n",
+                "        next <- Ok signal1\n",
+                "        next + signal2\n",
+                "    }\n",
             )
         );
     }

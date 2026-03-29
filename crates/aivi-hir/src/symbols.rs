@@ -99,6 +99,35 @@ fn format_type_depth(module: &Module, id: TypeId, depth: u8) -> String {
                 .collect();
             format!("{{ {} }}", parts.join(", "))
         }
+        TypeKind::RecordTransform { transform, source } => {
+            let source_str = format_type_depth(module, *source, depth + 1);
+            match transform {
+                crate::RecordRowTransform::Pick(labels) => {
+                    format!("Pick ({}) {}", format_symbol_labels(labels), source_str)
+                }
+                crate::RecordRowTransform::Omit(labels) => {
+                    format!("Omit ({}) {}", format_symbol_labels(labels), source_str)
+                }
+                crate::RecordRowTransform::Optional(labels) => {
+                    format!("Optional ({}) {}", format_symbol_labels(labels), source_str)
+                }
+                crate::RecordRowTransform::Required(labels) => {
+                    format!("Required ({}) {}", format_symbol_labels(labels), source_str)
+                }
+                crate::RecordRowTransform::Defaulted(labels) => {
+                    format!("Defaulted ({}) {}", format_symbol_labels(labels), source_str)
+                }
+                crate::RecordRowTransform::Rename(renames) => format!(
+                    "Rename {{ {} }} {}",
+                    renames
+                        .iter()
+                        .map(|rename| format!("{}: {}", rename.from.text(), rename.to.text()))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    source_str
+                ),
+            }
+        }
         TypeKind::Arrow { parameter, result } => {
             let param_str = format_type_depth(module, *parameter, depth + 1);
             let result_str = format_type_depth(module, *result, depth + 1);
@@ -113,6 +142,14 @@ fn format_type_depth(module: &Module, id: TypeId, depth: u8) -> String {
             format!("{} {}", callee_str, args.join(" "))
         }
     }
+}
+
+fn format_symbol_labels(labels: &[crate::Name]) -> String {
+    labels
+        .iter()
+        .map(|label| label.text())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn item_to_lsp_symbol(item: &Item, module: &Module) -> Option<LspSymbol> {

@@ -188,6 +188,67 @@ value score:Int = 42
 value message:Text = "Hello, {name}! Your score is {score}."
 ```
 
+## Record row transforms
+
+Record row transforms derive a new closed record type from an existing closed record type.
+
+They are useful when one canonical record needs closely related variants for create inputs, patch inputs, or public API responses:
+
+```aivi
+type User = {
+    id: Int,
+    name: Text,
+    nickname: Option Text,
+    createdAt: Text,
+    isAdmin: Bool
+}
+
+type UserPublic =
+    User
+    |> Omit (isAdmin)
+    |> Rename { createdAt: created_at }
+
+type UserPatch =
+    User
+    |> Omit (createdAt, isAdmin)
+    |> Optional (name, nickname)
+```
+
+Available transforms:
+
+| Transform | Meaning |
+| --- | --- |
+| `Pick (f1, ..., fn) R` | Keep exactly the listed fields |
+| `Omit (f1, ..., fn) R` | Remove the listed fields |
+| `Optional (f1, ..., fn) R` | Wrap listed fields in `Option` when they are not already optional |
+| `Required (f1, ..., fn) R` | Remove one `Option` layer from listed fields when present |
+| `Defaulted (f1, ..., fn) R` | Same resulting shape as `Optional`, but for fields expected to be supplied later by a defaulting or codec step |
+| `Rename { old: new } R` | Rename fields without changing their types |
+
+Rules:
+
+- the source must be a closed record type
+- every referenced field must exist
+- `Optional` and `Defaulted` do not create nested `Option (Option A)`
+- `Required` removes at most one `Option` layer
+- `Rename` must not produce field-name collisions
+
+The pipe form is only syntax sugar. This:
+
+```aivi
+type UserPublic =
+    User
+    |> Omit (isAdmin)
+    |> Rename { createdAt: created_at }
+```
+
+means the same thing as:
+
+```aivi
+type UserPublic =
+    Rename { createdAt: created_at } (Omit (isAdmin) User)
+```
+
 ## Summary
 
 | Form | Use it for |
@@ -200,3 +261,4 @@ value message:Text = "Hello, {name}! Your score is {score}."
 | `Result E A` | Success or failure |
 | `List A` | Homogeneous sequences |
 | `(A, B)` | Fixed-size tuples |
+| `Pick` / `Omit` / `Optional` / `Required` / `Defaulted` / `Rename` | Deriving related closed record types |

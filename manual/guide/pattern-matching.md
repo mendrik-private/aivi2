@@ -17,7 +17,12 @@ fun describeNumber:Text n:Int => n
 value sampleDescription = describeNumber 1
 ```
 
-The `_` pattern matches anything. Arms are tried from top to bottom.
+The `_` pattern matches anything. Arms are tried from top to bottom. Within pipe bodies, `.`
+is the ambient subject; `_` is only a discard pattern or discard binding.
+
+Today `||>` supports patterns only. Case-stage guard syntax is not implemented end to end yet, so
+the current workaround is to match first and then compute a `Bool` in the arm body or in a named
+helper.
 
 ## Matching custom types
 
@@ -57,7 +62,7 @@ value stateMessage = describeLoadState (Loaded "Ada")
 
 ## Wildcards
 
-Use `_` when you only care about one or two cases:
+Use `_` when you only care about one or two cases and want to discard the unmatched payload:
 
 ```aivi
 type Status =
@@ -106,7 +111,8 @@ value summaryText =
     }
 ```
 
-You can combine record destructuring with a follow-up boolean check:
+Because case-stage guards are not implemented end to end yet, combine record destructuring with a
+follow-up boolean check when you need an extra condition:
 
 ```aivi
 type Profile = {

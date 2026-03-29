@@ -148,7 +148,8 @@ Lambda:
 x => expr
 
 Ambient:
-. is lambda shorthand
+- `.` is the ambient subject shorthand inside pipe-stage bodies
+- `_` is a discard symbol only
 
 Examples:
 . + 1
@@ -198,6 +199,36 @@ Example:
 a &|> b |> f  ==  (a &|> b) |> f
 
 ============================================================
+6.5 Structural Patches (Current checked slice)
+============================================================
+
+Structural patches update immutable values with selector paths.
+
+```aivi
+value user2 = user <| {
+    .profile.name: "Grace"
+    .items[.active].price: 3
+}
+
+value promote:(User -> User) = patch {
+    .isAdmin: True
+}
+```
+
+Current checked forms:
+
+- dot-prefixed field selectors such as `.profile.name`
+- list traversal and predicates: `[*]`, `[.active]`
+- map key and predicate selectors: `["id-1"]`, `[.key == "id-1"]`
+- function-as-data with `:=`
+- constructor focus through `Some`, `Ok`, `Err`, `Valid`, `Invalid`, and same-module constructors with one payload field
+
+Current limitations:
+
+- `.field: -` is parsed but still rejected later because result-type-changing removal lowering is not implemented yet
+- patch expressions are not yet executable in the current runtime lowering slice
+
+============================================================
 7. Pipes (Normative)
 ============================================================
 
@@ -225,14 +256,14 @@ Intended form:
 signal +|> seed (state input => next)
 
 Current status:
-- parser/HIR hooks for +|> exist
-- end-to-end checked programs still use the ambient scan helper instead
+- one-stage signal accumulation lowers through the same scheduler-owned recurrence path as `scan`
+- `scan seed step` remains a supported helper spelling for the same executable shape
 
 Working checked shape today:
 
 signal derived =
     source
-     |> scan seed step
+     +|> seed step
 
 ============================================================
 9. Source Model (Normative)
@@ -327,7 +358,7 @@ Rules:
 ============================================================
 
 - Signals behave like reactive graph nodes
-- scan is the working checked state-accumulation surface; +|> remains an intended surface
+- `+|>` is the checked state-accumulation surface for signal recurrence; `scan` remains an equivalent helper spelling
 - Domains act like typeclasses
 - Sources unify async + caching + scheduling
 

@@ -21,16 +21,16 @@ use aivi_hir::{
 use crate::{
     Arena, ArenaOverflow, BuiltinAppendCarrier, BuiltinApplicativeCarrier, BuiltinApplyCarrier,
     BuiltinBifunctorCarrier, BuiltinClassMemberIntrinsic, BuiltinFilterableCarrier,
-    BuiltinFoldableCarrier, BuiltinFunctorCarrier, BuiltinOrdSubject, BuiltinTraversableCarrier,
-    DecodeField, DecodeProgram, DecodeProgramId, DecodeStep, DecodeStepId, DomainDecodeSurface,
-    DomainDecodeSurfaceKind, Expr, ExprId, FanoutFilter, FanoutJoin, FanoutStage, GateStage, Item,
-    ItemId, ItemKind, ItemParameter, MapEntry, Module, NonSourceWakeup, Pattern, PatternBinding,
-    PatternConstructor, PatternKind, Pipe, PipeCaseArm, PipeExpr, PipeOrigin, PipeRecurrence,
-    PipeStage, PipeTruthyFalsyBranch, PipeTruthyFalsyStage, ProjectionBase, RecordExprField,
-    RecordPatternField, RecurrenceGuard, RecurrenceStage, Reference, SignalInfo,
-    SourceArgumentValue, SourceId, SourceInstanceId, SourceNode, SourceOptionBinding,
-    SourceOptionValue, Stage, StageKind, TextLiteral, TextSegment, TruthyFalsyBranch,
-    TruthyFalsyStage, Type,
+    BuiltinFoldableCarrier, BuiltinFunctorCarrier, BuiltinMonadCarrier, BuiltinOrdSubject,
+    BuiltinTraversableCarrier, DecodeField, DecodeProgram, DecodeProgramId, DecodeStep,
+    DecodeStepId, DomainDecodeSurface, DomainDecodeSurfaceKind, Expr, ExprId, FanoutFilter,
+    FanoutJoin, FanoutStage, GateStage, Item, ItemId, ItemKind, ItemParameter, MapEntry, Module,
+    NonSourceWakeup, Pattern, PatternBinding, PatternConstructor, PatternKind, Pipe, PipeCaseArm,
+    PipeExpr, PipeOrigin, PipeRecurrence, PipeStage, PipeTruthyFalsyBranch, PipeTruthyFalsyStage,
+    ProjectionBase, RecordExprField, RecordPatternField, RecurrenceGuard, RecurrenceStage,
+    Reference, SignalInfo, SourceArgumentValue, SourceId, SourceInstanceId, SourceNode,
+    SourceOptionBinding, SourceOptionValue, Stage, StageKind, TextLiteral, TextSegment,
+    TruthyFalsyBranch, TruthyFalsyStage, Type,
     expr::ExprKind,
     validate::{ValidationError, validate_module},
 };
@@ -124,6 +124,15 @@ pub enum LoweringError {
         body_expr: HirExprId,
         span: SourceSpan,
         blocked: BlockedGeneralExprBody,
+    },
+    MissingGeneralExprElaboration {
+        owner: HirItemId,
+        span: SourceSpan,
+    },
+    MissingInstanceMemberElaboration {
+        instance: HirItemId,
+        member_index: usize,
+        span: SourceSpan,
     },
     DuplicatePipeStage {
         owner: HirItemId,
@@ -232,6 +241,18 @@ impl std::fmt::Display for LoweringError {
                 f,
                 "typed-core lowering blocked on general expression body for item {owner}: {blocked}"
             ),
+            Self::MissingGeneralExprElaboration { owner, .. } => write!(
+                f,
+                "typed-core lowering could not find a complete general-expression elaboration for item {owner}"
+            ),
+            Self::MissingInstanceMemberElaboration {
+                instance,
+                member_index,
+                ..
+            } => write!(
+                f,
+                "typed-core lowering could not find a complete general-expression elaboration for instance item {instance} member {member_index}"
+            ),
             Self::DuplicatePipeStage {
                 owner,
                 pipe_expr,
@@ -302,17 +323,6 @@ impl std::fmt::Display for LoweringError {
 }
 
 /// Lower a fully elaborated HIR module into a typed-core module.
-///
-/// # Note: no pre-lowering completeness check
-///
-/// There is currently no validation that the elaboration report carried by `hir` is complete
-/// before lowering begins. If the elaboration phase produced partial results (e.g. because some
-/// HIR items are still blocked on type information), core lowering may silently produce incorrect
-/// or incomplete output for those items rather than surfacing a clear error.
-///
-/// TODO: add a completeness check here that verifies the elaboration report has resolved all
-/// items to either a concrete plan or an explicit blocked/error state before proceeding with
-/// lowering.
 pub fn lower_module(hir: &aivi_hir::Module) -> Result<Module, LoweringErrors> {
     ModuleLowerer::new(hir).build()
 }
@@ -333,6 +343,62 @@ pub fn lower_runtime_module_with_items(
     included_items: &HashSet<HirItemId>,
 ) -> Result<Module, LoweringErrors> {
     ModuleLowerer::new_runtime_with_items(hir, included_items).build()
+}
+
+fn validate_general_expr_report_completeness(
+    hir: &aivi_hir::Module,
+    report: &aivi_hir::GeneralExprElaborationReport,
+    includes_item: impl Fn(HirItemId) -> bool,
+) -> Vec<LoweringError> {
+    let item_owners = report
+        .items()
+        .iter()
+        .map(|item| item.owner)
+        .collect::<HashSet<_>>();
+    let instance_members = report
+        .instance_members()
+        .iter()
+        .map(|item| (item.instance_owner, item.member_index))
+        .collect::<HashSet<_>>();
+    let mut errors = Vec::new();
+    for (item_id, item) in hir.items().iter() {
+        if hir.ambient_items().contains(&item_id) || !includes_item(item_id) {
+            continue;
+        }
+        match item {
+            HirItem::Value(value) if !item_owners.contains(&item_id) => {
+                errors.push(LoweringError::MissingGeneralExprElaboration {
+                    owner: item_id,
+                    span: value.header.span,
+                });
+            }
+            HirItem::Function(function) if !item_owners.contains(&item_id) => {
+                errors.push(LoweringError::MissingGeneralExprElaboration {
+                    owner: item_id,
+                    span: function.header.span,
+                });
+            }
+            HirItem::Signal(signal) if signal.body.is_some() && !item_owners.contains(&item_id) => {
+                errors.push(LoweringError::MissingGeneralExprElaboration {
+                    owner: item_id,
+                    span: signal.header.span,
+                });
+            }
+            HirItem::Instance(instance) => {
+                for (member_index, member) in instance.members.iter().enumerate() {
+                    if !instance_members.contains(&(item_id, member_index)) {
+                        errors.push(LoweringError::MissingInstanceMemberElaboration {
+                            instance: item_id,
+                            member_index,
+                            span: member.span,
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    errors
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -800,7 +866,14 @@ impl<'a> ModuleLowerer<'a> {
     }
 
     fn lower_general_exprs(&mut self) {
-        let (items, instance_members) = elaborate_general_expressions(self.hir).into_parts();
+        let report = elaborate_general_expressions(self.hir);
+        self.errors
+            .extend(validate_general_expr_report_completeness(
+                self.hir,
+                &report,
+                |item_id| self.includes_item(item_id),
+            ));
+        let (items, instance_members) = report.into_parts();
         for item in items {
             if !self.includes_item(item.owner) {
                 continue;
@@ -1950,6 +2023,22 @@ impl<'a> ModuleLowerer<'a> {
                     ));
                 }
             },
+            ("Chain", "chain", TypeBinding::Constructor(binding)) => {
+                let Some(carrier) = self.builtin_monad_carrier(binding.head()) else {
+                    return Err(unsupported(
+                        "runtime lowering only supports chain for List, Option, and Result",
+                    ));
+                };
+                BuiltinClassMemberIntrinsic::Chain(carrier)
+            }
+            ("Monad", "join", TypeBinding::Constructor(binding)) => {
+                let Some(carrier) = self.builtin_monad_carrier(binding.head()) else {
+                    return Err(unsupported(
+                        "runtime lowering only supports join for List, Option, and Result",
+                    ));
+                };
+                BuiltinClassMemberIntrinsic::Join(carrier)
+            }
             ("Foldable", "reduce", TypeBinding::Constructor(binding)) => match binding.head() {
                 TypeConstructorHead::Builtin(aivi_hir::BuiltinType::List) => {
                     BuiltinClassMemberIntrinsic::Reduce(BuiltinFoldableCarrier::List)
@@ -2147,6 +2236,21 @@ impl<'a> ModuleLowerer<'a> {
             }
             TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Option) => {
                 Some(BuiltinFilterableCarrier::Option)
+            }
+            _ => None,
+        }
+    }
+
+    fn builtin_monad_carrier(&self, head: TypeConstructorHead) -> Option<BuiltinMonadCarrier> {
+        match head {
+            TypeConstructorHead::Builtin(aivi_hir::BuiltinType::List) => {
+                Some(BuiltinMonadCarrier::List)
+            }
+            TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Option) => {
+                Some(BuiltinMonadCarrier::Option)
+            }
+            TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Result) => {
+                Some(BuiltinMonadCarrier::Result)
             }
             _ => None,
         }
@@ -3203,7 +3307,9 @@ impl TruthyFalsyArmSpec {
 
 impl<'a> RuntimeFragmentLowerer<'a> {
     fn new(hir: &'a aivi_hir::Module, fragment: &'a RuntimeFragmentSpec) -> Self {
-        let (items, instance_members) = elaborate_general_expressions(hir).into_parts();
+        let report = elaborate_general_expressions(hir);
+        let completeness_errors = validate_general_expr_report_completeness(hir, &report, |_| true);
+        let (items, instance_members) = report.into_parts();
         let report_by_owner = items.into_iter().map(|item| (item.owner, item)).collect();
         let instance_member_reports = instance_members
             .into_iter()
@@ -3217,7 +3323,7 @@ impl<'a> RuntimeFragmentLowerer<'a> {
                 )
             })
             .collect();
-        Self {
+        let mut lowerer = Self {
             lowerer: ModuleLowerer::new(hir),
             fragment,
             report_by_owner,
@@ -3226,7 +3332,9 @@ impl<'a> RuntimeFragmentLowerer<'a> {
             lowered: HashSet::new(),
             lowering_instance_members: HashSet::new(),
             lowered_instance_members: HashSet::new(),
-        }
+        };
+        lowerer.lowerer.errors.extend(completeness_errors);
+        lowerer
     }
 
     fn build(mut self) -> Result<LoweredRuntimeFragment, LoweringErrors> {
@@ -3749,10 +3857,13 @@ mod tests {
     use aivi_hir::{BuiltinType, PipeTransformMode};
     use aivi_syntax::parse_module;
 
-    use super::{LoweringError, RuntimeFragmentSpec, lower_module, lower_runtime_fragment};
+    use super::{
+        LoweringError, RuntimeFragmentSpec, lower_module, lower_runtime_fragment,
+        validate_general_expr_report_completeness,
+    };
     use crate::{
         BuiltinApplicativeCarrier, BuiltinBifunctorCarrier, BuiltinClassMemberIntrinsic,
-        BuiltinFilterableCarrier, BuiltinFoldableCarrier, BuiltinOrdSubject,
+        BuiltinFilterableCarrier, BuiltinFoldableCarrier, BuiltinMonadCarrier, BuiltinOrdSubject,
         BuiltinTraversableCarrier, DecodeStep, GateStage, ItemKind, Reference, StageKind, Type,
         validate::{ValidationError, validate_module},
     };
@@ -4702,6 +4813,139 @@ value filtered:List Int =
         else {
             panic!("filterMap should lower to the builtin list filterable intrinsic");
         };
+    }
+
+    #[test]
+    fn lowers_monad_and_chain_members_into_builtin_intrinsics() {
+        let lowered = lower_text(
+            "typed-core-monad-chain.aivi",
+            r#"
+fun nextOption:(Option Int) n:Int =>
+    Some (n + 1)
+
+fun nextResult:(Result Text Int) n:Int =>
+    Ok (n + 1)
+
+value okSeed:Result Text Int =
+    Ok 4
+
+value chainedOption:Option Int =
+    chain nextOption (Some 2)
+
+value joinedOption:Option Int =
+    join (Some (Some 3))
+
+value chainedResult:Result Text Int =
+    chain nextResult okSeed
+
+value joinedList:List Int =
+    join [[1, 2], [3]]
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "monad/chain example should lower to HIR: {:?}",
+            lowered.diagnostics()
+        );
+
+        let core = lower_module(lowered.module()).expect("typed-core lowering should succeed");
+
+        let chained_option = core
+            .items()
+            .iter()
+            .find(|(_, item)| item.name.as_ref() == "chainedOption")
+            .map(|(id, _)| id)
+            .expect("expected chainedOption value item");
+        let chained_option_body = core.items()[chained_option]
+            .body
+            .expect("chainedOption should carry a lowered body");
+        let crate::ExprKind::Apply { callee, arguments } = &core.exprs()[chained_option_body].kind
+        else {
+            panic!("chainedOption should lower to an apply expression");
+        };
+        assert_eq!(arguments.len(), 2);
+        let crate::ExprKind::Reference(Reference::BuiltinClassMember(
+            BuiltinClassMemberIntrinsic::Chain(BuiltinMonadCarrier::Option),
+        )) = &core.exprs()[*callee].kind
+        else {
+            panic!("chain should lower to the builtin option monad intrinsic");
+        };
+
+        let joined_option = core
+            .items()
+            .iter()
+            .find(|(_, item)| item.name.as_ref() == "joinedOption")
+            .map(|(id, _)| id)
+            .expect("expected joinedOption value item");
+        let joined_option_body = core.items()[joined_option]
+            .body
+            .expect("joinedOption should carry a lowered body");
+        let crate::ExprKind::Apply { callee, arguments } = &core.exprs()[joined_option_body].kind
+        else {
+            panic!("joinedOption should lower to an apply expression");
+        };
+        assert_eq!(arguments.len(), 1);
+        let crate::ExprKind::Reference(Reference::BuiltinClassMember(
+            BuiltinClassMemberIntrinsic::Join(BuiltinMonadCarrier::Option),
+        )) = &core.exprs()[*callee].kind
+        else {
+            panic!("join should lower to the builtin option monad intrinsic");
+        };
+
+        let chained_result = core
+            .items()
+            .iter()
+            .find(|(_, item)| item.name.as_ref() == "chainedResult")
+            .map(|(id, _)| id)
+            .expect("expected chainedResult value item");
+        let chained_result_body = core.items()[chained_result]
+            .body
+            .expect("chainedResult should carry a lowered body");
+        let crate::ExprKind::Apply { callee, .. } = &core.exprs()[chained_result_body].kind else {
+            panic!("chainedResult should lower to an apply expression");
+        };
+        let crate::ExprKind::Reference(Reference::BuiltinClassMember(
+            BuiltinClassMemberIntrinsic::Chain(BuiltinMonadCarrier::Result),
+        )) = &core.exprs()[*callee].kind
+        else {
+            panic!("chain should lower to the builtin result monad intrinsic");
+        };
+
+        let joined_list = core
+            .items()
+            .iter()
+            .find(|(_, item)| item.name.as_ref() == "joinedList")
+            .map(|(id, _)| id)
+            .expect("expected joinedList value item");
+        let joined_list_body = core.items()[joined_list]
+            .body
+            .expect("joinedList should carry a lowered body");
+        let crate::ExprKind::Apply { callee, .. } = &core.exprs()[joined_list_body].kind else {
+            panic!("joinedList should lower to an apply expression");
+        };
+        let crate::ExprKind::Reference(Reference::BuiltinClassMember(
+            BuiltinClassMemberIntrinsic::Join(BuiltinMonadCarrier::List),
+        )) = &core.exprs()[*callee].kind
+        else {
+            panic!("join should lower to the builtin list monad intrinsic");
+        };
+    }
+
+    #[test]
+    fn completeness_check_reports_missing_general_expr_items() {
+        let lowered = lower_text("typed-core-completeness.aivi", "value answer:Int = 42\n");
+        assert!(
+            !lowered.has_errors(),
+            "completeness example should lower to HIR: {:?}",
+            lowered.diagnostics()
+        );
+        let empty = aivi_hir::GeneralExprElaborationReport::new(Vec::new(), Vec::new());
+        let errors = validate_general_expr_report_completeness(lowered.module(), &empty, |_| true);
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            LoweringError::MissingGeneralExprElaboration { owner, .. }
+                if matches!(&lowered.module().items()[*owner], aivi_hir::Item::Value(value) if value.name.text() == "answer")
+        )));
     }
 
     #[test]

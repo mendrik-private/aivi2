@@ -12,3 +12,7 @@ regex-syntax.workspace = true
 
 [lints]
 workspace = true
+
+[[test]]
+name = "patch_typecheck"
+path = "tests/patch_typecheck.rs"

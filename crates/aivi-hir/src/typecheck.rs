@@ -698,6 +698,28 @@ impl<'a> TypeChecker<'a> {
         expected: Option<&GateType>,
         value_stack: &mut Vec<ItemId>,
     ) -> bool {
+        match self.module.exprs()[expr_id].kind.clone() {
+            ExprKind::PatchApply { target, patch } => {
+                return self.check_patch_apply_expr(
+                    expr_id,
+                    target,
+                    &patch,
+                    env,
+                    expected,
+                    value_stack,
+                );
+            }
+            ExprKind::PatchLiteral(patch) => {
+                return match expected {
+                    Some(expected) => {
+                        self.check_patch_literal_expr(expr_id, &patch, env, expected, value_stack)
+                    }
+                    None => self.check_patch_block_children(&patch, env, value_stack),
+                };
+            }
+            _ => {}
+        }
+
         if let Some(result) = self.check_operator_expr(expr_id, env, expected, value_stack) {
             return result;
         }
@@ -711,6 +733,44 @@ impl<'a> TypeChecker<'a> {
         }
 
         self.check_inferred_expr(expr_id, env, expected)
+    }
+
+    fn check_expr_with_ambient(
+        &mut self,
+        expr_id: ExprId,
+        env: &GateExprEnv,
+        expected: Option<&GateType>,
+        ambient: &GateType,
+    ) -> bool {
+        let info = self.typing.infer_expr(expr_id, env, Some(ambient));
+        self.emit_expr_issues(&info.issues);
+        self.handle_constraints(&info.constraints);
+
+        match (expected, info.ty.as_ref()) {
+            (Some(expected), Some(actual)) if actual.same_shape(expected) => true,
+            (Some(expected), Some(actual)) => {
+                self.emit_type_mismatch(self.module.exprs()[expr_id].span, expected, actual);
+                false
+            }
+            (Some(_), None) => false,
+            (None, Some(_)) | (None, None) => true,
+        }
+    }
+
+    fn expr_matches_with_ambient(
+        &mut self,
+        expr_id: ExprId,
+        env: &GateExprEnv,
+        expected: &GateType,
+        ambient: &GateType,
+    ) -> bool {
+        let info = self.typing.infer_expr(expr_id, env, Some(ambient));
+        self.enqueue_eq_constraints(&info.constraints);
+        info.issues.is_empty()
+            && info
+                .ty
+                .as_ref()
+                .is_some_and(|actual| actual.same_shape(expected))
     }
 
     fn check_inferred_expr(
@@ -1221,6 +1281,21 @@ impl<'a> TypeChecker<'a> {
             ExprKind::Projection { base, path } => {
                 self.check_projection_expr(expr_id, &base, &path, env, expected, value_stack)
             }
+            ExprKind::PatchApply { target, patch } => Some(self.check_patch_apply_expr(
+                expr_id,
+                target,
+                &patch,
+                env,
+                Some(expected),
+                value_stack,
+            )),
+            ExprKind::PatchLiteral(patch) => Some(self.check_patch_literal_expr(
+                expr_id,
+                &patch,
+                env,
+                expected,
+                value_stack,
+            )),
             ExprKind::AmbientSubject => None,
             ExprKind::Integer(_)
             | ExprKind::Float(_)
@@ -1900,6 +1975,355 @@ impl<'a> TypeChecker<'a> {
             current = *result;
         }
         Some(current)
+    }
+
+    fn check_patch_apply_expr(
+        &mut self,
+        expr_id: ExprId,
+        target: ExprId,
+        patch: &crate::PatchBlock,
+        env: &GateExprEnv,
+        expected: Option<&GateType>,
+        value_stack: &mut Vec<ItemId>,
+    ) -> bool {
+        let target_ty = expected.cloned().or_else(|| self.inferred_expr_shape(target, env));
+        let target_ok = match target_ty.as_ref() {
+            Some(subject) => self.check_expr(target, env, Some(subject), value_stack),
+            None => self.check_expr(target, env, None, value_stack),
+        };
+        let patch_ok = match target_ty.as_ref() {
+            Some(subject) => self.check_patch_block(patch, subject, env, value_stack),
+            None => self.check_patch_block_children(patch, env, value_stack),
+        };
+        let result_ok = match (expected, target_ty.as_ref()) {
+            (Some(expected), Some(actual)) => self.check_result_type(expr_id, Some(expected), actual),
+            _ => true,
+        };
+        target_ok && patch_ok && result_ok
+    }
+
+    fn check_patch_literal_expr(
+        &mut self,
+        expr_id: ExprId,
+        patch: &crate::PatchBlock,
+        env: &GateExprEnv,
+        expected: &GateType,
+        value_stack: &mut Vec<ItemId>,
+    ) -> bool {
+        let GateType::Arrow { parameter, result } = expected else {
+            self.diagnostics.push(
+                Diagnostic::error(format!("expected `{expected}` but found a patch literal"))
+                    .with_code(code("type-mismatch"))
+                    .with_primary_label(
+                        self.module.exprs()[expr_id].span,
+                        "patch literals currently require an expected function type",
+                    ),
+            );
+            let _ = self.check_patch_block_children(patch, env, value_stack);
+            return false;
+        };
+        if !parameter.same_shape(result) {
+            self.diagnostics.push(
+                Diagnostic::error(format!(
+                    "patch literals require a same-shape function type, found `{expected}`"
+                ))
+                .with_code(code("invalid-patch-literal-type"))
+                .with_primary_label(
+                    self.module.exprs()[expr_id].span,
+                    "use a function type whose parameter and result have the same shape",
+                ),
+            );
+            let _ = self.check_patch_block_children(patch, env, value_stack);
+            return false;
+        }
+        self.check_patch_block(patch, parameter, env, value_stack)
+    }
+
+    fn check_patch_block(
+        &mut self,
+        patch: &crate::PatchBlock,
+        subject: &GateType,
+        env: &GateExprEnv,
+        value_stack: &mut Vec<ItemId>,
+    ) -> bool {
+        patch
+            .entries
+            .iter()
+            .all(|entry| self.check_patch_entry(entry, subject, env, value_stack))
+    }
+
+    fn check_patch_block_children(
+        &mut self,
+        patch: &crate::PatchBlock,
+        env: &GateExprEnv,
+        value_stack: &mut Vec<ItemId>,
+    ) -> bool {
+        patch.entries.iter().all(|entry| {
+            let selector_ok = entry.selector.segments.iter().all(|segment| match segment {
+                crate::PatchSelectorSegment::BracketExpr { expr, .. } => {
+                    self.check_expr(*expr, env, None, value_stack)
+                }
+                crate::PatchSelectorSegment::Named { .. }
+                | crate::PatchSelectorSegment::BracketTraverse { .. } => true,
+            });
+            let instruction_ok = match entry.instruction.kind {
+                crate::PatchInstructionKind::Replace(expr)
+                | crate::PatchInstructionKind::Store(expr) => {
+                    self.check_expr(expr, env, None, value_stack)
+                }
+                crate::PatchInstructionKind::Remove => true,
+            };
+            selector_ok && instruction_ok
+        })
+    }
+
+    fn check_patch_entry(
+        &mut self,
+        entry: &crate::PatchEntry,
+        subject: &GateType,
+        env: &GateExprEnv,
+        value_stack: &mut Vec<ItemId>,
+    ) -> bool {
+        self.check_patch_selector_segments(
+            &entry.selector.segments,
+            0,
+            subject,
+            &entry.instruction,
+            env,
+            value_stack,
+        )
+    }
+
+    fn check_patch_selector_segments(
+        &mut self,
+        segments: &[crate::PatchSelectorSegment],
+        index: usize,
+        current: &GateType,
+        instruction: &crate::PatchInstruction,
+        env: &GateExprEnv,
+        value_stack: &mut Vec<ItemId>,
+    ) -> bool {
+        if index == segments.len() {
+            return self.check_patch_instruction(instruction, current, env, value_stack);
+        }
+        match &segments[index] {
+            crate::PatchSelectorSegment::Named { name, dotted, span } => {
+                if *dotted {
+                    let GateType::Record(fields) = current else {
+                        self.emit_invalid_patch_selector(
+                            *span,
+                            "field selector",
+                            current,
+                            "record values support `.<field>` patch selectors",
+                        );
+                        return false;
+                    };
+                    let Some(field) = fields.iter().find(|field| field.name == name.text()) else {
+                        self.emit_unknown_patch_field(*span, name.text(), current);
+                        return false;
+                    };
+                    self.check_patch_selector_segments(
+                        segments,
+                        index + 1,
+                        &field.ty,
+                        instruction,
+                        env,
+                        value_stack,
+                    )
+                } else {
+                    let Some(next) = self.patch_constructor_focus(current, name.text(), *span) else {
+                        return false;
+                    };
+                    self.check_patch_selector_segments(
+                        segments,
+                        index + 1,
+                        &next,
+                        instruction,
+                        env,
+                        value_stack,
+                    )
+                }
+            }
+            crate::PatchSelectorSegment::BracketTraverse { span } => {
+                let next = match current {
+                    GateType::List(element) => Some(element.as_ref().clone()),
+                    GateType::Map { value, .. } => Some(value.as_ref().clone()),
+                    _ => None,
+                };
+                let Some(next) = next else {
+                    self.emit_invalid_patch_selector(
+                        *span,
+                        "traversal selector",
+                        current,
+                        "`[*]` patch traversal is currently supported for `List` and `Map` values only",
+                    );
+                    return false;
+                };
+                self.check_patch_selector_segments(
+                    segments,
+                    index + 1,
+                    &next,
+                    instruction,
+                    env,
+                    value_stack,
+                )
+            }
+            crate::PatchSelectorSegment::BracketExpr { expr, span } => match current {
+                GateType::List(element) => {
+                    let bool_ty = GateType::Primitive(BuiltinType::Bool);
+                    let predicate_ok =
+                        self.check_expr_with_ambient(*expr, env, Some(&bool_ty), element);
+                    let rest_ok = self.check_patch_selector_segments(
+                        segments,
+                        index + 1,
+                        element,
+                        instruction,
+                        env,
+                        value_stack,
+                    );
+                    predicate_ok && rest_ok
+                }
+                GateType::Map { key, value } => {
+                    let entry_ty = patch_map_entry_type(key, value);
+                    let bool_ty = GateType::Primitive(BuiltinType::Bool);
+                    if self.expr_matches_with_ambient(*expr, env, &bool_ty, &entry_ty) {
+                        let predicate_ok =
+                            self.check_expr_with_ambient(*expr, env, Some(&bool_ty), &entry_ty);
+                        let rest_ok = self.check_patch_selector_segments(
+                            segments,
+                            index + 1,
+                            value,
+                            instruction,
+                            env,
+                            value_stack,
+                        );
+                        predicate_ok && rest_ok
+                    } else {
+                        let key_ok = self.check_expr(*expr, env, Some(key), value_stack);
+                        let rest_ok = self.check_patch_selector_segments(
+                            segments,
+                            index + 1,
+                            value,
+                            instruction,
+                            env,
+                            value_stack,
+                        );
+                        key_ok && rest_ok
+                    }
+                }
+                _ => {
+                    self.emit_invalid_patch_selector(
+                        *span,
+                        "bracket selector",
+                        current,
+                        "predicate and keyed patch selectors are currently supported on `List` and `Map` only",
+                    );
+                    false
+                }
+            },
+        }
+    }
+
+    fn check_patch_instruction(
+        &mut self,
+        instruction: &crate::PatchInstruction,
+        focus: &GateType,
+        env: &GateExprEnv,
+        value_stack: &mut Vec<ItemId>,
+    ) -> bool {
+        match instruction.kind {
+            crate::PatchInstructionKind::Replace(expr) => {
+                let transform_ty = GateType::Arrow {
+                    parameter: Box::new(focus.clone()),
+                    result: Box::new(focus.clone()),
+                };
+                if self.expr_matches_with_ambient(expr, env, &transform_ty, focus) {
+                    self.check_expr_with_ambient(expr, env, Some(&transform_ty), focus)
+                } else {
+                    self.check_expr_with_ambient(expr, env, Some(focus), focus)
+                }
+            }
+            crate::PatchInstructionKind::Store(expr) => {
+                self.check_expr_with_ambient(expr, env, Some(focus), focus)
+            }
+            crate::PatchInstructionKind::Remove => {
+                self.diagnostics.push(
+                    Diagnostic::error("structural patch removal is not implemented yet")
+                        .with_code(code("unsupported-patch-remove"))
+                        .with_primary_label(
+                            instruction.span,
+                            "remove support needs result-type elaboration through the compiler pipeline",
+                        ),
+                );
+                let _ = value_stack;
+                false
+            }
+        }
+    }
+
+    fn patch_constructor_focus(
+        &mut self,
+        subject: &GateType,
+        constructor: &str,
+        span: SourceSpan,
+    ) -> Option<GateType> {
+        match subject {
+            GateType::Option(value) if constructor == "Some" => Some(value.as_ref().clone()),
+            GateType::Result { value, .. } if constructor == "Ok" => Some(value.as_ref().clone()),
+            GateType::Result { error, .. } if constructor == "Err" => Some(error.as_ref().clone()),
+            GateType::Validation { value, .. } if constructor == "Valid" => {
+                Some(value.as_ref().clone())
+            }
+            GateType::Validation { error, .. } if constructor == "Invalid" => {
+                Some(error.as_ref().clone())
+            }
+            GateType::OpaqueItem {
+                item, arguments, ..
+            } => {
+                let Item::Type(type_item) = &self.module.items()[*item] else {
+                    self.emit_unknown_patch_constructor(span, constructor, subject);
+                    return None;
+                };
+                let TypeItemBody::Sum(variants) = &type_item.body else {
+                    self.emit_unknown_patch_constructor(span, constructor, subject);
+                    return None;
+                };
+                let Some(variant) = variants.iter().find(|variant| variant.name.text() == constructor)
+                else {
+                    self.emit_unknown_patch_constructor(span, constructor, subject);
+                    return None;
+                };
+                if variant.fields.len() != 1 {
+                    self.diagnostics.push(
+                        Diagnostic::error(format!(
+                            "constructor selector `{constructor}` currently requires exactly one payload field"
+                        ))
+                        .with_code(code("unsupported-patch-constructor-shape"))
+                        .with_primary_label(
+                            span,
+                            "patch constructor focus currently continues through single-payload constructors only",
+                        ),
+                    );
+                    return None;
+                }
+                let substitutions = type_item
+                    .parameters
+                    .iter()
+                    .copied()
+                    .zip(arguments.iter().cloned())
+                    .collect::<HashMap<_, _>>();
+                let Some(field_ty) = self.typing.lower_hir_type(variant.fields[0], &substitutions)
+                else {
+                    self.emit_unknown_patch_constructor(span, constructor, subject);
+                    return None;
+                };
+                Some(field_ty)
+            }
+            _ => {
+                self.emit_unknown_patch_constructor(span, constructor, subject);
+                None
+            }
+        }
     }
 
     fn project_type(&self, subject: &GateType, path: &NamePath) -> Result<GateType, GateIssue> {
@@ -3041,6 +3465,51 @@ impl<'a> TypeChecker<'a> {
             ),
         }
     }
+
+    fn emit_invalid_patch_selector(
+        &mut self,
+        span: SourceSpan,
+        selector_kind: &str,
+        subject: &GateType,
+        note: &str,
+    ) {
+        self.diagnostics.push(
+            Diagnostic::error(format!(
+                "{selector_kind} cannot be applied to `{subject}` in a patch selector"
+            ))
+            .with_code(code("invalid-patch-selector"))
+            .with_primary_label(span, "this selector segment is not valid for the current focus")
+            .with_note(note),
+        );
+    }
+
+    fn emit_unknown_patch_field(&mut self, span: SourceSpan, field: &str, subject: &GateType) {
+        self.diagnostics.push(
+            Diagnostic::error(format!(
+                "field selector `.{field}` is not available on `{subject}`"
+            ))
+            .with_code(code("unknown-patch-field"))
+            .with_primary_label(span, "this patch selector refers to a missing record field"),
+        );
+    }
+
+    fn emit_unknown_patch_constructor(
+        &mut self,
+        span: SourceSpan,
+        constructor: &str,
+        subject: &GateType,
+    ) {
+        self.diagnostics.push(
+            Diagnostic::error(format!(
+                "constructor selector `{constructor}` is not available on `{subject}`"
+            ))
+            .with_code(code("unknown-patch-constructor"))
+            .with_primary_label(
+                span,
+                "this patch selector refers to a constructor that does not match the current focus type",
+            ),
+        );
+    }
 }
 
 fn code(name: &'static str) -> DiagnosticCode {
@@ -3083,6 +3552,19 @@ fn binary_operator_text(operator: BinaryOperator) -> &'static str {
 fn describe_inferred_type(ty: Option<&GateType>) -> String {
     ty.map(|ty| format!("`{ty}`"))
         .unwrap_or_else(|| "an unresolved expression".to_owned())
+}
+
+fn patch_map_entry_type(key: &GateType, value: &GateType) -> GateType {
+    GateType::Record(vec![
+        GateRecordField {
+            name: "key".to_owned(),
+            ty: key.clone(),
+        },
+        GateRecordField {
+            name: "value".to_owned(),
+            ty: value.clone(),
+        },
+    ])
 }
 
 fn projection_path_text(path: &NamePath) -> String {

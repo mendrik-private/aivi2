@@ -423,7 +423,10 @@ impl<'a> DecodeTypeLowerer<'a> {
                     Err(SourceDecodeElaborationBlocker::AnnotationNotSignal { span: ty.span })
                 }
             },
-            TypeKind::Tuple(_) | TypeKind::Record(_) | TypeKind::Arrow { .. } => {
+            TypeKind::Tuple(_)
+            | TypeKind::Record(_)
+            | TypeKind::RecordTransform { .. }
+            | TypeKind::Arrow { .. } => {
                 Err(SourceDecodeElaborationBlocker::AnnotationNotSignal { span: ty.span })
             }
         }
@@ -506,6 +509,10 @@ impl<'a> DecodeTypeLowerer<'a> {
                         DecodeTypeLoweringError::invalid_shape(ty.span, error.kind().clone())
                     })
             }
+            TypeKind::RecordTransform { transform, source } => {
+                let source = self.lower_type(source, substitutions, item_stack)?;
+                self.apply_record_row_transform(source, &transform, ty.span)
+            }
             TypeKind::Arrow { .. } => Err(DecodeTypeLoweringError::unsupported(
                 ty.span,
                 SourceDecodeUnsupportedTypeKind::Arrow,
@@ -524,6 +531,121 @@ impl<'a> DecodeTypeLowerer<'a> {
                 )
             }
         }
+    }
+
+    fn apply_record_row_transform(
+        &mut self,
+        source: StructuralTypeId,
+        transform: &crate::RecordRowTransform,
+        span: SourceSpan,
+    ) -> Result<StructuralTypeId, DecodeTypeLoweringError> {
+        let aivi_typing::TypeNode::Record(shape) = self.types.node(source) else {
+            return Err(DecodeTypeLoweringError::unsupported(
+                span,
+                SourceDecodeUnsupportedTypeKind::Arrow,
+            ));
+        };
+        let fields = shape.fields().to_vec();
+        let field_index = fields
+            .iter()
+            .enumerate()
+            .map(|(index, field)| (field.name().as_str(), index))
+            .collect::<HashMap<_, _>>();
+        let lowered = match transform {
+            crate::RecordRowTransform::Pick(labels) => labels
+                .iter()
+                .map(|label| fields.get(*field_index.get(label.text())?).cloned())
+                .collect::<Option<Vec<_>>>(),
+            crate::RecordRowTransform::Omit(labels) => {
+                let omitted = labels
+                    .iter()
+                    .map(|label| field_index.get(label.text()).copied())
+                    .collect::<Option<std::collections::HashSet<_>>>()
+                    .ok_or_else(|| {
+                        DecodeTypeLoweringError::invalid_shape(
+                            span,
+                            ShapeErrorKind::DuplicateRecordField("invalid".into()),
+                        )
+                    })?;
+                Some(
+                    fields
+                        .iter()
+                        .enumerate()
+                        .filter(|(index, _)| !omitted.contains(index))
+                        .map(|(_, field)| field.clone())
+                        .collect(),
+                )
+            }
+            crate::RecordRowTransform::Optional(labels)
+            | crate::RecordRowTransform::Defaulted(labels) => Some(
+                fields
+                    .iter()
+                    .map(|field| {
+                        if labels.iter().any(|label| label.text() == field.name().as_str()) {
+                            let ty = match self.types.node(field.ty()) {
+                                aivi_typing::TypeNode::Option(_) => field.ty(),
+                                _ => self.types.option(field.ty()),
+                            };
+                            RecordField::new(field.name().as_str(), ty)
+                        } else {
+                            field.clone()
+                        }
+                    })
+                    .collect(),
+            ),
+            crate::RecordRowTransform::Required(labels) => Some(
+                fields
+                    .iter()
+                    .map(|field| {
+                        if labels.iter().any(|label| label.text() == field.name().as_str()) {
+                            let ty = match self.types.node(field.ty()) {
+                                aivi_typing::TypeNode::Option(inner) => *inner,
+                                _ => field.ty(),
+                            };
+                            RecordField::new(field.name().as_str(), ty)
+                        } else {
+                            field.clone()
+                        }
+                    })
+                    .collect(),
+            ),
+            crate::RecordRowTransform::Rename(renames) => {
+                let renamed = renames
+                    .iter()
+                    .map(|rename| Some((field_index.get(rename.from.text()).copied()?, rename)))
+                    .collect::<Option<HashMap<_, _>>>()
+                    .ok_or_else(|| {
+                        DecodeTypeLoweringError::invalid_shape(
+                            span,
+                            ShapeErrorKind::DuplicateRecordField("invalid".into()),
+                        )
+                    })?;
+                let mut result = Vec::with_capacity(fields.len());
+                let mut seen = std::collections::HashSet::with_capacity(fields.len());
+                for (index, field) in fields.iter().enumerate() {
+                    let name = renamed
+                        .get(&index)
+                        .map(|rename| rename.to.text().to_owned())
+                        .unwrap_or_else(|| field.name().as_str().to_owned());
+                    if !seen.insert(name.clone()) {
+                        return Err(DecodeTypeLoweringError::invalid_shape(
+                            span,
+                            ShapeErrorKind::DuplicateRecordField(name.as_str().into()),
+                        ));
+                    }
+                    result.push(RecordField::new(name, field.ty()));
+                }
+                Some(result)
+            }
+        };
+        self.types
+            .record(Closedness::Closed, lowered.ok_or_else(|| {
+                DecodeTypeLoweringError::invalid_shape(
+                    span,
+                    ShapeErrorKind::DuplicateRecordField("invalid".into()),
+                )
+            })?)
+            .map_err(|error| DecodeTypeLoweringError::invalid_shape(span, error.kind().clone()))
     }
 
     fn lower_type_reference(

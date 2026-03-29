@@ -8,4 +8,4 @@ signal tick : Signal Unit
 
 signal retried : Signal Int =
     tick
-     |> scan 0 step
+     +|> 0 step

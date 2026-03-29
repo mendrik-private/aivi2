@@ -12,9 +12,9 @@ use crate::{
     GateRuntimePipeExpr, GateRuntimePipeStage, GateRuntimePipeStageKind, GateRuntimeProjectionBase,
     GateRuntimeRecordField, GateRuntimeReference, GateRuntimeTextLiteral, GateRuntimeTextSegment,
     GateRuntimeTruthyFalsyBranch, GateRuntimeUnsupportedKind, GateRuntimeUnsupportedPipeStageKind,
-    InstanceItem, InstanceMember, Item, ItemId, Module, PipeExpr, PipeStageKind, ProjectionBase,
-    ResolutionState, SignalItem, TermReference, TermResolution, TypeItemBody, TypeResolution,
-    ValueItem,
+    InstanceItem, InstanceMember, IntrinsicValue, Item, ItemId, Module, Name, NamePath, PipeExpr,
+    PipeStageKind, ProjectionBase, ResolutionState, SignalItem, TermReference, TermResolution,
+    TypeItemBody, TypeResolution, ValueItem,
     gate_elaboration::{GateElaborationBlocker, GateRuntimeMapEntry},
     typecheck::{expression_matches, resolve_class_member_dispatch},
     validate::{
@@ -1005,16 +1005,16 @@ impl<'a> GeneralExprElaborator<'a> {
                     kind: GateRuntimeUnsupportedKind::RegexLiteral,
                 }]);
             }
-            ExprKind::Cluster(_) => {
-                return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
-                    span: expr.span,
-                    kind: GateRuntimeUnsupportedKind::ApplicativeCluster,
-                }]);
-            }
             ExprKind::Markup(_) => {
                 return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
                     span: expr.span,
                     kind: GateRuntimeUnsupportedKind::Markup,
+                }]);
+            }
+            ExprKind::PatchApply { .. } | ExprKind::PatchLiteral(_) => {
+                return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
+                    span: expr.span,
+                    kind: GateRuntimeUnsupportedKind::PatchExpr,
                 }]);
             }
             _ => {}
@@ -1202,8 +1202,14 @@ impl<'a> GeneralExprElaborator<'a> {
                 Some(&ty),
                 PipeLoweringMode::Full,
             )?),
-            ExprKind::Regex(_) | ExprKind::Cluster(_) | ExprKind::Markup(_) => {
+            ExprKind::Regex(_)
+            | ExprKind::Markup(_)
+            | ExprKind::PatchApply { .. }
+            | ExprKind::PatchLiteral(_) => {
                 unreachable!("unsupported runtime forms should be returned before type inference")
+            }
+            ExprKind::Cluster(cluster) => {
+                return self.lower_cluster_expr(expr_id, cluster, env, ambient, expected);
             }
         };
         Ok(GateRuntimeExpr {
@@ -1716,6 +1722,197 @@ impl<'a> GeneralExprElaborator<'a> {
                 arguments,
             },
         })
+    }
+
+    fn lower_cluster_expr(
+        &mut self,
+        expr_id: ExprId,
+        cluster_id: crate::ClusterId,
+        env: &GateExprEnv,
+        ambient: Option<&GateType>,
+        expected: Option<&GateType>,
+    ) -> Result<GateRuntimeExpr, Vec<GeneralExprBlocker>> {
+        let Some(cluster) = self.module.clusters().get(cluster_id).cloned() else {
+            return Err(vec![GeneralExprBlocker::UnknownExprType {
+                span: self.module.exprs()[expr_id].span,
+            }]);
+        };
+        let cluster_ty = self.expr_type(expr_id, env, ambient, expected)?;
+        let result_payload = self
+            .applicative_payload_type(&cluster_ty)
+            .ok_or_else(|| vec![GeneralExprBlocker::UnknownExprType { span: cluster.span }])?;
+        let spine = cluster.normalized_spine();
+        let members = spine.apply_arguments().collect::<Vec<_>>();
+        let mut member_payloads = Vec::with_capacity(members.len());
+        let mut lowered_members = Vec::with_capacity(members.len());
+        for member in members {
+            let member_ty = self.expr_type(member, env, ambient, None)?;
+            let payload = self
+                .applicative_payload_type(&member_ty)
+                .ok_or_else(|| vec![GeneralExprBlocker::UnknownExprType { span: cluster.span }])?;
+            member_payloads.push((member_ty.clone(), payload));
+            lowered_members.push(self.lower_expr(member, env, ambient, Some(&member_ty))?);
+        }
+
+        let finalizer_payload_parameters = member_payloads
+            .iter()
+            .map(|(_, payload)| payload.clone())
+            .collect::<Vec<_>>();
+        let finalizer_ty =
+            self.arrow_type(finalizer_payload_parameters.clone(), result_payload.clone());
+        let finalizer = match spine.pure_head() {
+            crate::ApplicativeSpineHead::Expr(finalizer) => {
+                self.lower_expr(finalizer, env, ambient, Some(&finalizer_ty))?
+            }
+            crate::ApplicativeSpineHead::TupleConstructor(arity) => GateRuntimeExpr {
+                span: cluster.span,
+                ty: finalizer_ty.clone(),
+                kind: GateRuntimeExprKind::Reference(GateRuntimeReference::IntrinsicValue(
+                    IntrinsicValue::TupleConstructor { arity: arity.get() },
+                )),
+            },
+        };
+
+        let mut current_inner = finalizer_ty;
+        let pure_result = self
+            .rewrap_applicative_gate_type(&cluster_ty, current_inner.clone())
+            .ok_or_else(|| vec![GeneralExprBlocker::UnknownExprType { span: cluster.span }])?;
+        let pure = self.lower_builtin_class_member_reference(
+            cluster.span,
+            "Applicative",
+            "pure",
+            vec![current_inner.clone()],
+            pure_result.clone(),
+        )?;
+        let mut current = GateRuntimeExpr {
+            span: cluster.span,
+            ty: pure_result,
+            kind: GateRuntimeExprKind::Apply {
+                callee: Box::new(pure),
+                arguments: vec![finalizer],
+            },
+        };
+
+        for (index, ((member_ty, _), member_expr)) in
+            member_payloads.into_iter().zip(lowered_members).enumerate()
+        {
+            let remaining_parameters = finalizer_payload_parameters
+                .iter()
+                .skip(index + 1)
+                .cloned()
+                .collect::<Vec<_>>();
+            current_inner = self.arrow_type(remaining_parameters, result_payload.clone());
+            let apply_result = self
+                .rewrap_applicative_gate_type(&cluster_ty, current_inner.clone())
+                .ok_or_else(|| vec![GeneralExprBlocker::UnknownExprType { span: cluster.span }])?;
+            let apply = self.lower_builtin_class_member_reference(
+                cluster.span,
+                "Apply",
+                "apply",
+                vec![current.ty.clone(), member_ty.clone()],
+                apply_result.clone(),
+            )?;
+            current = GateRuntimeExpr {
+                span: cluster.span,
+                ty: apply_result,
+                kind: GateRuntimeExprKind::Apply {
+                    callee: Box::new(apply),
+                    arguments: vec![current, member_expr],
+                },
+            };
+        }
+
+        Ok(current)
+    }
+
+    fn lower_builtin_class_member_reference(
+        &mut self,
+        span: SourceSpan,
+        class_name: &str,
+        member_name: &str,
+        argument_types: Vec<GateType>,
+        result_type: GateType,
+    ) -> Result<GateRuntimeExpr, Vec<GeneralExprBlocker>> {
+        let Some(resolution) = self.ambient_class_member_resolution(class_name, member_name) else {
+            return Err(vec![GeneralExprBlocker::UnknownExprType { span }]);
+        };
+        let reference = TermReference::resolved(
+            NamePath::from_vec(vec![
+                Name::new(member_name, span).expect("class members are named"),
+            ])
+            .expect("single-segment class member paths are valid"),
+            TermResolution::ClassMember(resolution),
+        );
+        let dispatch = resolve_class_member_dispatch(
+            self.module,
+            &reference,
+            &argument_types,
+            Some(&result_type),
+        )
+        .ok_or_else(|| vec![GeneralExprBlocker::UnknownExprType { span }])?;
+        let callee_ty = self.arrow_type(argument_types, result_type);
+        Ok(GateRuntimeExpr {
+            span,
+            ty: callee_ty,
+            kind: GateRuntimeExprKind::Reference(GateRuntimeReference::ClassMember(dispatch)),
+        })
+    }
+
+    fn ambient_class_member_resolution(
+        &self,
+        class_name: &str,
+        member_name: &str,
+    ) -> Option<crate::ClassMemberResolution> {
+        self.module.ambient_items().iter().find_map(|item_id| {
+            match &self.module.items()[*item_id] {
+                Item::Class(class_item) if class_item.name.text() == class_name => class_item
+                    .members
+                    .iter()
+                    .position(|member| member.name.text() == member_name)
+                    .map(|member_index| crate::ClassMemberResolution {
+                        class: *item_id,
+                        member_index,
+                    }),
+                _ => None,
+            }
+        })
+    }
+
+    fn applicative_payload_type(&self, ty: &GateType) -> Option<GateType> {
+        match ty {
+            GateType::List(payload) => Some(payload.as_ref().clone()),
+            GateType::Option(payload) => Some(payload.as_ref().clone()),
+            GateType::Result { value, .. } => Some(value.as_ref().clone()),
+            GateType::Validation { value, .. } => Some(value.as_ref().clone()),
+            GateType::Signal(payload) => Some(payload.as_ref().clone()),
+            GateType::Task { value, .. } => Some(value.as_ref().clone()),
+            _ => None,
+        }
+    }
+
+    fn rewrap_applicative_gate_type(
+        &self,
+        applicative: &GateType,
+        payload: GateType,
+    ) -> Option<GateType> {
+        match applicative {
+            GateType::List(_) => Some(GateType::List(Box::new(payload))),
+            GateType::Option(_) => Some(GateType::Option(Box::new(payload))),
+            GateType::Result { error, .. } => Some(GateType::Result {
+                error: error.clone(),
+                value: Box::new(payload),
+            }),
+            GateType::Validation { error, .. } => Some(GateType::Validation {
+                error: error.clone(),
+                value: Box::new(payload),
+            }),
+            GateType::Signal(_) => Some(GateType::Signal(Box::new(payload))),
+            GateType::Task { error, .. } => Some(GateType::Task {
+                error: error.clone(),
+                value: Box::new(payload),
+            }),
+            _ => None,
+        }
     }
 
     fn lower_text_literal(

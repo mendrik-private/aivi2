@@ -13,13 +13,15 @@ pub use cst::{
     DomainMemberName, ErrorItem, ExportItem, Expr, ExprKind, FloatLiteral, FunctionParam,
     Identifier, InstanceBody, InstanceItem, InstanceMember, IntegerLiteral, Item, ItemBase,
     ItemKind, MapExpr, MapExprEntry, MarkupAttribute, MarkupAttributeValue, MarkupNode, Module,
-    NamedItem, NamedItemBody, OperatorName, Pattern, PatternKind, PipeCaseArm, PipeExpr, PipeStage,
-    PipeStageKind, ProjectionPath, QualifiedName, ReactiveUpdateItem, RecordExpr, RecordField,
-    RecordPatternField, RegexLiteral, ResultBinding, ResultBlockExpr, SourceDecorator,
-    SourceProviderContractBody, SourceProviderContractFieldValue, SourceProviderContractItem,
-    SourceProviderContractMember, SourceProviderContractSchemaMember, SuffixedIntegerLiteral,
-    TextFragment, TextInterpolation, TextLiteral, TextSegment, TokenRange, TypeDeclBody, TypeExpr,
-    TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseImport, UseItem,
+    NamedItem, NamedItemBody, OperatorName, PatchBlock, PatchEntry, PatchInstruction,
+    PatchInstructionKind, PatchSelector, PatchSelectorSegment, Pattern, PatternKind, PipeCaseArm,
+    PipeExpr, PipeStage, PipeStageKind, ProjectionPath, QualifiedName, ReactiveUpdateItem,
+    RecordExpr, RecordField, RecordPatternField, RegexLiteral, ResultBinding, ResultBlockExpr,
+    SourceDecorator, SourceProviderContractBody, SourceProviderContractFieldValue,
+    SourceProviderContractItem, SourceProviderContractMember,
+    SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextFragment, TextInterpolation,
+    TextLiteral, TextSegment, TokenRange, TypeDeclBody, TypeExpr, TypeExprKind, TypeField,
+    TypeVariant, UnaryOperator, UseImport, UseItem,
 };
 pub use format::Formatter;
 pub use lex::{LexedModule, Token, TokenKind, lex_module};

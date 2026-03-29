@@ -35,11 +35,11 @@ use crate::{
         BindingId, ClusterId, ControlNodeId, DecoratorId, ExprId, ImportId, ItemId, MarkupNodeId,
         PatternId, TypeId, TypeParameterId,
     },
+    signal_metadata_elaboration::expr_signal_dependencies,
     source_contract_resolution::{
         ResolvedSourceContractType, ResolvedSourceTypeConstructor,
         SourceContractResolutionErrorKind, SourceContractTypeResolver,
     },
-    signal_metadata_elaboration::expr_signal_dependencies,
     typecheck::{TypeConstraint, expression_matches, typecheck_module},
 };
 
@@ -310,6 +310,7 @@ impl Validator<'_> {
     }
 
     fn validate_types(&mut self) {
+        let mut typing = GateTypeContext::new(self.module);
         for (_, ty) in self.module.types().iter() {
             self.check_span("type node", ty.span);
             match &ty.kind {
@@ -326,6 +327,10 @@ impl Validator<'_> {
                         self.require_type(field.span, "type field", "field type", field.ty);
                     }
                 }
+                TypeKind::RecordTransform { transform, source } => {
+                    self.require_type(ty.span, "type node", "record row transform source", *source);
+                    self.validate_record_row_transform_type(ty.span, transform, *source, &mut typing);
+                }
                 TypeKind::Arrow { parameter, result } => {
                     self.require_type(ty.span, "type node", "parameter type", *parameter);
                     self.require_type(ty.span, "type node", "result type", *result);
@@ -334,6 +339,115 @@ impl Validator<'_> {
                     self.require_type(ty.span, "type node", "type callee", *callee);
                     for argument in arguments.iter() {
                         self.require_type(ty.span, "type node", "type argument", *argument);
+                    }
+                }
+            }
+        }
+    }
+
+    fn validate_record_row_transform_type(
+        &mut self,
+        span: SourceSpan,
+        transform: &crate::RecordRowTransform,
+        source: TypeId,
+        typing: &mut GateTypeContext<'_>,
+    ) {
+        let Some(source_ty) = typing.lower_annotation(source) else {
+            return;
+        };
+        let GateType::Record(fields) = &source_ty else {
+            self.diagnostics.push(
+                Diagnostic::error("record row transforms require a closed record source type")
+                    .with_code(code("record-row-transform-source"))
+                    .with_primary_label(span, "this transform does not target a closed record type"),
+            );
+            return;
+        };
+        let field_names = fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<HashSet<_>>();
+        match transform {
+            crate::RecordRowTransform::Pick(labels)
+            | crate::RecordRowTransform::Omit(labels)
+            | crate::RecordRowTransform::Optional(labels)
+            | crate::RecordRowTransform::Required(labels)
+            | crate::RecordRowTransform::Defaulted(labels) => {
+                let mut seen = HashSet::new();
+                for label in labels {
+                    if !seen.insert(label.text()) {
+                        self.diagnostics.push(
+                            Diagnostic::error(format!(
+                                "record row transform references field `{}` more than once",
+                                label.text()
+                            ))
+                            .with_code(code("duplicate-record-row-field"))
+                            .with_primary_label(label.span(), "remove the duplicate field label"),
+                        );
+                    } else if !field_names.contains(label.text()) {
+                        self.diagnostics.push(
+                            Diagnostic::error(format!(
+                                "record row transform references unknown field `{}`",
+                                label.text()
+                            ))
+                            .with_code(code("unknown-record-row-field"))
+                            .with_primary_label(label.span(), "this field does not exist on the source record"),
+                        );
+                    }
+                }
+            }
+            crate::RecordRowTransform::Rename(renames) => {
+                let mut seen_sources = HashSet::new();
+                let mut seen_targets = HashSet::new();
+                for rename in renames {
+                    if !seen_sources.insert(rename.from.text()) {
+                        self.diagnostics.push(
+                            Diagnostic::error(format!(
+                                "record row transform renames field `{}` more than once",
+                                rename.from.text()
+                            ))
+                            .with_code(code("duplicate-record-row-field"))
+                            .with_primary_label(rename.from.span(), "each source field may be renamed at most once"),
+                        );
+                        continue;
+                    }
+                    if !field_names.contains(rename.from.text()) {
+                        self.diagnostics.push(
+                            Diagnostic::error(format!(
+                                "record row transform references unknown field `{}`",
+                                rename.from.text()
+                            ))
+                            .with_code(code("unknown-record-row-field"))
+                            .with_primary_label(rename.from.span(), "this field does not exist on the source record"),
+                        );
+                    }
+                    if !seen_targets.insert(rename.to.text()) {
+                        self.diagnostics.push(
+                            Diagnostic::error(format!(
+                                "record row transform renames multiple fields to `{}`",
+                                rename.to.text()
+                            ))
+                            .with_code(code("record-row-rename-collision"))
+                            .with_primary_label(rename.to.span(), "rename targets must be unique"),
+                        );
+                    }
+                }
+                let retained_names = field_names
+                    .iter()
+                    .filter(|name| !seen_sources.contains(**name))
+                    .copied()
+                    .collect::<HashSet<_>>();
+                for rename in renames {
+                    if retained_names.contains(rename.to.text()) {
+                        self.diagnostics.push(
+                            Diagnostic::error(format!(
+                                "record row transform renames `{}` to `{}`, which collides with an existing field",
+                                rename.from.text(),
+                                rename.to.text()
+                            ))
+                            .with_code(code("record-row-rename-collision"))
+                            .with_primary_label(rename.to.span(), "this renamed field collides with a retained field"),
+                        );
                     }
                 }
             }
@@ -470,6 +584,11 @@ impl Validator<'_> {
                     self.require_expr(expr.span, "expression", "binary left operand", *left);
                     self.require_expr(expr.span, "expression", "binary right operand", *right);
                 }
+                ExprKind::PatchApply { target, patch } => {
+                    self.require_expr(expr.span, "expression", "patch target", *target);
+                    self.validate_patch_block(expr.span, patch);
+                }
+                ExprKind::PatchLiteral(patch) => self.validate_patch_block(expr.span, patch),
                 ExprKind::Pipe(pipe) => {
                     self.require_expr(expr.span, "expression", "pipe head", pipe.head);
                     for stage in pipe.stages.iter() {
@@ -526,6 +645,41 @@ impl Validator<'_> {
                 }
                 ExprKind::Markup(node) => {
                     self.require_markup_node(expr.span, "expression", "markup node", *node);
+                }
+            }
+        }
+    }
+
+    fn validate_patch_block(&mut self, owner_span: SourceSpan, patch: &crate::PatchBlock) {
+        for entry in &patch.entries {
+            self.check_span("patch entry", entry.span);
+            self.check_span("patch selector", entry.selector.span);
+            for segment in &entry.selector.segments {
+                match segment {
+                    crate::PatchSelectorSegment::Named { name, span, .. } => {
+                        self.check_span("patch selector segment", *span);
+                        self.check_name(name);
+                    }
+                    crate::PatchSelectorSegment::BracketTraverse { span } => {
+                        self.check_span("patch selector segment", *span);
+                    }
+                    crate::PatchSelectorSegment::BracketExpr { expr, span } => {
+                        self.check_span("patch selector segment", *span);
+                        self.require_expr(*span, "patch selector", "bracket expression", *expr);
+                    }
+                }
+            }
+            self.check_span("patch instruction", entry.instruction.span);
+            match entry.instruction.kind {
+                crate::PatchInstructionKind::Replace(expr)
+                | crate::PatchInstructionKind::Store(expr) => self.require_expr(
+                    entry.instruction.span,
+                    "patch instruction",
+                    "instruction expression",
+                    expr,
+                ),
+                crate::PatchInstructionKind::Remove => {
+                    let _ = owner_span;
                 }
             }
         }
@@ -3633,6 +3787,7 @@ impl Validator<'_> {
                     self.source_option_hir_type_to_actual_type(*result, substitutions)?,
                 ),
             }),
+            TypeKind::RecordTransform { .. } => None,
         }
     }
 
@@ -3892,6 +4047,7 @@ impl Validator<'_> {
                     substitutions,
                 )
             }
+            TypeKind::RecordTransform { .. } => None,
         }
     }
 
@@ -4853,6 +5009,58 @@ impl Validator<'_> {
                                 env: env.clone(),
                             });
                             work.push(CaseExhaustivenessWork::Expr { expr: left, env });
+                        }
+                        ExprKind::PatchApply { target, patch } => {
+                            work.push(CaseExhaustivenessWork::Expr {
+                                expr: target,
+                                env: env.clone(),
+                            });
+                            for entry in patch.entries.into_iter().rev() {
+                                match entry.instruction.kind {
+                                    crate::PatchInstructionKind::Replace(expr)
+                                    | crate::PatchInstructionKind::Store(expr) => {
+                                        work.push(CaseExhaustivenessWork::Expr {
+                                            expr,
+                                            env: env.clone(),
+                                        });
+                                    }
+                                    crate::PatchInstructionKind::Remove => {}
+                                }
+                                for segment in entry.selector.segments.into_iter().rev() {
+                                    if let crate::PatchSelectorSegment::BracketExpr { expr, .. } =
+                                        segment
+                                    {
+                                        work.push(CaseExhaustivenessWork::Expr {
+                                            expr,
+                                            env: env.clone(),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        ExprKind::PatchLiteral(patch) => {
+                            for entry in patch.entries.into_iter().rev() {
+                                match entry.instruction.kind {
+                                    crate::PatchInstructionKind::Replace(expr)
+                                    | crate::PatchInstructionKind::Store(expr) => {
+                                        work.push(CaseExhaustivenessWork::Expr {
+                                            expr,
+                                            env: env.clone(),
+                                        });
+                                    }
+                                    crate::PatchInstructionKind::Remove => {}
+                                }
+                                for segment in entry.selector.segments.into_iter().rev() {
+                                    if let crate::PatchSelectorSegment::BracketExpr { expr, .. } =
+                                        segment
+                                    {
+                                        work.push(CaseExhaustivenessWork::Expr {
+                                            expr,
+                                            env: env.clone(),
+                                        });
+                                    }
+                                }
+                            }
                         }
                         ExprKind::Pipe(pipe) => {
                             work.push(CaseExhaustivenessWork::Expr {
@@ -7298,6 +7506,10 @@ impl Validator<'_> {
                                 stack.push(KindBuildFrame::Enter(field.ty));
                             }
                         }
+                        TypeKind::RecordTransform { source, .. } => {
+                            stack.push(KindBuildFrame::Exit(type_id));
+                            stack.push(KindBuildFrame::Enter(*source));
+                        }
                         TypeKind::Arrow { parameter, result } => {
                             stack.push(KindBuildFrame::Exit(type_id));
                             stack.push(KindBuildFrame::Enter(*result));
@@ -7330,6 +7542,7 @@ impl Validator<'_> {
                                 })
                                 .collect::<Vec<_>>(),
                         ),
+                        TypeKind::RecordTransform { source, .. } => lowered[source],
                         TypeKind::Arrow { parameter, result } => {
                             store.arrow_expr(lowered[parameter], lowered[result])
                         }
@@ -7715,6 +7928,45 @@ impl Validator<'_> {
         );
     }
 
+    fn validate_reactive_update_dependencies(&mut self, item_id: ItemId, item: &SignalItem) {
+        if self.mode != ValidationMode::RequireResolvedNames {
+            return;
+        }
+        let target_name = item.name.text();
+        for update in &item.reactive_updates {
+            if expr_signal_dependencies(self.module, [update.guard]).contains(&item_id) {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "reactive update guard for `{target_name}` cannot read the target signal itself"
+                    ))
+                    .with_code(code("reactive-update-self-reference"))
+                    .with_label(DiagnosticLabel::primary(
+                        self.module.exprs()[update.guard].span,
+                        "guards must not create feedback through the signal they update",
+                    ))
+                    .with_note(
+                        "use an explicit recurrence form instead when feedback is intentional",
+                    ),
+                );
+            }
+            if expr_signal_dependencies(self.module, [update.body]).contains(&item_id) {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "reactive update body for `{target_name}` cannot read the target signal itself"
+                    ))
+                    .with_code(code("reactive-update-self-reference"))
+                    .with_label(DiagnosticLabel::primary(
+                        self.module.exprs()[update.body].span,
+                        "reactive update bodies must not depend on the current value they overwrite",
+                    ))
+                    .with_note(
+                        "use an explicit recurrence form instead when feedback is intentional",
+                    ),
+                );
+            }
+        }
+    }
+
     fn check_text_literal(&mut self, owner_span: SourceSpan, text: &TextLiteral) {
         for segment in &text.segments {
             match segment {
@@ -7897,45 +8149,6 @@ impl Validator<'_> {
                 }
             }
             previous = Some(*dependency);
-        }
-    }
-
-    fn validate_reactive_update_dependencies(&mut self, item_id: ItemId, item: &SignalItem) {
-        if self.mode != ValidationMode::RequireResolvedNames {
-            return;
-        }
-        let target_name = item.name.text();
-        for update in &item.reactive_updates {
-            if expr_signal_dependencies(self.module, [update.guard]).contains(&item_id) {
-                self.diagnostics.push(
-                    Diagnostic::error(format!(
-                        "reactive update guard for `{target_name}` cannot read the target signal itself"
-                    ))
-                    .with_code(code("reactive-update-self-reference"))
-                    .with_label(DiagnosticLabel::primary(
-                        self.module.exprs()[update.guard].span,
-                        "guards must not create feedback through the signal they update",
-                    ))
-                    .with_note(
-                        "use an explicit recurrence form instead when feedback is intentional",
-                    ),
-                );
-            }
-            if expr_signal_dependencies(self.module, [update.body]).contains(&item_id) {
-                self.diagnostics.push(
-                    Diagnostic::error(format!(
-                        "reactive update body for `{target_name}` cannot read the target signal itself"
-                    ))
-                    .with_code(code("reactive-update-self-reference"))
-                    .with_label(DiagnosticLabel::primary(
-                        self.module.exprs()[update.body].span,
-                        "reactive update bodies must not depend on the current value they overwrite",
-                    ))
-                    .with_note(
-                        "use an explicit recurrence form instead when feedback is intentional",
-                    ),
-                );
-            }
         }
     }
 
@@ -10026,6 +10239,9 @@ impl<'a> GateTypeContext<'a> {
                 }
                 Some(GateType::Record(lowered))
             }
+            TypeKind::RecordTransform { transform, source } => {
+                self.lower_poly_record_row_transform_partially(transform, *source, bindings, item_stack)
+            }
             TypeKind::Arrow { parameter, result } => Some(GateType::Arrow {
                 parameter: Box::new(
                     self.lower_poly_type_partially(*parameter, bindings, item_stack)?,
@@ -10173,6 +10389,7 @@ impl<'a> GateTypeContext<'a> {
             }
             (TypeKind::Tuple(_), _)
             | (TypeKind::Record(_), _)
+            | (TypeKind::RecordTransform { .. }, _)
             | (TypeKind::Arrow { .. }, _)
             | (TypeKind::Apply { .. }, TypeBinding::Type(_)) => false,
         }
@@ -10391,11 +10608,7 @@ impl<'a> GateTypeContext<'a> {
 
         fn synthetic_type_parameter(index: usize) -> GateType {
             GateType::TypeParameter {
-                parameter: TypeParameterId::from_raw(
-                    u32::MAX
-                        .checked_sub(index as u32)
-                        .expect("intrinsic synthetic type parameter index must fit in u32"),
-                ),
+                parameter: TypeParameterId::from_raw(u32::MAX - index as u32),
                 name: format!("T{}", index + 1),
             }
         }
@@ -10619,7 +10832,9 @@ impl<'a> GateTypeContext<'a> {
                 GateType::Option(Box::new(primitive(BuiltinType::Text)))
             }
             IntrinsicValue::XdgDataDirs => GateType::List(Box::new(primitive(BuiltinType::Text))),
-            IntrinsicValue::XdgConfigDirs => GateType::List(Box::new(primitive(BuiltinType::Text))),
+            IntrinsicValue::XdgConfigDirs => {
+                GateType::List(Box::new(primitive(BuiltinType::Text)))
+            }
         }
     }
 
@@ -11030,6 +11245,7 @@ impl<'a> GateTypeContext<'a> {
                 substitutions,
                 item_stack,
             ),
+            TypeKind::RecordTransform { .. } => false,
         }
     }
 
@@ -11206,6 +11422,13 @@ impl<'a> GateTypeContext<'a> {
                 }
                 Some(GateType::Record(lowered))
             }
+            TypeKind::RecordTransform { transform, source } => self.lower_record_row_transform(
+                transform,
+                *source,
+                substitutions,
+                item_stack,
+                allow_open_type_parameters,
+            ),
             TypeKind::Arrow { parameter, result } => Some(GateType::Arrow {
                 parameter: Box::new(self.lower_type(
                     *parameter,
@@ -11237,6 +11460,118 @@ impl<'a> GateTypeContext<'a> {
                     item_stack,
                     allow_open_type_parameters,
                 )
+            }
+        }
+    }
+
+    fn lower_record_row_transform(
+        &mut self,
+        transform: &crate::RecordRowTransform,
+        source: TypeId,
+        substitutions: &HashMap<TypeParameterId, GateType>,
+        item_stack: &mut Vec<ItemId>,
+        allow_open_type_parameters: bool,
+    ) -> Option<GateType> {
+        let source = self.lower_type(
+            source,
+            substitutions,
+            item_stack,
+            allow_open_type_parameters,
+        )?;
+        self.apply_record_row_transform(transform, &source)
+    }
+
+    fn apply_record_row_transform(
+        &self,
+        transform: &crate::RecordRowTransform,
+        source: &GateType,
+    ) -> Option<GateType> {
+        let GateType::Record(fields) = source else {
+            return None;
+        };
+        let field_index = fields
+            .iter()
+            .enumerate()
+            .map(|(index, field)| (field.name.as_str(), index))
+            .collect::<HashMap<_, _>>();
+        match transform {
+            crate::RecordRowTransform::Pick(labels) => labels
+                .iter()
+                .map(|label| fields.get(*field_index.get(label.text())?).cloned())
+                .collect::<Option<Vec<_>>>()
+                .map(GateType::Record),
+            crate::RecordRowTransform::Omit(labels) => {
+                let omitted = labels
+                    .iter()
+                    .map(|label| field_index.get(label.text()).copied())
+                    .collect::<Option<HashSet<_>>>()?;
+                Some(GateType::Record(
+                    fields
+                        .iter()
+                        .enumerate()
+                        .filter(|(index, _)| !omitted.contains(index))
+                        .map(|(_, field)| field.clone())
+                        .collect(),
+                ))
+            }
+            crate::RecordRowTransform::Optional(labels)
+            | crate::RecordRowTransform::Defaulted(labels) => Some(GateType::Record(
+                fields
+                    .iter()
+                    .map(|field| {
+                        if labels.iter().any(|label| label.text() == field.name) {
+                            GateRecordField {
+                                name: field.name.clone(),
+                                ty: match &field.ty {
+                                    GateType::Option(_) => field.ty.clone(),
+                                    other => GateType::Option(Box::new(other.clone())),
+                                },
+                            }
+                        } else {
+                            field.clone()
+                        }
+                    })
+                    .collect(),
+            )),
+            crate::RecordRowTransform::Required(labels) => Some(GateType::Record(
+                fields
+                    .iter()
+                    .map(|field| {
+                        if labels.iter().any(|label| label.text() == field.name) {
+                            GateRecordField {
+                                name: field.name.clone(),
+                                ty: match &field.ty {
+                                    GateType::Option(inner) => inner.as_ref().clone(),
+                                    other => other.clone(),
+                                },
+                            }
+                        } else {
+                            field.clone()
+                        }
+                    })
+                    .collect(),
+            )),
+            crate::RecordRowTransform::Rename(renames) => {
+                let renamed = renames
+                    .iter()
+                    .map(|rename| Some((field_index.get(rename.from.text()).copied()?, rename)))
+                    .collect::<Option<HashMap<_, _>>>()?;
+                let mut result = Vec::with_capacity(fields.len());
+                let mut seen = HashSet::with_capacity(fields.len());
+                for (index, field) in fields.iter().enumerate() {
+                    let name = renamed
+                        .get(&index)
+                        .map(|rename| rename.to.text().to_owned())
+                        .unwrap_or_else(|| field.name.clone());
+                    if !seen.insert(name.clone()) {
+                        return None;
+                    }
+                    result.push(GateRecordField {
+                        name,
+                        ty: field.ty.clone(),
+                    });
+                }
+                Some(GateType::Record(result))
             }
         }
     }
@@ -11439,6 +11774,9 @@ impl<'a> GateTypeContext<'a> {
                 }
                 Some(GateType::Record(lowered))
             }
+            TypeKind::RecordTransform { transform, source } => {
+                self.lower_poly_record_row_transform(transform, *source, bindings, item_stack)
+            }
             TypeKind::Arrow { parameter, result } => Some(GateType::Arrow {
                 parameter: Box::new(self.lower_poly_type(*parameter, bindings, item_stack)?),
                 result: Box::new(self.lower_poly_type(*result, bindings, item_stack)?),
@@ -11477,6 +11815,28 @@ impl<'a> GateTypeContext<'a> {
                 }
             }
         }
+    }
+
+    fn lower_poly_record_row_transform(
+        &mut self,
+        transform: &crate::RecordRowTransform,
+        source: TypeId,
+        bindings: &PolyTypeBindings,
+        item_stack: &mut Vec<ItemId>,
+    ) -> Option<GateType> {
+        let source = self.lower_poly_type(source, bindings, item_stack)?;
+        self.apply_record_row_transform(transform, &source)
+    }
+
+    fn lower_poly_record_row_transform_partially(
+        &mut self,
+        transform: &crate::RecordRowTransform,
+        source: TypeId,
+        bindings: &PolyTypeBindings,
+        item_stack: &mut Vec<ItemId>,
+    ) -> Option<GateType> {
+        let source = self.lower_poly_type_partially(source, bindings, item_stack)?;
+        self.apply_record_row_transform(transform, &source)
     }
 
     fn lower_poly_type_reference(
@@ -11534,7 +11894,10 @@ impl<'a> GateTypeContext<'a> {
             TypeKind::Apply { .. } => self
                 .partial_poly_type_constructor_binding(type_id, bindings, &mut item_stack)
                 .map(TypeBinding::Constructor),
-            TypeKind::Tuple(_) | TypeKind::Record(_) | TypeKind::Arrow { .. } => None,
+            TypeKind::Tuple(_)
+            | TypeKind::Record(_)
+            | TypeKind::RecordTransform { .. }
+            | TypeKind::Arrow { .. } => None,
         }
     }
 
@@ -11599,7 +11962,10 @@ impl<'a> GateTypeContext<'a> {
                     }
                 }
             }
-            TypeKind::Tuple(_) | TypeKind::Record(_) | TypeKind::Arrow { .. } => None,
+            TypeKind::Tuple(_)
+            | TypeKind::Record(_)
+            | TypeKind::RecordTransform { .. }
+            | TypeKind::Arrow { .. } => None,
         }
     }
 
@@ -11674,6 +12040,7 @@ impl<'a> GateTypeContext<'a> {
             TypeKind::Apply { callee, arguments } => {
                 self.match_poly_type_application(callee, &arguments, actual, bindings, item_stack)
             }
+            TypeKind::RecordTransform { .. } => false,
         }
     }
 
@@ -11777,6 +12144,7 @@ impl<'a> GateTypeContext<'a> {
                 })
             }
             TypeKind::Tuple(_) | TypeKind::Record(_) | TypeKind::Arrow { .. } => None,
+            TypeKind::RecordTransform { .. } => None,
         }
     }
 
@@ -12245,6 +12613,46 @@ impl<'a> GateTypeContext<'a> {
             }
             ExprKind::Pipe(pipe) => self.infer_pipe_expr(&pipe, env),
             ExprKind::Cluster(cluster) => self.infer_cluster_expr(cluster, env),
+            ExprKind::PatchApply { target, patch } => {
+                let mut info = self.infer_expr(target, env, ambient);
+                info.actual = info
+                    .actual
+                    .clone()
+                    .or_else(|| info.ty.as_ref().map(SourceOptionActualType::from_gate_type));
+                for entry in &patch.entries {
+                    for segment in &entry.selector.segments {
+                        if let crate::PatchSelectorSegment::BracketExpr { expr, .. } = segment {
+                            info.merge(self.infer_expr(*expr, env, ambient));
+                        }
+                    }
+                    match entry.instruction.kind {
+                        crate::PatchInstructionKind::Replace(expr)
+                        | crate::PatchInstructionKind::Store(expr) => {
+                            info.merge(self.infer_expr(expr, env, ambient));
+                        }
+                        crate::PatchInstructionKind::Remove => {}
+                    }
+                }
+                info
+            }
+            ExprKind::PatchLiteral(patch) => {
+                let mut info = GateExprInfo::default();
+                for entry in &patch.entries {
+                    for segment in &entry.selector.segments {
+                        if let crate::PatchSelectorSegment::BracketExpr { expr, .. } = segment {
+                            info.merge(self.infer_expr(*expr, env, ambient));
+                        }
+                    }
+                    match entry.instruction.kind {
+                        crate::PatchInstructionKind::Replace(expr)
+                        | crate::PatchInstructionKind::Store(expr) => {
+                            info.merge(self.infer_expr(expr, env, ambient));
+                        }
+                        crate::PatchInstructionKind::Remove => {}
+                    }
+                }
+                info
+            }
             ExprKind::Markup(_) => GateExprInfo::default(),
         };
         self.finalize_expr_info(info)
@@ -12607,6 +13015,19 @@ impl<'a> GateTypeContext<'a> {
             .lower_annotation(result_annotation)
             .or_else(|| self.instantiate_poly_hir_type(result_annotation, &bindings))?;
         Some((instantiated_parameters, result))
+    }
+
+    fn function_signature(&self, ty: &GateType, arity: usize) -> Option<(Vec<GateType>, GateType)> {
+        let mut parameters = Vec::with_capacity(arity);
+        let mut current = ty;
+        for _ in 0..arity {
+            let GateType::Arrow { parameter, result } = current else {
+                return None;
+            };
+            parameters.push(parameter.as_ref().clone());
+            current = result.as_ref();
+        }
+        Some((parameters, current.clone()))
     }
 
     fn flatten_apply_expr(&self, expr_id: ExprId) -> (ExprId, Vec<ExprId>) {
@@ -13148,6 +13569,64 @@ impl<'a> GateTypeContext<'a> {
         self.finalize_expr_info(info)
     }
 
+    fn infer_accumulate_stage_info(
+        &mut self,
+        seed_expr: ExprId,
+        step_expr: ExprId,
+        env: &GateExprEnv,
+        subject: &GateType,
+    ) -> GateExprInfo {
+        let mut info = GateExprInfo::default();
+        let GateType::Signal(input_payload) = subject else {
+            info.issues.push(GateIssue::InvalidPipeStageInput {
+                span: self.module.exprs()[step_expr].span,
+                stage: "+|>",
+                expected: "Signal _".to_owned(),
+                actual: subject.to_string(),
+            });
+            return self.finalize_expr_info(info);
+        };
+
+        let seed_info = self.infer_expr(seed_expr, env, None);
+        let seed_ty = seed_info.ty.clone();
+        info.merge(seed_info);
+        let Some(seed_ty) = seed_ty else {
+            return self.finalize_expr_info(info);
+        };
+
+        let step_info = self.infer_expr(step_expr, env, Some(input_payload.as_ref()));
+        let step_ty = step_info.actual_gate_type().or(step_info.ty.clone());
+        info.merge(step_info);
+        let Some(step_ty) = step_ty else {
+            return self.finalize_expr_info(info);
+        };
+
+        let Some((parameters, result_ty)) = self.function_signature(&step_ty, 2) else {
+            info.issues.push(GateIssue::InvalidPipeStageInput {
+                span: self.module.exprs()[step_expr].span,
+                stage: "+|>",
+                expected: format!("{} -> {} -> {}", input_payload.as_ref(), seed_ty, seed_ty),
+                actual: step_ty.to_string(),
+            });
+            return self.finalize_expr_info(info);
+        };
+        if !parameters[0].same_shape(input_payload.as_ref())
+            || !parameters[1].same_shape(&seed_ty)
+            || !result_ty.same_shape(&seed_ty)
+        {
+            info.issues.push(GateIssue::InvalidPipeStageInput {
+                span: self.module.exprs()[step_expr].span,
+                stage: "+|>",
+                expected: format!("{} -> {} -> {}", input_payload.as_ref(), seed_ty, seed_ty),
+                actual: step_ty.to_string(),
+            });
+            return self.finalize_expr_info(info);
+        }
+
+        info.ty = Some(GateType::Signal(Box::new(seed_ty)));
+        self.finalize_expr_info(info)
+    }
+
     pub(crate) fn infer_truthy_falsy_branch(
         &mut self,
         expr_id: ExprId,
@@ -13653,13 +14132,16 @@ impl<'a> GateTypeContext<'a> {
                         &subject,
                     )
                 }
+                PipeStageKind::Accumulate { seed, step } => {
+                    stage_index += 1;
+                    self.infer_accumulate_stage_info(*seed, *step, &pipe_env, &subject)
+                }
                 PipeStageKind::Apply { .. }
                 | PipeStageKind::RecurStart { .. }
                 | PipeStageKind::RecurStep { .. }
                 | PipeStageKind::Validate { .. }
                 | PipeStageKind::Previous { .. }
-                | PipeStageKind::Diff { .. }
-                | PipeStageKind::Accumulate { .. } => {
+                | PipeStageKind::Diff { .. } => {
                     stage_index += 1;
                     GateExprInfo::default()
                 }
@@ -14005,6 +14487,7 @@ impl SourceOptionExpectedType {
         surface: SourceOptionTypeSurface,
     ) -> Option<Self> {
         match &module.types()[ty].kind {
+            TypeKind::RecordTransform { .. } => None,
             TypeKind::Name(reference) => match reference.resolution.as_ref() {
                 ResolutionState::Resolved(TypeResolution::Builtin(
                     builtin @ (BuiltinType::Int
@@ -15091,6 +15574,56 @@ pub(crate) fn walk_expr_tree(
                             is_root: false,
                         });
                     }
+                    ExprKind::PatchApply { target, patch } => {
+                        for entry in patch.entries.iter().rev() {
+                            match entry.instruction.kind {
+                                crate::PatchInstructionKind::Replace(expr)
+                                | crate::PatchInstructionKind::Store(expr) => {
+                                    work.push(ExprWalkWork::Expr {
+                                        expr,
+                                        is_root: false,
+                                    });
+                                }
+                                crate::PatchInstructionKind::Remove => {}
+                            }
+                            for segment in entry.selector.segments.iter().rev() {
+                                if let crate::PatchSelectorSegment::BracketExpr { expr, .. } = segment
+                                {
+                                    work.push(ExprWalkWork::Expr {
+                                        expr: *expr,
+                                        is_root: false,
+                                    });
+                                }
+                            }
+                        }
+                        work.push(ExprWalkWork::Expr {
+                            expr: target,
+                            is_root: false,
+                        });
+                    }
+                    ExprKind::PatchLiteral(patch) => {
+                        for entry in patch.entries.iter().rev() {
+                            match entry.instruction.kind {
+                                crate::PatchInstructionKind::Replace(expr)
+                                | crate::PatchInstructionKind::Store(expr) => {
+                                    work.push(ExprWalkWork::Expr {
+                                        expr,
+                                        is_root: false,
+                                    });
+                                }
+                                crate::PatchInstructionKind::Remove => {}
+                            }
+                            for segment in entry.selector.segments.iter().rev() {
+                                if let crate::PatchSelectorSegment::BracketExpr { expr, .. } = segment
+                                {
+                                    work.push(ExprWalkWork::Expr {
+                                        expr: *expr,
+                                        is_root: false,
+                                    });
+                                }
+                            }
+                        }
+                    }
                     ExprKind::Pipe(pipe) => {
                         for stage in pipe.stages.iter().rev() {
                             match &stage.kind {
@@ -15351,6 +15884,38 @@ mod tests {
             lowered.diagnostics()
         );
         validate_module(lowered.module(), ValidationMode::RequireResolvedNames)
+    }
+
+    fn lower_module_text(path: &str, text: &str) -> crate::LoweringResult {
+        let mut sources = SourceDatabase::new();
+        let file_id = sources.add_file(path, text);
+        let parsed = parse_module(&sources[file_id]);
+        assert!(
+            !parsed.has_errors(),
+            "test input should parse before module lowering: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+        let lowered = crate::lower_module(&parsed.module);
+        assert!(
+            !lowered.has_errors(),
+            "test input should lower before module inspection: {:?}",
+            lowered.diagnostics()
+        );
+        lowered
+    }
+
+    fn find_type_alias(module: &Module, name: &str) -> TypeId {
+        module
+            .root_items()
+            .iter()
+            .find_map(|item_id| match &module.items()[*item_id] {
+                Item::Type(item) if item.name.text() == name => match item.body {
+                    TypeItemBody::Alias(alias) => Some(alias),
+                    TypeItemBody::Sum(_) => None,
+                },
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected to find type alias `{name}`"))
     }
 
     #[test]
@@ -15982,19 +16547,6 @@ value resultLabel =
         }
     }
 
-    fn intrinsic_expr(module: &mut Module, value: IntrinsicValue, text: &str) -> crate::ExprId {
-        let path = NamePath::from_vec(vec![name(text)]).expect("intrinsic path should stay valid");
-        module
-            .alloc_expr(Expr {
-                span: unit_span(),
-                kind: ExprKind::Name(TermReference::resolved(
-                    path,
-                    TermResolution::IntrinsicValue(value),
-                )),
-            })
-            .expect("intrinsic expression allocation should fit")
-    }
-
     fn item_expr(module: &mut Module, item: crate::ItemId, text: &str) -> crate::ExprId {
         let path = NamePath::from_vec(vec![name(text)]).expect("item path should stay valid");
         module
@@ -16038,46 +16590,6 @@ value resultLabel =
                 .iter()
                 .any(|diagnostic| diagnostic.message.contains("missing expression 99"))
         );
-    }
-
-    #[test]
-    fn gate_typing_tracks_tuple_constructor_intrinsic_root_shape() {
-        let mut module = Module::new(FileId::new(0));
-        let tuple_ctor_expr = intrinsic_expr(
-            &mut module,
-            IntrinsicValue::TupleConstructor { arity: 2 },
-            "aivi.core.tuple.ctor2",
-        );
-
-        let mut typing = GateTypeContext::new(&module);
-
-        let tuple_ctor_info = typing.infer_expr(tuple_ctor_expr, &GateExprEnv::default(), None);
-        let tuple_ctor_ty = tuple_ctor_info
-            .ty
-            .clone()
-            .expect("tuple constructor root should have a type");
-        let GateType::Arrow {
-            parameter: first,
-            result,
-        } = tuple_ctor_ty
-        else {
-            panic!("expected tuple constructor root to be curried");
-        };
-        let GateType::Arrow {
-            parameter: second,
-            result,
-        } = *result
-        else {
-            panic!("expected tuple constructor root to take two arguments");
-        };
-        let GateType::Tuple(elements) = *result else {
-            panic!("expected tuple constructor root to return a tuple");
-        };
-        assert_eq!(elements.len(), 2);
-        assert!(matches!(first.as_ref(), GateType::TypeParameter { .. }));
-        assert!(matches!(second.as_ref(), GateType::TypeParameter { .. }));
-        assert!(elements[0].same_shape(first.as_ref()));
-        assert!(elements[1].same_shape(second.as_ref()));
     }
 
     #[test]
@@ -16191,6 +16703,125 @@ value resultLabel =
                 .iter()
                 .any(|label| label.style == LabelStyle::Primary && !label.message.is_empty()),
             "expected regex validation to keep the parser-provided primary error span",
+        );
+    }
+
+    #[test]
+    fn resolved_validation_elaborates_record_row_transforms_into_closed_record_types() {
+        let lowered = lower_module_text(
+            "record-row-transform-types.aivi",
+            concat!(
+                "type User = { id: Int, name: Text, nickname: Option Text, createdAt: Text }\n",
+                "type Public = Pick (id, name) User\n",
+                "type Patch = Optional (name, nickname) (Omit (createdAt) User)\n",
+                "type Strict = Required (name, nickname) Patch\n",
+                "type Defaults = Rename { createdAt: created_at } (Defaulted (createdAt) User)\n",
+            ),
+        );
+        let module = lowered.module();
+        let mut typing = GateTypeContext::new(module);
+
+        assert_eq!(
+            typing.lower_annotation(find_type_alias(module, "Public")),
+            Some(GateType::Record(vec![
+                GateRecordField {
+                    name: "id".to_owned(),
+                    ty: GateType::Primitive(BuiltinType::Int),
+                },
+                GateRecordField {
+                    name: "name".to_owned(),
+                    ty: GateType::Primitive(BuiltinType::Text),
+                },
+            ]))
+        );
+        assert_eq!(
+            typing.lower_annotation(find_type_alias(module, "Patch")),
+            Some(GateType::Record(vec![
+                GateRecordField {
+                    name: "id".to_owned(),
+                    ty: GateType::Primitive(BuiltinType::Int),
+                },
+                GateRecordField {
+                    name: "name".to_owned(),
+                    ty: GateType::Option(Box::new(GateType::Primitive(BuiltinType::Text))),
+                },
+                GateRecordField {
+                    name: "nickname".to_owned(),
+                    ty: GateType::Option(Box::new(GateType::Primitive(BuiltinType::Text))),
+                },
+            ]))
+        );
+        assert_eq!(
+            typing.lower_annotation(find_type_alias(module, "Strict")),
+            Some(GateType::Record(vec![
+                GateRecordField {
+                    name: "id".to_owned(),
+                    ty: GateType::Primitive(BuiltinType::Int),
+                },
+                GateRecordField {
+                    name: "name".to_owned(),
+                    ty: GateType::Primitive(BuiltinType::Text),
+                },
+                GateRecordField {
+                    name: "nickname".to_owned(),
+                    ty: GateType::Primitive(BuiltinType::Text),
+                },
+            ]))
+        );
+        assert_eq!(
+            typing.lower_annotation(find_type_alias(module, "Defaults")),
+            Some(GateType::Record(vec![
+                GateRecordField {
+                    name: "id".to_owned(),
+                    ty: GateType::Primitive(BuiltinType::Int),
+                },
+                GateRecordField {
+                    name: "name".to_owned(),
+                    ty: GateType::Primitive(BuiltinType::Text),
+                },
+                GateRecordField {
+                    name: "nickname".to_owned(),
+                    ty: GateType::Option(Box::new(GateType::Primitive(BuiltinType::Text))),
+                },
+                GateRecordField {
+                    name: "created_at".to_owned(),
+                    ty: GateType::Option(Box::new(GateType::Primitive(BuiltinType::Text))),
+                },
+            ]))
+        );
+    }
+
+    #[test]
+    fn resolved_validation_rejects_invalid_record_row_transforms() {
+        let report = validate_resolved_text(
+            "invalid-record-row-transforms.aivi",
+            concat!(
+                "type User = { id: Int, name: Text }\n",
+                "type Missing = Pick (email) User\n",
+                "type Source = Omit (id) Text\n",
+                "type Collision = Rename { id: handle, name: handle } User\n",
+                "type Shadow = Rename { id: name } User\n",
+            ),
+        );
+        let codes = report
+            .diagnostics()
+            .iter()
+            .filter_map(|diagnostic| diagnostic.code)
+            .collect::<Vec<_>>();
+        assert!(
+            codes.contains(&DiagnosticCode::new("hir", "unknown-record-row-field")),
+            "expected missing-field transform diagnostic, got {:?}",
+            report.diagnostics()
+        );
+        assert!(
+            codes.contains(&DiagnosticCode::new("hir", "record-row-transform-source")),
+            "expected non-record transform source diagnostic, got {:?}",
+            report.diagnostics()
+        );
+        assert!(
+            codes.contains(&DiagnosticCode::new("hir", "record-row-rename-collision")),
+            "expected rename collision diagnostic, got {:?}",
+            report.diagnostics()
         );
     }
 
