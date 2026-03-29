@@ -11,7 +11,7 @@ use crate::{
         ResolutionState, SignalItem, TermReference, TermResolution, TypeItemBody, TypeResolution,
         UnaryOperator, ValueItem,
     },
-    ids::{ExprId, ItemId, TypeId, TypeParameterId},
+    ids::{ExprId, ImportId, ItemId, TypeId, TypeParameterId},
     validate::{
         ClassConstraintBinding, ClassMemberCallMatch, DomainMemberSelection, GateExprEnv,
         GateIssue, GateRecordField, GateType, GateTypeContext, PolyTypeBindings, TypeBinding,
@@ -33,6 +33,7 @@ enum ConstraintOrigin {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DefaultEvidence {
     BuiltinOptionNone,
+    ImportedBinding(ImportId),
     SameModuleMemberBody(ExprId),
 }
 
@@ -51,6 +52,23 @@ struct SolvedDefaultRecordField {
 struct DefaultRecordElision {
     record_expr: ExprId,
     fields: Vec<SolvedDefaultRecordField>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct EqConstraintScope {
+    constrained_parameters: HashSet<TypeParameterId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingEqConstraint {
+    constraint: TypeConstraint,
+    scope: EqConstraintScope,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ImportedDefaultValue {
+    builtin: BuiltinType,
+    import: ImportId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -172,8 +190,9 @@ pub(crate) fn expression_matches(
     expected: &GateType,
 ) -> bool {
     let mut checker = TypeChecker::new(module);
-    checker.check_expr(expr_id, env, Some(expected), &mut Vec::new())
-        && checker.diagnostics.is_empty()
+    let matched = checker.check_expr(expr_id, env, Some(expected), &mut Vec::new());
+    checker.solve_pending_eq_constraints();
+    matched && checker.diagnostics.is_empty()
 }
 
 fn signal_name_payload_type<'a>(
@@ -217,7 +236,9 @@ struct TypeChecker<'a> {
     typing: GateTypeContext<'a>,
     diagnostics: Vec<Diagnostic>,
     option_default_in_scope: bool,
+    imported_default_values: Vec<ImportedDefaultValue>,
     default_record_elisions: Vec<DefaultRecordElision>,
+    pending_eq_constraints: Vec<PendingEqConstraint>,
     /// Eq-like constraints available in the current checking scope after expanding
     /// any in-scope class evidence through `with` / `require`.
     eq_constrained_parameters: HashSet<TypeParameterId>,
@@ -233,18 +254,16 @@ enum BinaryOperatorExpectation {
 
 impl<'a> TypeChecker<'a> {
     fn new(module: &'a Module) -> Self {
-        let option_default_in_scope = module.imports().iter().any(|(_, import)| {
-            matches!(
-                import.metadata,
-                ImportBindingMetadata::Bundle(ImportBundleKind::BuiltinOption)
-            )
-        });
+        let (option_default_in_scope, imported_default_values) =
+            Self::collect_default_imports(module);
         Self {
             module,
             typing: GateTypeContext::new(module),
             diagnostics: Vec::new(),
             option_default_in_scope,
+            imported_default_values,
             default_record_elisions: Vec::new(),
+            pending_eq_constraints: Vec::new(),
             eq_constrained_parameters: HashSet::new(),
             in_scope_class_constraints: Vec::new(),
         }
@@ -271,6 +290,71 @@ impl<'a> TypeChecker<'a> {
                 | Item::Export(_) => {}
             }
         }
+        self.solve_pending_eq_constraints();
+    }
+
+    fn collect_default_imports(module: &Module) -> (bool, Vec<ImportedDefaultValue>) {
+        let mut option_default_in_scope = false;
+        let mut imported_default_values = Vec::new();
+        for item_id in module.root_items().iter().copied() {
+            let Some(Item::Use(use_item)) = module.items().get(item_id) else {
+                continue;
+            };
+            if use_item.module.to_string() != "aivi.defaults" {
+                continue;
+            }
+            for import_id in use_item.imports.iter().copied() {
+                let import = &module.imports()[import_id];
+                match import.imported_name.text() {
+                    "Option"
+                        if matches!(
+                            &import.metadata,
+                            ImportBindingMetadata::Bundle(ImportBundleKind::BuiltinOption)
+                        ) =>
+                    {
+                        option_default_in_scope = true;
+                    }
+                    "defaultText"
+                        if Self::import_binding_has_primitive_type(import, BuiltinType::Text) =>
+                    {
+                        imported_default_values.push(ImportedDefaultValue {
+                            builtin: BuiltinType::Text,
+                            import: import_id,
+                        });
+                    }
+                    "defaultInt"
+                        if Self::import_binding_has_primitive_type(import, BuiltinType::Int) =>
+                    {
+                        imported_default_values.push(ImportedDefaultValue {
+                            builtin: BuiltinType::Int,
+                            import: import_id,
+                        });
+                    }
+                    "defaultBool"
+                        if Self::import_binding_has_primitive_type(import, BuiltinType::Bool) =>
+                    {
+                        imported_default_values.push(ImportedDefaultValue {
+                            builtin: BuiltinType::Bool,
+                            import: import_id,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+        (option_default_in_scope, imported_default_values)
+    }
+
+    fn import_binding_has_primitive_type(
+        import: &crate::ImportBinding,
+        builtin: BuiltinType,
+    ) -> bool {
+        matches!(
+            &import.metadata,
+            ImportBindingMetadata::Value {
+                ty: crate::ImportValueType::Primitive(found),
+            } if *found == builtin
+        )
     }
 
     fn check_value_item(&mut self, item: &ValueItem) {
@@ -566,7 +650,7 @@ impl<'a> TypeChecker<'a> {
     ) -> bool {
         let info = self.typing.infer_expr(expr_id, env, None);
         self.emit_expr_issues(&info.issues);
-        self.solve_constraints(&info.constraints);
+        self.handle_constraints(&info.constraints);
 
         match (expected, info.ty.as_ref()) {
             (Some(expected), Some(actual)) if actual.same_shape(expected) => true,
@@ -884,7 +968,7 @@ impl<'a> TypeChecker<'a> {
             return false;
         }
 
-        self.solve_constraints(&[TypeConstraint::eq(
+        self.handle_constraints(&[TypeConstraint::eq(
             self.module.exprs()[expr_id].span,
             operand_ty,
         )]);
@@ -893,11 +977,14 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn inferred_expr_type(&mut self, expr_id: ExprId, env: &GateExprEnv) -> Option<GateType> {
-        self.typing.infer_expr(expr_id, env, None).ty
+        let info = self.typing.infer_expr(expr_id, env, None);
+        self.enqueue_eq_constraints(&info.constraints);
+        info.ty
     }
 
     fn inferred_expr_shape(&mut self, expr_id: ExprId, env: &GateExprEnv) -> Option<GateType> {
         let info = self.typing.infer_expr(expr_id, env, None);
+        self.enqueue_eq_constraints(&info.constraints);
         info.ty.clone().or_else(|| info.actual_gate_type())
     }
 
@@ -1014,7 +1101,7 @@ impl<'a> TypeChecker<'a> {
                         value_stack,
                         &mut constraints,
                     );
-                    let solved = self.solve_constraints(&constraints);
+                    let solved = self.handle_constraints(&constraints);
                     let no_new_diagnostics = self.diagnostics.len() == checkpoint;
                     if ok && no_new_diagnostics && !solved.default_record_fields.is_empty() {
                         self.default_record_elisions.push(DefaultRecordElision {
@@ -1270,7 +1357,7 @@ impl<'a> TypeChecker<'a> {
         for argument in arguments.iter() {
             let info = self.typing.infer_expr(*argument, env, None);
             self.emit_expr_issues(&info.issues);
-            self.solve_constraints(&info.constraints);
+            self.handle_constraints(&info.constraints);
             let Some(argument_ty) = info.ty.clone().or_else(|| info.actual_gate_type()) else {
                 return None;
             };
@@ -1358,7 +1445,7 @@ impl<'a> TypeChecker<'a> {
         for argument in arguments.iter() {
             let info = self.typing.infer_expr(*argument, env, None);
             self.emit_expr_issues(&info.issues);
-            self.solve_constraints(&info.constraints);
+            self.handle_constraints(&info.constraints);
             let Some(argument_ty) = info.ty.clone().or_else(|| info.actual_gate_type()) else {
                 return None;
             };
@@ -1430,7 +1517,7 @@ impl<'a> TypeChecker<'a> {
         for argument in arguments.iter() {
             let info = self.typing.infer_expr(*argument, env, None);
             self.emit_expr_issues(&info.issues);
-            self.solve_constraints(&info.constraints);
+            self.handle_constraints(&info.constraints);
             let Some(argument_ty) = info.ty else {
                 return None;
             };
@@ -1481,7 +1568,7 @@ impl<'a> TypeChecker<'a> {
         let checkpoint = self.diagnostics.len();
         let callee_info = self.typing.infer_expr(callee, env, None);
         self.emit_expr_issues(&callee_info.issues);
-        self.solve_constraints(&callee_info.constraints);
+        self.handle_constraints(&callee_info.constraints);
         if self.diagnostics.len() != checkpoint {
             return Some(false);
         }
@@ -1538,7 +1625,7 @@ impl<'a> TypeChecker<'a> {
             .iter()
             .map(|field| (field.name.as_str(), &field.ty))
             .collect::<HashMap<_, _>>();
-        let mut seen = HashSet::<String>::new();
+        let mut seen = HashMap::<String, SourceSpan>::new();
         let mut ok = true;
 
         for field in &record.fields {
@@ -1557,12 +1644,26 @@ impl<'a> TypeChecker<'a> {
                 ok = false;
                 continue;
             };
-            seen.insert(label.to_owned());
+            if let Some(previous_span) = seen.insert(label.to_owned(), field.span) {
+                self.diagnostics.push(
+                    Diagnostic::error(format!("duplicate record field `{label}`"))
+                        .with_code(code("duplicate-record-field"))
+                        .with_primary_label(
+                            field.span,
+                            "this field repeats an earlier record entry",
+                        )
+                        .with_secondary_label(
+                            previous_span,
+                            "previous field with the same label here",
+                        ),
+                );
+                ok = false;
+            }
             ok &= self.check_expr(field.value, env, Some(*expected_ty), value_stack);
         }
 
         for field in expected_fields {
-            if seen.contains(&field.name) {
+            if seen.contains_key(&field.name) {
                 continue;
             }
             constraints.push(TypeConstraint::default_record_field(
@@ -1657,7 +1758,7 @@ impl<'a> TypeChecker<'a> {
         let checkpoint = self.diagnostics.len();
         let base_info = self.typing.infer_expr(*base_expr, env, None);
         self.emit_expr_issues(&base_info.issues);
-        self.solve_constraints(&base_info.constraints);
+        self.handle_constraints(&base_info.constraints);
         if self.diagnostics.len() != checkpoint {
             return Some(false);
         }
@@ -1715,7 +1816,7 @@ impl<'a> TypeChecker<'a> {
 
         let callee_info = self.typing.infer_expr(callee, env, None);
         self.emit_expr_issues(&callee_info.issues);
-        self.solve_constraints(&callee_info.constraints);
+        self.handle_constraints(&callee_info.constraints);
 
         let mut current = callee_info
             .ty
@@ -1756,6 +1857,9 @@ impl<'a> TypeChecker<'a> {
         if matches!(ty, GateType::Option(_)) && self.option_default_in_scope {
             return Ok(DefaultEvidence::BuiltinOptionNone);
         }
+        if let Some(import) = self.imported_default_value_binding(ty) {
+            return Ok(DefaultEvidence::ImportedBinding(import));
+        }
         if let Some(body) = self.same_module_default_member_body(ty)? {
             return Ok(DefaultEvidence::SameModuleMemberBody(body));
         }
@@ -1764,11 +1868,32 @@ impl<'a> TypeChecker<'a> {
                 "`Option A` only satisfies `Default` here via `use aivi.defaults (Option)` or a same-module `Default` instance"
                     .to_owned(),
             ),
+            GateType::Primitive(BuiltinType::Text) => Err(
+                "`Text` only satisfies `Default` here via `use aivi.defaults (defaultText)` or a same-module `Default` instance"
+                    .to_owned(),
+            ),
+            GateType::Primitive(BuiltinType::Int) => Err(
+                "`Int` only satisfies `Default` here via `use aivi.defaults (defaultInt)` or a same-module `Default` instance"
+                    .to_owned(),
+            ),
+            GateType::Primitive(BuiltinType::Bool) => Err(
+                "`Bool` only satisfies `Default` here via `use aivi.defaults (defaultBool)` or a same-module `Default` instance"
+                    .to_owned(),
+            ),
             _ => Err(
-                "resolved-HIR default checking currently accepts same-module `Default` instances only"
+                "resolved-HIR default checking currently accepts same-module `Default` instances and the compiler-known `aivi.defaults` imports only"
                     .to_owned(),
             ),
         }
+    }
+
+    fn imported_default_value_binding(&self, ty: &GateType) -> Option<ImportId> {
+        let GateType::Primitive(builtin) = ty else {
+            return None;
+        };
+        self.imported_default_values
+            .iter()
+            .find_map(|binding| (binding.builtin == *builtin).then_some(binding.import))
     }
 
     fn emit_expr_issues(&mut self, issues: &[GateIssue]) {
@@ -1994,40 +2119,12 @@ impl<'a> TypeChecker<'a> {
         );
     }
 
-    fn solve_constraints(&mut self, constraints: &[TypeConstraint]) -> ConstraintSolveReport {
+    fn handle_constraints(&mut self, constraints: &[TypeConstraint]) -> ConstraintSolveReport {
         let mut report = ConstraintSolveReport::default();
         for constraint in constraints {
             match constraint.class() {
-                // TODO: `ConstraintClass::Eq` constraints are collected at use sites and
-                // dispatched here, but there is no dedicated constraint solver pass. Each
-                // constraint is resolved ad-hoc via `require_eq` rather than being deferred
-                // into a unified solver. As a result, Eq constraints that arise in positions
-                // not covered by `solve_constraints` would be silently ignored rather than
-                // producing type errors. A proper constraint solver pass should be introduced
-                // to handle all collected constraints uniformly.
                 ConstraintClass::Eq => {
-                    // TODO: Eq constraints are collected here but never solved.
-                    // Solving Eq constraints requires a proper unification algorithm (Hindley-Milner
-                    // style). This is deferred to a future milestone. Currently, Eq instances are
-                    // resolved structurally by aivi-typing::eq, not via constraint propagation.
-                    // Programs that require Eq constraint inference may produce incorrect results.
-                    if let Err(reason) = self.require_eq(constraint.subject(), &mut Vec::new()) {
-                        self.diagnostics.push(
-                            Diagnostic::error(format!(
-                                "this expression requires `Eq` for `{}`",
-                                constraint.subject()
-                            ))
-                            .with_code(code("missing-eq-instance"))
-                            .with_primary_label(
-                                constraint.span(),
-                                format!(
-                                    "`{}` does not currently have `Eq` evidence",
-                                    constraint.subject()
-                                ),
-                            )
-                            .with_note(reason),
-                        );
-                    }
+                    self.enqueue_eq_constraint(constraint);
                 }
                 ConstraintClass::Default => match self.require_default(constraint.subject()) {
                     Ok(evidence) => {
@@ -2057,6 +2154,63 @@ impl<'a> TypeChecker<'a> {
             }
         }
         report
+    }
+
+    fn enqueue_eq_constraints(&mut self, constraints: &[TypeConstraint]) {
+        for constraint in constraints {
+            if matches!(constraint.class(), ConstraintClass::Eq) {
+                self.enqueue_eq_constraint(constraint);
+            }
+        }
+    }
+
+    fn enqueue_eq_constraint(&mut self, constraint: &TypeConstraint) {
+        debug_assert!(matches!(constraint.class(), ConstraintClass::Eq));
+        let pending = PendingEqConstraint {
+            constraint: constraint.clone(),
+            scope: self.current_eq_constraint_scope(),
+        };
+        if self
+            .pending_eq_constraints
+            .iter()
+            .any(|existing| *existing == pending)
+        {
+            return;
+        }
+        self.pending_eq_constraints.push(pending);
+    }
+
+    fn current_eq_constraint_scope(&self) -> EqConstraintScope {
+        EqConstraintScope {
+            constrained_parameters: self.eq_constrained_parameters.clone(),
+        }
+    }
+
+    fn solve_pending_eq_constraints(&mut self) {
+        let constraints = std::mem::take(&mut self.pending_eq_constraints);
+        for pending in constraints {
+            if let Err(reason) = self.require_eq_with_scope(
+                pending.constraint.subject(),
+                &pending.scope,
+                &mut Vec::new(),
+            ) {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "this expression requires `Eq` for `{}`",
+                        pending.constraint.subject()
+                    ))
+                    .with_code(code("missing-eq-instance"))
+                    .with_primary_label(
+                        pending.constraint.span(),
+                        format!(
+                            "`{}` does not currently have `Eq` evidence",
+                            pending.constraint.subject()
+                        ),
+                    )
+                    .with_note(reason),
+                );
+            }
+        }
     }
 
     fn fallback_apply_parameter_types(
@@ -2195,8 +2349,16 @@ impl<'a> TypeChecker<'a> {
         current
     }
 
-    fn require_eq(&mut self, ty: &GateType, item_stack: &mut Vec<ItemId>) -> Result<(), String> {
-        if self.require_compiler_derived_eq(ty, item_stack).is_ok() {
+    fn require_eq_with_scope(
+        &mut self,
+        ty: &GateType,
+        scope: &EqConstraintScope,
+        item_stack: &mut Vec<ItemId>,
+    ) -> Result<(), String> {
+        if self
+            .require_compiler_derived_eq_with_scope(ty, scope, item_stack)
+            .is_ok()
+        {
             return Ok(());
         }
         if let Some(class_item_id) = self.class_item_id_by_name("Eq") {
@@ -2207,12 +2369,22 @@ impl<'a> TypeChecker<'a> {
                 return Ok(());
             }
         }
-        self.require_compiler_derived_eq(ty, item_stack)
+        self.require_compiler_derived_eq_with_scope(ty, scope, item_stack)
     }
 
     fn require_compiler_derived_eq(
         &mut self,
         ty: &GateType,
+        item_stack: &mut Vec<ItemId>,
+    ) -> Result<(), String> {
+        let scope = self.current_eq_constraint_scope();
+        self.require_compiler_derived_eq_with_scope(ty, &scope, item_stack)
+    }
+
+    fn require_compiler_derived_eq_with_scope(
+        &mut self,
+        ty: &GateType,
+        scope: &EqConstraintScope,
         item_stack: &mut Vec<ItemId>,
     ) -> Result<(), String> {
         match ty {
@@ -2221,7 +2393,7 @@ impl<'a> TypeChecker<'a> {
             }
             GateType::Primitive(_) => Ok(()),
             GateType::TypeParameter { parameter, name } => {
-                if self.eq_constrained_parameters.contains(parameter) {
+                if scope.constrained_parameters.contains(parameter) {
                     Ok(())
                 } else {
                     Err(format!(
@@ -2233,22 +2405,22 @@ impl<'a> TypeChecker<'a> {
             }
             GateType::Tuple(elements) => {
                 for element in elements {
-                    self.require_eq(element, item_stack)?;
+                    self.require_eq_with_scope(element, scope, item_stack)?;
                 }
                 Ok(())
             }
             GateType::Record(fields) => {
                 for field in fields {
-                    self.require_eq(&field.ty, item_stack)?;
+                    self.require_eq_with_scope(&field.ty, scope, item_stack)?;
                 }
                 Ok(())
             }
             GateType::List(element) | GateType::Option(element) => {
-                self.require_eq(element, item_stack)
+                self.require_eq_with_scope(element, scope, item_stack)
             }
             GateType::Result { error, value } | GateType::Validation { error, value } => {
-                self.require_eq(error, item_stack)?;
-                self.require_eq(value, item_stack)
+                self.require_eq_with_scope(error, scope, item_stack)?;
+                self.require_eq_with_scope(value, scope, item_stack)
             }
             GateType::Domain {
                 item, arguments, ..
@@ -2271,7 +2443,7 @@ impl<'a> TypeChecker<'a> {
                     ));
                 };
                 item_stack.push(*item);
-                let result = self.require_eq(&carrier, item_stack);
+                let result = self.require_eq_with_scope(&carrier, scope, item_stack);
                 let popped = item_stack.pop();
                 debug_assert_eq!(popped, Some(*item));
                 result
@@ -2300,7 +2472,7 @@ impl<'a> TypeChecker<'a> {
                                 "the alias body for `{ty}` could not be lowered for Eq checking"
                             ));
                         };
-                        self.require_eq(&lowered, item_stack)
+                        self.require_eq_with_scope(&lowered, scope, item_stack)
                     }
                     TypeItemBody::Sum(variants) => {
                         for variant in variants.iter() {
@@ -2312,7 +2484,7 @@ impl<'a> TypeChecker<'a> {
                                         "constructor payloads for `{ty}` could not be lowered for Eq checking"
                                     ));
                                 };
-                                self.require_eq(&lowered, item_stack)?;
+                                self.require_eq_with_scope(&lowered, scope, item_stack)?;
                             }
                         }
                         Ok(())
@@ -2419,24 +2591,26 @@ impl<'a> TypeChecker<'a> {
         {
             return Some(ClassMemberImplementation::Builtin);
         }
+        if let Ok(Some((instance_id, instance))) =
+            self.resolve_same_module_instance_binding_with_id(resolution.class, subject)
+        {
+            let Item::Class(class_item) = &self.module.items()[resolution.class] else {
+                return None;
+            };
+            let member_name = class_item.members.get(resolution.member_index)?.name.text();
+            let member_index = instance
+                .members
+                .iter()
+                .position(|member| member.name.text() == member_name)?;
+            return Some(ClassMemberImplementation::SameModuleInstance {
+                instance: instance_id,
+                member_index,
+            });
+        }
         if self.has_builtin_class_instance_binding(class_name.as_str(), subject) {
             return Some(ClassMemberImplementation::Builtin);
         }
-        let (instance_id, instance) = self
-            .resolve_same_module_instance_binding_with_id(resolution.class, subject)
-            .ok()??;
-        let Item::Class(class_item) = &self.module.items()[resolution.class] else {
-            return None;
-        };
-        let member_name = class_item.members.get(resolution.member_index)?.name.text();
-        let member_index = instance
-            .members
-            .iter()
-            .position(|member| member.name.text() == member_name)?;
-        Some(ClassMemberImplementation::SameModuleInstance {
-            instance: instance_id,
-            member_index,
-        })
+        None
     }
 
     fn solve_class_constraint_bindings(
@@ -2893,6 +3067,9 @@ fn synthesize_default_record_field(
         DefaultEvidence::BuiltinOptionNone => {
             alloc_builtin_default_expr(module, record_span, BuiltinTerm::None, "None")
         }
+        DefaultEvidence::ImportedBinding(import) => {
+            alloc_import_default_expr(module, record_span, import)
+        }
         DefaultEvidence::SameModuleMemberBody(body) => body,
     };
     RecordExprField {
@@ -2919,6 +3096,23 @@ fn alloc_builtin_default_expr(
             kind: ExprKind::Name(TermReference::resolved(
                 path,
                 TermResolution::Builtin(builtin),
+            )),
+        })
+        .expect("default-record elaboration should fit inside the expression arena")
+}
+
+fn alloc_import_default_expr(module: &mut Module, span: SourceSpan, import: ImportId) -> ExprId {
+    let local_name = module.imports()[import].local_name.text().to_owned();
+    let path = NamePath::from_vec(vec![
+        Name::new(local_name, span).expect("default import local name must stay valid"),
+    ])
+    .expect("default import path must stay valid");
+    module
+        .alloc_expr(crate::Expr {
+            span,
+            kind: ExprKind::Name(TermReference::resolved(
+                path,
+                TermResolution::Import(import),
             )),
         })
         .expect("default-record elaboration should fit inside the expression arena")
@@ -3201,6 +3395,25 @@ mod tests {
             }),
             "expected missing Eq diagnostic for !=, got diagnostics: {:?}",
             report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn expression_matches_solves_deferred_eq_constraints() {
+        let module = lowered_module_text(
+            "expression-matches-map-equality.aivi",
+            "value left = Map { \"id\": 1 }\n\
+             value right = Map { \"id\": 1 }\n\
+             value same:Bool = left == right\n",
+        );
+        assert!(
+            !expression_matches(
+                &module,
+                value_body(&module, "same"),
+                &GateExprEnv::default(),
+                &GateType::Primitive(BuiltinType::Bool),
+            ),
+            "expected expression_matches to reject deferred missing Eq evidence"
         );
     }
 
@@ -3570,6 +3783,27 @@ mod tests {
     }
 
     #[test]
+    fn typecheck_accepts_imported_default_values_for_record_elision() {
+        let report = typecheck_text(
+            "imported-default-values.aivi",
+            "use aivi.defaults (defaultText as emptyText, defaultInt, defaultBool as disabled)\n\
+             type Settings = {\n\
+                 title: Text,\n\
+                 retries: Int,\n\
+                 enabled: Bool,\n\
+                 label: Text\n\
+             }\n\
+             value title = \"AIVI\"\n\
+             value settings:Settings = { title }\n",
+        );
+        assert!(
+            report.is_ok(),
+            "expected imported aivi.defaults values to satisfy record elision, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
     fn typecheck_accepts_ambient_default_class_for_record_elision() {
         let report = typecheck_text(
             "ambient-default-instance.aivi",
@@ -3587,6 +3821,79 @@ mod tests {
             "expected ambient Default class to satisfy record elision, got diagnostics: {:?}",
             report.diagnostics()
         );
+    }
+
+    #[test]
+    fn typecheck_elaborates_imported_default_values_into_explicit_fields() {
+        let (report, module) = typecheck_and_elaborate_text(
+            "imported-default-values-hir.aivi",
+            "use aivi.defaults (defaultText as emptyText, defaultInt, defaultBool as disabled)\n\
+             type Settings = {\n\
+                 title: Text,\n\
+                 retries: Int,\n\
+                 enabled: Bool,\n\
+                 label: Text\n\
+             }\n\
+             value title = \"AIVI\"\n\
+             value settings:Settings = { title }\n",
+        );
+        assert!(
+            report.is_ok(),
+            "expected imported aivi.defaults values to satisfy record elision, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+
+        let settings = value_body(&module, "settings");
+        let ExprKind::Record(record) = &module.exprs()[settings].kind else {
+            panic!("expected `settings` to stay a record literal");
+        };
+        assert_eq!(
+            record
+                .fields
+                .iter()
+                .map(|field| field.label.text())
+                .collect::<Vec<_>>(),
+            vec!["title", "retries", "enabled", "label"]
+        );
+        assert_eq!(
+            record
+                .fields
+                .iter()
+                .map(|field| field.surface)
+                .collect::<Vec<_>>(),
+            vec![
+                RecordFieldSurface::Shorthand,
+                RecordFieldSurface::Defaulted,
+                RecordFieldSurface::Defaulted,
+                RecordFieldSurface::Defaulted,
+            ]
+        );
+
+        let empty_text = import_binding_id(&module, "emptyText");
+        let default_int = import_binding_id(&module, "defaultInt");
+        let disabled = import_binding_id(&module, "disabled");
+        for (label, expected_import) in [
+            ("retries", default_int),
+            ("enabled", disabled),
+            ("label", empty_text),
+        ] {
+            let value = record
+                .fields
+                .iter()
+                .find(|field| field.label.text() == label)
+                .map(|field| field.value)
+                .expect("expected synthesized field to exist");
+            match &module.exprs()[value].kind {
+                ExprKind::Name(reference) => assert!(matches!(
+                    reference.resolution.as_ref(),
+                    ResolutionState::Resolved(TermResolution::Import(import_id))
+                        if *import_id == expected_import
+                )),
+                other => panic!(
+                    "expected synthesized imported default for `{label}` to stay a name reference, found {other:?}"
+                ),
+            }
+        }
     }
 
     #[test]
@@ -4434,5 +4741,15 @@ fun items:(List A) acc:(TakeAcc A) => acc.items
                 _ => None,
             })
             .expect("expected same-module Default member to exist")
+    }
+
+    fn import_binding_id(module: &Module, local_name: &str) -> ImportId {
+        module
+            .imports()
+            .iter()
+            .find_map(|(import_id, import)| {
+                (import.local_name.text() == local_name).then_some(import_id)
+            })
+            .expect("expected import binding to exist")
     }
 }

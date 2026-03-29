@@ -400,7 +400,7 @@ The following ambient classes and builtin carrier paths are wired through the cu
 |---|---|---|
 | `Eq A` | `==`, `!=` | primitive scalars, `Ordering`, `Option`, `Result`, `Validation`, `List` |
 | `Ord A` | `compare` | `Int`, `Text`, `Ordering` |
-| `Default A` | `default` | same-module `Default` instances; `Option` omission via `use aivi.defaults (Option)` |
+| `Default A` | `default` | same-module `Default` instances; `Option` omission via `use aivi.defaults (Option)`; `Text` / `Int` / `Bool` omission via `use aivi.defaults (defaultText, defaultInt, defaultBool)` |
 | `Functor F` | `map` (via `*\|>`) | `Option`, `Result`, `List`, `Validation`, `Signal` |
 | `Semigroup A` | `<>` | `Text`, `List` |
 | `Monoid A` | `empty` | `Text`, `List` |

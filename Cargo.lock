@@ -152,6 +152,7 @@ dependencies = [
  "aivi-lambda",
  "aivi-syntax",
  "aivi-typing",
+ "gio",
  "glib",
  "serde_json",
  "url",

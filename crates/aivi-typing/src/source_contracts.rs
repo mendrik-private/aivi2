@@ -31,11 +31,14 @@ pub enum BuiltinSourceProvider {
     PathDataHome,
     PathCacheHome,
     PathTempDir,
+    DbusOwnName,
+    DbusSignal,
+    DbusMethod,
     WindowKeyDown,
 }
 
 impl BuiltinSourceProvider {
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 22] = [
         Self::HttpGet,
         Self::HttpPost,
         Self::TimerEvery,
@@ -54,6 +57,9 @@ impl BuiltinSourceProvider {
         Self::PathDataHome,
         Self::PathCacheHome,
         Self::PathTempDir,
+        Self::DbusOwnName,
+        Self::DbusSignal,
+        Self::DbusMethod,
         Self::WindowKeyDown,
     ];
 
@@ -77,6 +83,9 @@ impl BuiltinSourceProvider {
             "path.dataHome" => Some(Self::PathDataHome),
             "path.cacheHome" => Some(Self::PathCacheHome),
             "path.tempDir" => Some(Self::PathTempDir),
+            "dbus.ownName" => Some(Self::DbusOwnName),
+            "dbus.signal" => Some(Self::DbusSignal),
+            "dbus.method" => Some(Self::DbusMethod),
             "window.keyDown" => Some(Self::WindowKeyDown),
             _ => None,
         }
@@ -102,6 +111,9 @@ impl BuiltinSourceProvider {
             Self::PathDataHome => "path.dataHome",
             Self::PathCacheHome => "path.cacheHome",
             Self::PathTempDir => "path.tempDir",
+            Self::DbusOwnName => "dbus.ownName",
+            Self::DbusSignal => "dbus.signal",
+            Self::DbusMethod => "dbus.method",
             Self::WindowKeyDown => "window.keyDown",
         }
     }
@@ -151,6 +163,12 @@ impl BuiltinSourceProvider {
             | Self::PathCacheHome
             | Self::PathTempDir => {
                 SourceContract::new(self, &NO_OPTIONS, STATIC_RECURRENCE, STATIC_LIFECYCLE)
+            }
+            Self::DbusOwnName => {
+                SourceContract::new(self, dbus_name_options(), DBUS_RECURRENCE, STREAM_LIFECYCLE)
+            }
+            Self::DbusSignal | Self::DbusMethod => {
+                SourceContract::new(self, dbus_bus_options(), DBUS_RECURRENCE, STREAM_LIFECYCLE)
             }
             Self::WindowKeyDown => {
                 SourceContract::new(self, &WINDOW_OPTIONS, WINDOW_RECURRENCE, STREAM_LIFECYCLE)
@@ -517,6 +535,7 @@ pub enum SourceNominalType {
     FsWatchEvent,
     Path,
     Retry,
+    BusNameFlag,
     StreamMode,
 }
 
@@ -528,6 +547,7 @@ impl SourceNominalType {
             Self::FsWatchEvent => "FsWatchEvent",
             Self::Path => "Path",
             Self::Retry => "Retry",
+            Self::BusNameFlag => "BusNameFlag",
             Self::StreamMode => "StreamMode",
         }
     }
@@ -737,6 +757,27 @@ const PROCESS_WAKEUP_OPTIONS: [SourceOptionWakeupContract; 1] = [SourceOptionWak
     SourceOptionWakeupCause::TriggerSignal,
 )];
 
+static DBUS_NAME_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
+
+fn dbus_name_options() -> &'static [SourceOptionContract] {
+    DBUS_NAME_OPTIONS_STORAGE.get_or_init(|| {
+        vec![
+            SourceOptionContract::new("bus", SourceContractType::text()),
+            SourceOptionContract::new(
+                "flags",
+                SourceContractType::list(SourceTypeAtom::nominal(SourceNominalType::BusNameFlag)),
+            ),
+        ]
+    })
+}
+
+static DBUS_BUS_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
+
+fn dbus_bus_options() -> &'static [SourceOptionContract] {
+    DBUS_BUS_OPTIONS_STORAGE
+        .get_or_init(|| vec![SourceOptionContract::new("bus", SourceContractType::text())])
+}
+
 static WINDOW_OPTIONS: [SourceOptionContract; 3] = [
     SourceOptionContract::new("capture", SourceContractType::bool()),
     SourceOptionContract::new("repeat", SourceContractType::bool()),
@@ -765,6 +806,10 @@ const MAILBOX_RECURRENCE: SourceRecurrenceContract = SourceRecurrenceContract::n
 const PROCESS_RECURRENCE: SourceRecurrenceContract = SourceRecurrenceContract::new(
     Some(SourceContractIntrinsicWakeup::ProviderDefinedTrigger),
     &PROCESS_WAKEUP_OPTIONS,
+);
+const DBUS_RECURRENCE: SourceRecurrenceContract = SourceRecurrenceContract::new(
+    Some(SourceContractIntrinsicWakeup::ProviderDefinedTrigger),
+    &[],
 );
 const WINDOW_RECURRENCE: SourceRecurrenceContract = SourceRecurrenceContract::new(
     Some(SourceContractIntrinsicWakeup::ProviderDefinedTrigger),
@@ -832,6 +877,31 @@ mod tests {
         assert_eq!(
             contract.option("retry").map(|option| option.ty()),
             Some(SourceContractType::nominal(SourceNominalType::Retry))
+        );
+    }
+
+    #[test]
+    fn exposes_dbus_source_option_contract_types() {
+        let own_name = BuiltinSourceProvider::DbusOwnName.contract();
+        let signal = BuiltinSourceProvider::DbusSignal.contract();
+
+        assert_eq!(
+            own_name.option("bus").map(|option| option.ty()),
+            Some(SourceContractType::text())
+        );
+        assert_eq!(
+            own_name.option("flags").map(|option| option.ty()),
+            Some(SourceContractType::list(SourceTypeAtom::nominal(
+                SourceNominalType::BusNameFlag,
+            )))
+        );
+        assert_eq!(
+            signal.option("bus").map(|option| option.ty()),
+            Some(SourceContractType::text())
+        );
+        assert_eq!(
+            own_name.intrinsic_wakeup(),
+            Some(SourceContractIntrinsicWakeup::ProviderDefinedTrigger)
         );
     }
 

@@ -1,0 +1,11 @@
+class Applicative F
+    pureInt : F Int
+
+instance Applicative Option
+    pureInt = Some 1
+
+class Functor F
+    labelInt : F Int
+
+instance Functor (Result Text)
+    labelInt = Ok 1

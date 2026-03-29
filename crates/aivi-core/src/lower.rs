@@ -4448,6 +4448,65 @@ value combined:Blob =
     }
 
     #[test]
+    fn lowers_higher_kinded_same_module_instance_member_calls_into_hidden_items() {
+        let lowered = lower_text(
+            "typed-core-higher-kinded-instance-member.aivi",
+            r#"
+class Applicative F
+    pureInt : F Int
+
+instance Applicative Option
+    pureInt = Some 1
+
+value chosen:Option Int =
+    pureInt
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "higher-kinded instance example should lower to HIR: {:?}",
+            lowered.diagnostics()
+        );
+        let hir_validation = aivi_hir::validate_module(
+            lowered.module(),
+            aivi_hir::ValidationMode::RequireResolvedNames,
+        );
+        assert!(
+            hir_validation.is_ok(),
+            "higher-kinded instance example should validate before typed-core lowering: {:?}",
+            hir_validation.diagnostics()
+        );
+
+        let core = lower_module(lowered.module()).expect("typed-core lowering should succeed");
+        let chosen = core
+            .items()
+            .iter()
+            .find(|(_, item)| item.name.as_ref() == "chosen")
+            .map(|(id, _)| id)
+            .expect("expected chosen value item");
+        let chosen_body = core.items()[chosen]
+            .body
+            .expect("chosen should carry a lowered body");
+        let crate::ExprKind::Reference(crate::Reference::Item(hidden_item)) =
+            &core.exprs()[chosen_body].kind
+        else {
+            panic!(
+                "higher-kinded same-module class member should lower to a hidden typed-core item"
+            );
+        };
+        let hidden = &core.items()[*hidden_item];
+        assert!(
+            hidden.name.starts_with("instance#"),
+            "expected hidden higher-kinded instance-member item name, found {}",
+            hidden.name
+        );
+        assert!(
+            hidden.body.is_some(),
+            "hidden higher-kinded instance-member item should carry a lowered body"
+        );
+    }
+
+    #[test]
     fn lowers_prelude_foldable_reduce_calls_into_builtin_intrinsics() {
         let lowered = lower_text(
             "typed-core-foldable-reduce.aivi",
@@ -4808,5 +4867,39 @@ value retried : Task Int Int =
             error,
             ValidationError::InlinePipeCaseArmResultMismatch { .. }
         )));
+    }
+
+    #[test]
+    fn lowers_result_block_fixture_into_core_ir() {
+        let lowered = lower_fixture("milestone-2/valid/result-block/main.aivi");
+        assert!(
+            !lowered.has_errors(),
+            "result block fixture should lower cleanly before typed-core lowering: {:?}",
+            lowered.diagnostics()
+        );
+
+        let core = lower_module(lowered.module()).expect("typed-core lowering should succeed");
+        validate_module(&core).expect("lowered core module should validate");
+
+        let combined = core
+            .items()
+            .iter()
+            .find(|(_, item)| item.name.as_ref() == "combined")
+            .map(|(id, _)| id)
+            .expect("expected combined value item");
+        let body = core.items()[combined]
+            .body
+            .expect("combined should carry a lowered body");
+        let crate::ExprKind::Pipe(pipe) = &core.exprs()[body].kind else {
+            panic!("combined should lower to a pipe expression");
+        };
+        let crate::PipeStageKind::Case { arms } = &pipe.stages[0].kind else {
+            panic!("combined should start with a case stage");
+        };
+        assert_eq!(
+            arms.len(),
+            2,
+            "result block bindings should lower into Ok/Err case arms"
+        );
     }
 }

@@ -82,6 +82,7 @@ fn check_accepts_valid_hir_fixtures() {
         "milestone-2/valid/markup-list-patterns/main.aivi",
         "milestone-2/valid/markup-control-nodes/main.aivi",
         "milestone-2/valid/class-declarations/main.aivi",
+        "milestone-2/valid/higher-kinded-class-instances/main.aivi",
         "milestone-2/valid/instance-declarations/main.aivi",
         "milestone-2/valid/domain-declarations/main.aivi",
         "milestone-2/valid/domain-member-resolution/main.aivi",
@@ -97,6 +98,7 @@ fn check_accepts_valid_hir_fixtures() {
         "milestone-2/valid/pipe-truthy-falsy-carriers/main.aivi",
         "milestone-2/valid/pipe-fanout-carriers/main.aivi",
         "milestone-2/valid/pipe-gate-carriers/main.aivi",
+        "milestone-2/valid/result-block/main.aivi",
         "milestone-2/valid/pipe-transform-memos/main.aivi",
         "milestone-2/valid/pipe-scan-signal-wakeup/main.aivi",
         "milestone-2/valid/pipe-explicit-recurrence-wakeups/main.aivi",
@@ -187,6 +189,7 @@ fn check_rejects_invalid_hir_fixtures() {
         "milestone-2/invalid/duplicate-top-level-names/main.aivi",
         "milestone-2/invalid/duplicate-source-provider-contract/main.aivi",
         "milestone-2/invalid/duplicate-map-literal-key/main.aivi",
+        "milestone-2/invalid/duplicate-record-fields/main.aivi",
         "milestone-2/invalid/unknown-imported-names/main.aivi",
         "milestone-2/invalid/unknown-decorator/main.aivi",
         "milestone-2/invalid/unresolved-names/main.aivi",
@@ -202,6 +205,8 @@ fn check_rejects_invalid_hir_fixtures() {
         "milestone-2/invalid/fanin-without-map/main.aivi",
         "milestone-2/invalid/fanout-non-list-subject/main.aivi",
         "milestone-2/invalid/fanin-invalid-projection/main.aivi",
+        "milestone-2/invalid/nested-gate-predicate/main.aivi",
+        "milestone-2/invalid/nested-fanout-map/main.aivi",
         "milestone-2/invalid/unsupported-pipe-memo-stage/main.aivi",
         "milestone-2/invalid/gate-predicate-not-bool/main.aivi",
         "milestone-2/invalid/impure-gate-predicate/main.aivi",
@@ -345,6 +350,30 @@ fn check_reports_unsupported_pipe_memo_stage() {
     assert!(
         stderr.contains("pipe memo bindings are currently supported only on `|>` and `|` stages"),
         "expected unsupported pipe memo message, got stderr: {stderr}"
+    );
+}
+
+#[test]
+fn check_reports_duplicate_record_fields_from_hir_lowering() {
+    let path = fixture_path("milestone-2/invalid/duplicate-record-fields/main.aivi");
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        !output.status.success(),
+        "duplicate record field fixture should fail check"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("hir::duplicate-record-field"),
+        "expected duplicate record field diagnostic code, got stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("duplicate record field `name`"),
+        "expected explicit duplicate record field message, got stderr: {stderr}"
     );
 }
 

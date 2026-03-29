@@ -327,11 +327,22 @@ signal keyDown : Signal Key
 
 The general form is `@source provider.variant args [with { ... }]` followed by `signal name : Signal T`. The provider and variant are resolved statically. Provider-backed signals remain decorator-based in the current compiler.
 
-### 5.0.5 There is no `result { ... }` block in the current parser
+### 5.0.5 `result { ... }` blocks sequence `Result` values
 
-`result` is not a top-level declaration keyword, and the current parser/compiler do not implement a `result { ... }` expression form with `<-` bindings.
+`result` is not a top-level declaration keyword. It is an expression form for declaration-ordered `Result` chaining with `<-` bindings:
 
-Older draft examples using `result { ... }` blocks are not current surface syntax. Express the same logic today with ordinary `value` / `fun` declarations, pipe operators, and helper bindings.
+```aivi
+value total =
+    result {
+        left <- Ok 20
+        right <- Ok 22
+        left + right
+    }
+```
+
+Each binding must produce a `Result E A`. `Ok` payloads are introduced into scope for the remaining block, the first `Err` short-circuits, and the final line is wrapped in `Ok`. If the block omits an explicit final line, it implicitly returns the last bound name.
+
+This surface currently supports the sequential `Result` interpretation above; the older draft notion of a dependency-graph block is not part of the implemented language.
 
 ### 5.0.6 Markup roots use `value`
 
@@ -553,7 +564,7 @@ Set [1, 2, 4]
 
 Core typeclasses are compiler-owned ambient prelude items injected into every checked module; local declarations may shadow them.
 
-Parser-level surface syntax includes the following forms. Low-kinded examples such as `Container`, `same`, and same-module `Eq` instances are checker-backed today, but end-to-end checking for user-authored higher-kinded classes and instances is still partial:
+Parser-level surface syntax includes the following forms. Low-kinded examples such as `Container`, `same`, and same-module `Eq` instances are checker-backed today, and same-module user-authored higher-kinded class declarations and instance heads such as `instance Applicative Option` are now checked through the current HIR/typechecking/core-lowering slice:
 
 ```aivi
 class Functor F
@@ -603,7 +614,7 @@ Parser-accurate rules:
 - instance-head example: `instance Eq A -> Eq (Option A)`
 - class declarations do not accept head constraint prefixes; superclass relationships are written only as body-level `with` lines
 - higher-kinded type application uses ordinary left-associative type application syntax: `F A`, `F Int`, `F (A -> B)`, `Result Text A`, `Either L R`
-- parser/formatter support higher-kinded class and instance shapes, but end-to-end checking for user-authored higher-kinded member signatures and instance targets remains partial
+- parser/formatter plus the current HIR/typechecking/core-lowering slice support same-module user-authored higher-kinded class and instance shapes such as `F Int`, `A -> F A`, and `instance Applicative Option`
 - current constraint-prefix disambiguation is parser-driven: a constraint must parse as a type application whose callee looks like a class name (currently a multi-character identifier such as `Eq`, `Functor`, `Applicative`)
 
 ### 7.1 Resolution rules
@@ -655,7 +666,7 @@ Same-module instance members lower as hidden callable items per `(instance, memb
 - `Signal` implements builtin `Functor`, `Apply`, and `Applicative`
 - `Task E` has builtin executable `Applicative` support today; broader checker-level `Functor` / `Apply` / `Chain` / `Monad` matching is not yet runtime-backed
 - `Eq` is compiler-provided for the structural cases in §7.3
-- current `Default` evidence is narrower than general imported instance resolution: builtin `Option` defaulting comes from `use aivi.defaults (Option)`, and other cases are limited to same-module `Default` instances
+- current `Default` evidence is narrower than general imported instance resolution: builtin `Option` defaulting comes from `use aivi.defaults (Option)`, `Text` / `Int` / `Bool` omission can use `use aivi.defaults (defaultText, defaultInt, defaultBool)`, and other cases are still limited to same-module `Default` instances
 
 ### 7.2.1 `reduce`
 
@@ -767,19 +778,20 @@ class Default A
 
 ### 9.2 `aivi.defaults`
 
-`use aivi.defaults (Option)` enables the builtin `Option` default-elision path used by record omission:
+`aivi.defaults` currently exposes a narrow compiler-known default slice for record omission:
 
 ```aivi
-use aivi.defaults (Option)
+use aivi.defaults (Option, defaultText, defaultInt, defaultBool)
 ```
 
-In the current checker this is a compiler-recognized import bundle rather than ordinary imported instance evidence.
+In the current checker these names are compiler-recognized imports rather than general imported instance evidence.
 
 ### 9.3 Record literal elision
 
 When an expected closed record type is known, omitted fields are filled only when each omitted field type is supported by the current default-evidence slice:
 
 - `Option A` via `use aivi.defaults (Option)`
+- `Text`, `Int`, and `Bool` via `use aivi.defaults (defaultText, defaultInt, defaultBool)`
 - or a same-module `Default` instance
 
 ```aivi
@@ -840,7 +852,7 @@ Shorthand does not introduce open records, punning across different field names,
 Omission is legal only when:
 
 - the expected record type is known
-- each omitted field is covered by the current default-evidence slice (`use aivi.defaults (Option)` for `Option`, or a same-module `Default` instance)
+- each omitted field is covered by the current default-evidence slice (`use aivi.defaults (Option)` for `Option`, `use aivi.defaults (defaultText, defaultInt, defaultBool)` for `Text` / `Int` / `Bool`, or a same-module `Default` instance)
 
 This does **not**:
 

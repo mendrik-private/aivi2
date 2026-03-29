@@ -126,6 +126,8 @@ pub enum GateRuntimeUnsupportedKind {
     BigIntLiteral,
     ApplicativeCluster,
     Markup,
+    NestedGate,
+    NestedFanout,
     PipeStage(GateRuntimeUnsupportedPipeStageKind),
 }
 
@@ -150,6 +152,8 @@ impl fmt::Display for GateRuntimeUnsupportedKind {
             Self::BigIntLiteral => f.write_str("BigInt literal"),
             Self::ApplicativeCluster => f.write_str("applicative cluster"),
             Self::Markup => f.write_str("markup expression"),
+            Self::NestedGate => f.write_str("nested gate expression"),
+            Self::NestedFanout => f.write_str("nested fan-out expression"),
             Self::PipeStage(kind) => write!(f, "{kind}"),
         }
     }
@@ -613,10 +617,6 @@ fn elaborate_gate_stage(
         }
         GateResultKind::PreservedSignalSubject => {
             let result_type = typing.apply_gate_plan(plan, subject);
-            // INVARIANT: gate predicates must evaluate to Bool.
-            // TODO: validate that the runtime expression tree produces a Bool-typed result.
-            // Currently this is assumed but not checked — a non-Bool predicate will cause
-            // incorrect codegen in aivi-backend/validate.rs.
             let runtime_predicate =
                 match lower_gate_pipe_body_runtime_expr(module, predicate, env, subject, typing) {
                     Ok(predicate) => predicate,
@@ -627,6 +627,14 @@ fn elaborate_gate_stage(
                         });
                     }
                 };
+            if !runtime_predicate.ty.is_bool() {
+                return GateStageOutcome::Blocked(BlockedGateStage {
+                    subject: Some(subject.clone()),
+                    blockers: vec![GateElaborationBlocker::PredicateNotBool {
+                        found: runtime_predicate.ty,
+                    }],
+                });
+            }
             GateStageOutcome::SignalFilter(SignalGateFilter {
                 input_subject: subject.clone(),
                 payload_type: subject.gate_payload().clone(),
@@ -1115,6 +1123,12 @@ fn lower_gate_runtime_expr_with_purity(
                     }
                     // --- Pipe: bounded number of stages (not deep in practice) ---
                     ExprKind::Pipe(pipe) => {
+                        if let Some(kind) = nested_pipe_runtime_unsupported_kind(&pipe) {
+                            return Err(GateElaborationBlocker::UnsupportedRuntimeExpr {
+                                span: expr.span,
+                                kind,
+                            });
+                        }
                         let lowered =
                             lower_runtime_pipe_expr(module, &pipe, env, ambient, typing, purity)?;
                         results.push(GateRuntimeExpr {
@@ -1671,6 +1685,32 @@ fn runtime_reference_for_name(
     }
 }
 
+fn nested_pipe_runtime_unsupported_kind(
+    pipe: &crate::PipeExpr,
+) -> Option<GateRuntimeUnsupportedKind> {
+    for stage in pipe.stages.iter() {
+        match stage.kind {
+            PipeStageKind::Gate { .. } => return Some(GateRuntimeUnsupportedKind::NestedGate),
+            PipeStageKind::Map { .. } | PipeStageKind::FanIn { .. } => {
+                return Some(GateRuntimeUnsupportedKind::NestedFanout);
+            }
+            PipeStageKind::Transform { .. }
+            | PipeStageKind::Tap { .. }
+            | PipeStageKind::Case { .. }
+            | PipeStageKind::Apply { .. }
+            | PipeStageKind::Truthy { .. }
+            | PipeStageKind::Falsy { .. }
+            | PipeStageKind::RecurStart { .. }
+            | PipeStageKind::RecurStep { .. }
+            | PipeStageKind::Validate { .. }
+            | PipeStageKind::Previous { .. }
+            | PipeStageKind::Diff { .. }
+            | PipeStageKind::Accumulate { .. } => {}
+        }
+    }
+    None
+}
+
 fn unsupported_runtime_pipe_stage(
     span: SourceSpan,
     kind: GateRuntimeUnsupportedPipeStageKind,
@@ -1713,7 +1753,7 @@ mod tests {
 
     use super::{
         GateCoreExprKind, GateElaborationBlocker, GateRuntimeExprKind, GateRuntimeProjectionBase,
-        GateRuntimeReference, GateStageOutcome, elaborate_gates,
+        GateRuntimeReference, GateRuntimeUnsupportedKind, GateStageOutcome, elaborate_gates,
     };
     use crate::{BuiltinType, GateType, Item, lower_module};
 
@@ -2329,6 +2369,30 @@ signal filtered : Signal Bool = flags ?|> {predicate}
                         .iter()
                         .any(|blocker| blocker == &GateElaborationBlocker::ImpurePredicate)
                 );
+            }
+            other => panic!("expected blocked gate stage, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blocks_nested_gate_predicates_explicitly() {
+        let lowered = lower_fixture("milestone-2/invalid/nested-gate-predicate/main.aivi");
+        let report = elaborate_gates(lowered.module());
+        let blocked = report
+            .stages()
+            .iter()
+            .find(|stage| item_name(lowered.module(), stage.owner) == "filtered")
+            .expect("expected blocked gate stage");
+
+        match &blocked.outcome {
+            GateStageOutcome::Blocked(stage) => {
+                assert!(stage.blockers.iter().any(|blocker| matches!(
+                    blocker,
+                    GateElaborationBlocker::UnsupportedRuntimeExpr {
+                        kind: GateRuntimeUnsupportedKind::NestedGate,
+                        ..
+                    }
+                )));
             }
             other => panic!("expected blocked gate stage, found {other:?}"),
         }

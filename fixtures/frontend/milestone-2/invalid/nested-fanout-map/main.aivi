@@ -1,0 +1,14 @@
+type User = {
+    emails: List Text
+}
+
+fun joinEmails:Text items:List Text =>
+    "joined"
+
+value users:List User = [
+    { emails: ["ada@example.com"] }
+]
+
+value summaries =
+    users
+     *|> (.emails *|> _ <|* joinEmails)

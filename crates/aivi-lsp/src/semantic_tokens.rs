@@ -67,6 +67,7 @@ fn token_type_index(kind: TokenKind) -> Option<u32> {
         | TokenKind::Ellipsis
         | TokenKind::Arrow
         | TokenKind::ThinArrow
+        | TokenKind::LeftArrow
         | TokenKind::PipeTransform
         | TokenKind::PipeGate
         | TokenKind::PipeCase

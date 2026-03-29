@@ -9,11 +9,12 @@ use crate::{
         IntegerLiteral, Item, ItemBase, MapExpr, MapExprEntry, MarkupAttribute,
         MarkupAttributeValue, MarkupNode, Module, NamedItem, NamedItemBody, OperatorName, Pattern,
         PatternKind, PipeCaseArm, PipeExpr, PipeStage, PipeStageKind, ProjectionPath,
-        QualifiedName, RecordExpr, RecordField, RecordPatternField, RegexLiteral, SourceDecorator,
-        SourceProviderContractBody, SourceProviderContractFieldValue, SourceProviderContractItem,
-        SourceProviderContractMember, SourceProviderContractSchemaMember, SuffixedIntegerLiteral,
-        TextFragment, TextInterpolation, TextLiteral, TextSegment, TokenRange, TypeDeclBody,
-        TypeExpr, TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseImport, UseItem,
+        QualifiedName, RecordExpr, RecordField, RecordPatternField, RegexLiteral, ResultBinding,
+        ResultBlockExpr, SourceDecorator, SourceProviderContractBody,
+        SourceProviderContractFieldValue, SourceProviderContractItem, SourceProviderContractMember,
+        SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextFragment,
+        TextInterpolation, TextLiteral, TextSegment, TokenRange, TypeDeclBody, TypeExpr,
+        TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseImport, UseItem,
     },
     lex::{LexedModule, Token, TokenKind, lex_fragment, lex_module},
 };
@@ -74,6 +75,11 @@ const UNTERMINATED_TEXT_INTERPOLATION: DiagnosticCode =
 const INVALID_DISCARD_EXPR: DiagnosticCode = DiagnosticCode::new("syntax", "invalid-discard-expr");
 const MISSING_PIPE_MEMO_NAME: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-pipe-memo-name");
+const EMPTY_RESULT_BLOCK: DiagnosticCode = DiagnosticCode::new("syntax", "empty-result-block");
+const MISSING_RESULT_BINDING_EXPR: DiagnosticCode =
+    DiagnosticCode::new("syntax", "missing-result-binding-expr");
+const MISSING_RESULT_BLOCK_TAIL: DiagnosticCode =
+    DiagnosticCode::new("syntax", "missing-result-block-tail");
 const PARSE_DEPTH_EXCEEDED: DiagnosticCode = DiagnosticCode::new("syntax", "parse-depth-exceeded");
 
 const MAX_PARSE_DEPTH: usize = 256;
@@ -2243,6 +2249,13 @@ impl<'a> Parser<'a> {
 
         match self.tokens[index].kind() {
             TokenKind::Identifier => {
+                if self.is_identifier_text(index, "result")
+                    && self
+                        .peek_nontrivia(index + 1, end)
+                        .is_some_and(|next| self.tokens[next].kind() == TokenKind::LBrace)
+                {
+                    return self.parse_result_block_expr(cursor, end);
+                }
                 if self.starts_prefixed_collection_literal(index, end, "Map", TokenKind::LBrace) {
                     return self.parse_map_expr(cursor, end).map(|map| Expr {
                         span: map.span,
@@ -2324,6 +2337,185 @@ impl<'a> Parser<'a> {
             }
             _ => None,
         }
+    }
+
+    fn parse_result_block_expr(&mut self, cursor: &mut usize, end: usize) -> Option<Expr> {
+        let keyword_index = self.peek_nontrivia(*cursor, end)?;
+        if !self.is_identifier_text(keyword_index, "result") {
+            return None;
+        }
+        *cursor = keyword_index + 1;
+        let start = keyword_index;
+        let open_brace = self.consume_kind(cursor, end, TokenKind::LBrace)?;
+        let Some(close_brace) = self.find_matching_brace(open_brace, end) else {
+            self.diagnostics.push(
+                Diagnostic::error("`result { ... }` block is missing a closing `}`")
+                    .with_code(MISSING_RESULT_BLOCK_TAIL)
+                    .with_primary_label(
+                        self.source_span_of_token(open_brace),
+                        "close this `result` block with `}`",
+                    ),
+            );
+            return None;
+        };
+
+        let mut bindings = Vec::new();
+        let mut tail = None;
+
+        while let Some(index) = self.peek_nontrivia(*cursor, close_brace) {
+            if let Some((name, left_arrow)) = self.result_block_binding_start(index, close_brace) {
+                let item_end =
+                    self.find_next_result_block_item_boundary(left_arrow + 1, close_brace);
+                let mut binding_cursor = left_arrow + 1;
+                let expr = self
+                    .parse_expr(&mut binding_cursor, item_end, ExprStop::default())
+                    .or_else(|| {
+                        self.diagnostics.push(
+                            Diagnostic::error(
+                                "result block bindings must have an expression after `<-`",
+                            )
+                            .with_code(MISSING_RESULT_BINDING_EXPR)
+                            .with_primary_label(
+                                self.source_span_of_token(left_arrow),
+                                "add a `Result ...` expression after this binding arrow",
+                            ),
+                        );
+                        None
+                    })?;
+                if let Some(trailing_index) =
+                    self.next_significant_in_range(binding_cursor, item_end)
+                {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "result block bindings must contain exactly one expression",
+                        )
+                        .with_code(MISSING_RESULT_BINDING_EXPR)
+                        .with_primary_label(
+                            self.source_span_of_token(trailing_index),
+                            "move this token into the binding expression or start a new block line",
+                        ),
+                    );
+                }
+                let span = SourceSpan::new(
+                    self.source.id(),
+                    Span::new(name.span.span().start(), expr.span.span().end()),
+                );
+                bindings.push(ResultBinding { name, expr, span });
+                *cursor = item_end;
+                continue;
+            }
+
+            let mut tail_cursor = index;
+            let expr = self
+                .parse_expr(&mut tail_cursor, close_brace, ExprStop::default())
+                .or_else(|| {
+                    self.diagnostics.push(
+                        Diagnostic::error("result blocks must end with a final expression")
+                            .with_code(MISSING_RESULT_BLOCK_TAIL)
+                            .with_primary_label(
+                                self.source_span_of_token(index),
+                                "add the final success value here",
+                            ),
+                    );
+                    None
+                })?;
+            if let Some(trailing_index) = self.next_significant_in_range(tail_cursor, close_brace) {
+                self.diagnostics.push(
+                    Diagnostic::error("result block tails must contain exactly one expression")
+                        .with_code(MISSING_RESULT_BLOCK_TAIL)
+                        .with_primary_label(
+                            self.source_span_of_token(trailing_index),
+                            "move this token into the tail expression or close the block",
+                        ),
+                );
+            }
+            tail = Some(Box::new(expr));
+            *cursor = close_brace;
+            break;
+        }
+
+        *cursor = close_brace;
+        let _ = self.consume_kind(cursor, end, TokenKind::RBrace);
+        let span = self.source_span_for_range(start, *cursor);
+        if bindings.is_empty() && tail.is_none() {
+            self.diagnostics.push(
+                Diagnostic::error("result blocks cannot be empty")
+                    .with_code(EMPTY_RESULT_BLOCK)
+                    .with_primary_label(
+                        span,
+                        "add a binding or final expression inside this block",
+                    ),
+            );
+        }
+        Some(Expr {
+            span,
+            kind: ExprKind::ResultBlock(ResultBlockExpr {
+                bindings,
+                tail,
+                span,
+            }),
+        })
+    }
+
+    fn result_block_binding_start(&self, index: usize, end: usize) -> Option<(Identifier, usize)> {
+        if self.tokens.get(index)?.kind() != TokenKind::Identifier {
+            return None;
+        }
+        let left_arrow = self.peek_nontrivia(index + 1, end)?;
+        (self.tokens[left_arrow].kind() == TokenKind::LeftArrow)
+            .then(|| (self.identifier_from_token(index), left_arrow))
+    }
+
+    fn find_matching_brace(&self, open_brace: usize, end: usize) -> Option<usize> {
+        let mut depth = 0usize;
+        for index in open_brace..end {
+            match self.tokens[index].kind() {
+                TokenKind::LBrace => depth += 1,
+                TokenKind::RBrace => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return Some(index);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn find_next_result_block_item_boundary(&self, start: usize, close_brace: usize) -> usize {
+        let mut paren_depth = 0usize;
+        let mut brace_depth = 0usize;
+        let mut bracket_depth = 0usize;
+        for index in start..close_brace {
+            match self.tokens[index].kind() {
+                TokenKind::LParen => paren_depth += 1,
+                TokenKind::RParen => paren_depth = paren_depth.saturating_sub(1),
+                TokenKind::LBrace => brace_depth += 1,
+                TokenKind::RBrace => {
+                    if brace_depth == 0 {
+                        return index;
+                    }
+                    brace_depth = brace_depth.saturating_sub(1);
+                }
+                TokenKind::LBracket => bracket_depth += 1,
+                TokenKind::RBracket => bracket_depth = bracket_depth.saturating_sub(1),
+                _ => {}
+            }
+
+            if paren_depth == 0
+                && brace_depth == 0
+                && bracket_depth == 0
+                && self.tokens[index].kind() == TokenKind::Newline
+                && let Some(next) = self.peek_nontrivia(index + 1, close_brace)
+                && self
+                    .result_block_binding_start(next, close_brace)
+                    .is_some()
+            {
+                return next;
+            }
+        }
+        close_brace
     }
 
     fn parse_projection_suffix(
@@ -4265,6 +4457,11 @@ value different = left != right
 value quotient = left / right
 value remainder = left % right
 value range = 1..10
+value chained =
+    result {
+        value <- Ok 1
+        value
+    }
 <Label text={status} />
 </match>
 value datePattern = rx"\d{4}-\d{2}-\d{2}"
@@ -4289,6 +4486,7 @@ value datePattern = rx"\d{4}-\d{2}-\d{2}"
         assert!(kinds.contains(&TokenKind::Slash));
         assert!(kinds.contains(&TokenKind::Percent));
         assert!(kinds.contains(&TokenKind::DotDot));
+        assert!(kinds.contains(&TokenKind::LeftArrow));
         assert!(kinds.contains(&TokenKind::PipeTransform));
         assert!(kinds.contains(&TokenKind::PipeGate));
         assert!(kinds.contains(&TokenKind::PipeCase));
@@ -4418,6 +4616,63 @@ export main
             }
             other => panic!("expected use item, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parser_builds_result_blocks_with_bindings_and_tail() {
+        let (_, parsed) = load(
+            r#"value total =
+    result {
+        left <- Ok 20
+        right <- Ok 22
+        left + right
+    }
+"#,
+        );
+
+        assert!(
+            !parsed.has_errors(),
+            "{:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+        let Item::Value(item) = &parsed.module.items[0] else {
+            panic!("expected value item");
+        };
+        let ExprKind::ResultBlock(block) = &item.expr_body().expect("value body").kind else {
+            panic!("expected result block body");
+        };
+        assert_eq!(block.bindings.len(), 2);
+        assert_eq!(block.bindings[0].name.text, "left");
+        assert_eq!(block.bindings[1].name.text, "right");
+        assert!(matches!(
+            block.tail.as_deref().map(|expr| &expr.kind),
+            Some(ExprKind::Binary { .. })
+        ));
+    }
+
+    #[test]
+    fn parser_allows_result_blocks_to_use_the_last_binding_as_the_implicit_tail() {
+        let (_, parsed) = load(
+            r#"value lastValue =
+    result {
+        payload <- Ok 42
+    }
+"#,
+        );
+
+        assert!(
+            !parsed.has_errors(),
+            "{:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+        let Item::Value(item) = &parsed.module.items[0] else {
+            panic!("expected value item");
+        };
+        let ExprKind::ResultBlock(block) = &item.expr_body().expect("value body").kind else {
+            panic!("expected result block body");
+        };
+        assert_eq!(block.bindings.len(), 1);
+        assert!(block.tail.is_none(), "tail should stay implicit in the CST");
     }
 
     #[test]

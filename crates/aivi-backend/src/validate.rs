@@ -828,10 +828,9 @@ fn validate_pipeline(
                     stage.result_layout,
                     errors,
                 );
-                // TODO: validate gate predicate layout is Bool — needs layout lookup from kernel context.
-                // GateStage::Ordinary does not carry a separate predicate kernel; the Bool
-                // constraint is enforced by the type system upstream. A dedicated predicate
-                // kernel ID would be required here to check `is_bool_layout` at the backend level.
+                // Ordinary gates lower the predicate away upstream into explicit true/false kernels.
+                // The backend can still validate those branch contracts here, while the original
+                // predicate Bool invariant is enforced earlier by HIR/core validation.
             }
             StageKind::Gate(GateStage::SignalFilter {
                 payload_layout,

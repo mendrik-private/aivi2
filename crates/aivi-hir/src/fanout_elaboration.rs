@@ -104,6 +104,9 @@ pub enum FanoutElaborationBlocker {
     SubjectNotCollection {
         found: GateType,
     },
+    NestedFanout {
+        span: SourceSpan,
+    },
     MapInvalidProjection {
         path: String,
         subject: String,
@@ -562,6 +565,10 @@ fn blocker_for_map_runtime_blocker(blocker: GateElaborationBlocker) -> FanoutEla
         GateElaborationBlocker::UnknownField { path, subject } => {
             FanoutElaborationBlocker::MapUnknownField { path, subject }
         }
+        GateElaborationBlocker::UnsupportedRuntimeExpr {
+            span,
+            kind: GateRuntimeUnsupportedKind::NestedFanout,
+        } => FanoutElaborationBlocker::NestedFanout { span },
         GateElaborationBlocker::UnknownSubjectType
         | GateElaborationBlocker::UnknownPredicateType
         | GateElaborationBlocker::ImpurePredicate
@@ -581,6 +588,10 @@ fn blocker_for_join_runtime_blocker(blocker: GateElaborationBlocker) -> FanoutEl
         GateElaborationBlocker::UnknownField { path, subject } => {
             FanoutElaborationBlocker::JoinUnknownField { path, subject }
         }
+        GateElaborationBlocker::UnsupportedRuntimeExpr {
+            span,
+            kind: GateRuntimeUnsupportedKind::NestedFanout,
+        } => FanoutElaborationBlocker::NestedFanout { span },
         GateElaborationBlocker::UnknownSubjectType
         | GateElaborationBlocker::UnknownPredicateType
         | GateElaborationBlocker::ImpurePredicate
@@ -953,6 +964,27 @@ value joinedEmails:Text =
                 )));
             }
             other => panic!("expected blocked fanout join segment, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blocks_nested_fanout_map_bodies_explicitly() {
+        let lowered = lower_fixture("milestone-2/invalid/nested-fanout-map/main.aivi");
+        let report = elaborate_fanouts(lowered.module());
+        let blocked = report
+            .segments()
+            .iter()
+            .find(|segment| item_name(lowered.module(), segment.owner) == "summaries")
+            .expect("expected blocked fanout segment");
+
+        match &blocked.outcome {
+            FanoutSegmentOutcome::Blocked(stage) => {
+                assert!(stage.blockers.iter().any(|blocker| matches!(
+                    blocker,
+                    FanoutElaborationBlocker::NestedFanout { .. }
+                )));
+            }
+            other => panic!("expected blocked fanout segment, found {other:?}"),
         }
     }
 

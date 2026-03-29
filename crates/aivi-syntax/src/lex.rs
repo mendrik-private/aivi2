@@ -46,6 +46,7 @@ pub enum TokenKind {
     Greater,
     LessEqual,
     GreaterEqual,
+    LeftArrow,
     Slash,
     Percent,
     CloseTagStart,
@@ -532,7 +533,7 @@ fn lex_range(source: &SourceFile, range: std::ops::Range<usize>) -> LexedModule 
 
 fn match_compound(bytes: &[u8], cursor: usize, end: usize) -> Option<(TokenKind, usize)> {
     // Patterns ordered longest-first so no short prefix shadows a longer match.
-    const PATTERNS: [(&[u8], TokenKind); 23] = [
+    const PATTERNS: [(&[u8], TokenKind); 24] = [
         (b"<|@", TokenKind::PipeRecurStep),
         (b"<|*", TokenKind::PipeFanIn),
         (b"</", TokenKind::CloseTagStart),
@@ -551,6 +552,7 @@ fn match_compound(bytes: &[u8], cursor: usize, end: usize) -> Option<(TokenKind,
         (b"...", TokenKind::Ellipsis),
         (b"..", TokenKind::DotDot),
         (b"->", TokenKind::ThinArrow),
+        (b"<-", TokenKind::LeftArrow),
         (b"!=", TokenKind::BangEqual),
         (b"==", TokenKind::EqualEqual),
         (b">=", TokenKind::GreaterEqual),

@@ -1,0 +1,10 @@
+signal flags:Signal Bool = True
+
+signal filtered:Signal Bool =
+    flags
+     ?|> (
+        _
+         ?|> _
+         T|> True
+         F|> False
+     )

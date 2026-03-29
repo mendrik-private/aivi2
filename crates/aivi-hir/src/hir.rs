@@ -259,6 +259,7 @@ pub enum BuiltinTerm {
 /// Compiler-known stdlib values that lower through dedicated runtime seams.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum IntrinsicValue {
+    TupleConstructor { arity: usize },
     RandomInt,
     RandomBytes,
     StdoutWrite,
@@ -323,6 +324,7 @@ pub enum IntrinsicValue {
 impl fmt::Display for IntrinsicValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::TupleConstructor { arity } => write!(f, "aivi.core.tuple.ctor{arity}"),
             Self::RandomInt => f.write_str("aivi.random.randomInt"),
             Self::RandomBytes => f.write_str("aivi.random.randomBytes"),
             Self::StdoutWrite => f.write_str("aivi.stdio.stdoutWrite"),

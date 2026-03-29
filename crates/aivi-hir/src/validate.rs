@@ -84,6 +84,8 @@ pub fn validate_structure(module: &Module, mode: ValidationMode) -> ValidationRe
         module,
         mode,
         diagnostics: Vec::new(),
+        kind_item_cache: HashMap::new(),
+        kind_item_stack: HashSet::new(),
     };
     v.validate_roots();
     v.validate_type_parameters();
@@ -105,6 +107,8 @@ pub fn validate_bindings(module: &Module, mode: ValidationMode) -> ValidationRep
         module,
         mode,
         diagnostics: Vec::new(),
+        kind_item_cache: HashMap::new(),
+        kind_item_stack: HashSet::new(),
     };
     v.validate_bindings();
     v.validate_signal_cycles();
@@ -118,6 +122,8 @@ pub fn validate_types(module: &Module, mode: ValidationMode) -> ValidationReport
         module,
         mode,
         diagnostics: Vec::new(),
+        kind_item_cache: HashMap::new(),
+        kind_item_stack: HashSet::new(),
     };
     v.validate_type_kinds();
     v.validate_instance_items();
@@ -136,6 +142,8 @@ pub fn validate_module(module: &Module, mode: ValidationMode) -> ValidationRepor
         module,
         mode,
         diagnostics: Vec::new(),
+        kind_item_cache: HashMap::new(),
+        kind_item_stack: HashSet::new(),
     };
     v.validate_decorator_semantics();
     report.extend(ValidationReport::new(v.diagnostics));
@@ -146,6 +154,8 @@ struct Validator<'a> {
     module: &'a Module,
     mode: ValidationMode,
     diagnostics: Vec<Diagnostic>,
+    kind_item_cache: HashMap<ItemId, Option<Kind>>,
+    kind_item_stack: HashSet<ItemId>,
 }
 
 const REGEX_LITERAL_PREFIX_LEN: usize = 3;
@@ -1646,6 +1656,7 @@ impl Validator<'_> {
                             "class member annotation",
                         );
                     }
+                    let _ = self.class_parameter_kinds(&item);
                 }
                 Item::Domain(item) => {
                     let parameters = item.parameters.clone();
@@ -1676,14 +1687,27 @@ impl Validator<'_> {
                 }
                 Item::Instance(item) => {
                     let parameters = item.type_parameters.clone();
+                    let class_kind = self
+                        .instance_class_item_id(&item)
+                        .and_then(|class_item_id| self.kind_for_item(class_item_id));
                     self.check_type_reference_kind(
                         &item.class,
                         &parameters,
-                        Kind::constructor(item.arguments.len()),
+                        class_kind.unwrap_or_else(|| Kind::constructor(item.arguments.len())),
                         "instance class head",
                     );
-                    for argument in item.arguments.iter() {
-                        self.check_expected_type_kind(*argument, &parameters, "instance argument");
+                    let parameter_kinds =
+                        self.instance_class_item_id(&item)
+                            .and_then(|class_item_id| match &self.module.items()[class_item_id] {
+                                Item::Class(class_item) => self.class_parameter_kinds(class_item),
+                                _ => None,
+                            });
+                    for (index, argument) in item.arguments.iter().enumerate() {
+                        let expected = parameter_kinds
+                            .as_ref()
+                            .and_then(|kinds| kinds.get(index).cloned())
+                            .unwrap_or(Kind::Type);
+                        self.check_type_kind(*argument, &parameters, expected, "instance argument");
                     }
                     for context in &item.context {
                         self.check_expected_type_kind(*context, &parameters, "instance context");
@@ -4366,7 +4390,15 @@ impl Validator<'_> {
                     value_stack,
                 );
             };
-            seen.insert(field.label.text().to_owned());
+            if !seen.insert(field.label.text().to_owned()) {
+                return self.check_source_option_expr_by_inference_or_unknown(
+                    expr_id,
+                    &SourceOptionExpectedType::Record(expected.to_vec()),
+                    typing,
+                    bindings,
+                    value_stack,
+                );
+            }
             match self.check_source_option_expr_inner(
                 field.value,
                 field_expected,
@@ -5799,6 +5831,9 @@ impl Validator<'_> {
                             | BuiltinSourceProvider::SocketConnect
                             | BuiltinSourceProvider::MailboxSubscribe
                             | BuiltinSourceProvider::ProcessSpawn
+                            | BuiltinSourceProvider::DbusOwnName
+                            | BuiltinSourceProvider::DbusSignal
+                            | BuiltinSourceProvider::DbusMethod
                             | BuiltinSourceProvider::WindowKeyDown => {
                                 "this built-in source should already have planned a wakeup; if you hit this diagnostic, keep the failing fixture because the recurrence wakeup adapter is inconsistent"
                             }
@@ -7207,6 +7242,20 @@ impl Validator<'_> {
         root: TypeId,
         parameters: &[TypeParameterId],
     ) -> Option<(KindStore, KindExprId, HashMap<KindExprId, SourceSpan>)> {
+        self.build_kind_graph_for_type_with_parameter_map(root, parameters)
+            .map(|(store, root, spans, _)| (store, root, spans))
+    }
+
+    fn build_kind_graph_for_type_with_parameter_map(
+        &mut self,
+        root: TypeId,
+        parameters: &[TypeParameterId],
+    ) -> Option<(
+        KindStore,
+        KindExprId,
+        HashMap<KindExprId, SourceSpan>,
+        HashMap<TypeParameterId, TypingKindParameterId>,
+    )> {
         let mut store = KindStore::default();
         let mut spans = HashMap::new();
         let mut parameter_map = self.kind_parameter_map(parameters, &mut store);
@@ -7294,7 +7343,7 @@ impl Validator<'_> {
             }
         }
 
-        Some((store, lowered[&root], spans))
+        Some((store, lowered[&root], spans, parameter_map))
     }
 
     fn build_kind_graph_for_reference(
@@ -7376,9 +7425,22 @@ impl Validator<'_> {
     }
 
     fn kind_for_item(&mut self, item_id: ItemId) -> Option<Kind> {
-        match &self.module.items()[item_id] {
+        if let Some(cached) = self.kind_item_cache.get(&item_id) {
+            return cached.clone();
+        }
+        if !self.kind_item_stack.insert(item_id) {
+            return None;
+        }
+        let inferred = match &self.module.items()[item_id] {
             Item::Type(item) => Some(Kind::constructor(item.parameters.len())),
-            Item::Class(item) => Some(Kind::constructor(item.parameters.len())),
+            Item::Class(item) => self.class_parameter_kinds(item).map(|parameter_kinds| {
+                parameter_kinds
+                    .into_iter()
+                    .rev()
+                    .fold(Kind::Type, |result, parameter| {
+                        Kind::arrow(parameter, result)
+                    })
+            }),
             Item::Domain(item) => Some(Kind::constructor(item.parameters.len())),
             other => {
                 self.diagnostics.push(
@@ -7394,7 +7456,96 @@ impl Validator<'_> {
                 );
                 None
             }
+        };
+        self.kind_item_stack.remove(&item_id);
+        self.kind_item_cache.insert(item_id, inferred.clone());
+        inferred
+    }
+
+    fn class_parameter_kinds(&mut self, item: &crate::hir::ClassItem) -> Option<Vec<Kind>> {
+        let mut inferred = HashMap::<TypeParameterId, Kind>::new();
+        let parameters = item.parameters.iter().copied().collect::<Vec<_>>();
+
+        for superclass in &item.superclasses {
+            self.merge_type_parameter_kinds(*superclass, &parameters, &Kind::Type, &mut inferred)?;
         }
+        for constraint in &item.param_constraints {
+            self.merge_type_parameter_kinds(*constraint, &parameters, &Kind::Type, &mut inferred)?;
+        }
+        for member in &item.members {
+            let mut parameters = item.parameters.iter().copied().collect::<Vec<_>>();
+            parameters.extend(member.type_parameters.iter().copied());
+            for constraint in &member.context {
+                self.merge_type_parameter_kinds(
+                    *constraint,
+                    &parameters,
+                    &Kind::Type,
+                    &mut inferred,
+                )?;
+            }
+            self.merge_type_parameter_kinds(
+                member.annotation,
+                &parameters,
+                &Kind::Type,
+                &mut inferred,
+            )?;
+        }
+
+        Some(
+            item.parameters
+                .iter()
+                .map(|parameter| inferred.remove(parameter).unwrap_or(Kind::Type))
+                .collect(),
+        )
+    }
+
+    fn merge_type_parameter_kinds(
+        &mut self,
+        root: TypeId,
+        parameters: &[TypeParameterId],
+        expected: &Kind,
+        inferred: &mut HashMap<TypeParameterId, Kind>,
+    ) -> Option<()> {
+        let (store, root_expr, spans, parameter_map) =
+            self.build_kind_graph_for_type_with_parameter_map(root, parameters)?;
+        let solution = match KindChecker.expect_kind_with_solution(&store, root_expr, expected) {
+            Ok(solution) => solution,
+            Err(error) => {
+                self.emit_kind_error("type", &spans, error);
+                return None;
+            }
+        };
+        for parameter in parameters {
+            let Some(kind_parameter) = parameter_map.get(parameter).copied() else {
+                continue;
+            };
+            let inferred_kind = solution.parameter_kind(kind_parameter).clone();
+            match inferred.entry(*parameter) {
+                Entry::Vacant(entry) => {
+                    entry.insert(inferred_kind);
+                }
+                Entry::Occupied(entry) if entry.get() == &inferred_kind => {}
+                Entry::Occupied(entry) => {
+                    let parameter_meta = &self.module.type_parameters()[*parameter];
+                    self.diagnostics.push(
+                        Diagnostic::error(format!(
+                            "type parameter `{}` is used at incompatible kinds",
+                            parameter_meta.name.text()
+                        ))
+                        .with_code(code("type-parameter-kind-mismatch"))
+                        .with_primary_label(
+                            parameter_meta.span,
+                            format!(
+                                "this parameter was inferred as both `{}` and `{inferred_kind}`",
+                                entry.get()
+                            ),
+                        ),
+                    );
+                    return None;
+                }
+            }
+        }
+        Some(())
     }
 
     fn import_type_kind(&self, import_id: ImportId) -> Option<Kind> {
@@ -12287,6 +12438,8 @@ impl<'a> GateTypeContext<'a> {
             module: self.module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut substitutions = HashMap::<TypeParameterId, SourceOptionActualType>::new();
         for (field, actual) in fields.iter().zip(argument_actuals.iter()) {
@@ -15836,6 +15989,26 @@ value resultLabel =
     }
 
     #[test]
+    fn resolved_validation_accepts_higher_kinded_class_members_and_instance_heads() {
+        let report = validate_resolved_text(
+            "higher-kinded-class-instance-check.aivi",
+            "class Applicative F\n\
+             \x20\x20\x20\x20pureInt : F Int\n\
+             instance Applicative Option\n\
+             \x20\x20\x20\x20pureInt = Some 1\n\
+             class Functor F\n\
+             \x20\x20\x20\x20labelInt : F Int\n\
+             instance Functor (Result Text)\n\
+             \x20\x20\x20\x20labelInt = Ok 1\n",
+        );
+        assert!(
+            report.is_ok(),
+            "expected higher-kinded class members and instance heads to validate, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
     fn regex_literal_validation_reports_hir_diagnostics() {
         let report = validate_text(
             "regex_invalid_quantifier.aivi",
@@ -16274,6 +16447,8 @@ value screenView =
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -16326,6 +16501,8 @@ value screenView =
             module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -16363,6 +16540,8 @@ value screenView =
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -16416,6 +16595,8 @@ value screenView =
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -16455,6 +16636,8 @@ value screenView =
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -16509,6 +16692,8 @@ value screenView =
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -16692,6 +16877,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut resolver = SourceContractTypeResolver::new(&module);
         let mut typing = GateTypeContext::new(&module);
@@ -16758,6 +16945,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut resolver = SourceContractTypeResolver::new(&module);
         let mut typing = GateTypeContext::new(&module);
@@ -16796,6 +16985,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -16833,6 +17024,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -16890,6 +17083,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -16974,6 +17169,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -17036,6 +17233,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -17100,6 +17299,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -17146,6 +17347,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -17175,6 +17378,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -17211,6 +17416,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -17257,6 +17464,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -17317,6 +17526,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -17376,6 +17587,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -17467,6 +17680,8 @@ signal login : Signal (Result HttpError Session)
             module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -17514,6 +17729,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -17579,6 +17796,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -17665,6 +17884,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -17733,6 +17954,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -17827,6 +18050,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -17918,6 +18143,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
         let mut typing = GateTypeContext::new(&module);
         let mut bindings = SourceOptionTypeBindings::default();
@@ -17994,6 +18221,8 @@ signal login : Signal (Result HttpError Session)
             module: &module,
             mode: ValidationMode::RequireResolvedNames,
             diagnostics: Vec::new(),
+            kind_item_cache: HashMap::new(),
+            kind_item_stack: HashSet::new(),
         };
 
         assert_eq!(

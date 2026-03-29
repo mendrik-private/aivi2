@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     env, fmt, fs,
     io::{BufRead, BufReader, Read},
     net::TcpStream,
@@ -17,6 +17,8 @@ use std::{
 use aivi_backend::{DetachedRuntimeValue, RuntimeCallable, RuntimeValue};
 use aivi_hir as hir;
 use aivi_typing::BuiltinSourceProvider;
+use gio::{BusNameOwnerFlags, BusType, DBusMessageType, DBusSendMessageFlags, DBusSignalFlags};
+use glib::{ControlFlow, MainContext, MainLoop, Variant, VariantClass};
 use url::Url;
 
 use crate::startup::DetachedRuntimePublicationPort;
@@ -726,6 +728,51 @@ impl SourceProviderManager {
                     &port,
                     RuntimeValue::Text(self.context.temp_dir_text()),
                 )?;
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::DbusOwnName) => {
+                let plan = DbusOwnNamePlan::parse(instance, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                let handle = spawn_dbus_own_name_worker(port, plan, stop.clone())?;
+                self.thread_handles
+                    .lock()
+                    .unwrap()
+                    .entry(instance)
+                    .or_default()
+                    .push(handle);
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::DbusSignal) => {
+                let plan = DbusSignalPlan::parse(instance, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                let handle = spawn_dbus_signal_worker(port, plan, stop.clone())?;
+                self.thread_handles
+                    .lock()
+                    .unwrap()
+                    .entry(instance)
+                    .or_default()
+                    .push(handle);
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
+            RuntimeSourceProvider::Builtin(BuiltinSourceProvider::DbusMethod) => {
+                let plan = DbusMethodPlan::parse(instance, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                let handle = spawn_dbus_method_worker(port, plan, stop.clone())?;
+                self.thread_handles
+                    .lock()
+                    .unwrap()
+                    .entry(instance)
+                    .or_default()
+                    .push(handle);
                 ActiveProviderState::Passive {
                     provider: config.provider.clone(),
                     stop,
@@ -2148,6 +2195,861 @@ impl WindowKeyOutputPlan {
                 ),
             )
             .map(Some),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum DbusBus {
+    Session,
+    System,
+}
+
+impl DbusBus {
+    fn parse_option(
+        instance: SourceInstanceId,
+        provider: BuiltinSourceProvider,
+        option_name: &str,
+        value: &DetachedRuntimeValue,
+    ) -> Result<Self, SourceProviderExecutionError> {
+        let value = parse_text_option(instance, provider, option_name, value)?;
+        match value.as_ref() {
+            "session" => Ok(Self::Session),
+            "system" => Ok(Self::System),
+            _ => Err(SourceProviderExecutionError::InvalidOption {
+                instance,
+                provider,
+                option_name: option_name.into(),
+                expected: "\"session\" or \"system\"".into(),
+                value: RuntimeValue::Text(value),
+            }),
+        }
+    }
+
+    const fn bus_type(self) -> BusType {
+        match self {
+            Self::Session => BusType::Session,
+            Self::System => BusType::System,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct DbusOwnNamePlan {
+    instance: SourceInstanceId,
+    name: Box<str>,
+    bus: DbusBus,
+    flags: BusNameOwnerFlags,
+    output: DbusNameStateOutputPlan,
+}
+
+impl DbusOwnNamePlan {
+    fn parse(
+        instance: SourceInstanceId,
+        config: &EvaluatedSourceConfig,
+    ) -> Result<Self, SourceProviderExecutionError> {
+        let provider = BuiltinSourceProvider::DbusOwnName;
+        validate_argument_count(instance, provider, config, 1)?;
+        let name = parse_text_argument(instance, provider, 0, &config.arguments[0])?;
+        let mut bus = DbusBus::Session;
+        let mut flags = BusNameOwnerFlags::NONE;
+        for option in &config.options {
+            match option.option_name.as_ref() {
+                "bus" => {
+                    bus = DbusBus::parse_option(
+                        instance,
+                        provider,
+                        &option.option_name,
+                        &option.value,
+                    )?;
+                }
+                "flags" => {
+                    for flag in parse_named_variants(
+                        instance,
+                        provider,
+                        &option.option_name,
+                        &option.value,
+                    )? {
+                        match flag.as_ref() {
+                            "AllowReplacement" => flags |= BusNameOwnerFlags::ALLOW_REPLACEMENT,
+                            "ReplaceExisting" => flags |= BusNameOwnerFlags::REPLACE,
+                            "DoNotQueue" => flags |= BusNameOwnerFlags::DO_NOT_QUEUE,
+                            _ => {
+                                return Err(SourceProviderExecutionError::InvalidOption {
+                                    instance,
+                                    provider,
+                                    option_name: option.option_name.clone(),
+                                    expected:
+                                        "List BusNameFlag (AllowReplacement | ReplaceExisting | DoNotQueue)"
+                                            .into(),
+                                    value: strip_detached_signal(&option.value).clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    return Err(SourceProviderExecutionError::UnsupportedOption {
+                        instance,
+                        provider,
+                        option_name: option.option_name.clone(),
+                    });
+                }
+            }
+        }
+        Ok(Self {
+            instance,
+            name,
+            bus,
+            flags,
+            output: DbusNameStateOutputPlan::parse(instance, config)?,
+        })
+    }
+}
+
+#[derive(Clone)]
+struct DbusSignalPlan {
+    instance: SourceInstanceId,
+    bus: DbusBus,
+    path: Box<str>,
+    interface: Box<str>,
+    member: Box<str>,
+    output: DbusMessageOutputPlan,
+}
+
+impl DbusSignalPlan {
+    fn parse(
+        instance: SourceInstanceId,
+        config: &EvaluatedSourceConfig,
+    ) -> Result<Self, SourceProviderExecutionError> {
+        let provider = BuiltinSourceProvider::DbusSignal;
+        validate_argument_count(instance, provider, config, 3)?;
+        let path = parse_text_argument(instance, provider, 0, &config.arguments[0])?;
+        let interface = parse_text_argument(instance, provider, 1, &config.arguments[1])?;
+        let member = parse_text_argument(instance, provider, 2, &config.arguments[2])?;
+        let mut bus = DbusBus::Session;
+        for option in &config.options {
+            match option.option_name.as_ref() {
+                "bus" => {
+                    bus = DbusBus::parse_option(
+                        instance,
+                        provider,
+                        &option.option_name,
+                        &option.value,
+                    )?;
+                }
+                _ => {
+                    return Err(SourceProviderExecutionError::UnsupportedOption {
+                        instance,
+                        provider,
+                        option_name: option.option_name.clone(),
+                    });
+                }
+            }
+        }
+        Ok(Self {
+            instance,
+            bus,
+            path,
+            interface,
+            member,
+            output: DbusMessageOutputPlan::parse_signal(instance, config)?,
+        })
+    }
+}
+
+#[derive(Clone)]
+struct DbusMethodPlan {
+    instance: SourceInstanceId,
+    bus: DbusBus,
+    destination: Box<str>,
+    path: Box<str>,
+    interface: Box<str>,
+    member: Box<str>,
+    output: DbusMessageOutputPlan,
+}
+
+impl DbusMethodPlan {
+    fn parse(
+        instance: SourceInstanceId,
+        config: &EvaluatedSourceConfig,
+    ) -> Result<Self, SourceProviderExecutionError> {
+        let provider = BuiltinSourceProvider::DbusMethod;
+        validate_argument_count(instance, provider, config, 4)?;
+        let destination = parse_text_argument(instance, provider, 0, &config.arguments[0])?;
+        let path = parse_text_argument(instance, provider, 1, &config.arguments[1])?;
+        let interface = parse_text_argument(instance, provider, 2, &config.arguments[2])?;
+        let member = parse_text_argument(instance, provider, 3, &config.arguments[3])?;
+        let mut bus = DbusBus::Session;
+        for option in &config.options {
+            match option.option_name.as_ref() {
+                "bus" => {
+                    bus = DbusBus::parse_option(
+                        instance,
+                        provider,
+                        &option.option_name,
+                        &option.value,
+                    )?;
+                }
+                _ => {
+                    return Err(SourceProviderExecutionError::UnsupportedOption {
+                        instance,
+                        provider,
+                        option_name: option.option_name.clone(),
+                    });
+                }
+            }
+        }
+        Ok(Self {
+            instance,
+            bus,
+            destination,
+            path,
+            interface,
+            member,
+            output: DbusMessageOutputPlan::parse_method(instance, config)?,
+        })
+    }
+}
+
+#[derive(Clone)]
+enum DbusNameStateOutputPlan {
+    Text,
+    NamedVariants { decode: hir::SourceDecodeProgram },
+}
+
+impl DbusNameStateOutputPlan {
+    fn parse(
+        instance: SourceInstanceId,
+        config: &EvaluatedSourceConfig,
+    ) -> Result<Self, SourceProviderExecutionError> {
+        let provider = BuiltinSourceProvider::DbusOwnName;
+        let decode = config
+            .decode
+            .clone()
+            .ok_or(SourceProviderExecutionError::MissingDecodeProgram { instance, provider })?;
+        validate_supported_program(&decode).map_err(|error| {
+            SourceProviderExecutionError::UnsupportedDecodeProgram {
+                instance,
+                provider,
+                detail: error.to_string().into_boxed_str(),
+            }
+        })?;
+        match decode.root_step() {
+            hir::DecodeProgramStep::Scalar {
+                scalar: aivi_typing::PrimitiveType::Text,
+            } => Ok(Self::Text),
+            hir::DecodeProgramStep::Sum { variants, .. } => {
+                let mut names = BTreeSet::new();
+                for variant in variants {
+                    if variant.payload.is_some() {
+                        return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                            instance,
+                            provider,
+                            detail: "dbus.ownName currently decodes to `Text` or a payloadless `BusNameState` sum".into(),
+                        });
+                    }
+                    names.insert(variant.name.as_str());
+                }
+                if names == BTreeSet::from(["Lost", "Owned", "Queued"]) {
+                    Ok(Self::NamedVariants { decode })
+                } else {
+                    Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                        instance,
+                        provider,
+                        detail: "dbus.ownName sum outputs must define exactly `Owned`, `Queued`, and `Lost`".into(),
+                    })
+                }
+            }
+            _ => Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                instance,
+                provider,
+                detail:
+                    "dbus.ownName currently decodes to `Text` or a payloadless `BusNameState` sum"
+                        .into(),
+            }),
+        }
+    }
+
+    fn value_for_state(&self, state: &'static str) -> Result<RuntimeValue, SourceDecodeError> {
+        match self {
+            Self::Text => Ok(RuntimeValue::Text(state.into())),
+            Self::NamedVariants { decode } => {
+                decode_external(decode, &ExternalSourceValue::variant(state))
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+enum DbusMessageShape {
+    Signal,
+    Method,
+}
+
+#[derive(Clone)]
+struct DbusMessageOutputPlan {
+    decode: hir::SourceDecodeProgram,
+    shape: DbusMessageShape,
+}
+
+impl DbusMessageOutputPlan {
+    fn parse_signal(
+        instance: SourceInstanceId,
+        config: &EvaluatedSourceConfig,
+    ) -> Result<Self, SourceProviderExecutionError> {
+        Self::parse(
+            instance,
+            BuiltinSourceProvider::DbusSignal,
+            config,
+            DbusMessageShape::Signal,
+        )
+    }
+
+    fn parse_method(
+        instance: SourceInstanceId,
+        config: &EvaluatedSourceConfig,
+    ) -> Result<Self, SourceProviderExecutionError> {
+        Self::parse(
+            instance,
+            BuiltinSourceProvider::DbusMethod,
+            config,
+            DbusMessageShape::Method,
+        )
+    }
+
+    fn parse(
+        instance: SourceInstanceId,
+        provider: BuiltinSourceProvider,
+        config: &EvaluatedSourceConfig,
+        shape: DbusMessageShape,
+    ) -> Result<Self, SourceProviderExecutionError> {
+        let decode = config
+            .decode
+            .clone()
+            .ok_or(SourceProviderExecutionError::MissingDecodeProgram { instance, provider })?;
+        validate_supported_program(&decode).map_err(|error| {
+            SourceProviderExecutionError::UnsupportedDecodeProgram {
+                instance,
+                provider,
+                detail: error.to_string().into_boxed_str(),
+            }
+        })?;
+        let expected = match shape {
+            DbusMessageShape::Signal => ["path", "interface", "member", "body"].as_slice(),
+            DbusMessageShape::Method => {
+                ["destination", "path", "interface", "member", "body"].as_slice()
+            }
+        };
+        let hir::DecodeProgramStep::Record { fields, .. } = decode.root_step() else {
+            return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                instance,
+                provider,
+                detail: match shape {
+                    DbusMessageShape::Signal => {
+                        "dbus.signal currently decodes to a `DbusSignal`-shaped record".into()
+                    }
+                    DbusMessageShape::Method => {
+                        "dbus.method currently decodes to a `DbusCall`-shaped record".into()
+                    }
+                },
+            });
+        };
+        if fields.len() != expected.len() {
+            return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                instance,
+                provider,
+                detail: format!(
+                    "{} currently requires record fields {:?}",
+                    provider.key(),
+                    expected
+                )
+                .into_boxed_str(),
+            });
+        }
+        for field_name in expected {
+            let Some(field) = fields
+                .iter()
+                .find(|field| field.name.as_str() == *field_name)
+            else {
+                return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                    instance,
+                    provider,
+                    detail: format!(
+                        "{} currently requires record fields {:?}",
+                        provider.key(),
+                        expected
+                    )
+                    .into_boxed_str(),
+                });
+            };
+            let valid = match *field_name {
+                "path" | "interface" | "member" | "destination" => matches!(
+                    decode.step(field.step),
+                    hir::DecodeProgramStep::Scalar {
+                        scalar: aivi_typing::PrimitiveType::Text,
+                    }
+                ),
+                "body" => matches!(
+                    decode.step(field.step),
+                    hir::DecodeProgramStep::List { element }
+                        if dbus_value_step_supported(&decode, *element, &mut HashSet::new())
+                ),
+                _ => false,
+            };
+            if !valid {
+                return Err(SourceProviderExecutionError::UnsupportedProviderShape {
+                    instance,
+                    provider,
+                    detail: match shape {
+                        DbusMessageShape::Signal => "dbus.signal outputs must use `Text` header fields and `List DbusValue` bodies".into(),
+                        DbusMessageShape::Method => "dbus.method outputs must use `Text` header fields and `List DbusValue` bodies".into(),
+                    },
+                });
+            }
+        }
+        Ok(Self { decode, shape })
+    }
+
+    fn signal_value(
+        &self,
+        path: &str,
+        interface: &str,
+        member: &str,
+        parameters: &Variant,
+    ) -> Result<RuntimeValue, SourceDecodeError> {
+        let raw = self.raw_record(None, path, interface, member, Some(parameters))?;
+        decode_external(&self.decode, &raw)
+    }
+
+    fn method_value(
+        &self,
+        destination: &str,
+        path: &str,
+        interface: &str,
+        member: &str,
+        parameters: Option<&Variant>,
+    ) -> Result<RuntimeValue, SourceDecodeError> {
+        let raw = self.raw_record(Some(destination), path, interface, member, parameters)?;
+        decode_external(&self.decode, &raw)
+    }
+
+    fn raw_record(
+        &self,
+        destination: Option<&str>,
+        path: &str,
+        interface: &str,
+        member: &str,
+        parameters: Option<&Variant>,
+    ) -> Result<ExternalSourceValue, SourceDecodeError> {
+        let mut record = BTreeMap::new();
+        if matches!(self.shape, DbusMessageShape::Method) {
+            record.insert(
+                "destination".into(),
+                ExternalSourceValue::Text(destination.unwrap_or_default().into()),
+            );
+        }
+        record.insert("path".into(), ExternalSourceValue::Text(path.into()));
+        record.insert(
+            "interface".into(),
+            ExternalSourceValue::Text(interface.into()),
+        );
+        record.insert("member".into(), ExternalSourceValue::Text(member.into()));
+        record.insert(
+            "body".into(),
+            dbus_body_external(parameters)
+                .map_err(|detail| SourceDecodeError::InvalidJson { detail })?,
+        );
+        Ok(ExternalSourceValue::Record(record))
+    }
+}
+
+fn dbus_value_step_supported(
+    decode: &hir::SourceDecodeProgram,
+    step: hir::DecodeProgramStepId,
+    visiting: &mut HashSet<hir::DecodeProgramStepId>,
+) -> bool {
+    if !visiting.insert(step) {
+        return true;
+    }
+    let result = match decode.step(step) {
+        hir::DecodeProgramStep::Sum { variants, .. } => {
+            variants
+                .iter()
+                .all(|variant| match (variant.name.as_str(), variant.payload) {
+                    ("DbusString", Some(payload)) => matches!(
+                        decode.step(payload),
+                        hir::DecodeProgramStep::Scalar {
+                            scalar: aivi_typing::PrimitiveType::Text,
+                        }
+                    ),
+                    ("DbusInt", Some(payload)) => matches!(
+                        decode.step(payload),
+                        hir::DecodeProgramStep::Scalar {
+                            scalar: aivi_typing::PrimitiveType::Int,
+                        }
+                    ),
+                    ("DbusBool", Some(payload)) => matches!(
+                        decode.step(payload),
+                        hir::DecodeProgramStep::Scalar {
+                            scalar: aivi_typing::PrimitiveType::Bool,
+                        }
+                    ),
+                    ("DbusList", Some(payload)) | ("DbusStruct", Some(payload)) => matches!(
+                        decode.step(payload),
+                        hir::DecodeProgramStep::List { element }
+                            if dbus_value_step_supported(decode, *element, visiting)
+                    ),
+                    ("DbusVariant", Some(payload)) => {
+                        dbus_value_step_supported(decode, payload, visiting)
+                    }
+                    _ => false,
+                })
+        }
+        _ => false,
+    };
+    visiting.remove(&step);
+    result
+}
+
+const MAX_DBUS_VALUE_DEPTH: usize = 64;
+
+fn dbus_body_external(parameters: Option<&Variant>) -> Result<ExternalSourceValue, Box<str>> {
+    let Some(parameters) = parameters else {
+        return Ok(ExternalSourceValue::List(Vec::new()));
+    };
+    let values = if parameters.type_().is_tuple() {
+        (0..parameters.n_children())
+            .map(|index| dbus_value_external(&parameters.child_value(index), 0))
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        vec![dbus_value_external(parameters, 0)?]
+    };
+    Ok(ExternalSourceValue::List(values))
+}
+
+fn dbus_value_external(value: &Variant, depth: usize) -> Result<ExternalSourceValue, Box<str>> {
+    if depth >= MAX_DBUS_VALUE_DEPTH {
+        return Err("D-Bus payload nesting exceeds the current runtime depth limit".into());
+    }
+    match value.classify() {
+        VariantClass::Boolean => Ok(ExternalSourceValue::variant_with_payload(
+            "DbusBool",
+            ExternalSourceValue::Bool(
+                value
+                    .get::<bool>()
+                    .ok_or_else(|| "failed to decode D-Bus boolean payload".to_owned())?,
+            ),
+        )),
+        VariantClass::Byte => Ok(ExternalSourceValue::variant_with_payload(
+            "DbusInt",
+            ExternalSourceValue::Int(
+                value
+                    .get::<u8>()
+                    .ok_or_else(|| "failed to decode D-Bus byte payload".to_owned())?
+                    as i64,
+            ),
+        )),
+        VariantClass::Int16 => dbus_int_value(
+            value
+                .get::<i16>()
+                .ok_or_else(|| "failed to decode D-Bus int16 payload".to_owned())?
+                as i64,
+        ),
+        VariantClass::Uint16 => dbus_int_value(
+            value
+                .get::<u16>()
+                .ok_or_else(|| "failed to decode D-Bus uint16 payload".to_owned())?
+                as i64,
+        ),
+        VariantClass::Int32 => dbus_int_value(
+            value
+                .get::<i32>()
+                .ok_or_else(|| "failed to decode D-Bus int32 payload".to_owned())?
+                as i64,
+        ),
+        VariantClass::Uint32 => dbus_int_value(
+            value
+                .get::<u32>()
+                .ok_or_else(|| "failed to decode D-Bus uint32 payload".to_owned())?
+                as i64,
+        ),
+        VariantClass::Int64 => dbus_int_value(
+            value
+                .get::<i64>()
+                .ok_or_else(|| "failed to decode D-Bus int64 payload".to_owned())?,
+        ),
+        VariantClass::Uint64 => {
+            let value = value
+                .get::<u64>()
+                .ok_or_else(|| "failed to decode D-Bus uint64 payload".to_owned())?;
+            let value = i64::try_from(value)
+                .map_err(|_| "D-Bus uint64 payload exceeds the current Int runtime slice")?;
+            dbus_int_value(value)
+        }
+        VariantClass::Handle => dbus_int_value(
+            value
+                .get::<i32>()
+                .ok_or_else(|| "failed to decode D-Bus handle payload".to_owned())?
+                as i64,
+        ),
+        VariantClass::String | VariantClass::ObjectPath | VariantClass::Signature => {
+            Ok(ExternalSourceValue::variant_with_payload(
+                "DbusString",
+                ExternalSourceValue::Text(
+                    value
+                        .str()
+                        .ok_or_else(|| "failed to decode D-Bus string payload".to_owned())?
+                        .into(),
+                ),
+            ))
+        }
+        VariantClass::Variant => {
+            let inner = value
+                .as_variant()
+                .ok_or_else(|| "failed to decode nested D-Bus variant payload".to_owned())?;
+            Ok(ExternalSourceValue::variant_with_payload(
+                "DbusVariant",
+                dbus_value_external(&inner, depth + 1)?,
+            ))
+        }
+        VariantClass::Array => {
+            let mut values = Vec::with_capacity(value.n_children());
+            for index in 0..value.n_children() {
+                values.push(dbus_value_external(&value.child_value(index), depth + 1)?);
+            }
+            Ok(ExternalSourceValue::variant_with_payload(
+                "DbusList",
+                ExternalSourceValue::List(values),
+            ))
+        }
+        VariantClass::Tuple | VariantClass::DictEntry => {
+            let mut values = Vec::with_capacity(value.n_children());
+            for index in 0..value.n_children() {
+                values.push(dbus_value_external(&value.child_value(index), depth + 1)?);
+            }
+            Ok(ExternalSourceValue::variant_with_payload(
+                "DbusStruct",
+                ExternalSourceValue::List(values),
+            ))
+        }
+        VariantClass::Maybe => Err(
+            "D-Bus maybe payloads are not representable by the current DbusValue runtime slice"
+                .into(),
+        ),
+        VariantClass::Double => Err(
+            "D-Bus floating-point payloads are not representable by the current DbusValue runtime slice"
+                .into(),
+        ),
+        VariantClass::__Unknown(_) => Err("unknown D-Bus payload class".into()),
+        _ => Err("unsupported D-Bus payload class".into()),
+    }
+}
+
+fn dbus_int_value(value: i64) -> Result<ExternalSourceValue, Box<str>> {
+    Ok(ExternalSourceValue::variant_with_payload(
+        "DbusInt",
+        ExternalSourceValue::Int(value),
+    ))
+}
+
+fn spawn_dbus_own_name_worker(
+    port: DetachedRuntimePublicationPort,
+    plan: DbusOwnNamePlan,
+    stop: Arc<AtomicBool>,
+) -> Result<thread::JoinHandle<()>, SourceProviderExecutionError> {
+    let (startup_tx, startup_rx) = mpsc::sync_channel(1);
+    let provider = BuiltinSourceProvider::DbusOwnName;
+    let instance = plan.instance;
+    let handle = thread::spawn(move || {
+        let context = MainContext::new();
+        let main_loop = MainLoop::new(Some(&context), false);
+        let startup = context.with_thread_default(|| {
+            install_dbus_stop_timer(&main_loop, &stop, &port);
+            let queued_port = port.clone();
+            let queued_output = plan.output.clone();
+            let queue_enabled = !plan.flags.contains(BusNameOwnerFlags::DO_NOT_QUEUE);
+            let owned_port = port.clone();
+            let owned_output = plan.output.clone();
+            let lost_port = port.clone();
+            let lost_output = plan.output.clone();
+            let owner_id = gio::bus_own_name(
+                plan.bus.bus_type(),
+                plan.name.as_ref(),
+                plan.flags,
+                move |_, _| {
+                    if queue_enabled && let Ok(value) = queued_output.value_for_state("Queued") {
+                        let _ =
+                            queued_port.publish(DetachedRuntimeValue::from_runtime_owned(value));
+                    }
+                },
+                move |_, _| {
+                    if let Ok(value) = owned_output.value_for_state("Owned") {
+                        let _ = owned_port.publish(DetachedRuntimeValue::from_runtime_owned(value));
+                    }
+                },
+                move |_, _| {
+                    if let Ok(value) = lost_output.value_for_state("Lost") {
+                        let _ = lost_port.publish(DetachedRuntimeValue::from_runtime_owned(value));
+                    }
+                },
+            );
+            let _ = startup_tx.send(Ok(()));
+            main_loop.run();
+            gio::bus_unown_name(owner_id);
+        });
+        if let Err(error) = startup {
+            let _ = startup_tx.send(Err(error.to_string().into_boxed_str()));
+        }
+    });
+    finish_dbus_startup(instance, provider, handle, startup_rx)
+}
+
+fn spawn_dbus_signal_worker(
+    port: DetachedRuntimePublicationPort,
+    plan: DbusSignalPlan,
+    stop: Arc<AtomicBool>,
+) -> Result<thread::JoinHandle<()>, SourceProviderExecutionError> {
+    let (startup_tx, startup_rx) = mpsc::sync_channel(1);
+    let provider = BuiltinSourceProvider::DbusSignal;
+    let instance = plan.instance;
+    let handle = thread::spawn(move || {
+        let context = MainContext::new();
+        let main_loop = MainLoop::new(Some(&context), false);
+        let startup = context.with_thread_default(|| {
+            install_dbus_stop_timer(&main_loop, &stop, &port);
+            let connection = gio::bus_get_sync(plan.bus.bus_type(), None::<&gio::Cancellable>)
+                .map_err(|error| error.to_string().into_boxed_str())?;
+            let output = plan.output.clone();
+            let publish_port = port.clone();
+            #[allow(deprecated)]
+            let subscription_id = connection.signal_subscribe(
+                None,
+                Some(plan.interface.as_ref()),
+                Some(plan.member.as_ref()),
+                Some(plan.path.as_ref()),
+                None,
+                DBusSignalFlags::NONE,
+                move |_, _, object_path, interface_name, signal_name, parameters| {
+                    let Ok(value) =
+                        output.signal_value(object_path, interface_name, signal_name, parameters)
+                    else {
+                        return;
+                    };
+                    let _ = publish_port.publish(DetachedRuntimeValue::from_runtime_owned(value));
+                },
+            );
+            let _ = startup_tx.send(Ok(()));
+            main_loop.run();
+            #[allow(deprecated)]
+            connection.signal_unsubscribe(subscription_id);
+            Ok::<(), Box<str>>(())
+        });
+        if let Err(error) = startup {
+            let _ = startup_tx.send(Err(error.to_string().into_boxed_str()));
+        }
+    });
+    finish_dbus_startup(instance, provider, handle, startup_rx)
+}
+
+fn spawn_dbus_method_worker(
+    port: DetachedRuntimePublicationPort,
+    plan: DbusMethodPlan,
+    stop: Arc<AtomicBool>,
+) -> Result<thread::JoinHandle<()>, SourceProviderExecutionError> {
+    let (startup_tx, startup_rx) = mpsc::sync_channel(1);
+    let provider = BuiltinSourceProvider::DbusMethod;
+    let instance = plan.instance;
+    let handle = thread::spawn(move || {
+        let context = MainContext::new();
+        let main_loop = MainLoop::new(Some(&context), false);
+        let startup = context.with_thread_default(|| {
+            install_dbus_stop_timer(&main_loop, &stop, &port);
+            let connection = gio::bus_get_sync(plan.bus.bus_type(), None::<&gio::Cancellable>)
+                .map_err(|error| error.to_string().into_boxed_str())?;
+            let output = plan.output.clone();
+            let publish_port = port.clone();
+            let destination = plan.destination.clone();
+            let path = plan.path.clone();
+            let interface = plan.interface.clone();
+            let member = plan.member.clone();
+            let filter_id = connection.add_filter(move |connection, message, incoming| {
+                if !incoming
+                    || message.message_type() != DBusMessageType::MethodCall
+                    || message.destination().as_deref() != Some(destination.as_ref())
+                    || message.path().as_deref() != Some(path.as_ref())
+                    || message.interface().as_deref() != Some(interface.as_ref())
+                    || message.member().as_deref() != Some(member.as_ref())
+                {
+                    return Some(message.clone());
+                }
+                let reply = message.new_method_reply();
+                let _ = connection.send_message(&reply, DBusSendMessageFlags::NONE);
+                if let Ok(value) = output.method_value(
+                    destination.as_ref(),
+                    path.as_ref(),
+                    interface.as_ref(),
+                    member.as_ref(),
+                    message.body().as_ref(),
+                ) {
+                    let _ = publish_port.publish(DetachedRuntimeValue::from_runtime_owned(value));
+                }
+                None
+            });
+            let _ = startup_tx.send(Ok(()));
+            main_loop.run();
+            connection.remove_filter(filter_id);
+            Ok::<(), Box<str>>(())
+        });
+        if let Err(error) = startup {
+            let _ = startup_tx.send(Err(error.to_string().into_boxed_str()));
+        }
+    });
+    finish_dbus_startup(instance, provider, handle, startup_rx)
+}
+
+fn install_dbus_stop_timer(
+    main_loop: &MainLoop,
+    stop: &Arc<AtomicBool>,
+    port: &DetachedRuntimePublicationPort,
+) {
+    let main_loop = main_loop.clone();
+    let stop = stop.clone();
+    let port = port.clone();
+    glib::timeout_add_local(Duration::from_millis(20), move || {
+        if stop.load(Ordering::Acquire) || port.is_cancelled() {
+            main_loop.quit();
+            ControlFlow::Break
+        } else {
+            ControlFlow::Continue
+        }
+    });
+}
+
+fn finish_dbus_startup(
+    instance: SourceInstanceId,
+    provider: BuiltinSourceProvider,
+    handle: thread::JoinHandle<()>,
+    startup_rx: mpsc::Receiver<Result<(), Box<str>>>,
+) -> Result<thread::JoinHandle<()>, SourceProviderExecutionError> {
+    match startup_rx.recv() {
+        Ok(Ok(())) => Ok(handle),
+        Ok(Err(detail)) => {
+            let _ = handle.join();
+            Err(SourceProviderExecutionError::StartFailed {
+                instance,
+                provider,
+                detail,
+            })
+        }
+        Err(error) => {
+            let _ = handle.join();
+            Err(SourceProviderExecutionError::StartFailed {
+                instance,
+                provider,
+                detail: format!("failed to receive provider startup status: {error}")
+                    .into_boxed_str(),
+            })
         }
     }
 }

@@ -5,10 +5,10 @@ use crate::cst::{
     DomainItem, DomainMember, DomainMemberName, ExportItem, Expr, ExprKind, FunctionParam,
     Identifier, InstanceItem, InstanceMember, Item, MapExpr, MarkupAttribute, MarkupAttributeValue,
     MarkupNode, Module, NamedItem, Pattern, PatternKind, PipeExpr, PipeStage, PipeStageKind,
-    ProjectionPath, QualifiedName, RecordExpr, RecordField, RecordPatternField, SourceDecorator,
-    SourceProviderContractItem, SourceProviderContractMember, SourceProviderContractSchemaMember,
-    SuffixedIntegerLiteral, TextLiteral, TextSegment, TypeDeclBody, TypeExpr, TypeExprKind,
-    TypeField, TypeVariant, UnaryOperator, UseItem,
+    ProjectionPath, QualifiedName, RecordExpr, RecordField, RecordPatternField, ResultBinding,
+    ResultBlockExpr, SourceDecorator, SourceProviderContractItem, SourceProviderContractMember,
+    SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextLiteral, TextSegment,
+    TypeDeclBody, TypeExpr, TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseItem,
 };
 
 const INDENT_WIDTH: usize = 4;
@@ -862,6 +862,7 @@ impl Formatter {
 
     fn format_expr_block(&self, expr: &Expr, force_multiline: bool) -> Block {
         match &expr.kind {
+            ExprKind::ResultBlock(block) => self.format_result_block(block),
             ExprKind::Pipe(pipe) => self.format_pipe_block(pipe),
             ExprKind::Markup(node) => self.format_markup_block(node),
             ExprKind::Tuple(elements) => self.format_expr_tuple_block(elements, force_multiline),
@@ -944,11 +945,56 @@ impl Formatter {
                 );
                 wrap_if_needed(rendered, precedence, parent_prec)
             }
+            ExprKind::ResultBlock(block) => self.format_result_block_inline(block),
             ExprKind::Pipe(pipe) => {
                 wrap_if_needed(self.format_pipe_inline(pipe), EXPR_PIPE_PREC, parent_prec)
             }
             ExprKind::Markup(node) => self.format_markup_inline(node),
         }
+    }
+
+    fn format_result_block(&self, block: &ResultBlockExpr) -> Block {
+        if block.bindings.is_empty() {
+            if let Some(tail) = block.tail.as_deref() {
+                return Block::inline(format!("result {{ {} }}", self.format_expr_inline(tail, 0)));
+            }
+            return Block::inline("result {}".to_owned());
+        }
+
+        let mut lines = vec!["result {".to_owned()];
+        for binding in &block.bindings {
+            lines.extend(
+                self.format_result_binding(binding)
+                    .indented(INDENT_WIDTH)
+                    .into_lines(),
+            );
+        }
+        if let Some(tail) = block.tail.as_deref() {
+            lines.extend(
+                self.format_expr_block(tail, true)
+                    .indented(INDENT_WIDTH)
+                    .into_lines(),
+            );
+        }
+        lines.push("}".to_owned());
+        Block::from_lines(lines)
+    }
+
+    fn format_result_binding(&self, binding: &ResultBinding) -> Block {
+        let prefix = format!("{} <- ", binding.name.text);
+        let expr_block = self.format_expr_block(&binding.expr, true);
+        if expr_block.is_inline() {
+            Block::inline(format!(
+                "{prefix}{}",
+                expr_block.inline_text().expect("inline block")
+            ))
+        } else {
+            expr_block.prefixed(&prefix)
+        }
+    }
+
+    fn format_result_block_inline(&self, block: &ResultBlockExpr) -> String {
+        self.format_result_block(block).into_lines().join("\n")
     }
 
     fn format_suffixed_integer_inline(&self, literal: &SuffixedIntegerLiteral) -> String {
@@ -1671,7 +1717,7 @@ impl Formatter {
             ExprKind::Map(map) => !map.entries.is_empty(),
             ExprKind::Set(elements) => !elements.is_empty(),
             ExprKind::Record(record) => !record.fields.is_empty(),
-            ExprKind::Pipe(_) | ExprKind::Markup(_) => true,
+            ExprKind::ResultBlock(_) | ExprKind::Pipe(_) | ExprKind::Markup(_) => true,
             ExprKind::Range { start, end } => {
                 self.expr_can_break(start) || self.expr_can_break(end)
             }

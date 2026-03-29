@@ -1585,6 +1585,49 @@ signal gated : Signal Int =
     }
 
     #[test]
+    fn lowers_builtin_dbus_source_providers_into_runtime_specs() {
+        let lowered = lower_text(
+            "runtime-hir-adapter-dbus.aivi",
+            r#"
+type DbusValue =
+  | DbusString Text
+  | DbusInt Int
+  | DbusBool Bool
+  | DbusList (List DbusValue)
+  | DbusStruct (List DbusValue)
+  | DbusVariant DbusValue
+
+type DbusSignal = {
+    path: Text,
+    interface: Text,
+    member: Text,
+    body: List DbusValue
+}
+
+@source dbus.signal "/org/aivi/Test" "org.aivi.Test" "Ping"
+signal inbound : Signal DbusSignal
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "dbus fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let assembly = assemble_hir_runtime(lowered.module())
+            .expect("dbus fixture should assemble into a runtime");
+        let inbound_id = item_id(lowered.module(), "inbound");
+        let source = assembly
+            .source_by_owner(inbound_id)
+            .expect("dbus source binding should exist");
+
+        assert_eq!(
+            source.spec.provider,
+            RuntimeSourceProvider::builtin(BuiltinSourceProvider::DbusSignal)
+        );
+    }
+
+    #[test]
     fn reports_unsupported_source_option_expressions_explicitly() {
         let lowered = lower_text(
             "runtime-hir-adapter-unsupported-source-option.aivi",

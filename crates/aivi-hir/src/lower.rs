@@ -1770,13 +1770,39 @@ impl<'a> Lowerer<'a> {
                 })
             }
             syn::ExprKind::Set(elements) => {
-                let elements = elements
-                    .iter()
-                    .map(|element| self.lower_expr(element))
-                    .collect();
+                let mut seen_elements =
+                    Vec::<(&syn::Expr, SourceSpan)>::with_capacity(elements.len());
+                let mut lowered_elements = Vec::with_capacity(elements.len());
+                for element in elements {
+                    if let Some((_, previous_span)) = seen_elements
+                        .iter()
+                        .find(|(previous, _)| surface_exprs_equal(previous, element))
+                    {
+                        self.diagnostics.push(
+                            Diagnostic::warning(
+                                "duplicate set element is redundant and will be ignored",
+                            )
+                            .with_code(code("duplicate-set-element"))
+                            .with_primary_label(
+                                element.span,
+                                "this element duplicates an earlier set entry",
+                            )
+                            .with_secondary_label(
+                                *previous_span,
+                                "previous equivalent set element here",
+                            )
+                            .with_note(
+                                "set literals are canonicalized during HIR lowering to one structurally equal entry",
+                            ),
+                        );
+                        continue;
+                    }
+                    seen_elements.push((element, element.span));
+                    lowered_elements.push(self.lower_expr(element));
+                }
                 self.alloc_expr(Expr {
                     span: expr.span,
-                    kind: ExprKind::Set(elements),
+                    kind: ExprKind::Set(lowered_elements),
                 })
             }
             syn::ExprKind::Record(record) => {
@@ -1865,6 +1891,7 @@ impl<'a> Lowerer<'a> {
                     },
                 })
             }
+            syn::ExprKind::ResultBlock(block) => self.lower_result_block_expr(block),
             syn::ExprKind::Pipe(pipe) => self.lower_pipe_expr(pipe),
             syn::ExprKind::Markup(markup) => {
                 let markup = self.lower_markup_node(markup, MarkupPlacement::Renderable);
@@ -1940,6 +1967,138 @@ impl<'a> Lowerer<'a> {
             return None;
         };
         integer.raw.parse::<i64>().ok()
+    }
+
+    fn lower_result_block_expr(&mut self, block: &syn::ResultBlockExpr) -> ExprId {
+        let Some(mut current) = self.lower_result_block_tail(block) else {
+            self.emit_error(
+                block.span,
+                "result blocks must produce a final success value",
+                code("empty-result-block"),
+            );
+            return self.placeholder_expr(block.span);
+        };
+        for binding in block.bindings.iter().rev() {
+            let source = self.lower_expr(&binding.expr);
+            current = self.lower_result_binding(binding, source, current);
+        }
+        current
+    }
+
+    fn lower_result_block_tail(&mut self, block: &syn::ResultBlockExpr) -> Option<ExprId> {
+        let tail = match block.tail.as_deref() {
+            Some(expr) => self.lower_expr(expr),
+            None => {
+                let binding = block.bindings.last()?;
+                self.lower_unresolved_name_expr(&binding.name.text, binding.name.span)
+            }
+        };
+        Some(self.lower_constructor_apply_expr("Ok", block.span, vec![tail]))
+    }
+
+    fn lower_result_binding(
+        &mut self,
+        binding: &syn::ResultBinding,
+        source: ExprId,
+        ok_body: ExprId,
+    ) -> ExprId {
+        let ok_binding_name = self.make_name(&binding.name.text, binding.name.span);
+        let ok_binding = self.alloc_binding(Binding {
+            span: binding.name.span,
+            name: ok_binding_name.clone(),
+            kind: BindingKind::Pattern,
+        });
+        let ok_argument = self.alloc_pattern(Pattern {
+            span: binding.name.span,
+            kind: PatternKind::Binding(BindingPattern {
+                binding: ok_binding,
+                name: ok_binding_name,
+            }),
+        });
+        let ok_pattern = self.alloc_pattern(Pattern {
+            span: binding.span,
+            kind: PatternKind::Constructor {
+                callee: self.make_unresolved_term_reference("Ok", binding.name.span),
+                arguments: vec![ok_argument],
+            },
+        });
+
+        let error_name = format!("__resultBlockErr{}", self.module.bindings().len());
+        let error_span = binding.expr.span;
+        let error_binding_name = self.make_name(&error_name, error_span);
+        let error_binding = self.alloc_binding(Binding {
+            span: error_span,
+            name: error_binding_name.clone(),
+            kind: BindingKind::Pattern,
+        });
+        let error_argument = self.alloc_pattern(Pattern {
+            span: error_span,
+            kind: PatternKind::Binding(BindingPattern {
+                binding: error_binding,
+                name: error_binding_name,
+            }),
+        });
+        let err_pattern = self.alloc_pattern(Pattern {
+            span: binding.span,
+            kind: PatternKind::Constructor {
+                callee: self.make_unresolved_term_reference("Err", binding.expr.span),
+                arguments: vec![error_argument],
+            },
+        });
+        let err_value = self.lower_unresolved_name_expr(&error_name, error_span);
+        let err_body = self.lower_constructor_apply_expr("Err", binding.expr.span, vec![err_value]);
+
+        let ok_stage = PipeStage {
+            span: binding.span,
+            subject_memo: None,
+            result_memo: None,
+            kind: PipeStageKind::Case {
+                pattern: ok_pattern,
+                body: ok_body,
+            },
+        };
+        let err_stage = PipeStage {
+            span: binding.span,
+            subject_memo: None,
+            result_memo: None,
+            kind: PipeStageKind::Case {
+                pattern: err_pattern,
+                body: err_body,
+            },
+        };
+        self.alloc_expr(Expr {
+            span: binding.span,
+            kind: ExprKind::Pipe(PipeExpr {
+                head: source,
+                stages: crate::NonEmpty::new(ok_stage, vec![err_stage]),
+            }),
+        })
+    }
+
+    fn lower_constructor_apply_expr(
+        &mut self,
+        constructor: &str,
+        span: SourceSpan,
+        arguments: Vec<ExprId>,
+    ) -> ExprId {
+        let callee = self.lower_unresolved_name_expr(constructor, span);
+        let arguments = crate::NonEmpty::from_vec(arguments)
+            .expect("result block constructors always receive at least one argument");
+        self.alloc_expr(Expr {
+            span,
+            kind: ExprKind::Apply { callee, arguments },
+        })
+    }
+
+    fn lower_unresolved_name_expr(&mut self, name: &str, span: SourceSpan) -> ExprId {
+        self.alloc_expr(Expr {
+            span,
+            kind: ExprKind::Name(self.make_unresolved_term_reference(name, span)),
+        })
+    }
+
+    fn make_unresolved_term_reference(&self, name: &str, span: SourceSpan) -> TermReference {
+        TermReference::unresolved(self.make_path(&[self.make_name(name, span)]))
     }
 
     fn lower_text_literal(&mut self, text: &syn::TextLiteral) -> TextLiteral {
@@ -2423,11 +2582,31 @@ impl<'a> Lowerer<'a> {
     }
 
     fn lower_record_expr(&mut self, record: &syn::RecordExpr) -> RecordExpr {
+        let mut seen_fields = HashMap::<String, SourceSpan>::with_capacity(record.fields.len());
         RecordExpr {
             fields: record
                 .fields
                 .iter()
                 .map(|field| {
+                    if let Some(previous_span) =
+                        seen_fields.insert(field.label.text.clone(), field.label.span)
+                    {
+                        self.diagnostics.push(
+                            Diagnostic::error(format!(
+                                "duplicate record field `{}`",
+                                field.label.text
+                            ))
+                            .with_code(code("duplicate-record-field"))
+                            .with_primary_label(
+                                field.label.span,
+                                "this field label repeats an earlier record entry",
+                            )
+                            .with_secondary_label(
+                                previous_span,
+                                "previous field with the same label here",
+                            ),
+                        );
+                    }
                     let value = field
                         .value
                         .as_ref()
@@ -5845,6 +6024,15 @@ fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMeta
         ("aivi.network", "Channel") => Some(ImportBindingMetadata::TypeConstructor {
             kind: Kind::constructor(2),
         }),
+        ("aivi.defaults", "defaultText") => Some(ImportBindingMetadata::Value {
+            ty: ImportValueType::Primitive(BuiltinType::Text),
+        }),
+        ("aivi.defaults", "defaultInt") => Some(ImportBindingMetadata::Value {
+            ty: ImportValueType::Primitive(BuiltinType::Int),
+        }),
+        ("aivi.defaults", "defaultBool") => Some(ImportBindingMetadata::Value {
+            ty: ImportValueType::Primitive(BuiltinType::Bool),
+        }),
         ("aivi.defaults", "Option") => Some(ImportBindingMetadata::Bundle(
             ImportBundleKind::BuiltinOption,
         )),
@@ -6497,6 +6685,22 @@ fn surface_exprs_equal(left: &syn::Expr, right: &syn::Expr) -> bool {
                 && surface_exprs_equal(left_left, right_left)
                 && surface_exprs_equal(left_right, right_right)
         }
+        (syn::ExprKind::ResultBlock(left), syn::ExprKind::ResultBlock(right)) => {
+            left.bindings.len() == right.bindings.len()
+                && left
+                    .bindings
+                    .iter()
+                    .zip(&right.bindings)
+                    .all(|(left, right)| {
+                        left.name.text == right.name.text
+                            && surface_exprs_equal(&left.expr, &right.expr)
+                    })
+                && match (&left.tail, &right.tail) {
+                    (Some(left), Some(right)) => surface_exprs_equal(left, right),
+                    (None, None) => true,
+                    _ => false,
+                }
+        }
         _ => false,
     }
 }
@@ -6509,7 +6713,7 @@ fn code(name: &'static str) -> DiagnosticCode {
 mod tests {
     use std::{fs, path::PathBuf};
 
-    use aivi_base::SourceDatabase;
+    use aivi_base::{Severity, SourceDatabase};
     use aivi_syntax::parse_module;
     use aivi_typing::{BuiltinSourceProvider, Kind};
 
@@ -6642,6 +6846,7 @@ mod tests {
             "milestone-2/valid/type-kinds/main.aivi",
             "milestone-2/valid/pipe-branch-and-join/main.aivi",
             "milestone-2/valid/pipe-fanout-carriers/main.aivi",
+            "milestone-2/valid/result-block/main.aivi",
             "milestone-2/valid/pipe-scan-signal-wakeup/main.aivi",
             "milestone-2/valid/pipe-explicit-recurrence-wakeups/main.aivi",
             "milestone-1/valid/records/record_shorthand_and_elision.aivi",
@@ -8981,6 +9186,66 @@ signal updates : Signal Int
     }
 
     #[test]
+    fn duplicate_record_fields_report_hir_diagnostics() {
+        let lowered = lower_text(
+            "duplicate-record-field.aivi",
+            "type User = { name: Text }\nvalue user:User = { name: \"Ada\", name: \"Grace\" }\n",
+        );
+        assert!(
+            lowered.has_errors(),
+            "duplicate record fields should fail lowering"
+        );
+        assert!(
+            lowered
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code == Some(super::code("duplicate-record-field"))),
+            "expected duplicate-record-field diagnostic, got {:?}",
+            lowered.diagnostics()
+        );
+    }
+
+    #[test]
+    fn duplicate_set_elements_warn_and_canonicalize() {
+        let lowered = lower_text(
+            "duplicate-set-element.aivi",
+            "value tags = Set [\"news\", \"featured\", \"news\"]\n",
+        );
+        assert!(
+            !lowered.has_errors(),
+            "duplicate set elements should canonicalize without a lowering error: {:?}",
+            lowered.diagnostics()
+        );
+        assert!(lowered.diagnostics().iter().any(|diagnostic| {
+            diagnostic.severity == Severity::Warning
+                && diagnostic.code == Some(super::code("duplicate-set-element"))
+        }));
+        let tags_body = lowered
+            .module()
+            .items()
+            .iter()
+            .find_map(|(_, item)| match item {
+                Item::Value(item) if item.name.text() == "tags" => Some(item.body),
+                _ => None,
+            })
+            .expect("fixture should contain tags value");
+        match &lowered.module().exprs()[tags_body].kind {
+            ExprKind::Set(elements) => {
+                assert_eq!(elements.len(), 2, "set literal should be canonicalized");
+                assert!(matches!(
+                    lowered.module().exprs()[elements[0]].kind,
+                    ExprKind::Text(_)
+                ));
+                assert!(matches!(
+                    lowered.module().exprs()[elements[1]].kind,
+                    ExprKind::Text(_)
+                ));
+            }
+            other => panic!("expected set literal expression, found {other:?}"),
+        }
+    }
+
+    #[test]
     fn exports_can_target_constructors_through_parent_type_items() {
         let lowered = lower_text(
             "constructor-export.aivi",
@@ -9183,5 +9448,69 @@ signal updates : Signal Int
             ),
             "local type definitions should shadow builtin types: {annotation_resolution:?}"
         );
+    }
+
+    #[test]
+    fn lowers_result_blocks_into_nested_result_case_pipes() {
+        let lowered = lower_fixture("milestone-2/valid/result-block/main.aivi");
+        assert!(
+            !lowered.has_errors(),
+            "result block fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+        let report = lowered
+            .module()
+            .validate(ValidationMode::RequireResolvedNames);
+        assert!(
+            report.is_ok(),
+            "result block fixture should validate as resolved HIR: {:?}",
+            report.diagnostics()
+        );
+
+        let combined = match find_named_item(lowered.module(), "combined") {
+            Item::Value(item) => item,
+            other => panic!("expected combined to be a value item, found {other:?}"),
+        };
+        let ExprKind::Pipe(outer_pipe) = &lowered.module().exprs()[combined.body].kind else {
+            panic!("expected combined body to lower into a pipe");
+        };
+        let outer_stages = outer_pipe.stages.iter().collect::<Vec<_>>();
+        assert_eq!(
+            outer_stages.len(),
+            2,
+            "each binding should lower into Ok/Err case arms"
+        );
+        assert!(matches!(outer_stages[0].kind, PipeStageKind::Case { .. }));
+        assert!(matches!(outer_stages[1].kind, PipeStageKind::Case { .. }));
+
+        let PipeStageKind::Case {
+            body: inner_body, ..
+        } = &outer_stages[0].kind
+        else {
+            panic!("expected first outer stage to be an Ok case arm");
+        };
+        let ExprKind::Pipe(inner_pipe) = &lowered.module().exprs()[*inner_body].kind else {
+            panic!("expected Ok branch to continue with the nested result binding");
+        };
+        assert_eq!(inner_pipe.stages.iter().count(), 2);
+
+        let rejected = match find_named_item(lowered.module(), "rejected") {
+            Item::Value(item) => item,
+            other => panic!("expected rejected to be a value item, found {other:?}"),
+        };
+        let ExprKind::Pipe(rejected_pipe) = &lowered.module().exprs()[rejected.body].kind else {
+            panic!("expected rejected body to lower into a pipe");
+        };
+        let rejected_stages = rejected_pipe.stages.iter().collect::<Vec<_>>();
+        let PipeStageKind::Case {
+            body: implicit_tail,
+            ..
+        } = &rejected_stages[0].kind
+        else {
+            panic!("expected rejected Ok branch to be the implicit tail");
+        };
+        let ExprKind::Apply { .. } = &lowered.module().exprs()[*implicit_tail].kind else {
+            panic!("implicit result tails should lower into an `Ok ...` constructor application");
+        };
     }
 }

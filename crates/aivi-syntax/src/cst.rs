@@ -377,6 +377,22 @@ pub struct Expr {
     pub span: SourceSpan,
 }
 
+/// One `<-` binding inside a `result { ... }` block.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResultBinding {
+    pub name: Identifier,
+    pub expr: Expr,
+    pub span: SourceSpan,
+}
+
+/// Block-shaped `result { ... }` expression preserved before HIR desugaring.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResultBlockExpr {
+    pub bindings: Vec<ResultBinding>,
+    pub tail: Option<Box<Expr>>,
+    pub span: SourceSpan,
+}
+
 /// Surface expression forms exercised by the Milestone 1 fixture corpus.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExprKind {
@@ -417,6 +433,7 @@ pub enum ExprKind {
         operator: BinaryOperator,
         right: Box<Expr>,
     },
+    ResultBlock(ResultBlockExpr),
     Pipe(PipeExpr),
     Markup(MarkupNode),
 }

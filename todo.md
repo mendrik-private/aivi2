@@ -1,8 +1,5 @@
 # Outstanding implementation gaps
 
-- `result { ... }` block syntax is still not implemented in the current parser/HIR pipeline. The RFC now documents that absence explicitly, but the old draft surface remains unimplemented.
-  - Evidence: `AIVI_RFC.md` formerly described `result { ... }` blocks, while parser searches show no `<-` / result-block support in `crates/aivi-syntax/src/parse.rs`.
-
 - LSP cursor-offset migration is still incomplete after `aivi_base::SourceFile::lsp_position_to_offset` began returning `Option<ByteIndex>`.
   - Evidence: `crates/aivi-lsp/src/completion.rs`, `crates/aivi-lsp/src/definition.rs`, and `crates/aivi-lsp/src/hover.rs` all still carry `TODO(aivi-base)` comments for that update.
 
