@@ -2881,40 +2881,63 @@ impl<'a> Lowerer<'a> {
                     .collect(),
                 rest: rest.as_deref().map(|rest| self.lower_pattern(rest)),
             },
-            syn::PatternKind::Record(fields) => PatternKind::Record(
-                fields
-                    .iter()
-                    .map(|field| RecordPatternField {
+            syn::PatternKind::Record(fields) => {
+                let mut seen_fields =
+                    HashMap::<String, SourceSpan>::with_capacity(fields.len());
+                let mut lowered_fields = Vec::with_capacity(fields.len());
+                for field in fields {
+                    if let Some(previous_span) =
+                        seen_fields.insert(field.label.text.clone(), field.label.span)
+                    {
+                        self.diagnostics.push(
+                            Diagnostic::error(format!(
+                                "duplicate field `{}` in record pattern",
+                                field.label.text
+                            ))
+                            .with_code(code("duplicate-record-field"))
+                            .with_primary_label(
+                                field.label.span,
+                                "this field label repeats an earlier record pattern entry",
+                            )
+                            .with_secondary_label(
+                                previous_span,
+                                "previous field with the same label here",
+                            ),
+                        );
+                    }
+                    let pat = field
+                        .pattern
+                        .as_ref()
+                        .map(|pattern| self.lower_pattern(pattern))
+                        .unwrap_or_else(|| {
+                            let binding_name =
+                                self.make_name(&field.label.text, field.label.span);
+                            let binding = self.alloc_binding(Binding {
+                                span: field.label.span,
+                                name: binding_name.clone(),
+                                kind: BindingKind::Pattern,
+                            });
+                            self.alloc_pattern(Pattern {
+                                span: field.label.span,
+                                kind: PatternKind::Binding(BindingPattern {
+                                    binding,
+                                    name: binding_name,
+                                }),
+                            })
+                        });
+                    lowered_fields.push(RecordPatternField {
                         span: field.span,
                         label: self.make_name(&field.label.text, field.label.span),
-                        pattern: field
-                            .pattern
-                            .as_ref()
-                            .map(|pattern| self.lower_pattern(pattern))
-                            .unwrap_or_else(|| {
-                                let binding_name =
-                                    self.make_name(&field.label.text, field.label.span);
-                                let binding = self.alloc_binding(Binding {
-                                    span: field.label.span,
-                                    name: binding_name.clone(),
-                                    kind: BindingKind::Pattern,
-                                });
-                                self.alloc_pattern(Pattern {
-                                    span: field.label.span,
-                                    kind: PatternKind::Binding(BindingPattern {
-                                        binding,
-                                        name: binding_name,
-                                    }),
-                                })
-                            }),
+                        pattern: pat,
                         surface: if field.pattern.is_some() {
                             RecordFieldSurface::Explicit
                         } else {
                             RecordFieldSurface::Shorthand
                         },
-                    })
-                    .collect(),
-            ),
+                    });
+                }
+                PatternKind::Record(lowered_fields)
+            }
             syn::PatternKind::Apply { callee, arguments } => PatternKind::Constructor {
                 callee: self.pattern_callee_from_pattern(callee, pattern.span),
                 arguments: arguments
@@ -2977,41 +3000,63 @@ impl<'a> Lowerer<'a> {
                     .collect(),
                 rest: None,
             },
-            syn::ExprKind::Record(record) => PatternKind::Record(
-                record
-                    .fields
-                    .iter()
-                    .map(|field| RecordPatternField {
+            syn::ExprKind::Record(record) => {
+                let mut seen_fields =
+                    HashMap::<String, SourceSpan>::with_capacity(record.fields.len());
+                let mut lowered_fields = Vec::with_capacity(record.fields.len());
+                for field in &record.fields {
+                    if let Some(previous_span) =
+                        seen_fields.insert(field.label.text.clone(), field.label.span)
+                    {
+                        self.diagnostics.push(
+                            Diagnostic::error(format!(
+                                "duplicate field `{}` in record pattern",
+                                field.label.text
+                            ))
+                            .with_code(code("duplicate-record-field"))
+                            .with_primary_label(
+                                field.label.span,
+                                "this field label repeats an earlier record pattern entry",
+                            )
+                            .with_secondary_label(
+                                previous_span,
+                                "previous field with the same label here",
+                            ),
+                        );
+                    }
+                    let pat = field
+                        .value
+                        .as_ref()
+                        .map(|value| self.lower_expr_pattern(value))
+                        .unwrap_or_else(|| {
+                            let binding_name =
+                                self.make_name(&field.label.text, field.label.span);
+                            let binding = self.alloc_binding(Binding {
+                                span: field.label.span,
+                                name: binding_name.clone(),
+                                kind: BindingKind::Pattern,
+                            });
+                            self.alloc_pattern(Pattern {
+                                span: field.label.span,
+                                kind: PatternKind::Binding(BindingPattern {
+                                    binding,
+                                    name: binding_name,
+                                }),
+                            })
+                        });
+                    lowered_fields.push(RecordPatternField {
                         span: field.span,
                         label: self.make_name(&field.label.text, field.label.span),
-                        pattern: field
-                            .value
-                            .as_ref()
-                            .map(|value| self.lower_expr_pattern(value))
-                            .unwrap_or_else(|| {
-                                let binding_name =
-                                    self.make_name(&field.label.text, field.label.span);
-                                let binding = self.alloc_binding(Binding {
-                                    span: field.label.span,
-                                    name: binding_name.clone(),
-                                    kind: BindingKind::Pattern,
-                                });
-                                self.alloc_pattern(Pattern {
-                                    span: field.label.span,
-                                    kind: PatternKind::Binding(BindingPattern {
-                                        binding,
-                                        name: binding_name,
-                                    }),
-                                })
-                            }),
+                        pattern: pat,
                         surface: if field.value.is_some() {
                             RecordFieldSurface::Explicit
                         } else {
                             RecordFieldSurface::Shorthand
                         },
-                    })
-                    .collect(),
-            ),
+                    });
+                }
+                PatternKind::Record(lowered_fields)
+            }
             syn::ExprKind::Apply { callee, arguments } => PatternKind::Constructor {
                 callee: self.pattern_callee_from_expr(callee, expr.span),
                 arguments: arguments
@@ -9802,6 +9847,46 @@ signal updates : Signal Int
         assert!(
             lowered.has_errors(),
             "duplicate record fields should fail lowering"
+        );
+        assert!(
+            lowered
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code == Some(super::code("duplicate-record-field"))),
+            "expected duplicate-record-field diagnostic, got {:?}",
+            lowered.diagnostics()
+        );
+    }
+
+    #[test]
+    fn duplicate_record_type_fields_report_hir_diagnostics() {
+        let lowered = lower_text(
+            "duplicate-record-type-field.aivi",
+            "type User = { name: Text, age: Int, name: Bool }\n",
+        );
+        assert!(
+            lowered.has_errors(),
+            "duplicate record type fields should fail lowering"
+        );
+        assert!(
+            lowered
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code == Some(super::code("duplicate-record-field"))),
+            "expected duplicate-record-field diagnostic, got {:?}",
+            lowered.diagnostics()
+        );
+    }
+
+    #[test]
+    fn duplicate_record_pattern_fields_report_hir_diagnostics() {
+        let lowered = lower_text(
+            "duplicate-record-pattern-field.aivi",
+            "type User = { name: Text }\nfun extract:Text user:User =>\n    user\n     ||> { name, name } -> name\n",
+        );
+        assert!(
+            lowered.has_errors(),
+            "duplicate record pattern fields should fail lowering"
         );
         assert!(
             lowered
