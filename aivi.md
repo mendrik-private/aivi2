@@ -288,7 +288,7 @@ result defines graph assembly.
 ============================================================
 
 - Signals behave like reactive graph nodes
-- +|> is the primary state mechanism
+- scan is the working checked state-accumulation surface; +|> remains an intended surface
 - Domains act like typeclasses
 - Sources unify async + caching + scheduling
 

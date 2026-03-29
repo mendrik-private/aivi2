@@ -43,7 +43,7 @@ type Result E A = Err E | Ok A
 
 ### `Validation E A`
 
-Like `Result`, but accumulates multiple errors instead of stopping at the first:
+Like `Result`, but with an accumulation-oriented applicative slice for independent failures. The current executable accumulation path combines `Validation (NonEmptyList E)` values rather than accumulating arbitrary error payloads:
 
 ```aivi
 type Validation E A =
@@ -409,6 +409,6 @@ The following ambient classes and builtin carrier paths are wired through the cu
 | `Foldable F` | `reduce` | `List`, `Option`, `Result`, `Validation` |
 | `Filterable F` | `filter` | `List`, `Option` |
 | `Apply F` | `apply` | `Option`, `Result`, `List`, `Validation`, `Signal` |
-| `Applicative F` | `pure`, `ap` | `Option`, `Result`, `List`, `Validation`, `Signal`, `Task` |
+| `Applicative F` | `pure` | `Option`, `Result`, `List`, `Validation`, `Signal`, `Task` (executable applicative slice) |
 | `Bifunctor F` | `bimap` | `Result`, `Validation` |
 | `Traversable F` | `traverse` | `List`, `Option`, `Result`, `Validation` |

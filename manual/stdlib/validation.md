@@ -1,6 +1,6 @@
 # aivi.validation
 
-Utilities for working with `Validation E A` — like `Result`, but designed to **accumulate** multiple errors rather than stopping at the first. The key function is `zipValidation`, which combines two validations and collects errors from both sides.
+Utilities for working with `Validation E A` — like `Result`, but with an accumulation-oriented applicative path for independent failures. The current executable accumulation surface is `zipValidation`, which combines two `Validation (NonEmptyList E)` values and collects errors from both sides.
 
 ```aivi
 use aivi.validation (

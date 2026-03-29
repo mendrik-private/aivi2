@@ -553,37 +553,35 @@ Set [1, 2, 4]
 
 Core typeclasses are compiler-owned ambient prelude items injected into every checked module; local declarations may shadow them.
 
-Parser-level surface syntax includes the following forms, but end-to-end checking for user-authored higher-kinded classes and instances is still partial:
+Parser-level surface syntax includes the following forms. Low-kinded examples such as `Container`, `same`, and same-module `Eq` instances are checker-backed today, but end-to-end checking for user-authored higher-kinded classes and instances is still partial:
 
 ```aivi
 class Functor F
     map : (A -> B) -> F A -> F B
 
-class Applicative F
+class Apply F
     with Functor F
-    pure : A -> F A
     apply : F (A -> B) -> F A -> F B
 
-class Traversable F
-    with Functor F
-    with Foldable F
-    traverse : Applicative G -> (A -> G B) -> F A -> G (F B)
+class Applicative F
+    with Apply F
+    pure : A -> F A
 
-class Container F
+class Traversable T
+    with Functor T
+    with Foldable T
+    traverse : Applicative G -> (A -> G B) -> T A -> G (T B)
+
+class Container A
     require Eq A
-    contains : A -> F A -> Bool
+    contains : A -> List A -> Bool
 
 fun same : Eq A -> Bool v:A =>
     v == v
 
 instance Eq A -> Eq (Option A)
     (==) left right = True
-
-instance Applicative Option
-    pureInt = Some 1
-
-instance Functor (Result Text)
-    labelInt = Ok 1
+    (!=) left right = False
 ```
 
 Parser-accurate rules:
@@ -655,7 +653,7 @@ Same-module instance members lower as hidden callable items per `(instance, memb
 - `List` implements builtin `Functor`, `Apply`, `Applicative`, `Foldable`, `Traversable`, and `Filterable`
 - `Validation E` implements builtin `Functor`, `Bifunctor`, `Apply`, `Applicative`, `Foldable`, and `Traversable`
 - `Signal` implements builtin `Functor`, `Apply`, and `Applicative`
-- `Task E` implements builtin `Applicative`
+- `Task E` has builtin executable `Applicative` support today; broader checker-level `Functor` / `Apply` / `Chain` / `Monad` matching is not yet runtime-backed
 - `Eq` is compiler-provided for the structural cases in §7.3
 - current `Default` evidence is narrower than general imported instance resolution: builtin `Option` defaulting comes from `use aivi.defaults (Option)`, and other cases are limited to same-module `Default` instances
 
