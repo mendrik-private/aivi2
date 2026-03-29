@@ -314,17 +314,22 @@ signal clicked : Signal Unit
 signal query   : Signal Text
 ```
 
-### 5.0.4 `source` — source-backed signal declarations
+### 5.0.4 `@source` — source-backed signal decorators
 
-`source` declares a signal backed by a runtime source provider:
+`@source` attaches a runtime source provider to a body-less `signal` declaration:
 
 ```aivi
-source users : Signal (Result HttpError (List User)) = http.get "/users"
-source tick  : Signal Unit = timer.every 120
-source keyDown : Signal Key = window.keyDown
+@source http.get "/users"
+signal users : Signal (Result HttpError (List User))
+
+@source timer.every 120
+signal tick : Signal Unit
+
+@source window.keyDown
+signal keyDown : Signal Key
 ```
 
-The general form is `source name : Signal T = provider.variant args`. The provider and variant are resolved statically. This replaces the former `@source` decorator on a body-less `signal`.
+The general form is `@source provider.variant args [with { ... }]` followed by `signal name : Signal T`. The provider and variant are resolved statically. Provider-backed signals remain decorator-based in the current compiler.
 
 ### 5.0.5 `result` — graph-assembly records
 
@@ -1425,20 +1430,21 @@ The scheduler is driven from an owned GLib main context. Workers may publish res
 
 ## 14. Sources and decoding
 
-External inputs are declared with `source`, which combines the provider binding and type annotation into a single declaration:
+External inputs enter through `@source` on body-less `signal` declarations.
 
 ```aivi
-source users : Signal (Result HttpError (List User)) = http.get "/users"
+@source http.get "/users"
+signal users : Signal (Result HttpError (List User))
 ```
 
 Source arguments and options are ordinary typed expressions. They may use interpolation and may depend on signals with statically known dependency sets.
 
 ```aivi
-source users : Signal (Result HttpError (List User)) =
-    http.get "{baseUrl}/users" with {
-        headers: authHeaders,
-        decode: Strict
-    }
+@source http.get "{baseUrl}/users" with {
+    headers: authHeaders,
+    decode: Strict
+}
+signal users : Signal (Result HttpError (List User))
 ```
 
 Reactive values in source strings, positional arguments, and options are real dependencies. When committed values change, the runtime rebuilds or retriggers the source per the provider contract while keeping the static graph shape fixed.
@@ -1459,7 +1465,7 @@ Sources may represent:
 - mailboxes/channels
 - GTK/window events
 
-The HIR surface preserves for every `source` declaration site:
+The HIR surface preserves for every `@source` site:
 
 - provider identity: missing / builtin / custom / invalid-shape
 - positional arguments as runtime expressions
@@ -1468,7 +1474,7 @@ The HIR surface preserves for every `source` declaration site:
 - decode program selection
 - stable source instance identity
 
-### 14.1.1 Recurrence decorators on non-source declarations
+### 14.1.1 Recurrence decorators on non-`@source` declarations
 
 ```aivi
 @recur.timer 1000ms
@@ -1480,40 +1486,42 @@ signal retried : Signal (Result FetchError Data)
 
 Rules:
 
-- `@recur.timer expr` and `@recur.backoff expr` are the only recurrence decorators for non-`source` declarations
+- `@recur.timer expr` and `@recur.backoff expr` are the only recurrence decorators for non-`@source` declarations
 - neither accepts `with { ... }` options or duplicates
-- not allowed on `source` declarations; source wakeups come from the source contract
+- not allowed on `@source` signals; source wakeups come from the source contract
 - a recurrent pipe is legal only where the compiler can prove a built-in runtime lowering target
 - recurrence lowering produces an explicit scheduler-node handoff; it is not collapsed into opaque self-recursion
 
-### 14.1.2 Source declaration shape
+### 14.1.2 Source decorator shape
 
 ```aivi
-source name : Signal T = provider.variant arg1 arg2 with {
+@source provider.variant arg1 arg2 with {
     option1: value1,
     option2: value2
 }
+signal name : Signal T
 ```
 
 The `with { ... }` option record is optional.
 
 ```aivi
-source tick : Signal Unit = timer.every 120
+@source timer.every 120
+signal tick : Signal Unit
 ```
 
 ```aivi
-source users : Signal (Result HttpError (List User)) =
-    http.get "/users" with {
-        decode: Strict,
-        retry: Retry.times 3,
-        timeout: 5sec
-    }
+@source http.get "/users" with {
+    decode: Strict,
+    retry: Retry.times 3,
+    timeout: 5sec
+}
+signal users : Signal (Result HttpError (List User))
 ```
 
 Rules:
 
 - provider and variant are resolved statically
-- `source` declarations are the primary form for provider-backed signals
+- `@source` may decorate only a body-less `signal`
 - positional arguments are provider-defined and typed
 - options are a closed record whose legal fields come from a central provider option catalog
 - unknown options are a compile-time error
@@ -1529,7 +1537,8 @@ Reactive source configuration does not make sources dynamic in the type-theoreti
 Stateful source handling is expressed by deriving from the raw source signal:
 
 ```aivi
-source tick : Signal Unit = timer.every 120
+@source timer.every 120
+signal tick : Signal Unit
 
 signal counter : Signal Int =
     tick +|> 0 (state _ => state + 1)
@@ -1540,15 +1549,16 @@ signal counter : Signal Int =
 #### HTTP
 
 ```aivi
-source users : Signal (Result HttpError (List User)) = http.get "/users"
+@source http.get "/users"
+signal users : Signal (Result HttpError (List User))
 
-source login : Signal (Result HttpError Session) =
-    http.post "/login" with {
-        body: creds,
-        headers: authHeaders,
-        decode: Strict,
-        timeout: 5sec
-    }
+@source http.post "/login" with {
+    body: creds,
+    headers: authHeaders,
+    decode: Strict,
+    timeout: 5sec
+}
+signal login : Signal (Result HttpError Session)
 ```
 
 Recommended HTTP options:
@@ -1577,8 +1587,11 @@ HTTP source semantics:
 #### Timer
 
 ```aivi
-source tick  : Signal Unit = timer.every 120
-source ready : Signal Unit = timer.after 1000
+@source timer.every 120
+signal tick : Signal Unit
+
+@source timer.after 1000
+signal ready : Signal Unit
 ```
 
 Recommended timer options:
@@ -1593,16 +1606,16 @@ Bare integer timer arguments mean milliseconds. Suffixed durations such as `250m
 #### File watching and reading
 
 ```aivi
-source fileEvents : Signal FsEvent =
-    fs.watch "/home/user/demo.txt" with {
-        events: [Created, Changed, Deleted]
-    }
+@source fs.watch "/home/user/demo.txt" with {
+    events: [Created, Changed, Deleted]
+}
+signal fileEvents : Signal FsEvent
 
-source fileText : Signal (Result FsError Text) =
-    fs.read "/home/user/demo.txt" with {
-        decode: Strict,
-        reloadOn: fileEvents
-    }
+@source fs.read "/home/user/demo.txt" with {
+    decode: Strict,
+    reloadOn: fileEvents
+}
+signal fileText : Signal (Result FsError Text)
 ```
 
 `fs.watch` publishes file-system change notifications only; it does **not** implicitly read file contents. `fs.read` performs snapshot loading and decode. This split is normative.
@@ -1616,12 +1629,13 @@ Built-in file sources request best-effort cancellation when superseded, suspende
 #### Socket / mailbox
 
 ```aivi
-source inbox : Signal (Result SocketError Message) =
-    socket.connect "tcp://localhost:8080" with {
-        decode: Strict
-    }
+@source socket.connect "tcp://localhost:8080" with {
+    decode: Strict
+}
+signal inbox : Signal (Result SocketError Message)
 
-source jobs : Signal Text = mailbox.subscribe "jobs"
+@source mailbox.subscribe "jobs"
+signal jobs : Signal Text
 ```
 
 - `socket.connect` is a raw `tcp://` line-stream provider, not a general WebSocket surface
@@ -1631,7 +1645,8 @@ source jobs : Signal Text = mailbox.subscribe "jobs"
 #### Process events
 
 ```aivi
-source grepEvents : Signal ProcessEvent = process.spawn "rg" ["TODO", "."]
+@source process.spawn "rg" ["TODO", "."]
+signal grepEvents : Signal ProcessEvent
 ```
 
 Recommended process options: `cwd : Path`, `env : Map Text Text`, `stdout : StreamMode`, `stderr : StreamMode`, `restartOn : Signal A`
@@ -1639,7 +1654,8 @@ Recommended process options: `cwd : Path`, `env : Map Text Text`, `stdout : Stre
 #### GTK / window events
 
 ```aivi
-source keyDown : Signal Key = window.keyDown with { repeat: False }
+@source window.keyDown with { repeat: False }
+signal keyDown : Signal Key
 ```
 
 Recommended window-event options: `capture : Bool`, `repeat : Bool`, `focusOnly : Bool`
@@ -1649,9 +1665,14 @@ Recommended window-event options: `capture : Bool`, `repeat : Bool`, `focusOnly 
 #### D-Bus
 
 ```aivi
-source busName   : Signal BusNameState = dbus.ownName "org.example.Mail"
-source busEvents : Signal MailBusEvent = dbus.signal "org.example.Mail" "/org/example/Mail" "NewMessage"
-source showWindow : Signal Unit         = dbus.method "org.example.Mail" "/org/example/Mail" "ShowWindow"
+@source dbus.ownName "org.example.Mail"
+signal busName : Signal BusNameState
+
+@source dbus.signal "org.example.Mail" "/org/example/Mail" "NewMessage"
+signal busEvents : Signal MailBusEvent
+
+@source dbus.method "org.example.Mail" "/org/example/Mail" "ShowWindow"
+signal showWindow : Signal Unit
 ```
 
 - `dbus.ownName`: tracks `Owned`, `Queued`, or `Lost`
@@ -1756,7 +1777,7 @@ Ordinary `value` definitions are pure.
 Effects enter through:
 
 - `Task`
-- `signal` / `source`
+- `signal` / `@source`
 - GTK event boundaries
 - runtime-owned scheduling and source integration
 
@@ -1799,7 +1820,7 @@ type Receiver A
 type Mailbox A
 ```
 
-Sending expressed through `Task`; receiving expressed through `source` integration.
+Sending expressed through `Task`; receiving expressed through `@source` integration.
 
 ---
 
@@ -1948,7 +1969,7 @@ Rules:
 - the bound signal must be a body-less annotated `Signal Bool` input signal
 - the host publishes `False` immediately at registration, `True` on first `map`, then `True` / `False` on later `map` / `unmap` transitions
 - `map` / `unmap` is used rather than `show` / `hide` because a widget may be shown while not yet mapped through an unshown parent
-- this is the canonical way to drive `source activeWhen` from visibility state
+- this is the canonical way to drive `@source activeWhen` from visibility state
 
 `hideOnClose={True}` on `ApplicationWindow` intercepts the delete event and calls `window.hide()` instead of destroying the window. This keeps the process alive and allows later restoration through normal presentation or D-Bus activation.
 
@@ -2755,11 +2776,11 @@ Rules:
 
 ### 28.3 D-Bus surface
 
-- `dbus.ownName`: `source` for name ownership state
+- `dbus.ownName`: `@source` for name ownership state
 - `dbus.call`: `Task`
 - `dbus.emit`: `Task`
-- `dbus.signal`: `source` for inbound signal subscription
-- `dbus.method`: `source` for fire-and-forget inbound method dispatch with immediate Unit reply semantics on the wire
+- `dbus.signal`: `@source` for inbound signal subscription
+- `dbus.method`: `@source` for fire-and-forget inbound method dispatch with immediate Unit reply semantics on the wire
 
 Methods returning non-Unit values to the caller are deferred.
 

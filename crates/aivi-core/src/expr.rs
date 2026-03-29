@@ -275,6 +275,9 @@ pub enum PipeStageKind {
     Tap {
         expr: ExprId,
     },
+    Debug {
+        label: Box<str>,
+    },
     Gate {
         predicate: ExprId,
         emits_negative_update: bool,

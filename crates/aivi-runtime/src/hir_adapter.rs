@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     fmt,
 };
 
@@ -54,6 +54,25 @@ pub fn assemble_hir_runtime(
     .build()
 }
 
+pub fn assemble_hir_runtime_with_items(
+    module: &hir::Module,
+    included_items: &HashSet<hir::ItemId>,
+) -> Result<HirRuntimeAssembly, HirRuntimeAdapterErrors> {
+    let source_lifecycles = hir::elaborate_source_lifecycles(module);
+    let source_decode_programs = hir::generate_source_decode_programs(module);
+    let recurrences = hir::elaborate_recurrences(module);
+    let gates = hir::elaborate_gates(module);
+    HirRuntimeAssemblyBuilder::new_with_items(
+        module,
+        &source_lifecycles,
+        &source_decode_programs,
+        &recurrences,
+        &gates,
+        included_items,
+    )
+    .build()
+}
+
 #[derive(Clone, Debug)]
 pub struct HirRuntimeAssemblyBuilder<'a> {
     module: &'a hir::Module,
@@ -61,6 +80,7 @@ pub struct HirRuntimeAssemblyBuilder<'a> {
     source_decode_programs: &'a hir::SourceDecodeProgramReport,
     recurrences: &'a hir::RecurrenceElaborationReport,
     gates: &'a hir::GateElaborationReport,
+    included_items: Option<&'a HashSet<hir::ItemId>>,
 }
 
 impl<'a> HirRuntimeAssemblyBuilder<'a> {
@@ -71,13 +91,56 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
         recurrences: &'a hir::RecurrenceElaborationReport,
         gates: &'a hir::GateElaborationReport,
     ) -> Self {
+        Self::new_internal(
+            module,
+            source_lifecycles,
+            source_decode_programs,
+            recurrences,
+            gates,
+            None,
+        )
+    }
+
+    pub const fn new_with_items(
+        module: &'a hir::Module,
+        source_lifecycles: &'a hir::SourceLifecycleElaborationReport,
+        source_decode_programs: &'a hir::SourceDecodeProgramReport,
+        recurrences: &'a hir::RecurrenceElaborationReport,
+        gates: &'a hir::GateElaborationReport,
+        included_items: &'a HashSet<hir::ItemId>,
+    ) -> Self {
+        Self::new_internal(
+            module,
+            source_lifecycles,
+            source_decode_programs,
+            recurrences,
+            gates,
+            Some(included_items),
+        )
+    }
+
+    const fn new_internal(
+        module: &'a hir::Module,
+        source_lifecycles: &'a hir::SourceLifecycleElaborationReport,
+        source_decode_programs: &'a hir::SourceDecodeProgramReport,
+        recurrences: &'a hir::RecurrenceElaborationReport,
+        gates: &'a hir::GateElaborationReport,
+        included_items: Option<&'a HashSet<hir::ItemId>>,
+    ) -> Self {
         Self {
             module,
             source_lifecycles,
             source_decode_programs,
             recurrences,
             gates,
+            included_items,
         }
+    }
+
+    fn includes_item(&self, item: hir::ItemId) -> bool {
+        self.included_items
+            .as_ref()
+            .is_none_or(|included| included.contains(&item))
     }
 
     pub fn build(self) -> Result<HirRuntimeAssembly, HirRuntimeAdapterErrors> {
@@ -94,6 +157,9 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
         let mut source_inputs = BTreeMap::<hir::ItemId, InputHandle>::new();
 
         for (item_id, item) in self.module.items().iter() {
+            if !self.includes_item(item_id) {
+                continue;
+            }
             let hir::Item::Signal(signal) = item else {
                 continue;
             };
@@ -229,6 +295,9 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
 
         let mut task_wakeups = BTreeMap::new();
         for node in self.recurrences.nodes() {
+            if !self.includes_item(node.owner) {
+                continue;
+            }
             let hir::RecurrenceNodeOutcome::Planned(plan) = &node.outcome else {
                 continue;
             };
@@ -324,12 +393,18 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
         }
 
         for owner in report_index.source_lifecycles.keys() {
+            if !self.includes_item(*owner) {
+                continue;
+            }
             if !seen_source_owners.contains(owner) {
                 errors
                     .push(HirRuntimeAdapterError::UnexpectedSourceLifecycleOwner { owner: *owner });
             }
         }
         for owner in report_index.source_decode_programs.keys() {
+            if !self.includes_item(*owner) {
+                continue;
+            }
             if !seen_source_owners.contains(owner) {
                 errors.push(HirRuntimeAdapterError::UnexpectedSourceDecodeOwner { owner: *owner });
             }
@@ -337,6 +412,9 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
 
         let mut tasks = Vec::new();
         for (item_id, item) in self.module.items().iter() {
+            if !self.includes_item(item_id) {
+                continue;
+            }
             let hir::Item::Value(value) = item else {
                 continue;
             };
@@ -383,6 +461,9 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
         let mut gates = Vec::new();
         let mut gate_sites = BTreeSet::new();
         for stage in self.gates.stages() {
+            if !self.includes_item(stage.owner) {
+                continue;
+            }
             let site = HirGateStageId::new(stage.owner, stage.pipe_expr, stage.stage_index);
             if !gate_sites.insert(site) {
                 errors.push(HirRuntimeAdapterError::DuplicateGateStage { site });
@@ -416,6 +497,9 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
         let mut recurrences = Vec::new();
         let mut recurrence_sites = BTreeSet::new();
         for node in self.recurrences.nodes() {
+            if !self.includes_item(node.owner) {
+                continue;
+            }
             let site = HirRecurrenceNodeId::new(node.owner, node.pipe_expr, node.start_stage_index);
             if !recurrence_sites.insert(site) {
                 errors.push(HirRuntimeAdapterError::DuplicateRecurrenceNode { site });

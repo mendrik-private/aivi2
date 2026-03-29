@@ -185,6 +185,12 @@ pub struct TypeParameter {
     pub name: Name,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeprecationNotice {
+    pub message: Option<Box<str>>,
+    pub replacement: Option<Box<str>>,
+}
+
 /// One imported binding surfaced by a `use` item.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ImportBinding {
@@ -193,6 +199,8 @@ pub struct ImportBinding {
     pub local_name: Name,
     pub resolution: ImportBindingResolution,
     pub metadata: ImportBindingMetadata,
+    pub callable_type: Option<ImportValueType>,
+    pub deprecation: Option<DeprecationNotice>,
 }
 
 /// Resolution outcome for one imported binding.
@@ -1498,12 +1506,34 @@ pub enum DecoratorPayload {
     Call(DecoratorCall),
     RecurrenceWakeup(RecurrenceWakeupDecorator),
     Source(SourceDecorator),
+    Test(TestDecorator),
+    Debug(DebugDecorator),
+    Deprecated(DeprecatedDecorator),
+    Mock(MockDecorator),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DecoratorCall {
     pub arguments: Vec<ExprId>,
     pub options: Option<ExprId>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TestDecorator;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DebugDecorator;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeprecatedDecorator {
+    pub message: Option<ExprId>,
+    pub options: Option<ExprId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MockDecorator {
+    pub target: ExprId,
+    pub replacement: ExprId,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1818,6 +1848,20 @@ impl Module {
 
     pub fn exprs(&self) -> &Arena<ExprId, Expr> {
         &self.arenas.exprs
+    }
+
+    pub fn expr_static_text(&self, expr: ExprId) -> Option<Box<str>> {
+        let ExprKind::Text(text) = &self.arenas.exprs.get(expr)?.kind else {
+            return None;
+        };
+        let mut rendered = String::new();
+        for segment in &text.segments {
+            match segment {
+                TextSegment::Text(fragment) => rendered.push_str(fragment.raw.as_ref()),
+                TextSegment::Interpolation(_) => return None,
+            }
+        }
+        Some(rendered.into_boxed_str())
     }
 
     pub fn patterns(&self) -> &Arena<PatternId, Pattern> {

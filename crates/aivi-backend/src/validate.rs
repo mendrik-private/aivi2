@@ -1307,6 +1307,7 @@ fn validate_kernel(
                         | InlinePipeStageKind::Tap { expr } => {
                             push_expr(kernel_id, *expr, kernel, &mut work, errors)
                         }
+                        InlinePipeStageKind::Debug { .. } => {}
                         InlinePipeStageKind::Gate { predicate, .. } => {
                             push_expr(kernel_id, *predicate, kernel, &mut work, errors);
                             if let Some(pred_expr) = kernel.exprs().get(*predicate) {

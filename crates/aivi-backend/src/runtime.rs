@@ -1455,6 +1455,10 @@ impl<'a> KernelEvaluator<'a> {
                     )?;
                     current
                 }
+                InlinePipeStageKind::Debug { label } => {
+                    eprintln!("{label}: {current}");
+                    current
+                }
                 InlinePipeStageKind::Gate { predicate, .. } => {
                     let result = self.evaluate_expr(
                         kernel_id,

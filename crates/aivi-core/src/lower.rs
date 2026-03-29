@@ -4,16 +4,18 @@ use aivi_base::SourceSpan;
 use aivi_hir::{
     BlockedFanoutSegment, BlockedGateStage, BlockedGeneralExpr as BlockedGeneralExprBody,
     BlockedRecurrenceNode, BlockedSourceDecodeProgram, BlockedSourceLifecycleNode,
-    BlockedTruthyFalsyStage, ExprId as HirExprId, GateRuntimeExpr, GateRuntimeExprKind,
-    GateRuntimePipeExpr, GateRuntimePipeStageKind, GateRuntimeProjectionBase, GateRuntimeReference,
-    GateRuntimeTextLiteral, GateRuntimeTextSegment, GateRuntimeTruthyFalsyBranch, GateStageOutcome,
+    BlockedTruthyFalsyStage, DecoratorPayload, ExprId as HirExprId, ExprKind as HirExprKind,
+    GateRuntimeExpr, GateRuntimeExprKind, GateRuntimePipeExpr, GateRuntimePipeStageKind,
+    GateRuntimeProjectionBase, GateRuntimeReference, GateRuntimeTextLiteral,
+    GateRuntimeTextSegment, GateRuntimeTruthyFalsyBranch, GateStageOutcome,
     GeneralExprInstanceMemberElaboration, GeneralExprOutcome, GeneralExprParameter,
     ImportBindingMetadata, ImportId, ImportValueType, Item as HirItem, ItemId as HirItemId,
     PatternId as HirPatternId, PipeTransformMode, RecurrenceNodeOutcome,
     ResolvedClassMemberDispatch, SourceDecodeProgram, SourceDecodeProgramOutcome,
-    SourceLifecycleNodeOutcome, TruthyFalsyStageOutcome, TypeBinding, TypeConstructorHead,
-    elaborate_fanouts, elaborate_gates, elaborate_general_expressions, elaborate_recurrences,
-    elaborate_source_lifecycles, elaborate_truthy_falsy, generate_source_decode_programs,
+    SourceLifecycleNodeOutcome, TermResolution, TruthyFalsyStageOutcome, TypeBinding,
+    TypeConstructorHead, elaborate_fanouts, elaborate_gates, elaborate_general_expressions,
+    elaborate_recurrences, elaborate_source_lifecycles, elaborate_truthy_falsy,
+    generate_source_decode_programs,
 };
 
 use crate::{
@@ -315,8 +317,22 @@ pub fn lower_module(hir: &aivi_hir::Module) -> Result<Module, LoweringErrors> {
     ModuleLowerer::new(hir).build()
 }
 
+pub fn lower_module_with_items(
+    hir: &aivi_hir::Module,
+    included_items: &HashSet<HirItemId>,
+) -> Result<Module, LoweringErrors> {
+    ModuleLowerer::new_with_items(hir, included_items).build()
+}
+
 pub fn lower_runtime_module(hir: &aivi_hir::Module) -> Result<Module, LoweringErrors> {
     ModuleLowerer::new_runtime(hir).build()
+}
+
+pub fn lower_runtime_module_with_items(
+    hir: &aivi_hir::Module,
+    included_items: &HashSet<HirItemId>,
+) -> Result<Module, LoweringErrors> {
+    ModuleLowerer::new_runtime_with_items(hir, included_items).build()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -372,6 +388,8 @@ enum PendingStage {
 struct ModuleLowerer<'a> {
     hir: &'a aivi_hir::Module,
     included_items: Option<HashSet<HirItemId>>,
+    debug_items: HashSet<HirItemId>,
+    mock_overrides: HashMap<HirItemId, HashMap<ImportId, MockImportTarget>>,
     module: Module,
     item_map: HashMap<HirItemId, ItemId>,
     import_item_map: HashMap<ImportId, ItemId>,
@@ -382,6 +400,99 @@ struct ModuleLowerer<'a> {
     next_synthetic_item_origin_raw: u32,
     next_synthetic_binding_raw: u32,
     errors: Vec<LoweringError>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MockImportTarget {
+    Item(HirItemId),
+    Import(ImportId),
+}
+
+fn is_markup_value(hir: &aivi_hir::Module, item_id: HirItemId) -> bool {
+    matches!(
+        hir.items().get(item_id),
+        Some(HirItem::Value(value))
+            if matches!(hir.exprs()[value.body].kind, HirExprKind::Markup(_))
+    )
+}
+
+fn collect_debug_items(
+    hir: &aivi_hir::Module,
+    included_items: Option<&HashSet<HirItemId>>,
+) -> HashSet<HirItemId> {
+    hir.items()
+        .iter()
+        .filter(|(item_id, _)| included_items.is_none_or(|included| included.contains(item_id)))
+        .filter_map(|(item_id, item)| {
+            item.decorators().iter().any(|decorator_id| {
+                hir.decorators()
+                    .get(*decorator_id)
+                    .is_some_and(|decorator| matches!(decorator.payload, DecoratorPayload::Debug(_)))
+            })
+            .then_some(item_id)
+        })
+        .collect()
+}
+
+fn collect_mock_overrides(
+    hir: &aivi_hir::Module,
+    included_items: Option<&HashSet<HirItemId>>,
+) -> HashMap<HirItemId, HashMap<ImportId, MockImportTarget>> {
+    let mut overrides = HashMap::new();
+    for (item_id, item) in hir.items().iter() {
+        if included_items.is_some_and(|included| !included.contains(&item_id)) {
+            continue;
+        }
+        let mut item_overrides = HashMap::new();
+        for decorator_id in item.decorators() {
+            let Some(decorator) = hir.decorators().get(*decorator_id) else {
+                continue;
+            };
+            let DecoratorPayload::Mock(mock) = &decorator.payload else {
+                continue;
+            };
+            let Some(target_import) = mock_target_import(hir, mock.target) else {
+                continue;
+            };
+            let Some(target) = mock_replacement_target(hir, mock.replacement) else {
+                continue;
+            };
+            item_overrides.insert(target_import, target);
+        }
+        if !item_overrides.is_empty() {
+            overrides.insert(item_id, item_overrides);
+        }
+    }
+    overrides
+}
+
+fn mock_target_import(hir: &aivi_hir::Module, expr_id: HirExprId) -> Option<ImportId> {
+    let HirExprKind::Name(reference) = &hir.exprs().get(expr_id)?.kind else {
+        return None;
+    };
+    let aivi_hir::ResolutionState::Resolved(TermResolution::Import(import_id)) = reference.resolution
+    else {
+        return None;
+    };
+    Some(import_id)
+}
+
+fn mock_replacement_target(
+    hir: &aivi_hir::Module,
+    expr_id: HirExprId,
+) -> Option<MockImportTarget> {
+    let HirExprKind::Name(reference) = &hir.exprs().get(expr_id)?.kind else {
+        return None;
+    };
+    match reference.resolution {
+        aivi_hir::ResolutionState::Resolved(TermResolution::Item(item_id)) => {
+            Some(MockImportTarget::Item(item_id))
+        }
+        aivi_hir::ResolutionState::Resolved(TermResolution::Import(import_id)) => {
+            Some(MockImportTarget::Import(import_id))
+        }
+        _ => None,
+    }
 }
 
 struct RuntimeFragmentLowerer<'a> {
@@ -397,24 +508,11 @@ struct RuntimeFragmentLowerer<'a> {
 
 impl<'a> ModuleLowerer<'a> {
     fn new(hir: &'a aivi_hir::Module) -> Self {
-        let next_synthetic_item_origin_raw =
-            u32::try_from(hir.items().iter().count()).expect("HIR item count should fit in u32");
-        let next_synthetic_binding_raw = u32::try_from(hir.bindings().iter().count())
-            .expect("HIR binding count should fit in u32");
-        Self {
-            hir,
-            included_items: None,
-            module: Module::new(),
-            item_map: HashMap::new(),
-            import_item_map: HashMap::new(),
-            instance_member_item_map: HashMap::new(),
-            pipe_builders: BTreeMap::new(),
-            source_by_owner: HashMap::new(),
-            decode_by_owner: HashMap::new(),
-            next_synthetic_item_origin_raw,
-            next_synthetic_binding_raw,
-            errors: Vec::new(),
-        }
+        Self::new_internal(hir, None)
+    }
+
+    fn new_with_items(hir: &'a aivi_hir::Module, included_items: &HashSet<HirItemId>) -> Self {
+        Self::new_internal(hir, Some(included_items.clone()))
     }
 
     fn new_runtime(hir: &'a aivi_hir::Module) -> Self {
@@ -430,13 +528,33 @@ impl<'a> ModuleLowerer<'a> {
                 _ => Some(item_id),
             })
             .collect::<HashSet<_>>();
+        Self::new_internal(hir, Some(included_items))
+    }
+
+    fn new_runtime_with_items(
+        hir: &'a aivi_hir::Module,
+        included_items: &HashSet<HirItemId>,
+    ) -> Self {
+        let included_items = included_items
+            .iter()
+            .copied()
+            .filter(|item_id| !is_markup_value(hir, *item_id))
+            .collect::<HashSet<_>>();
+        Self::new_internal(hir, Some(included_items))
+    }
+
+    fn new_internal(hir: &'a aivi_hir::Module, included_items: Option<HashSet<HirItemId>>) -> Self {
+        let debug_items = collect_debug_items(hir, included_items.as_ref());
+        let mock_overrides = collect_mock_overrides(hir, included_items.as_ref());
         let next_synthetic_item_origin_raw =
             u32::try_from(hir.items().iter().count()).expect("HIR item count should fit in u32");
         let next_synthetic_binding_raw = u32::try_from(hir.bindings().iter().count())
             .expect("HIR binding count should fit in u32");
         Self {
             hir,
-            included_items: Some(included_items),
+            included_items,
+            debug_items,
+            mock_overrides,
             module: Module::new(),
             item_map: HashMap::new(),
             import_item_map: HashMap::new(),
@@ -454,6 +572,115 @@ impl<'a> ModuleLowerer<'a> {
         self.included_items
             .as_ref()
             .is_none_or(|included| included.contains(&item))
+    }
+
+    fn debug_label(&self, owner: HirItemId, stage: Option<usize>) -> Box<str> {
+        let owner_name = match self.hir.items().get(owner) {
+            Some(HirItem::Value(item)) => item.name.text(),
+            Some(HirItem::Function(item)) => item.name.text(),
+            Some(HirItem::Signal(item)) => item.name.text(),
+            Some(HirItem::Type(item)) => item.name.text(),
+            Some(HirItem::Class(item)) => item.name.text(),
+            Some(HirItem::Domain(item)) => item.name.text(),
+            Some(HirItem::SourceProviderContract(item)) => item.provider.key().unwrap_or("<provider>"),
+            Some(HirItem::Instance(_)) => "instance",
+            Some(HirItem::Use(_)) => "use",
+            Some(HirItem::Export(_)) => "export",
+            None => "<missing>",
+        };
+        match stage {
+            Some(stage) => format!("{owner_name} stage {}", stage + 1).into_boxed_str(),
+            None => format!("{owner_name} head").into_boxed_str(),
+        }
+    }
+
+    fn lower_import_reference(
+        &mut self,
+        owner: HirItemId,
+        import: ImportId,
+    ) -> Result<Reference, LoweringError> {
+        if let Some(target) = self
+            .mock_overrides
+            .get(&owner)
+            .and_then(|overrides| overrides.get(&import))
+            .copied()
+        {
+            return match target {
+                MockImportTarget::Item(item_id) => Ok(self
+                    .item_map
+                    .get(&item_id)
+                    .copied()
+                    .map(Reference::Item)
+                    .unwrap_or(Reference::HirItem(item_id))),
+                MockImportTarget::Import(import_id) => {
+                    Ok(Reference::Item(self.seed_import_item(import_id)?))
+                }
+            };
+        }
+        Ok(Reference::Item(self.seed_import_item(import)?))
+    }
+
+    fn pipe_stage_specs(&self, owner: HirItemId, pipe: &GateRuntimePipeExpr) -> Vec<PipeStageSpec> {
+        let debug = self.debug_items.contains(&owner);
+        let mut specs = Vec::with_capacity(pipe.stages.len() * usize::from(debug) + pipe.stages.len() + usize::from(debug));
+        if debug {
+            let head_ty = Type::lower(&pipe.head.ty);
+            specs.push(PipeStageSpec {
+                span: pipe.head.span,
+                input_subject: head_ty.clone(),
+                result_subject: head_ty,
+                kind: PipeStageKindSpec::Debug {
+                    label: self.debug_label(owner, None),
+                },
+            });
+        }
+        for (stage_index, stage) in pipe.stages.iter().enumerate() {
+            specs.push(PipeStageSpec {
+                span: stage.span,
+                input_subject: Type::lower(&stage.input_subject),
+                result_subject: Type::lower(&stage.result_subject),
+                kind: match &stage.kind {
+                    GateRuntimePipeStageKind::Transform { mode, .. } => {
+                        PipeStageKindSpec::Transform { mode: *mode }
+                    }
+                    GateRuntimePipeStageKind::Tap { .. } => PipeStageKindSpec::Tap,
+                    GateRuntimePipeStageKind::Gate {
+                        emits_negative_update,
+                        ..
+                    } => PipeStageKindSpec::Gate {
+                        emits_negative_update: *emits_negative_update,
+                    },
+                    GateRuntimePipeStageKind::Case { arms } => PipeStageKindSpec::Case {
+                        arms: arms
+                            .iter()
+                            .map(|arm| CaseArmSpec {
+                                span: arm.span,
+                                pattern: arm.pattern,
+                                subject: stage.input_subject.clone(),
+                            })
+                            .collect(),
+                    },
+                    GateRuntimePipeStageKind::TruthyFalsy { truthy, falsy } => {
+                        PipeStageKindSpec::TruthyFalsy {
+                            truthy: TruthyFalsyArmSpec::from_hir(truthy),
+                            falsy: TruthyFalsyArmSpec::from_hir(falsy),
+                        }
+                    }
+                },
+            });
+            if debug {
+                let result_subject = Type::lower(&stage.result_subject);
+                specs.push(PipeStageSpec {
+                    span: stage.span,
+                    input_subject: result_subject.clone(),
+                    result_subject,
+                    kind: PipeStageKindSpec::Debug {
+                        label: self.debug_label(owner, Some(stage_index)),
+                    },
+                });
+            }
+        }
+        specs
     }
 
     fn build(mut self) -> Result<Module, LoweringErrors> {
@@ -2202,7 +2429,7 @@ impl<'a> ModuleLowerer<'a> {
                                     .map(Reference::Item)
                                     .unwrap_or(Reference::HirItem(*item)),
                                 GateRuntimeReference::Import(import) => {
-                                    Reference::Item(self.seed_import_item(*import)?)
+                                    self.lower_import_reference(owner, *import)?
                                 }
                                 GateRuntimeReference::SumConstructor(handle) => {
                                     Reference::SumConstructor(handle.clone())
@@ -2406,7 +2633,7 @@ impl<'a> ModuleLowerer<'a> {
                             tasks.push(Task::BuildPipe {
                                 span: expr.span,
                                 ty,
-                                stages: pipe_stage_specs(pipe),
+                                stages: self.pipe_stage_specs(owner, pipe),
                             });
                             for stage in pipe.stages.iter().rev() {
                                 match &stage.kind {
@@ -2631,6 +2858,9 @@ impl<'a> ModuleLowerer<'a> {
                                     PipeStageKindSpec::Tap => {
                                         let expr = children[0];
                                         crate::expr::PipeStageKind::Tap { expr }
+                                    }
+                                    PipeStageKindSpec::Debug { label } => {
+                                        crate::expr::PipeStageKind::Debug { label }
                                     }
                                     PipeStageKindSpec::Gate {
                                         emits_negative_update,
@@ -2868,45 +3098,6 @@ fn lower_text_pattern(text: &aivi_hir::TextLiteral) -> Box<str> {
     raw.into_boxed_str()
 }
 
-fn pipe_stage_specs(pipe: &GateRuntimePipeExpr) -> Vec<PipeStageSpec> {
-    pipe.stages
-        .iter()
-        .map(|stage| PipeStageSpec {
-            span: stage.span,
-            input_subject: Type::lower(&stage.input_subject),
-            result_subject: Type::lower(&stage.result_subject),
-            kind: match &stage.kind {
-                GateRuntimePipeStageKind::Transform { mode, .. } => {
-                    PipeStageKindSpec::Transform { mode: *mode }
-                }
-                GateRuntimePipeStageKind::Tap { .. } => PipeStageKindSpec::Tap,
-                GateRuntimePipeStageKind::Gate {
-                    emits_negative_update,
-                    ..
-                } => PipeStageKindSpec::Gate {
-                    emits_negative_update: *emits_negative_update,
-                },
-                GateRuntimePipeStageKind::Case { arms } => PipeStageKindSpec::Case {
-                    arms: arms
-                        .iter()
-                        .map(|arm| CaseArmSpec {
-                            span: arm.span,
-                            pattern: arm.pattern,
-                            subject: stage.input_subject.clone(),
-                        })
-                        .collect(),
-                },
-                GateRuntimePipeStageKind::TruthyFalsy { truthy, falsy } => {
-                    PipeStageKindSpec::TruthyFalsy {
-                        truthy: TruthyFalsyArmSpec::from_hir(truthy),
-                        falsy: TruthyFalsyArmSpec::from_hir(falsy),
-                    }
-                }
-            },
-        })
-        .collect()
-}
-
 #[derive(Clone)]
 enum SegmentSpec {
     Fragment { raw: Box<str>, span: SourceSpan },
@@ -2933,6 +3124,9 @@ enum PipeStageKindSpec {
         mode: PipeTransformMode,
     },
     Tap,
+    Debug {
+        label: Box<str>,
+    },
     Gate {
         emits_negative_update: bool,
     },
@@ -2949,6 +3143,7 @@ impl PipeStageKindSpec {
     fn child_expr_count(&self) -> usize {
         match self {
             Self::Transform { .. } | Self::Tap | Self::Gate { .. } => 1,
+            Self::Debug { .. } => 0,
             Self::Case { arms } => arms.len(),
             Self::TruthyFalsy { .. } => 2,
         }
@@ -3978,6 +4173,65 @@ signal cursor : Signal Cursor =
             imported.body.is_none(),
             "imported declaration stubs should stay bodyless in typed-core"
         );
+    }
+
+    #[test]
+    fn debug_decorator_injects_debug_pipe_stages() {
+        let lowered = lower_text(
+            "typed-core-debug.aivi",
+            r#"
+fun step:Int n:Int =>
+    n + 1
+
+@debug
+value traced : Int =
+    0
+     |> step
+     |> step
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "debug fixture should lower cleanly before typed-core lowering: {:?}",
+            lowered.diagnostics()
+        );
+
+        let core = lower_module(lowered.module()).expect("typed-core lowering should succeed");
+        validate_module(&core).expect("lowered core module should validate");
+
+        let traced = core
+            .items()
+            .iter()
+            .find(|(_, item)| item.name.as_ref() == "traced")
+            .map(|(id, _)| id)
+            .expect("expected traced value item");
+        let traced_body = core.items()[traced]
+            .body
+            .expect("traced should carry a lowered body");
+        let crate::ExprKind::Pipe(pipe) = &core.exprs()[traced_body].kind else {
+            panic!("traced body should lower to a pipe expression");
+        };
+        assert_eq!(pipe.stages.len(), 5);
+        assert!(matches!(
+            &pipe.stages[0].kind,
+            crate::expr::PipeStageKind::Debug { label } if label.as_ref() == "traced head"
+        ));
+        assert!(matches!(
+            &pipe.stages[1].kind,
+            crate::expr::PipeStageKind::Transform { .. }
+        ));
+        assert!(matches!(
+            &pipe.stages[2].kind,
+            crate::expr::PipeStageKind::Debug { label } if label.as_ref() == "traced stage 1"
+        ));
+        assert!(matches!(
+            &pipe.stages[3].kind,
+            crate::expr::PipeStageKind::Transform { .. }
+        ));
+        assert!(matches!(
+            &pipe.stages[4].kind,
+            crate::expr::PipeStageKind::Debug { label } if label.as_ref() == "traced stage 2"
+        ));
     }
 
     #[test]

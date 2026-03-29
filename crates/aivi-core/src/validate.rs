@@ -705,6 +705,7 @@ pub fn validate_module(module: &Module) -> Result<(), ValidationErrors> {
                                 }
                             }
                         }
+                        PipeStageKind::Debug { .. } => {}
                         PipeStageKind::Gate { predicate, .. } => {
                             push_expr(module, *predicate, &mut work, &mut errors);
                             if !module.exprs()[*predicate].ty.is_bool() {

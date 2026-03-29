@@ -22,14 +22,14 @@ use crate::{
     domain_operator_elaboration::{binary_operator_text, select_domain_binary_operator},
     hir::{
         ApplicativeSpineHead, BuiltinTerm, BuiltinType, ClassMemberResolution, ControlNode,
-        ControlNodeKind, CustomSourceRecurrenceWakeup, DecoratorPayload, DomainMemberKind,
-        DomainMemberResolution, ExportResolution, ExprKind, ImportBindingMetadata,
+        ControlNodeKind, CustomSourceRecurrenceWakeup, DecoratorPayload, DeprecationNotice,
+        DomainMemberKind, DomainMemberResolution, ExportResolution, ExprKind, ImportBindingMetadata,
         ImportBindingResolution, ImportValueType, IntrinsicValue, Item, LiteralSuffixResolution,
         MarkupAttributeValue, MarkupNodeKind, Module, Name, NamePath, PatternKind, PipeStage,
-        PipeStageKind, PipeTransformMode, RecurrenceWakeupDecoratorKind, ResolutionState,
-        SignalItem, SourceDecorator, SourceMetadata, SourceProviderRef, TermReference,
-        TermResolution, TextLiteral, TextSegment, TypeItemBody, TypeKind, TypeReference,
-        TypeResolution,
+        PipeStageKind, PipeTransformMode, RecurrenceWakeupDecoratorKind, RecordExpr,
+        ResolutionState, SignalItem, SourceDecorator, SourceMetadata, SourceProviderRef,
+        TermReference, TermResolution, TextLiteral, TextSegment, TypeItemBody, TypeKind,
+        TypeReference, TypeResolution,
     },
     ids::{
         BindingId, ClusterId, ControlNodeId, DecoratorId, ExprId, ImportId, ItemId, MarkupNodeId,
@@ -132,6 +132,13 @@ pub fn validate_module(module: &Module, mode: ValidationMode) -> ValidationRepor
     let mut report = validate_structure(module, mode);
     report.extend(validate_bindings(module, mode));
     report.extend(validate_types(module, mode));
+    let mut v = Validator {
+        module,
+        mode,
+        diagnostics: Vec::new(),
+    };
+    v.validate_decorator_semantics();
+    report.extend(ValidationReport::new(v.diagnostics));
     report
 }
 
@@ -253,6 +260,39 @@ impl Validator<'_> {
                             options,
                         );
                     }
+                }
+                DecoratorPayload::Test(_) | DecoratorPayload::Debug(_) => {}
+                DecoratorPayload::Deprecated(deprecated) => {
+                    if let Some(message) = deprecated.message {
+                        self.require_expr(
+                            decorator.span,
+                            "decorator",
+                            "deprecation message",
+                            message,
+                        );
+                    }
+                    if let Some(options) = deprecated.options {
+                        self.require_expr(
+                            decorator.span,
+                            "decorator",
+                            "deprecation options expression",
+                            options,
+                        );
+                    }
+                }
+                DecoratorPayload::Mock(mock) => {
+                    self.require_expr(
+                        decorator.span,
+                        "decorator",
+                        "mock target expression",
+                        mock.target,
+                    );
+                    self.require_expr(
+                        decorator.span,
+                        "decorator",
+                        "mock replacement expression",
+                        mock.replacement,
+                    );
                 }
             }
         }
@@ -1011,6 +1051,399 @@ impl Validator<'_> {
                 }
             }
         }
+    }
+
+    fn validate_decorator_semantics(&mut self) {
+        let mut typing = GateTypeContext::new(self.module);
+        for (item_id, item) in self.module.items().iter() {
+            if self.module.ambient_items().contains(&item_id) {
+                continue;
+            }
+            self.validate_item_decorator_semantics(item_id, item, &mut typing);
+        }
+    }
+
+    fn validate_item_decorator_semantics(
+        &mut self,
+        item_id: ItemId,
+        item: &Item,
+        typing: &mut GateTypeContext<'_>,
+    ) {
+        let mut test_count = 0usize;
+        let mut debug_count = 0usize;
+        let mut deprecated_count = 0usize;
+        let has_test = self.item_has_test_decorator(item);
+        let mut mocked_imports = HashSet::new();
+
+        for decorator_id in item.decorators() {
+            let decorator = &self.module.decorators()[*decorator_id];
+            match &decorator.payload {
+                DecoratorPayload::Test(_) => {
+                    test_count += 1;
+                    self.validate_test_decorator(item_id, decorator.span, typing);
+                }
+                DecoratorPayload::Debug(_) => {
+                    debug_count += 1;
+                }
+                DecoratorPayload::Deprecated(deprecated) => {
+                    deprecated_count += 1;
+                    self.validate_deprecated_decorator(decorator.span, deprecated);
+                }
+                DecoratorPayload::Mock(mock) => {
+                    self.validate_mock_decorator(
+                        item_id,
+                        has_test,
+                        decorator.span,
+                        mock,
+                        &mut mocked_imports,
+                        typing,
+                    );
+                }
+                DecoratorPayload::Bare
+                | DecoratorPayload::Call(_)
+                | DecoratorPayload::RecurrenceWakeup(_)
+                | DecoratorPayload::Source(_) => {}
+            }
+        }
+
+        if test_count > 1 {
+            self.diagnostics.push(
+                Diagnostic::error("duplicate `@test` decorator")
+                    .with_code(code("duplicate-test-decorator"))
+                    .with_primary_label(item.span(), "keep only one `@test` decorator"),
+            );
+        }
+        if debug_count > 1 {
+            self.diagnostics.push(
+                Diagnostic::error("duplicate `@debug` decorator")
+                    .with_code(code("duplicate-debug-decorator"))
+                    .with_primary_label(item.span(), "keep only one `@debug` decorator"),
+            );
+        }
+        if deprecated_count > 1 {
+            self.diagnostics.push(
+                Diagnostic::error("duplicate `@deprecated` decorator")
+                    .with_code(code("duplicate-deprecated-decorator"))
+                    .with_primary_label(item.span(), "keep only one `@deprecated` decorator"),
+            );
+        }
+
+        if let Item::Export(export) = item
+            && let ResolutionState::Resolved(ExportResolution::Item(target)) = export.resolution
+            && let Some(target_item) = self.module.items().get(target)
+            && self.item_has_test_decorator(target_item)
+        {
+            self.diagnostics.push(
+                Diagnostic::error("`@test` items cannot be exported")
+                    .with_code(code("test-export"))
+                    .with_primary_label(
+                        export.header.span,
+                        "remove this export or move the test into a non-exported declaration",
+                    ),
+            );
+        }
+    }
+
+    fn validate_test_decorator(
+        &mut self,
+        item_id: ItemId,
+        span: SourceSpan,
+        typing: &mut GateTypeContext<'_>,
+    ) {
+        if self.mode != ValidationMode::RequireResolvedNames {
+            return;
+        }
+        let Some(ty) = typing.item_value_type(item_id) else {
+            return;
+        };
+        let GateType::Task { value, .. } = ty else {
+            self.diagnostics.push(
+                Diagnostic::error("`@test` values must have a `Task ...` type")
+                    .with_code(code("invalid-test-type"))
+                    .with_primary_label(
+                        span,
+                        "annotate or infer this test as a task value",
+                    ),
+            );
+            return;
+        };
+        if !test_result_type_supported(value.as_ref()) {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    "`@test` tasks must produce `Unit`, `Bool`, `Result ...`, or `Validation ...`",
+                )
+                .with_code(code("invalid-test-result-type"))
+                .with_primary_label(
+                    span,
+                    "return one of the supported test result shapes",
+                ),
+            );
+        }
+    }
+
+    fn validate_deprecated_decorator(
+        &mut self,
+        span: SourceSpan,
+        deprecated: &crate::DeprecatedDecorator,
+    ) {
+        if let Some(message) = deprecated.message
+            && self.module.expr_static_text(message).is_none()
+        {
+            self.diagnostics.push(
+                Diagnostic::error("`@deprecated` message must be a plain text literal")
+                    .with_code(code("invalid-deprecated-message"))
+                    .with_primary_label(message_span(self.module, message), "use a plain text literal"),
+            );
+        }
+        let Some(options) = deprecated.options else {
+            return;
+        };
+        let Some(expr) = self.module.exprs().get(options) else {
+            return;
+        };
+        let ExprKind::Record(RecordExpr { fields }) = &expr.kind else {
+            self.diagnostics.push(
+                Diagnostic::error("`@deprecated` options must use `with { replacement: \"...\" }`")
+                    .with_code(code("invalid-deprecated-options"))
+                    .with_primary_label(span, "use a record literal in `with { ... }`"),
+            );
+            return;
+        };
+        let mut seen_replacement = false;
+        for field in fields {
+            if field.label.text() != "replacement" {
+                self.diagnostics.push(
+                    Diagnostic::error(format!(
+                        "`@deprecated` does not support option `{}`",
+                        field.label.text()
+                    ))
+                    .with_code(code("unknown-deprecated-option"))
+                    .with_primary_label(field.span, "remove this option"),
+                );
+                continue;
+            }
+            if seen_replacement {
+                self.diagnostics.push(
+                    Diagnostic::error("duplicate `replacement` option in `@deprecated`")
+                        .with_code(code("duplicate-deprecated-replacement"))
+                        .with_primary_label(field.span, "keep only one `replacement` option"),
+                );
+                continue;
+            }
+            seen_replacement = true;
+            if self.module.expr_static_text(field.value).is_none() {
+                self.diagnostics.push(
+                    Diagnostic::error("`@deprecated` replacement must be a plain text literal")
+                        .with_code(code("invalid-deprecated-replacement"))
+                        .with_primary_label(field.span, "use a plain text literal"),
+                );
+            }
+        }
+    }
+
+    fn validate_mock_decorator(
+        &mut self,
+        item_id: ItemId,
+        has_test: bool,
+        span: SourceSpan,
+        mock: &crate::MockDecorator,
+        seen_imports: &mut HashSet<ImportId>,
+        typing: &mut GateTypeContext<'_>,
+    ) {
+        if !has_test {
+            self.diagnostics.push(
+                Diagnostic::error("`@mock` is only valid on `@test` values")
+                    .with_code(code("mock-outside-test"))
+                    .with_primary_label(span, "add `@test` to this declaration or remove `@mock`"),
+            );
+        }
+        if self.mode != ValidationMode::RequireResolvedNames {
+            return;
+        }
+
+        let Some(target_import) = self.mock_target_import(mock.target) else {
+            self.diagnostics.push(
+                Diagnostic::error("the first `@mock` argument must name an imported top-level function")
+                    .with_code(code("invalid-mock-target"))
+                    .with_primary_label(
+                        message_span(self.module, mock.target),
+                        "reference an imported function binding here",
+                    ),
+            );
+            return;
+        };
+        if !seen_imports.insert(target_import) {
+            self.diagnostics.push(
+                Diagnostic::error("duplicate `@mock` target on one test")
+                    .with_code(code("duplicate-mock-target"))
+                    .with_primary_label(
+                        message_span(self.module, mock.target),
+                        "mock each imported binding at most once per test",
+                    ),
+            );
+            return;
+        }
+
+        let Some(target_ty) = self.mock_target_type(target_import, typing) else {
+            self.diagnostics.push(
+                Diagnostic::error("`@mock` targets must be imported functions")
+                    .with_code(code("mock-non-function-target"))
+                    .with_primary_label(
+                        message_span(self.module, mock.target),
+                        "this imported binding is not callable",
+                    ),
+            );
+            return;
+        };
+
+        let Some(replacement_ty) = self.mock_replacement_type(mock.replacement, typing) else {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    "the second `@mock` argument must name a top-level replacement value or function",
+                )
+                .with_code(code("invalid-mock-replacement"))
+                .with_primary_label(
+                    message_span(self.module, mock.replacement),
+                    "reference a top-level replacement binding here",
+                ),
+            );
+            return;
+        };
+
+        if target_ty != replacement_ty {
+            self.diagnostics.push(
+                Diagnostic::error("`@mock` replacement type must exactly match the mocked import")
+                    .with_code(code("mock-type-mismatch"))
+                    .with_primary_label(
+                        message_span(self.module, mock.replacement),
+                        format!(
+                            "replacement has type `{replacement_ty}` but the mocked import has type `{target_ty}`"
+                        ),
+                    ),
+            );
+        }
+
+        let Some(test_ty) = typing.item_value_type(item_id) else {
+            return;
+        };
+        if !matches!(test_ty, GateType::Task { .. }) {
+            self.diagnostics.push(
+                Diagnostic::error("`@mock` can only decorate executable `@test` task values")
+                    .with_code(code("mock-non-task-test"))
+                    .with_primary_label(span, "make this test value a `Task ...`"),
+            );
+        }
+    }
+
+    fn item_has_test_decorator(&self, item: &Item) -> bool {
+        item.decorators().iter().any(|decorator_id| {
+            self.module
+                .decorators()
+                .get(*decorator_id)
+                .is_some_and(|decorator| matches!(decorator.payload, DecoratorPayload::Test(_)))
+        })
+    }
+
+    fn item_deprecation_notice(&self, item_id: ItemId) -> Option<DeprecationNotice> {
+        let item = self.module.items().get(item_id)?;
+        item.decorators().iter().find_map(|decorator_id| {
+            let decorator = self.module.decorators().get(*decorator_id)?;
+            let DecoratorPayload::Deprecated(deprecated) = &decorator.payload else {
+                return None;
+            };
+            Some(DeprecationNotice {
+                message: deprecated
+                    .message
+                    .and_then(|message| self.module.expr_static_text(message)),
+                replacement: deprecated.options.and_then(|options| {
+                    let ExprKind::Record(RecordExpr { fields }) =
+                        &self.module.exprs().get(options)?.kind
+                    else {
+                        return None;
+                    };
+                    fields
+                        .iter()
+                        .find(|field| field.label.text() == "replacement")
+                        .and_then(|field| self.module.expr_static_text(field.value))
+                }),
+            })
+        })
+    }
+
+    fn mock_target_import(&self, expr_id: ExprId) -> Option<ImportId> {
+        let ExprKind::Name(reference) = &self.module.exprs().get(expr_id)?.kind else {
+            return None;
+        };
+        let ResolutionState::Resolved(TermResolution::Import(import_id)) = reference.resolution else {
+            return None;
+        };
+        Some(import_id)
+    }
+
+    fn mock_replacement_type(
+        &mut self,
+        expr_id: ExprId,
+        typing: &mut GateTypeContext<'_>,
+    ) -> Option<GateType> {
+        let ExprKind::Name(reference) = &self.module.exprs().get(expr_id)?.kind else {
+            return None;
+        };
+        match reference.resolution {
+            ResolutionState::Resolved(TermResolution::Item(item_id)) => typing.item_value_type(item_id),
+            ResolutionState::Resolved(TermResolution::Import(import_id)) => {
+                typing.import_value_type(import_id)
+            }
+            _ => None,
+        }
+    }
+
+    fn mock_target_type(&self, import_id: ImportId, typing: &GateTypeContext<'_>) -> Option<GateType> {
+        self.module.imports()[import_id]
+            .callable_type
+            .as_ref()
+            .map(|ty| typing.lower_import_value_type(ty))
+    }
+
+    fn emit_item_deprecation_warning(&mut self, span: SourceSpan, item_id: ItemId) {
+        let Some(notice) = self.item_deprecation_notice(item_id) else {
+            return;
+        };
+        let name = item_name(self.module.items().get(item_id));
+        self.emit_deprecation_warning(span, name.as_deref().unwrap_or("item"), &notice);
+    }
+
+    fn emit_import_deprecation_warning(&mut self, span: SourceSpan, import_id: ImportId) {
+        let Some(import) = self.module.imports().get(import_id) else {
+            return;
+        };
+        let Some(notice) = import.deprecation.as_ref() else {
+            return;
+        };
+        self.emit_deprecation_warning(span, import.local_name.text(), notice);
+    }
+
+    fn emit_deprecation_warning(
+        &mut self,
+        span: SourceSpan,
+        name: &str,
+        notice: &DeprecationNotice,
+    ) {
+        let mut message = format!("`{name}` is deprecated");
+        if let Some(detail) = notice.message.as_deref()
+            && !detail.is_empty()
+        {
+            message.push_str(": ");
+            message.push_str(detail);
+        }
+        let mut diagnostic = Diagnostic::warning(message)
+            .with_code(code("deprecated-use"))
+            .with_primary_label(span, "this reference uses a deprecated declaration");
+        if let Some(replacement) = notice.replacement.as_deref()
+            && !replacement.is_empty()
+        {
+            diagnostic = diagnostic.with_note(format!("replacement: {replacement}"));
+        }
+        self.diagnostics.push(diagnostic);
     }
 
     fn validate_signal_cycles(&mut self) {
@@ -4249,6 +4682,31 @@ impl Validator<'_> {
                         self.validate_recurrence_expr_tree(options, None, None, &env, &mut typing);
                     }
                 }
+                DecoratorPayload::Test(_) | DecoratorPayload::Debug(_) => {}
+                DecoratorPayload::Deprecated(deprecated) => {
+                    let env = GateExprEnv::default();
+                    if let Some(message) = deprecated.message {
+                        self.validate_case_exhaustiveness_expr_tree(message, &env, &mut typing);
+                        self.validate_recurrence_expr_tree(
+                            message,
+                            None,
+                            None,
+                            &env,
+                            &mut typing,
+                        );
+                    }
+                    if let Some(options) = deprecated.options {
+                        self.validate_case_exhaustiveness_expr_tree(options, &env, &mut typing);
+                        self.validate_recurrence_expr_tree(options, None, None, &env, &mut typing);
+                    }
+                }
+                DecoratorPayload::Mock(mock) => {
+                    let env = GateExprEnv::default();
+                    for expr in [mock.target, mock.replacement] {
+                        self.validate_case_exhaustiveness_expr_tree(expr, &env, &mut typing);
+                        self.validate_recurrence_expr_tree(expr, None, None, &env, &mut typing);
+                    }
+                }
             }
         }
     }
@@ -7045,9 +7503,11 @@ impl Validator<'_> {
                 }
                 TermResolution::Item(item) => {
                     this.require_item(reference.span(), "term reference", "item", *item);
+                    this.emit_item_deprecation_warning(reference.span(), *item);
                 }
                 TermResolution::Import(import) => {
                     this.require_import(reference.span(), "term reference", "import", *import);
+                    this.emit_import_deprecation_warning(reference.span(), *import);
                 }
                 TermResolution::DomainMember(resolution) => {
                     this.require_domain_member_resolution(reference.span(), *resolution);
@@ -7291,6 +7751,7 @@ impl Validator<'_> {
             |this, resolution| match resolution {
                 TypeResolution::Item(item) => {
                     this.require_item(reference.span(), "type reference", "item", *item);
+                    this.emit_item_deprecation_warning(reference.span(), *item);
                 }
                 TypeResolution::TypeParameter(parameter) => {
                     this.require_type_parameter(
@@ -7302,6 +7763,7 @@ impl Validator<'_> {
                 }
                 TypeResolution::Import(import) => {
                     this.require_import(reference.span(), "type reference", "import", *import);
+                    this.emit_import_deprecation_warning(reference.span(), *import);
                 }
                 TypeResolution::Builtin(_) => {}
             },
@@ -7800,6 +8262,21 @@ fn item_type_name(item: &Item) -> String {
             item.provider.key().unwrap_or("<provider>").to_owned()
         }
         other => format!("{:?}", other.kind()),
+    }
+}
+
+fn item_name(item: Option<&Item>) -> Option<String> {
+    match item? {
+        Item::Type(item) => Some(item.name.text().to_owned()),
+        Item::Value(item) => Some(item.name.text().to_owned()),
+        Item::Function(item) => Some(item.name.text().to_owned()),
+        Item::Signal(item) => Some(item.name.text().to_owned()),
+        Item::Class(item) => Some(item.name.text().to_owned()),
+        Item::Domain(item) => Some(item.name.text().to_owned()),
+        Item::SourceProviderContract(item) => {
+            Some(item.provider.key().unwrap_or("<provider>").to_owned())
+        }
+        Item::Instance(_) | Item::Use(_) | Item::Export(_) => None,
     }
 }
 
@@ -14565,6 +15042,20 @@ pub(crate) fn walk_expr_tree(
     }
 }
 
+fn test_result_type_supported(ty: &GateType) -> bool {
+    matches!(
+        ty,
+        GateType::Primitive(BuiltinType::Unit)
+            | GateType::Primitive(BuiltinType::Bool)
+            | GateType::Result { .. }
+            | GateType::Validation { .. }
+    )
+}
+
+fn message_span(module: &Module, expr: ExprId) -> SourceSpan {
+    module.exprs().get(expr).map_or(SourceSpan::default(), |expr| expr.span)
+}
+
 #[derive(Clone, Copy, Debug)]
 enum KindBuildFrame {
     Enter(TypeId),
@@ -15109,6 +15600,8 @@ value resultLabel =
                 local_name: name(text),
                 resolution: ImportBindingResolution::Resolved,
                 metadata: ImportBindingMetadata::TypeConstructor { kind },
+                callable_type: None,
+                deprecation: None,
             })
             .expect("import allocation should fit");
         let path = NamePath::from_vec(vec![name(text)]).expect("single-segment path");

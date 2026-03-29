@@ -32,6 +32,7 @@ pub use hir_adapter::{
     HirRecurrenceNodeId, HirRuntimeAdapterError, HirRuntimeAdapterErrors, HirRuntimeAssembly,
     HirRuntimeAssemblyBuilder, HirRuntimeGatePlan, HirRuntimeInstantiationError, HirSignalBinding,
     HirSignalBindingKind, HirSourceBinding, HirTaskBinding, assemble_hir_runtime,
+    assemble_hir_runtime_with_items,
 };
 pub use providers::{
     MailboxPublishError, SourceProviderContext, SourceProviderExecutionError, SourceProviderManager,

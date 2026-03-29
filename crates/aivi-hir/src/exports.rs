@@ -1,7 +1,8 @@
 use crate::{
-    BuiltinTerm, ExportItem, ExportResolution, ImportBindingMetadata, ImportBundleKind,
-    ImportRecordField, ImportValueType, Item, ItemId, Module, ResolutionState, TypeId,
-    TypeItemBody, TypeKind, TypeReference, TypeResolution,
+    BuiltinTerm, DecoratorPayload, DeprecatedDecorator, DeprecationNotice, ExportItem,
+    ExportResolution, ImportBindingMetadata, ImportBundleKind, ImportRecordField, ImportValueType,
+    Item, ItemId, Module, RecordExpr, ResolutionState, TypeId, TypeItemBody, TypeKind,
+    TypeReference, TypeResolution,
 };
 
 /// The kind of an exported name.
@@ -23,6 +24,8 @@ pub struct ExportedName {
     pub name: String,
     pub kind: ExportedNameKind,
     pub metadata: ImportBindingMetadata,
+    pub callable_type: Option<ImportValueType>,
+    pub deprecation: Option<DeprecationNotice>,
 }
 
 /// The complete set of names exported from a module.
@@ -104,11 +107,15 @@ fn export_item_to_exported_name(module: &Module, export: &ExportItem) -> Option<
             name: exported_name,
             kind: ExportedNameKind::Type,
             metadata: ImportBindingMetadata::BuiltinType(builtin),
+            callable_type: None,
+            deprecation: None,
         }),
         ExportResolution::BuiltinTerm(builtin) => Some(ExportedName {
             name: exported_name,
             kind: ExportedNameKind::Value,
             metadata: ImportBindingMetadata::BuiltinTerm(builtin),
+            callable_type: None,
+            deprecation: None,
         }),
         ExportResolution::Item(item_id) => {
             explicit_item_exported_name(module, item_id, exported_name.as_str())
@@ -122,10 +129,14 @@ fn explicit_item_exported_name(
     exported_name: &str,
 ) -> Option<ExportedName> {
     let item = module.items().get(item_id)?;
+    if item_has_test_decorator(module, item) {
+        return None;
+    }
     let ambient = module
         .ambient_items()
         .iter()
         .any(|ambient_id| *ambient_id == item_id);
+    let deprecation = item_deprecation_notice(module, item);
     match item {
         Item::Type(item) => {
             if item.name.text() == exported_name {
@@ -140,6 +151,8 @@ fn explicit_item_exported_name(
                     name: exported_name.to_owned(),
                     kind: ExportedNameKind::Type,
                     metadata,
+                    callable_type: None,
+                    deprecation,
                 });
             }
 
@@ -154,6 +167,8 @@ fn explicit_item_exported_name(
                     kind: ExportedNameKind::Value,
                     metadata: builtin_term_metadata(exported_name)
                         .unwrap_or(ImportBindingMetadata::OpaqueValue),
+                    callable_type: None,
+                    deprecation,
                 })
         }
         Item::Class(item) => (item.name.text() == exported_name).then(|| ExportedName {
@@ -166,6 +181,8 @@ fn explicit_item_exported_name(
                     kind: aivi_typing::Kind::constructor(item.parameters.len()),
                 }
             },
+            callable_type: None,
+            deprecation,
         }),
         Item::Domain(item) => (item.name.text() == exported_name).then(|| ExportedName {
             name: exported_name.to_owned(),
@@ -177,21 +194,29 @@ fn explicit_item_exported_name(
                     kind: aivi_typing::Kind::constructor(item.parameters.len()),
                 }
             },
+            callable_type: None,
+            deprecation,
         }),
         Item::Value(item) => (item.name.text() == exported_name).then(|| ExportedName {
             name: exported_name.to_owned(),
             kind: ExportedNameKind::Value,
             metadata: exported_value_metadata(module, item.annotation),
+            callable_type: None,
+            deprecation,
         }),
         Item::Function(item) => (item.name.text() == exported_name).then(|| ExportedName {
             name: exported_name.to_owned(),
             kind: ExportedNameKind::Function,
             metadata: exported_value_metadata(module, item.annotation),
+            callable_type: exported_function_type(module, item),
+            deprecation,
         }),
         Item::Signal(item) => (item.name.text() == exported_name).then(|| ExportedName {
             name: exported_name.to_owned(),
             kind: ExportedNameKind::Signal,
             metadata: exported_value_metadata(module, item.annotation),
+            callable_type: None,
+            deprecation,
         }),
         Item::SourceProviderContract(_) | Item::Instance(_) | Item::Use(_) | Item::Export(_) => {
             None
@@ -200,6 +225,10 @@ fn explicit_item_exported_name(
 }
 
 fn item_to_exported_name(module: &Module, item: &Item) -> Option<ExportedName> {
+    if item_has_test_decorator(module, item) {
+        return None;
+    }
+    let deprecation = item_deprecation_notice(module, item);
     match item {
         Item::Type(item) => Some(ExportedName {
             name: item.name.text().to_owned(),
@@ -207,21 +236,29 @@ fn item_to_exported_name(module: &Module, item: &Item) -> Option<ExportedName> {
             metadata: ImportBindingMetadata::TypeConstructor {
                 kind: aivi_typing::Kind::constructor(item.parameters.len()),
             },
+            callable_type: None,
+            deprecation,
         }),
         Item::Value(item) => Some(ExportedName {
             name: item.name.text().to_owned(),
             kind: ExportedNameKind::Value,
             metadata: exported_value_metadata(module, item.annotation),
+            callable_type: None,
+            deprecation,
         }),
         Item::Function(item) => Some(ExportedName {
             name: item.name.text().to_owned(),
             kind: ExportedNameKind::Function,
             metadata: exported_value_metadata(module, item.annotation),
+            callable_type: exported_function_type(module, item),
+            deprecation,
         }),
         Item::Signal(item) => Some(ExportedName {
             name: item.name.text().to_owned(),
             kind: ExportedNameKind::Signal,
             metadata: exported_value_metadata(module, item.annotation),
+            callable_type: None,
+            deprecation,
         }),
         Item::Class(item) => Some(ExportedName {
             name: item.name.text().to_owned(),
@@ -229,6 +266,8 @@ fn item_to_exported_name(module: &Module, item: &Item) -> Option<ExportedName> {
             metadata: ImportBindingMetadata::TypeConstructor {
                 kind: aivi_typing::Kind::constructor(item.parameters.len()),
             },
+            callable_type: None,
+            deprecation,
         }),
         Item::Domain(item) => Some(ExportedName {
             name: item.name.text().to_owned(),
@@ -236,6 +275,8 @@ fn item_to_exported_name(module: &Module, item: &Item) -> Option<ExportedName> {
             metadata: ImportBindingMetadata::TypeConstructor {
                 kind: aivi_typing::Kind::constructor(item.parameters.len()),
             },
+            callable_type: None,
+            deprecation,
         }),
         Item::SourceProviderContract(_) | Item::Instance(_) | Item::Use(_) | Item::Export(_) => {
             None
@@ -248,6 +289,65 @@ fn exported_value_metadata(module: &Module, annotation: Option<TypeId>) -> Impor
         .and_then(|annotation| import_value_type(module, annotation))
         .map(|ty| ImportBindingMetadata::Value { ty })
         .unwrap_or(ImportBindingMetadata::OpaqueValue)
+}
+
+fn exported_function_type(module: &Module, item: &crate::FunctionItem) -> Option<ImportValueType> {
+    if !item.type_parameters.is_empty() || !item.context.is_empty() {
+        return None;
+    }
+    let Some(mut result) = item.annotation.and_then(|annotation| import_value_type(module, annotation))
+    else {
+        return None;
+    };
+    for parameter in item.parameters.iter().rev() {
+        let Some(parameter_ty) =
+            parameter.annotation.and_then(|annotation| import_value_type(module, annotation))
+        else {
+            return None;
+        };
+        result = ImportValueType::Arrow {
+            parameter: Box::new(parameter_ty),
+            result: Box::new(result),
+        };
+    }
+    Some(result)
+}
+
+fn item_has_test_decorator(module: &Module, item: &Item) -> bool {
+    item.decorators().iter().any(|decorator_id| {
+        module
+            .decorators()
+            .get(*decorator_id)
+            .is_some_and(|decorator| matches!(decorator.payload, DecoratorPayload::Test(_)))
+    })
+}
+
+fn item_deprecation_notice(module: &Module, item: &Item) -> Option<DeprecationNotice> {
+    item.decorators().iter().find_map(|decorator_id| {
+        let decorator = module.decorators().get(*decorator_id)?;
+        let DecoratorPayload::Deprecated(deprecated) = &decorator.payload else {
+            return None;
+        };
+        Some(deprecation_notice(module, deprecated))
+    })
+}
+
+fn deprecation_notice(module: &Module, deprecated: &DeprecatedDecorator) -> DeprecationNotice {
+    DeprecationNotice {
+        message: deprecated
+            .message
+            .and_then(|message| module.expr_static_text(message)),
+        replacement: deprecated.options.and_then(|options| {
+            let expr = module.exprs().get(options)?;
+            let crate::ExprKind::Record(RecordExpr { fields }) = &expr.kind else {
+                return None;
+            };
+            fields
+                .iter()
+                .find(|field| field.label.text() == "replacement")
+                .and_then(|field| module.expr_static_text(field.value))
+        }),
+    }
 }
 
 fn import_value_type(module: &Module, ty: TypeId) -> Option<ImportValueType> {

@@ -332,6 +332,7 @@ impl<'a> ProgramLowerer<'a> {
                             match &stage.kind {
                                 core::PipeStageKind::Transform { expr, .. }
                                 | core::PipeStageKind::Tap { expr } => work.push(*expr),
+                                core::PipeStageKind::Debug { .. } => {}
                                 core::PipeStageKind::Gate { predicate, .. } => {
                                     work.push(*predicate);
                                 }
@@ -1357,6 +1358,7 @@ impl<'a> ProgramLowerer<'a> {
                             | core::PipeStageKind::Tap { expr } => {
                                 work.push((*expr, SubjectKind::Inline));
                             }
+                            core::PipeStageKind::Debug { .. } => {}
                             core::PipeStageKind::Gate { predicate, .. } => {
                                 work.push((*predicate, SubjectKind::Inline));
                             }
@@ -1482,6 +1484,9 @@ impl<'a> ProgramLowerer<'a> {
                 mode: PipeTransformMode,
             },
             Tap,
+            Debug {
+                label: Box<str>,
+            },
             Gate {
                 emits_negative_update: bool,
             },
@@ -1500,6 +1505,7 @@ impl<'a> ProgramLowerer<'a> {
                     InlinePipeStageBuild::Transform { .. }
                     | InlinePipeStageBuild::Tap
                     | InlinePipeStageBuild::Gate { .. } => 1,
+                    InlinePipeStageBuild::Debug { .. } => 0,
                     InlinePipeStageBuild::Case { arms } => arms.len(),
                     InlinePipeStageBuild::TruthyFalsy { .. } => 2,
                 }
@@ -1845,6 +1851,11 @@ impl<'a> ProgramLowerer<'a> {
                                         });
                                         InlinePipeStageBuild::Tap
                                     }
+                                    core::PipeStageKind::Debug { label } => {
+                                        InlinePipeStageBuild::Debug {
+                                            label: label.clone(),
+                                        }
+                                    }
                                     core::PipeStageKind::Gate {
                                         predicate,
                                         emits_negative_update,
@@ -2158,6 +2169,9 @@ impl<'a> ProgramLowerer<'a> {
                                 InlinePipeStageBuild::Tap => {
                                     let expr = iter.next().expect("pipe stage child should exist");
                                     InlinePipeStageKind::Tap { expr }
+                                }
+                                InlinePipeStageBuild::Debug { label } => {
+                                    InlinePipeStageKind::Debug { label }
                                 }
                                 InlinePipeStageBuild::Gate {
                                     emits_negative_update,

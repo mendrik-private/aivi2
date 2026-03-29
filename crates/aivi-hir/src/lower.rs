@@ -15,14 +15,15 @@ use crate::{
     ImportBundleKind, ImportId, ImportModuleResolution, ImportValueType, InstanceItem,
     InstanceMember, IntegerLiteral, IntrinsicValue, Item, ItemHeader, ItemId, ItemKind,
     LiteralSuffixResolution, MapExpr, MapExprEntry, MarkupAttribute, MarkupAttributeValue,
-    MarkupElement, MarkupNode, MarkupNodeId, MarkupNodeKind, MatchControl, Module, Name, NamePath,
-    Pattern, PatternId, PatternKind, PipeExpr, PipeStage, PipeStageKind, ProjectionBase,
-    RecordExpr, RecordExprField, RecordFieldSurface, RecordPatternField, RecurrenceWakeupDecorator,
-    RecurrenceWakeupDecoratorKind, RegexLiteral, ResolutionState, ShowControl, SignalItem,
-    SourceDecorator, SourceProviderContractItem, SourceProviderRef, SuffixedIntegerLiteral,
-    TermReference, TermResolution, TextFragment, TextInterpolation, TextLiteral, TextSegment,
-    TypeField, TypeId, TypeItem, TypeItemBody, TypeKind, TypeNode, TypeParameter, TypeParameterId,
-    TypeReference, TypeResolution, TypeVariant, UnaryOperator, UseItem, ValueItem, WithControl,
+    MarkupElement, MarkupNode, MarkupNodeId, MarkupNodeKind, MatchControl, MockDecorator, Module,
+    Name, NamePath, Pattern, PatternId, PatternKind, PipeExpr, PipeStage, PipeStageKind,
+    ProjectionBase, RecordExpr, RecordExprField, RecordFieldSurface, RecordPatternField,
+    RecurrenceWakeupDecorator, RecurrenceWakeupDecoratorKind, RegexLiteral, ResolutionState,
+    ShowControl, SignalItem, SourceDecorator, SourceProviderContractItem, SourceProviderRef,
+    SuffixedIntegerLiteral, TermReference, TermResolution, TestDecorator, TextFragment,
+    TextInterpolation, TextLiteral, TextSegment, TypeField, TypeId, TypeItem, TypeItemBody,
+    TypeKind, TypeNode, TypeParameter, TypeParameterId, TypeReference, TypeResolution, TypeVariant,
+    UnaryOperator, UseItem, ValueItem, WithControl, DebugDecorator, DeprecatedDecorator,
 };
 
 pub struct LoweringResult {
@@ -1113,7 +1114,7 @@ impl<'a> Lowerer<'a> {
                     .as_ref()
                     .map(|alias| self.make_name(&alias.text, alias.span))
                     .unwrap_or_else(|| imported_name.clone());
-                let (resolution, metadata) =
+                let (resolution, metadata, callable_type, deprecation) =
                     self.resolve_import_binding(&module_name, &imported_name, &module_resolution);
                 self.alloc_import(ImportBinding {
                     span: import.path.span,
@@ -1121,6 +1122,8 @@ impl<'a> Lowerer<'a> {
                     local_name,
                     resolution,
                     metadata,
+                    callable_type,
+                    deprecation,
                 })
             })
             .collect::<Vec<_>>();
@@ -1136,6 +1139,8 @@ impl<'a> Lowerer<'a> {
                 local_name: self.make_name("invalid", item.base.span),
                 resolution: ImportBindingResolution::UnknownModule,
                 metadata: ImportBindingMetadata::Unknown,
+                callable_type: None,
+                deprecation: None,
             }));
         }
         let imports =
@@ -1180,38 +1185,54 @@ impl<'a> Lowerer<'a> {
         module_name: &str,
         imported_name: &Name,
         module_resolution: &ImportModuleResolution,
-    ) -> (ImportBindingResolution, ImportBindingMetadata) {
+    ) -> (
+        ImportBindingResolution,
+        ImportBindingMetadata,
+        Option<ImportValueType>,
+        Option<crate::DeprecationNotice>,
+    ) {
         match module_resolution {
             ImportModuleResolution::Resolved(exports) => {
                 match known_import_metadata(module_name, imported_name.text()) {
-                    Some(metadata) => (ImportBindingResolution::Resolved, metadata),
+                    Some(metadata) => (ImportBindingResolution::Resolved, metadata, None, None),
                     None => match exports.find(imported_name.text()) {
-                        Some(exported) => {
-                            (ImportBindingResolution::Resolved, exported.metadata.clone())
-                        }
+                        Some(exported) => (
+                            ImportBindingResolution::Resolved,
+                            exported.metadata.clone(),
+                            exported.callable_type.clone(),
+                            exported.deprecation.clone(),
+                        ),
                         None => (
                             ImportBindingResolution::MissingExport,
                             ImportBindingMetadata::Unknown,
+                            None,
+                            None,
                         ),
                     },
                 }
             }
             ImportModuleResolution::Missing => {
                 match known_import_metadata(module_name, imported_name.text()) {
-                    Some(metadata) => (ImportBindingResolution::Resolved, metadata),
+                    Some(metadata) => (ImportBindingResolution::Resolved, metadata, None, None),
                     None if is_known_module(module_name) => (
                         ImportBindingResolution::MissingExport,
                         ImportBindingMetadata::Unknown,
+                        None,
+                        None,
                     ),
                     None => (
                         ImportBindingResolution::UnknownModule,
                         ImportBindingMetadata::Unknown,
+                        None,
+                        None,
                     ),
                 }
             }
             ImportModuleResolution::Cycle(_) => (
                 ImportBindingResolution::Cycle,
                 ImportBindingMetadata::Unknown,
+                None,
+                None,
             ),
         }
     }
@@ -1304,6 +1325,113 @@ impl<'a> Lowerer<'a> {
                 );
             }
             self.lower_recurrence_wakeup_decorator_payload(decorator, kind)
+        } else if is_test_decorator(&name) {
+            if target != ItemKind::Value {
+                self.emit_error(
+                    decorator.span,
+                    "`@test` is only valid on top-level `val` declarations",
+                    code("invalid-test-target"),
+                );
+            }
+            let call = self.lower_call_like_decorator_payload(&decorator.payload);
+            if !call.arguments.is_empty() || call.options.is_some() {
+                self.emit_error(
+                    decorator.span,
+                    "`@test` does not accept arguments or `with { ... }` options",
+                    code("invalid-test-decorator"),
+                );
+                DecoratorPayload::Call(call)
+            } else {
+                DecoratorPayload::Test(TestDecorator)
+            }
+        } else if is_debug_decorator(&name) {
+            if !matches!(
+                target,
+                ItemKind::Value | ItemKind::Function | ItemKind::Signal
+            ) {
+                self.emit_error(
+                    decorator.span,
+                    "`@debug` is only valid on top-level `val`, `fun`, or `sig` declarations",
+                    code("invalid-debug-target"),
+                );
+            }
+            let call = self.lower_call_like_decorator_payload(&decorator.payload);
+            if !call.arguments.is_empty() || call.options.is_some() {
+                self.emit_error(
+                    decorator.span,
+                    "`@debug` does not accept arguments or `with { ... }` options",
+                    code("invalid-debug-decorator"),
+                );
+                DecoratorPayload::Call(call)
+            } else {
+                DecoratorPayload::Debug(DebugDecorator)
+            }
+        } else if is_deprecated_decorator(&name) {
+            if !matches!(
+                target,
+                ItemKind::Type
+                    | ItemKind::Value
+                    | ItemKind::Function
+                    | ItemKind::Signal
+                    | ItemKind::Class
+                    | ItemKind::Domain
+            ) {
+                self.emit_error(
+                    decorator.span,
+                    "`@deprecated` is only valid on top-level named type, value, function, signal, class, or domain declarations",
+                    code("invalid-deprecated-target"),
+                );
+            }
+            let call = self.lower_call_like_decorator_payload(&decorator.payload);
+            if call.arguments.len() > 1 {
+                self.emit_error(
+                    decorator.span,
+                    "`@deprecated` accepts at most one positional text message",
+                    code("invalid-deprecated-decorator"),
+                );
+                DecoratorPayload::Call(call)
+            } else {
+                DecoratorPayload::Deprecated(DeprecatedDecorator {
+                    message: call.arguments.first().copied(),
+                    options: call.options,
+                })
+            }
+        } else if is_mock_decorator(&name) {
+            if target != ItemKind::Value {
+                self.emit_error(
+                    decorator.span,
+                    "`@mock` is only valid on top-level `val` declarations",
+                    code("invalid-mock-target"),
+                );
+            }
+            let call = self.lower_call_like_decorator_payload(&decorator.payload);
+            let mock_arguments = if call.options.is_some() {
+                None
+            } else if call.arguments.len() == 2 {
+                Some((call.arguments[0], call.arguments[1]))
+            } else if call.arguments.len() == 1 {
+                match &self.module.exprs()[call.arguments[0]].kind {
+                    ExprKind::Tuple(arguments) if arguments.len() == 2 => {
+                        Some((*arguments.first(), *arguments.second()))
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            if let Some((target, replacement)) = mock_arguments {
+                DecoratorPayload::Mock(MockDecorator {
+                    target,
+                    replacement,
+                })
+            } else {
+                self.emit_error(
+                    decorator.span,
+                    "`@mock` must carry exactly two positional references and no `with { ... }` options",
+                    code("invalid-mock-decorator"),
+                );
+                DecoratorPayload::Call(call)
+            }
         } else {
             self.emit_error(
                 decorator.span,
@@ -4241,6 +4369,19 @@ impl<'a> Lowerer<'a> {
                     self.resolve_expr(options, namespaces, &env);
                 }
             }
+            DecoratorPayload::Test(_) | DecoratorPayload::Debug(_) => {}
+            DecoratorPayload::Deprecated(deprecated) => {
+                if let Some(message) = deprecated.message {
+                    self.resolve_expr(message, namespaces, &env);
+                }
+                if let Some(options) = deprecated.options {
+                    self.resolve_expr(options, namespaces, &env);
+                }
+            }
+            DecoratorPayload::Mock(mock) => {
+                self.resolve_expr(mock.target, namespaces, &env);
+                self.resolve_expr(mock.replacement, namespaces, &env);
+            }
         }
         *self
             .module
@@ -5592,6 +5733,22 @@ fn lookup_item<T: Copy>(map: &HashMap<String, Vec<NamedSite<T>>>, name: &str) ->
 
 fn is_source_decorator(path: &NamePath) -> bool {
     path.segments().len() == 1 && path.segments().first().text() == "source"
+}
+
+fn is_test_decorator(path: &NamePath) -> bool {
+    path.segments().len() == 1 && path.segments().first().text() == "test"
+}
+
+fn is_debug_decorator(path: &NamePath) -> bool {
+    path.segments().len() == 1 && path.segments().first().text() == "debug"
+}
+
+fn is_deprecated_decorator(path: &NamePath) -> bool {
+    path.segments().len() == 1 && path.segments().first().text() == "deprecated"
+}
+
+fn is_mock_decorator(path: &NamePath) -> bool {
+    path.segments().len() == 1 && path.segments().first().text() == "mock"
 }
 
 fn recurrence_wakeup_decorator_kind(path: &NamePath) -> Option<RecurrenceWakeupDecoratorKind> {

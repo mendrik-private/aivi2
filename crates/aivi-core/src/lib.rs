@@ -15,6 +15,8 @@
 //! can already justify today and rejects blocked handoffs explicitly instead of guessing missing
 //! core semantics.
 
+use std::collections::HashSet;
+
 pub mod arena;
 pub mod expr;
 pub mod ids;
@@ -35,7 +37,8 @@ pub use expr::{
 pub use ids::{DecodeProgramId, DecodeStepId, ExprId, ItemId, PipeId, SourceId, StageId};
 pub use lower::{
     LoweredRuntimeFragment, LoweringError, LoweringErrors, RuntimeFragmentSpec, lower_module,
-    lower_runtime_fragment, lower_runtime_module,
+    lower_module_with_items, lower_runtime_fragment, lower_runtime_module,
+    lower_runtime_module_with_items,
 };
 pub use module::{
     DecodeField, DecodeProgram, DecodeStep, DecodeVariant, DomainDecodeSurface,
@@ -46,3 +49,5 @@ pub use module::{
 };
 pub use ty::{RecordField, Type};
 pub use validate::{ValidationError, ValidationErrors, validate_module};
+
+pub type IncludedItems = HashSet<aivi_hir::ItemId>;

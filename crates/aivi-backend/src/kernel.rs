@@ -562,6 +562,9 @@ pub enum InlinePipeStageKind {
     Tap {
         expr: KernelExprId,
     },
+    Debug {
+        label: Box<str>,
+    },
     Gate {
         predicate: KernelExprId,
         emits_negative_update: bool,

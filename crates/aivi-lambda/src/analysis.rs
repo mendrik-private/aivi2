@@ -141,6 +141,7 @@ pub(crate) fn capture_free_bindings(
                         | PipeStageKind::Gate {
                             predicate: expr, ..
                         } => walker.push_frame((*expr, scope.clone())),
+                        PipeStageKind::Debug { .. } => {}
                         PipeStageKind::Case { arms } => {
                             for arm in arms.iter().rev() {
                                 let mut arm_scope = scope.clone();

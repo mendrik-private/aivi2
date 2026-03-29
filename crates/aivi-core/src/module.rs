@@ -825,6 +825,9 @@ fn format_expr(module: &Module, expr_id: ExprId, f: &mut fmt::Formatter<'_>) -> 
                         f.write_str(" | ")?;
                         format_expr(module, *expr, f)?;
                     }
+                    crate::expr::PipeStageKind::Debug { label } => {
+                        write!(f, " |debug[{label}]")?;
+                    }
                     crate::expr::PipeStageKind::Gate {
                         predicate,
                         emits_negative_update,

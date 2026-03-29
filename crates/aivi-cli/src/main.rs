@@ -28,8 +28,9 @@ use aivi_backend::{
 };
 use aivi_base::{Diagnostic, FileId, Severity, SourceDatabase, SourceSpan};
 use aivi_core::{
-    RuntimeFragmentSpec, lower_module as lower_core_module, lower_runtime_fragment,
-    lower_runtime_module, validate_module as validate_core_module,
+    IncludedItems, RuntimeFragmentSpec, lower_module_with_items as lower_core_module_with_items,
+    lower_runtime_fragment, lower_runtime_module_with_items,
+    validate_module as validate_core_module,
 };
 use aivi_gtk::{
     GtkBridgeGraph, GtkBridgeNodeKind, GtkBridgeNodeRef, GtkChildGroup, GtkCollectionKey,
@@ -39,9 +40,10 @@ use aivi_gtk::{
     lower_widget_bridge,
 };
 use aivi_hir::{
-    BuiltinTerm, BuiltinType, ExprId as HirExprId, ExprKind, GeneralExprParameter, Item,
-    Module as HirModule, PatternId as HirPatternId, PatternKind, TermResolution, TypeKind,
-    TypeResolution, ValidationMode, ValueItem, collect_markup_runtime_expr_sites,
+    BuiltinTerm, BuiltinType, DecoratorPayload, ExprId as HirExprId, ExprKind,
+    GeneralExprParameter, Item, ItemId as HirItemId, Module as HirModule,
+    PatternId as HirPatternId, PatternKind, TermResolution, TypeKind, TypeResolution,
+    ValidationMode, ValueItem, collect_markup_runtime_expr_sites,
     elaborate_runtime_expr_with_env,
 };
 use aivi_lambda::{lower_module as lower_lambda_module, validate_module as validate_lambda_module};
@@ -52,7 +54,7 @@ use aivi_query::{
 use aivi_runtime::{
     BackendLinkedRuntime, GlibLinkedRuntimeDriver, HirRuntimeAssembly,
     InputHandle as RuntimeInputHandle, Publication, SourceProviderContext, SourceProviderManager,
-    assemble_hir_runtime, link_backend_runtime,
+    assemble_hir_runtime_with_items, link_backend_runtime,
 };
 use aivi_syntax::{Formatter, ItemKind, TokenKind, lex_module, parse_module};
 use gtk::{glib, prelude::*};
@@ -94,6 +96,10 @@ fn run() -> Result<ExitCode, String> {
 
     if first == OsString::from("execute") {
         return run_execute(args);
+    }
+
+    if first == OsString::from("test") {
+        return run_test(args);
     }
 
     if first == OsString::from("lex") {
@@ -319,6 +325,20 @@ fn run_execute(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Str
     }
 
     execute_file(&path, &program_args)
+}
+
+fn run_test(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
+    let path = args
+        .next()
+        .map(PathBuf::from)
+        .ok_or_else(|| "expected a path argument after `test`".to_owned())?;
+    if let Some(argument) = args.next() {
+        return Err(format!(
+            "unexpected test argument `{}`",
+            argument.to_string_lossy()
+        ));
+    }
+    test_file(&path)
 }
 
 fn validate_module_path(path: &[&str]) -> Result<(), String> {
@@ -792,11 +812,17 @@ fn run_markup_file_with_launch_config(
     run_session::launch_run_with_config(path, artifact, launch_config)
 }
 
+#[derive(Debug)]
 struct ExecuteArtifact {
-    main_owner: aivi_hir::ItemId,
+    task_owner: HirItemId,
     runtime_assembly: HirRuntimeAssembly,
     core: aivi_core::Module,
     backend: Arc<BackendProgram>,
+}
+
+struct TestTaskOutcome {
+    passed: bool,
+    detail: Option<String>,
 }
 
 fn execute_file(path: &Path, program_args: &[String]) -> Result<ExitCode, String> {
@@ -804,6 +830,119 @@ fn execute_file(path: &Path, program_args: &[String]) -> Result<ExitCode, String
     let mut stdout = io::stdout().lock();
     let mut stderr = io::stderr().lock();
     execute_file_with_context(path, context, &mut stdout, &mut stderr)
+}
+
+fn test_file(path: &Path) -> Result<ExitCode, String> {
+    let context = current_execute_source_context(&[])?;
+    let mut stdout = io::stdout().lock();
+    let mut stderr = io::stderr().lock();
+    test_file_with_context(path, context, &mut stdout, &mut stderr)
+}
+
+fn test_file_with_context(
+    path: &Path,
+    context: SourceProviderContext,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+) -> Result<ExitCode, String> {
+    require_file_exists(path)?;
+    let snapshot = WorkspaceHirSnapshot::load(path)?;
+    let syntax_failed = workspace_syntax_failed(&snapshot, |sources, diagnostics| {
+        print_diagnostics(sources, diagnostics.iter())
+    });
+    if syntax_failed {
+        return Ok(ExitCode::FAILURE);
+    }
+
+    let (hir_lowering_failed, hir_validation_failed) = workspace_hir_failed(
+        &snapshot,
+        |sources, diagnostics| print_diagnostics(sources, diagnostics.iter()),
+        |sources, diagnostics| print_diagnostics(sources, diagnostics.iter()),
+    );
+    if hir_lowering_failed || hir_validation_failed {
+        return Ok(ExitCode::FAILURE);
+    }
+
+    let tests = discover_workspace_tests(&snapshot);
+    if tests.is_empty() {
+        write_output_line(stderr, "no `@test` values found in the loaded workspace")?;
+        return Ok(ExitCode::FAILURE);
+    }
+
+    let mut passed = 0usize;
+    let mut failed = 0usize;
+
+    for test in tests {
+        let hir = query_hir_module(&snapshot.frontend.db, test.file);
+        let module = hir.module();
+        let artifact = match prepare_test_artifact(module, test.owner) {
+            Ok(artifact) => artifact,
+            Err(message) => {
+                failed += 1;
+                write_output_line(stderr, &format!("fail {}: {message}", test.location))?;
+                continue;
+            }
+        };
+        let value = match evaluate_task_owner_value(
+            path,
+            artifact,
+            context.clone(),
+            "`aivi test`",
+            &format!("test `{}`", test.name),
+        ) {
+            Ok(value) => value.into_runtime(),
+            Err(message) => {
+                failed += 1;
+                write_output_line(stderr, &format!("fail {}: {message}", test.location))?;
+                continue;
+            }
+        };
+        match execute_test_task_value(value, stdout, stderr) {
+            Ok(TestTaskOutcome {
+                passed: true,
+                detail,
+            }) => {
+                passed += 1;
+                match detail {
+                    Some(detail) => {
+                        write_output_line(stdout, &format!("ok   {}: {detail}", test.location))?
+                    }
+                    None => write_output_line(stdout, &format!("ok   {}", test.location))?,
+                }
+            }
+            Ok(TestTaskOutcome {
+                passed: false,
+                detail,
+            }) => {
+                failed += 1;
+                match detail {
+                    Some(detail) => {
+                        write_output_line(stderr, &format!("fail {}: {detail}", test.location))?
+                    }
+                    None => write_output_line(stderr, &format!("fail {}", test.location))?,
+                }
+            }
+            Err(message) => {
+                failed += 1;
+                write_output_line(stderr, &format!("fail {}: {message}", test.location))?;
+            }
+        }
+    }
+
+    let total = passed + failed;
+    if failed == 0 {
+        write_output_line(
+            stdout,
+            &format!("test result: ok. {passed} passed; 0 failed; {total} total"),
+        )?;
+        Ok(ExitCode::SUCCESS)
+    } else {
+        write_output_line(
+            stderr,
+            &format!("test result: FAILED. {passed} passed; {failed} failed; {total} total"),
+        )?;
+        Ok(ExitCode::FAILURE)
+    }
 }
 
 fn current_execute_source_context(
@@ -825,6 +964,71 @@ fn current_execute_source_context(
         cwd,
         env_vars,
     ))
+}
+
+fn item_is_test(module: &HirModule, item_id: HirItemId) -> bool {
+    module.items().get(item_id).is_some_and(|item| {
+        item.decorators().iter().any(|decorator_id| {
+            module
+                .decorators()
+                .get(*decorator_id)
+                .is_some_and(|decorator| matches!(decorator.payload, DecoratorPayload::Test(_)))
+        })
+    })
+}
+
+fn production_item_ids(module: &HirModule) -> IncludedItems {
+    module
+        .items()
+        .iter()
+        .filter_map(|(item_id, _)| (!item_is_test(module, item_id)).then_some(item_id))
+        .collect()
+}
+
+fn selected_test_item_ids(module: &HirModule, test_item: HirItemId) -> IncludedItems {
+    let mut included = production_item_ids(module);
+    included.insert(test_item);
+    included
+}
+
+#[derive(Clone)]
+struct DiscoveredWorkspaceTest {
+    file: QuerySourceFile,
+    owner: HirItemId,
+    name: Box<str>,
+    location: String,
+}
+
+fn discover_workspace_tests(snapshot: &WorkspaceHirSnapshot) -> Vec<DiscoveredWorkspaceTest> {
+    let mut tests = Vec::new();
+    for file in &snapshot.files {
+        let hir = query_hir_module(&snapshot.frontend.db, *file);
+        let module = hir.module();
+        for (item_id, item) in module.items().iter() {
+            let Item::Value(value) = item else {
+                continue;
+            };
+            if !item_is_test(module, item_id) {
+                continue;
+            }
+            tests.push(DiscoveredWorkspaceTest {
+                file: *file,
+                owner: item_id,
+                name: value.name.text().into(),
+                location: format!(
+                    "{}::{}",
+                    source_location(&snapshot.sources, value.header.span),
+                    value.name.text()
+                ),
+            });
+        }
+    }
+    tests.sort_by(|left, right| {
+        left.location
+            .cmp(&right.location)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    tests
 }
 
 fn execute_file_with_context(
@@ -874,8 +1078,9 @@ fn prepare_execute_artifact(module: &HirModule) -> Result<ExecuteArtifact, Strin
             main.name.text()
         )
     })?;
-    let lowered = lower_execute_backend_stack(module)?;
-    let runtime_assembly = assemble_hir_runtime(module).map_err(|errors| {
+    let included_items = production_item_ids(module);
+    let lowered = lower_runtime_backend_stack_with_items(module, &included_items, "`aivi execute`")?;
+    let runtime_assembly = assemble_hir_runtime_with_items(module, &included_items).map_err(|errors| {
         let mut rendered = String::from("failed to assemble runtime plans for `aivi execute`:\n");
         for error in errors.errors() {
             rendered.push_str("- ");
@@ -890,7 +1095,31 @@ fn prepare_execute_artifact(module: &HirModule) -> Result<ExecuteArtifact, Strin
         );
     }
     Ok(ExecuteArtifact {
-        main_owner,
+        task_owner: main_owner,
+        runtime_assembly,
+        core: lowered.core,
+        backend: lowered.backend,
+    })
+}
+
+fn prepare_test_artifact(module: &HirModule, test_owner: HirItemId) -> Result<ExecuteArtifact, String> {
+    let included_items = selected_test_item_ids(module, test_owner);
+    let lowered = lower_runtime_backend_stack_with_items(module, &included_items, "`aivi test`")?;
+    let runtime_assembly =
+        assemble_hir_runtime_with_items(module, &included_items).map_err(|errors| {
+            let mut rendered = String::from("failed to assemble runtime plans for `aivi test`:\n");
+            for error in errors.errors() {
+                rendered.push_str("- ");
+                rendered.push_str(&error.to_string());
+                rendered.push('\n');
+            }
+            rendered
+        })?;
+    if runtime_assembly.task_by_owner(test_owner).is_none() {
+        return Err("`aivi test` requires every `@test` value to be annotated as `Task ...`".to_owned());
+    }
+    Ok(ExecuteArtifact {
+        task_owner: test_owner,
         runtime_assembly,
         core: lowered.core,
         backend: lowered.backend,
@@ -900,7 +1129,10 @@ fn prepare_execute_artifact(module: &HirModule) -> Result<ExecuteArtifact, Strin
 fn select_execute_main<'a>(module: &'a HirModule) -> Result<&'a ValueItem, String> {
     let mut found_value = None;
     let mut found_non_value_kind = None;
-    for (_, item) in module.items().iter() {
+    for (item_id, item) in module.items().iter() {
+        if item_is_test(module, item_id) {
+            continue;
+        }
         match item {
             Item::Value(value) if value.name.text() == "main" => {
                 found_value = Some(value);
@@ -937,15 +1169,26 @@ fn launch_execute(
     stdout: &mut impl Write,
     stderr: &mut impl Write,
 ) -> Result<(), String> {
+    let value = evaluate_task_owner_value(path, artifact, context, "`aivi execute`", "`main`")?;
+    execute_main_task_value(value.into_runtime(), stdout, stderr)
+}
+
+fn evaluate_task_owner_value(
+    path: &Path,
+    artifact: ExecuteArtifact,
+    context: SourceProviderContext,
+    command_name: &str,
+    entry_name: &str,
+) -> Result<DetachedRuntimeValue, String> {
     let ExecuteArtifact {
-        main_owner,
+        task_owner,
         runtime_assembly,
         core,
         backend,
     } = artifact;
     let mut linked = link_backend_runtime(runtime_assembly, &core, backend).map_err(|errors| {
         let mut rendered = format!(
-            "failed to link backend runtime for `aivi execute` in {}:\n",
+            "failed to link backend runtime for {command_name} in {}:\n",
             path.display()
         );
         for error in errors.errors() {
@@ -957,15 +1200,12 @@ fn launch_execute(
     })?;
     let mut providers = SourceProviderManager::with_context(context);
     settle_execute_sources(&mut linked, &mut providers)?;
-    let value = linked
-        .evaluate_task_value_by_owner(main_owner)
-        .map_err(|error| {
-            format!(
-                "failed to evaluate `main` for `aivi execute` in {}: {error}",
-                path.display()
-            )
-        })?;
-    execute_main_task_value(value.into_runtime(), stdout, stderr)
+    linked.evaluate_task_value_by_owner(task_owner).map_err(|error| {
+        format!(
+            "failed to evaluate {entry_name} for {command_name} in {}: {error}",
+            path.display()
+        )
+    })
 }
 
 fn settle_execute_sources(
@@ -1003,6 +1243,60 @@ fn execute_main_task_value(
         write_output_line(stdout, &result.to_string())?;
     }
     Ok(())
+}
+
+fn execute_test_task_value(
+    value: RuntimeValue,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+) -> Result<TestTaskOutcome, String> {
+    let RuntimeValue::Task(plan) = value else {
+        return Err(format!(
+            "`aivi test` expected each `@test` value to evaluate to a task plan, found `{value}`"
+        ));
+    };
+    let result = execute_runtime_task_plan(plan, stdout, stderr)?;
+    Ok(match result {
+        RuntimeValue::Unit => TestTaskOutcome {
+            passed: true,
+            detail: None,
+        },
+        RuntimeValue::Bool(true) => TestTaskOutcome {
+            passed: true,
+            detail: None,
+        },
+        RuntimeValue::Bool(false) => TestTaskOutcome {
+            passed: false,
+            detail: Some("returned false".to_owned()),
+        },
+        RuntimeValue::ResultOk(value) => {
+            let detail = (*value != RuntimeValue::Unit).then(|| value.to_string());
+            TestTaskOutcome {
+                passed: true,
+                detail,
+            }
+        }
+        RuntimeValue::ResultErr(error) => TestTaskOutcome {
+            passed: false,
+            detail: Some(error.to_string()),
+        },
+        RuntimeValue::ValidationValid(value) => {
+            let detail = (*value != RuntimeValue::Unit).then(|| value.to_string());
+            TestTaskOutcome {
+                passed: true,
+                detail,
+            }
+        }
+        RuntimeValue::ValidationInvalid(error) => TestTaskOutcome {
+            passed: false,
+            detail: Some(error.to_string()),
+        },
+        other => {
+            return Err(format!(
+                "`aivi test` only supports task results of `Unit`, `Bool`, `Result`, or `Validation`; found `{other}`"
+            ));
+        }
+    })
 }
 
 fn execute_runtime_task_plan(
@@ -1212,6 +1506,7 @@ fn prepare_run_artifact(
     module: &HirModule,
     requested_view: Option<&str>,
 ) -> Result<RunArtifact, String> {
+    let included_items = production_item_ids(module);
     let view = select_run_view(module, requested_view)?;
     let view_owner = find_value_owner(module, view).ok_or_else(|| {
         format!(
@@ -1238,8 +1533,8 @@ fn prepare_run_artifact(
         )
     })?;
     validate_run_plan(sources, &bridge)?;
-    let lowered = lower_run_backend_stack(module)?;
-    let runtime_assembly = assemble_hir_runtime(module).map_err(|errors| {
+    let lowered = lower_runtime_backend_stack_with_items(module, &included_items, "`aivi run`")?;
+    let runtime_assembly = assemble_hir_runtime_with_items(module, &included_items).map_err(|errors| {
         let mut rendered = String::from("failed to assemble runtime plans for `aivi run`:\n");
         for error in errors.errors() {
             rendered.push_str("- ");
@@ -1279,7 +1574,10 @@ fn select_run_view<'a>(
 ) -> Result<&'a ValueItem, String> {
     let mut markup_values = Vec::new();
     let mut all_values = Vec::new();
-    for (_, item) in module.items().iter() {
+    for (item_id, item) in module.items().iter() {
+        if item_is_test(module, item_id) {
+            continue;
+        }
         let Item::Value(value) = item else {
             continue;
         };
@@ -1611,19 +1909,12 @@ struct LoweredRunBackendStack {
     backend: Arc<BackendProgram>,
 }
 
-fn lower_run_backend_stack(module: &HirModule) -> Result<LoweredRunBackendStack, String> {
-    lower_runtime_backend_stack(module, "`aivi run`")
-}
-
-fn lower_execute_backend_stack(module: &HirModule) -> Result<LoweredRunBackendStack, String> {
-    lower_runtime_backend_stack(module, "`aivi execute`")
-}
-
-fn lower_runtime_backend_stack(
+fn lower_runtime_backend_stack_with_items(
     module: &HirModule,
+    included_items: &IncludedItems,
     command_name: &str,
 ) -> Result<LoweredRunBackendStack, String> {
-    let core = lower_runtime_module(module).map_err(|errors| {
+    let core = lower_runtime_module_with_items(module, included_items).map_err(|errors| {
         let mut rendered = format!("failed to lower {command_name} module into typed core:\n");
         for error in errors.errors() {
             rendered.push_str("- ");
@@ -2921,7 +3212,9 @@ fn compile_file(path: &Path, output: Option<&Path>) -> Result<ExitCode, String> 
     let parsed = snapshot.entry_parsed();
     let lowered = snapshot.entry_hir();
     let hir_module = lowered.module();
-    let core = match lower_core_module(hir_module) {
+    let production_items = production_item_ids(hir_module);
+    let excluded_test_items = hir_module.items().iter().count() - production_items.len();
+    let core = match lower_core_module_with_items(hir_module, &production_items) {
         Ok(core) => core,
         Err(errors) => {
             print_stage_errors(CompileStage::TypedCoreLowering, errors.errors());
@@ -2984,9 +3277,11 @@ fn compile_file(path: &Path, output: Option<&Path>) -> Result<ExitCode, String> 
     );
     let hir_item_count = hir_module.items().iter().count();
     println!(
-        "  HIR: ok ({} item{})",
+        "  HIR: ok ({} item{}, {} `@test` item{} excluded from production lowering)",
         hir_item_count,
-        plural_suffix(hir_item_count)
+        plural_suffix(hir_item_count),
+        excluded_test_items,
+        plural_suffix(excluded_test_items)
     );
     let core_item_count = core.items().iter().count();
     println!(
@@ -3520,10 +3815,10 @@ fn run_lsp(_args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
 
 fn print_usage() {
     eprintln!(
-        "usage:\n  aivi <path>\n  aivi check <path>\n  aivi compile <path> [-o <object>]\n  aivi build <path> -o <bundle> [--view <name>]\n  aivi run [<path>] [--path <path>] [--view <name>]\n  aivi mcp [--path <path>] [--view <name>]\n  aivi execute <path> [-- args...]\n  aivi lex <path>\n  aivi fmt <path>\n  aivi fmt --stdin\n  aivi fmt --check [path...]\n  aivi manual-snippets [--root <manual-dir>] [--todo <report.json>] [--write]\n  aivi lsp"
+        "usage:\n  aivi <path>\n  aivi check <path>\n  aivi compile <path> [-o <object>]\n  aivi build <path> -o <bundle> [--view <name>]\n  aivi run [<path>] [--path <path>] [--view <name>]\n  aivi mcp [--path <path>] [--view <name>]\n  aivi execute <path> [-- args...]\n  aivi test <path>\n  aivi lex <path>\n  aivi fmt <path>\n  aivi fmt --stdin\n  aivi fmt --check [path...]\n  aivi manual-snippets [--root <manual-dir>] [--todo <report.json>] [--write]\n  aivi lsp"
     );
     eprintln!(
-        "commands:\n  check            Lex, parse, lower, and validate a module through HIR\n  compile          Lower through typed core, typed lambda, backend, and Cranelift codegen\n  build            Package a runnable bundle directory around the live GTK/runtime path\n  run              Launch the current live GTK runtime path (implicit `<workspace>/main.aivi` when no path is given)\n  mcp              Start the stdio MCP server for launching and inspecting the current app\n  execute          Evaluate a top-level `value main : Task ...` without GTK\n  lex              Dump the lossless token stream\n  fmt              Canonically format the supported surface subset\n  manual-snippets  Scan fenced ```aivi blocks in markdown, format them, and emit a TODO report\n  lsp              Start the language server"
+        "commands:\n  check            Lex, parse, lower, and validate a module through HIR\n  compile          Lower through typed core, typed lambda, backend, and Cranelift codegen\n  build            Package a runnable bundle directory around the live GTK/runtime path\n  run              Launch the current live GTK runtime path (implicit `<workspace>/main.aivi` when no path is given)\n  mcp              Start the stdio MCP server for launching and inspecting the current app\n  execute          Evaluate a top-level `value main : Task ...` without GTK\n  test             Discover and execute workspace `@test value ... : Task ...` declarations\n  lex              Dump the lossless token stream\n  fmt              Canonically format the supported surface subset\n  manual-snippets  Scan fenced ```aivi blocks in markdown, format them, and emit a TODO report\n  lsp              Start the language server"
     );
     eprintln!(
         "milestone-2 surface items: {:?}",
@@ -3565,7 +3860,8 @@ mod tests {
     use super::{
         HydratedRunNode, RunHydrationStaticState, WorkspaceHirSnapshot, check_file,
         execute_file_with_context, execute_runtime_task_plan, plan_run_hydration,
-        prepare_run_artifact, run_hydration_globals_ready,
+        prepare_execute_artifact, prepare_run_artifact, run_hydration_globals_ready,
+        test_file_with_context,
     };
     use aivi_backend::{DetachedRuntimeValue, RuntimeTaskPlan, RuntimeValue};
     use aivi_base::SourceDatabase;
@@ -3775,6 +4071,18 @@ mod tests {
         let mut stderr = Vec::new();
         let code = execute_file_with_context(path, context, &mut stdout, &mut stderr)
             .expect("execute should return an exit code");
+        (
+            code,
+            String::from_utf8(stdout).expect("stdout should stay UTF-8 in tests"),
+            String::from_utf8(stderr).expect("stderr should stay UTF-8 in tests"),
+        )
+    }
+
+    fn test_workspace(path: &Path, context: SourceProviderContext) -> (ExitCode, String, String) {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = test_file_with_context(path, context, &mut stdout, &mut stderr)
+            .expect("test should return an exit code");
         (
             code,
             String::from_utf8(stdout).expect("stdout should stay UTF-8 in tests"),
@@ -4556,6 +4864,100 @@ value second =
         )
         .expect_err("multiple unnamed markup views should require `--view`");
         assert!(error.contains("--view <name>"));
+    }
+
+    #[test]
+    fn test_command_discovers_workspace_tests_and_applies_mock_overrides() {
+        let workspace = TempDir::new("workspace-tests");
+        let entry = workspace.write(
+            "main.aivi",
+            r#"
+use util (
+    probe
+)
+use aivi.fs (
+    exists
+)
+
+@source process.cwd
+signal cwd : Signal Text
+
+fun mockedProbe:Task Text Bool path:Text =>
+    exists "{cwd}/flag.txt"
+
+@test
+@mock(probe, mockedProbe)
+value mocked_exists : Task Text Bool =
+    probe "missing.txt"
+"#,
+        );
+        workspace.write(
+            "util.aivi",
+            r#"
+use aivi.fs (
+    exists
+)
+
+@source process.cwd
+signal cwd : Signal Text
+
+fun probe:Task Text Bool path:Text =>
+    exists path
+
+@test
+value service_smoke : Task Text Bool =
+    exists "{cwd}/flag.txt"
+"#,
+        );
+        fs::write(workspace.path().join("flag.txt"), "ok").expect("test fixture should be writable");
+
+        let (code, stdout, stderr) = test_workspace(
+            &entry,
+            SourceProviderContext::new(Vec::new(), workspace.path().to_path_buf(), BTreeMap::new()),
+        );
+
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert!(stderr.is_empty(), "stderr should stay empty, found {stderr:?}");
+        assert!(stdout.contains("ok   "));
+        assert!(stdout.contains("util.aivi"));
+        assert!(stdout.contains("mocked_exists"));
+        assert!(stdout.contains("service_smoke"));
+        assert!(stdout.contains("test result: ok. 2 passed; 0 failed; 2 total"));
+    }
+
+    #[test]
+    fn production_entrypoint_selection_ignores_test_declarations() {
+        let execute_workspace = TempDir::new("execute-test-entry");
+        let execute_entry = execute_workspace.write(
+            "main.aivi",
+            r#"
+use aivi.stdio (
+    stderrWrite
+)
+
+@test
+value main : Task Text Unit =
+    stderrWrite "hidden"
+"#,
+        );
+        let execute_snapshot =
+            WorkspaceHirSnapshot::load(&execute_entry).expect("workspace should load");
+        let execute_lowered = execute_snapshot.entry_hir();
+        let execute_error = prepare_execute_artifact(execute_lowered.module())
+            .expect_err("`aivi execute` should ignore `@test main`");
+        assert!(execute_error.contains("no top-level `value main` found"));
+
+        let run_error = prepare_run_from_text(
+            "run-test-view.aivi",
+            r#"
+@test
+value view =
+    <Window title="Hidden" />
+"#,
+            None,
+        )
+        .expect_err("`aivi run` should ignore `@test view`");
+        assert!(run_error.contains("no markup view found"));
     }
 
     #[test]
