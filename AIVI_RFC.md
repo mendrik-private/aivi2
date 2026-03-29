@@ -1180,19 +1180,19 @@ Structural patches update immutable values with explicit selector paths.
 
 ```aivi
 updated = target <| {
-    .profile.name: "Grace"
-    .items[.active].price: 3
+    profile.name: "Grace"
+    items[.active].price: 3
 }
 
 promote : User -> User
 promote = patch {
-    .isAdmin: True
+    isAdmin: True
 }
 ```
 
 Current checked slice:
 
-- record field selectors use dot-prefixed segments such as `.profile.name`
+- record field selectors may omit the leading dot at the patch root, e.g. `profile.name` or `.profile.name`
 - list selectors support `[*]` traversal and `[predicate]` filtering with the current element as ambient subject
 - map selectors support `[*]` value traversal, `[key-expr]` direct key selection, and `[predicate]` entry filtering with ambient `.key` / `.value`
 - constructor focus selectors currently continue through built-in `Some` / `Ok` / `Err` / `Valid` / `Invalid` and same-module constructors with exactly one payload field
@@ -1201,7 +1201,7 @@ Current checked slice:
 
 Current limitation:
 
-- structural removal syntax (`.field: -`) parses and typechecks to an explicit blocker, but result-type-changing patch elaboration is not wired through the executable slice yet
+- structural removal syntax (`field: -`, or `.field: -`) parses and typechecks to an explicit blocker, but result-type-changing patch elaboration is not wired through the executable slice yet
 - general-expression and gate lowering still report patch expressions as unsupported runtime forms
 - same-module constructor focus is intentionally narrow: multi-field constructor payloads are not yet patch-focusable
 - map predicate projections must use the normalized dot-prefixed form (`.key`, `.value`); bare selector names are not part of this slice

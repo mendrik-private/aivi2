@@ -4895,6 +4895,35 @@ value datePattern = rx"\d{4}-\d{2}-\d{2}"
     }
 
     #[test]
+    fn parser_preserves_bare_root_patch_field_selectors() {
+        let (_, parsed) = load("value promote = patch { isAdmin: True }\n");
+        assert!(
+            !parsed.has_errors(),
+            "expected patch shorthand to parse cleanly, got diagnostics: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+
+        let Some(Item::Value(item)) = parsed.module.items().first() else {
+            panic!("expected a value item");
+        };
+        let Some(expr) = item.expr_body() else {
+            panic!("expected the value item to have an expression body");
+        };
+        let ExprKind::PatchLiteral(patch) = &expr.kind else {
+            panic!("expected the value body to be a patch literal");
+        };
+        let Some(entry) = patch.entries.first() else {
+            panic!("expected the patch literal to contain one entry");
+        };
+        let [PatchSelectorSegment::Named { name, dotted, .. }] = entry.selector.segments.as_slice() else {
+            panic!("expected one named selector segment");
+        };
+
+        assert_eq!(name.text, "isAdmin");
+        assert!(!*dotted, "expected the root field selector to stay undotted");
+    }
+
+    #[test]
     fn lexer_distinguishes_line_and_doc_comments_as_trivia() {
         let mut sources = SourceDatabase::new();
         let file_id = sources.add_file(

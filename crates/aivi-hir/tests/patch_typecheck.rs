@@ -51,15 +51,29 @@ fn accepts_patch_apply_over_map_entry_predicates() {
 }
 
 #[test]
-fn accepts_patch_literals_with_same_shape_function_types() {
+fn accepts_patch_literals_with_bare_record_field_selectors() {
     let report = typecheck_text(
-        "patch-literal-same-shape.aivi",
+        "patch-literal-bare-field.aivi",
+        "type User = { name: Text }\n\
+         value rename:(User -> User) = patch { name: \"Grace\" }\n",
+    );
+    assert!(
+        report.is_ok(),
+        "expected patch literals with bare field selectors to typecheck, got diagnostics: {:?}",
+        report.diagnostics()
+    );
+}
+
+#[test]
+fn accepts_patch_literals_with_dotted_record_field_selectors() {
+    let report = typecheck_text(
+        "patch-literal-dotted-field.aivi",
         "type User = { name: Text }\n\
          value rename:(User -> User) = patch { .name: \"Grace\" }\n",
     );
     assert!(
         report.is_ok(),
-        "expected patch literals with same-shape function annotations to typecheck, got diagnostics: {:?}",
+        "expected patch literals with dotted field selectors to typecheck, got diagnostics: {:?}",
         report.diagnostics()
     );
 }

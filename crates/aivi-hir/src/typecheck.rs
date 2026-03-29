@@ -2108,41 +2108,40 @@ impl<'a> TypeChecker<'a> {
         }
         match &segments[index] {
             crate::PatchSelectorSegment::Named { name, dotted, span } => {
-                if *dotted {
-                    let GateType::Record(fields) = current else {
-                        self.emit_invalid_patch_selector(
-                            *span,
-                            "field selector",
-                            current,
-                            "record values support `.<field>` patch selectors",
-                        );
-                        return false;
-                    };
+                if let GateType::Record(fields) = current {
                     let Some(field) = fields.iter().find(|field| field.name == name.text()) else {
-                        self.emit_unknown_patch_field(*span, name.text(), current);
+                        self.emit_unknown_patch_field(*span, name.text(), *dotted, current);
                         return false;
                     };
-                    self.check_patch_selector_segments(
+                    return self.check_patch_selector_segments(
                         segments,
                         index + 1,
                         &field.ty,
                         instruction,
                         env,
                         value_stack,
-                    )
-                } else {
-                    let Some(next) = self.patch_constructor_focus(current, name.text(), *span) else {
-                        return false;
-                    };
-                    self.check_patch_selector_segments(
-                        segments,
-                        index + 1,
-                        &next,
-                        instruction,
-                        env,
-                        value_stack,
-                    )
+                    );
                 }
+                if *dotted {
+                    self.emit_invalid_patch_selector(
+                        *span,
+                        "field selector",
+                        current,
+                        "record values support `<field>` and `.<field>` patch selectors",
+                    );
+                    return false;
+                }
+                let Some(next) = self.patch_constructor_focus(current, name.text(), *span) else {
+                    return false;
+                };
+                self.check_patch_selector_segments(
+                    segments,
+                    index + 1,
+                    &next,
+                    instruction,
+                    env,
+                    value_stack,
+                )
             }
             crate::PatchSelectorSegment::BracketTraverse { span } => {
                 let next = match current {
@@ -3483,10 +3482,21 @@ impl<'a> TypeChecker<'a> {
         );
     }
 
-    fn emit_unknown_patch_field(&mut self, span: SourceSpan, field: &str, subject: &GateType) {
+    fn emit_unknown_patch_field(
+        &mut self,
+        span: SourceSpan,
+        field: &str,
+        dotted: bool,
+        subject: &GateType,
+    ) {
+        let selector = if dotted {
+            format!(".{field}")
+        } else {
+            field.to_owned()
+        };
         self.diagnostics.push(
             Diagnostic::error(format!(
-                "field selector `.{field}` is not available on `{subject}`"
+                "field selector `{selector}` is not available on `{subject}`"
             ))
             .with_code(code("unknown-patch-field"))
             .with_primary_label(span, "this patch selector refers to a missing record field"),

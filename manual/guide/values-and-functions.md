@@ -159,8 +159,8 @@ value user:User = {
 }
 
 value promoted:User = user <| {
-    .name: "Grace"
-    .isAdmin: True
+    name: "Grace"
+    isAdmin: True
 }
 ```
 
@@ -168,13 +168,13 @@ value promoted:User = user <| {
 
 ```aivi
 value promote:(User -> User) = patch {
-    .isAdmin: True
+    isAdmin: True
 }
 ```
 
 Selectors are relative to the current focus:
 
-- `.<field>` follows record fields
+- record roots accept either `field` or `.<field>`; nested field steps still use dots, as in `profile.name`
 - `[*]` traverses `List` elements or `Map` values
 - `[predicate]` filters `List` elements
 - `["key"]` or `[.key == "id-1"]` selects `Map` entries
@@ -194,11 +194,11 @@ type Counter = {
 }
 
 value keepCounter:(Counter -> Counter) = patch {
-    .step: := increment
+    step: := increment
 }
 ```
 
-Current limitation: structural removal syntax (`.field: -`) is parsed but still rejected later in the compiler pipeline because result-type-changing patch elaboration is not wired through the executable slice yet.
+Current limitation: structural removal syntax (`field: -`, or equivalently `.field: -`) is parsed but still rejected later in the compiler pipeline because result-type-changing patch elaboration is not wired through the executable slice yet.
 
 ## Type annotations
 
@@ -219,4 +219,4 @@ fun negate:Int n:Int =>
 | Function | `fun add:Int x:Int y:Int => x + y` |
 | Function call | `add 3 4` |
 | Partial application | `value double = multiply 2` |
-| Patch apply | `value promoted = user <| { .isAdmin: True }` |
+| Patch apply | `value promoted = user <| { isAdmin: True }` |
