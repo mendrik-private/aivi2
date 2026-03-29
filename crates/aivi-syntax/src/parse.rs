@@ -2507,12 +2507,19 @@ impl<'a> Parser<'a> {
                 && brace_depth == 0
                 && bracket_depth == 0
                 && self.tokens[index].kind() == TokenKind::Newline
-                && let Some(next) = self.peek_nontrivia(index + 1, close_brace)
-                && self
+            {
+                let Some(next) = self.peek_nontrivia(index + 1, close_brace) else {
+                    return close_brace;
+                };
+                if self
                     .result_block_binding_start(next, close_brace)
                     .is_some()
-            {
-                return next;
+                {
+                    return next;
+                }
+                if !self.tokens[next].kind().is_pipe_operator() {
+                    return next;
+                }
             }
         }
         close_brace
