@@ -121,6 +121,75 @@ fn check_reports_reactive_update_self_reference_from_hir() {
 }
 
 #[test]
+fn check_rejects_result_block_bindings_that_are_not_results() {
+    let dir = TempDir::new("check-result-block-binding-not-result");
+    let path = dir.write(
+        "main.aivi",
+        concat!(
+            "value broken: Result Text Int =\n",
+            "    result {\n",
+            "        x <- 42\n",
+            "        x\n",
+            "    }\n",
+        ),
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        !output.status.success(),
+        "expected invalid result-block binding to fail check"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("hir::result-block-binding-not-result"),
+        "expected result-block binding diagnostic code, got stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("result block bindings must produce `Result E A`"),
+        "expected explicit result-block binding message, got stderr: {stderr}"
+    );
+}
+
+#[test]
+fn check_rejects_result_block_error_type_mismatches() {
+    let dir = TempDir::new("check-result-block-error-mismatch");
+    let path = dir.write(
+        "main.aivi",
+        concat!(
+            "value broken: Result Text Int =\n",
+            "    result {\n",
+            "        x <- Ok 1\n",
+            "        y <- Err 2\n",
+            "        x\n",
+            "    }\n",
+        ),
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        !output.status.success(),
+        "expected mismatched result-block errors to fail check"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("hir::result-block-error-mismatch"),
+        "expected result-block error mismatch diagnostic code, got stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("result block bindings must share one error type"),
+        "expected explicit result-block error mismatch message, got stderr: {stderr}"
+    );
+}
+
+#[test]
 fn check_accepts_valid_hir_fixtures() {
     for relative in [
         "milestone-2/valid/local-top-level-refs/main.aivi",

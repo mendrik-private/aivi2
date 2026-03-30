@@ -73,7 +73,7 @@ fn spin_until(
 }
 
 #[test]
-    fn window_key_accumulate_updates_direction_signal() {
+fn window_key_accumulate_updates_direction_signal() {
     let lowered = lower_text(
         "runtime-window-key-direction.aivi",
         r#"

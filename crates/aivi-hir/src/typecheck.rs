@@ -7,11 +7,11 @@ use crate::{
     hir::{
         BinaryOperator, BuiltinTerm, BuiltinType, ClassMemberResolution, ExprKind, FunctionItem,
         ImportBindingMetadata, ImportBundleKind, InstanceItem, InstanceMember, Item, MapExpr,
-        Module, Name, NamePath, ProjectionBase, RecordExpr, RecordExprField, RecordFieldSurface,
-        ResolutionState, SignalItem, TermReference, TermResolution, TypeItemBody, TypeResolution,
-        UnaryOperator, ValueItem,
+        Module, Name, NamePath, PatternKind, PipeExpr, PipeStageKind, ProjectionBase, RecordExpr,
+        RecordExprField, RecordFieldSurface, ResolutionState, SignalItem, TermReference,
+        TermResolution, TypeItemBody, TypeResolution, UnaryOperator, ValueItem,
     },
-    ids::{ExprId, ImportId, ItemId, TypeId, TypeParameterId},
+    ids::{BindingId, ExprId, ImportId, ItemId, PatternId, TypeId, TypeParameterId},
     validate::{
         ClassConstraintBinding, ClassMemberCallMatch, DomainMemberSelection, GateExprEnv,
         GateIssue, GateRecordField, GateType, GateTypeContext, PolyTypeBindings, TypeBinding,
@@ -257,6 +257,24 @@ enum BinaryOperatorExpectation {
     BoolOperands,
     MatchingNumericOperands,
     CommonTypeOperands,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ResultBlockCaseRun {
+    ok_pattern: PatternId,
+    ok_body: ExprId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ResultBindingShape {
+    Result {
+        error: Option<GateType>,
+        value: Option<GateType>,
+    },
+    NonResult {
+        actual: GateType,
+    },
+    Unknown,
 }
 
 impl<'a> TypeChecker<'a> {
@@ -721,6 +739,11 @@ impl<'a> TypeChecker<'a> {
             return result;
         }
 
+        if let Some(result) = self.check_result_block_pipe_expr(expr_id, env, expected, value_stack)
+        {
+            return result;
+        }
+
         if let Some(expected) = expected {
             if let Some(result) =
                 self.check_expected_special_case(expr_id, env, expected, value_stack)
@@ -1153,6 +1176,288 @@ impl<'a> TypeChecker<'a> {
             }
             _ => true,
         }
+    }
+
+    fn check_result_block_pipe_expr(
+        &mut self,
+        expr_id: ExprId,
+        env: &GateExprEnv,
+        expected: Option<&GateType>,
+        value_stack: &mut Vec<ItemId>,
+    ) -> Option<bool> {
+        let ExprKind::Pipe(pipe) = self.module.exprs()[expr_id].kind.clone() else {
+            return None;
+        };
+        pipe.result_block_desugaring.then(|| {
+            self.check_result_block_pipe_with_error(
+                expr_id,
+                &pipe,
+                env,
+                expected,
+                Self::result_block_expected_error(expected).cloned(),
+                value_stack,
+            )
+        })
+    }
+
+    fn check_result_block_expr_with_error(
+        &mut self,
+        expr_id: ExprId,
+        env: &GateExprEnv,
+        expected: Option<&GateType>,
+        expected_error: Option<&GateType>,
+        value_stack: &mut Vec<ItemId>,
+    ) -> bool {
+        let ExprKind::Pipe(pipe) = self.module.exprs()[expr_id].kind.clone() else {
+            return self.check_expr(expr_id, env, expected, value_stack);
+        };
+        if !pipe.result_block_desugaring {
+            return self.check_expr(expr_id, env, expected, value_stack);
+        }
+        self.check_result_block_pipe_with_error(
+            expr_id,
+            &pipe,
+            env,
+            expected,
+            expected_error.cloned(),
+            value_stack,
+        )
+    }
+
+    fn check_result_block_pipe_with_error(
+        &mut self,
+        expr_id: ExprId,
+        pipe: &PipeExpr,
+        env: &GateExprEnv,
+        expected: Option<&GateType>,
+        inherited_error: Option<GateType>,
+        value_stack: &mut Vec<ItemId>,
+    ) -> bool {
+        let Some(case_run) = self.result_block_case_run(pipe) else {
+            return self.check_inferred_expr(expr_id, env, expected);
+        };
+
+        let expected_error = match (
+            inherited_error,
+            Self::result_block_expected_error(expected).cloned(),
+        ) {
+            (Some(left), Some(right)) if left.same_shape(&right) => Some(left),
+            (Some(left), Some(_)) => Some(left),
+            (Some(left), None) => Some(left),
+            (None, Some(right)) => Some(right),
+            (None, None) => None,
+        };
+
+        let mut ok = self.check_result_block_expr_with_error(
+            pipe.head,
+            env,
+            None,
+            expected_error.as_ref(),
+            value_stack,
+        );
+
+        let propagated_error =
+            match self.result_block_binding_shape(pipe.head, env, expected_error.as_ref()) {
+                ResultBindingShape::Result { error, value } => {
+                    if let (Some(expected_error), Some(actual_error)) =
+                        (expected_error.as_ref(), error.as_ref())
+                        && !actual_error.same_shape(expected_error)
+                    {
+                        self.emit_result_block_error_mismatch(
+                            self.module.exprs()[pipe.head].span,
+                            expected_error,
+                            actual_error,
+                        );
+                        ok = false;
+                    }
+
+                    let mut ok_env = env.clone();
+                    if let Some(binding) = self.result_block_ok_binding(case_run.ok_pattern)
+                        && let Some(value_ty) = value
+                    {
+                        ok_env.locals.insert(binding, value_ty);
+                    }
+
+                    let propagated_error = error.or(expected_error);
+                    ok &= self.check_result_block_expr_with_error(
+                        case_run.ok_body,
+                        &ok_env,
+                        expected,
+                        propagated_error.as_ref(),
+                        value_stack,
+                    );
+                    propagated_error
+                }
+                ResultBindingShape::NonResult { actual } => {
+                    self.emit_result_block_binding_not_result(
+                        self.module.exprs()[pipe.head].span,
+                        &actual,
+                    );
+                    ok = false;
+                    expected_error
+                }
+                ResultBindingShape::Unknown => expected_error,
+            };
+
+        let _ = propagated_error;
+        ok & self.check_inferred_expr(expr_id, env, expected)
+    }
+
+    fn result_block_case_run(&self, pipe: &PipeExpr) -> Option<ResultBlockCaseRun> {
+        let mut ok = None;
+        let mut err = false;
+        for stage in pipe.stages.iter() {
+            let PipeStageKind::Case { pattern, body } = &stage.kind else {
+                return None;
+            };
+            match self.pattern_builtin_constructor(*pattern) {
+                Some(BuiltinTerm::Ok) if ok.is_none() => {
+                    ok = Some(ResultBlockCaseRun {
+                        ok_pattern: *pattern,
+                        ok_body: *body,
+                    });
+                }
+                Some(BuiltinTerm::Err) if !err => {
+                    err = true;
+                }
+                _ => return None,
+            }
+        }
+        ok.filter(|_| err)
+    }
+
+    fn result_block_binding_shape(
+        &mut self,
+        expr_id: ExprId,
+        env: &GateExprEnv,
+        expected_error: Option<&GateType>,
+    ) -> ResultBindingShape {
+        if let ExprKind::Pipe(pipe) = &self.module.exprs()[expr_id].kind
+            && pipe.result_block_desugaring
+        {
+            return ResultBindingShape::Result {
+                error: expected_error.cloned(),
+                value: self.result_block_value_shape(expr_id, env),
+            };
+        }
+
+        if let Some(actual) = self.inferred_expr_shape(expr_id, env) {
+            return match actual {
+                GateType::Result { error, value } => ResultBindingShape::Result {
+                    error: Some(*error),
+                    value: Some(*value),
+                },
+                actual => ResultBindingShape::NonResult { actual },
+            };
+        }
+
+        if let Some(argument) = self.builtin_constructor_argument(expr_id, BuiltinTerm::Ok) {
+            return ResultBindingShape::Result {
+                error: expected_error.cloned(),
+                value: self.inferred_expr_shape(argument, env),
+            };
+        }
+
+        if let Some(argument) = self.builtin_constructor_argument(expr_id, BuiltinTerm::Err) {
+            return ResultBindingShape::Result {
+                error: self
+                    .inferred_expr_shape(argument, env)
+                    .or_else(|| expected_error.cloned()),
+                value: None,
+            };
+        }
+
+        ResultBindingShape::Unknown
+    }
+
+    fn result_block_value_shape(&mut self, expr_id: ExprId, env: &GateExprEnv) -> Option<GateType> {
+        match self.inferred_expr_shape(expr_id, env) {
+            Some(GateType::Result { value, .. }) => Some(*value),
+            _ => self
+                .builtin_constructor_argument(expr_id, BuiltinTerm::Ok)
+                .and_then(|argument| self.inferred_expr_shape(argument, env)),
+        }
+    }
+
+    fn builtin_constructor_argument(
+        &self,
+        expr_id: ExprId,
+        builtin: BuiltinTerm,
+    ) -> Option<ExprId> {
+        let ExprKind::Apply { callee, arguments } = &self.module.exprs()[expr_id].kind else {
+            return None;
+        };
+        if arguments.len() != 1 {
+            return None;
+        }
+        let ExprKind::Name(reference) = &self.module.exprs()[*callee].kind else {
+            return None;
+        };
+        matches!(
+            reference.resolution.as_ref(),
+            ResolutionState::Resolved(TermResolution::Builtin(found)) if *found == builtin
+        )
+        .then_some(*arguments.first())
+    }
+
+    fn result_block_expected_error(expected: Option<&GateType>) -> Option<&GateType> {
+        match expected {
+            Some(GateType::Result { error, .. }) => Some(error.as_ref()),
+            _ => None,
+        }
+    }
+
+    fn result_block_ok_binding(&self, pattern_id: PatternId) -> Option<BindingId> {
+        let PatternKind::Constructor { arguments, .. } = &self.module.patterns()[pattern_id].kind
+        else {
+            return None;
+        };
+        let argument = *arguments.first()?;
+        let PatternKind::Binding(binding) = &self.module.patterns()[argument].kind else {
+            return None;
+        };
+        Some(binding.binding)
+    }
+
+    fn pattern_builtin_constructor(&self, pattern_id: PatternId) -> Option<BuiltinTerm> {
+        let PatternKind::Constructor { callee, .. } = &self.module.patterns()[pattern_id].kind
+        else {
+            return None;
+        };
+        let ResolutionState::Resolved(TermResolution::Builtin(builtin)) =
+            callee.resolution.as_ref()
+        else {
+            return None;
+        };
+        Some(*builtin)
+    }
+
+    fn emit_result_block_binding_not_result(&mut self, span: SourceSpan, actual: &GateType) {
+        self.diagnostics.push(
+            Diagnostic::error(format!(
+                "result block bindings must produce `Result E A`, found `{actual}`"
+            ))
+            .with_code(code("result-block-binding-not-result"))
+            .with_primary_label(span, "this `<-` binding expression is not a `Result` value"),
+        );
+    }
+
+    fn emit_result_block_error_mismatch(
+        &mut self,
+        span: SourceSpan,
+        expected: &GateType,
+        actual: &GateType,
+    ) {
+        self.diagnostics.push(
+            Diagnostic::error(format!(
+                "result block bindings must share one error type, found `{actual}` where `{expected}` was required"
+            ))
+            .with_code(code("result-block-error-mismatch"))
+            .with_primary_label(
+                span,
+                "this binding's `Err` carrier does not match the surrounding result block",
+            ),
+        );
     }
 
     fn check_expected_special_case(
@@ -4684,6 +4989,50 @@ value broken =
                 diagnostic.code == Some(DiagnosticCode::new("hir", "case-branch-type-mismatch"))
             }),
             "expected case branch type mismatch diagnostic, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_reports_non_result_bindings_in_result_blocks() {
+        let report = typecheck_text(
+            "result-block-binding-not-result.aivi",
+            concat!(
+                "value broken: Result Text Int =\n",
+                "    result {\n",
+                "        x <- 42\n",
+                "        x\n",
+                "    }\n",
+            ),
+        );
+        assert!(
+            report.diagnostics().iter().any(|diagnostic| diagnostic.code
+                == Some(DiagnosticCode::new(
+                    "hir",
+                    "result-block-binding-not-result"
+                ))),
+            "expected non-Result result-block binding diagnostic, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_reports_result_block_error_mismatches() {
+        let report = typecheck_text(
+            "result-block-error-mismatch.aivi",
+            concat!(
+                "value broken: Result Text Int =\n",
+                "    result {\n",
+                "        x <- Ok 1\n",
+                "        y <- Err 2\n",
+                "        x\n",
+                "    }\n",
+            ),
+        );
+        assert!(
+            report.diagnostics().iter().any(|diagnostic| diagnostic.code
+                == Some(DiagnosticCode::new("hir", "result-block-error-mismatch"))),
+            "expected result-block error mismatch diagnostic, got diagnostics: {:?}",
             report.diagnostics()
         );
     }

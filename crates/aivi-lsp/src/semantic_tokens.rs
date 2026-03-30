@@ -20,11 +20,9 @@ pub const TOKEN_TYPES: &[SemanticTokenType] = &[
     SemanticTokenType::COMMENT,
 ];
 
-const IDX_VARIABLE: u32 = 2;
 const IDX_KEYWORD: u32 = 3;
 const IDX_STRING: u32 = 4;
 const IDX_NUMBER: u32 = 5;
-const IDX_OPERATOR: u32 = 6;
 const IDX_COMMENT: u32 = 7;
 
 fn token_type_index(kind: TokenKind) -> Option<u32> {
@@ -185,15 +183,15 @@ fn soft_or_hard_token_type_index(
 
 #[cfg(test)]
 mod tests {
-    use super::{IDX_KEYWORD, IDX_OPERATOR, soft_or_hard_token_type_index, token_type_index};
+    use super::{IDX_KEYWORD, soft_or_hard_token_type_index, token_type_index};
     use aivi_base::{FileId, SourceFile};
     use aivi_syntax::{TokenKind, lex_module};
 
     #[test]
-    fn classifies_patch_surface_tokens() {
+    fn leaves_patch_surface_operators_to_textmate() {
         assert_eq!(token_type_index(TokenKind::PatchKw), Some(IDX_KEYWORD));
-        assert_eq!(token_type_index(TokenKind::PatchApply), Some(IDX_OPERATOR));
-        assert_eq!(token_type_index(TokenKind::ColonEquals), Some(IDX_OPERATOR));
+        assert_eq!(token_type_index(TokenKind::PatchApply), None);
+        assert_eq!(token_type_index(TokenKind::ColonEquals), None);
     }
 
     #[test]

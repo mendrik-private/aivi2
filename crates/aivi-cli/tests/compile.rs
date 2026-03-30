@@ -415,3 +415,37 @@ signal slowWindows : Signal Window =
         "expected explicit stop boundary, got stderr: {stderr}"
     );
 }
+
+#[test]
+fn compile_stops_at_hir_validation_for_invalid_result_blocks() {
+    let input = TempFile::new(
+        "compile-invalid-result-block",
+        "aivi",
+        concat!(
+            "value broken: Result Text Int =\n",
+            "    result {\n",
+            "        x <- 42\n",
+            "        x\n",
+            "    }\n",
+        ),
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("compile")
+        .arg(input.path())
+        .output()
+        .expect("compile command should run");
+
+    assert!(
+        !output.status.success(),
+        "expected invalid result block compile to fail"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("hir::result-block-binding-not-result"),
+        "expected result-block diagnostic code, got stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("compile pipeline stopped at HIR validation"),
+        "expected compile to stop during HIR validation, got stderr: {stderr}"
+    );
+}
