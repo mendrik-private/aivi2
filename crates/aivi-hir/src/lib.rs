@@ -123,7 +123,8 @@ pub use truthy_falsy_elaboration::{
 };
 pub use typecheck::{
     ClassMemberImplementation, ConstraintClass, ResolvedClassMemberDispatch, TypeCheckReport,
-    TypeConstraint, apply_defaults, elaborate_default_record_fields, typecheck_module,
+    TypeConstraint, apply_defaults, elaborate_default_record_fields, signal_payload_type,
+    typecheck_module,
 };
 pub use validate::{
     GateRecordField, GateType, TypeBinding, TypeConstructorBinding, TypeConstructorHead,

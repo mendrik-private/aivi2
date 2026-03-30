@@ -19,8 +19,10 @@ use crate::{
     SourceInstanceId, SourceLifecycleActionKind, SourcePublicationPort, TaskCompletionPort,
     TaskInstanceId, TaskSourceRuntime, TaskSourceRuntimeError, TickOutcome,
     TryDerivedNodeEvaluator,
-    graph::{DerivedHandle, OwnerHandle, SignalHandle},
-    hir_adapter::{HirRuntimeAssembly, HirRuntimeInstantiationError},
+    graph::{DerivedHandle, OwnerHandle, ReactiveClauseHandle, SignalHandle},
+    hir_adapter::{
+        HirCompiledRuntimeExpr, HirRuntimeAssembly, HirRuntimeInstantiationError,
+    },
     scheduler::DependencyValues,
 };
 
@@ -42,13 +44,15 @@ pub fn link_backend_runtime(
         assembly,
         runtime,
         backend,
-        signal_items_by_handle: linked.signal_items_by_handle,
-        runtime_signal_by_item: linked.runtime_signal_by_item,
-        derived_signals: linked.derived_signals,
-        linked_recurrence_signals: linked.linked_recurrence_signals,
-        source_bindings: linked.source_bindings,
-        task_bindings: linked.task_bindings,
-    })
+    signal_items_by_handle: linked.signal_items_by_handle,
+    runtime_signal_by_item: linked.runtime_signal_by_item,
+    derived_signals: linked.derived_signals,
+    reactive_signals: linked.reactive_signals,
+    reactive_clauses: linked.reactive_clauses,
+    linked_recurrence_signals: linked.linked_recurrence_signals,
+    source_bindings: linked.source_bindings,
+    task_bindings: linked.task_bindings,
+})
 }
 
 /// A fully linked runtime pairing a compiled backend program with the
@@ -64,6 +68,8 @@ pub struct BackendLinkedRuntime {
     signal_items_by_handle: BTreeMap<SignalHandle, BackendItemId>,
     runtime_signal_by_item: BTreeMap<BackendItemId, SignalHandle>,
     derived_signals: BTreeMap<DerivedHandle, LinkedDerivedSignal>,
+    reactive_signals: BTreeMap<SignalHandle, LinkedReactiveSignal>,
+    reactive_clauses: BTreeMap<ReactiveClauseHandle, LinkedReactiveClause>,
     linked_recurrence_signals: BTreeMap<DerivedHandle, LinkedRecurrenceSignal>,
     source_bindings: BTreeMap<SourceInstanceId, LinkedSourceBinding>,
     task_bindings: BTreeMap<TaskInstanceId, LinkedTaskBinding>,
@@ -210,7 +216,10 @@ impl BackendLinkedRuntime {
         let runtime_committed = materialize_detached_globals(&committed);
         let mut evaluator = LinkedDerivedEvaluator {
             backend: self.backend.as_ref(),
+            signal_items_by_handle: &self.signal_items_by_handle,
             derived_signals: &self.derived_signals,
+            reactive_signals: &self.reactive_signals,
+            reactive_clauses: &self.reactive_clauses,
             linked_recurrence_signals: &self.linked_recurrence_signals,
             committed_signals: &runtime_committed,
         };
@@ -489,6 +498,20 @@ fn materialize_detached_globals(
         .collect()
 }
 
+fn signal_global_value(value: &RuntimeValue) -> RuntimeValue {
+    match value {
+        RuntimeValue::Signal(_) => value.clone(),
+        other => RuntimeValue::Signal(Box::new(other.clone())),
+    }
+}
+
+fn signal_payload_value(value: &RuntimeValue) -> RuntimeValue {
+    match value {
+        RuntimeValue::Signal(inner) => inner.as_ref().clone(),
+        other => other.clone(),
+    }
+}
+
 fn stage_subject_value(
     backend: &BackendProgram,
     layout: aivi_backend::LayoutId,
@@ -534,6 +557,26 @@ pub struct LinkedRecurrenceSignal {
     pub step_kernels: Box<[KernelId]>,
     pub dependency_items: Box<[BackendItemId]>,
     pub pipeline_ids: Box<[BackendPipelineId]>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkedReactiveSignal {
+    pub item: hir::ItemId,
+    pub signal: SignalHandle,
+    pub backend_item: BackendItemId,
+    pub has_seed_body: bool,
+    pub pipeline_signals: Box<[SignalHandle]>,
+    pub pipeline_ids: Box<[BackendPipelineId]>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkedReactiveClause {
+    pub owner: hir::ItemId,
+    pub target: SignalHandle,
+    pub clause: ReactiveClauseHandle,
+    pub pipeline_ids: Box<[BackendPipelineId]>,
+    pub compiled_guard: HirCompiledRuntimeExpr,
+    pub compiled_body: HirCompiledRuntimeExpr,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1051,6 +1094,13 @@ pub enum BackendRuntimeError {
     UnknownDerivedSignal {
         signal: DerivedHandle,
     },
+    UnknownReactiveSignal {
+        signal: SignalHandle,
+    },
+    UnknownReactiveClause {
+        signal: SignalHandle,
+        clause: ReactiveClauseHandle,
+    },
     DerivedDependencyArityMismatch {
         signal: DerivedHandle,
         expected: usize,
@@ -1105,6 +1155,29 @@ pub enum BackendRuntimeError {
         item: hir::ItemId,
         error: EvaluationError,
     },
+    EvaluateReactiveSeed {
+        signal: SignalHandle,
+        item: hir::ItemId,
+        error: EvaluationError,
+    },
+    EvaluateReactiveGuard {
+        signal: SignalHandle,
+        clause: ReactiveClauseHandle,
+        item: hir::ItemId,
+        error: EvaluationError,
+    },
+    EvaluateReactiveBody {
+        signal: SignalHandle,
+        clause: ReactiveClauseHandle,
+        item: hir::ItemId,
+        error: EvaluationError,
+    },
+    ReactiveGuardReturnedNonBool {
+        signal: SignalHandle,
+        clause: ReactiveClauseHandle,
+        item: hir::ItemId,
+        value: RuntimeValue,
+    },
     EvaluateRecurrenceSignal {
         signal: DerivedHandle,
         item: hir::ItemId,
@@ -1143,6 +1216,18 @@ impl fmt::Display for BackendRuntimeError {
                     signal
                 )
             }
+            Self::UnknownReactiveSignal { signal } => {
+                write!(
+                    f,
+                    "startup linker does not know reactive signal {:?}",
+                    signal
+                )
+            }
+            Self::UnknownReactiveClause { signal, clause } => write!(
+                f,
+                "startup linker does not know reactive clause {:?} for signal {:?}",
+                clause, signal
+            ),
             Self::DerivedDependencyArityMismatch {
                 signal,
                 expected,
@@ -1240,6 +1325,45 @@ impl fmt::Display for BackendRuntimeError {
                 "failed to evaluate derived signal {:?} for item {item}: {error}",
                 signal
             ),
+            Self::EvaluateReactiveSeed {
+                signal,
+                item,
+                error,
+            } => write!(
+                f,
+                "failed to evaluate reactive seed for signal {:?} / item {item}: {error}",
+                signal
+            ),
+            Self::EvaluateReactiveGuard {
+                signal,
+                clause,
+                item,
+                error,
+            } => write!(
+                f,
+                "failed to evaluate reactive guard {:?} for signal {:?} / item {item}: {error}",
+                clause, signal
+            ),
+            Self::EvaluateReactiveBody {
+                signal,
+                clause,
+                item,
+                error,
+            } => write!(
+                f,
+                "failed to evaluate reactive body {:?} for signal {:?} / item {item}: {error}",
+                clause, signal
+            ),
+            Self::ReactiveGuardReturnedNonBool {
+                signal,
+                clause,
+                item,
+                value,
+            } => write!(
+                f,
+                "reactive guard {:?} for signal {:?} / item {item} returned non-Bool value {:?}",
+                clause, signal, value
+            ),
             Self::EvaluateRecurrenceSignal {
                 signal,
                 item,
@@ -1281,9 +1405,18 @@ impl std::error::Error for BackendRuntimeError {}
 
 struct LinkedDerivedEvaluator<'a> {
     backend: &'a BackendProgram,
+    signal_items_by_handle: &'a BTreeMap<SignalHandle, BackendItemId>,
     derived_signals: &'a BTreeMap<DerivedHandle, LinkedDerivedSignal>,
+    reactive_signals: &'a BTreeMap<SignalHandle, LinkedReactiveSignal>,
+    reactive_clauses: &'a BTreeMap<crate::ReactiveClauseHandle, LinkedReactiveClause>,
     linked_recurrence_signals: &'a BTreeMap<DerivedHandle, LinkedRecurrenceSignal>,
     committed_signals: &'a BTreeMap<BackendItemId, RuntimeValue>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReactivePipelineContext {
+    Seed,
+    Body(ReactiveClauseHandle),
 }
 
 impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
@@ -1344,9 +1477,184 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
             &mut evaluator,
         )
     }
+
+    fn try_evaluate_reactive_seed(
+        &mut self,
+        signal: SignalHandle,
+        inputs: DependencyValues<'_, RuntimeValue>,
+    ) -> Result<DerivedSignalUpdate<RuntimeValue>, Self::Error> {
+        let binding = self
+            .reactive_signals
+            .get(&signal)
+            .ok_or(BackendRuntimeError::UnknownReactiveSignal { signal })?;
+        if !binding.has_seed_body || !inputs.all_present() {
+            return Ok(DerivedSignalUpdate::Clear);
+        }
+
+        let globals = self.build_signal_globals(binding.backend_item, &inputs);
+        let mut evaluator = KernelEvaluator::new(self.backend);
+        let value = evaluator
+            .evaluate_item(binding.backend_item, &globals)
+            .map_err(|error| self.reactive_seed_eval_error(signal, binding.item, error))?;
+        self.apply_reactive_pipelines(
+            signal,
+            binding.item,
+            ReactivePipelineContext::Seed,
+            &binding.pipeline_ids,
+            value,
+            &globals,
+            &mut evaluator,
+        )
+    }
+
+    fn try_evaluate_reactive_guard(
+        &mut self,
+        signal: SignalHandle,
+        clause: ReactiveClauseHandle,
+        inputs: DependencyValues<'_, RuntimeValue>,
+    ) -> Result<bool, Self::Error> {
+        if !inputs.all_present() {
+            return Ok(false);
+        }
+        let binding = self.reactive_clause(signal, clause)?;
+        let Some(globals) = self.build_fragment_globals(&binding.compiled_guard, &inputs) else {
+            return Ok(false);
+        };
+        let mut evaluator = KernelEvaluator::new(binding.compiled_guard.backend.as_ref());
+        let value = evaluator
+            .evaluate_item(binding.compiled_guard.entry_item, &globals)
+            .map_err(|error| {
+                self.reactive_guard_eval_error(signal, clause, binding.owner, error)
+            })?;
+        match value {
+            RuntimeValue::Bool(value) => Ok(value),
+            RuntimeValue::Signal(inner) => match *inner {
+                RuntimeValue::Bool(value) => Ok(value),
+                other => Err(BackendRuntimeError::ReactiveGuardReturnedNonBool {
+                    signal,
+                    clause,
+                    item: binding.owner,
+                    value: RuntimeValue::Signal(Box::new(other)),
+                }),
+            },
+            other => Err(BackendRuntimeError::ReactiveGuardReturnedNonBool {
+                signal,
+                clause,
+                item: binding.owner,
+                value: other,
+            }),
+        }
+    }
+
+    fn try_evaluate_reactive_body(
+        &mut self,
+        signal: SignalHandle,
+        clause: ReactiveClauseHandle,
+        inputs: DependencyValues<'_, RuntimeValue>,
+    ) -> Result<DerivedSignalUpdate<RuntimeValue>, Self::Error> {
+        if !inputs.all_present() {
+            return Ok(DerivedSignalUpdate::Clear);
+        }
+        let signal_binding = self
+            .reactive_signals
+            .get(&signal)
+            .ok_or(BackendRuntimeError::UnknownReactiveSignal { signal })?;
+        let clause_binding = self.reactive_clause(signal, clause)?;
+        let Some(fragment_globals) =
+            self.build_fragment_globals(&clause_binding.compiled_body, &inputs)
+        else {
+            return Ok(DerivedSignalUpdate::Clear);
+        };
+        let mut fragment_evaluator = KernelEvaluator::new(clause_binding.compiled_body.backend.as_ref());
+        let value = fragment_evaluator
+            .evaluate_item(clause_binding.compiled_body.entry_item, &fragment_globals)
+            .map_err(|error| {
+                self.reactive_body_eval_error(signal, clause, clause_binding.owner, error)
+            })?;
+
+        let globals = self.build_signal_globals(signal_binding.backend_item, &inputs);
+        let mut evaluator = KernelEvaluator::new(self.backend);
+        self.apply_reactive_pipelines(
+            signal,
+            clause_binding.owner,
+            ReactivePipelineContext::Body(clause),
+            &clause_binding.pipeline_ids,
+            value,
+            &globals,
+            &mut evaluator,
+        )
+    }
 }
 
 impl LinkedDerivedEvaluator<'_> {
+    fn reactive_clause(
+        &self,
+        signal: SignalHandle,
+        clause: ReactiveClauseHandle,
+    ) -> Result<&LinkedReactiveClause, BackendRuntimeError> {
+        let binding = self
+            .reactive_clauses
+            .get(&clause)
+            .ok_or(BackendRuntimeError::UnknownReactiveClause { signal, clause })?;
+        if binding.target != signal {
+            return Err(BackendRuntimeError::UnknownReactiveClause { signal, clause });
+        }
+        Ok(binding)
+    }
+
+    fn build_signal_globals(
+        &self,
+        target_item: BackendItemId,
+        inputs: &DependencyValues<'_, RuntimeValue>,
+    ) -> BTreeMap<BackendItemId, RuntimeValue> {
+        let mut globals = self.committed_signals.clone();
+        globals.remove(&target_item);
+        for index in 0..inputs.len() {
+            let Some(signal) = inputs.signal(index) else {
+                continue;
+            };
+            let Some(&dependency) = self.signal_items_by_handle.get(&signal) else {
+                continue;
+            };
+            match inputs.value(index) {
+                Some(value) => {
+                    globals.insert(dependency, signal_global_value(value));
+                }
+                None => {
+                    globals.remove(&dependency);
+                }
+            }
+        }
+        globals
+    }
+
+    fn build_fragment_globals(
+        &self,
+        fragment: &HirCompiledRuntimeExpr,
+        inputs: &DependencyValues<'_, RuntimeValue>,
+    ) -> Option<BTreeMap<BackendItemId, RuntimeValue>> {
+        let mut globals = BTreeMap::new();
+        for required in fragment.required_signals.iter() {
+            let value = self.fragment_signal_value_for_inputs(inputs, required.signal)?;
+            globals.insert(required.backend_item, value);
+        }
+        Some(globals)
+    }
+
+    fn fragment_signal_value_for_inputs(
+        &self,
+        inputs: &DependencyValues<'_, RuntimeValue>,
+        signal: SignalHandle,
+    ) -> Option<RuntimeValue> {
+        if inputs.contains_signal(signal) {
+            return inputs.value_for(signal).cloned();
+        }
+        let backend_item = self.signal_items_by_handle.get(&signal)?;
+        self.committed_signals
+            .get(backend_item)
+            .map(signal_payload_value)
+    }
+
     fn derived_eval_error(
         &self,
         signal: DerivedHandle,
@@ -1357,6 +1665,64 @@ impl LinkedDerivedEvaluator<'_> {
             signal,
             item,
             error,
+        }
+    }
+
+    fn reactive_seed_eval_error(
+        &self,
+        signal: SignalHandle,
+        item: hir::ItemId,
+        error: EvaluationError,
+    ) -> BackendRuntimeError {
+        BackendRuntimeError::EvaluateReactiveSeed {
+            signal,
+            item,
+            error,
+        }
+    }
+
+    fn reactive_guard_eval_error(
+        &self,
+        signal: SignalHandle,
+        clause: ReactiveClauseHandle,
+        item: hir::ItemId,
+        error: EvaluationError,
+    ) -> BackendRuntimeError {
+        BackendRuntimeError::EvaluateReactiveGuard {
+            signal,
+            clause,
+            item,
+            error,
+        }
+    }
+
+    fn reactive_body_eval_error(
+        &self,
+        signal: SignalHandle,
+        clause: ReactiveClauseHandle,
+        item: hir::ItemId,
+        error: EvaluationError,
+    ) -> BackendRuntimeError {
+        BackendRuntimeError::EvaluateReactiveBody {
+            signal,
+            clause,
+            item,
+            error,
+        }
+    }
+
+    fn reactive_pipeline_eval_error(
+        &self,
+        signal: SignalHandle,
+        item: hir::ItemId,
+        context: ReactivePipelineContext,
+        error: EvaluationError,
+    ) -> BackendRuntimeError {
+        match context {
+            ReactivePipelineContext::Seed => self.reactive_seed_eval_error(signal, item, error),
+            ReactivePipelineContext::Body(clause) => {
+                self.reactive_body_eval_error(signal, clause, item, error)
+            }
         }
     }
 
@@ -1392,6 +1758,49 @@ impl LinkedDerivedEvaluator<'_> {
                     BackendStageKind::Fanout(fanout) => {
                         value = self
                             .apply_fanout_stage(signal, item, fanout, value, globals, evaluator)?;
+                    }
+                    _ => unreachable!(
+                        "unsupported pipeline stage kind should have been blocked during linking"
+                    ),
+                }
+            }
+        }
+        Ok(DerivedSignalUpdate::Value(value))
+    }
+
+    fn apply_reactive_pipelines(
+        &self,
+        signal: SignalHandle,
+        item: hir::ItemId,
+        context: ReactivePipelineContext,
+        pipeline_ids: &[BackendPipelineId],
+        mut value: RuntimeValue,
+        globals: &BTreeMap<BackendItemId, RuntimeValue>,
+        evaluator: &mut KernelEvaluator<'_>,
+    ) -> Result<DerivedSignalUpdate<RuntimeValue>, BackendRuntimeError> {
+        for &pipeline_id in pipeline_ids {
+            let pipeline = &self.backend.pipelines()[pipeline_id];
+            for stage in &pipeline.stages {
+                match &stage.kind {
+                    BackendStageKind::Gate(BackendGateStage::SignalFilter {
+                        predicate,
+                        emits_negative_update,
+                        ..
+                    }) => {
+                        let pred = evaluator
+                            .evaluate_kernel(*predicate, Some(&value), &[], globals)
+                            .map_err(|error| {
+                                self.reactive_pipeline_eval_error(signal, item, context, error)
+                            })?;
+                        if matches!(pred, RuntimeValue::Bool(false)) && !emits_negative_update {
+                            return Ok(DerivedSignalUpdate::Clear);
+                        }
+                    }
+                    BackendStageKind::TruthyFalsy(_) => {}
+                    BackendStageKind::Fanout(fanout) => {
+                        value = self.apply_reactive_fanout_stage(
+                            signal, item, context, fanout, value, globals, evaluator,
+                        )?;
                     }
                     _ => unreachable!(
                         "unsupported pipeline stage kind should have been blocked during linking"
@@ -1443,6 +1852,64 @@ impl LinkedDerivedEvaluator<'_> {
                 let joined = evaluator
                     .evaluate_kernel(join.kernel, Some(&subject), &[], globals)
                     .map_err(|error| self.derived_eval_error(signal, item, error))?;
+                Ok(unwrap_signal_layout_result(
+                    self.backend,
+                    join.result_layout,
+                    joined,
+                ))
+            }
+            None => Ok(mapped_collection),
+        }
+    }
+
+    fn apply_reactive_fanout_stage(
+        &self,
+        signal: SignalHandle,
+        item: hir::ItemId,
+        context: ReactivePipelineContext,
+        fanout: &aivi_backend::FanoutStage,
+        value: RuntimeValue,
+        globals: &BTreeMap<BackendItemId, RuntimeValue>,
+        evaluator: &mut KernelEvaluator<'_>,
+    ) -> Result<RuntimeValue, BackendRuntimeError> {
+        let current = match value {
+            RuntimeValue::Signal(inner) => *inner,
+            other => other,
+        };
+        let RuntimeValue::List(elements) = current else {
+            return Ok(current);
+        };
+
+        let mut mapped = Vec::with_capacity(elements.len());
+        'elements: for element in elements {
+            let mapped_value = evaluator
+                .evaluate_kernel(fanout.map, Some(&element), &[], globals)
+                .map_err(|error| {
+                    self.reactive_pipeline_eval_error(signal, item, context, error)
+                })?;
+            for filter in &fanout.filters {
+                let predicate = evaluator
+                    .evaluate_kernel(filter.predicate, Some(&mapped_value), &[], globals)
+                    .map_err(|error| {
+                        self.reactive_pipeline_eval_error(signal, item, context, error)
+                    })?;
+                if !matches!(predicate, RuntimeValue::Bool(true)) {
+                    continue 'elements;
+                }
+            }
+            mapped.push(mapped_value);
+        }
+
+        let mapped_collection = RuntimeValue::List(mapped);
+        match &fanout.join {
+            Some(join) => {
+                let subject =
+                    stage_subject_value(self.backend, join.input_layout, &mapped_collection);
+                let joined = evaluator
+                    .evaluate_kernel(join.kernel, Some(&subject), &[], globals)
+                    .map_err(|error| {
+                        self.reactive_pipeline_eval_error(signal, item, context, error)
+                    })?;
                 Ok(unwrap_signal_layout_result(
                     self.backend,
                     join.result_layout,
@@ -1564,6 +2031,8 @@ struct LinkArtifacts {
     signal_items_by_handle: BTreeMap<SignalHandle, BackendItemId>,
     runtime_signal_by_item: BTreeMap<BackendItemId, SignalHandle>,
     derived_signals: BTreeMap<DerivedHandle, LinkedDerivedSignal>,
+    reactive_signals: BTreeMap<SignalHandle, LinkedReactiveSignal>,
+    reactive_clauses: BTreeMap<ReactiveClauseHandle, LinkedReactiveClause>,
     linked_recurrence_signals: BTreeMap<DerivedHandle, LinkedRecurrenceSignal>,
     source_bindings: BTreeMap<SourceInstanceId, LinkedSourceBinding>,
     task_bindings: BTreeMap<TaskInstanceId, LinkedTaskBinding>,
@@ -1580,6 +2049,8 @@ struct LinkBuilder<'a> {
     signal_items_by_handle: BTreeMap<SignalHandle, BackendItemId>,
     runtime_signal_by_item: BTreeMap<BackendItemId, SignalHandle>,
     derived_signals: BTreeMap<DerivedHandle, LinkedDerivedSignal>,
+    reactive_signals: BTreeMap<SignalHandle, LinkedReactiveSignal>,
+    reactive_clauses: BTreeMap<ReactiveClauseHandle, LinkedReactiveClause>,
     linked_recurrence_signals: BTreeMap<DerivedHandle, LinkedRecurrenceSignal>,
     source_bindings: BTreeMap<SourceInstanceId, LinkedSourceBinding>,
     task_bindings: BTreeMap<TaskInstanceId, LinkedTaskBinding>,
@@ -1602,6 +2073,8 @@ impl<'a> LinkBuilder<'a> {
             signal_items_by_handle: BTreeMap::new(),
             runtime_signal_by_item: BTreeMap::new(),
             derived_signals: BTreeMap::new(),
+            reactive_signals: BTreeMap::new(),
+            reactive_clauses: BTreeMap::new(),
             linked_recurrence_signals: BTreeMap::new(),
             source_bindings: BTreeMap::new(),
             task_bindings: BTreeMap::new(),
@@ -1613,12 +2086,15 @@ impl<'a> LinkBuilder<'a> {
         self.index_signal_items();
         self.link_sources();
         self.link_tasks();
+        self.link_reactive_signals();
         self.link_derived_signals();
         if self.errors.is_empty() {
             Ok(LinkArtifacts {
                 signal_items_by_handle: std::mem::take(&mut self.signal_items_by_handle),
                 runtime_signal_by_item: std::mem::take(&mut self.runtime_signal_by_item),
                 derived_signals: std::mem::take(&mut self.derived_signals),
+                reactive_signals: std::mem::take(&mut self.reactive_signals),
+                reactive_clauses: std::mem::take(&mut self.reactive_clauses),
                 linked_recurrence_signals: std::mem::take(&mut self.linked_recurrence_signals),
                 source_bindings: std::mem::take(&mut self.source_bindings),
                 task_bindings: std::mem::take(&mut self.task_bindings),
@@ -1806,6 +2282,70 @@ impl<'a> LinkBuilder<'a> {
                     execution,
                 },
             );
+        }
+    }
+
+    fn link_reactive_signals(&mut self) {
+        for binding in self.assembly.signals() {
+            let Some(reactive) = binding.reactive_signal() else {
+                continue;
+            };
+            let Some(&backend_item) = self.hir_to_backend.get(&binding.item) else {
+                self.errors
+                    .push(BackendRuntimeLinkError::MissingBackendItem { item: binding.item });
+                continue;
+            };
+            let item = &self.backend.items()[backend_item];
+            let BackendItemKind::Signal(_) = &item.kind else {
+                self.errors
+                    .push(BackendRuntimeLinkError::BackendItemNotSignal {
+                        item: binding.item,
+                        backend_item,
+                    });
+                continue;
+            };
+            if !item.pipelines.is_empty() && !self.supported_body_backed_signal_pipelines(item) {
+                self.errors
+                    .push(BackendRuntimeLinkError::SignalPipelinesNotYetLinked {
+                        item: binding.item,
+                        count: item.pipelines.len(),
+                    });
+                continue;
+            }
+            let pipeline_ids = item
+                .pipelines
+                .iter()
+                .copied()
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+            let has_seed_body = item.body.is_some();
+            let pipeline_signals = self
+                .collect_pipeline_signal_handles(binding.item, pipeline_ids.as_ref())
+                .into_boxed_slice();
+            self.reactive_signals.insert(
+                reactive,
+                LinkedReactiveSignal {
+                    item: binding.item,
+                    signal: reactive,
+                    backend_item,
+                    has_seed_body,
+                    pipeline_signals,
+                    pipeline_ids: pipeline_ids.clone(),
+                },
+            );
+            for clause in binding.reactive_updates() {
+                self.reactive_clauses.insert(
+                    clause.clause,
+                    LinkedReactiveClause {
+                        owner: binding.item,
+                        target: reactive,
+                        clause: clause.clause,
+                        pipeline_ids: pipeline_ids.clone(),
+                        compiled_guard: clause.compiled_guard.clone(),
+                        compiled_body: clause.compiled_body.clone(),
+                    },
+                );
+            }
         }
     }
 
@@ -2078,6 +2618,79 @@ impl<'a> LinkBuilder<'a> {
         required.into_iter().collect::<Vec<_>>().into_boxed_slice()
     }
 
+    fn collect_required_signal_items_for_kernels(
+        &mut self,
+        owner: hir::ItemId,
+        kernels: Vec<KernelId>,
+    ) -> Box<[BackendItemId]> {
+        let mut required = BTreeSet::new();
+        let mut kernels = kernels;
+        let mut visited_items = BTreeSet::new();
+        while let Some(kernel_id) = kernels.pop() {
+            let kernel = &self.backend.kernels()[kernel_id];
+            for item_id in &kernel.global_items {
+                if !visited_items.insert(*item_id) {
+                    continue;
+                }
+                let item = &self.backend.items()[*item_id];
+                match item.kind {
+                    BackendItemKind::Signal(_) => {
+                        required.insert(*item_id);
+                    }
+                    _ => {
+                        let Some(body) = item.body else {
+                            self.errors
+                                .push(BackendRuntimeLinkError::MissingItemBodyForGlobal {
+                                    owner,
+                                    item: *item_id,
+                                });
+                            continue;
+                        };
+                        kernels.push(body);
+                    }
+                }
+            }
+        }
+        required.into_iter().collect::<Vec<_>>().into_boxed_slice()
+    }
+
+    fn collect_pipeline_signal_handles(
+        &mut self,
+        owner: hir::ItemId,
+        pipeline_ids: &[BackendPipelineId],
+    ) -> Vec<SignalHandle> {
+        let mut kernels = Vec::new();
+        for &pipeline_id in pipeline_ids {
+            let pipeline = &self.backend.pipelines()[pipeline_id];
+            for stage in &pipeline.stages {
+                match &stage.kind {
+                    BackendStageKind::Gate(BackendGateStage::Ordinary {
+                        when_true,
+                        when_false,
+                    }) => {
+                        kernels.push(*when_true);
+                        kernels.push(*when_false);
+                    }
+                    BackendStageKind::Gate(BackendGateStage::SignalFilter { predicate, .. }) => {
+                        kernels.push(*predicate);
+                    }
+                    BackendStageKind::Fanout(fanout) => {
+                        kernels.push(fanout.map);
+                        kernels.extend(fanout.filters.iter().map(|filter| filter.predicate));
+                        if let Some(join) = &fanout.join {
+                            kernels.push(join.kernel);
+                        }
+                    }
+                    BackendStageKind::TruthyFalsy(_) => {}
+                }
+            }
+        }
+        self.collect_required_signal_items_for_kernels(owner, kernels)
+            .iter()
+            .filter_map(|dependency| self.runtime_signal_for_backend_item(owner, *dependency))
+            .collect()
+    }
+
     fn supported_body_backed_signal_pipelines(&self, item: &aivi_backend::Item) -> bool {
         item.body.is_some()
             && item.pipelines.iter().copied().all(|pipeline_id| {
@@ -2244,10 +2857,61 @@ mod tests {
             signal_items_by_handle: BTreeMap::new(),
             runtime_signal_by_item: BTreeMap::new(),
             derived_signals: BTreeMap::new(),
+            reactive_signals: BTreeMap::new(),
+            reactive_clauses: BTreeMap::new(),
             linked_recurrence_signals: BTreeMap::new(),
             source_bindings: BTreeMap::new(),
             task_bindings: BTreeMap::from([(instance, binding)]),
         }
+    }
+
+    fn signal_handle(
+        linked: &BackendLinkedRuntime,
+        module: &hir::Module,
+        name: &str,
+    ) -> SignalHandle {
+        linked
+            .assembly()
+            .signal(item_id(module, name))
+            .unwrap_or_else(|| panic!("signal binding should exist for {name}"))
+            .signal()
+    }
+
+    fn activation_port_for_owner(
+        linked: &BackendLinkedRuntime,
+        module: &hir::Module,
+        outcome: &LinkedSourceTickOutcome,
+        owner_name: &str,
+    ) -> DetachedRuntimePublicationPort {
+        let instance = linked
+            .source_by_owner(item_id(module, owner_name))
+            .unwrap_or_else(|| panic!("source binding should exist for {owner_name}"))
+            .instance;
+        outcome
+            .source_actions()
+            .iter()
+            .find_map(|action| match action {
+                LinkedSourceLifecycleAction::Activate {
+                    instance: action_instance,
+                    port,
+                    ..
+                } if *action_instance == instance => Some(port.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected activation for source {owner_name}"))
+    }
+
+    fn user_value(active: bool, email: &str) -> DetachedRuntimeValue {
+        DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Record(vec![
+            aivi_backend::RuntimeRecordField {
+                label: "active".into(),
+                value: RuntimeValue::Bool(active),
+            },
+            aivi_backend::RuntimeRecordField {
+                label: "email".into(),
+                value: RuntimeValue::Text(email.into()),
+            },
+        ]))
     }
 
     #[test]
@@ -3141,6 +3805,198 @@ signal status : Signal Text =
             Some(&RuntimeValue::Text("ready".into()))
         );
         assert!(second.source_actions().is_empty());
+    }
+
+    #[test]
+    fn linked_runtime_executes_reactive_when_clauses_end_to_end() {
+        let lowered = lower_text(
+            "runtime-startup-reactive-when.aivi",
+            r#"
+provider custom.ready
+    wakeup: providerTrigger
+
+provider custom.enabled
+    wakeup: providerTrigger
+
+@source custom.ready
+signal ready : Signal Bool
+
+@source custom.enabled
+signal enabled : Signal Bool
+
+signal left = 20
+signal right = 22
+signal total : Signal Int = 0
+
+when ready => total <- left + right
+when ready and enabled => total <- left + right + 1
+"#,
+        );
+        let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+            .expect("runtime assembly should build");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("reactive when clauses should now link successfully");
+
+        let first = linked
+            .tick_with_source_lifecycle()
+            .expect("initial reactive tick should succeed");
+        assert_eq!(first.source_actions().len(), 2);
+        let ready_port = activation_port_for_owner(&linked, lowered.hir.module(), &first, "ready");
+        let enabled_port =
+            activation_port_for_owner(&linked, lowered.hir.module(), &first, "enabled");
+        let total_signal = signal_handle(&linked, lowered.hir.module(), "total");
+        assert_eq!(
+            linked.runtime().current_value(total_signal).unwrap(),
+            Some(&RuntimeValue::Int(0)),
+            "reactive signals should commit their seed body before any when clause fires"
+        );
+
+        ready_port
+            .publish(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Bool(
+                true,
+            )))
+            .expect("ready publication should queue");
+        linked
+            .tick_with_source_lifecycle()
+            .expect("ready-only reactive tick should succeed");
+        assert_eq!(
+            linked.runtime().current_value(total_signal).unwrap(),
+            Some(&RuntimeValue::Int(42)),
+            "the first when clause should fire once ready becomes true"
+        );
+
+        enabled_port
+            .publish(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Bool(
+                true,
+            )))
+            .expect("enabled publication should queue");
+        linked
+            .tick_with_source_lifecycle()
+            .expect("overlapping reactive tick should succeed");
+        assert_eq!(
+            linked.runtime().current_value(total_signal).unwrap(),
+            Some(&RuntimeValue::Int(43)),
+            "later firing when clauses should win by source order"
+        );
+
+        ready_port
+            .publish(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Bool(
+                false,
+            )))
+            .expect("ready reset should queue");
+        linked
+            .tick_with_source_lifecycle()
+            .expect("guard-false reactive tick should succeed");
+        assert_eq!(
+            linked.runtime().current_value(total_signal).unwrap(),
+            Some(&RuntimeValue::Int(43)),
+            "false guards should preserve the previously committed reactive value"
+        );
+    }
+
+    #[test]
+    fn linked_runtime_applies_target_pipelines_to_reactive_when_bodies() {
+        let lowered = lower_text(
+            "runtime-startup-reactive-when-pipeline.aivi",
+            r#"
+provider custom.ready
+    wakeup: providerTrigger
+
+provider custom.user
+    wakeup: providerTrigger
+
+type User = {
+    active: Bool,
+    email: Text
+}
+
+@source custom.ready
+signal ready : Signal Bool
+
+@source custom.user
+signal incoming : Signal User
+
+signal seed : Signal User = { active: True, email: "seed@example.com" }
+
+signal current : Signal User =
+    seed
+     ?|> .active
+
+when ready => current <- incoming
+"#,
+        );
+        let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+            .expect("runtime assembly should build");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("reactive when targets with supported pipelines should link successfully");
+
+        let first = linked
+            .tick_with_source_lifecycle()
+            .expect("initial reactive pipeline tick should succeed");
+        assert_eq!(first.source_actions().len(), 2);
+        let ready_port = activation_port_for_owner(&linked, lowered.hir.module(), &first, "ready");
+        let incoming_port =
+            activation_port_for_owner(&linked, lowered.hir.module(), &first, "incoming");
+        let current_signal = signal_handle(&linked, lowered.hir.module(), "current");
+        assert_eq!(
+            linked.runtime().current_value(current_signal).unwrap(),
+            Some(&RuntimeValue::Record(vec![
+                aivi_backend::RuntimeRecordField {
+                    label: "active".into(),
+                    value: RuntimeValue::Bool(true),
+                },
+                aivi_backend::RuntimeRecordField {
+                    label: "email".into(),
+                    value: RuntimeValue::Text("seed@example.com".into()),
+                },
+            ])),
+            "the seed body should still flow through the target pipeline"
+        );
+
+        ready_port
+            .publish(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Bool(
+                true,
+            )))
+            .expect("ready publication should queue");
+        incoming_port
+            .publish(user_value(false, "inactive@example.com"))
+            .expect("inactive user publication should queue");
+        linked
+            .tick_with_source_lifecycle()
+            .expect("inactive reactive pipeline tick should succeed");
+        assert!(
+            linked.runtime().current_value(current_signal).unwrap().is_none(),
+            "reactive bodies should still run through the target signal pipeline"
+        );
+
+        incoming_port
+            .publish(user_value(true, "active@example.com"))
+            .expect("active user publication should queue");
+        linked
+            .tick_with_source_lifecycle()
+            .expect("active reactive pipeline tick should succeed");
+        assert_eq!(
+            linked.runtime().current_value(current_signal).unwrap(),
+            Some(&RuntimeValue::Record(vec![
+                aivi_backend::RuntimeRecordField {
+                    label: "active".into(),
+                    value: RuntimeValue::Bool(true),
+                },
+                aivi_backend::RuntimeRecordField {
+                    label: "email".into(),
+                    value: RuntimeValue::Text("active@example.com".into()),
+                },
+            ])),
+            "reactive bodies should commit values that satisfy the target pipeline"
+        );
     }
 
     #[test]

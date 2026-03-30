@@ -1,11 +1,17 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     fmt,
+    sync::Arc,
 };
 
-use aivi_backend::{CommittedValueStore, InlineCommittedValueStore};
+use aivi_backend::{
+    CommittedValueStore, InlineCommittedValueStore, ItemId as BackendItemId,
+    Program as BackendProgram, lower_module as lower_backend_module, validate_program,
+};
 use aivi_base::SourceSpan;
+use aivi_core::{RuntimeFragmentSpec, lower_runtime_fragment};
 use aivi_hir as hir;
+use aivi_lambda::{lower_module as lower_lambda_module, validate_module as validate_lambda_module};
 use aivi_typing::RecurrenceTarget;
 
 use crate::{
@@ -305,13 +311,16 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                     seed_dependencies,
                     clauses,
                 } => {
-                    let merged_signal_dependencies = resolve_signal_dependencies(
-                        self.module,
-                        binding.item,
-                        &signal.signal_dependencies,
-                        &public_signals,
-                        &mut errors,
-                    );
+                    let signal_pipeline_dependencies = signal
+                        .body
+                        .map(|body| {
+                            collect_pipe_stage_signal_dependencies(
+                                self.module,
+                                body,
+                                &public_signal_names,
+                            )
+                        })
+                        .unwrap_or_default();
                     let mut resolved_seed_dependencies = signal
                         .body
                         .map(|body| {
@@ -332,21 +341,69 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                             dependencies
                         })
                         .unwrap_or_default();
-                    let mut reactive_dependencies = merged_signal_dependencies.clone();
+                    let mut reactive_dependencies = signal_pipeline_dependencies.clone();
                     for dependency in &resolved_seed_dependencies {
                         push_unique_signal(&mut reactive_dependencies, *dependency);
                     }
 
+                    let payload_type = hir::signal_payload_type(self.module, signal);
                     let mut clause_bindings = Vec::with_capacity(signal.reactive_updates.len());
                     let mut clause_specs = Vec::with_capacity(signal.reactive_updates.len());
-                    for update in &signal.reactive_updates {
-                        let mut guard_dependencies = resolve_signal_dependencies(
+                    for (clause_index, update) in signal.reactive_updates.iter().enumerate() {
+                        let guard_fragment = match compile_runtime_expr_fragment(
                             self.module,
                             binding.item,
-                            &hir::collect_signal_dependencies_for_expr(self.module, update.guard),
+                            update.span,
+                            update.guard,
+                            &hir::GateType::Primitive(hir::BuiltinType::Bool),
+                            format!(
+                                "__reactive_guard_{}_{}",
+                                binding.item.as_raw(),
+                                clause_index
+                            )
+                            .into_boxed_str(),
                             &public_signals,
-                            &mut errors,
-                        );
+                            ReactiveFragmentRole::Guard,
+                        ) {
+                            Ok(fragment) => fragment,
+                            Err(error) => {
+                                errors.push(error);
+                                continue;
+                            }
+                        };
+                        let Some(payload_type) = payload_type.as_ref() else {
+                            errors.push(HirRuntimeAdapterError::ReactiveUpdateUnknownPayloadType {
+                                owner: binding.item,
+                                clause_span: update.span,
+                            });
+                            continue;
+                        };
+                        let body_fragment = match compile_runtime_expr_fragment(
+                            self.module,
+                            binding.item,
+                            update.span,
+                            update.body,
+                            payload_type,
+                            format!(
+                                "__reactive_body_{}_{}",
+                                binding.item.as_raw(),
+                                clause_index
+                            )
+                            .into_boxed_str(),
+                            &public_signals,
+                            ReactiveFragmentRole::Body,
+                        ) {
+                            Ok(fragment) => fragment,
+                            Err(error) => {
+                                errors.push(error);
+                                continue;
+                            }
+                        };
+                        let mut guard_dependencies = guard_fragment
+                            .required_signals
+                            .iter()
+                            .map(|signal| signal.signal)
+                            .collect::<Vec<_>>();
                         if guard_dependencies.is_empty() {
                             guard_dependencies = collect_direct_signal_dependencies(
                                 self.module,
@@ -354,25 +411,16 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                                 &public_signal_names,
                             );
                         }
-                        if guard_dependencies.is_empty() && !merged_signal_dependencies.is_empty() {
-                            guard_dependencies = merged_signal_dependencies.clone();
+                        let mut body_dependencies = signal_pipeline_dependencies.clone();
+                        for signal in &body_fragment.required_signals {
+                            push_unique_signal(&mut body_dependencies, signal.signal);
                         }
-                        let mut body_dependencies = resolve_signal_dependencies(
-                            self.module,
-                            binding.item,
-                            &hir::collect_signal_dependencies_for_expr(self.module, update.body),
-                            &public_signals,
-                            &mut errors,
-                        );
                         if body_dependencies.is_empty() {
                             body_dependencies = collect_direct_signal_dependencies(
                                 self.module,
                                 update.body,
                                 &public_signal_names,
                             );
-                        }
-                        if body_dependencies.is_empty() && !merged_signal_dependencies.is_empty() {
-                            body_dependencies = merged_signal_dependencies.clone();
                         }
                         for dependency in guard_dependencies
                             .iter()
@@ -390,6 +438,8 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                             clause: ReactiveClauseHandle::from_raw(next_reactive_clause_raw),
                             guard_dependencies: guard_dependencies.clone().into_boxed_slice(),
                             body_dependencies: body_dependencies.clone().into_boxed_slice(),
+                            compiled_guard: guard_fragment,
+                            compiled_body: body_fragment,
                         });
                         next_reactive_clause_raw = next_reactive_clause_raw.wrapping_add(1);
                         clause_specs.push(ReactiveClauseBuilderSpec::new(
@@ -925,6 +975,21 @@ pub struct HirReactiveUpdateBinding {
     pub clause: ReactiveClauseHandle,
     pub guard_dependencies: Box<[SignalHandle]>,
     pub body_dependencies: Box<[SignalHandle]>,
+    pub compiled_guard: HirCompiledRuntimeExpr,
+    pub compiled_body: HirCompiledRuntimeExpr,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HirCompiledRuntimeExpr {
+    pub backend: Arc<BackendProgram>,
+    pub entry_item: BackendItemId,
+    pub required_signals: Box<[HirCompiledRuntimeExprSignal]>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HirCompiledRuntimeExprSignal {
+    pub signal: SignalHandle,
+    pub backend_item: BackendItemId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1148,6 +1213,39 @@ pub enum HirRuntimeAdapterError {
         site: HirRecurrenceNodeId,
         blockers: Box<[hir::RecurrenceElaborationBlocker]>,
     },
+    ReactiveUpdateUnknownPayloadType {
+        owner: hir::ItemId,
+        clause_span: SourceSpan,
+    },
+    BlockedReactiveUpdateGuard {
+        owner: hir::ItemId,
+        clause_span: SourceSpan,
+        blockers: Box<[hir::GeneralExprBlocker]>,
+    },
+    BlockedReactiveUpdateBody {
+        owner: hir::ItemId,
+        clause_span: SourceSpan,
+        blockers: Box<[hir::GeneralExprBlocker]>,
+    },
+    ReactiveUpdateFragmentLowering {
+        owner: hir::ItemId,
+        clause_span: SourceSpan,
+        role: &'static str,
+        stage: &'static str,
+        message: Box<str>,
+    },
+    ReactiveUpdateFragmentMissingEntry {
+        owner: hir::ItemId,
+        clause_span: SourceSpan,
+        role: &'static str,
+        entry_name: Box<str>,
+    },
+    ReactiveUpdateFragmentUnknownSignal {
+        owner: hir::ItemId,
+        clause_span: SourceSpan,
+        role: &'static str,
+        dependency: hir::ItemId,
+    },
     GraphBuild(GraphBuildError),
 }
 
@@ -1247,6 +1345,54 @@ impl fmt::Display for HirRuntimeAdapterError {
             Self::BlockedRecurrenceNode { site, blockers } => {
                 write!(f, "recurrence handoff {site:?} is blocked: {blockers:?}")
             }
+            Self::ReactiveUpdateUnknownPayloadType { owner, clause_span } => write!(
+                f,
+                "reactive update for owner {owner} at {clause_span:?} has no known signal payload type"
+            ),
+            Self::BlockedReactiveUpdateGuard {
+                owner,
+                clause_span,
+                blockers,
+            } => write!(
+                f,
+                "reactive update guard for owner {owner} at {clause_span:?} is blocked: {blockers:?}"
+            ),
+            Self::BlockedReactiveUpdateBody {
+                owner,
+                clause_span,
+                blockers,
+            } => write!(
+                f,
+                "reactive update body for owner {owner} at {clause_span:?} is blocked: {blockers:?}"
+            ),
+            Self::ReactiveUpdateFragmentLowering {
+                owner,
+                clause_span,
+                role,
+                stage,
+                message,
+            } => write!(
+                f,
+                "failed to lower reactive update {role} fragment for owner {owner} at {clause_span:?} during {stage}: {message}"
+            ),
+            Self::ReactiveUpdateFragmentMissingEntry {
+                owner,
+                clause_span,
+                role,
+                entry_name,
+            } => write!(
+                f,
+                "reactive update {role} fragment for owner {owner} at {clause_span:?} is missing entry item `{entry_name}`"
+            ),
+            Self::ReactiveUpdateFragmentUnknownSignal {
+                owner,
+                clause_span,
+                role,
+                dependency,
+            } => write!(
+                f,
+                "reactive update {role} fragment for owner {owner} at {clause_span:?} depends on signal item {dependency} with no runtime binding"
+            ),
             Self::GraphBuild(error) => write!(f, "signal graph build failed: {error:?}"),
         }
     }
@@ -1519,6 +1665,230 @@ fn collect_direct_signal_dependencies(
     }
 
     resolved
+}
+
+fn collect_pipe_stage_signal_dependencies(
+    module: &hir::Module,
+    expr: hir::ExprId,
+    public_signal_names: &BTreeMap<String, SignalHandle>,
+) -> Vec<SignalHandle> {
+    let hir::ExprKind::Pipe(pipe) = &module.exprs()[expr].kind else {
+        return Vec::new();
+    };
+    let mut resolved = Vec::new();
+    for stage in pipe.stages.iter() {
+        let exprs = match &stage.kind {
+            hir::PipeStageKind::Transform { expr }
+            | hir::PipeStageKind::Gate { expr }
+            | hir::PipeStageKind::Map { expr }
+            | hir::PipeStageKind::Apply { expr }
+            | hir::PipeStageKind::Tap { expr }
+            | hir::PipeStageKind::FanIn { expr }
+            | hir::PipeStageKind::Truthy { expr }
+            | hir::PipeStageKind::Falsy { expr }
+            | hir::PipeStageKind::RecurStart { expr }
+            | hir::PipeStageKind::RecurStep { expr }
+            | hir::PipeStageKind::Validate { expr }
+            | hir::PipeStageKind::Previous { expr }
+            | hir::PipeStageKind::Diff { expr } => vec![*expr],
+            hir::PipeStageKind::Accumulate { seed, step } => vec![*seed, *step],
+            hir::PipeStageKind::Case { body, .. } => vec![*body],
+        };
+        for stage_expr in exprs {
+            for signal in collect_direct_signal_dependencies(module, stage_expr, public_signal_names)
+            {
+                push_unique_signal(&mut resolved, signal);
+            }
+        }
+    }
+    resolved
+}
+
+#[derive(Clone, Copy)]
+enum ReactiveFragmentRole {
+    Guard,
+    Body,
+}
+
+impl ReactiveFragmentRole {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Guard => "guard",
+            Self::Body => "body",
+        }
+    }
+
+    fn blocked_error(
+        self,
+        owner: hir::ItemId,
+        clause_span: SourceSpan,
+        blockers: Box<[hir::GeneralExprBlocker]>,
+    ) -> HirRuntimeAdapterError {
+        match self {
+            Self::Guard => HirRuntimeAdapterError::BlockedReactiveUpdateGuard {
+                owner,
+                clause_span,
+                blockers,
+            },
+            Self::Body => HirRuntimeAdapterError::BlockedReactiveUpdateBody {
+                owner,
+                clause_span,
+                blockers,
+            },
+        }
+    }
+}
+
+fn compile_runtime_expr_fragment(
+    module: &hir::Module,
+    owner: hir::ItemId,
+    clause_span: SourceSpan,
+    expr: hir::ExprId,
+    expected: &hir::GateType,
+    name: Box<str>,
+    public_signals: &BTreeMap<hir::ItemId, SignalHandle>,
+    role: ReactiveFragmentRole,
+) -> Result<HirCompiledRuntimeExpr, HirRuntimeAdapterError> {
+    let body = hir::elaborate_runtime_expr_with_env(module, expr, &[], Some(expected)).map_err(
+        |blocked| role.blocked_error(owner, clause_span, blocked.blockers.into_boxed_slice()),
+    )?;
+    let fragment = RuntimeFragmentSpec {
+        name: name.clone(),
+        owner,
+        body_expr: expr,
+        parameters: Vec::new(),
+        body,
+    };
+    let lowered = lower_runtime_fragment(module, &fragment).map_err(|error| {
+        HirRuntimeAdapterError::ReactiveUpdateFragmentLowering {
+            owner,
+            clause_span,
+            role: role.label(),
+            stage: "typed core",
+            message: error.to_string().into_boxed_str(),
+        }
+    })?;
+    let lambda = lower_lambda_module(&lowered.module).map_err(|error| {
+        HirRuntimeAdapterError::ReactiveUpdateFragmentLowering {
+            owner,
+            clause_span,
+            role: role.label(),
+            stage: "typed lambda",
+            message: error.to_string().into_boxed_str(),
+        }
+    })?;
+    validate_lambda_module(&lambda).map_err(|error| {
+        HirRuntimeAdapterError::ReactiveUpdateFragmentLowering {
+            owner,
+            clause_span,
+            role: role.label(),
+            stage: "typed lambda validation",
+            message: error.to_string().into_boxed_str(),
+        }
+    })?;
+    let backend = lower_backend_module(&lambda).map_err(|error| {
+        HirRuntimeAdapterError::ReactiveUpdateFragmentLowering {
+            owner,
+            clause_span,
+            role: role.label(),
+            stage: "backend IR",
+            message: error.to_string().into_boxed_str(),
+        }
+    })?;
+    validate_program(&backend).map_err(|error| {
+        HirRuntimeAdapterError::ReactiveUpdateFragmentLowering {
+            owner,
+            clause_span,
+            role: role.label(),
+            stage: "backend validation",
+            message: error.to_string().into_boxed_str(),
+        }
+    })?;
+    let entry_item = backend
+        .items()
+        .iter()
+        .find_map(|(item_id, item)| (item.name.as_ref() == name.as_ref()).then_some(item_id))
+        .ok_or_else(|| HirRuntimeAdapterError::ReactiveUpdateFragmentMissingEntry {
+            owner,
+            clause_span,
+            role: role.label(),
+            entry_name: name.clone(),
+        })?;
+    let required_signals = collect_required_fragment_signal_bindings(
+        owner,
+        clause_span,
+        role,
+        &lowered.module,
+        &backend,
+        entry_item,
+        public_signals,
+    )?;
+    Ok(HirCompiledRuntimeExpr {
+        backend: Arc::new(backend),
+        entry_item,
+        required_signals,
+    })
+}
+
+fn collect_required_fragment_signal_bindings(
+    owner: hir::ItemId,
+    clause_span: SourceSpan,
+    role: ReactiveFragmentRole,
+    core: &aivi_core::Module,
+    backend: &BackendProgram,
+    entry_item: BackendItemId,
+    public_signals: &BTreeMap<hir::ItemId, SignalHandle>,
+) -> Result<Box<[HirCompiledRuntimeExprSignal]>, HirRuntimeAdapterError> {
+    let Some(entry) = backend.items().get(entry_item) else {
+        return Err(HirRuntimeAdapterError::ReactiveUpdateFragmentMissingEntry {
+            owner,
+            clause_span,
+            role: role.label(),
+            entry_name: "<missing-entry-item>".into(),
+        });
+    };
+    let Some(root_kernel) = entry.body else {
+        return Ok(Box::default());
+    };
+    let mut required = BTreeSet::new();
+    let mut kernels = vec![root_kernel];
+    let mut visited_items = BTreeSet::new();
+    while let Some(kernel_id) = kernels.pop() {
+        let kernel = &backend.kernels()[kernel_id];
+        for &item_id in &kernel.global_items {
+            if !visited_items.insert(item_id) {
+                continue;
+            }
+            let item = &backend.items()[item_id];
+            match item.kind {
+                aivi_backend::ItemKind::Signal(_) => {
+                    let hir_item = core.items()[item.origin].origin;
+                    let signal = public_signals.get(&hir_item).copied().ok_or_else(|| {
+                        HirRuntimeAdapterError::ReactiveUpdateFragmentUnknownSignal {
+                            owner,
+                            clause_span,
+                            role: role.label(),
+                            dependency: hir_item,
+                        }
+                    })?;
+                    required.insert((signal, item_id));
+                }
+                _ => {
+                    if let Some(body) = item.body {
+                        kernels.push(body);
+                    }
+                }
+            }
+        }
+    }
+    Ok(required
+        .into_iter()
+        .map(|(signal, backend_item)| HirCompiledRuntimeExprSignal {
+            signal,
+            backend_item,
+        })
+        .collect::<Vec<_>>()
+        .into_boxed_slice())
 }
 
 fn resolve_source_option_binding(

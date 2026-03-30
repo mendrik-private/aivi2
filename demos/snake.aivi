@@ -238,7 +238,7 @@ fun stepOnTick:TickState tick:Unit state:TickState =>
 
 fun foodOrEmptyGlyph:Text food:Cell cell:Cell => cell == food
   T|> "*"
-  F|> "."
+  F|> "·"
 
 fun bodyOrFoodGlyph:Text snake: (List Cell) food:Cell cell:Cell => snakeContains snake cell
   T|> "o"

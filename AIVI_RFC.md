@@ -1568,7 +1568,7 @@ Scheduler-facing rules:
 - if multiple clauses for the same target produce commits in one tick, source order breaks ties and the last firing clause wins
 - recurrence and self-reference must be validated explicitly; they are not accepted by accident
 
-Current implementation status: the frontend parses, formats, lowers, and exposes `when` clauses through HIR/editor surfaces, but runtime execution and full semantic validation are not wired end to end yet. The current runtime adapter therefore rejects signals carrying reactive updates instead of silently dropping them.
+Current implementation status: `when` clauses now lower and execute through the linked runtime end to end. Guards and bodies are compiled as runtime fragments, source-order conflict resolution happens in the scheduler, and validation still rejects recurrence or target self-reference explicitly.
 
 ### 13.3 Applicative meaning of `Signal`
 

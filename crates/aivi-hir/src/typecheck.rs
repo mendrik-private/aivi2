@@ -215,6 +215,19 @@ fn signal_annotation_payload(annotation: Option<&GateType>) -> Option<&GateType>
     }
 }
 
+pub fn signal_payload_type(module: &Module, item: &SignalItem) -> Option<GateType> {
+    let mut typing = GateTypeContext::new(module);
+    let expected = item
+        .annotation
+        .and_then(|annotation| typing.lower_annotation(annotation));
+    signal_annotation_payload(expected.as_ref())
+        .cloned()
+        .or_else(|| {
+            item.body
+                .and_then(|body| typing.infer_expr(body, &GateExprEnv::default(), None).ty)
+        })
+}
+
 pub(crate) fn resolve_class_member_dispatch(
     module: &Module,
     reference: &TermReference,
