@@ -96,11 +96,19 @@ use aivi.db (
     DbError
     SchemaMismatch
     QueryFailed
+    ConstraintViolation
+    NestedTransaction
+    ConnectionFailed
     SortDir
     Asc
     Desc
     Connection
     TableRef
+    DbRow
+    DbParam
+    DbStatement
+    DbPageOpts
+    DbTask
 )
 
 use aivi.imap (
@@ -227,6 +235,9 @@ value notification:Notification = {
 value notifFailed:NotificationError = NotificationFailed "dbus error"
 value schemaMismatch:DbError = SchemaMismatch "v2 required"
 value queryFailed:DbError = QueryFailed "no such table"
+value constraintViolation:DbError = ConstraintViolation "unique users_email"
+value nestedTransaction:DbError = NestedTransaction
+value connectionFailed:DbError = ConnectionFailed "offline"
 value sortAsc:SortDir = Asc
 value sortDesc:SortDir = Desc
 signal usersChanged: Signal Unit
@@ -238,6 +249,38 @@ value userTable:TableRef User = {
     conn: connection,
     changed: usersChanged
 }
+signal dbEnabled = True
+value pageOpts:DbPageOpts = {
+    limit: 25,
+    offset: 0
+}
+value userIdParam:DbParam = {
+    kind: "int",
+    bool: None,
+    int: Some 7,
+    float: None,
+    decimal: None,
+    bigInt: None,
+    text: None,
+    bytes: None
+}
+value userQuery:DbStatement = {
+    sql: "select * from users where id = ?",
+    arguments: [userIdParam]
+}
+value liveUsersQuery:DbTask (List DbRow) = pure []
+
+@source db.connect connection with {
+    pool: 2,
+    activeWhen: dbEnabled
+}
+signal liveConnection: Signal (Result DbError Connection)
+
+@source db.live liveUsersQuery with {
+    refreshOn: userTable.changed,
+    activeWhen: dbEnabled
+}
+signal liveUsers: Signal (Result DbError (List DbRow))
 
 value syncState:SyncState = {
     lastSyncedAt: None,

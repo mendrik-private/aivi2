@@ -8,20 +8,22 @@ use std::{
 use aivi_backend::{
     DetachedRuntimeValue, EvaluationError, GateStage as BackendGateStage, ItemId as BackendItemId,
     ItemKind as BackendItemKind, KernelEvaluator, KernelId, LayoutKind, MovingRuntimeValueStore,
-    PipelineId as BackendPipelineId, Program as BackendProgram, RuntimeCallable, RuntimeSumValue,
-    RuntimeValue, SourceId as BackendSourceId, StageKind as BackendStageKind,
+    PipelineId as BackendPipelineId, Program as BackendProgram, RuntimeCallable,
+    RuntimeDbConnection, RuntimeRecordField, RuntimeSumValue, RuntimeValue,
+    SourceId as BackendSourceId, StageKind as BackendStageKind,
 };
 use aivi_core as core;
 use aivi_hir as hir;
 
 use crate::{
-    DerivedSignalUpdate, InputHandle, PublicationPortError, RuntimeSourceProvider,
+    DerivedSignalUpdate, InputHandle, Publication, PublicationPortError, RuntimeSourceProvider,
     SourceInstanceId, SourceLifecycleActionKind, SourcePublicationPort, TaskCompletionPort,
     TaskInstanceId, TaskSourceRuntime, TaskSourceRuntimeError, TickOutcome,
     TryDerivedNodeEvaluator,
     graph::{DerivedHandle, OwnerHandle, SignalHandle},
     hir_adapter::{HirRuntimeAssembly, HirRuntimeInstantiationError},
     scheduler::DependencyValues,
+    task_executor::{RuntimeDbCommitInvalidation, execute_runtime_value_with_stdio_effects},
 };
 
 pub fn link_backend_runtime(
@@ -38,7 +40,7 @@ pub fn link_backend_runtime(
         })?;
     let mut builder = LinkBuilder::new(&assembly, core, &backend);
     let linked = builder.build()?;
-    Ok(BackendLinkedRuntime {
+    let mut linked_runtime = BackendLinkedRuntime {
         assembly,
         runtime,
         backend,
@@ -48,7 +50,11 @@ pub fn link_backend_runtime(
         linked_recurrence_signals: linked.linked_recurrence_signals,
         source_bindings: linked.source_bindings,
         task_bindings: linked.task_bindings,
-    })
+        db_changed_routes: linked.db_changed_routes,
+        db_commit_invalidation_sink: None,
+    };
+    linked_runtime.prime_db_changed_routes();
+    Ok(linked_runtime)
 }
 
 /// A fully linked runtime pairing a compiled backend program with the
@@ -67,6 +73,8 @@ pub struct BackendLinkedRuntime {
     linked_recurrence_signals: BTreeMap<DerivedHandle, LinkedRecurrenceSignal>,
     source_bindings: BTreeMap<SourceInstanceId, LinkedSourceBinding>,
     task_bindings: BTreeMap<TaskInstanceId, LinkedTaskBinding>,
+    db_changed_routes: Box<[LinkedDbChangedRoute]>,
+    db_commit_invalidation_sink: Option<DbCommitInvalidationSink>,
 }
 
 impl BackendLinkedRuntime {
@@ -125,6 +133,28 @@ impl BackendLinkedRuntime {
 
     pub fn queued_message_count(&self) -> usize {
         self.runtime.queued_message_count()
+    }
+
+    pub(crate) fn set_db_commit_invalidation_sink(
+        &mut self,
+        sink: Option<DbCommitInvalidationSink>,
+    ) {
+        self.db_commit_invalidation_sink = sink;
+    }
+
+    fn prime_db_changed_routes(&mut self) {
+        let mut seeded = BTreeSet::new();
+        for route in &self.db_changed_routes {
+            if !seeded.insert(route.changed_input) {
+                continue;
+            }
+            let Ok(stamp) = self.runtime.current_stamp(route.changed_input) else {
+                continue;
+            };
+            let _ = self
+                .runtime
+                .queue_publication(Publication::new(stamp, RuntimeValue::Unit));
+        }
     }
 
     pub fn current_signal_globals(
@@ -448,6 +478,7 @@ impl BackendLinkedRuntime {
             backend: self.backend.clone(),
             globals,
             completion,
+            db_commit_invalidation_sink: self.db_commit_invalidation_sink.clone(),
         })
     }
 
@@ -477,6 +508,108 @@ impl BackendLinkedRuntime {
             globals.insert(*item, value);
         }
         Ok(globals)
+    }
+
+    pub(crate) fn invalidate_db_commit(
+        &mut self,
+        invalidation: &RuntimeDbCommitInvalidation,
+    ) -> bool {
+        let snapshots = match self.committed_signal_snapshots() {
+            Ok(snapshots) => snapshots,
+            Err(_) => return false,
+        };
+        let mut changed_inputs = BTreeSet::new();
+        for route in &self.db_changed_routes {
+            let Some(identity) = self.db_changed_route_identity(route, &snapshots) else {
+                continue;
+            };
+            if identity.connection.database != invalidation.connection.database {
+                continue;
+            }
+            if !invalidation
+                .changed_tables
+                .contains(identity.table_name.as_ref())
+            {
+                continue;
+            }
+            changed_inputs.insert(route.changed_input);
+        }
+
+        let mut invalidated = false;
+        for input in changed_inputs {
+            match self.runtime.advance_generation(input) {
+                Ok(stamp) => {
+                    if self
+                        .runtime
+                        .queue_publication(Publication::new(stamp, RuntimeValue::Unit))
+                        .is_ok()
+                    {
+                        invalidated = true;
+                    }
+                }
+                Err(TaskSourceRuntimeError::Scheduler(
+                    crate::SchedulerAccessError::OwnerInactive { .. },
+                )) => {}
+                Err(_) => {}
+            }
+        }
+        invalidated
+    }
+
+    fn db_changed_route_identity(
+        &self,
+        route: &LinkedDbChangedRoute,
+        snapshots: &BTreeMap<BackendItemId, DetachedRuntimeValue>,
+    ) -> Option<RuntimeDbTableIdentity> {
+        let value = match &route.table {
+            LinkedDbChangedRouteTable::Signal { signal } => {
+                self.runtime.current_value(*signal).ok().flatten()?.clone()
+            }
+            LinkedDbChangedRouteTable::Value {
+                backend_item,
+                required_signals,
+                changed_signal_item,
+                ..
+            } => {
+                let globals = self.required_db_route_globals(
+                    required_signals,
+                    *changed_signal_item,
+                    snapshots,
+                )?;
+                let runtime_globals = materialize_detached_globals(&globals);
+                let mut evaluator = KernelEvaluator::new(self.backend.as_ref());
+                evaluator
+                    .evaluate_item(*backend_item, &runtime_globals)
+                    .ok()?
+            }
+        };
+        runtime_db_table_identity(&value)
+    }
+
+    fn required_db_route_globals(
+        &self,
+        required: &[BackendItemId],
+        changed_signal_item: Option<BackendItemId>,
+        snapshots: &BTreeMap<BackendItemId, DetachedRuntimeValue>,
+    ) -> Option<BTreeMap<BackendItemId, DetachedRuntimeValue>> {
+        let mut globals = BTreeMap::new();
+        for item in required {
+            if let Some(value) = snapshots.get(item) {
+                globals.insert(*item, value.clone());
+                continue;
+            }
+            if Some(*item) == changed_signal_item {
+                globals.insert(
+                    *item,
+                    DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Signal(Box::new(
+                        RuntimeValue::Unit,
+                    ))),
+                );
+                continue;
+            }
+            return None;
+        }
+        Some(globals)
     }
 }
 
@@ -511,6 +644,46 @@ fn unwrap_signal_layout_result(
         (LayoutKind::Signal { .. }, RuntimeValue::Signal(inner)) => *inner,
         (_, value) => value,
     }
+}
+
+fn runtime_db_table_identity(value: &RuntimeValue) -> Option<RuntimeDbTableIdentity> {
+    let RuntimeValue::Record(fields) = strip_runtime_signal(value) else {
+        return None;
+    };
+    let table_name = record_text_field(fields, "name")?;
+    let connection = runtime_db_connection_value(record_field(fields, "conn")?)?;
+    Some(RuntimeDbTableIdentity {
+        connection,
+        table_name: table_name.into(),
+    })
+}
+
+fn runtime_db_connection_value(value: &RuntimeValue) -> Option<RuntimeDbConnection> {
+    let RuntimeValue::Record(fields) = strip_runtime_signal(value) else {
+        return None;
+    };
+    Some(RuntimeDbConnection {
+        database: record_text_field(fields, "database")?.into(),
+    })
+}
+
+fn record_field<'a>(fields: &'a [RuntimeRecordField], label: &str) -> Option<&'a RuntimeValue> {
+    fields
+        .iter()
+        .find(|field| field.label.as_ref() == label)
+        .map(|field| &field.value)
+}
+
+fn record_text_field<'a>(fields: &'a [RuntimeRecordField], label: &str) -> Option<&'a str> {
+    strip_runtime_signal(record_field(fields, label)?).as_text()
+}
+
+fn strip_runtime_signal(value: &RuntimeValue) -> &RuntimeValue {
+    let mut current = value;
+    while let RuntimeValue::Signal(inner) = current {
+        current = inner.as_ref();
+    }
+    current
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -560,6 +733,34 @@ pub struct LinkedSourceOption {
     pub option_name: Box<str>,
     pub kernel: KernelId,
     pub required_signals: Box<[BackendItemId]>,
+}
+
+pub(crate) type DbCommitInvalidationSink =
+    Arc<dyn Fn(RuntimeDbCommitInvalidation) + Send + Sync + 'static>;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LinkedDbChangedRoute {
+    changed_input: InputHandle,
+    table: LinkedDbChangedRouteTable,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum LinkedDbChangedRouteTable {
+    Signal {
+        signal: SignalHandle,
+    },
+    Value {
+        owner: hir::ItemId,
+        backend_item: BackendItemId,
+        required_signals: Box<[BackendItemId]>,
+        changed_signal_item: Option<BackendItemId>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RuntimeDbTableIdentity {
+    connection: RuntimeDbConnection,
+    table_name: Box<str>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -615,6 +816,12 @@ pub enum LinkedTaskWorkerError {
         backend_item: BackendItemId,
         error: EvaluationError,
     },
+    TaskExecution {
+        instance: TaskInstanceId,
+        owner: hir::ItemId,
+        backend_item: BackendItemId,
+        error: crate::task_executor::RuntimeTaskExecutionError,
+    },
     Disconnected {
         instance: TaskInstanceId,
         owner: hir::ItemId,
@@ -634,6 +841,16 @@ impl fmt::Display for LinkedTaskWorkerError {
             } => write!(
                 f,
                 "task instance {} for owner {owner} failed while evaluating backend item item{backend_item}: {error}",
+                instance.as_raw()
+            ),
+            Self::TaskExecution {
+                instance,
+                owner,
+                backend_item,
+                error,
+            } => write!(
+                f,
+                "task instance {} for owner {owner} failed while executing the task plan produced by backend item item{backend_item}: {error}",
                 instance.as_raw()
             ),
             Self::Disconnected {
@@ -656,6 +873,11 @@ pub struct DetachedRuntimePublicationPort {
 }
 
 impl DetachedRuntimePublicationPort {
+    #[cfg(test)]
+    pub(crate) fn from_source_port(inner: SourcePublicationPort<RuntimeValue>) -> Self {
+        Self { inner }
+    }
+
     pub fn stamp(&self) -> crate::PublicationStamp {
         self.inner.stamp()
     }
@@ -801,6 +1023,7 @@ struct PreparedTaskExecution {
     backend: Arc<BackendProgram>,
     globals: BTreeMap<BackendItemId, DetachedRuntimeValue>,
     completion: DetachedRuntimeCompletionPort,
+    db_commit_invalidation_sink: Option<DbCommitInvalidationSink>,
 }
 
 fn execute_task_plan(
@@ -813,6 +1036,7 @@ fn execute_task_plan(
         backend,
         globals,
         completion,
+        db_commit_invalidation_sink,
     } = task;
     if completion.is_cancelled() {
         return Ok(LinkedTaskWorkerOutcome::Cancelled);
@@ -827,7 +1051,20 @@ fn execute_task_plan(
             backend_item,
             error,
         })?;
-    match completion.complete(DetachedRuntimeValue::from_runtime_owned(value)) {
+    let outcome = execute_runtime_value_with_stdio_effects(value).map_err(|error| {
+        LinkedTaskWorkerError::TaskExecution {
+            instance,
+            owner,
+            backend_item,
+            error,
+        }
+    })?;
+    if let Some(invalidation) = outcome.commit_invalidation
+        && let Some(sink) = db_commit_invalidation_sink
+    {
+        sink(invalidation);
+    }
+    match completion.complete(DetachedRuntimeValue::from_runtime_owned(outcome.value)) {
         Ok(()) => Ok(LinkedTaskWorkerOutcome::Published),
         Err(PublicationPortError::Cancelled { .. }) => Ok(LinkedTaskWorkerOutcome::Cancelled),
         Err(PublicationPortError::Disconnected { stamp, value }) => {
@@ -1567,6 +1804,7 @@ struct LinkArtifacts {
     linked_recurrence_signals: BTreeMap<DerivedHandle, LinkedRecurrenceSignal>,
     source_bindings: BTreeMap<SourceInstanceId, LinkedSourceBinding>,
     task_bindings: BTreeMap<TaskInstanceId, LinkedTaskBinding>,
+    db_changed_routes: Box<[LinkedDbChangedRoute]>,
 }
 
 struct LinkBuilder<'a> {
@@ -1583,6 +1821,7 @@ struct LinkBuilder<'a> {
     linked_recurrence_signals: BTreeMap<DerivedHandle, LinkedRecurrenceSignal>,
     source_bindings: BTreeMap<SourceInstanceId, LinkedSourceBinding>,
     task_bindings: BTreeMap<TaskInstanceId, LinkedTaskBinding>,
+    db_changed_routes: Vec<LinkedDbChangedRoute>,
 }
 
 impl<'a> LinkBuilder<'a> {
@@ -1605,6 +1844,7 @@ impl<'a> LinkBuilder<'a> {
             linked_recurrence_signals: BTreeMap::new(),
             source_bindings: BTreeMap::new(),
             task_bindings: BTreeMap::new(),
+            db_changed_routes: Vec::new(),
         }
     }
 
@@ -1613,6 +1853,7 @@ impl<'a> LinkBuilder<'a> {
         self.index_signal_items();
         self.link_sources();
         self.link_tasks();
+        self.link_db_changed_routes();
         self.link_derived_signals();
         if self.errors.is_empty() {
             Ok(LinkArtifacts {
@@ -1622,6 +1863,7 @@ impl<'a> LinkBuilder<'a> {
                 linked_recurrence_signals: std::mem::take(&mut self.linked_recurrence_signals),
                 source_bindings: std::mem::take(&mut self.source_bindings),
                 task_bindings: std::mem::take(&mut self.task_bindings),
+                db_changed_routes: std::mem::take(&mut self.db_changed_routes).into_boxed_slice(),
             })
         } else {
             Err(BackendRuntimeLinkErrors::new(std::mem::take(
@@ -1731,6 +1973,12 @@ impl<'a> LinkBuilder<'a> {
             let options = backend_source
                 .options
                 .iter()
+                .filter(|option| {
+                    !matches!(
+                        option.option_name.as_ref(),
+                        "decode" | "refreshOn" | "reloadOn" | "activeWhen"
+                    )
+                })
                 .map(|option| LinkedSourceOption {
                     option_name: option.option_name.clone(),
                     kernel: option.kernel,
@@ -1806,6 +2054,46 @@ impl<'a> LinkBuilder<'a> {
                     execution,
                 },
             );
+        }
+    }
+
+    fn link_db_changed_routes(&mut self) {
+        for binding in self.assembly.db_changed_bindings() {
+            let Some(changed_input) = self
+                .assembly
+                .signal(binding.changed_signal)
+                .and_then(|signal| signal.input())
+            else {
+                continue;
+            };
+            let table = if let Some(signal) = self.assembly.signal(binding.table_item) {
+                LinkedDbChangedRouteTable::Signal {
+                    signal: signal.signal(),
+                }
+            } else {
+                let Some(&backend_item) = self.hir_to_backend.get(&binding.table_item) else {
+                    continue;
+                };
+                let Some(item) = self.backend.items().get(backend_item) else {
+                    continue;
+                };
+                let Some(body) = item.body else {
+                    continue;
+                };
+                if !item.parameters.is_empty() {
+                    continue;
+                }
+                LinkedDbChangedRouteTable::Value {
+                    owner: binding.table_item,
+                    backend_item,
+                    required_signals: self.collect_required_signal_items(binding.table_item, body),
+                    changed_signal_item: self.hir_to_backend.get(&binding.changed_signal).copied(),
+                }
+            };
+            self.db_changed_routes.push(LinkedDbChangedRoute {
+                changed_input,
+                table,
+            });
         }
     }
 
@@ -2247,6 +2535,8 @@ mod tests {
             linked_recurrence_signals: BTreeMap::new(),
             source_bindings: BTreeMap::new(),
             task_bindings: BTreeMap::from([(instance, binding)]),
+            db_changed_routes: Vec::new().into_boxed_slice(),
+            db_commit_invalidation_sink: None,
         }
     }
 
@@ -2337,11 +2627,9 @@ signal users : Signal Text
             config.arguments.as_ref(),
             &[RuntimeValue::Text("https://example.com/7".into())]
         );
-        assert_eq!(config.options.len(), 1);
-        assert_eq!(config.options[0].option_name.as_ref(), "activeWhen");
-        assert_eq!(
-            config.options[0].value,
-            RuntimeValue::Signal(Box::new(RuntimeValue::Bool(true)))
+        assert!(
+            config.options.is_empty(),
+            "scheduler-owned lifecycle options should not leak into provider config"
         );
     }
 
@@ -2478,6 +2766,41 @@ signal users : Signal Text
             "runtime-startup-manual-task-success.aivi",
             r#"
 value answer = 42
+"#,
+        );
+        let mut linked = manual_task_linked_runtime(&lowered, "answer");
+        let binding = linked
+            .task_by_owner(item_id(lowered.hir.module(), "answer"))
+            .expect("manual task binding should exist")
+            .clone();
+
+        let handle = linked
+            .spawn_task_worker(binding.instance)
+            .expect("task worker should spawn");
+        assert_eq!(
+            handle
+                .join()
+                .expect("task worker thread should join cleanly"),
+            Ok(LinkedTaskWorkerOutcome::Published)
+        );
+
+        let outcome = linked.tick().expect("task publication tick should succeed");
+        assert!(!outcome.is_empty());
+        assert_eq!(
+            linked
+                .runtime()
+                .current_value(binding.input.as_signal())
+                .expect("task sink should be readable"),
+            Some(&RuntimeValue::Int(42))
+        );
+    }
+
+    #[test]
+    fn linked_runtime_task_workers_execute_runtime_task_plans_before_publication() {
+        let lowered = lower_text(
+            "runtime-startup-manual-task-plan-success.aivi",
+            r#"
+value answer : Task Text Int = pure 42
 "#,
         );
         let mut linked = manual_task_linked_runtime(&lowered, "answer");

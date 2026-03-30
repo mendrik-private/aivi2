@@ -201,6 +201,7 @@ These built-ins publish one host-context snapshot when the source starts. They d
 - `config` must currently evaluate to either a database path `Text` or a record containing `database: Text`.
 - Relative database paths are resolved against the runtime working directory before publication.
 - The current runtime validates that SQLite can open the target and then publishes the normalized `Connection` record.
+- The published `Connection.database` field is the normalized path the runtime actually opened.
 - The intended result shape is `Signal (Result DbError Connection)`.
 
 ### `db.live`
@@ -209,18 +210,21 @@ These built-ins publish one host-context snapshot when the source starts. They d
 
 | Option | Type | Current support |
 | --- | --- | --- |
-| `refreshOn` | `Signal B` | Present in the contract, but provider startup is not executed yet. |
-| `debounce` | `Duration` | Present in the contract, but provider startup is not executed yet. |
-| `optimistic` | `Bool` | Present in the contract, but provider startup is not executed yet. |
-| `onRollback` | `Signal DbError` | Present in the contract, but provider startup is not executed yet. |
-| `activeWhen` | `Signal Bool` | Present in the contract, but provider startup is not executed yet. |
+| `refreshOn` | `Signal B` | Supported through the existing source reconfiguration lifecycle, including pre-elaborated `.changed` projections. |
+| `debounce` | `Duration` | Supported for refresh reconfiguration; activation still loads immediately. |
+| `optimistic` | `Bool` | Only the default `False` is accepted in this slice; optimistic patching is still pending. |
+| `onRollback` | `Signal DbError` | Not executed yet; provider startup rejects this option in the current slice. |
+| `activeWhen` | `Signal Bool` | Supported through the existing source activation lifecycle. |
 
 **Notes**
 
 - The compiler now recognizes `db.live` as a built-in provider key.
-- Runtime execution is still pending; starting this source currently fails as an unsupported provider.
+- Runtime execution now runs the query task on a worker thread and republishes on activation or refresh.
 - The intended result shape is `Signal (Result DbError A)`.
-- The `refreshOn: users.changed` path described in the DB live design still needs deeper runtime adapter work before nested table-owned signals can drive source refreshes.
+- Successful `db.commit` tasks now advance matching input-backed `.changed` signals using the current `Connection.database` path plus changed table names, so `db.live refreshOn` paths refresh automatically after commits.
+- `refreshOn` is the whole refresh boundary in the current slice. A `users.changed` projection is accepted, but it is still just an explicit trigger signal routed through that same path.
+- `commit()` now drives `TableRef.changed`-style refreshes automatically when the commit plan names the changed tables and the table handle resolves to the same normalized `Connection.database` path.
+- Invalidation is still coarse at the table level in this slice. Row-scoped `watch`, `optimistic`, and rollback behavior remain future work.
 
 ## GTK input
 

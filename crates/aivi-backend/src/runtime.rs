@@ -117,6 +117,111 @@ pub enum RuntimeConstructor {
     Invalid,
 }
 
+/// Backend-owned DB task plans stay separate from `RuntimeTaskPlan` until executor integration
+/// lands. This keeps the representation explicit without forcing runtime/CLI wiring in this slice.
+#[allow(dead_code)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum RuntimeDbTaskPlan {
+    Query(RuntimeDbQueryPlan),
+    Commit(RuntimeDbCommitPlan),
+}
+
+/// Path-backed database identity extracted from the surface `Connection` record.
+///
+/// The `database` text must already be normalized so equality and change invalidation use the same
+/// canonical key.
+#[allow(dead_code)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct RuntimeDbConnection {
+    pub database: Box<str>,
+}
+
+/// One SQL statement plus its bound arguments.
+///
+/// Argument order is significant and preserves the lowering order so later execution can bind
+/// placeholders deterministically without re-inspecting source syntax.
+#[allow(dead_code)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct RuntimeDbStatement {
+    pub sql: Box<str>,
+    pub arguments: Vec<RuntimeValue>,
+}
+
+/// Read-only DB work.
+#[allow(dead_code)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct RuntimeDbQueryPlan {
+    pub connection: RuntimeDbConnection,
+    pub statement: RuntimeDbStatement,
+}
+
+/// Transactional DB work whose successful commit must invalidate explicit table keys.
+#[allow(dead_code)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct RuntimeDbCommitPlan {
+    pub connection: RuntimeDbConnection,
+    pub statements: Vec<RuntimeDbStatement>,
+    pub changed_tables: BTreeSet<Box<str>>,
+}
+
+impl fmt::Display for RuntimeDbTaskPlan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Query(plan) => write!(f, "db.{plan}"),
+            Self::Commit(plan) => write!(f, "db.{plan}"),
+        }
+    }
+}
+
+impl fmt::Display for RuntimeDbConnection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "db.connection({})", self.database)
+    }
+}
+
+impl fmt::Display for RuntimeDbStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "sql({}", self.sql)?;
+        if !self.arguments.is_empty() {
+            f.write_str("; args: [")?;
+            for (index, argument) in self.arguments.iter().enumerate() {
+                if index > 0 {
+                    f.write_str(", ")?;
+                }
+                write!(f, "{argument}")?;
+            }
+            f.write_str("]")?;
+        }
+        f.write_str(")")
+    }
+}
+
+impl fmt::Display for RuntimeDbQueryPlan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "query({}, {})", self.connection, self.statement)
+    }
+}
+
+impl fmt::Display for RuntimeDbCommitPlan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "commit({}, [", self.connection)?;
+        for (index, statement) in self.statements.iter().enumerate() {
+            if index > 0 {
+                f.write_str(", ")?;
+            }
+            write!(f, "{statement}")?;
+        }
+        f.write_str("]; changes: [")?;
+        for (index, table) in self.changed_tables.iter().enumerate() {
+            if index > 0 {
+                f.write_str(", ")?;
+            }
+            f.write_str(table)?;
+        }
+        f.write_str("])")
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RuntimeTaskPlan {
     Pure { value: Box<RuntimeValue> },
@@ -231,6 +336,7 @@ pub enum RuntimeValue {
     ValidationInvalid(Box<RuntimeValue>),
     Signal(Box<RuntimeValue>),
     Task(RuntimeTaskPlan),
+    DbTask(RuntimeDbTaskPlan),
     SuffixedInteger { raw: Box<str>, suffix: Box<str> },
     Callable(RuntimeCallable),
 }
@@ -383,6 +489,7 @@ impl RuntimeValue {
                         stack.push(DisplayFrame::StaticText("Signal("));
                     }
                     Self::Task(task) => write!(target, "<task {task}>")?,
+                    Self::DbTask(task) => write!(target, "<task {task}>")?,
                     Self::SuffixedInteger { raw, suffix } => write!(target, "{raw}{suffix}")?,
                     Self::Callable(callable) => match callable {
                         RuntimeCallable::ItemBody { item, .. } => {
@@ -3596,6 +3703,16 @@ fn intrinsic_value_arity(value: IntrinsicValue) -> usize {
         IntrinsicValue::FsWriteBytes => 2,
         IntrinsicValue::FsCreateDirAll => 1,
         IntrinsicValue::FsDeleteFile => 1,
+        IntrinsicValue::DbParamBool
+        | IntrinsicValue::DbParamInt
+        | IntrinsicValue::DbParamFloat
+        | IntrinsicValue::DbParamDecimal
+        | IntrinsicValue::DbParamBigInt
+        | IntrinsicValue::DbParamText
+        | IntrinsicValue::DbParamBytes => 1,
+        IntrinsicValue::DbStatement => 2,
+        IntrinsicValue::DbQuery => 2,
+        IntrinsicValue::DbCommit => 3,
         IntrinsicValue::FloatFloor
         | IntrinsicValue::FloatCeil
         | IntrinsicValue::FloatRound
@@ -3725,6 +3842,72 @@ fn evaluate_intrinsic_value(
                 path: expect_intrinsic_text(kernel, expr, value, 0, path)?,
             }))
         }
+        (IntrinsicValue::DbParamBool, [argument]) => Ok(runtime_db_param(
+            "bool",
+            "bool",
+            strip_signal(argument.clone()),
+        )),
+        (IntrinsicValue::DbParamInt, [argument]) => Ok(runtime_db_param(
+            "int",
+            "int",
+            strip_signal(argument.clone()),
+        )),
+        (IntrinsicValue::DbParamFloat, [argument]) => Ok(runtime_db_param(
+            "float",
+            "float",
+            strip_signal(argument.clone()),
+        )),
+        (IntrinsicValue::DbParamDecimal, [argument]) => Ok(runtime_db_param(
+            "decimal",
+            "decimal",
+            strip_signal(argument.clone()),
+        )),
+        (IntrinsicValue::DbParamBigInt, [argument]) => Ok(runtime_db_param(
+            "bigInt",
+            "bigInt",
+            strip_signal(argument.clone()),
+        )),
+        (IntrinsicValue::DbParamText, [argument]) => Ok(runtime_db_param(
+            "text",
+            "text",
+            strip_signal(argument.clone()),
+        )),
+        (IntrinsicValue::DbParamBytes, [argument]) => Ok(runtime_db_param(
+            "bytes",
+            "bytes",
+            strip_signal(argument.clone()),
+        )),
+        (IntrinsicValue::DbStatement, [sql, arguments]) => {
+            let sql = expect_intrinsic_text(kernel, expr, value, 0, sql)?;
+            let arguments = match strip_signal(arguments.clone()) {
+                RuntimeValue::List(arguments) => arguments,
+                found => {
+                    return Err(EvaluationError::InvalidIntrinsicArgument {
+                        kernel,
+                        expr,
+                        value,
+                        index: 1,
+                        found,
+                    });
+                }
+            };
+            Ok(runtime_db_statement(sql, arguments))
+        }
+        (IntrinsicValue::DbQuery, [connection, statement]) => Ok(RuntimeValue::DbTask(
+            RuntimeDbTaskPlan::Query(RuntimeDbQueryPlan {
+                connection: expect_intrinsic_db_connection(kernel, expr, value, 0, connection)?,
+                statement: expect_intrinsic_db_statement(kernel, expr, value, 1, statement)?,
+            }),
+        )),
+        (IntrinsicValue::DbCommit, [connection, changed_tables, statements]) => Ok(
+            RuntimeValue::DbTask(RuntimeDbTaskPlan::Commit(RuntimeDbCommitPlan {
+                connection: expect_intrinsic_db_connection(kernel, expr, value, 0, connection)?,
+                statements: expect_intrinsic_db_statement_list(kernel, expr, value, 2, statements)?,
+                changed_tables: expect_intrinsic_text_list(kernel, expr, value, 1, changed_tables)?
+                    .into_iter()
+                    .collect(),
+            })),
+        ),
         // Float math intrinsics — pure functions, return directly
         (IntrinsicValue::FloatFloor, [n]) => {
             let f = expect_intrinsic_float(kernel, expr, value, 0, n)?;
@@ -4383,6 +4566,282 @@ fn expect_intrinsic_float(
     }
 }
 
+fn invalid_intrinsic_argument(
+    kernel: KernelId,
+    expr: KernelExprId,
+    value: IntrinsicValue,
+    index: usize,
+    found: RuntimeValue,
+) -> EvaluationError {
+    EvaluationError::InvalidIntrinsicArgument {
+        kernel,
+        expr,
+        value,
+        index,
+        found,
+    }
+}
+
+fn runtime_record_field(label: &str, value: RuntimeValue) -> RuntimeRecordField {
+    RuntimeRecordField {
+        label: label.into(),
+        value,
+    }
+}
+
+fn runtime_db_param(
+    kind: &'static str,
+    payload_field: &'static str,
+    payload: RuntimeValue,
+) -> RuntimeValue {
+    let payload_slot = |field| {
+        if field == payload_field {
+            RuntimeValue::OptionSome(Box::new(payload.clone()))
+        } else {
+            RuntimeValue::OptionNone
+        }
+    };
+    RuntimeValue::Record(vec![
+        runtime_record_field("kind", RuntimeValue::Text(kind.into())),
+        runtime_record_field("bool", payload_slot("bool")),
+        runtime_record_field("int", payload_slot("int")),
+        runtime_record_field("float", payload_slot("float")),
+        runtime_record_field("decimal", payload_slot("decimal")),
+        runtime_record_field("bigInt", payload_slot("bigInt")),
+        runtime_record_field("text", payload_slot("text")),
+        runtime_record_field("bytes", payload_slot("bytes")),
+    ])
+}
+
+fn runtime_db_statement(sql: Box<str>, arguments: Vec<RuntimeValue>) -> RuntimeValue {
+    RuntimeValue::Record(vec![
+        runtime_record_field("sql", RuntimeValue::Text(sql)),
+        runtime_record_field("arguments", RuntimeValue::List(arguments)),
+    ])
+}
+
+fn record_field<'a>(fields: &'a [RuntimeRecordField], label: &str) -> Option<&'a RuntimeValue> {
+    fields
+        .iter()
+        .find(|field| field.label.as_ref() == label)
+        .map(|field| &field.value)
+}
+
+fn expect_intrinsic_text_list(
+    kernel: KernelId,
+    expr: KernelExprId,
+    value: IntrinsicValue,
+    index: usize,
+    argument: &RuntimeValue,
+) -> Result<Vec<Box<str>>, EvaluationError> {
+    let found = strip_signal(argument.clone());
+    let RuntimeValue::List(values) = &found else {
+        return Err(invalid_intrinsic_argument(
+            kernel, expr, value, index, found,
+        ));
+    };
+    values
+        .iter()
+        .map(|entry| match strip_signal(entry.clone()) {
+            RuntimeValue::Text(text) => Ok(text),
+            found => Err(invalid_intrinsic_argument(
+                kernel, expr, value, index, found,
+            )),
+        })
+        .collect()
+}
+
+fn expect_intrinsic_db_connection(
+    kernel: KernelId,
+    expr: KernelExprId,
+    value: IntrinsicValue,
+    index: usize,
+    argument: &RuntimeValue,
+) -> Result<RuntimeDbConnection, EvaluationError> {
+    let found = strip_signal(argument.clone());
+    let RuntimeValue::Record(fields) = &found else {
+        return Err(invalid_intrinsic_argument(
+            kernel, expr, value, index, found,
+        ));
+    };
+    let Some(database) = record_field(fields, "database") else {
+        return Err(invalid_intrinsic_argument(
+            kernel,
+            expr,
+            value,
+            index,
+            found.clone(),
+        ));
+    };
+    match strip_signal(database.clone()) {
+        RuntimeValue::Text(database) => Ok(RuntimeDbConnection { database }),
+        found => Err(invalid_intrinsic_argument(
+            kernel, expr, value, index, found,
+        )),
+    }
+}
+
+fn expect_intrinsic_db_statement_list(
+    kernel: KernelId,
+    expr: KernelExprId,
+    value: IntrinsicValue,
+    index: usize,
+    argument: &RuntimeValue,
+) -> Result<Vec<RuntimeDbStatement>, EvaluationError> {
+    let found = strip_signal(argument.clone());
+    let RuntimeValue::List(values) = &found else {
+        return Err(invalid_intrinsic_argument(
+            kernel, expr, value, index, found,
+        ));
+    };
+    values
+        .iter()
+        .map(|statement| expect_intrinsic_db_statement(kernel, expr, value, index, statement))
+        .collect()
+}
+
+fn expect_intrinsic_db_statement(
+    kernel: KernelId,
+    expr: KernelExprId,
+    value: IntrinsicValue,
+    index: usize,
+    argument: &RuntimeValue,
+) -> Result<RuntimeDbStatement, EvaluationError> {
+    let found = strip_signal(argument.clone());
+    let RuntimeValue::Record(fields) = &found else {
+        return Err(invalid_intrinsic_argument(
+            kernel, expr, value, index, found,
+        ));
+    };
+    let Some(sql) = record_field(fields, "sql") else {
+        return Err(invalid_intrinsic_argument(
+            kernel,
+            expr,
+            value,
+            index,
+            found.clone(),
+        ));
+    };
+    let Some(arguments) = record_field(fields, "arguments") else {
+        return Err(invalid_intrinsic_argument(
+            kernel,
+            expr,
+            value,
+            index,
+            found.clone(),
+        ));
+    };
+    let sql = match strip_signal(sql.clone()) {
+        RuntimeValue::Text(sql) => sql,
+        found => {
+            return Err(invalid_intrinsic_argument(
+                kernel, expr, value, index, found,
+            ));
+        }
+    };
+    let arguments = expect_intrinsic_db_statement_arguments(kernel, expr, value, index, arguments)?;
+    Ok(RuntimeDbStatement { sql, arguments })
+}
+
+fn expect_intrinsic_db_statement_arguments(
+    kernel: KernelId,
+    expr: KernelExprId,
+    value: IntrinsicValue,
+    index: usize,
+    argument: &RuntimeValue,
+) -> Result<Vec<RuntimeValue>, EvaluationError> {
+    let found = strip_signal(argument.clone());
+    let RuntimeValue::List(values) = &found else {
+        return Err(invalid_intrinsic_argument(
+            kernel, expr, value, index, found,
+        ));
+    };
+    values
+        .iter()
+        .map(|argument| expect_intrinsic_db_param(kernel, expr, value, index, argument))
+        .collect()
+}
+
+fn expect_intrinsic_db_param(
+    kernel: KernelId,
+    expr: KernelExprId,
+    value: IntrinsicValue,
+    index: usize,
+    argument: &RuntimeValue,
+) -> Result<RuntimeValue, EvaluationError> {
+    const PAYLOAD_FIELDS: [&str; 7] =
+        ["bool", "int", "float", "decimal", "bigInt", "text", "bytes"];
+
+    let found = strip_signal(argument.clone());
+    let RuntimeValue::Record(fields) = &found else {
+        return Err(invalid_intrinsic_argument(
+            kernel, expr, value, index, found,
+        ));
+    };
+    let Some(kind) = record_field(fields, "kind") else {
+        return Err(invalid_intrinsic_argument(
+            kernel,
+            expr,
+            value,
+            index,
+            found.clone(),
+        ));
+    };
+    let kind = match strip_signal(kind.clone()) {
+        RuntimeValue::Text(kind) => kind,
+        found => {
+            return Err(invalid_intrinsic_argument(
+                kernel, expr, value, index, found,
+            ));
+        }
+    };
+    if !PAYLOAD_FIELDS.contains(&kind.as_ref()) {
+        return Err(invalid_intrinsic_argument(
+            kernel,
+            expr,
+            value,
+            index,
+            found.clone(),
+        ));
+    }
+    for field in PAYLOAD_FIELDS {
+        let Some(value_field) = record_field(fields, field) else {
+            return Err(invalid_intrinsic_argument(
+                kernel,
+                expr,
+                value,
+                index,
+                found.clone(),
+            ));
+        };
+        let runtime_value = strip_signal(value_field.clone());
+        if field == kind.as_ref() {
+            let RuntimeValue::OptionSome(payload) = runtime_value else {
+                return Err(invalid_intrinsic_argument(
+                    kernel,
+                    expr,
+                    value,
+                    index,
+                    found.clone(),
+                ));
+            };
+            return Ok(*payload);
+        }
+        if !matches!(runtime_value, RuntimeValue::OptionNone) {
+            return Err(invalid_intrinsic_argument(
+                kernel,
+                expr,
+                value,
+                index,
+                found.clone(),
+            ));
+        }
+    }
+    Err(invalid_intrinsic_argument(
+        kernel, expr, value, index, found,
+    ))
+}
+
 fn expect_arity<const N: usize>(
     arguments: Vec<RuntimeValue>,
 ) -> Result<[RuntimeValue; N], &'static str> {
@@ -4506,7 +4965,9 @@ fn value_matches_layout(program: &Program, value: &RuntimeValue, layout: LayoutI
         (LayoutKind::Primitive(PrimitiveType::Text), RuntimeValue::Text(_)) => true,
         (LayoutKind::Primitive(PrimitiveType::Bytes), RuntimeValue::Bytes(_)) => true,
         (LayoutKind::Primitive(PrimitiveType::Task), RuntimeValue::Task(_))
-        | (LayoutKind::Task { .. }, RuntimeValue::Task(_)) => true,
+        | (LayoutKind::Primitive(PrimitiveType::Task), RuntimeValue::DbTask(_))
+        | (LayoutKind::Task { .. }, RuntimeValue::Task(_))
+        | (LayoutKind::Task { .. }, RuntimeValue::DbTask(_)) => true,
         (LayoutKind::Tuple(expected), RuntimeValue::Tuple(elements)) => {
             expected.len() == elements.len()
                 && expected
@@ -4692,7 +5153,9 @@ fn structural_eq(
         (RuntimeValue::Callable(_), _)
         | (_, RuntimeValue::Callable(_))
         | (RuntimeValue::Task(_), _)
-        | (_, RuntimeValue::Task(_)) => {
+        | (_, RuntimeValue::Task(_))
+        | (RuntimeValue::DbTask(_), _)
+        | (_, RuntimeValue::DbTask(_)) => {
             return Err(EvaluationError::UnsupportedStructuralEquality {
                 kernel,
                 expr,
@@ -4781,6 +5244,7 @@ fn runtime_values_may_match(left: &RuntimeValue, right: &RuntimeValue) -> bool {
         | (RuntimeValue::ValidationValid(_), RuntimeValue::ValidationValid(_))
         | (RuntimeValue::ValidationInvalid(_), RuntimeValue::ValidationInvalid(_))
         | (RuntimeValue::Task(_), RuntimeValue::Task(_))
+        | (RuntimeValue::DbTask(_), RuntimeValue::DbTask(_))
         | (RuntimeValue::Callable(_), RuntimeValue::Callable(_))
         | (RuntimeValue::SuffixedInteger { .. }, RuntimeValue::SuffixedInteger { .. }) => true,
         (RuntimeValue::Int(_), RuntimeValue::SuffixedInteger { .. })
@@ -4962,11 +5426,14 @@ fn matches_non_empty_runtime(value: &RuntimeSumValue) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use aivi_hir::{ItemId as HirItemId, SumConstructorHandle};
 
     use super::{
-        DetachedRuntimeValue, RuntimeMap, RuntimeMapEntry, RuntimeRecordField, RuntimeSumValue,
-        RuntimeValue, append_validation_errors, structural_eq,
+        DetachedRuntimeValue, RuntimeDbCommitPlan, RuntimeDbConnection, RuntimeDbQueryPlan,
+        RuntimeDbStatement, RuntimeDbTaskPlan, RuntimeMap, RuntimeMapEntry, RuntimeRecordField,
+        RuntimeSumValue, RuntimeValue, append_validation_errors, structural_eq,
     };
     use crate::{KernelExprId, KernelId};
 
@@ -5056,6 +5523,111 @@ mod tests {
         });
 
         assert_eq!(format!("{value}"), "<constructor Status.Ready>");
+    }
+
+    #[test]
+    fn db_task_plan_display_formats_query_work() {
+        let plan = RuntimeDbTaskPlan::Query(RuntimeDbQueryPlan {
+            connection: RuntimeDbConnection {
+                database: "/var/lib/app.sqlite".into(),
+            },
+            statement: RuntimeDbStatement {
+                sql: "select * from users where id = ?".into(),
+                arguments: vec![RuntimeValue::Int(7)],
+            },
+        });
+
+        assert_eq!(
+            format!("{plan}"),
+            "db.query(db.connection(/var/lib/app.sqlite), sql(select * from users where id = ?; args: [7]))"
+        );
+        assert_eq!(
+            format!("{plan:?}"),
+            r#"Query(RuntimeDbQueryPlan { connection: RuntimeDbConnection { database: "/var/lib/app.sqlite" }, statement: RuntimeDbStatement { sql: "select * from users where id = ?", arguments: [Int(7)] } })"#
+        );
+    }
+
+    #[test]
+    fn db_task_plan_display_formats_commit_work_deterministically() {
+        let plan = RuntimeDbTaskPlan::Commit(RuntimeDbCommitPlan {
+            connection: RuntimeDbConnection {
+                database: "/var/lib/app.sqlite".into(),
+            },
+            statements: vec![
+                RuntimeDbStatement {
+                    sql: "insert into users(id, name) values (?, ?)".into(),
+                    arguments: vec![RuntimeValue::Int(7), RuntimeValue::Text("Ada".into())],
+                },
+                RuntimeDbStatement {
+                    sql: "insert into audit_log(message) values (?)".into(),
+                    arguments: vec![RuntimeValue::Text("created user".into())],
+                },
+            ],
+            changed_tables: ["users", "audit_log"].into_iter().map(Into::into).collect(),
+        });
+
+        assert_eq!(
+            format!("{plan}"),
+            "db.commit(db.connection(/var/lib/app.sqlite), [sql(insert into users(id, name) values (?, ?); args: [7, Ada]), sql(insert into audit_log(message) values (?); args: [created user])]; changes: [audit_log, users])"
+        );
+    }
+
+    #[test]
+    fn db_commit_plan_equality_normalizes_changed_table_order() {
+        let left = RuntimeDbTaskPlan::Commit(RuntimeDbCommitPlan {
+            connection: RuntimeDbConnection {
+                database: "/var/lib/app.sqlite".into(),
+            },
+            statements: vec![RuntimeDbStatement {
+                sql: "update users set active = ? where id = ?".into(),
+                arguments: vec![RuntimeValue::Bool(true), RuntimeValue::Int(7)],
+            }],
+            changed_tables: ["users", "audit_log"].into_iter().map(Into::into).collect(),
+        });
+        let right = RuntimeDbTaskPlan::Commit(RuntimeDbCommitPlan {
+            connection: RuntimeDbConnection {
+                database: "/var/lib/app.sqlite".into(),
+            },
+            statements: vec![RuntimeDbStatement {
+                sql: "update users set active = ? where id = ?".into(),
+                arguments: vec![RuntimeValue::Bool(true), RuntimeValue::Int(7)],
+            }],
+            changed_tables: ["audit_log", "users"].into_iter().map(Into::into).collect(),
+        });
+
+        assert_eq!(left, right);
+    }
+
+    #[test]
+    fn db_commit_plan_equality_tracks_invalidation_and_statement_payload() {
+        let base_connection = RuntimeDbConnection {
+            database: "/var/lib/app.sqlite".into(),
+        };
+        let base_statement = RuntimeDbStatement {
+            sql: "update users set active = ? where id = ?".into(),
+            arguments: vec![RuntimeValue::Bool(true), RuntimeValue::Int(7)],
+        };
+        let left = RuntimeDbTaskPlan::Commit(RuntimeDbCommitPlan {
+            connection: base_connection.clone(),
+            statements: vec![base_statement.clone()],
+            changed_tables: BTreeSet::from(["users".into(), "audit_log".into()]),
+        });
+        let different_tables = RuntimeDbTaskPlan::Commit(RuntimeDbCommitPlan {
+            connection: base_connection.clone(),
+            statements: vec![base_statement.clone()],
+            changed_tables: BTreeSet::from(["users".into()]),
+        });
+        let different_statement = RuntimeDbTaskPlan::Commit(RuntimeDbCommitPlan {
+            connection: base_connection,
+            statements: vec![RuntimeDbStatement {
+                sql: "update users set active = ? where id = ?".into(),
+                arguments: vec![RuntimeValue::Bool(false), RuntimeValue::Int(7)],
+            }],
+            changed_tables: BTreeSet::from(["users".into(), "audit_log".into()]),
+        });
+
+        assert_ne!(left, different_tables);
+        assert_ne!(left, different_statement);
     }
 
     #[test]

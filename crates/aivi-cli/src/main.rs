@@ -23,8 +23,7 @@ use std::os::unix::fs::PermissionsExt;
 
 use aivi_backend::{
     DetachedRuntimeValue, ItemId as BackendItemId, KernelEvaluator, Program as BackendProgram,
-    RuntimeTaskPlan, RuntimeValue, compile_program, lower_module as lower_backend_module,
-    validate_program,
+    RuntimeValue, compile_program, lower_module as lower_backend_module, validate_program,
 };
 use aivi_base::{Diagnostic, FileId, Severity, SourceDatabase, SourceSpan};
 use aivi_core::{
@@ -53,7 +52,7 @@ use aivi_query::{
 use aivi_runtime::{
     BackendLinkedRuntime, GlibLinkedRuntimeDriver, HirRuntimeAssembly,
     InputHandle as RuntimeInputHandle, Publication, SourceProviderContext, SourceProviderManager,
-    assemble_hir_runtime_with_items, link_backend_runtime,
+    assemble_hir_runtime_with_items, execute_runtime_value, link_backend_runtime,
 };
 use aivi_syntax::{Formatter, ItemKind, TokenKind, lex_module, parse_module};
 use gtk::{glib, prelude::*};
@@ -1353,12 +1352,12 @@ fn execute_main_task_value(
     stdout: &mut impl Write,
     stderr: &mut impl Write,
 ) -> Result<(), String> {
-    let RuntimeValue::Task(plan) = value else {
+    if !matches!(&value, RuntimeValue::Task(_) | RuntimeValue::DbTask(_)) {
         return Err(format!(
             "`aivi execute` expected `main` to evaluate to a task plan, found `{value}`"
         ));
-    };
-    let result = execute_runtime_task_plan(plan, stdout, stderr)?;
+    }
+    let result = execute_runtime_value(value, stdout, stderr).map_err(|error| error.to_string())?;
     if result != RuntimeValue::Unit {
         write_output_line(stdout, &result.to_string())?;
     }
@@ -1370,12 +1369,12 @@ fn execute_test_task_value(
     stdout: &mut impl Write,
     stderr: &mut impl Write,
 ) -> Result<TestTaskOutcome, String> {
-    let RuntimeValue::Task(plan) = value else {
+    if !matches!(&value, RuntimeValue::Task(_) | RuntimeValue::DbTask(_)) {
         return Err(format!(
             "`aivi test` expected each `@test` value to evaluate to a task plan, found `{value}`"
         ));
-    };
-    let result = execute_runtime_task_plan(plan, stdout, stderr)?;
+    }
+    let result = execute_runtime_value(value, stdout, stderr).map_err(|error| error.to_string())?;
     Ok(match result {
         RuntimeValue::Unit => TestTaskOutcome {
             passed: true,
@@ -1419,207 +1418,8 @@ fn execute_test_task_value(
     })
 }
 
-fn execute_runtime_task_plan(
-    plan: RuntimeTaskPlan,
-    stdout: &mut impl Write,
-    stderr: &mut impl Write,
-) -> Result<RuntimeValue, String> {
-    match plan {
-        RuntimeTaskPlan::Pure { value } => Ok(*value),
-        RuntimeTaskPlan::RandomInt { low, high } => {
-            Ok(RuntimeValue::Int(sample_random_i64_inclusive(low, high)?))
-        }
-        RuntimeTaskPlan::RandomBytes { count } => {
-            let count = usize::try_from(count)
-                .map_err(|_| format!("random byte count must be non-negative, found {count}"))?;
-            Ok(RuntimeValue::Bytes(read_os_random_bytes(count)?))
-        }
-        RuntimeTaskPlan::StdoutWrite { text } => {
-            stdout
-                .write_all(text.as_bytes())
-                .map_err(|error| format!("failed to write stdout: {error}"))?;
-            stdout
-                .flush()
-                .map_err(|error| format!("failed to flush stdout: {error}"))?;
-            Ok(RuntimeValue::Unit)
-        }
-        RuntimeTaskPlan::StderrWrite { text } => {
-            stderr
-                .write_all(text.as_bytes())
-                .map_err(|error| format!("failed to write stderr: {error}"))?;
-            stderr
-                .flush()
-                .map_err(|error| format!("failed to flush stderr: {error}"))?;
-            Ok(RuntimeValue::Unit)
-        }
-        RuntimeTaskPlan::FsWriteText { path, text } => {
-            fs::write(Path::new(path.as_ref()), text.as_ref())
-                .map_err(|error| format!("failed to write {}: {error}", path))?;
-            Ok(RuntimeValue::Unit)
-        }
-        RuntimeTaskPlan::FsWriteBytes { path, bytes } => {
-            fs::write(Path::new(path.as_ref()), bytes.as_ref())
-                .map_err(|error| format!("failed to write {}: {error}", path))?;
-            Ok(RuntimeValue::Unit)
-        }
-        RuntimeTaskPlan::FsCreateDirAll { path } => {
-            fs::create_dir_all(Path::new(path.as_ref()))
-                .map_err(|error| format!("failed to create {}: {error}", path))?;
-            Ok(RuntimeValue::Unit)
-        }
-        RuntimeTaskPlan::FsDeleteFile { path } => {
-            fs::remove_file(Path::new(path.as_ref()))
-                .map_err(|error| format!("failed to delete {}: {error}", path))?;
-            Ok(RuntimeValue::Unit)
-        }
-        RuntimeTaskPlan::FsReadText { path } => {
-            let text = fs::read_to_string(Path::new(path.as_ref()))
-                .map_err(|error| format!("failed to read {}: {error}", path))?;
-            Ok(RuntimeValue::Text(text.into()))
-        }
-        RuntimeTaskPlan::FsReadDir { path } => {
-            let entries = fs::read_dir(Path::new(path.as_ref()))
-                .map_err(|error| format!("failed to read directory {}: {error}", path))?;
-            let names: Result<Vec<RuntimeValue>, String> = entries
-                .map(|entry| {
-                    entry
-                        .map_err(|e| format!("failed to read directory entry: {e}"))
-                        .and_then(|e| {
-                            e.file_name()
-                                .into_string()
-                                .map(|s| RuntimeValue::Text(s.into()))
-                                .map_err(|_| "directory entry name is not valid UTF-8".into())
-                        })
-                })
-                .collect();
-            Ok(RuntimeValue::List(names?))
-        }
-        RuntimeTaskPlan::FsExists { path } => {
-            Ok(RuntimeValue::Bool(Path::new(path.as_ref()).exists()))
-        }
-        RuntimeTaskPlan::FsReadBytes { path } => {
-            let bytes = fs::read(Path::new(path.as_ref()))
-                .map_err(|error| format!("failed to read bytes from {}: {error}", path))?;
-            Ok(RuntimeValue::Bytes(bytes.into()))
-        }
-        RuntimeTaskPlan::FsRename { from, to } => {
-            fs::rename(Path::new(from.as_ref()), Path::new(to.as_ref()))
-                .map_err(|error| format!("failed to rename {} to {}: {error}", from, to))?;
-            Ok(RuntimeValue::Unit)
-        }
-        RuntimeTaskPlan::FsCopy { from, to } => {
-            fs::copy(Path::new(from.as_ref()), Path::new(to.as_ref()))
-                .map_err(|error| format!("failed to copy {} to {}: {error}", from, to))?;
-            Ok(RuntimeValue::Unit)
-        }
-        RuntimeTaskPlan::FsDeleteDir { path } => {
-            fs::remove_dir_all(Path::new(path.as_ref()))
-                .map_err(|error| format!("failed to delete directory {}: {error}", path))?;
-            Ok(RuntimeValue::Unit)
-        }
-        RuntimeTaskPlan::JsonValidate { json } => {
-            let valid = serde_json::from_str::<serde_json::Value>(&*json).is_ok();
-            Ok(RuntimeValue::Bool(valid))
-        }
-        RuntimeTaskPlan::JsonGet { json, key } => {
-            let parsed: serde_json::Value =
-                serde_json::from_str(&*json).map_err(|e| format!("json.get: invalid JSON: {e}"))?;
-            Ok(parsed
-                .get(key.as_ref())
-                .map(|v| {
-                    let s: Box<str> = v.to_string().into();
-                    RuntimeValue::OptionSome(Box::new(RuntimeValue::Text(s)))
-                })
-                .unwrap_or(RuntimeValue::OptionNone))
-        }
-        RuntimeTaskPlan::JsonAt { json, index } => {
-            let parsed: serde_json::Value =
-                serde_json::from_str(&*json).map_err(|e| format!("json.at: invalid JSON: {e}"))?;
-            Ok(usize::try_from(index)
-                .ok()
-                .and_then(|i| parsed.get(i))
-                .map(|v: &serde_json::Value| {
-                    let s: Box<str> = v.to_string().into();
-                    RuntimeValue::OptionSome(Box::new(RuntimeValue::Text(s)))
-                })
-                .unwrap_or(RuntimeValue::OptionNone))
-        }
-        RuntimeTaskPlan::JsonKeys { json } => {
-            let parsed: serde_json::Value = serde_json::from_str(&*json)
-                .map_err(|e| format!("json.keys: invalid JSON: {e}"))?;
-            let keys = parsed
-                .as_object()
-                .map(|obj| {
-                    obj.keys()
-                        .map(|k| RuntimeValue::Text(k.as_str().into()))
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            Ok(RuntimeValue::List(keys))
-        }
-        RuntimeTaskPlan::JsonPretty { json } => {
-            let parsed: serde_json::Value = serde_json::from_str(&*json)
-                .map_err(|e| format!("json.pretty: invalid JSON: {e}"))?;
-            let pretty = serde_json::to_string_pretty(&parsed)
-                .map_err(|e| format!("json.pretty: serialisation error: {e}"))?;
-            Ok(RuntimeValue::Text(pretty.into()))
-        }
-        RuntimeTaskPlan::JsonMinify { json } => {
-            let parsed: serde_json::Value = serde_json::from_str(&*json)
-                .map_err(|e| format!("json.minify: invalid JSON: {e}"))?;
-            let minified = serde_json::to_string(&parsed)
-                .map_err(|e| format!("json.minify: serialisation error: {e}"))?;
-            Ok(RuntimeValue::Text(minified.into()))
-        }
-    }
-}
-
 fn write_output_line(target: &mut impl Write, text: &str) -> Result<(), String> {
     writeln!(target, "{text}").map_err(|error| format!("failed to write CLI output: {error}"))
-}
-
-fn sample_random_i64_inclusive(low: i64, high: i64) -> Result<i64, String> {
-    if low > high {
-        return Err(format!(
-            "randomInt requires `low <= high`, found low={low} and high={high}"
-        ));
-    }
-    if low == i64::MIN && high == i64::MAX {
-        return Ok(i64::from_le_bytes(random_u64()?.to_le_bytes()));
-    }
-    let range = u128::try_from(i128::from(high) - i128::from(low) + 1)
-        .expect("inclusive i64 range should fit into u128");
-    let domain = u128::from(u64::MAX) + 1;
-    let limit = (domain / range) * range;
-    loop {
-        let candidate = u128::from(random_u64()?);
-        if candidate < limit {
-            let value = i128::from(low)
-                + i128::try_from(candidate % range)
-                    .expect("random range remainder should fit into i128");
-            return Ok(i64::try_from(value).expect("random value should remain within i64 bounds"));
-        }
-    }
-}
-
-fn random_u64() -> Result<u64, String> {
-    let bytes = read_os_random_bytes(std::mem::size_of::<u64>())?;
-    let array: [u8; std::mem::size_of::<u64>()] = bytes
-        .as_ref()
-        .try_into()
-        .expect("fixed-length random byte buffer should match u64 width");
-    Ok(u64::from_le_bytes(array))
-}
-
-fn read_os_random_bytes(count: usize) -> Result<Box<[u8]>, String> {
-    let mut file = fs::File::open("/dev/urandom")
-        .map_err(|error| format!("failed to open /dev/urandom: {error}"))?;
-    let mut bytes = vec![0u8; count];
-    if count > 0 {
-        file.read_exact(&mut bytes)
-            .map_err(|error| format!("failed to read {count} random byte(s): {error}"))?;
-    }
-    Ok(bytes.into_boxed_slice())
 }
 
 fn prepare_run_artifact(
@@ -4042,15 +3842,14 @@ fn print_usage() {
 mod tests {
     use super::{
         HydratedRunNode, RunHydrationStaticState, WorkspaceHirSnapshot, check_file,
-        execute_file_with_context, execute_runtime_task_plan, plan_run_hydration,
-        prepare_execute_artifact, prepare_run_artifact, run_hydration_globals_ready,
-        test_file_with_context,
+        execute_file_with_context, plan_run_hydration, prepare_execute_artifact,
+        prepare_run_artifact, run_hydration_globals_ready, test_file_with_context,
     };
     use aivi_backend::{DetachedRuntimeValue, RuntimeTaskPlan, RuntimeValue};
     use aivi_base::SourceDatabase;
     use aivi_gtk::{GtkBridgeNodeKind, RuntimePropertyBinding, RuntimeShowMountPolicy};
     use aivi_hir::{ValidationMode, lower_module as lower_hir_module};
-    use aivi_runtime::SourceProviderContext;
+    use aivi_runtime::{SourceProviderContext, execute_runtime_task_plan};
     use aivi_syntax::parse_module;
     use std::{
         collections::BTreeMap,

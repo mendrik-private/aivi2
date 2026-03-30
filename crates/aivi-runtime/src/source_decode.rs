@@ -379,7 +379,9 @@ fn runtime_to_json(value: &RuntimeValue) -> Result<JsonValue, Box<str>> {
                 .map(|byte| JsonValue::Number(serde_json::Number::from(*byte)))
                 .collect(),
         )),
-        RuntimeValue::Task(_) => Err("runtime JSON encoding does not support Task values".into()),
+        RuntimeValue::Task(_) | RuntimeValue::DbTask(_) => {
+            Err("runtime JSON encoding does not support Task values".into())
+        }
     }
 }
 

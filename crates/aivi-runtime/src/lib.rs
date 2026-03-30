@@ -10,6 +10,7 @@ pub mod providers;
 pub mod scheduler;
 mod source_decode;
 pub mod startup;
+pub mod task_executor;
 
 pub use effects::{
     CancellationObserver, PublicationPortError, RuntimeSourceProvider, SourceActiveWhenEvaluator,
@@ -54,4 +55,8 @@ pub use startup::{
     LinkedSourceBinding, LinkedSourceLifecycleAction, LinkedSourceOption, LinkedSourceTickOutcome,
     LinkedTaskBinding, LinkedTaskExecutionBinding, LinkedTaskExecutionBlocker,
     LinkedTaskWorkerError, LinkedTaskWorkerOutcome, link_backend_runtime,
+};
+pub use task_executor::{
+    RuntimeTaskExecutionError, execute_runtime_db_task_plan, execute_runtime_task_plan,
+    execute_runtime_value,
 };

@@ -342,6 +342,7 @@ impl GlibLinkedRuntimeDriver {
             notifier,
         ));
         let worker_notifier = shared.worker_notifier();
+        let db_commit_invalidation_sink = shared.db_commit_invalidation_sink();
         {
             let mut state = shared
                 .state
@@ -353,6 +354,11 @@ impl GlibLinkedRuntimeDriver {
                 .linked
                 .runtime_mut()
                 .set_worker_publication_notifier(Some(worker_notifier));
+            state
+                .as_mut()
+                .expect("GLib linked runtime state should exist before commit invalidation install")
+                .linked
+                .set_db_commit_invalidation_sink(Some(db_commit_invalidation_sink));
         }
         Self { context, shared }
     }
@@ -690,6 +696,25 @@ impl GlibLinkedRuntimeShared {
         Arc::new(move || shared.request_tick())
     }
 
+    fn db_commit_invalidation_sink(self: &Arc<Self>) -> crate::startup::DbCommitInvalidationSink {
+        let shared = self.clone();
+        Arc::new(move |invalidation| {
+            if shared.stopped.load(Ordering::Acquire) {
+                return;
+            }
+            let shared = shared.clone();
+            let context = shared.context.clone();
+            context.spawn(async move {
+                if shared.stopped.load(Ordering::Acquire) {
+                    return;
+                }
+                if shared.apply_db_commit_invalidation(&invalidation) {
+                    shared.request_tick();
+                }
+            });
+        })
+    }
+
     fn request_tick(self: &Arc<Self>) {
         if self.stopped.load(Ordering::Acquire) {
             return;
@@ -708,6 +733,20 @@ impl GlibLinkedRuntimeShared {
         if let Some(notifier) = &self.notifier {
             notifier();
         }
+    }
+
+    fn apply_db_commit_invalidation(
+        &self,
+        invalidation: &crate::task_executor::RuntimeDbCommitInvalidation,
+    ) -> bool {
+        let mut guard = self
+            .state
+            .lock()
+            .expect("GLib linked runtime state mutex should not be poisoned");
+        let state = guard
+            .as_mut()
+            .expect("GLib linked runtime state should be present outside active ticks");
+        state.linked.invalidate_db_commit(invalidation)
     }
 
     fn drive_pending_ticks(&self) {
@@ -784,9 +823,13 @@ struct GlibLinkedRuntimeState {
 #[cfg(test)]
 mod tests {
     use std::{
+        fs,
         panic::{AssertUnwindSafe, catch_unwind},
+        path::{Path, PathBuf},
+        process::Command,
         sync::{Arc, Mutex},
         thread,
+        time::{Duration, Instant},
     };
 
     use aivi_backend::{DetachedRuntimeValue, ItemId as BackendItemId, RuntimeValue};
@@ -841,6 +884,58 @@ mod tests {
             .unwrap_or_else(|| panic!("expected backend item named {name}"))
     }
 
+    fn item_id(module: &hir::Module, name: &str) -> hir::ItemId {
+        module
+            .items()
+            .iter()
+            .find_map(|(item_id, item)| match item {
+                hir::Item::Value(item) if item.name.text() == name => Some(item_id),
+                hir::Item::Signal(item) if item.name.text() == name => Some(item_id),
+                hir::Item::Function(item) if item.name.text() == name => Some(item_id),
+                hir::Item::Type(item) if item.name.text() == name => Some(item_id),
+                hir::Item::Class(item) if item.name.text() == name => Some(item_id),
+                hir::Item::Domain(item) if item.name.text() == name => Some(item_id),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected item named {name}"))
+    }
+
+    fn test_sqlite_path(prefix: &str) -> PathBuf {
+        let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-scratch");
+        fs::create_dir_all(&base).expect("runtime GLib test scratch directory should exist");
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        base.join(format!(
+            "aivi-runtime-glib-{prefix}-{}-{unique}.sqlite",
+            std::process::id()
+        ))
+    }
+
+    fn seed_users_db(path: &Path, names: &[&str]) {
+        let mut script =
+            String::from("create table users(id integer primary key, name text not null);");
+        for (index, name) in names.iter().enumerate() {
+            script.push_str("insert into users(id, name) values (");
+            script.push_str(&(index + 1).to_string());
+            script.push_str(", '");
+            script.push_str(&name.replace('\'', "''"));
+            script.push_str("');");
+        }
+        let output = Command::new("sqlite3")
+            .arg(path)
+            .arg(&script)
+            .output()
+            .expect("sqlite3 should be available for GLib runtime tests");
+        assert!(
+            output.status.success(),
+            "sqlite3 should seed {} successfully: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     fn expected_signal_text(value: &str) -> DetachedRuntimeValue {
         DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Signal(Box::new(
             RuntimeValue::Text(value.into()),
@@ -848,11 +943,21 @@ mod tests {
     }
 
     fn pump_until(context: &MainContext, mut condition: impl FnMut() -> bool) {
-        for _ in 0..32 {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            while context.pending() {
+                context.iteration(false);
+            }
             if condition() {
                 return;
             }
-            context.iteration(true);
+            thread::sleep(Duration::from_millis(10));
+        }
+        while context.pending() {
+            context.iteration(false);
+        }
+        if condition() {
+            return;
         }
         panic!("GLib main context did not reach the expected scheduler state");
     }
@@ -1019,6 +1124,368 @@ signal keyDown : Signal Text
                         Some(&expected_signal_text(name))
                     );
                 }
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn glib_linked_runtime_refreshes_db_live_after_matching_commit() {
+        let context = MainContext::new();
+        context
+            .with_thread_default(|| {
+                let primary_db = test_sqlite_path("db-live-primary");
+                let secondary_db = test_sqlite_path("db-live-secondary");
+                seed_users_db(&primary_db, &[]);
+                seed_users_db(&secondary_db, &["Bob"]);
+                let lowered = lower_text(
+                    "glib-runtime-db-live-commit-refresh.aivi",
+                    &format!(
+                        r#"
+use aivi.db (paramInt, paramText, statement, commit)
+use aivi.random (randomBytes)
+
+signal primaryChanged : Signal Unit
+signal secondaryChanged : Signal Unit
+
+value primaryConn = {{
+    database: "{}"
+}}
+
+value secondaryConn = {{
+    database: "{}"
+}}
+
+value primaryUsers = {{
+    name: "users",
+    conn: primaryConn,
+    changed: primaryChanged
+}}
+
+value secondaryUsers = {{
+    name: "users",
+    conn: secondaryConn,
+    changed: secondaryChanged
+}}
+
+value samplePrimary : Task Text Bytes =
+    randomBytes 16
+
+value sampleSecondary : Task Text Bytes =
+    randomBytes 16
+
+@source db.live samplePrimary with {{
+    refreshOn: primaryUsers.changed
+}}
+signal primaryBytes : Signal (Result Text Bytes)
+
+@source db.live sampleSecondary with {{
+    refreshOn: secondaryUsers.changed
+}}
+signal secondaryBytes : Signal (Result Text Bytes)
+
+value addPrimary : Task Text Unit =
+    [
+        statement "insert into users(id, name) values (?, ?)" [paramInt 1, paramText "Ada"]
+    ]
+     |> commit primaryConn ["users"]
+"#,
+                        primary_db.display(),
+                        secondary_db.display(),
+                    ),
+                );
+                let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+                    .expect("runtime assembly should build");
+                let primary_rows_signal = assembly
+                    .signal(item_id(lowered.hir.module(), "primaryBytes"))
+                    .expect("primaryBytes signal binding should exist")
+                    .signal();
+                let primary_rows_input = assembly
+                    .signal(item_id(lowered.hir.module(), "primaryBytes"))
+                    .expect("primaryBytes signal binding should exist")
+                    .input()
+                    .expect("primaryBytes should be source-input-backed");
+                let secondary_rows_signal = assembly
+                    .signal(item_id(lowered.hir.module(), "secondaryBytes"))
+                    .expect("secondaryBytes signal binding should exist")
+                    .signal();
+                let secondary_rows_input = assembly
+                    .signal(item_id(lowered.hir.module(), "secondaryBytes"))
+                    .expect("secondaryBytes signal binding should exist")
+                    .input()
+                    .expect("secondaryBytes should be source-input-backed");
+                let primary_changed_input = assembly
+                    .signal(item_id(lowered.hir.module(), "primaryChanged"))
+                    .expect("primaryChanged signal binding should exist")
+                    .input()
+                    .expect("primaryChanged should be input-backed");
+                let secondary_changed_input = assembly
+                    .signal(item_id(lowered.hir.module(), "secondaryChanged"))
+                    .expect("secondaryChanged signal binding should exist")
+                    .input()
+                    .expect("secondaryChanged should be input-backed");
+                let primary_source_instance = assembly
+                    .source_by_owner(item_id(lowered.hir.module(), "primaryBytes"))
+                    .expect("primaryBytes source binding should exist")
+                    .spec
+                    .instance;
+                let secondary_source_instance = assembly
+                    .source_by_owner(item_id(lowered.hir.module(), "secondaryBytes"))
+                    .expect("secondaryBytes source binding should exist")
+                    .spec
+                    .instance;
+                let add_primary_owner = item_id(lowered.hir.module(), "addPrimary");
+                let linked = crate::link_backend_runtime(
+                    assembly,
+                    &lowered.core,
+                    Arc::new(lowered.backend.clone()),
+                )
+                .expect("startup link should succeed");
+                let driver = GlibLinkedRuntimeDriver::new(
+                    context.clone(),
+                    linked,
+                    SourceProviderManager::new(),
+                    None,
+                );
+
+                driver.tick_now();
+                pump_until(&context, || {
+                    driver.failure_count() > 0
+                        || (driver
+                            .current_signal_value(primary_rows_signal)
+                            .ok()
+                            .flatten()
+                            .is_some()
+                            && driver
+                                .current_signal_value(secondary_rows_signal)
+                                .ok()
+                                .flatten()
+                                .is_some())
+                });
+                if driver.failure_count() != 0 {
+                    panic!(
+                        "unexpected GLib runtime failures after commit refresh: {:?}",
+                        driver.drain_failures()
+                    );
+                }
+                let primary_rows_generation = driver.current_generation(primary_rows_input).unwrap();
+                let secondary_rows_generation =
+                    driver.current_generation(secondary_rows_input).unwrap();
+                driver.drain_outcomes();
+
+                let primary_generation = driver.current_generation(primary_changed_input).unwrap();
+                let secondary_generation =
+                    driver.current_generation(secondary_changed_input).unwrap();
+                let handle = driver.with_state_mut(|state| {
+                    state
+                        .linked
+                        .spawn_task_worker_by_owner(add_primary_owner)
+                        .expect("db commit task worker should spawn")
+                });
+                assert_eq!(
+                    handle
+                        .join()
+                        .expect("task worker thread should join cleanly"),
+                    Ok(crate::LinkedTaskWorkerOutcome::Published)
+                );
+
+                pump_until(&context, || {
+                    driver.failure_count() > 0
+                        || driver.current_generation(primary_rows_input).ok()
+                            != Some(primary_rows_generation)
+                });
+
+                if driver.failure_count() != 0 {
+                    panic!(
+                        "unexpected GLib runtime failures after commit refresh: {:?}",
+                        driver.drain_failures()
+                    );
+                }
+                assert_eq!(
+                    driver.current_generation(secondary_rows_input).unwrap(),
+                    secondary_rows_generation
+                );
+                assert_ne!(
+                    driver.current_generation(primary_rows_input).unwrap(),
+                    primary_rows_generation
+                );
+                assert_ne!(
+                    driver.current_generation(primary_changed_input).unwrap(),
+                    primary_generation
+                );
+                assert_eq!(
+                    driver.current_generation(secondary_changed_input).unwrap(),
+                    secondary_generation
+                );
+                let outcomes = driver.drain_outcomes();
+                assert!(
+                    outcomes.iter().any(|outcome| outcome.source_actions().iter().any(|action| {
+                        matches!(
+                            action,
+                            crate::LinkedSourceLifecycleAction::Reconfigure { instance, .. }
+                                if *instance == primary_source_instance
+                        )
+                    })),
+                    "matching db.commit invalidation should reconfigure the primary db.live source"
+                );
+                assert!(
+                    !outcomes.iter().any(|outcome| outcome.source_actions().iter().any(|action| {
+                        matches!(
+                            action,
+                            crate::LinkedSourceLifecycleAction::Reconfigure { instance, .. }
+                                if *instance == secondary_source_instance
+                        )
+                    })),
+                    "commit invalidation should not reconfigure db.live sources bound to other connections"
+                );
+                let _ = fs::remove_file(primary_db);
+                let _ = fs::remove_file(secondary_db);
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn glib_linked_runtime_skips_db_live_invalidation_after_failed_commit() {
+        let context = MainContext::new();
+        context
+            .with_thread_default(|| {
+                let database = test_sqlite_path("db-live-commit-failure");
+                seed_users_db(&database, &[]);
+                let lowered = lower_text(
+                    "glib-runtime-db-live-commit-failure.aivi",
+                    &format!(
+                        r#"
+use aivi.db (paramInt, statement, commit)
+use aivi.random (randomBytes)
+
+signal usersChanged : Signal Unit
+
+value conn = {{
+    database: "{}"
+}}
+
+value users = {{
+    name: "users",
+    conn: conn,
+    changed: usersChanged
+}}
+
+value sampleUsers : Task Text Bytes =
+    randomBytes 16
+
+@source db.live sampleUsers with {{
+    refreshOn: users.changed
+}}
+signal rows : Signal (Result Text Bytes)
+
+value failInsert : Task Text Unit =
+    [
+        statement "insert into missing_table(id) values (?)" [paramInt 1]
+    ]
+     |> commit conn ["users"]
+"#,
+                        database.display(),
+                    ),
+                );
+                let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+                    .expect("runtime assembly should build");
+                let rows_signal = assembly
+                    .signal(item_id(lowered.hir.module(), "rows"))
+                    .expect("rows signal binding should exist")
+                    .signal();
+                let changed_input = assembly
+                    .signal(item_id(lowered.hir.module(), "usersChanged"))
+                    .expect("usersChanged signal binding should exist")
+                    .input()
+                    .expect("usersChanged should be input-backed");
+                let rows_source_instance = assembly
+                    .source_by_owner(item_id(lowered.hir.module(), "rows"))
+                    .expect("rows source binding should exist")
+                    .spec
+                    .instance;
+                let fail_task_signal = assembly
+                    .task_by_owner(item_id(lowered.hir.module(), "failInsert"))
+                    .expect("failInsert task binding should exist")
+                    .input
+                    .as_signal();
+                let fail_insert_owner = item_id(lowered.hir.module(), "failInsert");
+                let linked = crate::link_backend_runtime(
+                    assembly,
+                    &lowered.core,
+                    Arc::new(lowered.backend.clone()),
+                )
+                .expect("startup link should succeed");
+                let driver = GlibLinkedRuntimeDriver::new(
+                    context.clone(),
+                    linked,
+                    SourceProviderManager::new(),
+                    None,
+                );
+
+                driver.tick_now();
+                pump_until(&context, || {
+                    driver.failure_count() > 0
+                        || driver
+                            .current_signal_value(rows_signal)
+                            .ok()
+                            .flatten()
+                            .is_some()
+                });
+                assert_eq!(driver.failure_count(), 0);
+                let rows_before = driver
+                    .current_signal_value(rows_signal)
+                    .expect("db.live source value should be readable")
+                    .expect("db.live source should publish a value");
+                driver.drain_outcomes();
+
+                let changed_generation = driver.current_generation(changed_input).unwrap();
+                let handle = driver.with_state_mut(|state| {
+                    state
+                        .linked
+                        .spawn_task_worker_by_owner(fail_insert_owner)
+                        .expect("failing db commit task worker should spawn")
+                });
+                assert_eq!(
+                    handle
+                        .join()
+                        .expect("task worker thread should join cleanly"),
+                    Ok(crate::LinkedTaskWorkerOutcome::Published)
+                );
+                pump_until(&context, || {
+                    driver.failure_count() > 0
+                        || driver
+                            .current_signal_value(fail_task_signal)
+                            .ok()
+                            .flatten()
+                            .is_some()
+                });
+
+                assert_eq!(driver.failure_count(), 0);
+                assert_eq!(
+                    driver
+                        .current_signal_value(rows_signal)
+                        .expect("db.live source value should stay readable")
+                        .expect("db.live source should stay published"),
+                    rows_before
+                );
+                assert_eq!(
+                    driver.current_generation(changed_input).unwrap(),
+                    changed_generation
+                );
+                let outcomes = driver.drain_outcomes();
+                assert!(
+                    !outcomes
+                        .iter()
+                        .any(|outcome| outcome.source_actions().iter().any(|action| {
+                            matches!(
+                                action,
+                                crate::LinkedSourceLifecycleAction::Reconfigure { instance, .. }
+                                    if *instance == rows_source_instance
+                            )
+                        })),
+                    "failed db.commit should not reconfigure the dependent db.live source"
+                );
+
+                let _ = fs::remove_file(database);
             })
             .unwrap();
     }

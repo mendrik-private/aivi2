@@ -498,6 +498,13 @@ where
         self.scheduler.current_stamp(input).map_err(Into::into)
     }
 
+    pub fn advance_generation(
+        &mut self,
+        input: InputHandle,
+    ) -> Result<PublicationStamp, TaskSourceRuntimeError> {
+        self.scheduler.advance_generation(input).map_err(Into::into)
+    }
+
     pub fn is_owner_active(&self, owner: OwnerHandle) -> Result<bool, TaskSourceRuntimeError> {
         self.scheduler.is_owner_active(owner).map_err(Into::into)
     }

@@ -649,6 +649,8 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
             }
         }
 
+        let db_changed_bindings = collect_db_changed_bindings(self.module, self.included_items);
+
         if !errors.is_empty() {
             return Err(HirRuntimeAdapterErrors::new(errors));
         }
@@ -665,6 +667,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
             tasks: tasks.into_boxed_slice(),
             gates: gates.into_boxed_slice(),
             recurrences: recurrences.into_boxed_slice(),
+            db_changed_bindings,
         })
     }
 
@@ -733,6 +736,56 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
     }
 }
 
+fn collect_db_changed_bindings(
+    module: &hir::Module,
+    included_items: Option<&HashSet<hir::ItemId>>,
+) -> Box<[HirDbChangedBinding]> {
+    let mut bindings = BTreeSet::new();
+    for (expr_id, expr) in module.exprs().iter() {
+        let hir::ExprKind::Projection {
+            base: hir::ProjectionBase::Expr(base),
+            path,
+        } = &expr.kind
+        else {
+            continue;
+        };
+        if path.segments().len() != 1 || path.segments().first().text() != "changed" {
+            continue;
+        }
+        let Some(table_item) = resolve_db_changed_projection_base_item(module, *base) else {
+            continue;
+        };
+        let changed_signals = hir::collect_signal_dependencies_for_expr(module, expr_id);
+        let [changed_signal] = changed_signals.as_slice() else {
+            continue;
+        };
+        if !included_items.is_none_or(|items| items.contains(&table_item))
+            || !included_items.is_none_or(|items| items.contains(changed_signal))
+        {
+            continue;
+        }
+        bindings.insert(HirDbChangedBinding {
+            table_item,
+            changed_signal: *changed_signal,
+        });
+    }
+    bindings.into_iter().collect::<Vec<_>>().into_boxed_slice()
+}
+
+fn resolve_db_changed_projection_base_item(
+    module: &hir::Module,
+    expr: hir::ExprId,
+) -> Option<hir::ItemId> {
+    let hir::ExprKind::Name(reference) = &module.exprs()[expr].kind else {
+        return None;
+    };
+    let hir::ResolutionState::Resolved(hir::TermResolution::Item(item)) = reference.resolution
+    else {
+        return None;
+    };
+    Some(item)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HirRuntimeAssembly {
     graph: SignalGraph,
@@ -742,6 +795,7 @@ pub struct HirRuntimeAssembly {
     tasks: Box<[HirTaskBinding]>,
     gates: Box<[HirGateStageBinding]>,
     recurrences: Box<[HirRecurrenceBinding]>,
+    db_changed_bindings: Box<[HirDbChangedBinding]>,
 }
 
 impl HirRuntimeAssembly {
@@ -771,6 +825,10 @@ impl HirRuntimeAssembly {
 
     pub fn recurrences(&self) -> &[HirRecurrenceBinding] {
         &self.recurrences
+    }
+
+    pub(crate) fn db_changed_bindings(&self) -> &[HirDbChangedBinding] {
+        &self.db_changed_bindings
     }
 
     pub fn owner(&self, item: hir::ItemId) -> Option<&HirOwnerBinding> {
@@ -823,6 +881,12 @@ impl HirRuntimeAssembly {
         }
         Ok(runtime)
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct HirDbChangedBinding {
+    pub table_item: hir::ItemId,
+    pub changed_signal: hir::ItemId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1528,25 +1592,28 @@ fn resolve_source_option_binding(
     public_signals: &BTreeMap<hir::ItemId, SignalHandle>,
     errors: &mut Vec<HirRuntimeAdapterError>,
 ) -> Option<SignalHandle> {
-    let target = match resolve_direct_signal_expr(module, binding.expr) {
-        Ok(item) => item,
-        Err(DirectSignalExprError::UnsupportedExpr) => {
-            errors.push(HirRuntimeAdapterError::UnsupportedSourceOptionSignalExpr {
-                owner,
-                option_name: binding.option_name.text().into(),
-                expr: binding.expr,
-            });
-            return None;
-        }
-        Err(DirectSignalExprError::ResolvedNonSignal { item, kind }) => {
-            errors.push(HirRuntimeAdapterError::SourceOptionBindingNotSignal {
-                owner,
-                option_name: binding.option_name.text().into(),
-                item,
-                kind,
-            });
-            return None;
-        }
+    let target = match binding.signal {
+        Some(item) => item,
+        None => match resolve_direct_signal_expr(module, binding.expr) {
+            Ok(item) => item,
+            Err(DirectSignalExprError::UnsupportedExpr) => {
+                errors.push(HirRuntimeAdapterError::UnsupportedSourceOptionSignalExpr {
+                    owner,
+                    option_name: binding.option_name.text().into(),
+                    expr: binding.expr,
+                });
+                return None;
+            }
+            Err(DirectSignalExprError::ResolvedNonSignal { item, kind }) => {
+                errors.push(HirRuntimeAdapterError::SourceOptionBindingNotSignal {
+                    owner,
+                    option_name: binding.option_name.text().into(),
+                    item,
+                    kind,
+                });
+                return None;
+            }
+        },
     };
 
     match public_signals.get(&target).copied() {
@@ -1763,6 +1830,50 @@ signal retried : Signal Int =
             runtime.graph().signal_count(),
             assembly.graph().signal_count()
         );
+    }
+
+    #[test]
+    fn assembles_db_live_refresh_from_changed_projection() {
+        let lowered = lower_text(
+            "runtime-hir-adapter-db-live-changed.aivi",
+            r#"
+type TableRef A = {
+    changed: Signal Unit
+}
+
+signal usersChanged : Signal Unit
+
+value users : TableRef Int = {
+    changed: usersChanged
+}
+
+@source db.live with {
+    refreshOn: users.changed
+}
+signal rows : Signal Int
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "db.live changed projection fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let assembly = assemble_hir_runtime(lowered.module())
+            .expect("db.live changed projection fixture should assemble");
+        let changed = assembly
+            .signal(item_id(lowered.module(), "usersChanged"))
+            .expect("usersChanged signal binding should exist");
+        let rows_id = item_id(lowered.module(), "rows");
+        let rows = assembly
+            .source_by_owner(rows_id)
+            .expect("rows source binding should exist");
+
+        assert_eq!(
+            rows.spec.provider,
+            RuntimeSourceProvider::builtin(BuiltinSourceProvider::DbLive)
+        );
+        assert_eq!(rows.spec.explicit_triggers.as_ref(), &[changed.signal()]);
     }
 
     #[test]

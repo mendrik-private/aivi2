@@ -12,20 +12,20 @@ use crate::{
     DomainItem, DomainMember, DomainMemberKind, DomainMemberResolution, EachControl, EmptyControl,
     ExportItem, ExportResolution, Expr, ExprId, ExprKind, FloatLiteral, FragmentControl,
     FunctionItem, FunctionParameter, ImportBinding, ImportBindingMetadata, ImportBindingResolution,
-    ImportBundleKind, ImportId, ImportModuleResolution, ImportValueType, InstanceItem,
-    InstanceMember, IntegerLiteral, IntrinsicValue, Item, ItemHeader, ItemId, ItemKind,
-    LiteralSuffixResolution, MapExpr, MapExprEntry, MarkupAttribute, MarkupAttributeValue,
-    MarkupElement, MarkupNode, MarkupNodeId, MarkupNodeKind, MatchControl, MockDecorator, Module,
-    Name, NamePath, PatchBlock, PatchEntry, PatchInstruction, PatchInstructionKind, PatchSelector,
-    PatchSelectorSegment, Pattern, PatternId, PatternKind, PipeExpr, PipeStage, PipeStageKind,
-    ProjectionBase, ReactiveUpdateClause, RecordExpr, RecordExprField, RecordFieldSurface,
-    RecordPatternField, RecordRowRename, RecordRowTransform, RecurrenceWakeupDecorator,
-    RecurrenceWakeupDecoratorKind, RegexLiteral, ResolutionState, ShowControl, SignalItem,
-    SourceDecorator, SourceProviderContractItem, SourceProviderRef, SuffixedIntegerLiteral,
-    TermReference, TermResolution, TestDecorator, TextFragment, TextInterpolation, TextLiteral,
-    TextSegment, TypeField, TypeId, TypeItem, TypeItemBody, TypeKind, TypeNode, TypeParameter,
-    TypeParameterId, TypeReference, TypeResolution, TypeVariant, UnaryOperator, UseItem, ValueItem,
-    WithControl,
+    ImportBundleKind, ImportId, ImportModuleResolution, ImportRecordField, ImportValueType,
+    InstanceItem, InstanceMember, IntegerLiteral, IntrinsicValue, Item, ItemHeader, ItemId,
+    ItemKind, LiteralSuffixResolution, MapExpr, MapExprEntry, MarkupAttribute,
+    MarkupAttributeValue, MarkupElement, MarkupNode, MarkupNodeId, MarkupNodeKind, MatchControl,
+    MockDecorator, Module, Name, NamePath, PatchBlock, PatchEntry, PatchInstruction,
+    PatchInstructionKind, PatchSelector, PatchSelectorSegment, Pattern, PatternId, PatternKind,
+    PipeExpr, PipeStage, PipeStageKind, ProjectionBase, ReactiveUpdateClause, RecordExpr,
+    RecordExprField, RecordFieldSurface, RecordPatternField, RecordRowRename, RecordRowTransform,
+    RecurrenceWakeupDecorator, RecurrenceWakeupDecoratorKind, RegexLiteral, ResolutionState,
+    ShowControl, SignalItem, SourceDecorator, SourceProviderContractItem, SourceProviderRef,
+    SuffixedIntegerLiteral, TermReference, TermResolution, TestDecorator, TextFragment,
+    TextInterpolation, TextLiteral, TextSegment, TypeField, TypeId, TypeItem, TypeItemBody,
+    TypeKind, TypeNode, TypeParameter, TypeParameterId, TypeReference, TypeResolution, TypeVariant,
+    UnaryOperator, UseItem, ValueItem, WithControl,
 };
 
 pub struct LoweringResult {
@@ -6495,7 +6495,7 @@ fn builtin_type(name: &str) -> Option<BuiltinType> {
 fn is_known_module(module: &str) -> bool {
     matches!(
         module,
-        "aivi.network" | "aivi.defaults" | "aivi.random" | "aivi.stdio"
+        "aivi.network" | "aivi.defaults" | "aivi.random" | "aivi.stdio" | "aivi.db"
     )
 }
 
@@ -6628,6 +6628,97 @@ fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMeta
                 task_import_type(
                     primitive_import_type(BuiltinType::Text),
                     primitive_import_type(BuiltinType::Unit),
+                ),
+            ),
+        )),
+        ("aivi.db", "paramBool") => Some(intrinsic_import_value(
+            IntrinsicValue::DbParamBool,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Bool),
+                db_param_import_type(),
+            ),
+        )),
+        ("aivi.db", "paramInt") => Some(intrinsic_import_value(
+            IntrinsicValue::DbParamInt,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Int),
+                db_param_import_type(),
+            ),
+        )),
+        ("aivi.db", "paramFloat") => Some(intrinsic_import_value(
+            IntrinsicValue::DbParamFloat,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Float),
+                db_param_import_type(),
+            ),
+        )),
+        ("aivi.db", "paramDecimal") => Some(intrinsic_import_value(
+            IntrinsicValue::DbParamDecimal,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Decimal),
+                db_param_import_type(),
+            ),
+        )),
+        ("aivi.db", "paramBigInt") => Some(intrinsic_import_value(
+            IntrinsicValue::DbParamBigInt,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::BigInt),
+                db_param_import_type(),
+            ),
+        )),
+        ("aivi.db", "paramText") => Some(intrinsic_import_value(
+            IntrinsicValue::DbParamText,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Text),
+                db_param_import_type(),
+            ),
+        )),
+        ("aivi.db", "paramBytes") => Some(intrinsic_import_value(
+            IntrinsicValue::DbParamBytes,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Bytes),
+                db_param_import_type(),
+            ),
+        )),
+        ("aivi.db", "statement") => Some(intrinsic_import_value(
+            IntrinsicValue::DbStatement,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Text),
+                arrow_import_type(
+                    list_import_type(db_param_import_type()),
+                    db_statement_import_type(),
+                ),
+            ),
+        )),
+        ("aivi.db", "query") => Some(intrinsic_import_value(
+            IntrinsicValue::DbQuery,
+            arrow_import_type(
+                db_connection_import_type(),
+                arrow_import_type(
+                    db_statement_import_type(),
+                    task_import_type(
+                        primitive_import_type(BuiltinType::Text),
+                        list_import_type(map_import_type(
+                            primitive_import_type(BuiltinType::Text),
+                            primitive_import_type(BuiltinType::Text),
+                        )),
+                    ),
+                ),
+            ),
+        )),
+        ("aivi.db", "commit") => Some(intrinsic_import_value(
+            IntrinsicValue::DbCommit,
+            arrow_import_type(
+                db_connection_import_type(),
+                arrow_import_type(
+                    list_import_type(primitive_import_type(BuiltinType::Text)),
+                    arrow_import_type(
+                        list_import_type(db_statement_import_type()),
+                        task_import_type(
+                            primitive_import_type(BuiltinType::Text),
+                            primitive_import_type(BuiltinType::Unit),
+                        ),
+                    ),
                 ),
             ),
         )),
@@ -7002,6 +7093,17 @@ fn primitive_import_type(builtin: BuiltinType) -> ImportValueType {
     ImportValueType::Primitive(builtin)
 }
 
+fn record_import_type(fields: Vec<ImportRecordField>) -> ImportValueType {
+    ImportValueType::Record(fields)
+}
+
+fn record_import_field(name: &str, ty: ImportValueType) -> ImportRecordField {
+    ImportRecordField {
+        name: name.into(),
+        ty,
+    }
+}
+
 fn arrow_import_type(parameter: ImportValueType, result: ImportValueType) -> ImportValueType {
     ImportValueType::Arrow {
         parameter: Box::new(parameter),
@@ -7022,6 +7124,61 @@ fn option_import_type(element: ImportValueType) -> ImportValueType {
 
 fn list_import_type(element: ImportValueType) -> ImportValueType {
     ImportValueType::List(Box::new(element))
+}
+
+fn map_import_type(key: ImportValueType, value: ImportValueType) -> ImportValueType {
+    ImportValueType::Map {
+        key: Box::new(key),
+        value: Box::new(value),
+    }
+}
+
+fn db_connection_import_type() -> ImportValueType {
+    record_import_type(vec![record_import_field(
+        "database",
+        primitive_import_type(BuiltinType::Text),
+    )])
+}
+
+fn db_param_import_type() -> ImportValueType {
+    record_import_type(vec![
+        record_import_field("kind", primitive_import_type(BuiltinType::Text)),
+        record_import_field(
+            "bool",
+            option_import_type(primitive_import_type(BuiltinType::Bool)),
+        ),
+        record_import_field(
+            "int",
+            option_import_type(primitive_import_type(BuiltinType::Int)),
+        ),
+        record_import_field(
+            "float",
+            option_import_type(primitive_import_type(BuiltinType::Float)),
+        ),
+        record_import_field(
+            "decimal",
+            option_import_type(primitive_import_type(BuiltinType::Decimal)),
+        ),
+        record_import_field(
+            "bigInt",
+            option_import_type(primitive_import_type(BuiltinType::BigInt)),
+        ),
+        record_import_field(
+            "text",
+            option_import_type(primitive_import_type(BuiltinType::Text)),
+        ),
+        record_import_field(
+            "bytes",
+            option_import_type(primitive_import_type(BuiltinType::Bytes)),
+        ),
+    ])
+}
+
+fn db_statement_import_type() -> ImportValueType {
+    record_import_type(vec![
+        record_import_field("sql", primitive_import_type(BuiltinType::Text)),
+        record_import_field("arguments", list_import_type(db_param_import_type())),
+    ])
 }
 
 fn surface_exprs_equal(left: &syn::Expr, right: &syn::Expr) -> bool {
@@ -7209,10 +7366,10 @@ mod tests {
     use crate::{
         ApplicativeSpineHead, BuiltinTerm, BuiltinType, ClusterFinalizer, ClusterPresentation,
         DecoratorPayload, DomainMemberKind, ExportResolution, ExprKind, ImportBindingMetadata,
-        ImportBundleKind, ImportValueType, Item, LiteralSuffixResolution, PipeStageKind,
-        RecordRowTransform, RecurrenceWakeupDecoratorKind, ResolutionState, SourceProviderRef,
-        TermResolution, TextSegment, TypeItemBody, TypeKind, TypeResolution, ValidationMode,
-        exports,
+        ImportBundleKind, ImportValueType, IntrinsicValue, Item, LiteralSuffixResolution,
+        PipeStageKind, RecordRowTransform, RecurrenceWakeupDecoratorKind, ResolutionState,
+        SourceProviderRef, TermResolution, TextSegment, TypeItemBody, TypeKind, TypeResolution,
+        ValidationMode, exports,
     };
 
     fn fixture_root() -> PathBuf {
@@ -9507,6 +9664,93 @@ signal updates : Signal Int
                 ResolutionState::Resolved(TypeResolution::Import(_))
             )),
             "aliased imported type references should still resolve through import bindings: {imported_type_refs:?}"
+        );
+    }
+
+    #[test]
+    fn use_db_imports_preserve_intrinsic_metadata_for_builder_surface() {
+        let lowered = lower_text(
+            "db-builder-imports.aivi",
+            "use aivi.db (paramInt, statement, query, commit)\n",
+        );
+        assert!(
+            !lowered.has_errors(),
+            "db builder import fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let imported = lowered
+            .module()
+            .imports()
+            .iter()
+            .map(|(_, import)| {
+                (
+                    import.imported_name.text().to_owned(),
+                    import.metadata.clone(),
+                )
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+
+        assert_eq!(
+            imported.get("paramInt"),
+            Some(&ImportBindingMetadata::IntrinsicValue {
+                value: IntrinsicValue::DbParamInt,
+                ty: super::arrow_import_type(
+                    super::primitive_import_type(BuiltinType::Int),
+                    super::db_param_import_type(),
+                ),
+            })
+        );
+        assert_eq!(
+            imported.get("statement"),
+            Some(&ImportBindingMetadata::IntrinsicValue {
+                value: IntrinsicValue::DbStatement,
+                ty: super::arrow_import_type(
+                    super::primitive_import_type(BuiltinType::Text),
+                    super::arrow_import_type(
+                        super::list_import_type(super::db_param_import_type()),
+                        super::db_statement_import_type(),
+                    ),
+                ),
+            })
+        );
+        assert_eq!(
+            imported.get("query"),
+            Some(&ImportBindingMetadata::IntrinsicValue {
+                value: IntrinsicValue::DbQuery,
+                ty: super::arrow_import_type(
+                    super::db_connection_import_type(),
+                    super::arrow_import_type(
+                        super::db_statement_import_type(),
+                        super::task_import_type(
+                            super::primitive_import_type(BuiltinType::Text),
+                            super::list_import_type(super::map_import_type(
+                                super::primitive_import_type(BuiltinType::Text),
+                                super::primitive_import_type(BuiltinType::Text),
+                            )),
+                        ),
+                    ),
+                ),
+            })
+        );
+        assert_eq!(
+            imported.get("commit"),
+            Some(&ImportBindingMetadata::IntrinsicValue {
+                value: IntrinsicValue::DbCommit,
+                ty: super::arrow_import_type(
+                    super::db_connection_import_type(),
+                    super::arrow_import_type(
+                        super::list_import_type(super::primitive_import_type(BuiltinType::Text)),
+                        super::arrow_import_type(
+                            super::list_import_type(super::db_statement_import_type()),
+                            super::task_import_type(
+                                super::primitive_import_type(BuiltinType::Text),
+                                super::primitive_import_type(BuiltinType::Unit),
+                            ),
+                        ),
+                    ),
+                ),
+            })
         );
     }
 

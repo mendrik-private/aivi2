@@ -26,7 +26,7 @@ use crate::{
         DomainMemberKind, DomainMemberResolution, ExportResolution, ExprKind,
         ImportBindingMetadata, ImportBindingResolution, ImportValueType, IntrinsicValue, Item,
         LiteralSuffixResolution, MarkupAttributeValue, MarkupNodeKind, Module, Name, NamePath,
-        PatternKind, PipeStage, PipeStageKind, PipeTransformMode, RecordExpr,
+        PatternKind, PipeStage, PipeStageKind, PipeTransformMode, ProjectionBase, RecordExpr,
         RecurrenceWakeupDecoratorKind, ResolutionState, SignalItem, SourceDecorator,
         SourceMetadata, SourceProviderRef, TermReference, TermResolution, TextLiteral, TextSegment,
         TypeItemBody, TypeKind, TypeReference, TypeResolution,
@@ -2154,12 +2154,21 @@ impl Validator<'_> {
             let mut remaining = Vec::new();
             for pending_option in pending {
                 let mut trial_bindings = bindings.clone();
-                match self.check_source_option_expr(
-                    pending_option.field.value,
-                    &pending_option.expected,
-                    typing,
-                    &mut trial_bindings,
-                ) {
+                match self
+                    .check_builtin_source_trigger_projection(
+                        provider,
+                        &pending_option,
+                        typing,
+                        &mut trial_bindings,
+                    )
+                    .unwrap_or_else(|| {
+                        self.check_source_option_expr(
+                            pending_option.field.value,
+                            &pending_option.expected,
+                            typing,
+                            &mut trial_bindings,
+                        )
+                    }) {
                     SourceOptionTypeCheck::Match => {
                         bindings = trial_bindings;
                         resolved.push(pending_option);
@@ -2193,6 +2202,45 @@ impl Validator<'_> {
                 &bindings,
             );
         }
+    }
+
+    fn check_builtin_source_trigger_projection(
+        &self,
+        provider: BuiltinSourceProvider,
+        option: &PendingSourceOptionValue,
+        typing: &mut GateTypeContext<'_>,
+        bindings: &mut SourceOptionTypeBindings,
+    ) -> Option<SourceOptionTypeCheck> {
+        if provider != BuiltinSourceProvider::DbLive
+            || option.field.label.text() != "refreshOn"
+            || !is_db_changed_trigger_projection(self.module, option.field.value)
+        {
+            return None;
+        }
+
+        if expr_signal_dependencies(self.module, [option.field.value]).len() != 1 {
+            return Some(SourceOptionTypeCheck::Unknown);
+        }
+
+        let actual = typing
+            .infer_expr(option.field.value, &GateExprEnv::default(), None)
+            .actual();
+        Some(match actual {
+            Some(actual)
+                if source_option_expected_matches_actual_type(
+                    &option.expected,
+                    &actual,
+                    bindings,
+                ) =>
+            {
+                SourceOptionTypeCheck::Match
+            }
+            Some(actual) => SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
+                span: self.module.exprs()[option.field.value].span,
+                actual: actual.to_string(),
+            }),
+            None => SourceOptionTypeCheck::Unknown,
+        })
     }
 
     fn validate_custom_source_contract_schema_types(
@@ -10671,6 +10719,64 @@ impl<'a> GateTypeContext<'a> {
             }
         }
 
+        fn option(element: GateType) -> GateType {
+            GateType::Option(Box::new(element))
+        }
+
+        fn list(element: GateType) -> GateType {
+            GateType::List(Box::new(element))
+        }
+
+        fn map(key: GateType, value: GateType) -> GateType {
+            GateType::Map {
+                key: Box::new(key),
+                value: Box::new(value),
+            }
+        }
+
+        fn record(fields: Vec<(&str, GateType)>) -> GateType {
+            GateType::Record(
+                fields
+                    .into_iter()
+                    .map(|(name, ty)| GateRecordField {
+                        name: name.to_owned(),
+                        ty,
+                    })
+                    .collect(),
+            )
+        }
+
+        fn db_connection_type() -> GateType {
+            record(vec![("database", primitive(BuiltinType::Text))])
+        }
+
+        fn db_param_type() -> GateType {
+            record(vec![
+                ("kind", primitive(BuiltinType::Text)),
+                ("bool", option(primitive(BuiltinType::Bool))),
+                ("int", option(primitive(BuiltinType::Int))),
+                ("float", option(primitive(BuiltinType::Float))),
+                ("decimal", option(primitive(BuiltinType::Decimal))),
+                ("bigInt", option(primitive(BuiltinType::BigInt))),
+                ("text", option(primitive(BuiltinType::Text))),
+                ("bytes", option(primitive(BuiltinType::Bytes))),
+            ])
+        }
+
+        fn db_statement_type() -> GateType {
+            record(vec![
+                ("sql", primitive(BuiltinType::Text)),
+                ("arguments", list(db_param_type())),
+            ])
+        }
+
+        fn db_rows_type() -> GateType {
+            list(map(
+                primitive(BuiltinType::Text),
+                primitive(BuiltinType::Text),
+            ))
+        }
+
         match value {
             IntrinsicValue::TupleConstructor { arity } => {
                 let elements: Vec<_> = (0..arity).map(synthetic_type_parameter).collect();
@@ -10712,6 +10818,36 @@ impl<'a> GateTypeContext<'a> {
             IntrinsicValue::FsCreateDirAll | IntrinsicValue::FsDeleteFile => arrow(
                 primitive(BuiltinType::Text),
                 task(primitive(BuiltinType::Text), primitive(BuiltinType::Unit)),
+            ),
+            IntrinsicValue::DbParamBool => arrow(primitive(BuiltinType::Bool), db_param_type()),
+            IntrinsicValue::DbParamInt => arrow(primitive(BuiltinType::Int), db_param_type()),
+            IntrinsicValue::DbParamFloat => arrow(primitive(BuiltinType::Float), db_param_type()),
+            IntrinsicValue::DbParamDecimal => {
+                arrow(primitive(BuiltinType::Decimal), db_param_type())
+            }
+            IntrinsicValue::DbParamBigInt => arrow(primitive(BuiltinType::BigInt), db_param_type()),
+            IntrinsicValue::DbParamText => arrow(primitive(BuiltinType::Text), db_param_type()),
+            IntrinsicValue::DbParamBytes => arrow(primitive(BuiltinType::Bytes), db_param_type()),
+            IntrinsicValue::DbStatement => arrow(
+                primitive(BuiltinType::Text),
+                arrow(list(db_param_type()), db_statement_type()),
+            ),
+            IntrinsicValue::DbQuery => arrow(
+                db_connection_type(),
+                arrow(
+                    db_statement_type(),
+                    task(primitive(BuiltinType::Text), db_rows_type()),
+                ),
+            ),
+            IntrinsicValue::DbCommit => arrow(
+                db_connection_type(),
+                arrow(
+                    list(primitive(BuiltinType::Text)),
+                    arrow(
+                        list(db_statement_type()),
+                        task(primitive(BuiltinType::Text), primitive(BuiltinType::Unit)),
+                    ),
+                ),
             ),
             IntrinsicValue::FloatFloor
             | IntrinsicValue::FloatCeil
@@ -14343,6 +14479,16 @@ fn custom_source_wakeup_kind(wakeup: CustomSourceRecurrenceWakeup) -> Recurrence
     }
 }
 
+fn is_db_changed_trigger_projection(module: &Module, expr: ExprId) -> bool {
+    matches!(
+        &module.exprs()[expr].kind,
+        ExprKind::Projection {
+            base: ProjectionBase::Expr(_),
+            path,
+        } if path.segments().len() == 1 && path.segments().first().text() == "changed"
+    )
+}
+
 fn type_argument_phrase(count: usize) -> String {
     format!("{count} type argument{}", if count == 1 { "" } else { "s" })
 }
@@ -17543,6 +17689,60 @@ value screenView =
                 &mut bindings,
             ),
             SourceOptionTypeCheck::Unknown,
+        );
+    }
+
+    #[test]
+    fn resolved_validation_accepts_db_live_refresh_on_changed_projection() {
+        let report = validate_resolved_text(
+            "db-live-refresh-on-changed-projection.aivi",
+            "type TableRef A = {\n\
+             \x20\x20\x20\x20changed: Signal Unit\n\
+             }\n\
+             \n\
+             signal usersChanged : Signal Unit\n\
+             \n\
+             value users : TableRef Int = {\n\
+             \x20\x20\x20\x20changed: usersChanged\n\
+             }\n\
+             \n\
+             @source db.live with {\n\
+             \x20\x20\x20\x20refreshOn: users.changed\n\
+             }\n\
+             signal rows : Signal Int\n",
+        );
+
+        assert!(
+            report.is_ok(),
+            "unexpected diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn resolved_validation_accepts_db_query_and_commit_builder_flows() {
+        let report = validate_resolved_text(
+            "db-query-commit-builder-flows.aivi",
+            "use aivi.db (paramBool, paramInt, paramText, statement, query, commit)\n\
+             \n\
+             value conn = { database: \"app.sqlite\" }\n\
+             \n\
+             value selectUsers: Task Text (List (Map Text Text)) =\n\
+             \x20\x20\x20\x20statement \"select * from users where id = ?\" [paramInt 7]\n\
+             \x20\x20\x20\x20 |> query conn\n\
+             \n\
+             value activateUser: Task Text Unit =\n\
+             \x20\x20\x20\x20[\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20statement \"update users set active = ? where id = ?\" [paramBool True, paramInt 7],\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20statement \"insert into audit_log(message) values (?)\" [paramText \"activated user\"]\n\
+             \x20\x20\x20\x20]\n\
+             \x20\x20\x20\x20 |> commit conn [\"users\", \"audit_log\"]\n",
+        );
+
+        assert!(
+            report.is_ok(),
+            "unexpected diagnostics: {:?}",
+            report.diagnostics()
         );
     }
 

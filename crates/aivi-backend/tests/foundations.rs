@@ -8,9 +8,10 @@ use aivi_backend::{
     GateStage as BackendGateStage, InlinePipeConstructor, InlinePipePatternKind,
     InlinePipeStageKind, ItemKind as BackendItemKind, KernelEvaluator, KernelExprKind,
     KernelOriginKind, LayoutKind, LoweringError, NonSourceWakeupCause, RecurrenceTarget,
-    RuntimeBigInt, RuntimeDecimal, RuntimeFloat, RuntimeRecordField, RuntimeSumValue,
-    RuntimeTaskPlan, RuntimeValue, SourceProvider, StageKind as BackendStageKind, ValidationError,
-    compile_program, lower_module as lower_backend_module, validate_program,
+    RuntimeBigInt, RuntimeDbCommitPlan, RuntimeDbConnection, RuntimeDbQueryPlan,
+    RuntimeDbStatement, RuntimeDbTaskPlan, RuntimeDecimal, RuntimeFloat, RuntimeRecordField,
+    RuntimeSumValue, RuntimeTaskPlan, RuntimeValue, SourceProvider, StageKind as BackendStageKind,
+    ValidationError, compile_program, lower_module as lower_backend_module, validate_program,
 };
 use aivi_base::{SourceDatabase, SourceSpan};
 use aivi_core::{
@@ -2957,4 +2958,80 @@ signal slowWindows : Signal Window =
         CodegenError::UnsupportedExpression { detail, .. }
             if detail.contains("record projection, pointer-niche Option carriers")
     )));
+}
+
+#[test]
+fn runtime_evaluates_db_query_builder_flow_into_db_task_plan() {
+    let backend = lower_text(
+        "backend-db-query-runtime.aivi",
+        r#"
+use aivi.db (paramInt, statement, query)
+
+value conn = { database: "app.sqlite" }
+
+value selectUsers: Task Text (List (Map Text Text)) =
+    statement "select * from users where id = ?" [paramInt 7]
+     |> query conn
+"#,
+    );
+    let mut evaluator = KernelEvaluator::new(&backend);
+    let globals = BTreeMap::new();
+
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "selectUsers"), &globals)
+            .expect("db query should evaluate into a backend db task plan"),
+        RuntimeValue::DbTask(RuntimeDbTaskPlan::Query(RuntimeDbQueryPlan {
+            connection: RuntimeDbConnection {
+                database: "app.sqlite".into(),
+            },
+            statement: RuntimeDbStatement {
+                sql: "select * from users where id = ?".into(),
+                arguments: vec![RuntimeValue::Int(7)],
+            },
+        }))
+    );
+}
+
+#[test]
+fn runtime_evaluates_db_commit_builder_flow_into_db_task_plan() {
+    let backend = lower_text(
+        "backend-db-commit-runtime.aivi",
+        r#"
+use aivi.db (paramBool, paramInt, paramText, statement, commit)
+
+value conn = { database: "app.sqlite" }
+
+value activateUser: Task Text Unit =
+    [
+        statement "update users set active = ? where id = ?" [paramBool True, paramInt 7],
+        statement "insert into audit_log(message) values (?)" [paramText "activated user"]
+    ]
+     |> commit conn ["users", "audit_log", "users"]
+"#,
+    );
+    let mut evaluator = KernelEvaluator::new(&backend);
+    let globals = BTreeMap::new();
+
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "activateUser"), &globals)
+            .expect("db commit should evaluate into a backend db task plan"),
+        RuntimeValue::DbTask(RuntimeDbTaskPlan::Commit(RuntimeDbCommitPlan {
+            connection: RuntimeDbConnection {
+                database: "app.sqlite".into(),
+            },
+            statements: vec![
+                RuntimeDbStatement {
+                    sql: "update users set active = ? where id = ?".into(),
+                    arguments: vec![RuntimeValue::Bool(true), RuntimeValue::Int(7)],
+                },
+                RuntimeDbStatement {
+                    sql: "insert into audit_log(message) values (?)".into(),
+                    arguments: vec![RuntimeValue::Text("activated user".into())],
+                },
+            ],
+            changed_tables: ["users", "audit_log"].into_iter().map(Into::into).collect(),
+        }))
+    );
 }
