@@ -8506,7 +8506,10 @@ when keyDown (Key "ArrowUp") => event <- Turn "up"
         let module = lowered.module();
         let event = find_signal(module, "event");
         assert_eq!(event.reactive_updates.len(), 1);
-        assert_eq!(signal_dependency_names(module, event), vec!["keyDown".to_owned()]);
+        assert_eq!(
+            signal_dependency_names(module, event),
+            vec!["keyDown".to_owned()]
+        );
         assert_eq!(
             event.reactive_updates[0].body_mode,
             ReactiveUpdateBodyMode::OptionalPayload

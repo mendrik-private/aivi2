@@ -873,10 +873,7 @@ impl<'a> Parser<'a> {
             self.diagnostics.push(
                 Diagnostic::error("reactive update is missing its source signal name")
                     .with_code(MISSING_REACTIVE_UPDATE_SOURCE)
-                    .with_primary_label(
-                        keyword_span,
-                        "expected a source signal name after `when`",
-                    ),
+                    .with_primary_label(keyword_span, "expected a source signal name after `when`"),
             );
             None
         });
@@ -888,7 +885,10 @@ impl<'a> Parser<'a> {
                 PatternStop::reactive_update_source_context(),
             )
             .or_else(|| {
-                let source_span = source.as_ref().map(|name| name.span).unwrap_or(keyword_span);
+                let source_span = source
+                    .as_ref()
+                    .map(|name| name.span)
+                    .unwrap_or(keyword_span);
                 self.diagnostics.push(
                     Diagnostic::error("reactive update is missing its source pattern")
                         .with_code(MISSING_REACTIVE_UPDATE_SOURCE_PATTERN)
