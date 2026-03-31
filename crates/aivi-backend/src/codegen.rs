@@ -5,20 +5,22 @@ use std::{
 
 use cranelift_codegen::{
     ir::{
-        AbiParam, InstBuilder, MemFlags, Type, UserFuncName, Value, condcodes::IntCC,
+        AbiParam, BlockArg, InstBuilder, MemFlags, Type, UserFuncName, Value,
+        condcodes::{FloatCC, IntCC},
         immediates::Ieee64, types,
     },
     print_errors::pretty_verifier_error,
     settings, verify_function,
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
-use cranelift_module::{DataDescription, Linkage, Module, default_libcall_names};
+use cranelift_module::{DataDescription, FuncId, Linkage, Module, default_libcall_names};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 
 use crate::{
-    AbiPassMode, BinaryOperator, BuiltinTerm, CallingConventionKind, EnvSlotId, Kernel,
+    AbiPassMode, BinaryOperator, BuiltinTerm, CallingConventionKind, EnvSlotId, ItemId, Kernel,
     KernelExprId, KernelExprKind, KernelId, KernelOriginKind, LayoutId, LayoutKind, ParameterRole,
-    PrimitiveType, Program, SubjectRef, UnaryOperator, ValidationError, describe_expr_kind,
+    PrimitiveType, Program, RuntimeMap, RuntimeMapEntry, RuntimeRecordField, RuntimeValue,
+    SubjectRef, UnaryOperator, ValidationError, describe_expr_kind,
     numeric::{RuntimeBigInt, RuntimeDecimal, RuntimeFloat},
     validate_program,
 };
@@ -259,12 +261,19 @@ impl std::error::Error for CodegenError {}
 /// - it maps `RuntimeKernelV1` onto the target's default call convention,
 /// - it materializes `Int` as `i64`, `Float` as finite `f64`, `Bool` as `i8`, and backend
 ///   by-reference values as host pointers,
-/// - it materializes `Decimal` / `BigInt` literals as immutable backend-owned constant cells behind
-///   those by-reference pointers,
+/// - it materializes `Decimal` / `BigInt` plus fragment-only `Text` literals as immutable
+///   backend-owned constant cells behind those by-reference pointers,
 /// - it uses a backend-local pointer niche for `Option` over by-reference payloads,
 /// - it resolves record projection offsets inside backend/codegen,
-/// - and it explicitly rejects general apply/domain/collection/text/inline-pipe lowering until
-///   those contracts are owned in this layer.
+/// - it emits backend item-body kernels directly,
+/// - it lowers saturated direct item calls, representational by-reference domain-member calls,
+///   niche `Option` constructor calls already represented in backend IR,
+/// - it lowers selected scalar unary/binary operators, including `Float` comparison/equality,
+///   plus native equality for `Text`, record/tuple aggregates, and niche `Option` pointers whose
+///   leaves are already codegen-supported, and
+/// - it explicitly rejects the remaining apply/domain/builtin aggregate/collection/dynamic-text
+///   lowering, plus inline-pipe control-flow/debug stages, until those contracts are owned in this
+///   layer.
 pub fn compile_program(program: &Program) -> Result<CompiledProgram, CodegenErrors> {
     if let Err(errors) = validate_program(program) {
         return Err(CodegenErrors::new(
@@ -284,8 +293,50 @@ pub fn compile_program(program: &Program) -> Result<CompiledProgram, CodegenErro
 struct CraneliftCompiler<'a> {
     program: &'a Program,
     module: ObjectModule,
+    declared_functions: BTreeMap<KernelId, FuncId>,
     function_builder_ctx: FunctionBuilderContext,
     next_data_symbol: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DirectApplyPlan {
+    Item { body: KernelId },
+    DomainMember(DomainMemberCallPlan),
+    Builtin(BuiltinCallPlan),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DomainMemberCallPlan {
+    RepresentationalIdentityUnary,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BuiltinCallPlan {
+    NicheOptionSome,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativeCompareKind {
+    Integer,
+    Float,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum NativeEqualityShape {
+    Integer,
+    Float,
+    Text,
+    Aggregate(Vec<NativeEqualityField>),
+    NicheOption {
+        payload: Box<NativeEqualityShape>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NativeEqualityField {
+    offset: i32,
+    layout: LayoutId,
+    shape: Box<NativeEqualityShape>,
 }
 
 impl<'a> CraneliftCompiler<'a> {
@@ -310,6 +361,7 @@ impl<'a> CraneliftCompiler<'a> {
         Ok(Self {
             program,
             module,
+            declared_functions: BTreeMap::new(),
             function_builder_ctx: FunctionBuilderContext::new(),
             next_data_symbol: 0,
         })
@@ -319,9 +371,6 @@ impl<'a> CraneliftCompiler<'a> {
         let mut errors = Vec::new();
 
         for (kernel_id, kernel) in self.program.kernels().iter() {
-            if matches!(kernel.origin.kind, KernelOriginKind::ItemBody { .. }) {
-                continue;
-            }
             match kernel.convention.kind {
                 CallingConventionKind::RuntimeKernelV1 => {}
             }
@@ -353,15 +402,9 @@ impl<'a> CraneliftCompiler<'a> {
 
                 let expr = &kernel.exprs()[expr_id];
                 match &expr.kind {
-                    KernelExprKind::Subject(SubjectRef::Input) | KernelExprKind::Environment(_) => {
-                    }
-                    KernelExprKind::Subject(SubjectRef::Inline(_)) => {
-                        errors.push(self.unsupported_expression(
-                            kernel_id,
-                            expr_id,
-                            "inline subjects require inline-pipe codegen, which stays out of this backend slice",
-                        ));
-                    }
+                    KernelExprKind::Subject(SubjectRef::Input)
+                    | KernelExprKind::Subject(SubjectRef::Inline(_))
+                    | KernelExprKind::Environment(_) => {}
                     KernelExprKind::OptionSome { payload } => {
                         if let Err(error) = self.require_niche_option_expression(
                             kernel_id,
@@ -437,19 +480,51 @@ impl<'a> CraneliftCompiler<'a> {
                             errors.push(error);
                         }
                     }
+                    KernelExprKind::Builtin(BuiltinTerm::None) => {
+                        if let Err(error) = self.require_niche_option_expression(
+                            kernel_id,
+                            kernel,
+                            expr_id,
+                            None,
+                            expr.layout,
+                            "None constructor",
+                        ) {
+                            errors.push(error);
+                        }
+                    }
+                    KernelExprKind::Text(text) => {
+                        if let Err(error) = self.require_text_expression(
+                            kernel_id,
+                            expr_id,
+                            expr.layout,
+                            "Text literal",
+                        ) {
+                            errors.push(error);
+                        }
+                        match self.render_static_text_literal(kernel_id, kernel, expr_id, text) {
+                            Ok(Some(_)) => {}
+                            Ok(None) => {
+                                errors.push(self.unsupported_expression(
+                                    kernel_id,
+                                    expr_id,
+                                    "text interpolation still requires a native text formatting contract beyond static literal folding",
+                                ));
+                            }
+                            Err(error) => {
+                                errors.push(error);
+                            }
+                        }
+                    }
                     KernelExprKind::Projection { base, .. } => {
                         let Some(base_layout) = (match base {
                             crate::ProjectionBase::Subject(SubjectRef::Input) => {
                                 kernel.input_subject
                             }
-                            crate::ProjectionBase::Subject(SubjectRef::Inline(_)) => {
-                                errors.push(self.unsupported_expression(
-                                    kernel_id,
-                                    expr_id,
-                                    "projection from inline subjects still requires inline-pipe codegen",
-                                ));
-                                None
-                            }
+                            crate::ProjectionBase::Subject(SubjectRef::Inline(slot)) => Some(
+                                *kernel.inline_subjects.get(slot.index()).expect(
+                                    "validated backend kernels keep inline subject layouts aligned with codegen",
+                                ),
+                            ),
                             crate::ProjectionBase::Expr(base_expr) => {
                                 work.push(*base_expr);
                                 Some(kernel.exprs()[*base_expr].layout)
@@ -461,6 +536,89 @@ impl<'a> CraneliftCompiler<'a> {
                         if let Err(error) =
                             self.resolve_projection_steps(kernel_id, kernel, expr_id, base_layout)
                         {
+                            errors.push(error);
+                        }
+                    }
+                    KernelExprKind::Pipe(pipe) => {
+                        work.push(pipe.head);
+                        let mut current_layout = kernel.exprs()[pipe.head].layout;
+                        for (stage_index, stage) in pipe.stages.iter().enumerate() {
+                            if let Err(error) = self.require_layout_match(
+                                kernel_id,
+                                expr_id,
+                                stage.input_layout,
+                                current_layout,
+                                &format!("inline-pipe stage {stage_index} input"),
+                            ) {
+                                errors.push(error);
+                            }
+                            match &stage.kind {
+                                crate::InlinePipeStageKind::Transform { expr, .. } => {
+                                    work.push(*expr);
+                                    if let Err(error) = self.require_layout_match(
+                                        kernel_id,
+                                        expr_id,
+                                        stage.result_layout,
+                                        kernel.exprs()[*expr].layout,
+                                        &format!("inline-pipe stage {stage_index} result"),
+                                    ) {
+                                        errors.push(error);
+                                    }
+                                }
+                                crate::InlinePipeStageKind::Tap { expr } => {
+                                    work.push(*expr);
+                                    if let Err(error) = self.require_layout_match(
+                                        kernel_id,
+                                        expr_id,
+                                        stage.result_layout,
+                                        stage.input_layout,
+                                        &format!("inline-pipe tap stage {stage_index} result"),
+                                    ) {
+                                        errors.push(error);
+                                    }
+                                }
+                                crate::InlinePipeStageKind::Debug { .. } => {
+                                    errors.push(self.unsupported_inline_pipe_stage(
+                                        kernel_id,
+                                        expr_id,
+                                        stage_index,
+                                        "still requires runtime-side debug effects",
+                                    ))
+                                }
+                                crate::InlinePipeStageKind::Gate { .. } => {
+                                    errors.push(self.unsupported_inline_pipe_stage(
+                                        kernel_id,
+                                        expr_id,
+                                        stage_index,
+                                        "still requires control-flow/Option branching codegen",
+                                    ))
+                                }
+                                crate::InlinePipeStageKind::Case { .. } => {
+                                    errors.push(self.unsupported_inline_pipe_stage(
+                                        kernel_id,
+                                        expr_id,
+                                        stage_index,
+                                        "still requires pattern-matching codegen",
+                                    ))
+                                }
+                                crate::InlinePipeStageKind::TruthyFalsy { .. } => {
+                                    errors.push(self.unsupported_inline_pipe_stage(
+                                        kernel_id,
+                                        expr_id,
+                                        stage_index,
+                                        "still requires branch selection codegen",
+                                    ))
+                                }
+                            }
+                            current_layout = stage.result_layout;
+                        }
+                        if let Err(error) = self.require_layout_match(
+                            kernel_id,
+                            expr_id,
+                            expr.layout,
+                            current_layout,
+                            "inline-pipe result",
+                        ) {
                             errors.push(error);
                         }
                     }
@@ -525,27 +683,12 @@ impl<'a> CraneliftCompiler<'a> {
                             | BinaryOperator::LessThan
                             | BinaryOperator::GreaterThanOrEqual
                             | BinaryOperator::LessThanOrEqual => {
-                                if let Err(error) = self.require_int_expression(
+                                if let Err(error) = self.require_ordered_expression_pair(
                                     kernel_id,
-                                    *left,
-                                    kernel.exprs()[*left].layout,
-                                    "comparison lhs",
-                                ) {
-                                    errors.push(error);
-                                }
-                                if let Err(error) = self.require_int_expression(
-                                    kernel_id,
-                                    *right,
-                                    kernel.exprs()[*right].layout,
-                                    "comparison rhs",
-                                ) {
-                                    errors.push(error);
-                                }
-                                if let Err(error) = self.require_bool_expression(
-                                    kernel_id,
+                                    kernel,
                                     expr_id,
-                                    expr.layout,
-                                    "comparison result",
+                                    *left,
+                                    *right,
                                 ) {
                                     errors.push(error);
                                 }
@@ -593,25 +736,38 @@ impl<'a> CraneliftCompiler<'a> {
                             }
                         }
                     }
-                    KernelExprKind::Item(_)
-                    | KernelExprKind::SumConstructor(_)
+                    KernelExprKind::Item(item) => {
+                        if let Err(error) =
+                            self.require_compilable_item_call(kernel_id, expr_id, *item, &[])
+                        {
+                            errors.push(error);
+                        }
+                    }
+                    KernelExprKind::Apply { callee, arguments } => {
+                        for argument in arguments {
+                            work.push(*argument);
+                        }
+                        if let Err(error) =
+                            self.resolve_direct_apply_plan(kernel_id, expr_id, *callee, arguments)
+                        {
+                            errors.push(error);
+                        }
+                    }
+                    KernelExprKind::SumConstructor(_)
                     | KernelExprKind::DomainMember(_)
                     | KernelExprKind::BuiltinClassMember(_)
                     | KernelExprKind::Builtin(_)
                     | KernelExprKind::IntrinsicValue(_)
                     | KernelExprKind::SuffixedInteger(_)
-                    | KernelExprKind::Text(_)
                     | KernelExprKind::Tuple(_)
                     | KernelExprKind::List(_)
                     | KernelExprKind::Map(_)
                     | KernelExprKind::Set(_)
-                    | KernelExprKind::Record(_)
-                    | KernelExprKind::Apply { .. }
-                    | KernelExprKind::Pipe(_) => {
+                    | KernelExprKind::Record(_) => {
                         errors.push(self.unsupported_expression(
                             kernel_id,
                             expr_id,
-                            "the current Cranelift slice lowers record projection, pointer-niche Option carriers, scalar literals, and unary/binary Int/Bool operators only",
+                            "the current Cranelift slice lowers direct saturated item calls, representational by-reference domain-member calls, niche Option constructors/carriers, record projection, straight-line inline-pipe transform/tap stages, scalar literals, Int/Bool arithmetic, Int/Float/Bool comparison, and native equality over scalar/Text/record/tuple/niche-Option shapes only",
                         ));
                     }
                 }
@@ -626,13 +782,28 @@ impl<'a> CraneliftCompiler<'a> {
     }
 
     fn compile(mut self) -> Result<CompiledProgram, CodegenErrors> {
-        let mut compiled_kernels = Vec::with_capacity(self.program.kernels().len());
+        let kernel_ids = self
+            .program
+            .kernels()
+            .iter()
+            .map(|(kernel_id, _)| kernel_id)
+            .collect::<Vec<_>>();
+        let mut declaration_errors = Vec::new();
+        for &kernel_id in &kernel_ids {
+            let kernel = &self.program.kernels()[kernel_id];
+            if let Err(error) = self.declare_kernel(kernel_id, kernel) {
+                declaration_errors.push(error);
+            }
+        }
+        if !declaration_errors.is_empty() {
+            return Err(CodegenErrors::new(declaration_errors));
+        }
+
+        let mut compiled_kernels = Vec::with_capacity(kernel_ids.len());
         let mut errors = Vec::new();
 
-        for (kernel_id, kernel) in self.program.kernels().iter() {
-            if matches!(kernel.origin.kind, KernelOriginKind::ItemBody { .. }) {
-                continue;
-            }
+        for &kernel_id in &kernel_ids {
+            let kernel = &self.program.kernels()[kernel_id];
             match self.compile_kernel(kernel_id, kernel) {
                 Ok(compiled) => compiled_kernels.push(compiled),
                 Err(error) => errors.push(error),
@@ -661,15 +832,7 @@ impl<'a> CraneliftCompiler<'a> {
         })
     }
 
-    fn compile_kernel(
-        &mut self,
-        kernel_id: KernelId,
-        kernel: &Kernel,
-    ) -> Result<CompiledKernel, CodegenError> {
-        match kernel.convention.kind {
-            CallingConventionKind::RuntimeKernelV1 => {}
-        }
-
+    fn declare_kernel(&mut self, kernel_id: KernelId, kernel: &Kernel) -> Result<(), CodegenError> {
         let signature = self.build_signature(kernel_id, kernel)?;
         let symbol = kernel_symbol(self.program, kernel_id, kernel);
         let func_id = self
@@ -679,6 +842,25 @@ impl<'a> CraneliftCompiler<'a> {
                 kernel: Some(kernel_id),
                 message: error.to_string().into_boxed_str(),
             })?;
+        self.declared_functions.insert(kernel_id, func_id);
+        Ok(())
+    }
+
+    fn compile_kernel(
+        &mut self,
+        kernel_id: KernelId,
+        kernel: &Kernel,
+    ) -> Result<CompiledKernel, CodegenError> {
+        match kernel.convention.kind {
+            CallingConventionKind::RuntimeKernelV1 => {}
+        }
+
+        let symbol = kernel_symbol(self.program, kernel_id, kernel);
+        let signature = self.build_signature(kernel_id, kernel)?;
+        let func_id = *self
+            .declared_functions
+            .get(&kernel_id)
+            .expect("declared kernels must be available before compilation");
 
         let mut ctx = self.module.make_context();
         ctx.func.signature = signature;
@@ -764,11 +946,50 @@ impl<'a> CraneliftCompiler<'a> {
             Visit(KernelExprId),
             BuildOptionSome(KernelExprId),
             BuildProjection(KernelExprId),
+            BuildDirectApply {
+                expr: KernelExprId,
+                plan: DirectApplyPlan,
+                argument_count: usize,
+            },
             BuildUnary(KernelExprId),
             BuildBinary(KernelExprId),
+            BuildPipeStage {
+                pipe_expr: KernelExprId,
+                stage_index: usize,
+            },
+            ContinuePipeTransform {
+                pipe_expr: KernelExprId,
+                stage_index: usize,
+            },
+            ContinuePipeTap {
+                pipe_expr: KernelExprId,
+                stage_index: usize,
+                current: Value,
+            },
+            RestoreInlineSubjects(Vec<(usize, Option<Value>)>),
+        }
+
+        fn snapshot_pipe_subjects(
+            pipe: &crate::InlinePipeExpr,
+            inline_subjects: &[Option<Value>],
+        ) -> Vec<(usize, Option<Value>)> {
+            let mut saved = Vec::new();
+            for stage in &pipe.stages {
+                for slot in [Some(stage.subject), stage.subject_memo, stage.result_memo]
+                    .into_iter()
+                    .flatten()
+                {
+                    let index = slot.index();
+                    if saved.iter().all(|(saved_index, _)| *saved_index != index) {
+                        saved.push((index, inline_subjects[index]));
+                    }
+                }
+            }
+            saved
         }
 
         let mut input = None;
+        let mut inline_subjects = vec![None; kernel.inline_subjects.len()];
         let mut environment = vec![None; kernel.environment.len()];
         let parameters = builder.block_params(entry).to_vec();
         for (value, parameter) in parameters.into_iter().zip(&kernel.convention.parameters) {
@@ -786,20 +1007,26 @@ impl<'a> CraneliftCompiler<'a> {
                 Task::Visit(expr_id) => {
                     let expr = &kernel.exprs()[expr_id];
                     match &expr.kind {
-                        KernelExprKind::Subject(SubjectRef::Input) => {
-                            let Some(value) = input else {
-                                return Err(CodegenError::MissingInputParameter {
-                                    kernel: kernel_id,
-                                });
-                            };
-                            values.push(value);
-                        }
-                        KernelExprKind::Subject(SubjectRef::Inline(_)) => {
-                            return Err(self.unsupported_expression(
+                        KernelExprKind::Item(item) => {
+                            let body =
+                                self.require_compilable_item_call(kernel_id, expr_id, *item, &[])?;
+                            values.push(self.lower_direct_item_call(
                                 kernel_id,
+                                body,
+                                &[],
+                                builder,
+                            )?);
+                        }
+                        KernelExprKind::Subject(subject) => {
+                            let (value, _) = self.lower_subject_reference(
+                                kernel_id,
+                                kernel,
                                 expr_id,
-                                "inline subjects require inline-pipe codegen, which stays out of this first scalar slice",
-                            ));
+                                *subject,
+                                input,
+                                &inline_subjects,
+                            )?;
+                            values.push(value);
                         }
                         KernelExprKind::OptionSome { payload } => {
                             tasks.push(Task::BuildOptionSome(expr_id));
@@ -902,6 +1129,23 @@ impl<'a> CraneliftCompiler<'a> {
                                 builder,
                             )?);
                         }
+                        KernelExprKind::Text(text) => {
+                            self.require_text_expression(
+                                kernel_id,
+                                expr_id,
+                                expr.layout,
+                                "Text literal",
+                            )?;
+                            values.push(
+                                self.materialize_text_literal(
+                                    kernel_id,
+                                    kernel,
+                                    expr_id,
+                                    text,
+                                    builder,
+                                )?,
+                            );
+                        }
                         KernelExprKind::Builtin(BuiltinTerm::True) => {
                             self.require_bool_expression(kernel_id, expr_id, expr.layout, "True")?;
                             values.push(builder.ins().iconst(types::I8, 1));
@@ -910,16 +1154,27 @@ impl<'a> CraneliftCompiler<'a> {
                             self.require_bool_expression(kernel_id, expr_id, expr.layout, "False")?;
                             values.push(builder.ins().iconst(types::I8, 0));
                         }
+                        KernelExprKind::Builtin(BuiltinTerm::None) => {
+                            self.require_niche_option_expression(
+                                kernel_id,
+                                kernel,
+                                expr_id,
+                                None,
+                                expr.layout,
+                                "None constructor",
+                            )?;
+                            values.push(builder.ins().iconst(self.pointer_type(), 0));
+                        }
                         KernelExprKind::Projection { base, .. } => match base {
-                            crate::ProjectionBase::Subject(SubjectRef::Input) => {
-                                let Some(value) = input else {
-                                    return Err(CodegenError::MissingInputParameter {
-                                        kernel: kernel_id,
-                                    });
-                                };
-                                let base_layout = kernel.input_subject.expect(
-                                    "validated backend kernels keep input subjects aligned with codegen",
-                                );
+                            crate::ProjectionBase::Subject(subject) => {
+                                let (value, base_layout) = self.lower_subject_reference(
+                                    kernel_id,
+                                    kernel,
+                                    expr_id,
+                                    *subject,
+                                    input,
+                                    &inline_subjects,
+                                )?;
                                 values.push(self.lower_projection(
                                     kernel_id,
                                     kernel,
@@ -928,13 +1183,6 @@ impl<'a> CraneliftCompiler<'a> {
                                     base_layout,
                                     builder,
                                 )?);
-                            }
-                            crate::ProjectionBase::Subject(SubjectRef::Inline(_)) => {
-                                return Err(self.unsupported_expression(
-                                    kernel_id,
-                                    expr_id,
-                                    "projection from inline subjects still requires inline-pipe codegen",
-                                ));
                             }
                             crate::ProjectionBase::Expr(base) => {
                                 tasks.push(Task::BuildProjection(expr_id));
@@ -950,11 +1198,37 @@ impl<'a> CraneliftCompiler<'a> {
                             tasks.push(Task::Visit(*right));
                             tasks.push(Task::Visit(*left));
                         }
+                        KernelExprKind::Apply { callee, arguments } => {
+                            let plan = self.resolve_direct_apply_plan(
+                                kernel_id, expr_id, *callee, arguments,
+                            )?;
+                            tasks.push(Task::BuildDirectApply {
+                                expr: expr_id,
+                                plan,
+                                argument_count: arguments.len(),
+                            });
+                            for argument in arguments.iter().rev() {
+                                tasks.push(Task::Visit(*argument));
+                            }
+                        }
+                        KernelExprKind::Pipe(pipe) => {
+                            let saved = snapshot_pipe_subjects(pipe, &inline_subjects);
+                            if !saved.is_empty() {
+                                tasks.push(Task::RestoreInlineSubjects(saved));
+                            }
+                            if !pipe.stages.is_empty() {
+                                tasks.push(Task::BuildPipeStage {
+                                    pipe_expr: expr_id,
+                                    stage_index: 0,
+                                });
+                            }
+                            tasks.push(Task::Visit(pipe.head));
+                        }
                         _ => {
                             return Err(self.unsupported_expression(
                                 kernel_id,
                                 expr_id,
-                                "the current Cranelift slice only lowers record projection, pointer-niche Option carriers, scalar subjects/environment slots, integers, booleans, and unary/binary operators",
+                                "the current Cranelift slice only lowers direct saturated item calls, representational by-reference domain-member calls, niche Option constructors/carriers, record projection, scalar subjects/environment slots, straight-line inline-pipe transform/tap stages, scalar literals, Int/Bool arithmetic, Int/Float/Bool comparison, and native equality over scalar/record/tuple/niche-Option shapes",
                             ));
                         }
                     }
@@ -995,6 +1269,25 @@ impl<'a> CraneliftCompiler<'a> {
                         expr_id,
                         base,
                         kernel.exprs()[*base_expr].layout,
+                        builder,
+                    )?);
+                }
+                Task::BuildDirectApply {
+                    expr,
+                    plan,
+                    argument_count,
+                } => {
+                    let mut argument_values = Vec::with_capacity(argument_count);
+                    for _ in 0..argument_count {
+                        argument_values
+                            .push(values.pop().expect("direct apply argument should exist"));
+                    }
+                    argument_values.reverse();
+                    values.push(self.lower_direct_apply(
+                        kernel_id,
+                        expr,
+                        plan,
+                        &argument_values,
                         builder,
                     )?);
                 }
@@ -1147,114 +1440,83 @@ impl<'a> CraneliftCompiler<'a> {
                             builder.ins().srem(lhs, rhs)
                         }
                         BinaryOperator::GreaterThan => {
-                            self.require_int_expression(
-                                kernel_id,
-                                *left,
-                                kernel.exprs()[*left].layout,
-                                "comparison lhs",
-                            )?;
-                            self.require_int_expression(
-                                kernel_id,
-                                *right,
-                                kernel.exprs()[*right].layout,
-                                "comparison rhs",
-                            )?;
-                            self.require_bool_expression(
-                                kernel_id,
-                                expr_id,
-                                expr.layout,
-                                "comparison result",
-                            )?;
-                            builder.ins().icmp(IntCC::SignedGreaterThan, lhs, rhs)
+                            match self.require_ordered_expression_pair(
+                                kernel_id, kernel, expr_id, *left, *right,
+                            )? {
+                                NativeCompareKind::Integer => {
+                                    builder.ins().icmp(IntCC::SignedGreaterThan, lhs, rhs)
+                                }
+                                NativeCompareKind::Float => {
+                                    builder.ins().fcmp(FloatCC::GreaterThan, lhs, rhs)
+                                }
+                            }
                         }
                         BinaryOperator::LessThan => {
-                            self.require_int_expression(
-                                kernel_id,
-                                *left,
-                                kernel.exprs()[*left].layout,
-                                "comparison lhs",
-                            )?;
-                            self.require_int_expression(
-                                kernel_id,
-                                *right,
-                                kernel.exprs()[*right].layout,
-                                "comparison rhs",
-                            )?;
-                            self.require_bool_expression(
-                                kernel_id,
-                                expr_id,
-                                expr.layout,
-                                "comparison result",
-                            )?;
-                            builder.ins().icmp(IntCC::SignedLessThan, lhs, rhs)
+                            match self.require_ordered_expression_pair(
+                                kernel_id, kernel, expr_id, *left, *right,
+                            )? {
+                                NativeCompareKind::Integer => {
+                                    builder.ins().icmp(IntCC::SignedLessThan, lhs, rhs)
+                                }
+                                NativeCompareKind::Float => {
+                                    builder.ins().fcmp(FloatCC::LessThan, lhs, rhs)
+                                }
+                            }
                         }
                         BinaryOperator::GreaterThanOrEqual => {
-                            self.require_int_expression(
-                                kernel_id,
-                                *left,
-                                kernel.exprs()[*left].layout,
-                                "comparison lhs",
-                            )?;
-                            self.require_int_expression(
-                                kernel_id,
-                                *right,
-                                kernel.exprs()[*right].layout,
-                                "comparison rhs",
-                            )?;
-                            self.require_bool_expression(
-                                kernel_id,
-                                expr_id,
-                                expr.layout,
-                                "comparison result",
-                            )?;
-                            builder
-                                .ins()
-                                .icmp(IntCC::SignedGreaterThanOrEqual, lhs, rhs)
+                            match self.require_ordered_expression_pair(
+                                kernel_id, kernel, expr_id, *left, *right,
+                            )? {
+                                NativeCompareKind::Integer => builder
+                                    .ins()
+                                    .icmp(IntCC::SignedGreaterThanOrEqual, lhs, rhs),
+                                NativeCompareKind::Float => {
+                                    builder.ins().fcmp(FloatCC::GreaterThanOrEqual, lhs, rhs)
+                                }
+                            }
                         }
                         BinaryOperator::LessThanOrEqual => {
-                            self.require_int_expression(
-                                kernel_id,
-                                *left,
-                                kernel.exprs()[*left].layout,
-                                "comparison lhs",
-                            )?;
-                            self.require_int_expression(
-                                kernel_id,
-                                *right,
-                                kernel.exprs()[*right].layout,
-                                "comparison rhs",
-                            )?;
-                            self.require_bool_expression(
-                                kernel_id,
-                                expr_id,
-                                expr.layout,
-                                "comparison result",
-                            )?;
-                            builder.ins().icmp(IntCC::SignedLessThanOrEqual, lhs, rhs)
+                            match self.require_ordered_expression_pair(
+                                kernel_id, kernel, expr_id, *left, *right,
+                            )? {
+                                NativeCompareKind::Integer => {
+                                    builder.ins().icmp(IntCC::SignedLessThanOrEqual, lhs, rhs)
+                                }
+                                NativeCompareKind::Float => {
+                                    builder.ins().fcmp(FloatCC::LessThanOrEqual, lhs, rhs)
+                                }
+                            }
                         }
                         BinaryOperator::Equals => {
-                            self.require_equatable_expression_pair(
+                            let shape = self.require_equatable_expression_pair(
                                 kernel_id, kernel, expr_id, *left, *right,
                             )?;
-                            self.require_bool_expression(
-                                kernel_id,
-                                expr_id,
-                                expr.layout,
-                                "equality result",
-                            )?;
-                            builder.ins().icmp(IntCC::Equal, lhs, rhs)
+                            self.lower_native_equality_shape(
+                                kernel_id, expr_id, &shape, lhs, rhs, builder,
+                            )?
                         }
                         BinaryOperator::NotEquals => {
-                            self.require_equatable_expression_pair(
+                            let shape = self.require_equatable_expression_pair(
                                 kernel_id, kernel, expr_id, *left, *right,
                             )?;
-                            self.require_bool_expression(
-                                kernel_id,
-                                expr_id,
-                                expr.layout,
-                                "inequality result",
-                            )?;
-                            builder.ins().icmp(IntCC::NotEqual, lhs, rhs)
+                            match &shape {
+                                NativeEqualityShape::Integer => {
+                                    builder.ins().icmp(IntCC::NotEqual, lhs, rhs)
+                                }
+                                NativeEqualityShape::Float => {
+                                    builder.ins().fcmp(FloatCC::NotEqual, lhs, rhs)
+                                }
+                                NativeEqualityShape::Text
+                                |
+                                NativeEqualityShape::Aggregate(_)
+                                | NativeEqualityShape::NicheOption { .. } => {
+                                    let equal = self.lower_native_equality_shape(
+                                        kernel_id, expr_id, &shape, lhs, rhs, builder,
+                                    )?;
+                                    let one = builder.ins().iconst(types::I8, 1);
+                                    builder.ins().bxor(equal, one)
+                                }
+                            }
                         }
                         BinaryOperator::And => {
                             self.require_bool_expression(
@@ -1301,12 +1563,590 @@ impl<'a> CraneliftCompiler<'a> {
                     };
                     values.push(lowered);
                 }
+                Task::BuildPipeStage {
+                    pipe_expr,
+                    stage_index,
+                } => {
+                    let current = values.pop().expect("pipe stage input should exist");
+                    let pipe_expr_ref = &kernel.exprs()[pipe_expr];
+                    let KernelExprKind::Pipe(pipe) = &pipe_expr_ref.kind else {
+                        unreachable!("pipe build task must only be queued for pipe expressions");
+                    };
+                    let stage = &pipe.stages[stage_index];
+                    let current_layout = if stage_index == 0 {
+                        kernel.exprs()[pipe.head].layout
+                    } else {
+                        pipe.stages[stage_index - 1].result_layout
+                    };
+                    self.require_layout_match(
+                        kernel_id,
+                        pipe_expr,
+                        stage.input_layout,
+                        current_layout,
+                        &format!("inline-pipe stage {stage_index} input"),
+                    )?;
+                    inline_subjects[stage.subject.index()] = Some(current);
+                    if let Some(slot) = stage.subject_memo {
+                        inline_subjects[slot.index()] = Some(current);
+                    }
+                    match &stage.kind {
+                        crate::InlinePipeStageKind::Transform { expr, .. } => {
+                            tasks.push(Task::ContinuePipeTransform {
+                                pipe_expr,
+                                stage_index,
+                            });
+                            tasks.push(Task::Visit(*expr));
+                        }
+                        crate::InlinePipeStageKind::Tap { expr } => {
+                            tasks.push(Task::ContinuePipeTap {
+                                pipe_expr,
+                                stage_index,
+                                current,
+                            });
+                            tasks.push(Task::Visit(*expr));
+                        }
+                        crate::InlinePipeStageKind::Debug { .. } => {
+                            return Err(self.unsupported_inline_pipe_stage(
+                                kernel_id,
+                                pipe_expr,
+                                stage_index,
+                                "still requires runtime-side debug effects",
+                            ));
+                        }
+                        crate::InlinePipeStageKind::Gate { .. } => {
+                            return Err(self.unsupported_inline_pipe_stage(
+                                kernel_id,
+                                pipe_expr,
+                                stage_index,
+                                "still requires control-flow/Option branching codegen",
+                            ));
+                        }
+                        crate::InlinePipeStageKind::Case { .. } => {
+                            return Err(self.unsupported_inline_pipe_stage(
+                                kernel_id,
+                                pipe_expr,
+                                stage_index,
+                                "still requires pattern-matching codegen",
+                            ));
+                        }
+                        crate::InlinePipeStageKind::TruthyFalsy { .. } => {
+                            return Err(self.unsupported_inline_pipe_stage(
+                                kernel_id,
+                                pipe_expr,
+                                stage_index,
+                                "still requires branch selection codegen",
+                            ));
+                        }
+                    }
+                }
+                Task::ContinuePipeTransform {
+                    pipe_expr,
+                    stage_index,
+                } => {
+                    let result = values.pop().expect("pipe transform result should exist");
+                    let pipe_expr_ref = &kernel.exprs()[pipe_expr];
+                    let KernelExprKind::Pipe(pipe) = &pipe_expr_ref.kind else {
+                        unreachable!("pipe continuation must only be queued for pipe expressions");
+                    };
+                    let stage = &pipe.stages[stage_index];
+                    let crate::InlinePipeStageKind::Transform { expr, .. } = &stage.kind else {
+                        unreachable!(
+                            "transform continuation must only be queued for transform stages"
+                        );
+                    };
+                    self.require_layout_match(
+                        kernel_id,
+                        pipe_expr,
+                        stage.result_layout,
+                        kernel.exprs()[*expr].layout,
+                        &format!("inline-pipe stage {stage_index} result"),
+                    )?;
+                    if let Some(slot) = stage.result_memo {
+                        inline_subjects[slot.index()] = Some(result);
+                    }
+                    values.push(result);
+                    if stage_index + 1 < pipe.stages.len() {
+                        tasks.push(Task::BuildPipeStage {
+                            pipe_expr,
+                            stage_index: stage_index + 1,
+                        });
+                    }
+                }
+                Task::ContinuePipeTap {
+                    pipe_expr,
+                    stage_index,
+                    current,
+                } => {
+                    let _ = values.pop().expect("pipe tap result should exist");
+                    let pipe_expr_ref = &kernel.exprs()[pipe_expr];
+                    let KernelExprKind::Pipe(pipe) = &pipe_expr_ref.kind else {
+                        unreachable!("pipe continuation must only be queued for pipe expressions");
+                    };
+                    let stage = &pipe.stages[stage_index];
+                    let crate::InlinePipeStageKind::Tap { .. } = &stage.kind else {
+                        unreachable!("tap continuation must only be queued for tap stages");
+                    };
+                    self.require_layout_match(
+                        kernel_id,
+                        pipe_expr,
+                        stage.result_layout,
+                        stage.input_layout,
+                        &format!("inline-pipe tap stage {stage_index} result"),
+                    )?;
+                    if let Some(slot) = stage.result_memo {
+                        inline_subjects[slot.index()] = Some(current);
+                    }
+                    values.push(current);
+                    if stage_index + 1 < pipe.stages.len() {
+                        tasks.push(Task::BuildPipeStage {
+                            pipe_expr,
+                            stage_index: stage_index + 1,
+                        });
+                    }
+                }
+                Task::RestoreInlineSubjects(saved) => {
+                    for (index, value) in saved {
+                        inline_subjects[index] = value;
+                    }
+                }
             }
         }
 
         Ok(values
             .pop()
             .expect("kernel expression lowering should leave one root value"))
+    }
+
+    fn lower_subject_reference(
+        &self,
+        kernel_id: KernelId,
+        kernel: &Kernel,
+        expr_id: KernelExprId,
+        subject: SubjectRef,
+        input: Option<Value>,
+        inline_subjects: &[Option<Value>],
+    ) -> Result<(Value, LayoutId), CodegenError> {
+        match subject {
+            SubjectRef::Input => {
+                let Some(value) = input else {
+                    return Err(CodegenError::MissingInputParameter { kernel: kernel_id });
+                };
+                let layout = kernel
+                    .input_subject
+                    .expect("validated backend kernels keep input subjects aligned with codegen");
+                Ok((value, layout))
+            }
+            SubjectRef::Inline(slot) => {
+                let layout = *kernel.inline_subjects.get(slot.index()).expect(
+                    "validated backend kernels keep inline subject layouts aligned with codegen",
+                );
+                let Some(Some(value)) = inline_subjects.get(slot.index()).copied() else {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        &format!(
+                            "inline subject {slot} has no active value in this Cranelift pipe scope"
+                        ),
+                    ));
+                };
+                Ok((value, layout))
+            }
+        }
+    }
+
+    fn require_compilable_item_call(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        item: ItemId,
+        arguments: &[KernelExprId],
+    ) -> Result<KernelId, CodegenError> {
+        let kernel = &self.program.kernels()[kernel_id];
+        let item_decl = self
+            .program
+            .items()
+            .get(item)
+            .expect("validated backend kernels keep item references aligned with codegen");
+        if matches!(item_decl.kind, crate::ItemKind::Signal(_)) {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "signal item `{}` still requires signal-aware item codegen",
+                    item_decl.name
+                ),
+            ));
+        }
+        let Some(body) = item_decl.body else {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!("item `{}` has no body kernel to compile", item_decl.name),
+            ));
+        };
+        if arguments.is_empty() {
+            if !item_decl.parameters.is_empty() {
+                return Err(self.unsupported_expression(
+                    kernel_id,
+                    expr_id,
+                    &format!(
+                        "item `{}` expects {} argument(s) and still requires callable codegen when referenced without saturation",
+                        item_decl.name,
+                        item_decl.parameters.len()
+                    ),
+                ));
+            }
+        } else if arguments.len() != item_decl.parameters.len() {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "direct item apply to `{}` currently requires saturation: expected {} argument(s), found {}",
+                    item_decl.name,
+                    item_decl.parameters.len(),
+                    arguments.len()
+                ),
+            ));
+        }
+
+        let body_kernel = self
+            .program
+            .kernels()
+            .get(body)
+            .expect("validated backend programs keep item body kernels aligned with codegen");
+        self.require_layout_match(
+            kernel_id,
+            expr_id,
+            kernel.exprs()[expr_id].layout,
+            body_kernel.result_layout,
+            &format!("direct item call result for `{}`", item_decl.name),
+        )?;
+        for (index, (argument, expected_layout)) in arguments
+            .iter()
+            .zip(item_decl.parameters.iter())
+            .enumerate()
+        {
+            self.require_layout_match(
+                kernel_id,
+                *argument,
+                *expected_layout,
+                kernel.exprs()[*argument].layout,
+                &format!("direct item call argument {index} for `{}`", item_decl.name),
+            )?;
+        }
+        Ok(body)
+    }
+
+    fn resolve_direct_apply_plan(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        callee: KernelExprId,
+        arguments: &[KernelExprId],
+    ) -> Result<DirectApplyPlan, CodegenError> {
+        let kernel = &self.program.kernels()[kernel_id];
+        match &kernel.exprs()[callee].kind {
+            KernelExprKind::Item(item) => {
+                let body = self.require_compilable_item_call(kernel_id, expr_id, *item, arguments)?;
+                Ok(DirectApplyPlan::Item { body })
+            }
+            KernelExprKind::DomainMember(handle) => self
+                .require_compilable_domain_member_call(kernel_id, expr_id, callee, handle, arguments)
+                .map(DirectApplyPlan::DomainMember),
+            KernelExprKind::Builtin(term) => self
+                .require_compilable_builtin_call(kernel_id, expr_id, callee, *term, arguments)
+                .map(DirectApplyPlan::Builtin),
+            KernelExprKind::BuiltinClassMember(intrinsic) => Err(
+                self.unsupported_builtin_class_member_call(
+                    kernel_id,
+                    expr_id,
+                    *intrinsic,
+                    arguments.len(),
+                ),
+            ),
+            _ => Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                "the current Cranelift slice only lowers direct saturated item calls, representational by-reference domain-member calls, and niche Option constructors",
+            )),
+        }
+    }
+
+    fn require_compilable_domain_member_call(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        callee: KernelExprId,
+        handle: &aivi_hir::DomainMemberHandle,
+        arguments: &[KernelExprId],
+    ) -> Result<DomainMemberCallPlan, CodegenError> {
+        let detail = format!(
+            "domain member `{}.{}`",
+            handle.domain_name, handle.member_name
+        );
+        let (parameters, result_layout) =
+            self.require_saturated_callable_call(kernel_id, expr_id, callee, arguments, &detail)?;
+        let [parameter_layout] = parameters.as_slice() else {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "{detail} still requires backend-owned domain lowering because only unary representational wrappers are compiled in this Cranelift slice"
+                ),
+            ));
+        };
+
+        if domain_member_binary_operator(handle.member_name.as_ref()).is_some()
+            || matches!(
+                handle.member_name.as_ref(),
+                "singleton" | "head" | "tail" | "fromList"
+            )
+        {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "{detail} still requires backend-owned domain/collection lowering beyond representational pointer forwarding"
+                ),
+            ));
+        }
+
+        if self.program.layouts()[*parameter_layout].abi != AbiPassMode::ByReference
+            || self.program.layouts()[result_layout].abi != AbiPassMode::ByReference
+        {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "{detail} currently only lowers representational wrappers when both parameter and result stay by-reference, found layout{parameter_layout}=`{}` -> layout{result_layout}=`{}`",
+                    self.program.layouts()[*parameter_layout],
+                    self.program.layouts()[result_layout]
+                ),
+            ));
+        }
+
+        match handle.member_name.as_ref() {
+            "value" | "unwrap" if self.is_named_domain_layout(*parameter_layout) => {
+                Ok(DomainMemberCallPlan::RepresentationalIdentityUnary)
+            }
+            _ if self.is_named_domain_layout(result_layout) => {
+                Ok(DomainMemberCallPlan::RepresentationalIdentityUnary)
+            }
+            _ => Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "{detail} still requires backend-owned domain lowering beyond representational pointer forwarding"
+                ),
+            )),
+        }
+    }
+
+    fn require_compilable_builtin_call(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        callee: KernelExprId,
+        term: BuiltinTerm,
+        arguments: &[KernelExprId],
+    ) -> Result<BuiltinCallPlan, CodegenError> {
+        match term {
+            BuiltinTerm::Some => {
+                let detail = format!("builtin constructor `{term}`");
+                let (_parameters, result_layout) = self.require_saturated_callable_call(
+                    kernel_id,
+                    expr_id,
+                    callee,
+                    arguments,
+                    &detail,
+                )?;
+                let [payload] = arguments else {
+                    unreachable!("saturated `Some` call should keep exactly one payload");
+                };
+                let kernel = &self.program.kernels()[kernel_id];
+                self.require_niche_option_expression(
+                    kernel_id,
+                    kernel,
+                    expr_id,
+                    Some(*payload),
+                    result_layout,
+                    &detail,
+                )?;
+                Ok(BuiltinCallPlan::NicheOptionSome)
+            }
+            BuiltinTerm::None
+            | BuiltinTerm::Ok
+            | BuiltinTerm::Err
+            | BuiltinTerm::Valid
+            | BuiltinTerm::Invalid => Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "builtin constructor `{term}` still requires backend-owned aggregate constructor lowering; the current Cranelift slice only lowers Bool literals plus niche Option None/Some forms"
+                ),
+            )),
+            BuiltinTerm::True | BuiltinTerm::False => Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!("Bool literal `{term}` is not callable"),
+            )),
+        }
+    }
+
+    fn require_saturated_callable_call(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        callee: KernelExprId,
+        arguments: &[KernelExprId],
+        detail: &str,
+    ) -> Result<(Vec<LayoutId>, LayoutId), CodegenError> {
+        let kernel = &self.program.kernels()[kernel_id];
+        let (parameters, result_layout) = self.callable_signature(kernel.exprs()[callee].layout);
+        if arguments.len() != parameters.len() {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "direct call to {detail} currently requires saturation: expected {} argument(s), found {}",
+                    parameters.len(),
+                    arguments.len()
+                ),
+            ));
+        }
+        self.require_layout_match(
+            kernel_id,
+            expr_id,
+            kernel.exprs()[expr_id].layout,
+            result_layout,
+            &format!("direct call result for {detail}"),
+        )?;
+        for (index, (argument, expected_layout)) in
+            arguments.iter().zip(parameters.iter()).enumerate()
+        {
+            self.require_layout_match(
+                kernel_id,
+                *argument,
+                *expected_layout,
+                kernel.exprs()[*argument].layout,
+                &format!("direct call argument {index} for {detail}"),
+            )?;
+        }
+        Ok((parameters, result_layout))
+    }
+
+    fn callable_signature(&self, layout: LayoutId) -> (Vec<LayoutId>, LayoutId) {
+        let mut parameters = Vec::new();
+        let mut result = layout;
+        loop {
+            let Some(layout) = self.program.layouts().get(result) else {
+                return (parameters, result);
+            };
+            let LayoutKind::Arrow {
+                parameter,
+                result: next_result,
+            } = &layout.kind
+            else {
+                return (parameters, result);
+            };
+            parameters.push(*parameter);
+            result = *next_result;
+        }
+    }
+
+    fn is_named_domain_layout(&self, layout: LayoutId) -> bool {
+        matches!(
+            self.program
+                .layouts()
+                .get(layout)
+                .map(|layout| &layout.kind),
+            Some(LayoutKind::Domain { .. })
+        )
+    }
+
+    fn lower_direct_item_call(
+        &mut self,
+        kernel_id: KernelId,
+        body: KernelId,
+        arguments: &[Value],
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<Value, CodegenError> {
+        let func_id = *self.declared_functions.get(&body).ok_or_else(|| {
+            self.unsupported_expression(
+                kernel_id,
+                self.program.kernels()[kernel_id].root,
+                &format!("item body kernel {body} was not declared before call lowering"),
+            )
+        })?;
+        let local = self.module.declare_func_in_func(func_id, builder.func);
+        let call = builder.ins().call(local, arguments);
+        let results = builder.inst_results(call);
+        let [result] = results else {
+            unreachable!("backend kernels always return exactly one value");
+        };
+        Ok(*result)
+    }
+
+    fn lower_direct_apply(
+        &mut self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        plan: DirectApplyPlan,
+        arguments: &[Value],
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<Value, CodegenError> {
+        match plan {
+            DirectApplyPlan::Item { body } => {
+                self.lower_direct_item_call(kernel_id, body, arguments, builder)
+            }
+            DirectApplyPlan::DomainMember(DomainMemberCallPlan::RepresentationalIdentityUnary)
+            | DirectApplyPlan::Builtin(BuiltinCallPlan::NicheOptionSome) => {
+                let [argument] = arguments else {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "direct unary call lowering expected exactly one materialized argument",
+                    ));
+                };
+                Ok(*argument)
+            }
+        }
+    }
+
+    fn require_layout_match(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        expected: LayoutId,
+        found: LayoutId,
+        detail: &str,
+    ) -> Result<(), CodegenError> {
+        if expected == found {
+            return Ok(());
+        }
+        Err(self.unsupported_expression(
+            kernel_id,
+            expr_id,
+            &format!(
+                "{detail} expects layout{expected}=`{}`, found layout{found}=`{}`",
+                self.program.layouts()[expected],
+                self.program.layouts()[found]
+            ),
+        ))
+    }
+
+    fn unsupported_inline_pipe_stage(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        stage_index: usize,
+        detail: &str,
+    ) -> CodegenError {
+        self.unsupported_expression(
+            kernel_id,
+            expr_id,
+            &format!("inline-pipe stage {stage_index} {detail}"),
+        )
     }
 
     fn materialize_signature_type(
@@ -1419,6 +2259,26 @@ impl<'a> CraneliftCompiler<'a> {
         }
     }
 
+    fn require_text_expression(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        layout: LayoutId,
+        detail: &str,
+    ) -> Result<(), CodegenError> {
+        match &self.program.layouts()[layout].kind {
+            LayoutKind::Primitive(PrimitiveType::Text) => Ok(()),
+            _ => Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "{detail} expects Text, found `{}`",
+                    self.program.layouts()[layout]
+                ),
+            )),
+        }
+    }
+
     fn require_niche_option_expression(
         &self,
         kernel_id: KernelId,
@@ -1464,6 +2324,40 @@ impl<'a> CraneliftCompiler<'a> {
         Ok(())
     }
 
+    fn require_ordered_expression_pair(
+        &self,
+        kernel_id: KernelId,
+        kernel: &Kernel,
+        expr_id: KernelExprId,
+        left: KernelExprId,
+        right: KernelExprId,
+    ) -> Result<NativeCompareKind, CodegenError> {
+        let left_layout = self.program.layouts()[kernel.exprs()[left].layout].clone();
+        let right_layout = self.program.layouts()[kernel.exprs()[right].layout].clone();
+        let left_layout_id = kernel.exprs()[left].layout;
+        let right_layout_id = kernel.exprs()[right].layout;
+        let kind = match (&left_layout.kind, &right_layout.kind) {
+            (LayoutKind::Primitive(PrimitiveType::Int), LayoutKind::Primitive(PrimitiveType::Int)) => {
+                NativeCompareKind::Integer
+            }
+            (
+                LayoutKind::Primitive(PrimitiveType::Float),
+                LayoutKind::Primitive(PrimitiveType::Float),
+            ) => NativeCompareKind::Float,
+            _ => {
+                return Err(self.unsupported_expression(
+                    kernel_id,
+                    expr_id,
+                    &format!(
+                        "comparison expects matching Int/Float operands, found layout{left_layout_id}=`{left_layout}` and layout{right_layout_id}=`{right_layout}`"
+                    ),
+                ));
+            }
+        };
+        self.require_bool_expression(kernel_id, expr_id, kernel.exprs()[expr_id].layout, "comparison result")?;
+        Ok(kind)
+    }
+
     fn require_equatable_expression_pair(
         &self,
         kernel_id: KernelId,
@@ -1471,25 +2365,412 @@ impl<'a> CraneliftCompiler<'a> {
         expr_id: KernelExprId,
         left: KernelExprId,
         right: KernelExprId,
-    ) -> Result<(), CodegenError> {
-        let left_layout = self.program.layouts()[kernel.exprs()[left].layout].clone();
-        let right_layout = self.program.layouts()[kernel.exprs()[right].layout].clone();
+    ) -> Result<NativeEqualityShape, CodegenError> {
         let left_layout_id = kernel.exprs()[left].layout;
         let right_layout_id = kernel.exprs()[right].layout;
-        match (&left_layout.kind, &right_layout.kind) {
-            (LayoutKind::Primitive(PrimitiveType::Int), LayoutKind::Primitive(PrimitiveType::Int))
-            | (
-                LayoutKind::Primitive(PrimitiveType::Bool),
-                LayoutKind::Primitive(PrimitiveType::Bool),
-            ) => Ok(()),
+        let left_layout = self.program.layouts()[left_layout_id].clone();
+        let right_layout = self.program.layouts()[right_layout_id].clone();
+        if left_layout_id != right_layout_id {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "equality expects matching operand layouts, found layout{left_layout_id}=`{left_layout}` and layout{right_layout_id}=`{right_layout}`"
+                ),
+            ));
+        }
+        let mut visited = HashSet::new();
+        let kind = self.resolve_native_equality_shape(
+            kernel_id,
+            expr_id,
+            left_layout_id,
+            &mut visited,
+        )?;
+        self.require_bool_expression(kernel_id, expr_id, kernel.exprs()[expr_id].layout, "equality result")?;
+        Ok(kind)
+    }
+
+    fn resolve_native_equality_shape(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        layout: LayoutId,
+        visited: &mut HashSet<LayoutId>,
+    ) -> Result<NativeEqualityShape, CodegenError> {
+        match &self.program.layouts()[layout].kind {
+            LayoutKind::Primitive(PrimitiveType::Int)
+            | LayoutKind::Primitive(PrimitiveType::Bool) => Ok(NativeEqualityShape::Integer),
+            LayoutKind::Primitive(PrimitiveType::Float) => Ok(NativeEqualityShape::Float),
+            LayoutKind::Primitive(PrimitiveType::Text) => {
+                if self.program.layouts()[layout].abi != AbiPassMode::ByReference {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        &format!(
+                            "Text layout{layout}=`{}` must stay by-reference for native equality lowering",
+                            self.program.layouts()[layout]
+                        ),
+                    ));
+                }
+                Ok(NativeEqualityShape::Text)
+            }
+            LayoutKind::Tuple(elements) => {
+                if self.program.layouts()[layout].abi != AbiPassMode::ByReference {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        &format!(
+                            "tuple layout{layout}=`{}` must stay by-reference for native equality lowering",
+                            self.program.layouts()[layout]
+                        ),
+                    ));
+                }
+                if !visited.insert(layout) {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        &format!(
+                            "equality for recursive tuple layout{layout}=`{}` still requires a compiled representation bridge",
+                            self.program.layouts()[layout]
+                        ),
+                    ));
+                }
+                let result = (|| {
+                    let mut fields = Vec::with_capacity(elements.len());
+                    let mut offset = 0u32;
+                    for (index, field_layout) in elements.iter().copied().enumerate() {
+                        let abi = self.field_abi_shape(
+                            kernel_id,
+                            field_layout,
+                            &format!("tuple field {index} in layout{layout}"),
+                        )?;
+                        offset = align_to(offset, abi.align);
+                        let field_offset =
+                            i32::try_from(offset).map_err(|_| CodegenError::UnsupportedLayout {
+                                kernel: kernel_id,
+                                layout,
+                                detail: format!(
+                                    "tuple field {index} in layout{layout} would live past the current Cranelift immediate-offset range"
+                                )
+                                .into_boxed_str(),
+                            })?;
+                        let shape = self.resolve_native_equality_shape(
+                            kernel_id,
+                            expr_id,
+                            field_layout,
+                            visited,
+                        )?;
+                        fields.push(NativeEqualityField {
+                            offset: field_offset,
+                            layout: field_layout,
+                            shape: Box::new(shape),
+                        });
+                        offset = offset.checked_add(abi.size).ok_or_else(|| {
+                            CodegenError::UnsupportedLayout {
+                                kernel: kernel_id,
+                                layout,
+                                detail: format!(
+                                    "tuple layout{layout} overflows backend field-offset computation"
+                                )
+                                .into_boxed_str(),
+                            }
+                        })?;
+                    }
+                    Ok(NativeEqualityShape::Aggregate(fields))
+                })();
+                visited.remove(&layout);
+                result
+            }
+            LayoutKind::Option { element } => {
+                if self.program.layouts()[layout].abi != AbiPassMode::ByReference {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        &format!(
+                            "Option layout{layout}=`{}` must stay by-reference for native equality lowering",
+                            self.program.layouts()[layout]
+                        ),
+                    ));
+                }
+                if self.program.layouts()[*element].abi != AbiPassMode::ByReference {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        &format!(
+                            "Option layout{layout}=`{}` still requires aggregate option encoding because payload layout{element}=`{}` is not by-reference",
+                            self.program.layouts()[layout],
+                            self.program.layouts()[*element]
+                        ),
+                    ));
+                }
+                if !visited.insert(layout) {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        &format!(
+                            "equality for recursive Option layout{layout}=`{}` still requires a compiled representation bridge",
+                            self.program.layouts()[layout]
+                        ),
+                    ));
+                }
+                let result = self
+                    .resolve_native_equality_shape(kernel_id, expr_id, *element, visited)
+                    .map(|payload| NativeEqualityShape::NicheOption {
+                        payload: Box::new(payload),
+                    });
+                visited.remove(&layout);
+                result
+            }
+            LayoutKind::Record(fields) => {
+                if self.program.layouts()[layout].abi != AbiPassMode::ByReference {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        &format!(
+                            "record layout{layout}=`{}` must stay by-reference for native equality lowering",
+                            self.program.layouts()[layout]
+                        ),
+                    ));
+                }
+                if !visited.insert(layout) {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        &format!(
+                            "equality for recursive record layout{layout}=`{}` still requires a compiled representation bridge",
+                            self.program.layouts()[layout]
+                        ),
+                    ));
+                }
+                let result = (|| {
+                    let mut steps = Vec::with_capacity(fields.len());
+                    let mut offset = 0u32;
+                    for field in fields {
+                        let abi = self.field_abi_shape(
+                            kernel_id,
+                            field.layout,
+                            &format!("record field `{}` in layout{layout}", field.name),
+                        )?;
+                        offset = align_to(offset, abi.align);
+                        let field_offset =
+                            i32::try_from(offset).map_err(|_| CodegenError::UnsupportedLayout {
+                                kernel: kernel_id,
+                                layout,
+                                detail: format!(
+                                    "record field `{}` in layout{layout} would live past the current Cranelift immediate-offset range",
+                                    field.name
+                                )
+                                .into_boxed_str(),
+                            })?;
+                        let shape = self.resolve_native_equality_shape(
+                            kernel_id,
+                            expr_id,
+                            field.layout,
+                            visited,
+                        )?;
+                        steps.push(NativeEqualityField {
+                            offset: field_offset,
+                            layout: field.layout,
+                            shape: Box::new(shape),
+                        });
+                        offset = offset.checked_add(abi.size).ok_or_else(|| {
+                            CodegenError::UnsupportedLayout {
+                                kernel: kernel_id,
+                                layout,
+                                detail: format!(
+                                    "record layout{layout} overflows backend field-offset computation"
+                                )
+                                .into_boxed_str(),
+                            }
+                        })?;
+                    }
+                    Ok(NativeEqualityShape::Aggregate(steps))
+                })();
+                visited.remove(&layout);
+                result
+            }
             _ => Err(self.unsupported_expression(
                 kernel_id,
                 expr_id,
                 &format!(
-                    "equality expects matching Int/Bool operands, found layout{left_layout_id}=`{left_layout}` and layout{right_layout_id}=`{right_layout}`"
+                    "equality for layout{layout}=`{}` still requires a compiled representation bridge beyond native scalar/Text/record/tuple/niche-Option shapes",
+                    self.program.layouts()[layout]
                 ),
             )),
         }
+    }
+
+    fn lower_native_equality_shape(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        shape: &NativeEqualityShape,
+        lhs: Value,
+        rhs: Value,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<Value, CodegenError> {
+        match shape {
+            NativeEqualityShape::Integer => Ok(builder.ins().icmp(IntCC::Equal, lhs, rhs)),
+            NativeEqualityShape::Float => Ok(builder.ins().fcmp(FloatCC::Equal, lhs, rhs)),
+            NativeEqualityShape::Text => Ok(self.lower_native_text_equality(lhs, rhs, builder)),
+            NativeEqualityShape::Aggregate(fields) => {
+                let mut equal = builder.ins().iconst(types::I8, 1);
+                for field in fields {
+                    let abi = self.field_abi_shape(kernel_id, field.layout, "native equality field")?;
+                    let left_field = builder
+                        .ins()
+                        .load(abi.ty, MemFlags::new(), lhs, field.offset);
+                    let right_field = builder
+                        .ins()
+                        .load(abi.ty, MemFlags::new(), rhs, field.offset);
+                    let field_equal = self.lower_native_equality_shape(
+                        kernel_id,
+                        expr_id,
+                        field.shape.as_ref(),
+                        left_field,
+                        right_field,
+                        builder,
+                    )?;
+                    equal = builder.ins().band(equal, field_equal);
+                }
+                Ok(equal)
+            }
+            NativeEqualityShape::NicheOption { payload } => {
+                let zero = builder.ins().iconst(self.pointer_type(), 0);
+                let left_is_none = builder.ins().icmp(IntCC::Equal, lhs, zero);
+                let right_is_none = builder.ins().icmp(IntCC::Equal, rhs, zero);
+                let both_none = builder.ins().band(left_is_none, right_is_none);
+                let any_none = builder.ins().bor(left_is_none, right_is_none);
+
+                let payload_block = builder.create_block();
+                let merge_block = builder.create_block();
+                let bool_ty = builder.func.dfg.value_type(both_none);
+                builder.append_block_param(merge_block, bool_ty);
+                builder
+                    .ins()
+                    .brif(
+                        any_none,
+                        merge_block,
+                        &[BlockArg::Value(both_none)],
+                        payload_block,
+                        &[],
+                    );
+
+                builder.seal_block(payload_block);
+                builder.switch_to_block(payload_block);
+                let some_equal = self.lower_native_equality_shape(
+                    kernel_id,
+                    expr_id,
+                    payload.as_ref(),
+                    lhs,
+                    rhs,
+                    builder,
+                )?;
+                builder.ins().jump(merge_block, &[BlockArg::Value(some_equal)]);
+
+                builder.seal_block(merge_block);
+                builder.switch_to_block(merge_block);
+                Ok(builder.block_params(merge_block)[0])
+            }
+        }
+    }
+
+    fn lower_native_text_equality(
+        &self,
+        lhs: Value,
+        rhs: Value,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Value {
+        let same_pointer = builder.ins().icmp(IntCC::Equal, lhs, rhs);
+        let bool_ty = builder.func.dfg.value_type(same_pointer);
+        let true_value = builder.ins().iconst(bool_ty, 1);
+        let false_value = builder.ins().iconst(bool_ty, 0);
+        let load_lengths_block = builder.create_block();
+        let loop_block = builder.create_block();
+        let compare_block = builder.create_block();
+        let done_block = builder.create_block();
+        let pointer_ty = self.pointer_type();
+
+        builder.append_block_param(loop_block, types::I64);
+        builder.append_block_param(loop_block, types::I64);
+        builder.append_block_param(loop_block, pointer_ty);
+        builder.append_block_param(loop_block, pointer_ty);
+        builder.append_block_param(done_block, bool_ty);
+
+        builder.ins().brif(
+            same_pointer,
+            done_block,
+            &[BlockArg::Value(true_value)],
+            load_lengths_block,
+            &[],
+        );
+
+        builder.seal_block(load_lengths_block);
+        builder.switch_to_block(load_lengths_block);
+        let left_len = builder.ins().load(types::I64, MemFlags::new(), lhs, 0);
+        let right_len = builder.ins().load(types::I64, MemFlags::new(), rhs, 0);
+        let same_len = builder.ins().icmp(IntCC::Equal, left_len, right_len);
+        let left_bytes = builder.ins().iadd_imm(lhs, 8);
+        let right_bytes = builder.ins().iadd_imm(rhs, 8);
+        let zero_index = builder.ins().iconst(types::I64, 0);
+        builder.ins().brif(
+            same_len,
+            loop_block,
+            &[
+                BlockArg::Value(zero_index),
+                BlockArg::Value(left_len),
+                BlockArg::Value(left_bytes),
+                BlockArg::Value(right_bytes),
+            ],
+            done_block,
+            &[BlockArg::Value(false_value)],
+        );
+
+        builder.switch_to_block(loop_block);
+        let loop_params = builder.block_params(loop_block).to_vec();
+        let index = loop_params[0];
+        let len = loop_params[1];
+        let left_bytes = loop_params[2];
+        let right_bytes = loop_params[3];
+        let at_end = builder.ins().icmp(IntCC::Equal, index, len);
+        builder.ins().brif(
+            at_end,
+            done_block,
+            &[BlockArg::Value(true_value)],
+            compare_block,
+            &[],
+        );
+
+        builder.seal_block(compare_block);
+        builder.switch_to_block(compare_block);
+        let index_as_ptr = if pointer_ty == types::I64 {
+            index
+        } else {
+            builder.ins().ireduce(pointer_ty, index)
+        };
+        let left_addr = builder.ins().iadd(left_bytes, index_as_ptr);
+        let right_addr = builder.ins().iadd(right_bytes, index_as_ptr);
+        let left_byte = builder.ins().load(types::I8, MemFlags::new(), left_addr, 0);
+        let right_byte = builder.ins().load(types::I8, MemFlags::new(), right_addr, 0);
+        let byte_equal = builder.ins().icmp(IntCC::Equal, left_byte, right_byte);
+        let next_index = builder.ins().iadd_imm(index, 1);
+        builder.ins().brif(
+            byte_equal,
+            loop_block,
+            &[
+                BlockArg::Value(next_index),
+                BlockArg::Value(len),
+                BlockArg::Value(left_bytes),
+                BlockArg::Value(right_bytes),
+            ],
+            done_block,
+            &[BlockArg::Value(false_value)],
+        );
+
+        builder.seal_block(loop_block);
+        builder.seal_block(done_block);
+        builder.switch_to_block(done_block);
+        builder.block_params(done_block)[0]
     }
 
     fn lower_projection(
@@ -1756,6 +3037,321 @@ impl<'a> CraneliftCompiler<'a> {
         Ok(builder.ins().symbol_value(self.pointer_type(), global))
     }
 
+    fn materialize_text_literal(
+        &mut self,
+        kernel_id: KernelId,
+        kernel: &Kernel,
+        expr_id: KernelExprId,
+        text: &crate::TextLiteral,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<Value, CodegenError> {
+        let rendered = self
+            .render_static_text_literal(kernel_id, kernel, expr_id, text)?
+            .ok_or_else(|| {
+                self.unsupported_expression(
+                    kernel_id,
+                    expr_id,
+                    "text interpolation still requires a native text formatting contract beyond static literal folding",
+                )
+            })?;
+        self.materialize_text_constant(kernel_id, rendered.as_ref(), builder)
+    }
+
+    fn materialize_text_constant(
+        &mut self,
+        kernel_id: KernelId,
+        rendered: &str,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<Value, CodegenError> {
+        // Backend-native Text literals use a stable, len-prefixed UTF-8 constant cell.
+        // The current Cranelift slice treats the resulting pointer opaquely; richer Text
+        // operations still need a shared representation contract at the runtime edge.
+        let bytes = rendered.as_bytes();
+        let mut encoded = Vec::with_capacity(8 + bytes.len());
+        encoded.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+        encoded.extend_from_slice(bytes);
+        self.materialize_literal_pointer(
+            kernel_id,
+            "text_literal",
+            encoded.into_boxed_slice(),
+            8,
+            builder,
+        )
+    }
+
+    fn render_static_text_literal(
+        &self,
+        kernel_id: KernelId,
+        kernel: &Kernel,
+        expr_id: KernelExprId,
+        text: &crate::TextLiteral,
+    ) -> Result<Option<Box<str>>, CodegenError> {
+        let mut rendered = String::new();
+        for segment in &text.segments {
+            match segment {
+                crate::TextSegment::Fragment { raw, .. } => rendered.push_str(raw),
+                crate::TextSegment::Interpolation { expr, .. } => {
+                    let Some(value) = self.evaluate_static_value(kernel_id, kernel, *expr)? else {
+                        return Ok(None);
+                    };
+                    rendered.push_str(&value.to_string());
+                }
+            }
+        }
+        let _ = expr_id;
+        Ok(Some(rendered.into_boxed_str()))
+    }
+
+    fn evaluate_static_value(
+        &self,
+        kernel_id: KernelId,
+        kernel: &Kernel,
+        root: KernelExprId,
+    ) -> Result<Option<RuntimeValue>, CodegenError> {
+        enum Task<'a> {
+            Visit(KernelExprId),
+            BuildOptionSome,
+            BuildText {
+                segments: &'a [crate::TextSegment],
+            },
+            BuildTuple {
+                len: usize,
+            },
+            BuildList {
+                len: usize,
+            },
+            BuildSet {
+                len: usize,
+            },
+            BuildMap {
+                len: usize,
+            },
+            BuildRecord {
+                fields: &'a [crate::RecordExprField],
+            },
+        }
+
+        let mut tasks = vec![Task::Visit(root)];
+        let mut values = Vec::new();
+        while let Some(task) = tasks.pop() {
+            match task {
+                Task::Visit(expr_id) => match &kernel.exprs()[expr_id].kind {
+                    KernelExprKind::OptionSome { payload } => {
+                        tasks.push(Task::BuildOptionSome);
+                        tasks.push(Task::Visit(*payload));
+                    }
+                    KernelExprKind::OptionNone => {
+                        values.push(RuntimeValue::OptionNone);
+                    }
+                    KernelExprKind::Builtin(BuiltinTerm::True) => {
+                        values.push(RuntimeValue::Bool(true));
+                    }
+                    KernelExprKind::Builtin(BuiltinTerm::False) => {
+                        values.push(RuntimeValue::Bool(false));
+                    }
+                    KernelExprKind::Builtin(BuiltinTerm::None) => {
+                        values.push(RuntimeValue::OptionNone);
+                    }
+                    KernelExprKind::Builtin(_)
+                    | KernelExprKind::Subject(_)
+                    | KernelExprKind::Environment(_)
+                    | KernelExprKind::Item(_)
+                    | KernelExprKind::SumConstructor(_)
+                    | KernelExprKind::DomainMember(_)
+                    | KernelExprKind::BuiltinClassMember(_)
+                    | KernelExprKind::IntrinsicValue(_)
+                    | KernelExprKind::Projection { .. }
+                    | KernelExprKind::Apply { .. }
+                    | KernelExprKind::Unary { .. }
+                    | KernelExprKind::Binary { .. }
+                    | KernelExprKind::Pipe(_) => {
+                        return Ok(None);
+                    }
+                    KernelExprKind::Integer(integer) => {
+                        let value = integer.raw.parse::<i64>().map(RuntimeValue::Int).map_err(|_| {
+                            CodegenError::InvalidIntegerLiteral {
+                                kernel: kernel_id,
+                                expr: expr_id,
+                                raw: integer.raw.clone(),
+                            }
+                        })?;
+                        values.push(value);
+                    }
+                    KernelExprKind::Float(float) => {
+                        let value = RuntimeFloat::parse_literal(float.raw.as_ref())
+                            .map(RuntimeValue::Float)
+                            .ok_or_else(|| CodegenError::InvalidFloatLiteral {
+                                kernel: kernel_id,
+                                expr: expr_id,
+                                raw: float.raw.clone(),
+                            })?;
+                        values.push(value);
+                    }
+                    KernelExprKind::Decimal(decimal) => {
+                        let value = RuntimeDecimal::parse_literal(decimal.raw.as_ref())
+                            .map(RuntimeValue::Decimal)
+                            .ok_or_else(|| CodegenError::InvalidDecimalLiteral {
+                                kernel: kernel_id,
+                                expr: expr_id,
+                                raw: decimal.raw.clone(),
+                            })?;
+                        values.push(value);
+                    }
+                    KernelExprKind::BigInt(bigint) => {
+                        let value = RuntimeBigInt::parse_literal(bigint.raw.as_ref())
+                            .map(RuntimeValue::BigInt)
+                            .ok_or_else(|| CodegenError::InvalidBigIntLiteral {
+                                kernel: kernel_id,
+                                expr: expr_id,
+                                raw: bigint.raw.clone(),
+                            })?;
+                        values.push(value);
+                    }
+                    KernelExprKind::SuffixedInteger(integer) => {
+                        values.push(RuntimeValue::SuffixedInteger {
+                            raw: integer.raw.clone(),
+                            suffix: integer.suffix.clone(),
+                        });
+                    }
+                    KernelExprKind::Text(text) => {
+                        tasks.push(Task::BuildText {
+                            segments: &text.segments,
+                        });
+                        for segment in text.segments.iter().rev() {
+                            if let crate::TextSegment::Interpolation { expr, .. } = segment {
+                                tasks.push(Task::Visit(*expr));
+                            }
+                        }
+                    }
+                    KernelExprKind::Tuple(elements) => {
+                        tasks.push(Task::BuildTuple {
+                            len: elements.len(),
+                        });
+                        for element in elements.iter().rev() {
+                            tasks.push(Task::Visit(*element));
+                        }
+                    }
+                    KernelExprKind::List(elements) => {
+                        tasks.push(Task::BuildList {
+                            len: elements.len(),
+                        });
+                        for element in elements.iter().rev() {
+                            tasks.push(Task::Visit(*element));
+                        }
+                    }
+                    KernelExprKind::Map(entries) => {
+                        tasks.push(Task::BuildMap { len: entries.len() });
+                        for entry in entries.iter().rev() {
+                            tasks.push(Task::Visit(entry.value));
+                            tasks.push(Task::Visit(entry.key));
+                        }
+                    }
+                    KernelExprKind::Set(elements) => {
+                        tasks.push(Task::BuildSet {
+                            len: elements.len(),
+                        });
+                        for element in elements.iter().rev() {
+                            tasks.push(Task::Visit(*element));
+                        }
+                    }
+                    KernelExprKind::Record(fields) => {
+                        tasks.push(Task::BuildRecord { fields });
+                        for field in fields.iter().rev() {
+                            tasks.push(Task::Visit(field.value));
+                        }
+                    }
+                },
+                Task::BuildOptionSome => {
+                    let payload = values.pop().expect("static option payload should exist");
+                    values.push(RuntimeValue::OptionSome(Box::new(payload)));
+                }
+                Task::BuildText { segments } => {
+                    let interpolation_count = segments
+                        .iter()
+                        .filter(|segment| matches!(segment, crate::TextSegment::Interpolation { .. }))
+                        .count();
+                    let mut interpolation_values =
+                        drain_tail(&mut values, interpolation_count).into_iter();
+                    let mut rendered = String::new();
+                    for segment in segments {
+                        match segment {
+                            crate::TextSegment::Fragment { raw, .. } => rendered.push_str(raw),
+                            crate::TextSegment::Interpolation { .. } => {
+                                let mut value = interpolation_values
+                                    .next()
+                                    .expect("static text interpolation should align with values");
+                                loop {
+                                    match value {
+                                        RuntimeValue::Signal(inner) => {
+                                            value = *inner;
+                                        }
+                                        RuntimeValue::Callable(_) => return Ok(None),
+                                        other => {
+                                            rendered.push_str(&other.to_string());
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    values.push(RuntimeValue::Text(rendered.into_boxed_str()));
+                }
+                Task::BuildTuple { len } => {
+                    let elements = drain_tail(&mut values, len);
+                    values.push(RuntimeValue::Tuple(elements));
+                }
+                Task::BuildList { len } => {
+                    let elements = drain_tail(&mut values, len);
+                    values.push(RuntimeValue::List(elements));
+                }
+                Task::BuildSet { len } => {
+                    let elements = drain_tail(&mut values, len);
+                    values.push(RuntimeValue::Set(elements));
+                }
+                Task::BuildMap { len } => {
+                    let entries = drain_tail(&mut values, len * 2)
+                        .chunks_exact(2)
+                        .map(|pair| RuntimeMapEntry {
+                            key: pair[0].clone(),
+                            value: pair[1].clone(),
+                        })
+                        .collect();
+                    values.push(RuntimeValue::Map(RuntimeMap::from_entries(entries)));
+                }
+                Task::BuildRecord { fields } => {
+                    let values_tail = drain_tail(&mut values, fields.len());
+                    values.push(RuntimeValue::Record(
+                        fields
+                            .iter()
+                            .map(|field| field.label.clone())
+                            .zip(values_tail.into_iter())
+                            .map(|(label, value)| RuntimeRecordField { label, value })
+                            .collect(),
+                    ));
+                }
+            }
+        }
+
+        Ok(values.pop())
+    }
+
+    fn unsupported_builtin_class_member_call(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        intrinsic: crate::BuiltinClassMemberIntrinsic,
+        argument_count: usize,
+    ) -> CodegenError {
+        self.unsupported_expression(
+            kernel_id,
+            expr_id,
+            &format!(
+                "builtin class member `{intrinsic:?}` still requires builtin aggregate or higher-order callable lowering; found direct call with {argument_count} argument(s)"
+            ),
+        )
+    }
+
     fn unsupported_expression(
         &self,
         kernel_id: KernelId,
@@ -1771,6 +3367,26 @@ impl<'a> CraneliftCompiler<'a> {
             )
             .into_boxed_str(),
         }
+    }
+}
+
+fn drain_tail<T>(values: &mut Vec<T>, len: usize) -> Vec<T> {
+    let split = values.len() - len;
+    values.drain(split..).collect()
+}
+
+fn domain_member_binary_operator(member_name: &str) -> Option<BinaryOperator> {
+    match member_name {
+        "+" => Some(BinaryOperator::Add),
+        "-" => Some(BinaryOperator::Subtract),
+        "*" => Some(BinaryOperator::Multiply),
+        "/" => Some(BinaryOperator::Divide),
+        "%" => Some(BinaryOperator::Modulo),
+        ">" => Some(BinaryOperator::GreaterThan),
+        "<" => Some(BinaryOperator::LessThan),
+        ">=" => Some(BinaryOperator::GreaterThanOrEqual),
+        "<=" => Some(BinaryOperator::LessThanOrEqual),
+        _ => None,
     }
 }
 

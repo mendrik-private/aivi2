@@ -101,11 +101,9 @@ pub enum LoweringError {
     GlobalItemCycle {
         item: ItemId,
     },
-    UnsupportedInlinePipeStage {
-        span: SourceSpan,
-    },
     UnsupportedInlinePipePattern {
         span: SourceSpan,
+        detail: Box<str>,
     },
     MissingInputSubjectContract {
         span: SourceSpan,
@@ -150,12 +148,12 @@ impl fmt::Display for LoweringError {
                 f,
                 "backend lowering detected a global item dependency cycle involving item {item}"
             ),
-            Self::UnsupportedInlinePipeStage { .. } => f.write_str(
-                "backend lowering does not yet encode inline case/truthy-falsy pipe stages",
-            ),
-            Self::UnsupportedInlinePipePattern { .. } => f.write_str(
-                "backend lowering cannot encode this inline pipe pattern/runtime carrier yet",
-            ),
+            Self::UnsupportedInlinePipePattern { detail, .. } => {
+                write!(
+                    f,
+                    "backend lowering rejects this inline pipe pattern: {detail}"
+                )
+            }
             Self::MissingInputSubjectContract { .. } => f.write_str(
                 "backend kernel uses an input subject without an explicit backend contract",
             ),
@@ -1379,10 +1377,10 @@ impl<'a> ProgramLowerer<'a> {
             }
         }
 
-        // TODO: cycle detection needed — items collected into `globals` here could form a cycle
-        // (e.g. item A depends on B which depends on A). Each kernel collects its own
-        // `global_items` independently; a cross-kernel dependency graph is not assembled here.
-        // See `validate_no_item_dep_cycles()` in validate.rs for the validation-pass check.
+        // `global_items` stays kernel-local here. Global item dependency cycles are already
+        // rejected earlier by `check_global_item_cycles()` and revalidated by
+        // `validate_no_item_dep_cycles()` in `validate.rs`, so this contract builder only needs
+        // to record the direct item references for the current kernel.
         Ok(KernelContract {
             uses_input_subject,
             environment,
@@ -2330,7 +2328,10 @@ impl<'a> ProgramLowerer<'a> {
                 let LayoutKind::Primitive(PrimitiveType::Int) =
                     &self.program.layouts()[layout].kind
                 else {
-                    return Err(UnsupportedInlinePipePattern { span: pattern.span });
+                    return Err(unsupported_inline_pipe_pattern(
+                        pattern.span,
+                        "integer literal patterns require an Int subject",
+                    ));
                 };
                 InlinePipePatternKind::Integer(IntegerLiteral {
                     raw: integer.raw.clone(),
@@ -2340,17 +2341,32 @@ impl<'a> ProgramLowerer<'a> {
                 let LayoutKind::Primitive(PrimitiveType::Text) =
                     &self.program.layouts()[layout].kind
                 else {
-                    return Err(UnsupportedInlinePipePattern { span: pattern.span });
+                    return Err(unsupported_inline_pipe_pattern(
+                        pattern.span,
+                        "text literal patterns require a Text subject",
+                    ));
                 };
                 InlinePipePatternKind::Text(raw.clone())
             }
             core::PatternKind::Tuple(elements) => {
                 let layouts = match &self.program.layouts()[layout].kind {
                     LayoutKind::Tuple(layouts) => layouts.clone(),
-                    _ => return Err(UnsupportedInlinePipePattern { span: pattern.span }),
+                    _ => {
+                        return Err(unsupported_inline_pipe_pattern(
+                            pattern.span,
+                            "tuple patterns require a tuple subject",
+                        ));
+                    }
                 };
                 if layouts.len() != elements.len() {
-                    return Err(UnsupportedInlinePipePattern { span: pattern.span });
+                    return Err(unsupported_inline_pipe_pattern(
+                        pattern.span,
+                        format!(
+                            "tuple pattern expects {} element(s), but the subject layout supplies {}",
+                            elements.len(),
+                            layouts.len()
+                        ),
+                    ));
                 }
                 InlinePipePatternKind::Tuple(
                     elements
@@ -2365,7 +2381,12 @@ impl<'a> ProgramLowerer<'a> {
             core::PatternKind::List { elements, rest } => {
                 let element_layout = match &self.program.layouts()[layout].kind {
                     LayoutKind::List { element } => *element,
-                    _ => return Err(UnsupportedInlinePipePattern { span: pattern.span }),
+                    _ => {
+                        return Err(unsupported_inline_pipe_pattern(
+                            pattern.span,
+                            "list patterns require a List subject",
+                        ));
+                    }
                 };
                 InlinePipePatternKind::List {
                     elements: elements
@@ -2391,7 +2412,12 @@ impl<'a> ProgramLowerer<'a> {
             core::PatternKind::Record(fields) => {
                 let layout_fields = match &self.program.layouts()[layout].kind {
                     LayoutKind::Record(layout_fields) => layout_fields.clone(),
-                    _ => return Err(UnsupportedInlinePipePattern { span: pattern.span }),
+                    _ => {
+                        return Err(unsupported_inline_pipe_pattern(
+                            pattern.span,
+                            "record patterns require a record subject",
+                        ));
+                    }
                 };
                 InlinePipePatternKind::Record(
                     fields
@@ -2401,7 +2427,13 @@ impl<'a> ProgramLowerer<'a> {
                                 .iter()
                                 .find(|candidate| candidate.name.as_ref() == field.label.as_ref())
                             else {
-                                return Err(UnsupportedInlinePipePattern { span: pattern.span });
+                                return Err(unsupported_inline_pipe_pattern(
+                                    pattern.span,
+                                    format!(
+                                        "record pattern field `.{}` is not present in layout{layout}",
+                                        field.label
+                                    ),
+                                ));
                             };
                             Ok(InlinePipeRecordPatternField {
                                 label: field.label.clone(),
@@ -2420,32 +2452,38 @@ impl<'a> ProgramLowerer<'a> {
                 let (constructor, argument_layouts) = match &callee.reference {
                     core::Reference::Builtin(term) => {
                         let constructor = map_builtin_term(*term);
-                        let argument_layouts =
-                            match (constructor, &self.program.layouts()[layout].kind) {
-                                (
-                                    BuiltinTerm::True | BuiltinTerm::False,
-                                    LayoutKind::Primitive(PrimitiveType::Bool),
-                                ) => Vec::new(),
-                                (BuiltinTerm::None, LayoutKind::Option { .. }) => Vec::new(),
-                                (BuiltinTerm::Some, LayoutKind::Option { element }) => {
-                                    vec![*element]
-                                }
-                                (BuiltinTerm::Ok, LayoutKind::Result { value, .. }) => vec![*value],
-                                (BuiltinTerm::Err, LayoutKind::Result { error, .. }) => {
-                                    vec![*error]
-                                }
-                                (BuiltinTerm::Valid, LayoutKind::Validation { value, .. }) => {
-                                    vec![*value]
-                                }
-                                (BuiltinTerm::Invalid, LayoutKind::Validation { error, .. }) => {
-                                    vec![*error]
-                                }
-                                _ => {
-                                    return Err(UnsupportedInlinePipePattern {
-                                        span: pattern.span,
-                                    });
-                                }
-                            };
+                        let argument_layouts = match (
+                            constructor,
+                            &self.program.layouts()[layout].kind,
+                        ) {
+                            (
+                                BuiltinTerm::True | BuiltinTerm::False,
+                                LayoutKind::Primitive(PrimitiveType::Bool),
+                            ) => Vec::new(),
+                            (BuiltinTerm::None, LayoutKind::Option { .. }) => Vec::new(),
+                            (BuiltinTerm::Some, LayoutKind::Option { element }) => {
+                                vec![*element]
+                            }
+                            (BuiltinTerm::Ok, LayoutKind::Result { value, .. }) => vec![*value],
+                            (BuiltinTerm::Err, LayoutKind::Result { error, .. }) => {
+                                vec![*error]
+                            }
+                            (BuiltinTerm::Valid, LayoutKind::Validation { value, .. }) => {
+                                vec![*value]
+                            }
+                            (BuiltinTerm::Invalid, LayoutKind::Validation { error, .. }) => {
+                                vec![*error]
+                            }
+                            _ => {
+                                return Err(unsupported_inline_pipe_pattern(
+                                    pattern.span,
+                                    format!(
+                                        "constructor `{constructor}` does not match subject layout{layout}=`{}`",
+                                        self.program.layouts()[layout]
+                                    ),
+                                ));
+                            }
+                        };
                         (
                             InlinePipeConstructor::Builtin(constructor),
                             argument_layouts,
@@ -2462,22 +2500,44 @@ impl<'a> ProgramLowerer<'a> {
                             _ => false,
                         };
                         if !matches_layout {
-                            return Err(UnsupportedInlinePipePattern { span: pattern.span });
+                            return Err(unsupported_inline_pipe_pattern(
+                                pattern.span,
+                                format!(
+                                    "sum constructor `{}.{}` does not match subject layout{layout}=`{}`",
+                                    handle.type_name,
+                                    handle.variant_name,
+                                    self.program.layouts()[layout]
+                                ),
+                            ));
                         }
-                        let field_types = callee
-                            .field_types
-                            .as_ref()
-                            .ok_or(UnsupportedInlinePipePattern { span: pattern.span })?;
+                        let field_types = callee.field_types.as_ref().ok_or_else(|| {
+                            unsupported_inline_pipe_pattern(
+                                pattern.span,
+                                "sum constructor pattern is missing lowered field types",
+                            )
+                        })?;
                         let argument_layouts = field_types
                             .iter()
                             .map(|field| self.intern_core_type(field))
                             .collect::<Result<Vec<_>, _>>()?;
                         (InlinePipeConstructor::Sum(handle.clone()), argument_layouts)
                     }
-                    _ => return Err(UnsupportedInlinePipePattern { span: pattern.span }),
+                    _ => {
+                        return Err(unsupported_inline_pipe_pattern(
+                            pattern.span,
+                            "constructor patterns require builtin terms or sum constructors",
+                        ));
+                    }
                 };
                 if arguments.len() != argument_layouts.len() {
-                    return Err(UnsupportedInlinePipePattern { span: pattern.span });
+                    return Err(unsupported_inline_pipe_pattern(
+                        pattern.span,
+                        format!(
+                            "constructor pattern expects {} argument(s), found {}",
+                            argument_layouts.len(),
+                            arguments.len()
+                        ),
+                    ));
                 }
                 InlinePipePatternKind::Constructor {
                     constructor,
@@ -2927,6 +2987,13 @@ fn arena_overflow(family: &'static str, overflow: ArenaOverflow) -> LoweringErro
     LoweringError::ArenaOverflow {
         family,
         attempted_len: overflow.attempted_len(),
+    }
+}
+
+fn unsupported_inline_pipe_pattern(span: SourceSpan, detail: impl Into<Box<str>>) -> LoweringError {
+    LoweringError::UnsupportedInlinePipePattern {
+        span,
+        detail: detail.into(),
     }
 }
 

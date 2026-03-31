@@ -1304,12 +1304,14 @@ fn validate_kernel(
                     if let Some(subject) = stage.subject_memo {
                         match kernel.inline_subjects.get(subject.index()) {
                             Some(layout) if *layout == stage.input_layout => {}
-                            Some(layout) => errors.push(ValidationError::KernelSubjectLayoutMismatch {
-                                kernel: kernel_id,
-                                expr: expr_id,
-                                expected: *layout,
-                                found: stage.input_layout,
-                            }),
+                            Some(layout) => {
+                                errors.push(ValidationError::KernelSubjectLayoutMismatch {
+                                    kernel: kernel_id,
+                                    expr: expr_id,
+                                    expected: *layout,
+                                    found: stage.input_layout,
+                                })
+                            }
                             None => errors.push(ValidationError::KernelUnknownInlineSubject {
                                 kernel: kernel_id,
                                 expr: expr_id,
@@ -1320,12 +1322,14 @@ fn validate_kernel(
                     if let Some(subject) = stage.result_memo {
                         match kernel.inline_subjects.get(subject.index()) {
                             Some(layout) if *layout == stage.result_layout => {}
-                            Some(layout) => errors.push(ValidationError::KernelSubjectLayoutMismatch {
-                                kernel: kernel_id,
-                                expr: expr_id,
-                                expected: *layout,
-                                found: stage.result_layout,
-                            }),
+                            Some(layout) => {
+                                errors.push(ValidationError::KernelSubjectLayoutMismatch {
+                                    kernel: kernel_id,
+                                    expr: expr_id,
+                                    expected: *layout,
+                                    found: stage.result_layout,
+                                })
+                            }
                             None => errors.push(ValidationError::KernelUnknownInlineSubject {
                                 kernel: kernel_id,
                                 expr: expr_id,

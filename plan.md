@@ -1,316 +1,134 @@
 # AIVI Readability Improvements
 
-## Context
+## What already exists (and is simply underused in snake.aivi)
 
-`demos/snake.aivi` is 362 lines. The core game logic is straightforward, but five gaps in the
-expression language force verbose workarounds: no method call syntax, no `let` bindings, no
-flat multi-condition expressions, no variant test operator, and no way to merge multiple event
-sources into one signal stream.
+| Feature | Syntax | Used in snake.aivi? |
+|---------|--------|---------------------|
+| Pipe memos | `\|> #before transform #after` | Yes, but inconsistently |
+| Reactive `when` updates | `when guard => signal <- expr` | No — all state via `+\|>` accumulate |
+| `<\|` patch operator | `record <\| { .field: val }` | No — all explicit record construction |
+| `\|\|>` constructor matching | `\|\|> Constructor args -> expr` | Yes |
+| `&\|>` applicative cluster | `&\|> sig1 &\|> sig2 +\|> seed step` | No |
 
-These are general-purpose improvements — they benefit every AIVI program, not just games.
-
-**Key discovery:** the `<|` patch operator already exists (`record <| { .field: val }`) but
-snake.aivi doesn't use it. All five features below are genuinely new.
-
----
-
-## Feature 1 — Method call syntax
-
-`expr.method(arg₁, arg₂)` desugars to `method expr arg₁ arg₂`.
-
-Disambiguation: `expr.field` with no parens stays a plain projection; `expr.method(args)` with
-parens is a method call. No ambiguity, no new AST node — just a rewrite to `Apply` during parse.
-
-Layers: `parse.rs` (peek for `(` after `.identifier`), `format.rs` (round-trip), LSP
-completion (offer functions whose first parameter type matches the receiver).
+The only genuinely new feature needed is **method call syntax** (`expr.method(args)` → `method expr args`).
+Everything else is already in the language.
 
 ---
 
-## Feature 2 — `let` binding in expressions
+## The root of snake.aivi's verbosity
 
-```
-let name = expr
-body
-```
+`TickState` exists for one reason: the `+|>` accumulate fires only on its primary signal (`tick`),
+so to access `direction` and `restartCount` during a tick, the current code injects them into the
+state. This creates the entire `seenRestartCount` / `restartPending` / `restartIfRequested`
+coordination chain.
 
-Layout-sensitive. Chains naturally. Desugars to `(\name -> body) expr` — no mutation.
-
-Needed to name intermediate values (e.g. `nextHead`) without inventing a top-level function or
-threading through pipe memo syntax.
-
-Layers: new `let` keyword in `lex.rs`, `ExprKind::Let` in `cst.rs`, desugar in `hir/lower.rs`,
-formatter, LSP scope tracking.
+The fix is to stop using `+|>` for the primary game state and use **reactive `when` updates**
+instead. `when` clauses targeting the same signal can fire from different sources independently —
+no coordination needed...
 
 ---
 
-## Feature 3 — `when/otherwise` cond expression
+## Rewritten structure (in words)
 
-```
-when cond₁ -> expr₁
-when cond₂ -> expr₂
-otherwise  -> exprN
-```
+### Types — 5 fewer types
 
-First true condition wins. `otherwise` is mandatory (exhaustiveness). Desugars to nested
-`T|>` / `F|>` chains — no new runtime semantics.
+The five helper record types (`TickState`, `CellHeadState`, `CellTakeState`, `FoodSearch`,
+`BoardTextState`) all exist to carry intermediate values through reduces and the tick pipeline.
+With reactive updates and pipe memos, none of them are needed.
 
-Also adds **guards on `||>` case arms**: `||> Pattern when boolExpr -> body`, so the same
-priority-chain style works inside ADT dispatch.
+- `TickState` is eliminated entirely because `direction` and `restart` are handled by separate
+  `when` clauses, not bundled into the accumulate input.
+- `CellHeadState` and `CellTakeState` are eliminated by using `#memo` bindings inside the snake
+  manipulation functions instead of threading a record through a reduce.
+- `FoodSearch` is eliminated the same way: the `spawnFood` reduce uses `#seed` and `#candidate`
+  memos in successive pipe stages rather than carrying a search-state record.
+- `BoardTextState` is eliminated by using memos to bind row text across pipe stages.
 
-Layers: `when`/`otherwise` keywords, `ExprKind::Cond` in `cst.rs`, `guard: Option<Expr>` on
-`PipeCaseArm`, desugar in `hir/lower.rs`, formatter.
+### Functions — roughly half the current count
 
----
+With `<|` patches, every function that returns an updated game state becomes a one-liner — no
+more explicit record literals listing all unchanged fields. `gameOverState` disappears entirely
+(replaced inline with `game <| { .status: GameOver }`). `applyRunningStep` shrinks to a single
+patch expression.
 
-## Feature 4 — `is` variant test
+The `willCrash` and `willEat` functions can be inlined into `stepRunning` using `#next` and
+`#ate` memos. `stepRunning` becomes a single pipe expression: compute the next head, bind it as
+`#next`, then branch via `T|>` / `F|>` with the two cases (`gameOver` patch or grow/move patch)
+directly in the arms.
 
-`expr is Constructor` → `Bool`.
+`stepOnTick` and `stepTickState` disappear completely — they only exist to unwrap `TickState`.
 
-- Unit variant: desugars to `expr == Constructor`
-- Parameterized variant: desugars to `expr ||> Constructor _ -> True ||> _ -> False`
+`restartIfRequested`, `countRestart`, `restartPending` all disappear — handled by a `when` clause
+directly (see signals section).
 
-Layers: `is` keyword, `ExprKind::IsTest` in `cst.rs`, desugar in `hir/lower.rs`, LSP completion
-(offer constructors of the expression's type after `is`).
+`nextScore`, `nextFood`, `nextSnake` can be inlined into the `T|>` arm of `stepRunning` using
+`<|` patches: a single record patch updating all four fields at once, with the new seed bound
+as a memo in an earlier stage.
 
----
+With method call syntax, `firstCell`, `snakeContains`, `cellLength` disappear — they become
+standard library calls on `List` (`snake.head`, `snake.contains(cell)`, `snake.length`).
+`moveCell` and `growSnake`/`moveSnake` become methods on `Cell` and `List Cell` respectively.
 
-## Feature 5 — Multi-source signal merge
+### Signals — no coordination dance
 
-```
-signal events : Signal GameEvent = merge {
-  tick    |> \_ -> Tick,
-  keyDown ||>
-    ArrowLeft  -> Turn West
-    ArrowRight -> Turn East
-    ArrowUp    -> Turn North
-    ArrowDown  -> Turn South
-    Space      -> Restart
-}
+The key structural change:
 
-signal state : Signal GameState = events
-  +|> initialState stepGame
-```
+**Before:** `signal gameState = tick +|> initialTickState stepOnTick`
+where `stepOnTick` must read `direction` and `restartCount` through closure capture and compare
+`seenRestartCount` against `restartCount` to detect a restart — requiring `TickState` to carry
+that comparison across ticks.
 
-`merge { ... }` fires whenever any branch fires. Each branch maps its source to the shared result
-type. The accumulate then receives a cleanly-typed event stream.
+**After:**
+- `direction` is a reactive signal with initial value `East`, updated by a `when keyDown` clause
+  that maps the key to a new direction (unchanged if opposite).
+- `gameState` is a reactive signal with initial value `initialGame`, updated by two `when` clauses:
+  one on `tick` that calls `stepRunning direction gameState`, and one on `keyDown == Space`
+  that resets to `initialGame` immediately. No tick synchronisation needed for restart.
+- The `restartCount` and `restartPending` signals are completely gone.
 
-This eliminates the `TickState` / `seenRestartCount` coordination hack entirely. Direction becomes
-part of `GameState`, updated by `Turn` events in the same stream as `Tick` and `Restart`.
+The `game`, `snake`, `food`, `score`, `gameOver` projection signals remain but they now project
+from a cleaner `gameState`.
 
-Layers: `merge` keyword, `ExprKind::Merge` in `cst.rs`, HIR `SignalItem` gets a `MergeBody`
-variant, new multi-source input signal kind in `aivi-runtime` (graph, hir_adapter, scheduler).
-
----
-
-## Impact summary
-
-| Before | After |
-|--------|-------|
-| `TickState`, `seenRestartCount` (~40 lines) | Eliminated by merge signal |
-| `CellHeadState`, `cellHeadStep`, `firstCell` (~8 lines) | `snake.head` via stdlib + method call |
-| `willCrash`, `willEat`, `applyRunningStep`, `gameOverState`, `nextSnake`, `nextScore`, `nextFood`, `stepRunning`, `stepGame`, `restartIfRequested`, `restartPending`, `countRestart`, `stepOnTick`, `stepTickState` (~75 lines) | One `when/otherwise` chain in `stepGame` |
-| Explicit record construction listing all fields | `<| { .field: val }` patches |
-| Separate `direction`/`restartCount` accumulate signals with coordination dance | `direction` is part of `GameState`, driven by `Turn` events |
-
-**Estimated result: ~160–180 lines from 362.**
+### View — unchanged
 
 ---
 
-## Layers affected per feature
+## Remaining work after the above (existing features only)
 
-All features follow:
-```
-lex.rs → parse.rs → cst.rs → hir/lower.rs → typecheck.rs → format.rs → LSP
-```
+After applying all the above — reactive `when` updates, `<|` patches, memos, `||>` inline matching
+— the estimate is roughly **180–200 lines** (from 362), with **no new language features**.
 
-Features 1, 2, 4: pure syntactic sugar, no backend changes.
-Feature 3: desugars in HIR lowering, touches `PipeCaseArm`.
-Feature 5: requires `aivi-runtime` changes (graph, hir_adapter, scheduler).
+The remaining length is the snake logic itself: food spawning (a reduce over 600 cells),
+board rendering (a reduce over 600 cells), and `moveCell` direction dispatch.
 
 ---
 
-## Verification
+## The one new feature still worth adding: method call syntax
 
-1. Rewrite `demos/snake.aivi` using all five features as the integration test
-2. `cargo test --workspace` must remain green
-3. Run rewritten snake through MCP tools (`launch_app`, `emit_gtk_event`) to confirm identical
-   behaviour
-4. Add HIR/backend fixtures for each new form
-5. Formatter round-trip: `format(parse(format(source))) == format(source)`
+Without `expr.method(args)`, every function call that has a clear "subject" reads backwards:
+`firstCell snake`, `snakeContains snake cell`, `moveCell direction cell`, `hitsWall board cell`.
+These aren't just readability preferences — they force helper functions like `firstCell` to
+exist because there is no way to express `snake.head` without assuming a stdlib function
+can be applied in a fluent style.
+
+Method call syntax is the single highest-value addition. It desugars purely in the parser
+(`expr.method(args)` → `Apply(method, [expr, args…])`), requires no runtime changes, and
+would let users write `snake.head`, `snake.contains(cell)`, `cell.moved(direction)`,
+`board.contains(cell)`, and similar expressions that are self-evidently readable.
+
+With method calls added on top of the existing-feature rewrite, the estimate drops further to
+roughly **140–160 lines**, and the helper function count halves again.
 
 ---
 
-## Improved snake.aivi (target state)
+## Layers needed for method call syntax
 
-```aivi
-domain Duration over Int
-    literal ms:Int -> Duration
-
-type Direction =
-  | North
-  | South
-  | East
-  | West
-
-type Cell =
-  | Cell Int Int
-
-type Status =
-  | Running
-  | GameOver
-
-type Board = { width: Int, height: Int }
-
-type GameState = {
-    snake: List Cell,
-    food: Cell,
-    score: Int,
-    status: Status,
-    direction: Direction,
-    seed: Int
-}
-
-type GameEvent =
-  | Tick
-  | Turn Direction
-  | Restart
-
-value board:Board = { width: 30, height: 20 }
-value boardColumns = [0..29]
-value boardRows = [0..19]
-value initialSeed = 2463534242
-
-value initialSnake = [Cell 6 10, Cell 5 10, Cell 4 10]
-
--- stdlib assumed: List.head, List.contains, List.append, List.take, List.length
-
-fun moveCell:Cell direction:Direction cell:Cell => (direction, cell)
-  ||> (North, Cell x y) -> Cell x (y - 1)
-  ||> (South, Cell x y) -> Cell x (y + 1)
-  ||> (East,  Cell x y) -> Cell (x + 1) y
-  ||> (West,  Cell x y) -> Cell (x - 1) y
-
-fun isOutside:Bool board:Board cell:Cell => cell
-  ||> Cell x y -> x < 0 or x >= board.width or y < 0 or y >= board.height
-
-fun nextSeed:Int seed:Int =>
-    (seed * 1103515245 + 12345) % 2147483648
-
-fun spawnFood:Cell snake:(List Cell) seed:Int => [0..599]
-  |> reduce (\state \_ => state.found
-      T|> state
-      F|> let candidate = Cell (state.seed % board.width) ((state.seed / board.width) % board.height)
-          when snake.contains(candidate) -> { seed: nextSeed state.seed, found: False, value: Cell 0 0 }
-          otherwise                      -> { seed: state.seed, found: True, value: candidate })
-    { seed, found: False, value: Cell 0 0 }
-  |> .value
-
-value initialState:GameState = {
-    snake: initialSnake,
-    food: spawnFood initialSnake initialSeed,
-    score: 0,
-    status: Running,
-    direction: East,
-    seed: initialSeed
-}
-
-fun oppositeDirection:Direction d:Direction => d
-  ||> North -> South
-  ||> South -> North
-  ||> East  -> West
-  ||> West  -> East
-
-fun stepGame:GameState event:GameEvent state:GameState => event
-  ||> Restart ->
-      initialState
-
-  ||> Turn dir when state.status is Running ->
-      when state.direction == oppositeDirection dir -> state
-      otherwise -> state <| { .direction: dir }
-
-  ||> Turn _ -> state
-
-  ||> Tick when state.status is GameOver -> state
-
-  ||> Tick ->
-      let next = state.snake.head.moved(state.direction)
-      when next.isOutside(board)          -> state <| { .status: GameOver }
-      when state.snake.contains(next)     -> state <| { .status: GameOver }
-      when next == state.food             ->
-          let newSeed = nextSeed state.seed
-          state <| { .snake:  state.snake.prepend(next),
-                     .score:  state.score + 1,
-                     .seed:   newSeed,
-                     .food:   spawnFood state.snake.prepend(next) newSeed }
-      otherwise ->
-          state <| { .snake: state.snake.prepend(next).take(state.snake.length) }
-
-@source window.keyDown with { repeat: False, focusOnly: True }
-signal keyDown: Signal Key
-
-@source timer.every 120ms with { immediate: False, coalesce: True }
-signal tick: Signal Unit
-
-signal events : Signal GameEvent = merge {
-    tick    |> \_ -> Tick,
-    keyDown ||>
-        ArrowLeft  -> Turn West
-        ArrowRight -> Turn East
-        ArrowUp    -> Turn North
-        ArrowDown  -> Turn South
-        Space      -> Restart
-}
-
-signal state : Signal GameState = events
-  +|> initialState stepGame
-
-fun directionLabel:Text d:Direction => d
-  ||> North -> "Up"
-  ||> South -> "Down"
-  ||> East  -> "Right"
-  ||> West  -> "Left"
-
-fun cellGlyph:Text snake:(List Cell) food:Cell cell:Cell =>
-  when cell == snake.head   -> "@"
-  when snake.contains(cell) -> "o"
-  when cell == food         -> "*"
-  otherwise                 -> "·"
-
-fun rowText:Text snake:(List Cell) food:Cell row:Int => boardColumns
-  |> reduce (\text \col => "{text}{cellGlyph snake food (Cell col row)}") ""
-
-fun boardText:Text s:GameState => boardRows
-  |> reduce (\acc \row => acc == "" ? rowText s.snake s.food row : "{acc}\n{rowText s.snake s.food row}") ""
-
-value main =
-    <Window title="AIVI Snake">
-        <Box orientation="vertical" spacing={8}>
-            <Label text={"Direction: {directionLabel state.direction}"} />
-            <Label text={"Score: {state.score}"} />
-            <Label text={state.status ||> Running -> "Running" ||> GameOver -> "Game Over"} />
-            <Label text={boardText state} monospace />
-            <show when={state.status is GameOver}>
-                <Label text={"Final score: {state.score}"} />
-            </show>
-        </Box>
-    </Window>
-
-export main
-```
-
-### What the new version demonstrates
-
-| Feature | Where used |
-|---------|-----------|
-| Method call `expr.method(args)` | `snake.head.moved(direction)`, `snake.contains(cell)`, `state.snake.prepend(next)`, `state.snake.length` |
-| `let` binding | `let next = ...` and `let newSeed = ...` inside `stepGame` |
-| `when/otherwise` expression | `stepGame` Tick handler, `cellGlyph`, `boardText` |
-| Guards on `\|\|>` arms | `\|\|> Turn dir when state.status is Running` |
-| `is` variant test | `state.status is Running`, `state.status is GameOver`, `show when={...}` |
-| `merge { }` signal | Merging tick + keyDown into one typed `GameEvent` stream |
-| `<\|` patch (already exists) | `state <\| { .status: GameOver }`, `state <\| { .direction: dir }` |
-
-Lines: **~130** vs current **362**.
-
-The remaining complexity is inherent to snake itself: food spawning, board rendering,
-`moveCell` dispatch. No boilerplate.
+- `parse.rs` — after consuming `.identifier`, peek for `(`; if found, consume argument list
+  and emit `Apply { callee: Name(method), arguments: [receiver, …args] }`
+- `cst.rs` — no new node; reuses existing `Apply`
+- `format.rs` — when printing an `Apply` whose first argument is a projection base, optionally
+  round-trip as `receiver.method(args)` form (needs a heuristic or annotation)
+- `hir/lower.rs` — no change; resolves as normal function application
+- `typecheck.rs` — no change
+- LSP `completion.rs` — dot-triggered completion should offer all functions in scope whose
+  first parameter type matches the receiver's type

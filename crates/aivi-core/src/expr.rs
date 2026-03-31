@@ -258,7 +258,10 @@ pub struct PipeStage {
 
 impl PipeStage {
     pub const fn supports_memos(&self) -> bool {
-        matches!(self.kind, PipeStageKind::Transform { .. } | PipeStageKind::Tap { .. })
+        matches!(
+            self.kind,
+            PipeStageKind::Transform { .. } | PipeStageKind::Tap { .. }
+        )
     }
 }
 
