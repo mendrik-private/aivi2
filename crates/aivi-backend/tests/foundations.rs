@@ -3608,6 +3608,115 @@ fn cranelift_codegen_compiles_inline_pipe_memos() {
 }
 
 #[test]
+fn cranelift_codegen_compiles_inline_pipe_gate_option_carriers() {
+    let backend = lower_text(
+        "backend-inline-pipe-gate-carriers.aivi",
+        r#"
+value maybePositive : Option Int = 2
+ ?|> True
+
+value missingNumber : Option Int = 2
+ ?|> False
+
+value maybeGreeting : Option Text = "hello"
+ ?|> True
+
+value missingGreeting : Option Text = "hello"
+ ?|> False
+"#,
+    );
+
+    let maybe_positive = find_item(&backend, "maybePositive");
+    let maybe_positive_body = backend.items()[maybe_positive]
+        .body
+        .expect("maybePositive should carry a body kernel");
+    let kernel = &backend.kernels()[maybe_positive_body];
+    let KernelExprKind::Pipe(pipe) = &kernel.exprs()[kernel.root].kind else {
+        panic!("expected inline pipe body for maybePositive");
+    };
+    assert!(matches!(
+        pipe.stages[0].kind,
+        InlinePipeStageKind::Gate { .. }
+    ));
+
+    let mut evaluator = KernelEvaluator::new(&backend);
+    let globals = BTreeMap::new();
+    assert_eq!(
+        evaluator
+            .evaluate_item(maybe_positive, &globals)
+            .expect("inline scalar gate should evaluate"),
+        RuntimeValue::OptionSome(Box::new(RuntimeValue::Int(2)))
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "missingNumber"), &globals)
+            .expect("inline scalar false gate should evaluate"),
+        RuntimeValue::OptionNone
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "maybeGreeting"), &globals)
+            .expect("inline niche gate should evaluate"),
+        RuntimeValue::OptionSome(Box::new(RuntimeValue::Text("hello".into())))
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(find_item(&backend, "missingGreeting"), &globals)
+            .expect("inline niche false gate should evaluate"),
+        RuntimeValue::OptionNone
+    );
+
+    let compiled = compile_program(&backend)
+        .expect("inline pipe gate carriers should compile through Cranelift");
+
+    let maybe_positive_artifact = compiled
+        .kernel(maybe_positive_body)
+        .expect("compiled program should retain maybePositive metadata");
+    assert!(maybe_positive_artifact.code_size > 0);
+    assert!(maybe_positive_artifact.clif.contains("brif"));
+    assert!(maybe_positive_artifact.clif.contains("() -> i128"));
+    assert!(maybe_positive_artifact.clif.contains("ishl_imm"));
+
+    let missing_number_body = backend.items()[find_item(&backend, "missingNumber")]
+        .body
+        .expect("missingNumber should carry a body kernel");
+    let missing_number_artifact = compiled
+        .kernel(missing_number_body)
+        .expect("compiled program should retain missingNumber metadata");
+    assert!(missing_number_artifact.clif.contains("iconst.i64 0"));
+    assert!(missing_number_artifact.clif.contains("uextend.i128"));
+
+    let maybe_greeting_body = backend.items()[find_item(&backend, "maybeGreeting")]
+        .body
+        .expect("maybeGreeting should carry a body kernel");
+    let maybe_greeting_artifact = compiled
+        .kernel(maybe_greeting_body)
+        .expect("compiled program should retain maybeGreeting metadata");
+    let ptr = clif_pointer_ty();
+    assert!(maybe_greeting_artifact.code_size > 0);
+    assert!(maybe_greeting_artifact.clif.contains("brif"));
+    assert!(
+        maybe_greeting_artifact
+            .clif
+            .contains(&format!("() -> {ptr}"))
+    );
+    assert!(maybe_greeting_artifact.clif.contains("symbol_value"));
+
+    let missing_greeting_body = backend.items()[find_item(&backend, "missingGreeting")]
+        .body
+        .expect("missingGreeting should carry a body kernel");
+    let missing_greeting_artifact = compiled
+        .kernel(missing_greeting_body)
+        .expect("compiled program should retain missingGreeting metadata");
+    assert!(
+        missing_greeting_artifact
+            .clif
+            .contains(&format!("iconst.{ptr} 0"))
+    );
+    assert!(!compiled.object().is_empty());
+}
+
+#[test]
 fn cranelift_codegen_compiles_float_comparison_and_equality_kernels() {
     let backend = lower_text(
         "backend-float-compare-codegen.aivi",

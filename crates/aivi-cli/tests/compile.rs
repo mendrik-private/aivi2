@@ -123,14 +123,85 @@ fn compile_accepts_reactive_update_programs() {
 }
 
 #[test]
+fn compile_accepts_inline_pipe_gate_programs() {
+    let input = TempFile::new(
+        "compile-inline-pipe-gate",
+        "aivi",
+        concat!(
+            "value maybePositive : Option Int = 2\n",
+            " ?|> True\n",
+            "\n",
+            "value missingNumber : Option Int = 2\n",
+            " ?|> False\n",
+            "\n",
+            "value maybeGreeting : Option Text = \"hello\"\n",
+            " ?|> True\n",
+            "\n",
+            "value missingGreeting : Option Text = \"hello\"\n",
+            " ?|> False\n",
+        ),
+    );
+    let output_dir = TempDir::new("compile-inline-pipe-gate");
+    let output_path = output_dir.path().join("inline-pipe-gate.o");
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("compile")
+        .arg(input.path())
+        .arg("-o")
+        .arg(&output_path)
+        .output()
+        .expect("compile command should run");
+
+    assert!(
+        output.status.success(),
+        "expected inline pipe gate compile to succeed, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let metadata =
+        fs::metadata(&output_path).expect("inline pipe gate compile should write an object file");
+    assert!(
+        metadata.len() > 0,
+        "inline pipe gate object file should not be empty"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("compile pipeline passed"),
+        "expected compile summary, got stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("codegen: ok"),
+        "expected codegen success in summary, got stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("runtime startup/link integration is not available yet"),
+        "expected explicit runtime/link boundary, got stdout: {stdout}"
+    );
+}
+
+#[test]
 fn compile_writes_object_and_reports_codegen_boundary() {
+    let input = TempFile::new(
+        "compile-success",
+        "aivi",
+        concat!(
+            "value maybePositive : Option Int = 2\n",
+            " ?|> True\n",
+            "\n",
+            "value missingNumber : Option Int = 2\n",
+            " ?|> False\n",
+            "\n",
+            "value maybeGreeting : Option Text = \"hello\"\n",
+            " ?|> True\n",
+            "\n",
+            "value missingGreeting : Option Text = \"hello\"\n",
+            " ?|> False\n",
+        ),
+    );
     let output_dir = TempDir::new("compile-success");
     let output_path = output_dir.path().join("fixture.o");
     let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
         .arg("compile")
-        .arg(fixture_path(
-            "milestone-2/valid/pipe-gate-carriers/main.aivi",
-        ))
+        .arg(input.path())
         .arg("-o")
         .arg(&output_path)
         .output()
