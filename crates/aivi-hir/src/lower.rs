@@ -18,14 +18,14 @@ use crate::{
     MarkupAttributeValue, MarkupElement, MarkupNode, MarkupNodeId, MarkupNodeKind, MatchControl,
     MockDecorator, Module, Name, NamePath, NonEmpty, PatchBlock, PatchEntry, PatchInstruction,
     PatchInstructionKind, PatchSelector, PatchSelectorSegment, Pattern, PatternId, PatternKind,
-    PipeExpr, PipeStage, PipeStageKind, ProjectionBase, ReactiveUpdateClause, RecordExpr,
-    RecordExprField, RecordFieldSurface, RecordPatternField, RecordRowRename, RecordRowTransform,
-    RecurrenceWakeupDecorator, RecurrenceWakeupDecoratorKind, RegexLiteral, ResolutionState,
-    ShowControl, SignalItem, SourceDecorator, SourceProviderContractItem, SourceProviderRef,
-    SuffixedIntegerLiteral, TermReference, TermResolution, TestDecorator, TextFragment,
-    TextInterpolation, TextLiteral, TextSegment, TypeField, TypeId, TypeItem, TypeItemBody,
-    TypeKind, TypeNode, TypeParameter, TypeParameterId, TypeReference, TypeResolution, TypeVariant,
-    UnaryOperator, UseItem, ValueItem, WithControl,
+    PipeExpr, PipeStage, PipeStageKind, ProjectionBase, ReactiveUpdateBodyMode,
+    ReactiveUpdateClause, RecordExpr, RecordExprField, RecordFieldSurface, RecordPatternField,
+    RecordRowRename, RecordRowTransform, RecurrenceWakeupDecorator, RecurrenceWakeupDecoratorKind,
+    RegexLiteral, ResolutionState, ShowControl, SignalItem, SourceDecorator,
+    SourceProviderContractItem, SourceProviderRef, SuffixedIntegerLiteral, TermReference,
+    TermResolution, TestDecorator, TextFragment, TextInterpolation, TextLiteral, TextSegment,
+    TypeField, TypeId, TypeItem, TypeItemBody, TypeKind, TypeNode, TypeParameter, TypeParameterId,
+    TypeReference, TypeResolution, TypeVariant, UnaryOperator, UseItem, ValueItem, WithControl,
 };
 
 pub struct LoweringResult {
@@ -629,31 +629,161 @@ impl<'a> Lowerer<'a> {
     }
 
     fn attach_reactive_update_clause(&mut self, item: &syn::ReactiveUpdateItem) {
-        let Some(guard) = item.guard.as_ref() else {
+        match &item.kind {
+            syn::ReactiveUpdateKind::Guarded {
+                guard,
+                target,
+                body,
+            } => {
+                self.attach_guarded_reactive_update_clause(
+                    item.base.span,
+                    item.keyword_span,
+                    guard.as_ref(),
+                    target.as_ref(),
+                    body.as_ref(),
+                );
+            }
+            syn::ReactiveUpdateKind::Match { subject, arms } => {
+                self.attach_pattern_reactive_update_clauses(
+                    item.base.span,
+                    item.keyword_span,
+                    subject.as_ref(),
+                    arms,
+                );
+            }
+        }
+    }
+
+    fn attach_guarded_reactive_update_clause(
+        &mut self,
+        span: SourceSpan,
+        keyword_span: SourceSpan,
+        guard: Option<&syn::Expr>,
+        target: Option<&syn::Identifier>,
+        body: Option<&syn::Expr>,
+    ) {
+        let Some(guard) = guard else {
             self.emit_error(
-                item.base.span,
+                span,
                 "reactive update is missing its guard expression",
                 code("reactive-update-missing-guard"),
             );
             return;
         };
-        let Some(target) = item.target.as_ref() else {
+        let Some(target) = target else {
             self.emit_error(
-                item.base.span,
+                span,
                 "reactive update is missing its target signal name",
                 code("reactive-update-missing-target"),
             );
             return;
         };
-        let Some(body) = item.body.as_ref() else {
+        let Some(body) = body else {
             self.emit_error(
-                item.base.span,
+                span,
                 "reactive update is missing its body expression",
                 code("reactive-update-missing-body"),
             );
             return;
         };
+        let Some(target_item) = self.resolve_reactive_update_target(target) else {
+            return;
+        };
+        let guard = self.lower_expr(guard);
+        let body = self.lower_expr(body);
+        let Some(Item::Signal(signal)) = self.module.arenas.items.get_mut(target_item) else {
+            unreachable!("reactive update target resolution only returns signal items");
+        };
+        signal.reactive_updates.push(ReactiveUpdateClause {
+            span,
+            keyword_span,
+            target_span: target.span,
+            guard,
+            body,
+            body_mode: ReactiveUpdateBodyMode::Payload,
+        });
+    }
 
+    fn attach_pattern_reactive_update_clauses(
+        &mut self,
+        span: SourceSpan,
+        keyword_span: SourceSpan,
+        subject: Option<&syn::Expr>,
+        arms: &[syn::ReactiveUpdateArm],
+    ) {
+        let Some(subject) = subject else {
+            self.emit_error(
+                span,
+                "reactive update is missing its subject expression",
+                code("reactive-update-missing-subject"),
+            );
+            return;
+        };
+        if arms.is_empty() {
+            self.emit_error(
+                span,
+                "pattern-armed reactive updates require at least one `||>` arm",
+                code("reactive-update-missing-arm"),
+            );
+            return;
+        }
+
+        let subject_expr = self.lower_expr(subject);
+        for arm in arms {
+            self.attach_pattern_reactive_update_arm(keyword_span, subject_expr, arm);
+        }
+    }
+
+    fn attach_pattern_reactive_update_arm(
+        &mut self,
+        keyword_span: SourceSpan,
+        subject: ExprId,
+        arm: &syn::ReactiveUpdateArm,
+    ) {
+        let Some(pattern) = arm.pattern.as_ref() else {
+            self.emit_error(
+                arm.span,
+                "reactive update arm is missing its pattern",
+                code("reactive-update-missing-arm-pattern"),
+            );
+            return;
+        };
+        let Some(target) = arm.target.as_ref() else {
+            self.emit_error(
+                arm.span,
+                "reactive update arm is missing its target signal name",
+                code("reactive-update-missing-target"),
+            );
+            return;
+        };
+        let Some(body) = arm.body.as_ref() else {
+            self.emit_error(
+                arm.span,
+                "reactive update arm is missing its body expression",
+                code("reactive-update-missing-body"),
+            );
+            return;
+        };
+        let Some(target_item) = self.resolve_reactive_update_target(target) else {
+            return;
+        };
+
+        let guard = self.make_pattern_match_bool_expr(subject, pattern, arm.span);
+        let body = self.make_pattern_match_optional_expr(subject, pattern, body, arm.span);
+        let Some(Item::Signal(signal)) = self.module.arenas.items.get_mut(target_item) else {
+            unreachable!("reactive update target resolution only returns signal items");
+        };
+        signal.reactive_updates.push(ReactiveUpdateClause {
+            span: arm.span,
+            keyword_span,
+            target_span: target.span,
+            guard,
+            body,
+            body_mode: ReactiveUpdateBodyMode::OptionalPayload,
+        });
+    }
+
+    fn resolve_reactive_update_target(&mut self, target: &syn::Identifier) -> Option<ItemId> {
         let Some(target_item) = self.find_predeclared_named_item(target.text.as_str()) else {
             self.emit_error(
                 target.span,
@@ -663,12 +793,9 @@ impl<'a> Lowerer<'a> {
                 ),
                 code("reactive-update-unknown-target"),
             );
-            return;
+            return None;
         };
-
-        let guard = self.lower_expr(guard);
-        let body = self.lower_expr(body);
-        let Some(Item::Signal(signal)) = self.module.arenas.items.get_mut(target_item) else {
+        if !matches!(self.module.items()[target_item], Item::Signal(_)) {
             self.emit_error(
                 target.span,
                 format!(
@@ -677,16 +804,72 @@ impl<'a> Lowerer<'a> {
                 ),
                 code("reactive-update-target-not-signal"),
             );
-            return;
-        };
+            return None;
+        }
+        Some(target_item)
+    }
 
-        signal.reactive_updates.push(ReactiveUpdateClause {
-            span: item.base.span,
-            keyword_span: item.keyword_span,
-            target_span: target.span,
-            guard,
-            body,
-        });
+    fn make_pattern_match_bool_expr(
+        &mut self,
+        subject: ExprId,
+        pattern: &syn::Pattern,
+        span: SourceSpan,
+    ) -> ExprId {
+        let on_match = self.lower_unresolved_name_expr("True", span);
+        let on_fallback = self.lower_unresolved_name_expr("False", span);
+        self.make_pattern_match_pipe_expr(subject, pattern, on_match, on_fallback, span)
+    }
+
+    fn make_pattern_match_optional_expr(
+        &mut self,
+        subject: ExprId,
+        pattern: &syn::Pattern,
+        body: &syn::Expr,
+        span: SourceSpan,
+    ) -> ExprId {
+        let matched_body = self.lower_expr(body);
+        let on_match = self.lower_constructor_apply_expr("Some", span, vec![matched_body]);
+        let on_fallback = self.lower_unresolved_name_expr("None", span);
+        self.make_pattern_match_pipe_expr(subject, pattern, on_match, on_fallback, span)
+    }
+
+    fn make_pattern_match_pipe_expr(
+        &mut self,
+        subject: ExprId,
+        pattern: &syn::Pattern,
+        on_match: ExprId,
+        on_fallback: ExprId,
+        span: SourceSpan,
+    ) -> ExprId {
+        let match_stage = PipeStage {
+            span,
+            subject_memo: None,
+            result_memo: None,
+            kind: PipeStageKind::Case {
+                pattern: self.lower_pattern(pattern),
+                body: on_match,
+            },
+        };
+        let fallback_stage = PipeStage {
+            span,
+            subject_memo: None,
+            result_memo: None,
+            kind: PipeStageKind::Case {
+                pattern: self.alloc_pattern(Pattern {
+                    span,
+                    kind: PatternKind::Wildcard,
+                }),
+                body: on_fallback,
+            },
+        };
+        self.alloc_expr(Expr {
+            span,
+            kind: ExprKind::Pipe(PipeExpr {
+                head: subject,
+                stages: NonEmpty::new(match_stage, vec![fallback_stage]),
+                result_block_desugaring: false,
+            }),
+        })
     }
 
     fn find_predeclared_named_item(&self, name: &str) -> Option<ItemId> {
@@ -7726,9 +7909,9 @@ mod tests {
         ApplicativeSpineHead, BuiltinTerm, BuiltinType, ClusterFinalizer, ClusterPresentation,
         DecoratorPayload, DomainMemberKind, ExportResolution, ExprKind, ImportBindingMetadata,
         ImportBundleKind, ImportValueType, IntrinsicValue, Item, LiteralSuffixResolution,
-        PipeStageKind, RecordRowTransform, RecurrenceWakeupDecoratorKind, ResolutionState,
-        SourceProviderRef, TermResolution, TextSegment, TypeItemBody, TypeKind, TypeResolution,
-        ValidationMode, exports,
+        PipeStageKind, ReactiveUpdateBodyMode, RecordRowTransform, RecurrenceWakeupDecoratorKind,
+        ResolutionState, SourceProviderRef, TermResolution, TextSegment, TypeItemBody, TypeKind,
+        TypeResolution, ValidationMode, exports,
     };
 
     fn fixture_root() -> PathBuf {
@@ -8049,6 +8232,59 @@ signal total : Signal Int
             total.reactive_updates.is_empty(),
             "invalid updates should not attach to later signals"
         );
+    }
+
+    #[test]
+    fn lowers_pattern_armed_reactive_updates_onto_target_signals() {
+        let lowered = lower_text(
+            "pattern_armed_reactive_updates.aivi",
+            r#"type Direction = Up | Down
+type Event = Turn Direction | Tick
+
+signal event = Turn Down
+signal heading : Signal Direction
+signal tickSeen : Signal Bool
+
+when event
+  ||> Turn dir => heading <- dir
+  ||> Tick => tickSeen <- True
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "expected pattern-armed reactive updates to lower cleanly, got diagnostics: {:?}",
+            lowered.diagnostics()
+        );
+
+        let module = lowered.module();
+        let heading = find_signal(module, "heading");
+        let tick_seen = find_signal(module, "tickSeen");
+        assert_eq!(heading.reactive_updates.len(), 1);
+        assert_eq!(tick_seen.reactive_updates.len(), 1);
+        assert_eq!(
+            signal_dependency_names(module, heading),
+            vec!["event".to_owned()]
+        );
+        assert_eq!(
+            signal_dependency_names(module, tick_seen),
+            vec!["event".to_owned()]
+        );
+        assert_eq!(
+            heading.reactive_updates[0].body_mode,
+            ReactiveUpdateBodyMode::OptionalPayload
+        );
+        assert_eq!(
+            tick_seen.reactive_updates[0].body_mode,
+            ReactiveUpdateBodyMode::OptionalPayload
+        );
+        assert!(matches!(
+            module.exprs()[heading.reactive_updates[0].guard].kind,
+            ExprKind::Pipe(_)
+        ));
+        assert!(matches!(
+            module.exprs()[heading.reactive_updates[0].body].kind,
+            ExprKind::Pipe(_)
+        ));
     }
 
     #[test]

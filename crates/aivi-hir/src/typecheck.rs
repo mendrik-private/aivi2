@@ -7,9 +7,10 @@ use crate::{
     hir::{
         BinaryOperator, BuiltinTerm, BuiltinType, ClassMemberResolution, ExprKind, FunctionItem,
         ImportBindingMetadata, ImportBundleKind, InstanceItem, InstanceMember, Item, MapExpr,
-        Module, Name, NamePath, PatternKind, PipeExpr, PipeStageKind, ProjectionBase, RecordExpr,
-        RecordExprField, RecordFieldSurface, ResolutionState, SignalItem, TermReference,
-        TermResolution, TypeItemBody, TypeResolution, UnaryOperator, ValueItem,
+        Module, Name, NamePath, PatternKind, PipeExpr, PipeStageKind, ProjectionBase,
+        ReactiveUpdateBodyMode, RecordExpr, RecordExprField, RecordFieldSurface, ResolutionState,
+        SignalItem, TermReference, TermResolution, TypeItemBody, TypeResolution, UnaryOperator,
+        ValueItem,
     },
     ids::{BindingId, ExprId, ImportId, ItemId, PatternId, TypeId, TypeParameterId},
     validate::{
@@ -518,16 +519,46 @@ impl<'a> TypeChecker<'a> {
         };
         let bool_ty = GateType::Primitive(BuiltinType::Bool);
         for update in &item.reactive_updates {
+            let expected_body = match update.body_mode {
+                ReactiveUpdateBodyMode::Payload => expected_payload.clone(),
+                ReactiveUpdateBodyMode::OptionalPayload => {
+                    GateType::Option(Box::new(expected_payload.clone()))
+                }
+            };
+            let signal_bool_ty = GateType::Signal(Box::new(bool_ty.clone()));
+            let signal_body_ty = GateType::Signal(Box::new(expected_body.clone()));
+            let guard_expected = if update.body_mode == ReactiveUpdateBodyMode::OptionalPayload
+                && expression_matches(
+                    self.module,
+                    update.guard,
+                    &GateExprEnv::default(),
+                    &signal_bool_ty,
+                ) {
+                &signal_bool_ty
+            } else {
+                &bool_ty
+            };
+            let body_expected = if update.body_mode == ReactiveUpdateBodyMode::OptionalPayload
+                && expression_matches(
+                    self.module,
+                    update.body,
+                    &GateExprEnv::default(),
+                    &signal_body_ty,
+                ) {
+                &signal_body_ty
+            } else {
+                &expected_body
+            };
             self.check_expr(
                 update.guard,
                 &GateExprEnv::default(),
-                Some(&bool_ty),
+                Some(guard_expected),
                 &mut Vec::new(),
             );
             self.check_expr(
                 update.body,
                 &GateExprEnv::default(),
-                Some(expected_payload),
+                Some(body_expected),
                 &mut Vec::new(),
             );
         }
@@ -4578,6 +4609,29 @@ mod tests {
                 diagnostic.code == Some(DiagnosticCode::new("hir", "type-mismatch"))
             }),
             "expected reactive update body mismatch to report a type mismatch, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_accepts_pattern_armed_reactive_updates() {
+        let report = typecheck_text(
+            "pattern-armed-reactive-update-valid.aivi",
+            r#"type Direction = Up | Down
+type Event = Turn Direction | Tick
+
+signal event = Turn Down
+signal heading = Up
+signal tickSeen = False
+
+when event
+  ||> Turn dir => heading <- dir
+  ||> Tick => tickSeen <- True
+"#,
+        );
+        assert!(
+            report.is_ok(),
+            "expected pattern-armed reactive update typing to succeed, got diagnostics: {:?}",
             report.diagnostics()
         );
     }

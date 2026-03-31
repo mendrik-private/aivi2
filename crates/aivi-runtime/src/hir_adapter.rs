@@ -378,12 +378,18 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                             });
                             continue;
                         };
+                        let body_type = match update.body_mode {
+                            hir::ReactiveUpdateBodyMode::Payload => payload_type.clone(),
+                            hir::ReactiveUpdateBodyMode::OptionalPayload => {
+                                hir::GateType::Option(Box::new(payload_type.clone()))
+                            }
+                        };
                         let body_fragment = match compile_runtime_expr_fragment(
                             self.module,
                             binding.item,
                             update.span,
                             update.body,
-                            payload_type,
+                            &body_type,
                             format!("__reactive_body_{}_{}", binding.item.as_raw(), clause_index)
                                 .into_boxed_str(),
                             &public_signals,
@@ -431,6 +437,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                             target_span: update.target_span,
                             guard: update.guard,
                             body: update.body,
+                            body_mode: update.body_mode,
                             clause: ReactiveClauseHandle::from_raw(next_reactive_clause_raw),
                             guard_dependencies: guard_dependencies.clone().into_boxed_slice(),
                             body_dependencies: body_dependencies.clone().into_boxed_slice(),
@@ -1032,6 +1039,7 @@ pub struct HirReactiveUpdateBinding {
     pub target_span: SourceSpan,
     pub guard: hir::ExprId,
     pub body: hir::ExprId,
+    pub body_mode: hir::ReactiveUpdateBodyMode,
     pub clause: ReactiveClauseHandle,
     pub guard_dependencies: Box<[SignalHandle]>,
     pub body_dependencies: Box<[SignalHandle]>,
@@ -2491,6 +2499,63 @@ when ready and enabled => total <- left + right
                 total.signal()
             );
         }
+    }
+
+    #[test]
+    fn assembles_pattern_armed_reactive_updates_into_runtime_bindings() {
+        let lowered = lower_text(
+            "runtime-hir-adapter-pattern-reactive-updates.aivi",
+            r#"
+type Direction = Up | Down
+type Event = Turn Direction | Tick
+
+signal event = Turn Down
+signal heading = Up
+signal tickSeen = False
+
+when event
+  ||> Turn dir => heading <- dir
+  ||> Tick => tickSeen <- True
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "pattern-armed reactive update fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let assembly = assemble_hir_runtime(lowered.module())
+            .expect("pattern-armed reactive update fixture should assemble");
+        let event = assembly
+            .signal(item_id(lowered.module(), "event"))
+            .expect("event signal binding should exist");
+        let heading = assembly
+            .signal(item_id(lowered.module(), "heading"))
+            .expect("heading signal binding should exist");
+        let tick_seen = assembly
+            .signal(item_id(lowered.module(), "tickSeen"))
+            .expect("tickSeen signal binding should exist");
+
+        assert!(matches!(
+            heading.kind,
+            HirSignalBindingKind::Reactive { .. }
+        ));
+        assert!(matches!(
+            tick_seen.kind,
+            HirSignalBindingKind::Reactive { .. }
+        ));
+        assert_eq!(heading.dependencies(), &[event.signal()]);
+        assert_eq!(tick_seen.dependencies(), &[event.signal()]);
+        assert_eq!(heading.reactive_updates().len(), 1);
+        assert_eq!(tick_seen.reactive_updates().len(), 1);
+        assert_eq!(
+            heading.reactive_updates()[0].body_mode,
+            hir::ReactiveUpdateBodyMode::OptionalPayload
+        );
+        assert_eq!(
+            tick_seen.reactive_updates()[0].body_mode,
+            hir::ReactiveUpdateBodyMode::OptionalPayload
+        );
     }
 
     #[test]

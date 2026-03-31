@@ -67,7 +67,9 @@ For ordinary non-signal values, the same operator returns `Option A`.
 
 ## Reactive update clauses with `when`
 
-You can also attach top-level reactive updates to an already declared signal:
+You can also attach top-level reactive updates to an already declared signal.
+
+The guarded form uses an ordinary boolean expression:
 
 ```aivi
 signal left = 20
@@ -84,20 +86,37 @@ when ready and enabled => total <-
     }
 ```
 
-This form means:
+You can also match a subject value directly and route each matching arm into an existing signal:
 
-- the guard is an ordinary boolean expression
+```aivi
+type Direction = Up | Down
+type Event = Turn Direction | Tick
+
+signal event = Turn Down
+signal heading = Up
+signal tickSeen = False
+
+when event
+  ||> Turn dir => heading <- dir
+  ||> Tick => tickSeen <- True
+```
+
+These forms mean:
+
+- the guarded form uses an ordinary boolean expression
+- the pattern-armed form matches each `||>` arm against the subject expression
+- any binders introduced by an arm, like `dir`, are only in scope for that arm body
 - the target must be a previously declared signal
 - the right-hand side is an ordinary expression with direct signal references
-- unlike a pipe, there is no ambient subject value
-- if the guard is false when the clause fires, the target keeps its previous committed value
+- unlike a pipe, there is no ambient subject value inside the body
+- if a guarded clause is false when it fires, the target keeps its previous committed value
 - if multiple `when` clauses write the same signal in one tick, later clauses win by source order
 
 Guards like `status.done` are fine too, but only when ordinary expression typing already proves that member access is a `Bool`.
 
 Use `when` when you want event-shaped reactive commits into an existing signal. Use pipes when you want to transform the current subject flowing through one expression spine.
 
-At the moment, this surface is documented and partially wired through the frontend/tooling, but runtime execution is still incomplete, so end-to-end programs using `when` are not yet fully supported.
+Reactive update self-reference rules are unchanged. A target signal still cannot read itself from its own `when` guard or body.
 
 ## Previous and diff
 

@@ -746,6 +746,7 @@ pub struct LinkedReactiveClause {
     pub target: SignalHandle,
     pub clause: ReactiveClauseHandle,
     pub pipeline_ids: Box<[BackendPipelineId]>,
+    pub body_mode: hir::ReactiveUpdateBodyMode,
     pub compiled_guard: HirCompiledRuntimeExpr,
     pub compiled_body: HirCompiledRuntimeExpr,
 }
@@ -1407,6 +1408,12 @@ pub enum BackendRuntimeError {
         item: hir::ItemId,
         error: EvaluationError,
     },
+    ReactiveBodyReturnedNonOption {
+        signal: SignalHandle,
+        clause: ReactiveClauseHandle,
+        item: hir::ItemId,
+        value: RuntimeValue,
+    },
     ReactiveGuardReturnedNonBool {
         signal: SignalHandle,
         clause: ReactiveClauseHandle,
@@ -1587,6 +1594,16 @@ impl fmt::Display for BackendRuntimeError {
             } => write!(
                 f,
                 "failed to evaluate reactive body {:?} for signal {:?} / item {item}: {error}",
+                clause, signal
+            ),
+            Self::ReactiveBodyReturnedNonOption {
+                signal,
+                clause,
+                item,
+                value,
+            } => write!(
+                f,
+                "reactive body {:?} for signal {:?} / item {item} returned non-option value {value:?}",
                 clause, signal
             ),
             Self::ReactiveGuardReturnedNonBool {
@@ -1807,6 +1824,33 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
             .map_err(|error| {
                 self.reactive_body_eval_error(signal, clause, clause_binding.owner, error)
             })?;
+        let value = match clause_binding.body_mode {
+            hir::ReactiveUpdateBodyMode::Payload => value,
+            hir::ReactiveUpdateBodyMode::OptionalPayload => match value {
+                RuntimeValue::OptionSome(value) => *value,
+                RuntimeValue::OptionNone => return Ok(DerivedSignalUpdate::Unchanged),
+                RuntimeValue::Signal(inner) => match *inner {
+                    RuntimeValue::OptionSome(value) => *value,
+                    RuntimeValue::OptionNone => return Ok(DerivedSignalUpdate::Unchanged),
+                    other => {
+                        return Err(BackendRuntimeError::ReactiveBodyReturnedNonOption {
+                            signal,
+                            clause,
+                            item: clause_binding.owner,
+                            value: RuntimeValue::Signal(Box::new(other)),
+                        });
+                    }
+                },
+                other => {
+                    return Err(BackendRuntimeError::ReactiveBodyReturnedNonOption {
+                        signal,
+                        clause,
+                        item: clause_binding.owner,
+                        value: other,
+                    });
+                }
+            },
+        };
 
         let globals = self.build_signal_globals(signal_binding.backend_item, &inputs);
         let mut evaluator = KernelEvaluator::new(self.backend);
@@ -2586,6 +2630,7 @@ impl<'a> LinkBuilder<'a> {
                         target: reactive,
                         clause: clause.clause,
                         pipeline_ids: pipeline_ids.clone(),
+                        body_mode: clause.body_mode,
                         compiled_guard: clause.compiled_guard.clone(),
                         compiled_body: clause.compiled_body.clone(),
                     },
@@ -4217,6 +4262,57 @@ when ready and enabled => total <- left + right + 1
             linked.runtime().current_value(total_signal).unwrap(),
             Some(&RuntimeValue::Int(43)),
             "false guards should preserve the previously committed reactive value"
+        );
+    }
+
+    #[test]
+    fn linked_runtime_executes_pattern_armed_reactive_updates_end_to_end() {
+        let lowered = lower_text(
+            "runtime-startup-pattern-reactive-when.aivi",
+            r#"
+type Direction = Up | Down
+type Event = Turn Direction | Tick
+
+signal event = Turn Down
+signal heading : Signal Direction = Up
+signal tickSeen : Signal Bool = False
+
+when event
+  ||> Turn dir => heading <- dir
+  ||> Tick => tickSeen <- True
+"#,
+        );
+        let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+            .expect("runtime assembly should build for pattern-armed reactive updates");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("pattern-armed reactive updates should link successfully");
+
+        let first = linked
+            .tick_with_source_lifecycle()
+            .expect("initial pattern-armed reactive tick should succeed");
+        assert!(
+            first.source_actions().is_empty(),
+            "constant pattern-armed fixture should not request source actions"
+        );
+
+        let heading_signal = signal_handle(&linked, lowered.hir.module(), "heading");
+        let tick_seen_signal = signal_handle(&linked, lowered.hir.module(), "tickSeen");
+        let Some(RuntimeValue::Sum(heading)) =
+            linked.runtime().current_value(heading_signal).unwrap()
+        else {
+            panic!("heading signal should hold a sum value after the reactive tick");
+        };
+        assert_eq!(&*heading.type_name, "Direction");
+        assert_eq!(&*heading.variant_name, "Down");
+        assert!(heading.fields.is_empty());
+        assert_eq!(
+            linked.runtime().current_value(tick_seen_signal).unwrap(),
+            Some(&RuntimeValue::Bool(false)),
+            "non-matching pattern arms should leave the other target untouched"
         );
     }
 

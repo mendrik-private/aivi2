@@ -735,6 +735,13 @@ pub struct ReactiveUpdateClause {
     pub target_span: SourceSpan,
     pub guard: ExprId,
     pub body: ExprId,
+    pub body_mode: ReactiveUpdateBodyMode,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReactiveUpdateBodyMode {
+    Payload,
+    OptionalPayload,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

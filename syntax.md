@@ -750,22 +750,36 @@ Rules:
 signal total = 0
 
 when ready => total <- left + right
-when ready and enabled => total <- left + right
+
+when event
+  ||> Turn dir => heading <- dir
+  ||> Tick => tickSeen <- True
 ```
 
 Rules:
 
-- Canonical form: `when <guard> => <target> <- <expr>`
-- Guard must be `Bool`.
-- Target must be a previously declared local `signal`.
-- No ambient subject in the body expression.
-- If multiple clauses fire in one tick, later source order wins.
+- Guarded form: `when <guard> => <target> <- <expr>`
+- Pattern-armed form:
+
+  ```aivi
+  when <subject>
+    ||> <pattern> => <target> <- <expr>
+    ||> <pattern> => <target> <- <expr>
+  ```
+
+- In the guarded form, the guard must be `Bool`.
+- In the pattern-armed form, each arm pattern is matched against the subject with ordinary pattern rules.
+- Pattern binders introduced by an arm are only in scope for that arm body.
+- Every target must be a previously declared local `signal`.
+- No ambient subject is available inside the body expression.
+- Pattern-armed `when` is specific to reactive updates; it does not weaken ordinary pipe exhaustiveness elsewhere.
+- Reactive update self-reference rules are unchanged: the target signal cannot read itself from its own reactive update guard or body.
+- If multiple clauses for the same target fire in one tick, later source order wins.
 
 Current implementation note:
 
-- Frontend support exists.
-- Runtime execution is not fully wired end to end yet.
-- For conservative executable code, prefer ordinary derived signals or `+|>` unless `when` is already used in the target codebase/runtime slice.
+- The surface lowers through existing pipe/case machinery rather than a separate pattern runtime.
+- Standalone compile/startup integration remains narrower than the fully checked frontend/runtime test surface.
 
 ### 7.5 `Task E A`
 

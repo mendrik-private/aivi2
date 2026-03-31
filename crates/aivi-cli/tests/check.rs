@@ -121,6 +121,40 @@ fn check_reports_reactive_update_self_reference_from_hir() {
 }
 
 #[test]
+fn check_accepts_pattern_armed_reactive_updates() {
+    let dir = TempDir::new("check-pattern-reactive-update");
+    let path = dir.write(
+        "main.aivi",
+        concat!(
+            "type Direction = Up | Down\n",
+            "type Event = Turn Direction | Tick\n",
+            "signal event = Turn Down\n",
+            "signal heading = Up\n",
+            "signal tickSeen = False\n",
+            "when event\n",
+            "  ||> Turn dir => heading <- dir\n",
+            "  ||> Tick => tickSeen <- True\n",
+        ),
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        output.status.success(),
+        "expected pattern-armed reactive update program to pass check, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("syntax + HIR passed"),
+        "expected success output for pattern-armed reactive update program, got stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
 fn check_accepts_multiline_accumulate_pipe_signal_bodies() {
     let dir = TempDir::new("check-multiline-accumulate-pipe");
     let path = dir.write(

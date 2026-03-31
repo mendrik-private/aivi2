@@ -704,14 +704,35 @@ impl NamedItem {
     }
 }
 
-/// Top-level `when <guard> => <target> <- <expr>` reactive signal update clause.
+/// One pattern arm inside a pattern-armed reactive update item.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReactiveUpdateArm {
+    pub pattern: Option<Pattern>,
+    pub target: Option<Identifier>,
+    pub body: Option<Expr>,
+    pub span: SourceSpan,
+}
+
+/// Surface forms supported by top-level reactive update items.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReactiveUpdateKind {
+    Guarded {
+        guard: Option<Expr>,
+        target: Option<Identifier>,
+        body: Option<Expr>,
+    },
+    Match {
+        subject: Option<Expr>,
+        arms: Vec<ReactiveUpdateArm>,
+    },
+}
+
+/// Top-level reactive signal update item.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReactiveUpdateItem {
     pub base: ItemBase,
     pub keyword_span: SourceSpan,
-    pub guard: Option<Expr>,
-    pub target: Option<Identifier>,
-    pub body: Option<Expr>,
+    pub kind: ReactiveUpdateKind,
 }
 
 /// `instance` declaration.

@@ -6,17 +6,18 @@ use crate::cst::{
     Identifier, InstanceItem, InstanceMember, Item, MapExpr, MarkupAttribute, MarkupAttributeValue,
     MarkupNode, Module, NamedItem, PatchBlock, PatchEntry, PatchInstruction, PatchInstructionKind,
     PatchSelector, PatchSelectorSegment, Pattern, PatternKind, PipeExpr, PipeStage, PipeStageKind,
-    ProjectionPath, QualifiedName, ReactiveUpdateItem, RecordExpr, RecordField, RecordPatternField,
-    ResultBinding, ResultBlockExpr, SourceDecorator, SourceProviderContractItem,
-    SourceProviderContractMember, SourceProviderContractSchemaMember, SuffixedIntegerLiteral,
-    TextLiteral, TextSegment, TypeDeclBody, TypeExpr, TypeExprKind, TypeField, TypeVariant,
-    UnaryOperator, UseItem,
+    ProjectionPath, QualifiedName, ReactiveUpdateArm, ReactiveUpdateItem, ReactiveUpdateKind,
+    RecordExpr, RecordField, RecordPatternField, ResultBinding, ResultBlockExpr, SourceDecorator,
+    SourceProviderContractItem, SourceProviderContractMember, SourceProviderContractSchemaMember,
+    SuffixedIntegerLiteral, TextLiteral, TextSegment, TypeDeclBody, TypeExpr, TypeExprKind,
+    TypeField, TypeVariant, UnaryOperator, UseItem,
 };
 
 const INDENT_WIDTH: usize = 4;
 const INLINE_LIMIT: usize = 32;
 const TYPE_VARIANT_INDENT: usize = 2;
 const PIPE_STAGE_INDENT: usize = 1;
+const REACTIVE_UPDATE_ARM_INDENT: usize = 2;
 
 const EXPR_PIPE_PREC: u8 = 0;
 const EXPR_RANGE_PREC: u8 = 1;
@@ -220,18 +221,65 @@ impl Formatter {
     }
 
     fn format_reactive_update_item(&self, item: &ReactiveUpdateItem) -> Vec<String> {
-        let guard = item
-            .guard
-            .as_ref()
+        match &item.kind {
+            ReactiveUpdateKind::Guarded {
+                guard,
+                target,
+                body,
+            } => {
+                self.format_guarded_reactive_update(guard.as_ref(), target.as_ref(), body.as_ref())
+            }
+            ReactiveUpdateKind::Match { subject, arms } => {
+                let subject = subject
+                    .as_ref()
+                    .map(|expr| self.format_expr_inline(expr, 0))
+                    .unwrap_or_else(|| "_".to_owned());
+                let mut lines = vec![format!("when {subject}")];
+                for arm in arms {
+                    lines.extend(
+                        self.format_reactive_update_arm(arm)
+                            .into_iter()
+                            .map(|line| format!("{}{line}", spaces(REACTIVE_UPDATE_ARM_INDENT))),
+                    );
+                }
+                lines
+            }
+        }
+    }
+
+    fn format_guarded_reactive_update(
+        &self,
+        guard: Option<&Expr>,
+        target: Option<&Identifier>,
+        body: Option<&Expr>,
+    ) -> Vec<String> {
+        let guard = guard
             .map(|expr| self.format_expr_inline(expr, 0))
             .unwrap_or_else(|| "_".to_owned());
-        let target = item
+        let target = target
+            .map(|target| target.text.clone())
+            .unwrap_or_else(|| "_".to_owned());
+        let header = format!("when {guard} => {target}");
+        self.format_reactive_update_body(&header, body)
+    }
+
+    fn format_reactive_update_arm(&self, arm: &ReactiveUpdateArm) -> Vec<String> {
+        let pattern = arm
+            .pattern
+            .as_ref()
+            .map(|pattern| self.format_pattern_inline(pattern, 0))
+            .unwrap_or_else(|| "_".to_owned());
+        let target = arm
             .target
             .as_ref()
             .map(|target| target.text.clone())
             .unwrap_or_else(|| "_".to_owned());
-        let header = format!("when {guard} => {target}");
-        let Some(body) = &item.body else {
+        let header = format!("||> {pattern} => {target}");
+        self.format_reactive_update_body(&header, arm.body.as_ref())
+    }
+
+    fn format_reactive_update_body(&self, header: &str, body: Option<&Expr>) -> Vec<String> {
+        let Some(body) = body else {
             return vec![format!("{header} <-")];
         };
 
@@ -2647,6 +2695,25 @@ value view =
                 "        next <- Ok signal1\n",
                 "        next + signal2\n",
                 "    }\n",
+            )
+        );
+    }
+
+    #[test]
+    fn formatter_normalizes_pattern_armed_reactive_update_items() {
+        let formatted = format_text(
+            "signal heading:Signal Direction\nsignal ticks:Signal Int\nsignal event:Signal Event\nwhen event\n  ||>Turn dir=>heading<-dir\n  ||>Tick=>ticks<-ticks+1\n",
+        );
+        assert_eq!(
+            formatted,
+            concat!(
+                "signal heading : Signal Direction\n",
+                "signal ticks : Signal Int\n",
+                "signal event : Signal Event\n",
+                "\n",
+                "when event\n",
+                "  ||> Turn dir => heading <- dir\n",
+                "  ||> Tick => ticks <- ticks + 1\n",
             )
         );
     }

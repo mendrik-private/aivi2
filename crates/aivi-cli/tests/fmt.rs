@@ -94,6 +94,53 @@ fn fmt_normalizes_reactive_update_items() {
 }
 
 #[test]
+fn fmt_normalizes_pattern_armed_reactive_update_items() {
+    let input = TempFile::new(
+        "fmt-pattern-reactive-update",
+        concat!(
+            "type Direction=Up|Down\n",
+            "type Event=Turn Direction|Tick\n",
+            "signal heading:Signal Direction\n",
+            "signal tickSeen:Signal Bool\n",
+            "signal event=Turn Down\n",
+            "when event\n",
+            "  ||>Turn dir=>heading<-dir\n",
+            "  ||>Tick=>tickSeen<-True\n",
+        ),
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("fmt")
+        .arg(input.path())
+        .output()
+        .expect("fmt command should run");
+
+    assert!(
+        output.status.success(),
+        "fmt should succeed for pattern-armed reactive update items, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout should be utf-8"),
+        concat!(
+            "type Direction = Up | Down\n",
+            "\n",
+            "type Event =\n",
+            "  | Turn Direction\n",
+            "  | Tick\n",
+            "\n",
+            "signal heading : Signal Direction\n",
+            "signal tickSeen : Signal Bool\n",
+            "signal event = Turn Down\n",
+            "\n",
+            "when event\n",
+            "  ||> Turn dir => heading <- dir\n",
+            "  ||> Tick => tickSeen <- True\n",
+        )
+    );
+}
+
+#[test]
 fn fmt_normalizes_markup_layout() {
     let input = TempFile::new(
         "fmt-normalize",
