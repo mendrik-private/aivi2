@@ -35,20 +35,20 @@ type TickState = {
     seenRestartCount: Int
 }
 
+type FoodSearch = {
+    seed: Int,
+    found: Bool,
+    value: Cell
+}
+
 type CellHeadState = {
     found: Bool,
     value: Cell
 }
 
-type CellTakeState = {
+type SnakeTrimState = {
     remaining: Int,
     cells: List Cell
-}
-
-type FoodSearch = {
-    seed: Int,
-    found: Bool,
-    value: Cell
 }
 
 value board : Board = {
@@ -67,15 +67,15 @@ value initialSnake = [
     Cell 4 10
 ]
 
+type List Cell => Cell
+func snakeHead snake => snake
+  |> reduce cellHeadStep { found: False, value: Cell 0 0 }
+  |> .value
+
 type CellHeadState -> Cell -> CellHeadState
 func cellHeadStep state item => state.found
  T|> state
  F|> { found: True, value: item }
-
-type List Cell => Cell
-func firstCell cells => cells
-  |> reduce cellHeadStep { found: False, value: Cell 0 0 }
-  |> .value
 
 type Cell -> Bool -> Cell -> Bool
 func snakeContainsStep target found item => found
@@ -163,10 +163,9 @@ func countRestart key total => key
 
 type Direction -> (List Cell) -> Cell
 func nextHeadFor direction snake => snake
-  |> firstCell
+  |> snakeHead
   |> moveCell direction
 
-type Cell -> Bool
 func hitsWall cell => cell
  ||> Cell x y -> x < 0 or x >= board.width or y < 0 or y >= board.height
 
@@ -181,36 +180,36 @@ func willCrash direction game => game.snake
  T|> True
  F|> snakeContains snake next
 
+type Direction -> (List Cell) -> (List Cell)
+func advanceSnake direction snake =>
+    append [nextHeadFor direction snake] snake
+
 type Int -> Cell -> Int
-func cellLengthStep total item =>
+func snakeLengthStep total item =>
     total + 1
 
 type List Cell => Int
-func cellLength cells => cells
-  |> reduce cellLengthStep 0
+func snakeLength snake => snake
+  |> reduce snakeLengthStep 0
 
-type Direction -> (List Cell) -> (List Cell)
-func growSnake direction snake =>
-    append [nextHeadFor direction snake] snake
-
-type CellTakeState -> Cell -> CellTakeState
-func takeCellStep state item => state.remaining > 0
+type SnakeTrimState -> Cell -> SnakeTrimState
+func trimSnakeStep state item => state.remaining > 0
  T|> { remaining: state.remaining - 1, cells: append state.cells [item] }
  F|> state
 
-type Int -> (List Cell) -> (List Cell)
-func takeCells n cells => cells
-  |> reduce takeCellStep { remaining: n, cells: [] }
+type List Cell => (List Cell) -> (List Cell)
+func trimSnake snake cells => cells
+  |> reduce trimSnakeStep { remaining: snakeLength snake, cells: [] }
   |> .cells
 
 type Direction -> (List Cell) -> (List Cell)
-func moveSnake direction snake => append [nextHeadFor direction snake] snake
-  |> takeCells (cellLength snake)
+func movedSnake direction snake =>
+    trimSnake snake (advanceSnake direction snake)
 
 type Direction -> Bool -> (List Cell) -> (List Cell)
 func nextSnake direction ate snake => ate
- T|> growSnake direction snake
- F|> moveSnake direction snake
+ T|> advanceSnake direction snake
+ F|> movedSnake direction snake
 
 type Bool -> Int -> Int
 func nextScore ate score => ate
@@ -271,7 +270,7 @@ func stepOnTick tick state =>
 type Cell -> Cell -> Text
 func foodOrEmptyGlyph food cell => cell == food
  T|> "*"
- F|> "·"
+ F|> "."
 
 type List Cell => Cell -> Cell -> Text
 func bodyOrFoodGlyph snake food cell => snakeContains snake cell
@@ -279,7 +278,7 @@ func bodyOrFoodGlyph snake food cell => snakeContains snake cell
  F|> foodOrEmptyGlyph food cell
 
 type List Cell => Cell -> Cell -> Text
-func cellGlyph snake food cell => cell == firstCell snake
+func cellGlyph snake food cell => cell == snakeHead snake
  T|> "@"
  F|> bodyOrFoodGlyph snake food cell
 
@@ -307,6 +306,27 @@ func directionLabel direction => direction
  ||> East  -> "Right"
  ||> West  -> "Left"
 
+type TickState -> Bool
+func gameOverFromState state =>
+    state.game.gameOver
+
+type TickState -> Text
+func scoreLineFromState state =>
+    "Score: {state.game.score}"
+
+type TickState -> Text
+func statusLineFromState state => state.game.gameOver
+ T|> "Game Over"
+ F|> "Running"
+
+type TickState -> Text
+func boardTextFromState state =>
+    boardTextFor state.game
+
+type TickState -> Text
+func finalScoreLineFromState state =>
+    "Final score: {state.game.score}"
+
 @source window.keyDown with {
     repeat: False,
     focusOnly: True
@@ -328,17 +348,22 @@ signal restartCount : Signal Int = keyDown
 signal gameState : Signal TickState = tick
  +|> initialTickState stepOnTick
 
-signal game : Signal Game = gameState.game
+signal gameOver : Signal Bool = gameOverFromState gameState
+signal dirLine : Signal Text = directionLabel direction
+signal scoreLine : Signal Text = scoreLineFromState gameState
+signal statusLine : Signal Text = statusLineFromState gameState
+signal boardText : Signal Text = boardTextFromState gameState
+signal finalScoreLine : Signal Text = finalScoreLineFromState gameState
 
 value main =
     <Window title="AIVI Snake">
         <Box orientation="vertical" spacing={8}>
-            <Label text={directionLabel direction} />
-            <Label text={"Score: {game.score}"} />
-            <Label text={game.gameOver T|> "Game Over" F|> "Running"} />
-            <Label text={boardTextFor game} monospace />
-            <show when={game.gameOver}>
-                <Label text={"Final score: {game.score}"} />
+            <Label text={dirLine} />
+            <Label text={scoreLine} />
+            <Label text={statusLine} />
+            <Label text={boardText} monospace />
+            <show when={gameOver}>
+                <Label text={finalScoreLine} />
             </show>
         </Box>
     </Window>

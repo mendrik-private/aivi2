@@ -28,8 +28,10 @@ const IDX_COMMENT: u32 = 7;
 fn token_type_index(kind: TokenKind) -> Option<u32> {
     match kind {
         // Keywords
-        TokenKind::TypeKw
-        | TokenKind::FuncKw
+        // Keep `type` on TextMate scopes so type signatures/declarations can
+        // opt into a uniform line color without a semantic-keyword override.
+        TokenKind::TypeKw => None,
+        TokenKind::FuncKw
         | TokenKind::ValueKw
         | TokenKind::SignalKw
         | TokenKind::ClassKw
@@ -241,6 +243,11 @@ mod tests {
     }
 
     #[test]
+    fn leaves_type_keyword_to_textmate() {
+        assert_eq!(token_type_index(TokenKind::TypeKw), None);
+    }
+
+    #[test]
     fn detects_unescaped_text_interpolation_holes() {
         assert!(string_literal_has_interpolation(
             r#""Final score: {game.score}""#
@@ -283,6 +290,9 @@ mod tests {
             .copied()
             .expect("expected a string literal token");
 
-        assert_eq!(soft_or_hard_token_type_index(string, &source), Some(IDX_STRING));
+        assert_eq!(
+            soft_or_hard_token_type_index(string, &source),
+            Some(IDX_STRING)
+        );
     }
 }

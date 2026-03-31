@@ -14335,25 +14335,7 @@ impl<'a> GateTypeContext<'a> {
     }
 
     fn project_type(&self, subject: &GateType, path: &NamePath) -> Result<GateType, GateIssue> {
-        let mut current = subject.clone();
-        for segment in path.segments().iter() {
-            let GateType::Record(fields) = &current else {
-                return Err(GateIssue::InvalidProjection {
-                    span: path.span(),
-                    path: name_path_text(path),
-                    subject: current.to_string(),
-                });
-            };
-            let Some(field) = fields.iter().find(|field| field.name == segment.text()) else {
-                return Err(GateIssue::UnknownField {
-                    span: path.span(),
-                    path: name_path_text(path),
-                    subject: current.to_string(),
-                });
-            };
-            current = field.ty.clone();
-        }
-        Ok(current)
+        project_gate_type(subject, path)
     }
 
     fn apply_function(&self, callee: &GateType, argument: &GateType) -> Option<GateType> {
@@ -14416,6 +14398,48 @@ pub(crate) fn truthy_falsy_pair_stages<'a>(
         }),
         _ => None,
     }
+}
+
+pub(crate) fn project_gate_type(
+    subject: &GateType,
+    path: &NamePath,
+) -> Result<GateType, GateIssue> {
+    let mut current = subject.clone();
+    for segment in path.segments().iter() {
+        let (fields, wrap_signal) = match &current {
+            GateType::Record(fields) => (fields, false),
+            GateType::Signal(payload) => match payload.as_ref() {
+                GateType::Record(fields) => (fields, true),
+                _ => {
+                    return Err(GateIssue::InvalidProjection {
+                        span: path.span(),
+                        path: name_path_text(path),
+                        subject: current.to_string(),
+                    });
+                }
+            },
+            _ => {
+                return Err(GateIssue::InvalidProjection {
+                    span: path.span(),
+                    path: name_path_text(path),
+                    subject: current.to_string(),
+                });
+            }
+        };
+        let Some(field) = fields.iter().find(|field| field.name == segment.text()) else {
+            return Err(GateIssue::UnknownField {
+                span: path.span(),
+                path: name_path_text(path),
+                subject: current.to_string(),
+            });
+        };
+        current = if wrap_signal {
+            GateType::Signal(Box::new(field.ty.clone()))
+        } else {
+            field.ty.clone()
+        };
+    }
+    Ok(current)
 }
 
 fn name_path_text(path: &NamePath) -> String {

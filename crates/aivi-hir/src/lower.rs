@@ -4381,7 +4381,9 @@ impl<'a> Lowerer<'a> {
                     item.parameters.len(),
                     item.context.clone(),
                     item.annotation,
-                    item.parameters.iter().any(|parameter| parameter.annotation.is_some()),
+                    item.parameters
+                        .iter()
+                        .any(|parameter| parameter.annotation.is_some()),
                     item.header.span,
                 )),
                 _ => None,
@@ -4397,8 +4399,8 @@ impl<'a> Lowerer<'a> {
             return;
         }
 
-        let Some((constraint_count, parameter_annotations, result_annotation)) = self
-            .split_normalized_function_signature_annotation(&context, annotation, arity)
+        let Some((constraint_count, parameter_annotations, result_annotation)) =
+            self.split_normalized_function_signature_annotation(&context, annotation, arity)
         else {
             self.diagnostics.push(
                 Diagnostic::error(
@@ -4455,8 +4457,8 @@ impl<'a> Lowerer<'a> {
             }
             let remaining_arity = arity - trailing_parameter_count;
             let mut item_stack = Vec::new();
-            let Some((mut parameter_annotations, result_annotation)) =
-                self.split_function_signature_annotation(
+            let Some((mut parameter_annotations, result_annotation)) = self
+                .split_function_signature_annotation(
                     annotation,
                     remaining_arity,
                     &HashMap::new(),
@@ -4492,8 +4494,12 @@ impl<'a> Lowerer<'a> {
         match ty.kind {
             TypeKind::Arrow { parameter, result } => {
                 let parameter = self.instantiate_signature_type(parameter, substitutions)?;
-                let (mut parameters, result) =
-                    self.split_function_signature_annotation(result, arity - 1, substitutions, item_stack)?;
+                let (mut parameters, result) = self.split_function_signature_annotation(
+                    result,
+                    arity - 1,
+                    substitutions,
+                    item_stack,
+                )?;
                 parameters.insert(0, parameter);
                 Some((parameters, result))
             }
@@ -4562,8 +4568,10 @@ impl<'a> Lowerer<'a> {
                 }
                 let mut nested_substitutions = HashMap::with_capacity(parameters.len());
                 for (parameter, argument) in parameters.iter().zip(arguments.iter()) {
-                    nested_substitutions
-                        .insert(*parameter, self.instantiate_signature_type(*argument, substitutions)?);
+                    nested_substitutions.insert(
+                        *parameter,
+                        self.instantiate_signature_type(*argument, substitutions)?,
+                    );
                 }
                 item_stack.push(alias_item_id);
                 let split = self.split_function_signature_annotation(
@@ -4625,13 +4633,15 @@ impl<'a> Lowerer<'a> {
                 if !changed {
                     return Some(type_id);
                 }
-                Some(self.alloc_type(TypeNode {
-                    span: ty.span,
-                    kind: TypeKind::Tuple(
-                        AtLeastTwo::from_vec(instantiated)
-                            .expect("tuple instantiation preserves arity"),
-                    ),
-                }))
+                Some(
+                    self.alloc_type(TypeNode {
+                        span: ty.span,
+                        kind: TypeKind::Tuple(
+                            AtLeastTwo::from_vec(instantiated)
+                                .expect("tuple instantiation preserves arity"),
+                        ),
+                    }),
+                )
             }
             TypeKind::Record(fields) => {
                 let mut changed = false;
@@ -4693,14 +4703,19 @@ impl<'a> Lowerer<'a> {
                 if !changed {
                     return Some(type_id);
                 }
-                Some(self.alloc_type(TypeNode {
-                    span: ty.span,
-                    kind: TypeKind::Apply {
-                        callee: instantiated_callee,
-                        arguments: NonEmpty::from_vec(instantiated_arguments)
-                            .expect("type applications preserve non-empty argument lists"),
+                Some(self.alloc_type(
+                    TypeNode {
+                        span: ty.span,
+                        kind:
+                            TypeKind::Apply {
+                                callee: instantiated_callee,
+                                arguments:
+                                    NonEmpty::from_vec(instantiated_arguments).expect(
+                                        "type applications preserve non-empty argument lists",
+                                    ),
+                            },
                     },
-                }))
+                ))
             }
         }
     }
@@ -9288,6 +9303,46 @@ signal updates : Signal Int
     }
 
     #[test]
+    fn tracks_signal_dependencies_through_signal_record_projections() {
+        let lowered = lower_text(
+            "signal-projection-dependencies.aivi",
+            "type Game = { score: Int }\n\
+             type State = { game: Game, seenRestartCount: Int }\n\
+             signal state : Signal State = { game: { score: 0 }, seenRestartCount: 0 }\n\
+             signal game : Signal Game = state.game\n\
+             signal score : Signal Int = state.game.score\n",
+        );
+        assert!(
+            !lowered.has_errors(),
+            "signal projection dependency example should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = lowered
+            .module()
+            .validate(ValidationMode::RequireResolvedNames);
+        assert!(
+            report.is_ok(),
+            "signal projection dependency example should validate cleanly: {:?}",
+            report.diagnostics()
+        );
+
+        let game = find_signal(lowered.module(), "game");
+        assert_eq!(
+            signal_dependency_names(lowered.module(), game),
+            vec!["state".to_owned()],
+            "projecting a field out of a signal record should keep the upstream signal dependency"
+        );
+
+        let score = find_signal(lowered.module(), "score");
+        assert_eq!(
+            signal_dependency_names(lowered.module(), score),
+            vec!["state".to_owned()],
+            "nested signal record projections should still trace back to the original upstream signal"
+        );
+    }
+
+    #[test]
     fn normalizes_expression_headed_clusters_into_spines() {
         let lowered = lower_text(
             "expression-headed-clusters.aivi",
@@ -9812,7 +9867,9 @@ signal updates : Signal Int
                         "expected builtin `List` callee resolution, found {:?}",
                         reference.resolution.as_ref()
                     ),
-                    other => panic!("expected `List` callee in parameter annotation, found {other:?}"),
+                    other => {
+                        panic!("expected `List` callee in parameter annotation, found {other:?}")
+                    }
                 }
                 let argument = arguments
                     .iter()

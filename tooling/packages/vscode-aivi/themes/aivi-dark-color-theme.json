@@ -388,6 +388,30 @@
       "scope": "entity.other.attribute-name.aivi",
       "settings": { "foreground": "#B294BB" } }
 
+    ,{ "name": "Type surface unicolor",
+      "scope": ["meta.type.annotation.aivi",
+                "meta.type.annotation.aivi entity.name",
+                "meta.type.annotation.aivi support",
+                "meta.type.annotation.aivi variable",
+                "meta.type.annotation.aivi keyword",
+                "meta.type.annotation.aivi punctuation",
+                "meta.type.annotation.aivi constant",
+                "meta.type.signature.aivi",
+                "meta.type.signature.aivi entity.name",
+                "meta.type.signature.aivi support",
+                "meta.type.signature.aivi variable",
+                "meta.type.signature.aivi keyword",
+                "meta.type.signature.aivi punctuation",
+                "meta.type.signature.aivi constant",
+                "meta.type.declaration.aivi",
+                "meta.type.declaration.aivi entity.name",
+                "meta.type.declaration.aivi support",
+                "meta.type.declaration.aivi variable",
+                "meta.type.declaration.aivi keyword",
+                "meta.type.declaration.aivi punctuation",
+                "meta.type.declaration.aivi constant"],
+      "settings": { "foreground": "#2B2B40" } }
+
   ],
   "semanticTokenColors": {
     "type":      { "foreground": "#F0C674" },

@@ -129,6 +129,7 @@
 
     "annotated-signatures": {
       "patterns": [
+        { "include": "#type-signature" },
         { "include": "#fun-signature" },
         { "include": "#value-signature" },
         { "include": "#signal-signature" },
@@ -139,6 +140,18 @@
         { "include": "#class-annotation-block" },
         { "include": "#domain-annotation-block" },
         { "include": "#provider-annotation-block" }
+      ]
+    },
+
+    "type-signature": {
+      "begin": "^\\s*(type)\\b(?!\\s+[A-Z][a-zA-Z0-9_]*(?:\\s+[a-z][a-zA-Z0-9_]*)*\\s*=)",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration.type.aivi" }
+      },
+      "end": "$",
+      "name": "meta.type.signature.aivi",
+      "patterns": [
+        { "include": "#type-surface" }
       ]
     },
 
@@ -166,7 +179,10 @@
         "0": { "name": "punctuation.separator.type.annotation.declaration.aivi" }
       },
       "end": "(?=\\s+[a-z_][a-zA-Z0-9_]*\\s*:(?!:)|\\s*=>|$)",
-      "contentName": "meta.type.annotation.aivi"
+      "name": "meta.type.annotation.aivi",
+      "patterns": [
+        { "include": "#type-surface" }
+      ]
     },
 
     "assignment-type-annotation": {
@@ -175,7 +191,10 @@
         "0": { "name": "punctuation.separator.type.annotation.declaration.aivi" }
       },
       "end": "(?=\\s*=|$)",
-      "contentName": "meta.type.annotation.aivi"
+      "name": "meta.type.annotation.aivi",
+      "patterns": [
+        { "include": "#type-surface" }
+      ]
     },
 
     "value-signature": {
@@ -310,13 +329,16 @@
     "declaration": {
       "patterns": [
         {
-          "comment": "type Name <params>",
-          "match": "\\b(type)\\s+([A-Z][a-zA-Z0-9_]*)((?:\\s+[a-z][a-zA-Z0-9_]*)*)",
-          "captures": {
-            "1": { "name": "keyword.declaration.type.aivi" },
-            "2": { "name": "entity.name.type.aivi" },
-            "3": { "name": "variable.parameter.type.aivi" }
-          }
+          "comment": "type Name <params> = ...",
+          "begin": "^\\s*(type)\\b(?=\\s+[A-Z][a-zA-Z0-9_]*(?:\\s+[a-z][a-zA-Z0-9_]*)*(?:\\s*=|$))",
+          "beginCaptures": {
+            "1": { "name": "keyword.declaration.type.aivi" }
+          },
+          "end": "$",
+          "name": "meta.type.declaration.aivi",
+          "patterns": [
+            { "include": "#type-surface" }
+          ]
         },
         {
           "comment": "class Name TypeParam",
@@ -639,6 +661,28 @@
           "name": "support.constant.builtin.aivi",
           "match": "\\b(Some|None|Ok|Err|True|False|Valid|Invalid)\\b"
         }
+      ]
+    },
+
+    "type-surface": {
+      "patterns": [
+        { "include": "#line-comment" },
+        { "include": "#block-comment" },
+        { "include": "#record-key" },
+        { "include": "#type-expression" },
+        {
+          "match": "\\b([A-Z][a-zA-Z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "entity.name.type.aivi" }
+          }
+        },
+        {
+          "match": "\\b([a-z_][a-zA-Z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "variable.parameter.type.aivi" }
+          }
+        },
+        { "include": "#operators" }
       ]
     },
 

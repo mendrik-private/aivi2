@@ -295,7 +295,8 @@ impl Formatter {
             .iter()
             .map(|parameter| parameter.annotation.as_ref())
             .collect();
-        let parameter_annotations = parameter_annotations.filter(|annotations| !annotations.is_empty());
+        let parameter_annotations =
+            parameter_annotations.filter(|annotations| !annotations.is_empty());
 
         let mut rendered = String::new();
         if !item.constraints.is_empty() {
@@ -2642,7 +2643,7 @@ value view =
                 "\n",
                 "when ready => total <- signal1 + signal2\n",
                 "when ready.done => total <-\n",
-                    "    result {\n",
+                "    result {\n",
                 "        next <- Ok signal1\n",
                 "        next + signal2\n",
                 "    }\n",

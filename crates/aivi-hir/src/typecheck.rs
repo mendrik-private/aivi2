@@ -15,6 +15,7 @@ use crate::{
     validate::{
         ClassConstraintBinding, ClassMemberCallMatch, DomainMemberSelection, GateExprEnv,
         GateIssue, GateRecordField, GateType, GateTypeContext, PolyTypeBindings, TypeBinding,
+        project_gate_type,
     },
 };
 
@@ -2236,7 +2237,7 @@ impl<'a> TypeChecker<'a> {
             return Some(false);
         }
 
-        match self.project_type(&subject, path) {
+        match project_gate_type(&subject, path) {
             Ok(actual) => Some(self.check_result_type(expr_id, Some(expected), &actual)),
             Err(issue) => {
                 self.emit_expr_issues(&[issue]);
@@ -2642,28 +2643,6 @@ impl<'a> TypeChecker<'a> {
                 None
             }
         }
-    }
-
-    fn project_type(&self, subject: &GateType, path: &NamePath) -> Result<GateType, GateIssue> {
-        let mut current = subject.clone();
-        for segment in path.segments().iter() {
-            let GateType::Record(fields) = &current else {
-                return Err(GateIssue::InvalidProjection {
-                    span: path.span(),
-                    path: projection_path_text(path),
-                    subject: current.to_string(),
-                });
-            };
-            let Some(field) = fields.iter().find(|field| field.name == segment.text()) else {
-                return Err(GateIssue::UnknownField {
-                    span: path.span(),
-                    path: projection_path_text(path),
-                    subject: current.to_string(),
-                });
-            };
-            current = field.ty.clone();
-        }
-        Ok(current)
     }
 
     fn require_default(&mut self, ty: &GateType) -> Result<DefaultEvidence, String> {
@@ -3897,17 +3876,6 @@ fn patch_map_entry_type(key: &GateType, value: &GateType) -> GateType {
             ty: value.clone(),
         },
     ])
-}
-
-fn projection_path_text(path: &NamePath) -> String {
-    format!(
-        ".{}",
-        path.segments()
-            .iter()
-            .map(|segment| segment.text())
-            .collect::<Vec<_>>()
-            .join(".")
-    )
 }
 
 // KNOWN ISSUE: This function mutates the module (by synthesizing and injecting new record
@@ -5647,6 +5615,56 @@ fun items:(List A) acc:(TakeAcc A) => acc.items
         assert!(
             report.is_ok(),
             "expected projection from an unannotated record value to typecheck, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_accepts_projection_from_signal_wrapped_records() {
+        let report = typecheck_text(
+            "projection-from-signal-record.aivi",
+            "type Game = { score: Int }\n\
+             type State = { game: Game, seenRestartCount: Int }\n\
+             signal state : Signal State = { game: { score: 0 }, seenRestartCount: 0 }\n\
+             signal game : Signal Game = state.game\n\
+             signal score : Signal Int = state.game.score\n",
+        );
+        assert!(
+            report.is_ok(),
+            "expected projection from signal-wrapped records to typecheck, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_reports_unknown_field_from_signal_record_projection() {
+        let report = typecheck_text(
+            "signal-projection-unknown-field.aivi",
+            "type State = { game: Int }\n\
+             signal state : Signal State = { game: 1 }\n\
+             signal missing : Signal Int = state.score\n",
+        );
+        assert!(
+            report.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code == Some(DiagnosticCode::new("hir", "unknown-projection-field"))
+            }),
+            "expected unknown projection field diagnostic from a signal projection, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typecheck_reports_invalid_projection_from_signal_non_record_payload() {
+        let report = typecheck_text(
+            "signal-projection-non-record-payload.aivi",
+            "signal score : Signal Int = 1\n\
+             signal broken : Signal Int = score.value\n",
+        );
+        assert!(
+            report.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code == Some(DiagnosticCode::new("hir", "invalid-projection"))
+            }),
+            "expected invalid projection diagnostic from a signal payload projection, got diagnostics: {:?}",
             report.diagnostics()
         );
     }
