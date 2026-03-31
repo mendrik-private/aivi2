@@ -15,6 +15,21 @@ pub async fn definition(
     let lsp_pos = params.text_document_position_params.position;
 
     let file = *state.files.get(uri)?;
+    let navigation = crate::navigation::NavigationAnalysis::load(&state.db, file);
+    match navigation.definition_targets_at_lsp_position(
+        &state.db,
+        LspPosition {
+            line: lsp_pos.line,
+            character: lsp_pos.character,
+        },
+    ) {
+        crate::navigation::NavigationLookup::Targets(targets) => {
+            return crate::navigation::goto_response(&state.db, targets);
+        }
+        crate::navigation::NavigationLookup::NoTargets => return None,
+        crate::navigation::NavigationLookup::NoSite => {}
+    }
+
     let analysis = crate::analysis::FileAnalysis::load(&state.db, file);
     let sym = analysis.tightest_symbol_at_lsp_position(LspPosition {
         line: lsp_pos.line,

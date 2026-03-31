@@ -20,6 +20,6 @@ pub use entry::{
 pub use inputs::SourceFile;
 pub use queries::{
     HirModuleResult, ParsedFileResult, all_diagnostics, exported_names, format_file, hir_module,
-    parsed_file, symbol_index,
+    parsed_file, resolve_module_file, symbol_index,
 };
 pub use workspace::{discover_workspace_root, discover_workspace_root_from_directory};

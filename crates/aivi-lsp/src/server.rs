@@ -3,16 +3,18 @@ use std::sync::Arc;
 use tower_lsp::{
     Client, LanguageServer,
     jsonrpc::Result,
+    lsp_types::request::{GotoImplementationParams, GotoImplementationResponse},
     lsp_types::{
         CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
         DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
         DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
-        Hover, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-        InitializedParams, Location, MessageType, OneOf, SemanticTokensFullOptions,
-        SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
-        SemanticTokensServerCapabilities, ServerCapabilities, SymbolInformation, SymbolKind,
-        TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit,
-        WorkDoneProgressOptions, WorkspaceSymbolParams,
+        Hover, HoverParams, HoverProviderCapability, ImplementationProviderCapability,
+        InitializeParams, InitializeResult, InitializedParams, Location, MessageType, OneOf,
+        SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
+        SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
+        ServerCapabilities, SymbolInformation, SymbolKind, TextDocumentSyncCapability,
+        TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit, WorkDoneProgressOptions,
+        WorkspaceSymbolParams,
     },
 };
 
@@ -70,6 +72,7 @@ impl LanguageServer for Backend {
                     ..Default::default()
                 }),
                 definition_provider: Some(OneOf::Left(true)),
+                implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
@@ -190,6 +193,13 @@ impl LanguageServer for Backend {
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
         Ok(crate::definition::definition(params, Arc::clone(&self.state)).await)
+    }
+
+    async fn goto_implementation(
+        &self,
+        params: GotoImplementationParams,
+    ) -> Result<Option<GotoImplementationResponse>> {
+        Ok(crate::implementation::implementation(params, Arc::clone(&self.state)).await)
     }
 
     async fn symbol(

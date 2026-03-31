@@ -197,6 +197,18 @@ pub fn exported_names(db: &RootDatabase, file: SourceFile) -> ExportedNames {
     hir_module(db, file).exported_names().clone()
 }
 
+/// Resolve a module path from the perspective of an already-known source file.
+///
+/// This reuses the same workspace-root and bundled-stdlib rules as HIR lowering,
+/// opening the target source file on demand when it exists on disk.
+pub fn resolve_module_file(
+    db: &RootDatabase,
+    file: SourceFile,
+    module: &[&str],
+) -> Option<SourceFile> {
+    Workspace::discover(db, file).resolve_module_file(db, module)
+}
+
 /// Format the source file using the memoised CST.
 pub fn format_file(db: &RootDatabase, file: SourceFile) -> Option<String> {
     let parsed = parsed_file(db, file);

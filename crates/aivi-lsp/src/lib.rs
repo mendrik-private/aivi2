@@ -9,6 +9,8 @@ pub mod diagnostics;
 pub mod documents;
 pub mod formatting;
 pub mod hover;
+pub mod implementation;
+mod navigation;
 pub mod semantic_tokens;
 pub mod server;
 pub mod state;
