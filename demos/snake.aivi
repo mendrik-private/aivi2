@@ -51,11 +51,6 @@ type FoodSearch = {
     value: Cell
 }
 
-type BoardTextState = {
-    first: Bool,
-    value: Text
-}
-
 value board : Board = {
     width: 30,
     height: 20
@@ -77,7 +72,7 @@ func cellHeadStep state item => state.found
  T|> state
  F|> { found: True, value: item }
 
-type (List Cell) -> Cell
+type List Cell => Cell
 func firstCell cells => cells
   |> reduce cellHeadStep { found: False, value: Cell 0 0 }
   |> .value
@@ -87,11 +82,11 @@ func snakeContainsStep target found item => found
  T|> True
  F|> item == target
 
-type (List Cell) -> Cell -> Bool
+type List Cell => Cell -> Bool
 func snakeContains snake cell => snake
   |> reduce (snakeContainsStep cell) False
 
-type (List Cell) -> Cell -> Bool
+type List Cell => Cell -> Bool
 func cellIsOpen snake cell =>
     not (snakeContains snake cell)
 
@@ -111,19 +106,19 @@ func advanceFoodSearch seed =>
         value: Cell 0 0
     }
 
-type (List Cell) -> Int -> FoodSearch
+type List Cell => Int -> FoodSearch
 func maybePickFood snake seed => seed
   |> spawnCandidate #candidate
   |> cellIsOpen snake
  T|> { seed, found: True, value: candidate }
  F|> advanceFoodSearch seed
 
-type (List Cell) -> FoodSearch -> Int -> FoodSearch
-func searchFoodStep snake state step => state.found
- T|> state
- F|> maybePickFood snake state.seed
+type List Cell => FoodSearch -> Int -> FoodSearch
+func searchFoodStep snake search step => search.found
+ T|> search
+ F|> maybePickFood snake search.seed
 
-type (List Cell) -> Int -> Cell
+type List Cell => Int -> Cell
 func spawnFood snake seed => foodSearchSteps
   |> reduce (searchFoodStep snake) { seed, found: False, value: Cell 0 0 }
   |> .value
@@ -190,7 +185,7 @@ type Int -> Cell -> Int
 func cellLengthStep total item =>
     total + 1
 
-type (List Cell) -> Int
+type List Cell => Int
 func cellLength cells => cells
   |> reduce cellLengthStep 0
 
@@ -252,24 +247,20 @@ func stepRunning direction game => willCrash direction game
  T|> gameOverState game
  F|> applyRunningStep direction (willEat direction game) (nextSeed game.seed) game
 
-type Int -> Int -> Bool
-func restartPending restartCount seenRestartCount =>
-    restartCount != seenRestartCount
-
 type Bool -> Game -> Game
-func restartIfRequested restart game => restart
+func restartGame restart game => restart
  T|> initialGame
  F|> game
 
 type Bool -> Direction -> Game -> Game
 func stepGame restart direction game => game.gameOver
- T|> restartIfRequested restart game
+ T|> restartGame restart game
  F|> stepRunning direction game
 
 type Int -> Direction -> TickState -> TickState
 func stepTickState restartCount direction state =>
     {
-        game: stepGame (restartPending restartCount state.seenRestartCount) direction state.game,
+        game: stepGame (restartCount != state.seenRestartCount) direction state.game,
         seenRestartCount: restartCount
     }
 
@@ -282,33 +273,32 @@ func foodOrEmptyGlyph food cell => cell == food
  T|> "*"
  F|> "·"
 
-type (List Cell) -> Cell -> Cell -> Text
+type List Cell => Cell -> Cell -> Text
 func bodyOrFoodGlyph snake food cell => snakeContains snake cell
  T|> "o"
  F|> foodOrEmptyGlyph food cell
 
-type (List Cell) -> Cell -> Cell -> Text
+type List Cell => Cell -> Cell -> Text
 func cellGlyph snake food cell => cell == firstCell snake
  T|> "@"
  F|> bodyOrFoodGlyph snake food cell
 
-type (List Cell) -> Cell -> Int -> Text -> Int -> Text
+type List Cell => Cell -> Int -> Text -> Int -> Text
 func rowTextStep snake food row text col =>
     "{text}{cellGlyph snake food (Cell col row)}"
 
-type (List Cell) -> Cell -> Int -> Text
+type List Cell => Cell -> Int -> Text
 func rowText snake food row => boardColumns
   |> reduce (rowTextStep snake food row) ""
 
-type (List Cell) -> Cell -> BoardTextState -> Int -> BoardTextState
-func boardTextStep snake food state row => state.first
- T|> { first: False, value: rowText snake food row }
- F|> { first: False, value: "{state.value}\n{rowText snake food row}" }
+type List Cell => Cell -> Text -> Int -> Text
+func boardTextStep snake food text row => text == ""
+ T|> rowText snake food row
+ F|> "{text}\n{rowText snake food row}"
 
 type Game -> Text
 func boardTextFor game => boardRows
-  |> reduce (boardTextStep game.snake game.food) { first: True, value: "" }
-  |> .value
+  |> reduce (boardTextStep game.snake game.food) ""
 
 type Direction -> Text
 func directionLabel direction => direction
@@ -361,23 +351,6 @@ signal score : Signal Int = game
 
 signal gameOver : Signal Bool = game
   |> .gameOver
-
-signal head : Signal Cell = snake
-  |> firstCell
-
-signal nextHead : Signal Cell = snake
-  |> nextHeadFor direction
-
-signal hasEaten : Signal Bool = game
-  |> willEat direction
-
-signal hitWall : Signal Bool = nextHead
-  |> hitsWall
-
-signal hitSelf : Signal Bool = nextHead
-  |> snakeContains snake
-
-signal dead : Signal Bool = hitWall or hitSelf
 
 signal boardText : Signal Text = game
   |> boardTextFor
