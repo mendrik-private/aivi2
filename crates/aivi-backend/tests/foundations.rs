@@ -3858,22 +3858,70 @@ fun sameStats:Bool left:Stats right:Stats =>
 }
 
 #[test]
-fn cranelift_codegen_rejects_non_niche_option_equality() {
+fn cranelift_codegen_compiles_scalar_option_equality_and_constructors() {
     let backend = lower_text(
         "backend-option-int-equality-codegen.aivi",
         r#"
 fun sameMaybeInt:Bool left:(Option Int) right:(Option Int) =>
     left == right
+
+fun differentMaybeInt:Bool left:(Option Int) right:(Option Int) =>
+    left != right
+
+fun liftMaybeInt:(Option Int) value:Int =>
+    Some value
+
+value missingMaybeInt:(Option Int) =
+    None
 "#,
     );
 
-    let errors =
-        compile_program(&backend).expect_err("Option Int equality should stay unsupported");
-    assert!(errors.errors().iter().any(|error| matches!(
-        error,
-        CodegenError::UnsupportedExpression { detail, .. }
-            if detail.contains("aggregate option encoding") && detail.contains("Option")
-    )));
+    let same_body = backend.items()[find_item(&backend, "sameMaybeInt")]
+        .body
+        .expect("sameMaybeInt should carry a body kernel");
+    let different_body = backend.items()[find_item(&backend, "differentMaybeInt")]
+        .body
+        .expect("differentMaybeInt should carry a body kernel");
+    let lift_body = backend.items()[find_item(&backend, "liftMaybeInt")]
+        .body
+        .expect("liftMaybeInt should carry a body kernel");
+    let missing_body = backend.items()[find_item(&backend, "missingMaybeInt")]
+        .body
+        .expect("missingMaybeInt should carry a body kernel");
+
+    let compiled = compile_program(&backend)
+        .expect("scalar Option Int constructors and equality should compile");
+
+    let same_artifact = compiled
+        .kernel(same_body)
+        .expect("compiled program should retain sameMaybeInt kernel metadata");
+    assert!(same_artifact.code_size > 0);
+    assert!(same_artifact.clif.contains("(i128, i128) -> i8"));
+    assert!(same_artifact.clif.contains("icmp"));
+
+    let different_artifact = compiled
+        .kernel(different_body)
+        .expect("compiled program should retain differentMaybeInt kernel metadata");
+    assert!(different_artifact.code_size > 0);
+    assert!(different_artifact.clif.contains("(i128, i128) -> i8"));
+    assert!(different_artifact.clif.contains("bxor"));
+
+    let lift_artifact = compiled
+        .kernel(lift_body)
+        .expect("compiled program should retain liftMaybeInt kernel metadata");
+    assert!(lift_artifact.code_size > 0);
+    assert!(lift_artifact.clif.contains("(i64) -> i128"));
+    assert!(lift_artifact.clif.contains("ishl_imm"));
+    assert!(lift_artifact.clif.contains("bor"));
+
+    let missing_artifact = compiled
+        .kernel(missing_body)
+        .expect("compiled program should retain missingMaybeInt kernel metadata");
+    assert!(missing_artifact.code_size > 0);
+    assert!(missing_artifact.clif.contains("() -> i128"));
+    assert!(missing_artifact.clif.contains("iconst.i64 0"));
+    assert!(missing_artifact.clif.contains("uextend.i128"));
+    assert!(!compiled.object().is_empty());
 }
 
 #[test]
@@ -4033,6 +4081,7 @@ fn cranelift_codegen_compiles_selected_bytes_intrinsics() {
         r#"
 use aivi.core.bytes (
     empty,
+    get,
     fromText,
     length,
     toText
@@ -4043,6 +4092,9 @@ value noBytes:Bytes =
 
 fun measureBytes:Int bytes:Bytes =>
     length bytes
+
+fun firstByte:(Option Int) bytes:Bytes =>
+    get 0 bytes
 
 fun encodeLabel:Bytes label:Text =>
     fromText label
@@ -4059,6 +4111,9 @@ fun decodeLabel:(Option Text) bytes:Bytes =>
     let measure_bytes_body = backend.items()[find_item(&backend, "measureBytes")]
         .body
         .expect("measureBytes should carry a body kernel");
+    let first_byte_body = backend.items()[find_item(&backend, "firstByte")]
+        .body
+        .expect("firstByte should carry a body kernel");
     let encode_label_body = backend.items()[find_item(&backend, "encodeLabel")]
         .body
         .expect("encodeLabel should carry a body kernel");
@@ -4086,6 +4141,19 @@ fun decodeLabel:(Option Text) bytes:Bytes =>
             .contains(&format!("({ptr}) -> i64"))
     );
     assert!(measure_bytes_artifact.clif.contains("load.i64"));
+
+    let first_byte_artifact = compiled
+        .kernel(first_byte_body)
+        .expect("compiled program should retain firstByte kernel metadata");
+    assert!(first_byte_artifact.code_size > 0);
+    assert!(
+        first_byte_artifact
+            .clif
+            .contains(&format!("({ptr}) -> i128"))
+    );
+    assert!(first_byte_artifact.clif.contains("load.i64"));
+    assert!(first_byte_artifact.clif.contains("load.i8"));
+    assert!(first_byte_artifact.clif.contains("brif"));
 
     let encode_label_artifact = compiled
         .kernel(encode_label_body)
@@ -4244,7 +4312,7 @@ fun combine:Bytes left:Bytes right:Bytes =>
     assert!(errors.errors().iter().any(|error| matches!(
         error,
         CodegenError::UnsupportedExpression { detail, .. }
-            if detail.contains("empty/length/fromText/toText Cranelift subset")
+            if detail.contains("empty/length/get/fromText/toText Cranelift subset")
     )));
 }
 
@@ -4719,7 +4787,7 @@ fn cranelift_codegen_prevalidates_invalid_projection_paths() {
 }
 
 #[test]
-fn cranelift_codegen_rejects_non_niche_option_carriers() {
+fn cranelift_codegen_compiles_scalar_option_carriers() {
     let option_int = CoreType::Option(Box::new(CoreType::Primitive(BuiltinType::Int)));
     let core = manual_core_gate_stage(
         CoreType::Primitive(BuiltinType::Bool),
@@ -4765,13 +4833,34 @@ fn cranelift_codegen_rejects_non_niche_option_carriers() {
     let backend = lower_backend_module(&lambda).expect("backend lowering should succeed");
     validate_program(&backend).expect("backend program should validate");
 
-    let errors =
-        compile_program(&backend).expect_err("non-niche Option carriers should stay unsupported");
-    assert!(errors.errors().iter().any(|error| matches!(
-        error,
-        CodegenError::UnsupportedExpression { detail, .. }
-            if detail.contains("requires an Option over a by-reference payload")
-    )));
+    let item = find_item(&backend, "captured");
+    let (when_true, when_false) =
+        match &backend.pipelines()[first_pipeline(&backend, item)].stages[0].kind {
+            BackendStageKind::Gate(BackendGateStage::Ordinary {
+                when_true,
+                when_false,
+            }) => (*when_true, *when_false),
+            other => panic!("expected ordinary gate stage, found {other:?}"),
+        };
+
+    let compiled =
+        compile_program(&backend).expect("scalar Option carriers should compile through Cranelift");
+    let when_true_artifact = compiled
+        .kernel(when_true)
+        .expect("compiled program should retain Some carrier kernel metadata");
+    assert!(when_true_artifact.code_size > 0);
+    assert!(when_true_artifact.clif.contains("() -> i128"));
+    assert!(when_true_artifact.clif.contains("ishl_imm"));
+    assert!(when_true_artifact.clif.contains("bor"));
+
+    let when_false_artifact = compiled
+        .kernel(when_false)
+        .expect("compiled program should retain None carrier kernel metadata");
+    assert!(when_false_artifact.code_size > 0);
+    assert!(when_false_artifact.clif.contains("() -> i128"));
+    assert!(when_false_artifact.clif.contains("iconst.i64 0"));
+    assert!(when_false_artifact.clif.contains("uextend.i128"));
+    assert!(!compiled.object().is_empty());
 }
 
 #[test]

@@ -12,7 +12,8 @@ use cranelift_codegen::{
         types,
     },
     print_errors::pretty_verifier_error,
-    settings, verify_function,
+    settings::{self, Configurable},
+    verify_function,
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::{DataDescription, FuncId, Linkage, Module, default_libcall_names};
@@ -20,9 +21,9 @@ use cranelift_object::{ObjectBuilder, ObjectModule};
 
 use crate::{
     AbiPassMode, BinaryOperator, BuiltinTerm, CallingConventionKind, EnvSlotId, ItemId, Kernel,
-    KernelExprId, KernelExprKind, KernelId, KernelOriginKind, LayoutId, LayoutKind, ParameterRole,
-    PrimitiveType, Program, RuntimeMap, RuntimeMapEntry, RuntimeRecordField, RuntimeValue,
-    SubjectRef, UnaryOperator, ValidationError, describe_expr_kind,
+    KernelExprId, KernelExprKind, KernelId, KernelOriginKind, Layout, LayoutId, LayoutKind,
+    ParameterRole, PrimitiveType, Program, RuntimeMap, RuntimeMapEntry, RuntimeRecordField,
+    RuntimeValue, SubjectRef, UnaryOperator, ValidationError, describe_expr_kind,
     numeric::{RuntimeBigInt, RuntimeDecimal, RuntimeFloat},
     validate_program,
 };
@@ -315,14 +316,28 @@ enum DomainMemberCallPlan {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BuiltinCallPlan {
-    NicheOptionSome,
+    OptionSome(OptionCodegenContract),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum IntrinsicCallPlan {
     BytesLength,
+    BytesGet,
     BytesFromText,
     BytesToText,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScalarOptionKind {
+    Int,
+    Float,
+    Bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OptionCodegenContract {
+    NicheReference,
+    InlineScalar(ScalarOptionKind),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -339,6 +354,7 @@ enum NativeEqualityShape {
     Bytes,
     Aggregate(Vec<NativeEqualityField>),
     NicheOption { payload: Box<NativeEqualityShape> },
+    InlineScalarOption(ScalarOptionKind),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -357,6 +373,11 @@ enum StaticMaterializationPlan {
     Bytes(Box<[u8]>),
     NicheOptionNone,
     NicheOptionSome(Box<StaticMaterializationPlan>),
+    InlineScalarOptionNone(ScalarOptionKind),
+    InlineScalarOptionSome {
+        kind: ScalarOptionKind,
+        payload: Box<StaticMaterializationPlan>,
+    },
 }
 
 impl<'a> CraneliftCompiler<'a> {
@@ -365,8 +386,14 @@ impl<'a> CraneliftCompiler<'a> {
             cranelift_native::builder().map_err(|message| CodegenError::HostIsaUnavailable {
                 message: message.to_owned().into_boxed_str(),
             })?;
+        let mut flags = settings::builder();
+        flags
+            .enable("enable_llvm_abi_extensions")
+            .map_err(|error| CodegenError::TargetIsaCreation {
+                message: error.to_string().into_boxed_str(),
+            })?;
         let isa = isa_builder
-            .finish(settings::Flags::new(settings::builder()))
+            .finish(settings::Flags::new(flags))
             .map_err(|error| CodegenError::TargetIsaCreation {
                 message: error.to_string().into_boxed_str(),
             })?;
@@ -434,7 +461,7 @@ impl<'a> CraneliftCompiler<'a> {
                     | KernelExprKind::Subject(SubjectRef::Inline(_))
                     | KernelExprKind::Environment(_) => {}
                     KernelExprKind::OptionSome { payload } => {
-                        if let Err(error) = self.require_niche_option_expression(
+                        if let Err(error) = self.require_option_codegen_contract(
                             kernel_id,
                             kernel,
                             expr_id,
@@ -447,7 +474,7 @@ impl<'a> CraneliftCompiler<'a> {
                         work.push(*payload);
                     }
                     KernelExprKind::OptionNone => {
-                        if let Err(error) = self.require_niche_option_expression(
+                        if let Err(error) = self.require_option_codegen_contract(
                             kernel_id,
                             kernel,
                             expr_id,
@@ -509,7 +536,7 @@ impl<'a> CraneliftCompiler<'a> {
                         }
                     }
                     KernelExprKind::Builtin(BuiltinTerm::None) => {
-                        if let Err(error) = self.require_niche_option_expression(
+                        if let Err(error) = self.require_option_codegen_contract(
                             kernel_id,
                             kernel,
                             expr_id,
@@ -805,7 +832,7 @@ impl<'a> CraneliftCompiler<'a> {
                         errors.push(self.unsupported_expression(
                             kernel_id,
                             expr_id,
-                            "the current Cranelift slice lowers direct saturated item calls, selected direct bytes intrinsics, representational by-reference domain-member calls, niche Option constructors/carriers, record projection, straight-line inline-pipe transform/tap stages, scalar literals, static scalar tuple/record literals, Int/Bool arithmetic, Int/Float/Bool comparison, and native equality over scalar/Text/Bytes/record/tuple/niche-Option shapes only",
+                            "the current Cranelift slice lowers direct saturated item calls, selected direct bytes intrinsics, representational by-reference domain-member calls, niche and inline scalar Option constructors/carriers, record projection, straight-line inline-pipe transform/tap stages, scalar literals, static scalar tuple/record literals, Int/Bool arithmetic, Int/Float/Bool comparison, and native equality over scalar/Text/Bytes/record/tuple/scalar-Option/niche-Option shapes only",
                         ));
                     }
                 }
@@ -1077,7 +1104,7 @@ impl<'a> CraneliftCompiler<'a> {
                             tasks.push(Task::Visit(*payload));
                         }
                         KernelExprKind::OptionNone => {
-                            self.require_niche_option_expression(
+                            let contract = self.require_option_codegen_contract(
                                 kernel_id,
                                 kernel,
                                 expr_id,
@@ -1085,7 +1112,15 @@ impl<'a> CraneliftCompiler<'a> {
                                 expr.layout,
                                 "None carrier",
                             )?;
-                            values.push(builder.ins().iconst(self.pointer_type(), 0));
+                            let value = match contract {
+                                OptionCodegenContract::NicheReference => {
+                                    builder.ins().iconst(self.pointer_type(), 0)
+                                }
+                                OptionCodegenContract::InlineScalar(_) => {
+                                    self.lower_inline_scalar_option_none(builder)
+                                }
+                            };
+                            values.push(value);
                         }
                         KernelExprKind::Environment(slot) => {
                             let Some(Some(value)) = environment.get(slot.index()) else {
@@ -1198,7 +1233,7 @@ impl<'a> CraneliftCompiler<'a> {
                             values.push(builder.ins().iconst(types::I8, 0));
                         }
                         KernelExprKind::Builtin(BuiltinTerm::None) => {
-                            self.require_niche_option_expression(
+                            let contract = self.require_option_codegen_contract(
                                 kernel_id,
                                 kernel,
                                 expr_id,
@@ -1206,7 +1241,15 @@ impl<'a> CraneliftCompiler<'a> {
                                 expr.layout,
                                 "None constructor",
                             )?;
-                            values.push(builder.ins().iconst(self.pointer_type(), 0));
+                            let value = match contract {
+                                OptionCodegenContract::NicheReference => {
+                                    builder.ins().iconst(self.pointer_type(), 0)
+                                }
+                                OptionCodegenContract::InlineScalar(_) => {
+                                    self.lower_inline_scalar_option_none(builder)
+                                }
+                            };
+                            values.push(value);
                         }
                         KernelExprKind::IntrinsicValue(intrinsic) => {
                             values.push(self.lower_intrinsic_value(
@@ -1280,7 +1323,7 @@ impl<'a> CraneliftCompiler<'a> {
                             return Err(self.unsupported_expression(
                                 kernel_id,
                                 expr_id,
-                                "the current Cranelift slice only lowers direct saturated item calls, selected direct bytes intrinsics, representational by-reference domain-member calls, niche Option constructors/carriers, record projection, scalar subjects/environment slots, straight-line inline-pipe transform/tap stages, scalar literals, static scalar tuple/record literals, Int/Bool arithmetic, Int/Float/Bool comparison, and native equality over scalar/Text/Bytes/record/tuple/niche-Option shapes",
+                                "the current Cranelift slice only lowers direct saturated item calls, selected direct bytes intrinsics, representational by-reference domain-member calls, niche and inline scalar Option constructors/carriers, record projection, scalar subjects/environment slots, straight-line inline-pipe transform/tap stages, scalar literals, static scalar tuple/record literals, Int/Bool arithmetic, Int/Float/Bool comparison, and native equality over scalar/Text/Bytes/record/tuple/scalar-Option/niche-Option shapes",
                             ));
                         }
                     }
@@ -1291,7 +1334,7 @@ impl<'a> CraneliftCompiler<'a> {
                     let KernelExprKind::OptionSome { payload } = &expr.kind else {
                         unreachable!("build task must only be queued for option expressions");
                     };
-                    self.require_niche_option_expression(
+                    let contract = self.require_option_codegen_contract(
                         kernel_id,
                         kernel,
                         expr_id,
@@ -1299,6 +1342,12 @@ impl<'a> CraneliftCompiler<'a> {
                         expr.layout,
                         "Some carrier",
                     )?;
+                    let value = match contract {
+                        OptionCodegenContract::NicheReference => value,
+                        OptionCodegenContract::InlineScalar(kind) => {
+                            self.lower_inline_scalar_option_some(kind, value, builder)
+                        }
+                    };
                     values.push(value);
                 }
                 Task::BuildProjection(expr_id) => {
@@ -1563,6 +1612,7 @@ impl<'a> CraneliftCompiler<'a> {
                                 NativeEqualityShape::Text
                                 | NativeEqualityShape::Bytes
                                 | NativeEqualityShape::Aggregate(_)
+                                | NativeEqualityShape::InlineScalarOption(_)
                                 | NativeEqualityShape::NicheOption { .. } => {
                                     let equal = self.lower_native_equality_shape(
                                         kernel_id, expr_id, &shape, lhs, rhs, builder,
@@ -1930,7 +1980,7 @@ impl<'a> CraneliftCompiler<'a> {
             _ => Err(self.unsupported_expression(
                 kernel_id,
                 expr_id,
-                "the current Cranelift slice only lowers direct saturated item calls, selected direct bytes intrinsics, representational by-reference domain-member calls, and niche Option constructors",
+                "the current Cranelift slice only lowers direct saturated item calls, selected direct bytes intrinsics, representational by-reference domain-member calls, and niche or inline scalar Option constructors",
             )),
         }
     }
@@ -2027,7 +2077,7 @@ impl<'a> CraneliftCompiler<'a> {
                     unreachable!("saturated `Some` call should keep exactly one payload");
                 };
                 let kernel = &self.program.kernels()[kernel_id];
-                self.require_niche_option_expression(
+                let contract = self.require_option_codegen_contract(
                     kernel_id,
                     kernel,
                     expr_id,
@@ -2035,7 +2085,7 @@ impl<'a> CraneliftCompiler<'a> {
                     result_layout,
                     &detail,
                 )?;
-                Ok(BuiltinCallPlan::NicheOptionSome)
+                Ok(BuiltinCallPlan::OptionSome(contract))
             }
             BuiltinTerm::None
             | BuiltinTerm::Ok
@@ -2045,7 +2095,7 @@ impl<'a> CraneliftCompiler<'a> {
                 kernel_id,
                 expr_id,
                 &format!(
-                    "builtin constructor `{term}` still requires backend-owned aggregate constructor lowering; the current Cranelift slice only lowers Bool literals plus niche Option None/Some forms"
+                    "builtin constructor `{term}` still requires backend-owned aggregate constructor lowering; the current Cranelift slice only lowers Bool literals plus niche and inline scalar Option None/Some forms"
                 ),
             )),
             BuiltinTerm::True | BuiltinTerm::False => Err(self.unsupported_expression(
@@ -2081,6 +2131,42 @@ impl<'a> CraneliftCompiler<'a> {
                 )?;
                 self.require_int_expression(kernel_id, expr_id, result_layout, "bytes.length result")?;
                 Ok(IntrinsicCallPlan::BytesLength)
+            }
+            IntrinsicValue::BytesGet => {
+                let [index, bytes] = arguments else {
+                    unreachable!("saturated `BytesGet` call should keep exactly two arguments");
+                };
+                self.require_int_expression(
+                    kernel_id,
+                    *index,
+                    kernel.exprs()[*index].layout,
+                    "bytes.get index",
+                )?;
+                self.require_bytes_expression(
+                    kernel_id,
+                    *bytes,
+                    kernel.exprs()[*bytes].layout,
+                    "bytes.get bytes",
+                )?;
+                let kind = self.require_inline_scalar_option_expression(
+                    kernel_id,
+                    kernel,
+                    expr_id,
+                    None,
+                    result_layout,
+                    "bytes.get result",
+                )?;
+                if kind != ScalarOptionKind::Int {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        &format!(
+                            "{detail} currently requires an inline scalar Option Int result, found layout{result_layout}=`{}`",
+                            self.program.layouts()[result_layout]
+                        ),
+                    ));
+                }
+                Ok(IntrinsicCallPlan::BytesGet)
             }
             IntrinsicValue::BytesFromText => {
                 let [text] = arguments else {
@@ -2157,7 +2243,7 @@ impl<'a> CraneliftCompiler<'a> {
                 kernel_id,
                 expr_id,
                 &format!(
-                    "{detail} still requires backend-owned bytes/runtime lowering beyond the current empty/length/fromText/toText Cranelift subset"
+                    "{detail} still requires backend-owned bytes/runtime lowering beyond the current empty/length/get/fromText/toText Cranelift subset"
                 ),
             )),
         }
@@ -2270,7 +2356,6 @@ impl<'a> CraneliftCompiler<'a> {
                 self.lower_direct_item_call(kernel_id, body, arguments, builder)
             }
             DirectApplyPlan::DomainMember(DomainMemberCallPlan::RepresentationalIdentityUnary)
-            | DirectApplyPlan::Builtin(BuiltinCallPlan::NicheOptionSome)
             | DirectApplyPlan::Intrinsic(IntrinsicCallPlan::BytesFromText) => {
                 let [argument] = arguments else {
                     return Err(self.unsupported_expression(
@@ -2280,6 +2365,21 @@ impl<'a> CraneliftCompiler<'a> {
                     ));
                 };
                 Ok(*argument)
+            }
+            DirectApplyPlan::Builtin(BuiltinCallPlan::OptionSome(contract)) => {
+                let [argument] = arguments else {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "direct Some lowering expected exactly one materialized payload",
+                    ));
+                };
+                match contract {
+                    OptionCodegenContract::NicheReference => Ok(*argument),
+                    OptionCodegenContract::InlineScalar(kind) => {
+                        Ok(self.lower_inline_scalar_option_some(kind, *argument, builder))
+                    }
+                }
             }
             DirectApplyPlan::Intrinsic(IntrinsicCallPlan::BytesLength) => {
                 let [argument] = arguments else {
@@ -2292,6 +2392,16 @@ impl<'a> CraneliftCompiler<'a> {
                 Ok(builder
                     .ins()
                     .load(types::I64, MemFlags::new(), *argument, 0))
+            }
+            DirectApplyPlan::Intrinsic(IntrinsicCallPlan::BytesGet) => {
+                let [index, bytes] = arguments else {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "direct bytes.get lowering expected exactly two materialized arguments",
+                    ));
+                };
+                Ok(self.lower_bytes_get_option(*index, *bytes, builder))
             }
             DirectApplyPlan::Intrinsic(IntrinsicCallPlan::BytesToText) => {
                 let [argument] = arguments else {
@@ -2492,7 +2602,42 @@ impl<'a> CraneliftCompiler<'a> {
         }
     }
 
-    fn require_niche_option_expression(
+    fn scalar_option_kind_for_layout(&self, layout: LayoutId) -> Option<ScalarOptionKind> {
+        match &self.program.layouts()[layout] {
+            Layout {
+                abi: AbiPassMode::ByValue,
+                kind: LayoutKind::Primitive(PrimitiveType::Int),
+            } => Some(ScalarOptionKind::Int),
+            Layout {
+                abi: AbiPassMode::ByValue,
+                kind: LayoutKind::Primitive(PrimitiveType::Float),
+            } => Some(ScalarOptionKind::Float),
+            Layout {
+                abi: AbiPassMode::ByValue,
+                kind: LayoutKind::Primitive(PrimitiveType::Bool),
+            } => Some(ScalarOptionKind::Bool),
+            _ => None,
+        }
+    }
+
+    fn option_codegen_contract(&self, layout: LayoutId) -> Option<OptionCodegenContract> {
+        let LayoutKind::Option { element } = &self.program.layouts()[layout].kind else {
+            return None;
+        };
+        if self.program.layouts()[layout].abi == AbiPassMode::ByReference
+            && self.program.layouts()[*element].abi == AbiPassMode::ByReference
+        {
+            return Some(OptionCodegenContract::NicheReference);
+        }
+        if self.program.layouts()[layout].abi == AbiPassMode::ByValue {
+            return self
+                .scalar_option_kind_for_layout(*element)
+                .map(OptionCodegenContract::InlineScalar);
+        }
+        None
+    }
+
+    fn require_option_codegen_contract(
         &self,
         kernel_id: KernelId,
         kernel: &Kernel,
@@ -2500,7 +2645,7 @@ impl<'a> CraneliftCompiler<'a> {
         payload: Option<KernelExprId>,
         layout: LayoutId,
         detail: &str,
-    ) -> Result<(), CodegenError> {
+    ) -> Result<OptionCodegenContract, CodegenError> {
         let LayoutKind::Option { element } = &self.program.layouts()[layout].kind else {
             return Err(self.unsupported_expression(
                 kernel_id,
@@ -2511,16 +2656,6 @@ impl<'a> CraneliftCompiler<'a> {
                 ),
             ));
         };
-        if self.program.layouts()[*element].abi != AbiPassMode::ByReference {
-            return Err(self.unsupported_expression(
-                kernel_id,
-                expr_id,
-                &format!(
-                    "{detail} currently requires an Option over a by-reference payload so codegen can use a null-pointer niche, found payload layout{element}=`{}`",
-                    self.program.layouts()[*element]
-                ),
-            ));
-        }
         if let Some(payload_expr) = payload {
             let payload_layout = kernel.exprs()[payload_expr].layout;
             if payload_layout != *element {
@@ -2534,7 +2669,82 @@ impl<'a> CraneliftCompiler<'a> {
                 ));
             }
         }
-        Ok(())
+        match self.option_codegen_contract(layout) {
+            Some(contract) => Ok(contract),
+            None if self.program.layouts()[layout].abi == AbiPassMode::ByReference => {
+                Err(self.unsupported_expression(
+                    kernel_id,
+                    expr_id,
+                    &format!(
+                        "{detail} currently requires either a by-reference payload for null-niche lowering or a by-value scalar payload for inline scalar option lowering, found Option layout{layout}=`{}` over payload layout{element}=`{}`",
+                        self.program.layouts()[layout],
+                        self.program.layouts()[*element]
+                    ),
+                ))
+            }
+            None => Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "{detail} still requires aggregate option encoding beyond the current scalar Option contract, found layout{layout}=`{}` over payload layout{element}=`{}`",
+                    self.program.layouts()[layout],
+                    self.program.layouts()[*element]
+                ),
+            )),
+        }
+    }
+
+    fn require_niche_option_expression(
+        &self,
+        kernel_id: KernelId,
+        kernel: &Kernel,
+        expr_id: KernelExprId,
+        payload: Option<KernelExprId>,
+        layout: LayoutId,
+        detail: &str,
+    ) -> Result<(), CodegenError> {
+        match self
+            .require_option_codegen_contract(kernel_id, kernel, expr_id, payload, layout, detail)?
+        {
+            OptionCodegenContract::NicheReference => Ok(()),
+            OptionCodegenContract::InlineScalar(_) => {
+                let LayoutKind::Option { element } = &self.program.layouts()[layout].kind else {
+                    unreachable!("validated option contract should preserve Option layouts");
+                };
+                Err(self.unsupported_expression(
+                    kernel_id,
+                    expr_id,
+                    &format!(
+                        "{detail} currently requires an Option over a by-reference payload so codegen can use a null-pointer niche, found payload layout{element}=`{}`",
+                        self.program.layouts()[*element]
+                    ),
+                ))
+            }
+        }
+    }
+
+    fn require_inline_scalar_option_expression(
+        &self,
+        kernel_id: KernelId,
+        kernel: &Kernel,
+        expr_id: KernelExprId,
+        payload: Option<KernelExprId>,
+        layout: LayoutId,
+        detail: &str,
+    ) -> Result<ScalarOptionKind, CodegenError> {
+        match self.require_option_codegen_contract(
+            kernel_id, kernel, expr_id, payload, layout, detail,
+        )? {
+            OptionCodegenContract::InlineScalar(kind) => Ok(kind),
+            OptionCodegenContract::NicheReference => Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "{detail} currently requires a by-value scalar Option layout for inline lowering, found `{}`",
+                    self.program.layouts()[layout]
+                ),
+            )),
+        }
     }
 
     fn require_compilable_intrinsic_value(
@@ -2747,6 +2957,19 @@ impl<'a> CraneliftCompiler<'a> {
                 result
             }
             LayoutKind::Option { element } => {
+                if let Some(kind) = self.scalar_option_kind_for_layout(*element) {
+                    if self.program.layouts()[layout].abi != AbiPassMode::ByValue {
+                        return Err(self.unsupported_expression(
+                            kernel_id,
+                            expr_id,
+                            &format!(
+                                "inline scalar Option layout{layout}=`{}` must stay by-value for native equality lowering",
+                                self.program.layouts()[layout]
+                            ),
+                        ));
+                    }
+                    return Ok(NativeEqualityShape::InlineScalarOption(kind));
+                }
                 if self.program.layouts()[layout].abi != AbiPassMode::ByReference {
                     return Err(self.unsupported_expression(
                         kernel_id,
@@ -2858,7 +3081,7 @@ impl<'a> CraneliftCompiler<'a> {
                 kernel_id,
                 expr_id,
                 &format!(
-                    "equality for layout{layout}=`{}` still requires a compiled representation bridge beyond native scalar/Text/Bytes/record/tuple/niche-Option shapes",
+                    "equality for layout{layout}=`{}` still requires a compiled representation bridge beyond native scalar/Text/Bytes/record/tuple/scalar-Option/niche-Option shapes",
                     self.program.layouts()[layout]
                 ),
             )),
@@ -2877,6 +3100,9 @@ impl<'a> CraneliftCompiler<'a> {
         match shape {
             NativeEqualityShape::Integer => Ok(builder.ins().icmp(IntCC::Equal, lhs, rhs)),
             NativeEqualityShape::Float => Ok(builder.ins().fcmp(FloatCC::Equal, lhs, rhs)),
+            NativeEqualityShape::InlineScalarOption(_) => {
+                Ok(builder.ins().icmp(IntCC::Equal, lhs, rhs))
+            }
             NativeEqualityShape::Text | NativeEqualityShape::Bytes => {
                 Ok(self.lower_native_byte_sequence_equality(lhs, rhs, builder))
             }
@@ -3039,6 +3265,81 @@ impl<'a> CraneliftCompiler<'a> {
         );
 
         builder.seal_block(loop_block);
+        builder.seal_block(done_block);
+        builder.switch_to_block(done_block);
+        builder.block_params(done_block)[0]
+    }
+
+    fn lower_inline_scalar_option_none(&self, builder: &mut FunctionBuilder<'_>) -> Value {
+        let zero = builder.ins().iconst(types::I64, 0);
+        builder.ins().uextend(types::I128, zero)
+    }
+
+    fn lower_inline_scalar_option_some(
+        &self,
+        kind: ScalarOptionKind,
+        payload: Value,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Value {
+        let payload_bits = match kind {
+            ScalarOptionKind::Int => builder.ins().sextend(types::I128, payload),
+            ScalarOptionKind::Float => {
+                let bits = builder.ins().bitcast(types::I64, MemFlags::new(), payload);
+                builder.ins().uextend(types::I128, bits)
+            }
+            ScalarOptionKind::Bool => builder.ins().uextend(types::I128, payload),
+        };
+        let shifted = builder.ins().ishl_imm(payload_bits, 64);
+        let tag_i64 = builder.ins().iconst(types::I64, 1);
+        let tag = builder.ins().uextend(types::I128, tag_i64);
+        builder.ins().bor(shifted, tag)
+    }
+
+    fn lower_bytes_get_option(
+        &self,
+        index: Value,
+        bytes: Value,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Value {
+        let negative_index = builder.ins().icmp_imm(IntCC::SignedLessThan, index, 0);
+        let bounds_block = builder.create_block();
+        let payload_block = builder.create_block();
+        let done_block = builder.create_block();
+        let none = self.lower_inline_scalar_option_none(builder);
+
+        builder.append_block_param(bounds_block, types::I64);
+        builder.append_block_param(payload_block, types::I64);
+        builder.append_block_param(done_block, types::I128);
+
+        builder.ins().brif(
+            negative_index,
+            done_block,
+            &[BlockArg::Value(none)],
+            bounds_block,
+            &[BlockArg::Value(index)],
+        );
+
+        builder.seal_block(bounds_block);
+        builder.switch_to_block(bounds_block);
+        let index = builder.block_params(bounds_block)[0];
+        let len = builder.ins().load(types::I64, MemFlags::new(), bytes, 0);
+        let in_bounds = builder.ins().icmp(IntCC::UnsignedLessThan, index, len);
+        builder.ins().brif(
+            in_bounds,
+            payload_block,
+            &[BlockArg::Value(index)],
+            done_block,
+            &[BlockArg::Value(none)],
+        );
+
+        builder.seal_block(payload_block);
+        builder.switch_to_block(payload_block);
+        let index = builder.block_params(payload_block)[0];
+        let byte =
+            self.lower_load_byte_sequence_byte(builder.ins().iadd_imm(bytes, 8), index, builder);
+        let some = self.lower_inline_scalar_option_some(ScalarOptionKind::Int, byte, builder);
+        builder.ins().jump(done_block, &[BlockArg::Value(some)]);
+
         builder.seal_block(done_block);
         builder.switch_to_block(done_block);
         builder.block_params(done_block)[0]
@@ -3570,6 +3871,15 @@ impl<'a> CraneliftCompiler<'a> {
                     )
                     .into_boxed_str(),
                 }),
+                LayoutKind::Option { element }
+                    if self.scalar_option_kind_for_layout(*element).is_some() =>
+                {
+                    Ok(AbiShape {
+                        ty: types::I128,
+                        size: 16,
+                        align: 16,
+                    })
+                }
                 _ => Err(CodegenError::UnsupportedLayout {
                     kernel: kernel_id,
                     layout,
@@ -3756,6 +4066,24 @@ impl<'a> CraneliftCompiler<'a> {
                 Some(StaticMaterializationPlan::Bytes(value.clone()))
             }
             (LayoutKind::Option { element }, RuntimeValue::OptionNone)
+                if self.program.layouts()[layout].abi == AbiPassMode::ByValue =>
+            {
+                self.scalar_option_kind_for_layout(*element)
+                    .map(StaticMaterializationPlan::InlineScalarOptionNone)
+            }
+            (LayoutKind::Option { element }, RuntimeValue::OptionSome(payload))
+                if self.program.layouts()[layout].abi == AbiPassMode::ByValue =>
+            {
+                let kind = self.scalar_option_kind_for_layout(*element)?;
+                self.static_materialization_plan(*element, payload)
+                    .map(
+                        |payload| StaticMaterializationPlan::InlineScalarOptionSome {
+                            kind,
+                            payload: Box::new(payload),
+                        },
+                    )
+            }
+            (LayoutKind::Option { element }, RuntimeValue::OptionNone)
                 if self.supports_static_niche_option_payload(*element) =>
             {
                 Some(StaticMaterializationPlan::NicheOptionNone)
@@ -3802,6 +4130,13 @@ impl<'a> CraneliftCompiler<'a> {
             }
             StaticMaterializationPlan::NicheOptionSome(payload) => {
                 self.materialize_static_plan(kernel_id, *payload, builder)
+            }
+            StaticMaterializationPlan::InlineScalarOptionNone(_) => {
+                Ok(self.lower_inline_scalar_option_none(builder))
+            }
+            StaticMaterializationPlan::InlineScalarOptionSome { kind, payload } => {
+                let payload = self.materialize_static_plan(kernel_id, *payload, builder)?;
+                Ok(self.lower_inline_scalar_option_some(kind, payload, builder))
             }
         }
     }

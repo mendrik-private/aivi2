@@ -20,7 +20,7 @@ use aivi_typing::{
 };
 
 use crate::{
-    AbiParameter, AbiResult, BigIntLiteral, BinaryOperator,
+    AbiParameter, AbiPassMode, AbiResult, BigIntLiteral, BinaryOperator,
     BuiltinAppendCarrier as BackendBuiltinAppendCarrier,
     BuiltinApplicativeCarrier as BackendBuiltinApplicativeCarrier,
     BuiltinApplyCarrier as BackendBuiltinApplyCarrier,
@@ -207,6 +207,23 @@ struct ProgramLowerer<'a> {
 }
 
 impl<'a> ProgramLowerer<'a> {
+    fn option_layout(&self, element: LayoutId) -> Layout {
+        let abi = match &self.program.layouts()[element] {
+            Layout {
+                abi: AbiPassMode::ByValue,
+                kind:
+                    LayoutKind::Primitive(
+                        PrimitiveType::Int | PrimitiveType::Float | PrimitiveType::Bool,
+                    ),
+            } => AbiPassMode::ByValue,
+            _ => AbiPassMode::ByReference,
+        };
+        Layout {
+            abi,
+            kind: LayoutKind::Option { element },
+        }
+    }
+
     fn new(lambda: &'a lambda::Module) -> Self {
         Self {
             lambda,
@@ -1063,9 +1080,7 @@ impl<'a> ProgramLowerer<'a> {
                         DecodeBuildTask::Option => {
                             let (element, element_layout) =
                                 values.pop().expect("option element should exist");
-                            let layout = self.intern_layout(Layout::new(LayoutKind::Option {
-                                element: element_layout,
-                            }))?;
+                            let layout = self.intern_layout(self.option_layout(element_layout))?;
                             (
                                 DecodeStep {
                                     layout,
@@ -2831,9 +2846,10 @@ impl<'a> ProgramLowerer<'a> {
                         TypeBuildTask::Set => Layout::new(LayoutKind::Set {
                             element: values.pop().expect("set child should exist"),
                         }),
-                        TypeBuildTask::Option => Layout::new(LayoutKind::Option {
-                            element: values.pop().expect("option child should exist"),
-                        }),
+                        TypeBuildTask::Option => {
+                            let element = values.pop().expect("option child should exist");
+                            self.option_layout(element)
+                        }
                         TypeBuildTask::Result => {
                             let lowered = drain_tail(&mut values, 2);
                             Layout::new(LayoutKind::Result {
