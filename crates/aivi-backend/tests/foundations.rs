@@ -3236,7 +3236,11 @@ value greeting:Text = "hello"
         .kernel(body)
         .expect("compiled program should retain greeting kernel metadata");
     assert!(artifact.code_size > 0);
-    assert!(artifact.clif.contains(&format!("() -> {}", clif_pointer_ty())));
+    assert!(
+        artifact
+            .clif
+            .contains(&format!("() -> {}", clif_pointer_ty()))
+    );
     assert!(artifact.clif.contains("symbol_value"));
     assert!(!compiled.object().is_empty());
 }
@@ -3279,7 +3283,11 @@ value folded:Text =
         .kernel(body)
         .expect("compiled program should retain folded kernel metadata");
     assert!(artifact.code_size > 0);
-    assert!(artifact.clif.contains(&format!("() -> {}", clif_pointer_ty())));
+    assert!(
+        artifact
+            .clif
+            .contains(&format!("() -> {}", clif_pointer_ty()))
+    );
     assert!(artifact.clif.contains("symbol_value"));
     assert!(!compiled.object().is_empty());
 }
@@ -3325,7 +3333,11 @@ value folded:Text =
         .kernel(body)
         .expect("compiled program should retain folded bytes kernel metadata");
     assert!(artifact.code_size > 0);
-    assert!(artifact.clif.contains(&format!("() -> {}", clif_pointer_ty())));
+    assert!(
+        artifact
+            .clif
+            .contains(&format!("() -> {}", clif_pointer_ty()))
+    );
     assert!(artifact.clif.contains("symbol_value"));
     assert!(!compiled.object().is_empty());
 }
@@ -3621,7 +3633,8 @@ fun ne:Bool left:Float right:Float =>
         .body
         .expect("ne should carry a body kernel");
 
-    let compiled = compile_program(&backend).expect("Float compare/equality kernels should compile");
+    let compiled =
+        compile_program(&backend).expect("Float compare/equality kernels should compile");
 
     let gt_artifact = compiled
         .kernel(gt_body)
@@ -3674,7 +3687,11 @@ fun differentTuple:Bool left:(Int, Float, Bool) right:(Int, Float, Bool) =>
         .kernel(same_body)
         .expect("compiled program should retain sameTuple kernel metadata");
     assert!(same_artifact.code_size > 0);
-    assert!(same_artifact.clif.contains(&format!("({ptr}, {ptr}) -> i8")));
+    assert!(
+        same_artifact
+            .clif
+            .contains(&format!("({ptr}, {ptr}) -> i8"))
+    );
     assert!(same_artifact.clif.contains("load.i64"));
     assert!(same_artifact.clif.contains("load.f64"));
     assert!(same_artifact.clif.contains("load.i8"));
@@ -3684,7 +3701,11 @@ fun differentTuple:Bool left:(Int, Float, Bool) right:(Int, Float, Bool) =>
         .kernel(different_body)
         .expect("compiled program should retain differentTuple kernel metadata");
     assert!(different_artifact.code_size > 0);
-    assert!(different_artifact.clif.contains(&format!("({ptr}, {ptr}) -> i8")));
+    assert!(
+        different_artifact
+            .clif
+            .contains(&format!("({ptr}, {ptr}) -> i8"))
+    );
     assert!(different_artifact.clif.contains("bxor"));
     assert!(!compiled.object().is_empty());
 }
@@ -3720,7 +3741,11 @@ fun differentWrapper:Bool left:Wrapper right:Wrapper =>
         .kernel(same_stats_body)
         .expect("compiled program should retain sameStats kernel metadata");
     assert!(same_artifact.code_size > 0);
-    assert!(same_artifact.clif.contains(&format!("({ptr}, {ptr}) -> i8")));
+    assert!(
+        same_artifact
+            .clif
+            .contains(&format!("({ptr}, {ptr}) -> i8"))
+    );
     assert!(same_artifact.clif.contains("load.i64"));
     assert!(same_artifact.clif.contains("load.f64"));
     assert!(same_artifact.clif.contains("load.i8"));
@@ -3730,7 +3755,11 @@ fun differentWrapper:Bool left:Wrapper right:Wrapper =>
         .kernel(different_wrapper_body)
         .expect("compiled program should retain differentWrapper kernel metadata");
     assert!(different_artifact.code_size > 0);
-    assert!(different_artifact.clif.contains(&format!("({ptr}, {ptr}) -> i8")));
+    assert!(
+        different_artifact
+            .clif
+            .contains(&format!("({ptr}, {ptr}) -> i8"))
+    );
     assert!(different_artifact.clif.contains("load.i64"));
     assert!(different_artifact.clif.contains("load.f64"));
     assert!(different_artifact.clif.contains("load.i8"));
@@ -3768,7 +3797,11 @@ fun differentMaybeStats:Bool left:(Option Stats) right:(Option Stats) =>
         .kernel(same_body)
         .expect("compiled program should retain sameMaybeStats kernel metadata");
     assert!(same_artifact.code_size > 0);
-    assert!(same_artifact.clif.contains(&format!("({ptr}, {ptr}) -> i8")));
+    assert!(
+        same_artifact
+            .clif
+            .contains(&format!("({ptr}, {ptr}) -> i8"))
+    );
     assert!(same_artifact.clif.contains("brif"));
     assert!(same_artifact.clif.contains("load.i64"));
     assert!(same_artifact.clif.contains("load.i8"));
@@ -3777,7 +3810,11 @@ fun differentMaybeStats:Bool left:(Option Stats) right:(Option Stats) =>
         .kernel(different_body)
         .expect("compiled program should retain differentMaybeStats kernel metadata");
     assert!(different_artifact.code_size > 0);
-    assert!(different_artifact.clif.contains(&format!("({ptr}, {ptr}) -> i8")));
+    assert!(
+        different_artifact
+            .clif
+            .contains(&format!("({ptr}, {ptr}) -> i8"))
+    );
     assert!(different_artifact.clif.contains("brif"));
     assert!(different_artifact.clif.contains("bxor"));
     assert!(!compiled.object().is_empty());
@@ -3830,7 +3867,8 @@ fun sameMaybeInt:Bool left:(Option Int) right:(Option Int) =>
 "#,
     );
 
-    let errors = compile_program(&backend).expect_err("Option Int equality should stay unsupported");
+    let errors =
+        compile_program(&backend).expect_err("Option Int equality should stay unsupported");
     assert!(errors.errors().iter().any(|error| matches!(
         error,
         CodegenError::UnsupportedExpression { detail, .. }
@@ -3877,7 +3915,11 @@ fun sameLabels:Bool left:Labels right:Labels =>
         .kernel(same_text_body)
         .expect("compiled program should retain sameText kernel metadata");
     assert!(same_text_artifact.code_size > 0);
-    assert!(same_text_artifact.clif.contains(&format!("({ptr}, {ptr}) -> i8")));
+    assert!(
+        same_text_artifact
+            .clif
+            .contains(&format!("({ptr}, {ptr}) -> i8"))
+    );
     assert!(same_text_artifact.clif.contains("load.i64"));
     assert!(same_text_artifact.clif.contains("load.i8"));
     assert!(same_text_artifact.clif.contains("brif"));
@@ -3886,14 +3928,22 @@ fun sameLabels:Bool left:Labels right:Labels =>
         .kernel(different_text_body)
         .expect("compiled program should retain differentText kernel metadata");
     assert!(different_text_artifact.code_size > 0);
-    assert!(different_text_artifact.clif.contains(&format!("({ptr}, {ptr}) -> i8")));
+    assert!(
+        different_text_artifact
+            .clif
+            .contains(&format!("({ptr}, {ptr}) -> i8"))
+    );
     assert!(different_text_artifact.clif.contains("bxor"));
 
     let same_labels_artifact = compiled
         .kernel(same_labels_body)
         .expect("compiled program should retain sameLabels kernel metadata");
     assert!(same_labels_artifact.code_size > 0);
-    assert!(same_labels_artifact.clif.contains(&format!("({ptr}, {ptr}) -> i8")));
+    assert!(
+        same_labels_artifact
+            .clif
+            .contains(&format!("({ptr}, {ptr}) -> i8"))
+    );
     assert!(same_labels_artifact.clif.contains("load.i64"));
     assert!(same_labels_artifact.clif.contains("load.i8"));
     assert!(same_labels_artifact.clif.contains("band"));
@@ -3933,14 +3983,18 @@ fun sameBlobs:Bool left:Blobs right:Blobs =>
         .body
         .expect("sameBlobs should carry a body kernel");
 
-    let compiled =
-        compile_program(&backend).expect("Bytes equality over native byte-sequence cells should compile");
+    let compiled = compile_program(&backend)
+        .expect("Bytes equality over native byte-sequence cells should compile");
 
     let same_bytes_artifact = compiled
         .kernel(same_bytes_body)
         .expect("compiled program should retain sameBytes kernel metadata");
     assert!(same_bytes_artifact.code_size > 0);
-    assert!(same_bytes_artifact.clif.contains(&format!("({ptr}, {ptr}) -> i8")));
+    assert!(
+        same_bytes_artifact
+            .clif
+            .contains(&format!("({ptr}, {ptr}) -> i8"))
+    );
     assert!(same_bytes_artifact.clif.contains("load.i64"));
     assert!(same_bytes_artifact.clif.contains("load.i8"));
     assert!(same_bytes_artifact.clif.contains("brif"));
@@ -3949,14 +4003,22 @@ fun sameBlobs:Bool left:Blobs right:Blobs =>
         .kernel(different_bytes_body)
         .expect("compiled program should retain differentBytes kernel metadata");
     assert!(different_bytes_artifact.code_size > 0);
-    assert!(different_bytes_artifact.clif.contains(&format!("({ptr}, {ptr}) -> i8")));
+    assert!(
+        different_bytes_artifact
+            .clif
+            .contains(&format!("({ptr}, {ptr}) -> i8"))
+    );
     assert!(different_bytes_artifact.clif.contains("bxor"));
 
     let same_blobs_artifact = compiled
         .kernel(same_blobs_body)
         .expect("compiled program should retain sameBlobs kernel metadata");
     assert!(same_blobs_artifact.code_size > 0);
-    assert!(same_blobs_artifact.clif.contains(&format!("({ptr}, {ptr}) -> i8")));
+    assert!(
+        same_blobs_artifact
+            .clif
+            .contains(&format!("({ptr}, {ptr}) -> i8"))
+    );
     assert!(same_blobs_artifact.clif.contains("load.i64"));
     assert!(same_blobs_artifact.clif.contains("load.i8"));
     assert!(same_blobs_artifact.clif.contains("band"));
@@ -3972,7 +4034,8 @@ fn cranelift_codegen_compiles_selected_bytes_intrinsics() {
 use aivi.core.bytes (
     empty,
     fromText,
-    length
+    length,
+    toText
 )
 
 value noBytes:Bytes =
@@ -3983,6 +4046,9 @@ fun measureBytes:Int bytes:Bytes =>
 
 fun encodeLabel:Bytes label:Text =>
     fromText label
+
+fun decodeLabel:(Option Text) bytes:Bytes =>
+    toText bytes
 "#,
     );
 
@@ -3996,6 +4062,9 @@ fun encodeLabel:Bytes label:Text =>
     let encode_label_body = backend.items()[find_item(&backend, "encodeLabel")]
         .body
         .expect("encodeLabel should carry a body kernel");
+    let decode_label_body = backend.items()[find_item(&backend, "decodeLabel")]
+        .body
+        .expect("decodeLabel should carry a body kernel");
 
     let compiled = compile_program(&backend)
         .expect("selected bytes intrinsics should compile through Cranelift");
@@ -4011,14 +4080,35 @@ fun encodeLabel:Bytes label:Text =>
         .kernel(measure_bytes_body)
         .expect("compiled program should retain measureBytes kernel metadata");
     assert!(measure_bytes_artifact.code_size > 0);
-    assert!(measure_bytes_artifact.clif.contains(&format!("({ptr}) -> i64")));
+    assert!(
+        measure_bytes_artifact
+            .clif
+            .contains(&format!("({ptr}) -> i64"))
+    );
     assert!(measure_bytes_artifact.clif.contains("load.i64"));
 
     let encode_label_artifact = compiled
         .kernel(encode_label_body)
         .expect("compiled program should retain encodeLabel kernel metadata");
     assert!(encode_label_artifact.code_size > 0);
-    assert!(encode_label_artifact.clif.contains(&format!("({ptr}) -> {ptr}")));
+    assert!(
+        encode_label_artifact
+            .clif
+            .contains(&format!("({ptr}) -> {ptr}"))
+    );
+
+    let decode_label_artifact = compiled
+        .kernel(decode_label_body)
+        .expect("compiled program should retain decodeLabel kernel metadata");
+    assert!(decode_label_artifact.code_size > 0);
+    assert!(
+        decode_label_artifact
+            .clif
+            .contains(&format!("({ptr}) -> {ptr}"))
+    );
+    assert!(decode_label_artifact.clif.contains("load.i64"));
+    assert!(decode_label_artifact.clif.contains("load.i8"));
+    assert!(decode_label_artifact.clif.contains("brif"));
     assert!(!compiled.object().is_empty());
 }
 
@@ -4099,7 +4189,11 @@ value invalid:(Option Text) =
         .kernel(blob_body)
         .expect("compiled program should retain blob kernel metadata");
     assert!(blob_artifact.code_size > 0);
-    assert!(blob_artifact.clif.contains(&format!("() -> {}", clif_pointer_ty())));
+    assert!(
+        blob_artifact
+            .clif
+            .contains(&format!("() -> {}", clif_pointer_ty()))
+    );
     assert!(blob_artifact.clif.contains("symbol_value"));
 
     let size_artifact = compiled
@@ -4112,14 +4206,22 @@ value invalid:(Option Text) =
         .kernel(decoded_body)
         .expect("compiled program should retain decoded kernel metadata");
     assert!(decoded_artifact.code_size > 0);
-    assert!(decoded_artifact.clif.contains(&format!("() -> {}", clif_pointer_ty())));
+    assert!(
+        decoded_artifact
+            .clif
+            .contains(&format!("() -> {}", clif_pointer_ty()))
+    );
     assert!(decoded_artifact.clif.contains("symbol_value"));
 
     let invalid_artifact = compiled
         .kernel(invalid_body)
         .expect("compiled program should retain invalid kernel metadata");
     assert!(invalid_artifact.code_size > 0);
-    assert!(invalid_artifact.clif.contains(&format!("() -> {}", clif_pointer_ty())));
+    assert!(
+        invalid_artifact
+            .clif
+            .contains(&format!("() -> {}", clif_pointer_ty()))
+    );
     assert!(!compiled.object().is_empty());
 }
 
@@ -4137,12 +4239,12 @@ fun combine:Bytes left:Bytes right:Bytes =>
 "#,
     );
 
-    let errors =
-        compile_program(&backend).expect_err("bytes.append should stay unsupported without allocation");
+    let errors = compile_program(&backend)
+        .expect_err("bytes.append should stay unsupported without allocation");
     assert!(errors.errors().iter().any(|error| matches!(
         error,
         CodegenError::UnsupportedExpression { detail, .. }
-            if detail.contains("empty/length/fromText Cranelift subset")
+            if detail.contains("empty/length/fromText/toText Cranelift subset")
     )));
 }
 
@@ -4158,7 +4260,8 @@ fun samePath:Bool left:Path right:Path =>
 "#,
     );
 
-    let errors = compile_program(&backend).expect_err("named-domain equality should stay unsupported");
+    let errors =
+        compile_program(&backend).expect_err("named-domain equality should stay unsupported");
     assert!(errors.errors().iter().any(|error| matches!(
         error,
         CodegenError::UnsupportedExpression { detail, .. }
@@ -4847,15 +4950,19 @@ value stats:Stats = { count: 7, ratio: 3.5, active: True }
         .body
         .expect("stats should carry a body kernel");
 
-    let compiled = compile_program(&backend)
-        .expect("static scalar tuple/record item bodies should compile");
+    let compiled =
+        compile_program(&backend).expect("static scalar tuple/record item bodies should compile");
 
     for kernel_id in [pair_body, stats_body] {
         let artifact = compiled
             .kernel(kernel_id)
             .expect("compiled program should retain aggregate kernel metadata");
         assert!(artifact.code_size > 0);
-        assert!(artifact.clif.contains(&format!("() -> {}", clif_pointer_ty())));
+        assert!(
+            artifact
+                .clif
+                .contains(&format!("() -> {}", clif_pointer_ty()))
+        );
         assert!(artifact.clif.contains("symbol_value"));
     }
     assert!(!compiled.object().is_empty());

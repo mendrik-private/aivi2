@@ -3,11 +3,13 @@ use std::{
     fmt,
 };
 
+use aivi_hir::IntrinsicValue;
 use cranelift_codegen::{
     ir::{
         AbiParam, BlockArg, InstBuilder, MemFlags, Type, UserFuncName, Value,
         condcodes::{FloatCC, IntCC},
-        immediates::Ieee64, types,
+        immediates::Ieee64,
+        types,
     },
     print_errors::pretty_verifier_error,
     settings, verify_function,
@@ -15,7 +17,6 @@ use cranelift_codegen::{
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::{DataDescription, FuncId, Linkage, Module, default_libcall_names};
 use cranelift_object::{ObjectBuilder, ObjectModule};
-use aivi_hir::IntrinsicValue;
 
 use crate::{
     AbiPassMode, BinaryOperator, BuiltinTerm, CallingConventionKind, EnvSlotId, ItemId, Kernel,
@@ -321,6 +322,7 @@ enum BuiltinCallPlan {
 enum IntrinsicCallPlan {
     BytesLength,
     BytesFromText,
+    BytesToText,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -336,9 +338,7 @@ enum NativeEqualityShape {
     Text,
     Bytes,
     Aggregate(Vec<NativeEqualityField>),
-    NicheOption {
-        payload: Box<NativeEqualityShape>,
-    },
+    NicheOption { payload: Box<NativeEqualityShape> },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -544,11 +544,9 @@ impl<'a> CraneliftCompiler<'a> {
                         }
                     }
                     KernelExprKind::Tuple(_) | KernelExprKind::Record(_) => {
-                        if let Err(error) = self.require_static_scalar_aggregate_expression(
-                            kernel_id,
-                            kernel,
-                            expr_id,
-                        ) {
+                        if let Err(error) = self
+                            .require_static_scalar_aggregate_expression(kernel_id, kernel, expr_id)
+                        {
                             errors.push(error);
                         }
                     }
@@ -721,11 +719,7 @@ impl<'a> CraneliftCompiler<'a> {
                             | BinaryOperator::GreaterThanOrEqual
                             | BinaryOperator::LessThanOrEqual => {
                                 if let Err(error) = self.require_ordered_expression_pair(
-                                    kernel_id,
-                                    kernel,
-                                    expr_id,
-                                    *left,
-                                    *right,
+                                    kernel_id, kernel, expr_id, *left, *right,
                                 ) {
                                     errors.push(error);
                                 }
@@ -807,8 +801,7 @@ impl<'a> CraneliftCompiler<'a> {
                     | KernelExprKind::SuffixedInteger(_)
                     | KernelExprKind::List(_)
                     | KernelExprKind::Map(_)
-                    | KernelExprKind::Set(_)
-                    => {
+                    | KernelExprKind::Set(_) => {
                         errors.push(self.unsupported_expression(
                             kernel_id,
                             expr_id,
@@ -1052,10 +1045,7 @@ impl<'a> CraneliftCompiler<'a> {
                 Task::Visit(expr_id) => {
                     let expr = &kernel.exprs()[expr_id];
                     if let Some(value) = self.materialize_static_expression_if_supported(
-                        kernel_id,
-                        kernel,
-                        expr_id,
-                        builder,
+                        kernel_id, kernel, expr_id, builder,
                     )? {
                         values.push(value);
                         continue;
@@ -1190,22 +1180,13 @@ impl<'a> CraneliftCompiler<'a> {
                                 expr.layout,
                                 "Text literal",
                             )?;
-                            values.push(
-                                self.materialize_text_literal(
-                                    kernel_id,
-                                    kernel,
-                                    expr_id,
-                                    text,
-                                    builder,
-                                )?,
-                            );
+                            values.push(self.materialize_text_literal(
+                                kernel_id, kernel, expr_id, text, builder,
+                            )?);
                         }
                         KernelExprKind::Tuple(_) | KernelExprKind::Record(_) => {
                             values.push(self.materialize_static_scalar_aggregate_expression(
-                                kernel_id,
-                                kernel,
-                                expr_id,
-                                builder,
+                                kernel_id, kernel, expr_id, builder,
                             )?);
                         }
                         KernelExprKind::Builtin(BuiltinTerm::True) => {
@@ -1538,9 +1519,11 @@ impl<'a> CraneliftCompiler<'a> {
                             match self.require_ordered_expression_pair(
                                 kernel_id, kernel, expr_id, *left, *right,
                             )? {
-                                NativeCompareKind::Integer => builder
-                                    .ins()
-                                    .icmp(IntCC::SignedGreaterThanOrEqual, lhs, rhs),
+                                NativeCompareKind::Integer => {
+                                    builder
+                                        .ins()
+                                        .icmp(IntCC::SignedGreaterThanOrEqual, lhs, rhs)
+                                }
                                 NativeCompareKind::Float => {
                                     builder.ins().fcmp(FloatCC::GreaterThanOrEqual, lhs, rhs)
                                 }
@@ -2131,11 +2114,50 @@ impl<'a> CraneliftCompiler<'a> {
                 }
                 Ok(IntrinsicCallPlan::BytesFromText)
             }
+            IntrinsicValue::BytesToText => {
+                let [bytes] = arguments else {
+                    unreachable!("saturated `BytesToText` call should keep exactly one argument");
+                };
+                self.require_bytes_expression(
+                    kernel_id,
+                    *bytes,
+                    kernel.exprs()[*bytes].layout,
+                    "bytes.toText argument",
+                )?;
+                self.require_niche_option_expression(
+                    kernel_id,
+                    kernel,
+                    expr_id,
+                    None,
+                    result_layout,
+                    "bytes.toText result",
+                )?;
+                let LayoutKind::Option { element } = &self.program.layouts()[result_layout].kind else {
+                    unreachable!("niche option validation should preserve Option layouts");
+                };
+                self.require_text_expression(
+                    kernel_id,
+                    expr_id,
+                    *element,
+                    "bytes.toText result payload",
+                )?;
+                if self.program.layouts()[result_layout].abi != AbiPassMode::ByReference {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        &format!(
+                            "{detail} currently only lowers when the Option Text result stays by-reference, found layout{result_layout}=`{}`",
+                            self.program.layouts()[result_layout]
+                        ),
+                    ));
+                }
+                Ok(IntrinsicCallPlan::BytesToText)
+            }
             _ => Err(self.unsupported_expression(
                 kernel_id,
                 expr_id,
                 &format!(
-                    "{detail} still requires backend-owned bytes/runtime lowering beyond the current empty/length/fromText Cranelift subset"
+                    "{detail} still requires backend-owned bytes/runtime lowering beyond the current empty/length/fromText/toText Cranelift subset"
                 ),
             )),
         }
@@ -2267,7 +2289,19 @@ impl<'a> CraneliftCompiler<'a> {
                         "direct bytes.length lowering expected exactly one materialized argument",
                     ));
                 };
-                Ok(builder.ins().load(types::I64, MemFlags::new(), *argument, 0))
+                Ok(builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), *argument, 0))
+            }
+            DirectApplyPlan::Intrinsic(IntrinsicCallPlan::BytesToText) => {
+                let [argument] = arguments else {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "direct bytes.toText lowering expected exactly one materialized argument",
+                    ));
+                };
+                Ok(self.lower_bytes_to_text_option(*argument, builder))
             }
         }
     }
@@ -2548,9 +2582,10 @@ impl<'a> CraneliftCompiler<'a> {
         let left_layout_id = kernel.exprs()[left].layout;
         let right_layout_id = kernel.exprs()[right].layout;
         let kind = match (&left_layout.kind, &right_layout.kind) {
-            (LayoutKind::Primitive(PrimitiveType::Int), LayoutKind::Primitive(PrimitiveType::Int)) => {
-                NativeCompareKind::Integer
-            }
+            (
+                LayoutKind::Primitive(PrimitiveType::Int),
+                LayoutKind::Primitive(PrimitiveType::Int),
+            ) => NativeCompareKind::Integer,
             (
                 LayoutKind::Primitive(PrimitiveType::Float),
                 LayoutKind::Primitive(PrimitiveType::Float),
@@ -2565,7 +2600,12 @@ impl<'a> CraneliftCompiler<'a> {
                 ));
             }
         };
-        self.require_bool_expression(kernel_id, expr_id, kernel.exprs()[expr_id].layout, "comparison result")?;
+        self.require_bool_expression(
+            kernel_id,
+            expr_id,
+            kernel.exprs()[expr_id].layout,
+            "comparison result",
+        )?;
         Ok(kind)
     }
 
@@ -2591,13 +2631,14 @@ impl<'a> CraneliftCompiler<'a> {
             ));
         }
         let mut visited = HashSet::new();
-        let kind = self.resolve_native_equality_shape(
+        let kind =
+            self.resolve_native_equality_shape(kernel_id, expr_id, left_layout_id, &mut visited)?;
+        self.require_bool_expression(
             kernel_id,
             expr_id,
-            left_layout_id,
-            &mut visited,
+            kernel.exprs()[expr_id].layout,
+            "equality result",
         )?;
-        self.require_bool_expression(kernel_id, expr_id, kernel.exprs()[expr_id].layout, "equality result")?;
         Ok(kind)
     }
 
@@ -2842,13 +2883,15 @@ impl<'a> CraneliftCompiler<'a> {
             NativeEqualityShape::Aggregate(fields) => {
                 let mut equal = builder.ins().iconst(types::I8, 1);
                 for field in fields {
-                    let abi = self.field_abi_shape(kernel_id, field.layout, "native equality field")?;
+                    let abi =
+                        self.field_abi_shape(kernel_id, field.layout, "native equality field")?;
                     let left_field = builder
                         .ins()
                         .load(abi.ty, MemFlags::new(), lhs, field.offset);
-                    let right_field = builder
-                        .ins()
-                        .load(abi.ty, MemFlags::new(), rhs, field.offset);
+                    let right_field =
+                        builder
+                            .ins()
+                            .load(abi.ty, MemFlags::new(), rhs, field.offset);
                     let field_equal = self.lower_native_equality_shape(
                         kernel_id,
                         expr_id,
@@ -2872,15 +2915,13 @@ impl<'a> CraneliftCompiler<'a> {
                 let merge_block = builder.create_block();
                 let bool_ty = builder.func.dfg.value_type(both_none);
                 builder.append_block_param(merge_block, bool_ty);
-                builder
-                    .ins()
-                    .brif(
-                        any_none,
-                        merge_block,
-                        &[BlockArg::Value(both_none)],
-                        payload_block,
-                        &[],
-                    );
+                builder.ins().brif(
+                    any_none,
+                    merge_block,
+                    &[BlockArg::Value(both_none)],
+                    payload_block,
+                    &[],
+                );
 
                 builder.seal_block(payload_block);
                 builder.switch_to_block(payload_block);
@@ -2892,7 +2933,9 @@ impl<'a> CraneliftCompiler<'a> {
                     rhs,
                     builder,
                 )?;
-                builder.ins().jump(merge_block, &[BlockArg::Value(some_equal)]);
+                builder
+                    .ins()
+                    .jump(merge_block, &[BlockArg::Value(some_equal)]);
 
                 builder.seal_block(merge_block);
                 builder.switch_to_block(merge_block);
@@ -2977,7 +3020,9 @@ impl<'a> CraneliftCompiler<'a> {
         let left_addr = builder.ins().iadd(left_bytes, index_as_ptr);
         let right_addr = builder.ins().iadd(right_bytes, index_as_ptr);
         let left_byte = builder.ins().load(types::I8, MemFlags::new(), left_addr, 0);
-        let right_byte = builder.ins().load(types::I8, MemFlags::new(), right_addr, 0);
+        let right_byte = builder
+            .ins()
+            .load(types::I8, MemFlags::new(), right_addr, 0);
         let byte_equal = builder.ins().icmp(IntCC::Equal, left_byte, right_byte);
         let next_index = builder.ins().iadd_imm(index, 1);
         builder.ins().brif(
@@ -2997,6 +3042,319 @@ impl<'a> CraneliftCompiler<'a> {
         builder.seal_block(done_block);
         builder.switch_to_block(done_block);
         builder.block_params(done_block)[0]
+    }
+
+    fn lower_bytes_to_text_option(&self, bytes: Value, builder: &mut FunctionBuilder<'_>) -> Value {
+        let pointer_ty = self.pointer_type();
+        let zero_ptr = builder.ins().iconst(pointer_ty, 0);
+        let len = builder.ins().load(types::I64, MemFlags::new(), bytes, 0);
+        let bytes_base = builder.ins().iadd_imm(bytes, 8);
+
+        let loop_block = builder.create_block();
+        let inspect_block = builder.create_block();
+        let non_ascii_block = builder.create_block();
+        let non_two_block = builder.create_block();
+        let non_three_block = builder.create_block();
+        let validate_two_block = builder.create_block();
+        let validate_two_body_block = builder.create_block();
+        let validate_three_block = builder.create_block();
+        let validate_three_body_block = builder.create_block();
+        let validate_four_block = builder.create_block();
+        let validate_four_body_block = builder.create_block();
+        let done_block = builder.create_block();
+
+        builder.append_block_param(loop_block, types::I64);
+        builder.append_block_param(inspect_block, types::I64);
+        builder.append_block_param(non_ascii_block, types::I64);
+        builder.append_block_param(non_ascii_block, types::I64);
+        builder.append_block_param(non_two_block, types::I64);
+        builder.append_block_param(non_two_block, types::I64);
+        builder.append_block_param(non_three_block, types::I64);
+        builder.append_block_param(non_three_block, types::I64);
+        builder.append_block_param(validate_two_block, types::I64);
+        builder.append_block_param(validate_two_body_block, types::I64);
+        builder.append_block_param(validate_three_block, types::I64);
+        builder.append_block_param(validate_three_block, types::I64);
+        builder.append_block_param(validate_three_body_block, types::I64);
+        builder.append_block_param(validate_three_body_block, types::I64);
+        builder.append_block_param(validate_four_block, types::I64);
+        builder.append_block_param(validate_four_block, types::I64);
+        builder.append_block_param(validate_four_body_block, types::I64);
+        builder.append_block_param(validate_four_body_block, types::I64);
+        builder.append_block_param(done_block, pointer_ty);
+
+        let zero_index = builder.ins().iconst(types::I64, 0);
+        builder
+            .ins()
+            .jump(loop_block, &[BlockArg::Value(zero_index)]);
+
+        builder.switch_to_block(loop_block);
+        let index = builder.block_params(loop_block)[0];
+        let at_end = builder.ins().icmp(IntCC::Equal, index, len);
+        builder.ins().brif(
+            at_end,
+            done_block,
+            &[BlockArg::Value(bytes)],
+            inspect_block,
+            &[BlockArg::Value(index)],
+        );
+
+        builder.seal_block(inspect_block);
+        builder.switch_to_block(inspect_block);
+        let index = builder.block_params(inspect_block)[0];
+        let first = self.lower_load_byte_sequence_byte(bytes_base, index, builder);
+        let is_ascii = builder.ins().icmp_imm(IntCC::UnsignedLessThan, first, 0x80);
+        let next_ascii = builder.ins().iadd_imm(index, 1);
+        builder.ins().brif(
+            is_ascii,
+            loop_block,
+            &[BlockArg::Value(next_ascii)],
+            non_ascii_block,
+            &[BlockArg::Value(index), BlockArg::Value(first)],
+        );
+
+        builder.seal_block(non_ascii_block);
+        builder.switch_to_block(non_ascii_block);
+        let non_ascii_params = builder.block_params(non_ascii_block).to_vec();
+        let index = non_ascii_params[0];
+        let first = non_ascii_params[1];
+        let is_two = self.lower_unsigned_byte_range(first, 0xC2, 0xDF, builder);
+        builder.ins().brif(
+            is_two,
+            validate_two_block,
+            &[BlockArg::Value(index)],
+            non_two_block,
+            &[BlockArg::Value(index), BlockArg::Value(first)],
+        );
+
+        builder.seal_block(validate_two_block);
+        builder.seal_block(non_two_block);
+        builder.switch_to_block(validate_two_block);
+        let index = builder.block_params(validate_two_block)[0];
+        let required_end = builder.ins().iadd_imm(index, 2);
+        let enough = builder
+            .ins()
+            .icmp(IntCC::UnsignedLessThanOrEqual, required_end, len);
+        builder.ins().brif(
+            enough,
+            validate_two_body_block,
+            &[BlockArg::Value(index)],
+            done_block,
+            &[BlockArg::Value(zero_ptr)],
+        );
+
+        builder.seal_block(validate_two_body_block);
+        builder.switch_to_block(validate_two_body_block);
+        let index = builder.block_params(validate_two_body_block)[0];
+        let second = self.lower_load_byte_sequence_byte(
+            bytes_base,
+            builder.ins().iadd_imm(index, 1),
+            builder,
+        );
+        let second_ok = self.lower_unsigned_byte_range(second, 0x80, 0xBF, builder);
+        let next_index = builder.ins().iadd_imm(index, 2);
+        builder.ins().brif(
+            second_ok,
+            loop_block,
+            &[BlockArg::Value(next_index)],
+            done_block,
+            &[BlockArg::Value(zero_ptr)],
+        );
+
+        builder.switch_to_block(non_two_block);
+        let non_two_params = builder.block_params(non_two_block).to_vec();
+        let index = non_two_params[0];
+        let first = non_two_params[1];
+        let is_three = self.lower_unsigned_byte_range(first, 0xE0, 0xEF, builder);
+        builder.ins().brif(
+            is_three,
+            validate_three_block,
+            &[BlockArg::Value(index), BlockArg::Value(first)],
+            non_three_block,
+            &[BlockArg::Value(index), BlockArg::Value(first)],
+        );
+
+        builder.seal_block(validate_three_block);
+        builder.seal_block(non_three_block);
+        builder.switch_to_block(validate_three_block);
+        let validate_three_params = builder.block_params(validate_three_block).to_vec();
+        let index = validate_three_params[0];
+        let first = validate_three_params[1];
+        let required_end = builder.ins().iadd_imm(index, 3);
+        let enough = builder
+            .ins()
+            .icmp(IntCC::UnsignedLessThanOrEqual, required_end, len);
+        builder.ins().brif(
+            enough,
+            validate_three_body_block,
+            &[BlockArg::Value(index), BlockArg::Value(first)],
+            done_block,
+            &[BlockArg::Value(zero_ptr)],
+        );
+
+        builder.seal_block(validate_three_body_block);
+        builder.switch_to_block(validate_three_body_block);
+        let validate_three_body_params = builder.block_params(validate_three_body_block).to_vec();
+        let index = validate_three_body_params[0];
+        let first = validate_three_body_params[1];
+        let second = self.lower_load_byte_sequence_byte(
+            bytes_base,
+            builder.ins().iadd_imm(index, 1),
+            builder,
+        );
+        let third = self.lower_load_byte_sequence_byte(
+            bytes_base,
+            builder.ins().iadd_imm(index, 2),
+            builder,
+        );
+        let head_e0 = builder.ins().icmp_imm(IntCC::Equal, first, 0xE0);
+        let head_ed = builder.ins().icmp_imm(IntCC::Equal, first, 0xED);
+        let second_default = self.lower_unsigned_byte_range(second, 0x80, 0xBF, builder);
+        let second_e0 = self.lower_unsigned_byte_range(second, 0xA0, 0xBF, builder);
+        let second_ed = self.lower_unsigned_byte_range(second, 0x80, 0x9F, builder);
+        let third_ok = self.lower_unsigned_byte_range(third, 0x80, 0xBF, builder);
+        let bool_ty = builder.func.dfg.value_type(head_e0);
+        let one = builder.ins().iconst(bool_ty, 1);
+        let special = builder.ins().bor(head_e0, head_ed);
+        let not_special = builder.ins().bxor(special, one);
+        let e0_ok = builder.ins().band(head_e0, second_e0);
+        let ed_ok = builder.ins().band(head_ed, second_ed);
+        let default_ok = builder.ins().band(not_special, second_default);
+        let special_ok = builder.ins().bor(e0_ok, ed_ok);
+        let second_ok = builder.ins().bor(special_ok, default_ok);
+        let sequence_ok = builder.ins().band(second_ok, third_ok);
+        let next_index = builder.ins().iadd_imm(index, 3);
+        builder.ins().brif(
+            sequence_ok,
+            loop_block,
+            &[BlockArg::Value(next_index)],
+            done_block,
+            &[BlockArg::Value(zero_ptr)],
+        );
+
+        builder.switch_to_block(non_three_block);
+        let non_three_params = builder.block_params(non_three_block).to_vec();
+        let index = non_three_params[0];
+        let first = non_three_params[1];
+        let is_four = self.lower_unsigned_byte_range(first, 0xF0, 0xF4, builder);
+        builder.ins().brif(
+            is_four,
+            validate_four_block,
+            &[BlockArg::Value(index), BlockArg::Value(first)],
+            done_block,
+            &[BlockArg::Value(zero_ptr)],
+        );
+
+        builder.seal_block(validate_four_block);
+        builder.switch_to_block(validate_four_block);
+        let validate_four_params = builder.block_params(validate_four_block).to_vec();
+        let index = validate_four_params[0];
+        let first = validate_four_params[1];
+        let required_end = builder.ins().iadd_imm(index, 4);
+        let enough = builder
+            .ins()
+            .icmp(IntCC::UnsignedLessThanOrEqual, required_end, len);
+        builder.ins().brif(
+            enough,
+            validate_four_body_block,
+            &[BlockArg::Value(index), BlockArg::Value(first)],
+            done_block,
+            &[BlockArg::Value(zero_ptr)],
+        );
+
+        builder.seal_block(validate_four_body_block);
+        builder.switch_to_block(validate_four_body_block);
+        let validate_four_body_params = builder.block_params(validate_four_body_block).to_vec();
+        let index = validate_four_body_params[0];
+        let first = validate_four_body_params[1];
+        let second = self.lower_load_byte_sequence_byte(
+            bytes_base,
+            builder.ins().iadd_imm(index, 1),
+            builder,
+        );
+        let third = self.lower_load_byte_sequence_byte(
+            bytes_base,
+            builder.ins().iadd_imm(index, 2),
+            builder,
+        );
+        let fourth = self.lower_load_byte_sequence_byte(
+            bytes_base,
+            builder.ins().iadd_imm(index, 3),
+            builder,
+        );
+        let head_f0 = builder.ins().icmp_imm(IntCC::Equal, first, 0xF0);
+        let head_f4 = builder.ins().icmp_imm(IntCC::Equal, first, 0xF4);
+        let second_default = self.lower_unsigned_byte_range(second, 0x80, 0xBF, builder);
+        let second_f0 = self.lower_unsigned_byte_range(second, 0x90, 0xBF, builder);
+        let second_f4 = self.lower_unsigned_byte_range(second, 0x80, 0x8F, builder);
+        let third_ok = self.lower_unsigned_byte_range(third, 0x80, 0xBF, builder);
+        let fourth_ok = self.lower_unsigned_byte_range(fourth, 0x80, 0xBF, builder);
+        let bool_ty = builder.func.dfg.value_type(head_f0);
+        let one = builder.ins().iconst(bool_ty, 1);
+        let special = builder.ins().bor(head_f0, head_f4);
+        let not_special = builder.ins().bxor(special, one);
+        let f0_ok = builder.ins().band(head_f0, second_f0);
+        let f4_ok = builder.ins().band(head_f4, second_f4);
+        let default_ok = builder.ins().band(not_special, second_default);
+        let special_ok = builder.ins().bor(f0_ok, f4_ok);
+        let second_ok = builder.ins().bor(special_ok, default_ok);
+        let tail_ok = builder.ins().band(third_ok, fourth_ok);
+        let sequence_ok = builder.ins().band(second_ok, tail_ok);
+        let next_index = builder.ins().iadd_imm(index, 4);
+        builder.ins().brif(
+            sequence_ok,
+            loop_block,
+            &[BlockArg::Value(next_index)],
+            done_block,
+            &[BlockArg::Value(zero_ptr)],
+        );
+
+        builder.seal_block(loop_block);
+        builder.seal_block(done_block);
+        builder.switch_to_block(done_block);
+        builder.block_params(done_block)[0]
+    }
+
+    fn lower_byte_sequence_index_address(
+        &self,
+        bytes_base: Value,
+        index: Value,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Value {
+        let pointer_ty = self.pointer_type();
+        let index_as_ptr = if pointer_ty == types::I64 {
+            index
+        } else {
+            builder.ins().ireduce(pointer_ty, index)
+        };
+        builder.ins().iadd(bytes_base, index_as_ptr)
+    }
+
+    fn lower_load_byte_sequence_byte(
+        &self,
+        bytes_base: Value,
+        index: Value,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Value {
+        let addr = self.lower_byte_sequence_index_address(bytes_base, index, builder);
+        let byte = builder.ins().load(types::I8, MemFlags::new(), addr, 0);
+        builder.ins().uextend(types::I64, byte)
+    }
+
+    fn lower_unsigned_byte_range(
+        &self,
+        value: Value,
+        start: i64,
+        end: i64,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Value {
+        let at_least = builder
+            .ins()
+            .icmp_imm(IntCC::UnsignedGreaterThanOrEqual, value, start);
+        let at_most = builder
+            .ins()
+            .icmp_imm(IntCC::UnsignedLessThanOrEqual, value, end);
+        builder.ins().band(at_least, at_most)
     }
 
     fn lower_projection(
@@ -3313,7 +3671,12 @@ impl<'a> CraneliftCompiler<'a> {
         // Backend-native Text literals use a stable, len-prefixed UTF-8 constant cell.
         // The current Cranelift slice treats the resulting pointer opaquely; richer Text
         // operations still need a shared representation contract at the runtime edge.
-        self.materialize_byte_sequence_constant(kernel_id, "text_literal", rendered.as_bytes(), builder)
+        self.materialize_byte_sequence_constant(
+            kernel_id,
+            "text_literal",
+            rendered.as_bytes(),
+            builder,
+        )
     }
 
     fn materialize_bytes_constant(
@@ -3335,13 +3698,7 @@ impl<'a> CraneliftCompiler<'a> {
         let mut encoded = Vec::with_capacity(8 + bytes.len());
         encoded.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
         encoded.extend_from_slice(bytes);
-        self.materialize_literal_pointer(
-            kernel_id,
-            family,
-            encoded.into_boxed_slice(),
-            8,
-            builder,
-        )
+        self.materialize_literal_pointer(kernel_id, family, encoded.into_boxed_slice(), 8, builder)
     }
 
     fn can_materialize_static_expression(
@@ -3372,7 +3729,9 @@ impl<'a> CraneliftCompiler<'a> {
         else {
             return Ok(None);
         };
-        Ok(Some(self.materialize_static_plan(kernel_id, plan, builder)?))
+        Ok(Some(
+            self.materialize_static_plan(kernel_id, plan, builder)?,
+        ))
     }
 
     fn static_materialization_plan(
@@ -3565,23 +3924,27 @@ impl<'a> CraneliftCompiler<'a> {
                     ),
                 ));
             }
-            let abi = self.field_abi_shape(
-                kernel_id,
-                layout,
-                &format!("{detail} field `{label}`"),
-            )?;
+            let abi =
+                self.field_abi_shape(kernel_id, layout, &format!("{detail} field `{label}`"))?;
             max_align = max_align.max(abi.align);
             offset = align_to(offset, abi.align);
             encoded.resize(offset as usize, 0);
             encoded.extend_from_slice(
-                &self.encode_static_scalar_field(kernel_id, expr_id, layout, value, detail, &label)?,
+                &self.encode_static_scalar_field(
+                    kernel_id, expr_id, layout, value, detail, &label,
+                )?,
             );
-            offset = offset.checked_add(abi.size).ok_or_else(|| CodegenError::UnsupportedLayout {
-                kernel: kernel_id,
-                layout,
-                detail: format!("{detail} field `{label}` overflows backend constant packing")
-                    .into_boxed_str(),
-            })?;
+            offset =
+                offset
+                    .checked_add(abi.size)
+                    .ok_or_else(|| CodegenError::UnsupportedLayout {
+                        kernel: kernel_id,
+                        layout,
+                        detail: format!(
+                            "{detail} field `{label}` overflows backend constant packing"
+                        )
+                        .into_boxed_str(),
+                    })?;
         }
         Ok((encoded.into_boxed_slice(), u64::from(max_align)))
     }
@@ -3687,226 +4050,239 @@ impl<'a> CraneliftCompiler<'a> {
         let mut values = Vec::new();
         while let Some(task) = tasks.pop() {
             match task {
-                Task::Visit(expr_id) => match &kernel.exprs()[expr_id].kind {
-                    KernelExprKind::OptionSome { payload } => {
-                        tasks.push(Task::BuildOptionSome);
-                        tasks.push(Task::Visit(*payload));
-                    }
-                    KernelExprKind::OptionNone => {
-                        values.push(RuntimeValue::OptionNone);
-                    }
-                    KernelExprKind::Builtin(BuiltinTerm::True) => {
-                        values.push(RuntimeValue::Bool(true));
-                    }
-                    KernelExprKind::Builtin(BuiltinTerm::False) => {
-                        values.push(RuntimeValue::Bool(false));
-                    }
-                    KernelExprKind::Builtin(BuiltinTerm::None) => {
-                        values.push(RuntimeValue::OptionNone);
-                    }
-                    KernelExprKind::IntrinsicValue(IntrinsicValue::BytesEmpty) => {
-                        values.push(RuntimeValue::Bytes(Box::new([])));
-                    }
-                    KernelExprKind::SumConstructor(handle) if handle.field_count == 0 => {
-                        values.push(RuntimeValue::Sum(crate::RuntimeSumValue {
-                            item: handle.item,
-                            type_name: handle.type_name.clone(),
-                            variant_name: handle.variant_name.clone(),
-                            fields: Vec::new(),
-                        }));
-                    }
-                    KernelExprKind::SumConstructor(_) => {
-                        return Ok(None);
-                    }
-                    KernelExprKind::Builtin(_)
-                    | KernelExprKind::IntrinsicValue(_)
-                    | KernelExprKind::Subject(_)
-                    | KernelExprKind::Environment(_)
-                    | KernelExprKind::Item(_)
-                    | KernelExprKind::DomainMember(_)
-                    | KernelExprKind::BuiltinClassMember(_)
-                    | KernelExprKind::Projection { .. }
-                    | KernelExprKind::Pipe(_) => {
-                        return Ok(None);
-                    }
-                    KernelExprKind::Integer(integer) => {
-                        let value = integer.raw.parse::<i64>().map(RuntimeValue::Int).map_err(|_| {
-                            CodegenError::InvalidIntegerLiteral {
-                                kernel: kernel_id,
-                                expr: expr_id,
+                Task::Visit(expr_id) => {
+                    match &kernel.exprs()[expr_id].kind {
+                        KernelExprKind::OptionSome { payload } => {
+                            tasks.push(Task::BuildOptionSome);
+                            tasks.push(Task::Visit(*payload));
+                        }
+                        KernelExprKind::OptionNone => {
+                            values.push(RuntimeValue::OptionNone);
+                        }
+                        KernelExprKind::Builtin(BuiltinTerm::True) => {
+                            values.push(RuntimeValue::Bool(true));
+                        }
+                        KernelExprKind::Builtin(BuiltinTerm::False) => {
+                            values.push(RuntimeValue::Bool(false));
+                        }
+                        KernelExprKind::Builtin(BuiltinTerm::None) => {
+                            values.push(RuntimeValue::OptionNone);
+                        }
+                        KernelExprKind::IntrinsicValue(IntrinsicValue::BytesEmpty) => {
+                            values.push(RuntimeValue::Bytes(Box::new([])));
+                        }
+                        KernelExprKind::SumConstructor(handle) if handle.field_count == 0 => {
+                            values.push(RuntimeValue::Sum(crate::RuntimeSumValue {
+                                item: handle.item,
+                                type_name: handle.type_name.clone(),
+                                variant_name: handle.variant_name.clone(),
+                                fields: Vec::new(),
+                            }));
+                        }
+                        KernelExprKind::SumConstructor(_) => {
+                            return Ok(None);
+                        }
+                        KernelExprKind::Builtin(_)
+                        | KernelExprKind::IntrinsicValue(_)
+                        | KernelExprKind::Subject(_)
+                        | KernelExprKind::Environment(_)
+                        | KernelExprKind::Item(_)
+                        | KernelExprKind::DomainMember(_)
+                        | KernelExprKind::BuiltinClassMember(_)
+                        | KernelExprKind::Projection { .. }
+                        | KernelExprKind::Pipe(_) => {
+                            return Ok(None);
+                        }
+                        KernelExprKind::Integer(integer) => {
+                            let value = integer.raw.parse::<i64>().map(RuntimeValue::Int).map_err(
+                                |_| CodegenError::InvalidIntegerLiteral {
+                                    kernel: kernel_id,
+                                    expr: expr_id,
+                                    raw: integer.raw.clone(),
+                                },
+                            )?;
+                            values.push(value);
+                        }
+                        KernelExprKind::Float(float) => {
+                            let value = RuntimeFloat::parse_literal(float.raw.as_ref())
+                                .map(RuntimeValue::Float)
+                                .ok_or_else(|| CodegenError::InvalidFloatLiteral {
+                                    kernel: kernel_id,
+                                    expr: expr_id,
+                                    raw: float.raw.clone(),
+                                })?;
+                            values.push(value);
+                        }
+                        KernelExprKind::Decimal(decimal) => {
+                            let value = RuntimeDecimal::parse_literal(decimal.raw.as_ref())
+                                .map(RuntimeValue::Decimal)
+                                .ok_or_else(|| CodegenError::InvalidDecimalLiteral {
+                                    kernel: kernel_id,
+                                    expr: expr_id,
+                                    raw: decimal.raw.clone(),
+                                })?;
+                            values.push(value);
+                        }
+                        KernelExprKind::BigInt(bigint) => {
+                            let value = RuntimeBigInt::parse_literal(bigint.raw.as_ref())
+                                .map(RuntimeValue::BigInt)
+                                .ok_or_else(|| CodegenError::InvalidBigIntLiteral {
+                                    kernel: kernel_id,
+                                    expr: expr_id,
+                                    raw: bigint.raw.clone(),
+                                })?;
+                            values.push(value);
+                        }
+                        KernelExprKind::SuffixedInteger(integer) => {
+                            values.push(RuntimeValue::SuffixedInteger {
                                 raw: integer.raw.clone(),
-                            }
-                        })?;
-                        values.push(value);
-                    }
-                    KernelExprKind::Float(float) => {
-                        let value = RuntimeFloat::parse_literal(float.raw.as_ref())
-                            .map(RuntimeValue::Float)
-                            .ok_or_else(|| CodegenError::InvalidFloatLiteral {
-                                kernel: kernel_id,
-                                expr: expr_id,
-                                raw: float.raw.clone(),
-                            })?;
-                        values.push(value);
-                    }
-                    KernelExprKind::Decimal(decimal) => {
-                        let value = RuntimeDecimal::parse_literal(decimal.raw.as_ref())
-                            .map(RuntimeValue::Decimal)
-                            .ok_or_else(|| CodegenError::InvalidDecimalLiteral {
-                                kernel: kernel_id,
-                                expr: expr_id,
-                                raw: decimal.raw.clone(),
-                            })?;
-                        values.push(value);
-                    }
-                    KernelExprKind::BigInt(bigint) => {
-                        let value = RuntimeBigInt::parse_literal(bigint.raw.as_ref())
-                            .map(RuntimeValue::BigInt)
-                            .ok_or_else(|| CodegenError::InvalidBigIntLiteral {
-                                kernel: kernel_id,
-                                expr: expr_id,
-                                raw: bigint.raw.clone(),
-                            })?;
-                        values.push(value);
-                    }
-                    KernelExprKind::SuffixedInteger(integer) => {
-                        values.push(RuntimeValue::SuffixedInteger {
-                            raw: integer.raw.clone(),
-                            suffix: integer.suffix.clone(),
-                        });
-                    }
-                    KernelExprKind::Text(text) => {
-                        tasks.push(Task::BuildText {
-                            segments: &text.segments,
-                        });
-                        for segment in text.segments.iter().rev() {
-                            if let crate::TextSegment::Interpolation { expr, .. } = segment {
-                                tasks.push(Task::Visit(*expr));
-                            }
-                        }
-                    }
-                    KernelExprKind::Tuple(elements) => {
-                        tasks.push(Task::BuildTuple {
-                            len: elements.len(),
-                        });
-                        for element in elements.iter().rev() {
-                            tasks.push(Task::Visit(*element));
-                        }
-                    }
-                    KernelExprKind::List(elements) => {
-                        tasks.push(Task::BuildList {
-                            len: elements.len(),
-                        });
-                        for element in elements.iter().rev() {
-                            tasks.push(Task::Visit(*element));
-                        }
-                    }
-                    KernelExprKind::Map(entries) => {
-                        tasks.push(Task::BuildMap { len: entries.len() });
-                        for entry in entries.iter().rev() {
-                            tasks.push(Task::Visit(entry.value));
-                            tasks.push(Task::Visit(entry.key));
-                        }
-                    }
-                    KernelExprKind::Set(elements) => {
-                        tasks.push(Task::BuildSet {
-                            len: elements.len(),
-                        });
-                        for element in elements.iter().rev() {
-                            tasks.push(Task::Visit(*element));
-                        }
-                    }
-                    KernelExprKind::Record(fields) => {
-                        tasks.push(Task::BuildRecord { fields });
-                        for field in fields.iter().rev() {
-                            tasks.push(Task::Visit(field.value));
-                        }
-                    }
-                    KernelExprKind::Apply { callee, arguments } => match &kernel.exprs()[*callee].kind {
-                        KernelExprKind::Builtin(
-                            BuiltinTerm::Some
-                            | BuiltinTerm::Ok
-                            | BuiltinTerm::Err
-                            | BuiltinTerm::Valid
-                            | BuiltinTerm::Invalid,
-                        ) => {
-                            if arguments.len() != 1 {
-                                return Ok(None);
-                            }
-                            let constructor = match kernel.exprs()[*callee].kind {
-                                KernelExprKind::Builtin(BuiltinTerm::Some) => {
-                                    crate::RuntimeConstructor::Some
-                                }
-                                KernelExprKind::Builtin(BuiltinTerm::Ok) => crate::RuntimeConstructor::Ok,
-                                KernelExprKind::Builtin(BuiltinTerm::Err) => {
-                                    crate::RuntimeConstructor::Err
-                                }
-                                KernelExprKind::Builtin(BuiltinTerm::Valid) => {
-                                    crate::RuntimeConstructor::Valid
-                                }
-                                KernelExprKind::Builtin(BuiltinTerm::Invalid) => {
-                                    crate::RuntimeConstructor::Invalid
-                                }
-                                _ => unreachable!("matched builtin constructor above"),
-                            };
-                            tasks.push(Task::BuildBuiltinConstructor { constructor });
-                            tasks.push(Task::Visit(arguments[0]));
-                        }
-                        KernelExprKind::SumConstructor(handle) => {
-                            if arguments.len() != handle.field_count as usize {
-                                return Ok(None);
-                            }
-                            tasks.push(Task::BuildSumValue {
-                                handle: handle.clone(),
+                                suffix: integer.suffix.clone(),
                             });
-                            for argument in arguments.iter().rev() {
-                                tasks.push(Task::Visit(*argument));
-                            }
                         }
-                        KernelExprKind::IntrinsicValue(intrinsic) => {
-                            let Some(expected_arity) = static_intrinsic_arity(*intrinsic) else {
-                                return Ok(None);
-                            };
-                            if arguments.len() != expected_arity {
-                                return Ok(None);
-                            }
-                            tasks.push(Task::BuildIntrinsicCall {
-                                intrinsic: *intrinsic,
+                        KernelExprKind::Text(text) => {
+                            tasks.push(Task::BuildText {
+                                segments: &text.segments,
                             });
-                            for argument in arguments.iter().rev() {
-                                tasks.push(Task::Visit(*argument));
+                            for segment in text.segments.iter().rev() {
+                                if let crate::TextSegment::Interpolation { expr, .. } = segment {
+                                    tasks.push(Task::Visit(*expr));
+                                }
                             }
                         }
-                        _ => return Ok(None),
-                    },
-                    KernelExprKind::Unary { operator, expr } => {
-                        tasks.push(Task::BuildUnary {
-                            operator: *operator,
-                        });
-                        tasks.push(Task::Visit(*expr));
+                        KernelExprKind::Tuple(elements) => {
+                            tasks.push(Task::BuildTuple {
+                                len: elements.len(),
+                            });
+                            for element in elements.iter().rev() {
+                                tasks.push(Task::Visit(*element));
+                            }
+                        }
+                        KernelExprKind::List(elements) => {
+                            tasks.push(Task::BuildList {
+                                len: elements.len(),
+                            });
+                            for element in elements.iter().rev() {
+                                tasks.push(Task::Visit(*element));
+                            }
+                        }
+                        KernelExprKind::Map(entries) => {
+                            tasks.push(Task::BuildMap { len: entries.len() });
+                            for entry in entries.iter().rev() {
+                                tasks.push(Task::Visit(entry.value));
+                                tasks.push(Task::Visit(entry.key));
+                            }
+                        }
+                        KernelExprKind::Set(elements) => {
+                            tasks.push(Task::BuildSet {
+                                len: elements.len(),
+                            });
+                            for element in elements.iter().rev() {
+                                tasks.push(Task::Visit(*element));
+                            }
+                        }
+                        KernelExprKind::Record(fields) => {
+                            tasks.push(Task::BuildRecord { fields });
+                            for field in fields.iter().rev() {
+                                tasks.push(Task::Visit(field.value));
+                            }
+                        }
+                        KernelExprKind::Apply { callee, arguments } => {
+                            match &kernel.exprs()[*callee].kind {
+                                KernelExprKind::Builtin(
+                                    BuiltinTerm::Some
+                                    | BuiltinTerm::Ok
+                                    | BuiltinTerm::Err
+                                    | BuiltinTerm::Valid
+                                    | BuiltinTerm::Invalid,
+                                ) => {
+                                    if arguments.len() != 1 {
+                                        return Ok(None);
+                                    }
+                                    let constructor = match kernel.exprs()[*callee].kind {
+                                        KernelExprKind::Builtin(BuiltinTerm::Some) => {
+                                            crate::RuntimeConstructor::Some
+                                        }
+                                        KernelExprKind::Builtin(BuiltinTerm::Ok) => {
+                                            crate::RuntimeConstructor::Ok
+                                        }
+                                        KernelExprKind::Builtin(BuiltinTerm::Err) => {
+                                            crate::RuntimeConstructor::Err
+                                        }
+                                        KernelExprKind::Builtin(BuiltinTerm::Valid) => {
+                                            crate::RuntimeConstructor::Valid
+                                        }
+                                        KernelExprKind::Builtin(BuiltinTerm::Invalid) => {
+                                            crate::RuntimeConstructor::Invalid
+                                        }
+                                        _ => unreachable!("matched builtin constructor above"),
+                                    };
+                                    tasks.push(Task::BuildBuiltinConstructor { constructor });
+                                    tasks.push(Task::Visit(arguments[0]));
+                                }
+                                KernelExprKind::SumConstructor(handle) => {
+                                    if arguments.len() != handle.field_count as usize {
+                                        return Ok(None);
+                                    }
+                                    tasks.push(Task::BuildSumValue {
+                                        handle: handle.clone(),
+                                    });
+                                    for argument in arguments.iter().rev() {
+                                        tasks.push(Task::Visit(*argument));
+                                    }
+                                }
+                                KernelExprKind::IntrinsicValue(intrinsic) => {
+                                    let Some(expected_arity) = static_intrinsic_arity(*intrinsic)
+                                    else {
+                                        return Ok(None);
+                                    };
+                                    if arguments.len() != expected_arity {
+                                        return Ok(None);
+                                    }
+                                    tasks.push(Task::BuildIntrinsicCall {
+                                        intrinsic: *intrinsic,
+                                    });
+                                    for argument in arguments.iter().rev() {
+                                        tasks.push(Task::Visit(*argument));
+                                    }
+                                }
+                                _ => return Ok(None),
+                            }
+                        }
+                        KernelExprKind::Unary { operator, expr } => {
+                            tasks.push(Task::BuildUnary {
+                                operator: *operator,
+                            });
+                            tasks.push(Task::Visit(*expr));
+                        }
+                        KernelExprKind::Binary {
+                            left,
+                            operator,
+                            right,
+                        } => {
+                            tasks.push(Task::BuildBinary {
+                                operator: *operator,
+                            });
+                            tasks.push(Task::Visit(*right));
+                            tasks.push(Task::Visit(*left));
+                        }
                     }
-                    KernelExprKind::Binary {
-                        left,
-                        operator,
-                        right,
-                    } => {
-                        tasks.push(Task::BuildBinary {
-                            operator: *operator,
-                        });
-                        tasks.push(Task::Visit(*right));
-                        tasks.push(Task::Visit(*left));
-                    }
-                },
+                }
                 Task::BuildOptionSome => {
                     let payload = values.pop().expect("static option payload should exist");
                     values.push(RuntimeValue::OptionSome(Box::new(payload)));
                 }
                 Task::BuildBuiltinConstructor { constructor } => {
-                    let payload = values.pop().expect("static constructor payload should exist");
+                    let payload = values
+                        .pop()
+                        .expect("static constructor payload should exist");
                     let value = match constructor {
-                        crate::RuntimeConstructor::Some => RuntimeValue::OptionSome(Box::new(payload)),
+                        crate::RuntimeConstructor::Some => {
+                            RuntimeValue::OptionSome(Box::new(payload))
+                        }
                         crate::RuntimeConstructor::Ok => RuntimeValue::ResultOk(Box::new(payload)),
-                        crate::RuntimeConstructor::Err => RuntimeValue::ResultErr(Box::new(payload)),
+                        crate::RuntimeConstructor::Err => {
+                            RuntimeValue::ResultErr(Box::new(payload))
+                        }
                         crate::RuntimeConstructor::Valid => {
                             RuntimeValue::ValidationValid(Box::new(payload))
                         }
@@ -3930,8 +4306,9 @@ impl<'a> CraneliftCompiler<'a> {
                         intrinsic,
                         drain_tail(
                             &mut values,
-                            static_intrinsic_arity(intrinsic)
-                                .expect("static intrinsic builder should only use supported arities"),
+                            static_intrinsic_arity(intrinsic).expect(
+                                "static intrinsic builder should only use supported arities",
+                            ),
                         ),
                     ) else {
                         return Ok(None);
@@ -3953,43 +4330,61 @@ impl<'a> CraneliftCompiler<'a> {
                     values.push(value);
                 }
                 Task::BuildBinary { operator } => {
-                    let right = static_strip_signal(
-                        values.pop().expect("static binary rhs should exist"),
-                    );
-                    let left = static_strip_signal(
-                        values.pop().expect("static binary lhs should exist"),
-                    );
+                    let right =
+                        static_strip_signal(values.pop().expect("static binary rhs should exist"));
+                    let left =
+                        static_strip_signal(values.pop().expect("static binary lhs should exist"));
                     let Some(value) = (match (operator, &left, &right) {
-                        (BinaryOperator::GreaterThan, RuntimeValue::Int(left), RuntimeValue::Int(right)) => {
-                            Some(RuntimeValue::Bool(left > right))
-                        }
-                        (BinaryOperator::GreaterThan, RuntimeValue::Float(left), RuntimeValue::Float(right)) => {
-                            Some(RuntimeValue::Bool(left.to_f64() > right.to_f64()))
-                        }
-                        (BinaryOperator::LessThan, RuntimeValue::Int(left), RuntimeValue::Int(right)) => {
-                            Some(RuntimeValue::Bool(left < right))
-                        }
-                        (BinaryOperator::LessThan, RuntimeValue::Float(left), RuntimeValue::Float(right)) => {
-                            Some(RuntimeValue::Bool(left.to_f64() < right.to_f64()))
-                        }
-                        (BinaryOperator::GreaterThanOrEqual, RuntimeValue::Int(left), RuntimeValue::Int(right)) => {
-                            Some(RuntimeValue::Bool(left >= right))
-                        }
-                        (BinaryOperator::GreaterThanOrEqual, RuntimeValue::Float(left), RuntimeValue::Float(right)) => {
-                            Some(RuntimeValue::Bool(left.to_f64() >= right.to_f64()))
-                        }
-                        (BinaryOperator::LessThanOrEqual, RuntimeValue::Int(left), RuntimeValue::Int(right)) => {
-                            Some(RuntimeValue::Bool(left <= right))
-                        }
-                        (BinaryOperator::LessThanOrEqual, RuntimeValue::Float(left), RuntimeValue::Float(right)) => {
-                            Some(RuntimeValue::Bool(left.to_f64() <= right.to_f64()))
-                        }
-                        (BinaryOperator::And, RuntimeValue::Bool(left), RuntimeValue::Bool(right)) => {
-                            Some(RuntimeValue::Bool(*left && *right))
-                        }
-                        (BinaryOperator::Or, RuntimeValue::Bool(left), RuntimeValue::Bool(right)) => {
-                            Some(RuntimeValue::Bool(*left || *right))
-                        }
+                        (
+                            BinaryOperator::GreaterThan,
+                            RuntimeValue::Int(left),
+                            RuntimeValue::Int(right),
+                        ) => Some(RuntimeValue::Bool(left > right)),
+                        (
+                            BinaryOperator::GreaterThan,
+                            RuntimeValue::Float(left),
+                            RuntimeValue::Float(right),
+                        ) => Some(RuntimeValue::Bool(left.to_f64() > right.to_f64())),
+                        (
+                            BinaryOperator::LessThan,
+                            RuntimeValue::Int(left),
+                            RuntimeValue::Int(right),
+                        ) => Some(RuntimeValue::Bool(left < right)),
+                        (
+                            BinaryOperator::LessThan,
+                            RuntimeValue::Float(left),
+                            RuntimeValue::Float(right),
+                        ) => Some(RuntimeValue::Bool(left.to_f64() < right.to_f64())),
+                        (
+                            BinaryOperator::GreaterThanOrEqual,
+                            RuntimeValue::Int(left),
+                            RuntimeValue::Int(right),
+                        ) => Some(RuntimeValue::Bool(left >= right)),
+                        (
+                            BinaryOperator::GreaterThanOrEqual,
+                            RuntimeValue::Float(left),
+                            RuntimeValue::Float(right),
+                        ) => Some(RuntimeValue::Bool(left.to_f64() >= right.to_f64())),
+                        (
+                            BinaryOperator::LessThanOrEqual,
+                            RuntimeValue::Int(left),
+                            RuntimeValue::Int(right),
+                        ) => Some(RuntimeValue::Bool(left <= right)),
+                        (
+                            BinaryOperator::LessThanOrEqual,
+                            RuntimeValue::Float(left),
+                            RuntimeValue::Float(right),
+                        ) => Some(RuntimeValue::Bool(left.to_f64() <= right.to_f64())),
+                        (
+                            BinaryOperator::And,
+                            RuntimeValue::Bool(left),
+                            RuntimeValue::Bool(right),
+                        ) => Some(RuntimeValue::Bool(*left && *right)),
+                        (
+                            BinaryOperator::Or,
+                            RuntimeValue::Bool(left),
+                            RuntimeValue::Bool(right),
+                        ) => Some(RuntimeValue::Bool(*left || *right)),
                         (BinaryOperator::Equals, left, right) => {
                             Some(RuntimeValue::Bool(static_structural_eq(left, right)))
                         }
@@ -4005,7 +4400,9 @@ impl<'a> CraneliftCompiler<'a> {
                 Task::BuildText { segments } => {
                     let interpolation_count = segments
                         .iter()
-                        .filter(|segment| matches!(segment, crate::TextSegment::Interpolation { .. }))
+                        .filter(|segment| {
+                            matches!(segment, crate::TextSegment::Interpolation { .. })
+                        })
                         .count();
                     let mut interpolation_values =
                         drain_tail(&mut values, interpolation_count).into_iter();
@@ -4113,9 +4510,9 @@ fn drain_tail<T>(values: &mut Vec<T>, len: usize) -> Vec<T> {
 
 fn static_intrinsic_arity(intrinsic: IntrinsicValue) -> Option<usize> {
     match intrinsic {
-        IntrinsicValue::BytesLength | IntrinsicValue::BytesFromText | IntrinsicValue::BytesToText => {
-            Some(1)
-        }
+        IntrinsicValue::BytesLength
+        | IntrinsicValue::BytesFromText
+        | IntrinsicValue::BytesToText => Some(1),
         IntrinsicValue::BytesGet | IntrinsicValue::BytesAppend | IntrinsicValue::BytesRepeat => {
             Some(2)
         }
@@ -4133,18 +4530,20 @@ fn static_evaluate_intrinsic_call(
         (IntrinsicValue::BytesLength, [RuntimeValue::Bytes(bytes)]) => {
             Some(RuntimeValue::Int(bytes.len() as i64))
         }
-        (IntrinsicValue::BytesGet, [RuntimeValue::Int(index), RuntimeValue::Bytes(bytes)]) => {
-            Some(
-                usize::try_from(*index)
-                    .ok()
-                    .and_then(|index| bytes.get(index))
-                    .map(|&byte| RuntimeValue::OptionSome(Box::new(RuntimeValue::Int(byte as i64))))
-                    .unwrap_or(RuntimeValue::OptionNone),
-            )
-        }
+        (IntrinsicValue::BytesGet, [RuntimeValue::Int(index), RuntimeValue::Bytes(bytes)]) => Some(
+            usize::try_from(*index)
+                .ok()
+                .and_then(|index| bytes.get(index))
+                .map(|&byte| RuntimeValue::OptionSome(Box::new(RuntimeValue::Int(byte as i64))))
+                .unwrap_or(RuntimeValue::OptionNone),
+        ),
         (
             IntrinsicValue::BytesSlice,
-            [RuntimeValue::Int(from), RuntimeValue::Int(to), RuntimeValue::Bytes(bytes)],
+            [
+                RuntimeValue::Int(from),
+                RuntimeValue::Int(to),
+                RuntimeValue::Bytes(bytes),
+            ],
         ) => {
             let start = (*from as usize).min(bytes.len());
             let end = (*to as usize).min(bytes.len());
@@ -4221,7 +4620,9 @@ fn static_structural_eq(left: &RuntimeValue, right: &RuntimeValue) -> bool {
                     .zip(right.iter())
                     .all(|(left, right)| static_structural_eq(left, right))
         }
-        (RuntimeValue::Set(left), RuntimeValue::Set(right)) => static_unordered_values_eq(left, right),
+        (RuntimeValue::Set(left), RuntimeValue::Set(right)) => {
+            static_unordered_values_eq(left, right)
+        }
         (RuntimeValue::Map(left), RuntimeValue::Map(right)) => static_unordered_map_eq(left, right),
         (RuntimeValue::Record(left), RuntimeValue::Record(right)) => {
             left.len() == right.len()
@@ -4245,7 +4646,9 @@ fn static_structural_eq(left: &RuntimeValue, right: &RuntimeValue) -> bool {
         | (RuntimeValue::ResultErr(left), RuntimeValue::ResultErr(right))
         | (RuntimeValue::ValidationValid(left), RuntimeValue::ValidationValid(right))
         | (RuntimeValue::ValidationInvalid(left), RuntimeValue::ValidationInvalid(right))
-        | (RuntimeValue::Signal(left), RuntimeValue::Signal(right)) => static_structural_eq(left, right),
+        | (RuntimeValue::Signal(left), RuntimeValue::Signal(right)) => {
+            static_structural_eq(left, right)
+        }
         (RuntimeValue::Callable(_), _)
         | (_, RuntimeValue::Callable(_))
         | (RuntimeValue::Task(_), _)
