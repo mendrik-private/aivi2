@@ -4317,6 +4317,72 @@ when event
     }
 
     #[test]
+    fn linked_runtime_executes_source_pattern_reactive_updates_end_to_end() {
+        let lowered = lower_text(
+            "runtime-startup-source-pattern-reactive-when.aivi",
+            r#"
+provider custom.ready
+    wakeup: providerTrigger
+
+@source custom.ready
+signal ready : Signal Bool
+
+signal total : Signal Int = 0
+
+when ready True => total <- 42
+"#,
+        );
+        let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+            .expect("runtime assembly should build for source-pattern reactive updates");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("source-pattern reactive updates should link successfully");
+
+        let first = linked
+            .tick_with_source_lifecycle()
+            .expect("initial source-pattern reactive tick should succeed");
+        assert_eq!(first.source_actions().len(), 1);
+        let ready_port = activation_port_for_owner(&linked, lowered.hir.module(), &first, "ready");
+        let total_signal = signal_handle(&linked, lowered.hir.module(), "total");
+        assert_eq!(
+            linked.runtime().current_value(total_signal).unwrap(),
+            Some(&RuntimeValue::Int(0)),
+            "seeded targets should retain their seed until a source-pattern clause matches"
+        );
+
+        ready_port
+            .publish(DetachedRuntimeValue::from_runtime_owned(
+                RuntimeValue::Bool(true),
+            ))
+            .expect("ready publication should queue");
+        linked
+            .tick_with_source_lifecycle()
+            .expect("matching source-pattern tick should succeed");
+        assert_eq!(
+            linked.runtime().current_value(total_signal).unwrap(),
+            Some(&RuntimeValue::Int(42)),
+            "matching source-pattern clauses should commit their body"
+        );
+
+        ready_port
+            .publish(DetachedRuntimeValue::from_runtime_owned(
+                RuntimeValue::Bool(false),
+            ))
+            .expect("ready reset should queue");
+        linked
+            .tick_with_source_lifecycle()
+            .expect("non-matching source-pattern tick should succeed");
+        assert_eq!(
+            linked.runtime().current_value(total_signal).unwrap(),
+            Some(&RuntimeValue::Int(42)),
+            "non-matching source-pattern clauses should preserve the committed value"
+        );
+    }
+
+    #[test]
     fn linked_runtime_applies_target_pipelines_to_reactive_when_bodies() {
         let lowered = lower_text(
             "runtime-startup-reactive-when-pipeline.aivi",

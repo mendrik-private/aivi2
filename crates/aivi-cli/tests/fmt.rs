@@ -179,6 +179,39 @@ fn fmt_normalizes_pattern_armed_reactive_update_items() {
 }
 
 #[test]
+fn fmt_normalizes_source_pattern_reactive_update_items() {
+    let input = TempFile::new(
+        "fmt-source-pattern-reactive-update",
+        concat!(
+            "signal event:Signal Event\n",
+            "when keyDown(Key \"ArrowUp\")=>event<-Turn North\n",
+            "when tick _=>event<-Tick\n",
+        ),
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("fmt")
+        .arg(input.path())
+        .output()
+        .expect("fmt command should run");
+
+    assert!(
+        output.status.success(),
+        "fmt should succeed for source-pattern reactive update items, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout should be utf-8"),
+        concat!(
+            "signal event : Signal Event\n",
+            "\n",
+            "when keyDown (Key \"ArrowUp\") => event <- Turn North\n",
+            "when tick _ => event <- Tick\n",
+        )
+    );
+}
+
+#[test]
 fn fmt_normalizes_markup_layout() {
     let input = TempFile::new(
         "fmt-normalize",

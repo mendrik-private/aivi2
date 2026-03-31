@@ -155,6 +155,36 @@ fn check_accepts_pattern_armed_reactive_updates() {
 }
 
 #[test]
+fn check_accepts_source_pattern_reactive_updates() {
+    let dir = TempDir::new("check-source-pattern-reactive-update");
+    let path = dir.write(
+        "main.aivi",
+        concat!(
+            "signal incoming : Signal (Option Int)\n",
+            "signal total : Signal Int = 0\n",
+            "\n",
+            "when incoming (Some value) => total <- value\n",
+        ),
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        output.status.success(),
+        "expected source-pattern reactive update program to pass check, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("syntax + HIR passed"),
+        "expected success output for source-pattern reactive update program, got stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
 fn check_accepts_multiline_accumulate_pipe_signal_bodies() {
     let dir = TempDir::new("check-multiline-accumulate-pipe");
     let path = dir.write(

@@ -2559,6 +2559,45 @@ when event
     }
 
     #[test]
+    fn assembles_source_pattern_reactive_updates_into_runtime_bindings() {
+        let lowered = lower_text(
+            "runtime-hir-adapter-source-pattern-reactive-updates.aivi",
+            r#"
+provider custom.ready
+    wakeup: providerTrigger
+
+@source custom.ready
+signal ready : Signal Bool
+signal total : Signal Int = 0
+
+when ready True => total <- 42
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "source-pattern reactive update fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let assembly = assemble_hir_runtime(lowered.module())
+            .expect("source-pattern reactive update fixture should assemble");
+        let ready = assembly
+            .signal(item_id(lowered.module(), "ready"))
+            .expect("ready signal binding should exist");
+        let total = assembly
+            .signal(item_id(lowered.module(), "total"))
+            .expect("total signal binding should exist");
+
+        assert!(matches!(total.kind, HirSignalBindingKind::Reactive { .. }));
+        assert_eq!(total.dependencies(), &[ready.signal()]);
+        assert_eq!(total.reactive_updates().len(), 1);
+        assert_eq!(
+            total.reactive_updates()[0].body_mode,
+            hir::ReactiveUpdateBodyMode::OptionalPayload
+        );
+    }
+
+    #[test]
     fn lowers_builtin_dbus_source_providers_into_runtime_specs() {
         let lowered = lower_text(
             "runtime-hir-adapter-dbus.aivi",

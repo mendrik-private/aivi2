@@ -757,6 +757,8 @@ signal total = 0
 
 when ready => total <- left + right
 
+when keyDown (Key "ArrowUp") => heading <- North
+
 when event
   ||> Turn dir => heading <- dir
   ||> Tick => tickSeen <- True
@@ -765,6 +767,7 @@ when event
 Rules:
 
 - Guarded form: `when <guard> => <target> <- <expr>`
+- Source-pattern form: `when <source-signal> <pattern> => <target> <- <expr>`
 - Pattern-armed form:
 
   ```aivi
@@ -774,6 +777,9 @@ Rules:
   ```
 
 - In the guarded form, the guard must be `Bool`.
+- In the source-pattern form, the source must name a previously declared local `signal`.
+- In the source-pattern form, the pattern is matched against that signal's current payload for the tick.
+- Pattern binders introduced by the source-pattern form are only in scope for that body.
 - In the pattern-armed form, each arm pattern is matched against the subject with ordinary pattern rules.
 - Pattern binders introduced by an arm are only in scope for that arm body.
 - Every target must be a previously declared local `signal`.

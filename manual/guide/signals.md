@@ -86,6 +86,21 @@ when ready and enabled => total <-
     }
 ```
 
+There is also a source-pattern form for routing emissions from a named signal directly into another
+signal:
+
+```aivi
+type Event = Tick | Turn Text
+type Key = Key Text
+
+signal event : Signal Event
+signal tick : Signal Unit
+signal keyDown : Signal Key
+
+when tick _ => event <- Tick
+when keyDown (Key "ArrowUp") => event <- Turn "up"
+```
+
 You can also match a subject value directly and route each matching arm into an existing signal:
 
 ```aivi
@@ -104,12 +119,16 @@ when event
 These forms mean:
 
 - the guarded form uses an ordinary boolean expression
+- the source-pattern form matches each emission from a previously declared signal name against one ordinary pattern
 - the pattern-armed form matches each `||>` arm against the subject expression
+- pattern binders introduced by the source-pattern form are only in scope for that body
 - any binders introduced by an arm, like `dir`, are only in scope for that arm body
 - the target must be a previously declared signal
+- the source-pattern form also requires its source name to refer to a previously declared signal
 - the right-hand side is an ordinary expression with direct signal references
 - unlike a pipe, there is no ambient subject value inside the body
 - if a guarded clause is false when it fires, the target keeps its previous committed value
+- if a source-pattern clause does not match, the target keeps its previous committed value
 - if multiple `when` clauses write the same signal in one tick, later clauses win by source order
 
 Guards like `status.done` are fine too, but only when ordinary expression typing already proves that member access is a `Bool`.

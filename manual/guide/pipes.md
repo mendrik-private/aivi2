@@ -139,12 +139,14 @@ signal total = 0
 signal ready = True
 
 when ready => total <- left + right
+when tick _ => total <- left + right
 ```
 
 This is different from `?|>` and the rest of pipe algebra:
 
 - `when` does not live inside a pipe spine
 - `when` targets an existing signal explicitly
+- `when` can match a named signal emission with `when <signal> <pattern> => ...`
 - the body has no ambient subject such as `.`
 - `when` is for event-driven commits, while pipes are for left-to-right expression flow
 

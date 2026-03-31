@@ -331,7 +331,10 @@ when ready and enabled => total <-
 Normative rules for `when`:
 
 - canonical surface: `when <guard> => <target> <- <expr>`
+- source-pattern surface: `when <source-signal> <pattern> => <target> <- <expr>`
 - `<guard>` is an ordinary expression that must type-check as `Bool`
+- `<source-signal>` must resolve to a previously declared local `signal`
+- `<pattern>` is matched against that signal's payload for the tick; non-matches do not commit a value
 - `<target>` must resolve to a previously declared local `signal`
 - `<expr>` is an ordinary expression; unlike pipe stages, it has no ambient subject value
 - when the clause is triggered and the guard is `False`, the target keeps its previous committed value
@@ -1576,13 +1579,16 @@ signal enabled = True
 
 when ready => total <- left + right
 when ready and enabled => total <- left + right
+when keyDown (Key "ArrowUp") => heading <- Up
 ```
 
 Scheduler-facing rules:
 
 - the compiler records the signal dependencies referenced by each clause guard and body
+- source-pattern clauses record the referenced source signal and lower through pattern matching on that signal payload
 - a clause evaluates against the tick's stable upstream values; its body does not receive an ambient subject
 - if the clause guard evaluates to `False`, no new value is committed for that clause and the target keeps its previous committed value
+- if the source-pattern does not match, no new value is committed for that clause and the target keeps its previous committed value
 - if multiple clauses for the same target produce commits in one tick, source order breaks ties and the last firing clause wins
 - recurrence and self-reference must be validated explicitly; they are not accepted by accident
 
