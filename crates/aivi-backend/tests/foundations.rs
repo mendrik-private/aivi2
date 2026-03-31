@@ -3249,8 +3249,12 @@ fn cranelift_codegen_compiles_static_interpolated_text_item_bodies() {
 domain Duration over Int
     literal ms : Int -> Duration
 
+type Status =
+  | Idle
+  | Ready Int
+
 value folded:Text =
-    "count={7} ok={True} ratio={3.5} cost={19.25d} big={123n} dur={15ms} pair={(7, False)} list={[7, 8]}"
+    "count={7} ok={True} ratio={3.5} cost={19.25d} big={123n} dur={15ms} pair={(7, False)} list={[7, 8]} maybe={Some 7} status={Ready 9} not={not False} cmp={3 < 5} fcmp={3.5 >= 2.0} same={(Some 7) == (Some 7)} diff={(Ready 9) != (Ready 8)}"
 "#,
     );
 
@@ -3265,7 +3269,7 @@ value folded:Text =
             .evaluate_item(folded, &BTreeMap::new())
             .expect("static interpolation should evaluate"),
         RuntimeValue::Text(
-            "count=7 ok=True ratio=3.5 cost=19.25d big=123n dur=15ms pair=(7, False) list=[7, 8]".into()
+            "count=7 ok=True ratio=3.5 cost=19.25d big=123n dur=15ms pair=(7, False) list=[7, 8] maybe=Some 7 status=Ready 9 not=True cmp=True fcmp=True same=True diff=True".into()
         )
     );
 
@@ -3274,6 +3278,52 @@ value folded:Text =
     let artifact = compiled
         .kernel(body)
         .expect("compiled program should retain folded kernel metadata");
+    assert!(artifact.code_size > 0);
+    assert!(artifact.clif.contains(&format!("() -> {}", clif_pointer_ty())));
+    assert!(artifact.clif.contains("symbol_value"));
+    assert!(!compiled.object().is_empty());
+}
+
+#[test]
+fn cranelift_codegen_compiles_static_interpolated_text_with_bytes_intrinsics() {
+    let backend = lower_workspace_text(
+        "milestone-2/valid/workspace-type-imports/main.aivi",
+        r#"
+use aivi.core.bytes (
+    append,
+    empty,
+    get,
+    length,
+    repeat,
+    slice,
+    toText
+)
+
+value folded:Text =
+    "empty={empty} len={length (append (repeat 65 1) (repeat 66 2))} get={get 1 (repeat 67 3)} slice={slice 1 3 (repeat 68 4)} text={toText (repeat 69 2)} repeat={repeat 65 3} raw={append (repeat 65 1) (repeat 66 2)}"
+"#,
+    );
+
+    let folded = find_item(&backend, "folded");
+    let body = backend.items()[folded]
+        .body
+        .expect("folded should carry a body kernel");
+
+    let mut evaluator = KernelEvaluator::new(&backend);
+    assert_eq!(
+        evaluator
+            .evaluate_item(folded, &BTreeMap::new())
+            .expect("bytes interpolation should evaluate"),
+        RuntimeValue::Text(
+            "empty=<bytes:0> len=3 get=Some 67 slice=<bytes:2> text=Some EE repeat=<bytes:3> raw=<bytes:3>".into()
+        )
+    );
+
+    let compiled = compile_program(&backend)
+        .expect("static bytes interpolation should fold into a native text literal");
+    let artifact = compiled
+        .kernel(body)
+        .expect("compiled program should retain folded bytes kernel metadata");
     assert!(artifact.code_size > 0);
     assert!(artifact.clif.contains(&format!("() -> {}", clif_pointer_ty())));
     assert!(artifact.clif.contains("symbol_value"));
@@ -3849,6 +3899,251 @@ fun sameLabels:Bool left:Labels right:Labels =>
     assert!(same_labels_artifact.clif.contains("band"));
     assert!(same_labels_artifact.clif.contains("brif"));
     assert!(!compiled.object().is_empty());
+}
+
+#[test]
+fn cranelift_codegen_compiles_bytes_equality_kernels() {
+    let backend = lower_text(
+        "backend-bytes-equality-codegen.aivi",
+        r#"
+fun sameBytes:Bool left:Bytes right:Bytes =>
+    left == right
+
+fun differentBytes:Bool left:Bytes right:Bytes =>
+    left != right
+
+type Blobs = {
+    primary: Bytes,
+    alias: Option Bytes
+}
+
+fun sameBlobs:Bool left:Blobs right:Blobs =>
+    left == right
+"#,
+    );
+
+    let ptr = clif_pointer_ty();
+    let same_bytes_body = backend.items()[find_item(&backend, "sameBytes")]
+        .body
+        .expect("sameBytes should carry a body kernel");
+    let different_bytes_body = backend.items()[find_item(&backend, "differentBytes")]
+        .body
+        .expect("differentBytes should carry a body kernel");
+    let same_blobs_body = backend.items()[find_item(&backend, "sameBlobs")]
+        .body
+        .expect("sameBlobs should carry a body kernel");
+
+    let compiled =
+        compile_program(&backend).expect("Bytes equality over native byte-sequence cells should compile");
+
+    let same_bytes_artifact = compiled
+        .kernel(same_bytes_body)
+        .expect("compiled program should retain sameBytes kernel metadata");
+    assert!(same_bytes_artifact.code_size > 0);
+    assert!(same_bytes_artifact.clif.contains(&format!("({ptr}, {ptr}) -> i8")));
+    assert!(same_bytes_artifact.clif.contains("load.i64"));
+    assert!(same_bytes_artifact.clif.contains("load.i8"));
+    assert!(same_bytes_artifact.clif.contains("brif"));
+
+    let different_bytes_artifact = compiled
+        .kernel(different_bytes_body)
+        .expect("compiled program should retain differentBytes kernel metadata");
+    assert!(different_bytes_artifact.code_size > 0);
+    assert!(different_bytes_artifact.clif.contains(&format!("({ptr}, {ptr}) -> i8")));
+    assert!(different_bytes_artifact.clif.contains("bxor"));
+
+    let same_blobs_artifact = compiled
+        .kernel(same_blobs_body)
+        .expect("compiled program should retain sameBlobs kernel metadata");
+    assert!(same_blobs_artifact.code_size > 0);
+    assert!(same_blobs_artifact.clif.contains(&format!("({ptr}, {ptr}) -> i8")));
+    assert!(same_blobs_artifact.clif.contains("load.i64"));
+    assert!(same_blobs_artifact.clif.contains("load.i8"));
+    assert!(same_blobs_artifact.clif.contains("band"));
+    assert!(same_blobs_artifact.clif.contains("brif"));
+    assert!(!compiled.object().is_empty());
+}
+
+#[test]
+fn cranelift_codegen_compiles_selected_bytes_intrinsics() {
+    let backend = lower_workspace_text(
+        "milestone-2/valid/workspace-type-imports/main.aivi",
+        r#"
+use aivi.core.bytes (
+    empty,
+    fromText,
+    length
+)
+
+value noBytes:Bytes =
+    empty
+
+fun measureBytes:Int bytes:Bytes =>
+    length bytes
+
+fun encodeLabel:Bytes label:Text =>
+    fromText label
+"#,
+    );
+
+    let ptr = clif_pointer_ty();
+    let no_bytes_body = backend.items()[find_item(&backend, "noBytes")]
+        .body
+        .expect("noBytes should carry a body kernel");
+    let measure_bytes_body = backend.items()[find_item(&backend, "measureBytes")]
+        .body
+        .expect("measureBytes should carry a body kernel");
+    let encode_label_body = backend.items()[find_item(&backend, "encodeLabel")]
+        .body
+        .expect("encodeLabel should carry a body kernel");
+
+    let compiled = compile_program(&backend)
+        .expect("selected bytes intrinsics should compile through Cranelift");
+
+    let no_bytes_artifact = compiled
+        .kernel(no_bytes_body)
+        .expect("compiled program should retain noBytes kernel metadata");
+    assert!(no_bytes_artifact.code_size > 0);
+    assert!(no_bytes_artifact.clif.contains(&format!("() -> {ptr}")));
+    assert!(no_bytes_artifact.clif.contains("symbol_value"));
+
+    let measure_bytes_artifact = compiled
+        .kernel(measure_bytes_body)
+        .expect("compiled program should retain measureBytes kernel metadata");
+    assert!(measure_bytes_artifact.code_size > 0);
+    assert!(measure_bytes_artifact.clif.contains(&format!("({ptr}) -> i64")));
+    assert!(measure_bytes_artifact.clif.contains("load.i64"));
+
+    let encode_label_artifact = compiled
+        .kernel(encode_label_body)
+        .expect("compiled program should retain encodeLabel kernel metadata");
+    assert!(encode_label_artifact.code_size > 0);
+    assert!(encode_label_artifact.clif.contains(&format!("({ptr}) -> {ptr}")));
+    assert!(!compiled.object().is_empty());
+}
+
+#[test]
+fn cranelift_codegen_materializes_supported_static_bytes_roots() {
+    let backend = lower_workspace_text(
+        "milestone-2/valid/workspace-type-imports/main.aivi",
+        r#"
+use aivi.core.bytes (
+    append,
+    length,
+    repeat,
+    toText
+)
+
+value blob:Bytes =
+    append (repeat 65 1) (repeat 66 2)
+
+value size:Int =
+    length (append (repeat 65 1) (repeat 66 2))
+
+value decoded:(Option Text) =
+    toText (repeat 69 2)
+
+value invalid:(Option Text) =
+    toText (repeat 255 1)
+"#,
+    );
+
+    let blob = find_item(&backend, "blob");
+    let size = find_item(&backend, "size");
+    let decoded = find_item(&backend, "decoded");
+    let invalid = find_item(&backend, "invalid");
+
+    let mut evaluator = KernelEvaluator::new(&backend);
+    assert_eq!(
+        evaluator
+            .evaluate_item(blob, &BTreeMap::new())
+            .expect("blob should evaluate"),
+        RuntimeValue::Bytes(Box::from(*b"ABB"))
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(size, &BTreeMap::new())
+            .expect("size should evaluate"),
+        RuntimeValue::Int(3)
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(decoded, &BTreeMap::new())
+            .expect("decoded should evaluate"),
+        RuntimeValue::OptionSome(Box::new(RuntimeValue::Text("EE".into())))
+    );
+    assert_eq!(
+        evaluator
+            .evaluate_item(invalid, &BTreeMap::new())
+            .expect("invalid should evaluate"),
+        RuntimeValue::OptionNone
+    );
+
+    let blob_body = backend.items()[blob]
+        .body
+        .expect("blob should carry a body kernel");
+    let size_body = backend.items()[size]
+        .body
+        .expect("size should carry a body kernel");
+    let decoded_body = backend.items()[decoded]
+        .body
+        .expect("decoded should carry a body kernel");
+    let invalid_body = backend.items()[invalid]
+        .body
+        .expect("invalid should carry a body kernel");
+
+    let compiled = compile_program(&backend)
+        .expect("supported static bytes roots should materialize through Cranelift");
+
+    let blob_artifact = compiled
+        .kernel(blob_body)
+        .expect("compiled program should retain blob kernel metadata");
+    assert!(blob_artifact.code_size > 0);
+    assert!(blob_artifact.clif.contains(&format!("() -> {}", clif_pointer_ty())));
+    assert!(blob_artifact.clif.contains("symbol_value"));
+
+    let size_artifact = compiled
+        .kernel(size_body)
+        .expect("compiled program should retain size kernel metadata");
+    assert!(size_artifact.code_size > 0);
+    assert!(size_artifact.clif.contains("() -> i64"));
+
+    let decoded_artifact = compiled
+        .kernel(decoded_body)
+        .expect("compiled program should retain decoded kernel metadata");
+    assert!(decoded_artifact.code_size > 0);
+    assert!(decoded_artifact.clif.contains(&format!("() -> {}", clif_pointer_ty())));
+    assert!(decoded_artifact.clif.contains("symbol_value"));
+
+    let invalid_artifact = compiled
+        .kernel(invalid_body)
+        .expect("compiled program should retain invalid kernel metadata");
+    assert!(invalid_artifact.code_size > 0);
+    assert!(invalid_artifact.clif.contains(&format!("() -> {}", clif_pointer_ty())));
+    assert!(!compiled.object().is_empty());
+}
+
+#[test]
+fn cranelift_codegen_rejects_unimplemented_bytes_intrinsics() {
+    let backend = lower_workspace_text(
+        "milestone-2/valid/workspace-type-imports/main.aivi",
+        r#"
+use aivi.core.bytes (
+    append
+)
+
+fun combine:Bytes left:Bytes right:Bytes =>
+    append left right
+"#,
+    );
+
+    let errors =
+        compile_program(&backend).expect_err("bytes.append should stay unsupported without allocation");
+    assert!(errors.errors().iter().any(|error| matches!(
+        error,
+        CodegenError::UnsupportedExpression { detail, .. }
+            if detail.contains("empty/length/fromText Cranelift subset")
+    )));
 }
 
 #[test]
@@ -4529,6 +4824,60 @@ fn cranelift_codegen_rejects_by_value_aggregate_abi_contracts() {
             if (*kernel == when_true || *kernel == when_false)
                 && *layout == pair_layout
                 && detail.contains("uses aggregate layout")
+    )));
+}
+
+#[test]
+fn cranelift_codegen_compiles_static_scalar_tuple_and_record_item_bodies() {
+    let backend = lower_text(
+        "backend-static-scalar-aggregate-codegen.aivi",
+        r#"
+type Pair = (Int, Float, Bool)
+type Stats = { count: Int, ratio: Float, active: Bool }
+
+value pair:Pair = (7, 3.5, False)
+value stats:Stats = { count: 7, ratio: 3.5, active: True }
+"#,
+    );
+
+    let pair_body = backend.items()[find_item(&backend, "pair")]
+        .body
+        .expect("pair should carry a body kernel");
+    let stats_body = backend.items()[find_item(&backend, "stats")]
+        .body
+        .expect("stats should carry a body kernel");
+
+    let compiled = compile_program(&backend)
+        .expect("static scalar tuple/record item bodies should compile");
+
+    for kernel_id in [pair_body, stats_body] {
+        let artifact = compiled
+            .kernel(kernel_id)
+            .expect("compiled program should retain aggregate kernel metadata");
+        assert!(artifact.code_size > 0);
+        assert!(artifact.clif.contains(&format!("() -> {}", clif_pointer_ty())));
+        assert!(artifact.clif.contains("symbol_value"));
+    }
+    assert!(!compiled.object().is_empty());
+}
+
+#[test]
+fn cranelift_codegen_rejects_static_aggregate_literals_with_by_reference_fields() {
+    let backend = lower_text(
+        "backend-static-byref-aggregate-codegen.aivi",
+        r#"
+type User = { name: Text, active: Bool }
+
+value user:User = { name: "Ada", active: True }
+"#,
+    );
+
+    let errors = compile_program(&backend)
+        .expect_err("static aggregate literals with by-reference fields should stay unsupported");
+    assert!(errors.errors().iter().any(|error| matches!(
+        error,
+        CodegenError::UnsupportedExpression { detail, .. }
+            if detail.contains("by-reference constant contract") && detail.contains("name")
     )));
 }
 

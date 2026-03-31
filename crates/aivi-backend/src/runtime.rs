@@ -1292,7 +1292,7 @@ impl<'a> KernelEvaluator<'a> {
                         }
                         KernelExprKind::Builtin(term) => values.push(map_builtin(*term)),
                         KernelExprKind::IntrinsicValue(value) => {
-                            values.push(runtime_intrinsic_value(*value))
+                            values.push(runtime_intrinsic_value(kernel_id, expr_id, *value)?)
                         }
                         KernelExprKind::Integer(integer) => {
                             let value = integer.raw.parse::<i64>().map(RuntimeValue::Int).map_err(
@@ -3677,11 +3677,19 @@ fn map_builtin(term: BuiltinTerm) -> RuntimeValue {
     }
 }
 
-fn runtime_intrinsic_value(value: IntrinsicValue) -> RuntimeValue {
-    RuntimeValue::Callable(RuntimeCallable::IntrinsicValue {
-        value,
-        bound_arguments: Vec::new(),
-    })
+fn runtime_intrinsic_value(
+    kernel: KernelId,
+    expr: KernelExprId,
+    value: IntrinsicValue,
+) -> Result<RuntimeValue, EvaluationError> {
+    if intrinsic_value_arity(value) == 0 {
+        evaluate_intrinsic_value(kernel, expr, value, Vec::new())
+    } else {
+        Ok(RuntimeValue::Callable(RuntimeCallable::IntrinsicValue {
+            value,
+            bound_arguments: Vec::new(),
+        }))
+    }
 }
 
 fn runtime_class_member_value(intrinsic: BuiltinClassMemberIntrinsic) -> RuntimeValue {

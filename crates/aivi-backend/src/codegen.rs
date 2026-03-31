@@ -15,6 +15,7 @@ use cranelift_codegen::{
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::{DataDescription, FuncId, Linkage, Module, default_libcall_names};
 use cranelift_object::{ObjectBuilder, ObjectModule};
+use aivi_hir::IntrinsicValue;
 
 use crate::{
     AbiPassMode, BinaryOperator, BuiltinTerm, CallingConventionKind, EnvSlotId, ItemId, Kernel,
@@ -303,6 +304,7 @@ enum DirectApplyPlan {
     Item { body: KernelId },
     DomainMember(DomainMemberCallPlan),
     Builtin(BuiltinCallPlan),
+    Intrinsic(IntrinsicCallPlan),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -316,6 +318,12 @@ enum BuiltinCallPlan {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IntrinsicCallPlan {
+    BytesLength,
+    BytesFromText,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NativeCompareKind {
     Integer,
     Float,
@@ -326,6 +334,7 @@ enum NativeEqualityShape {
     Integer,
     Float,
     Text,
+    Bytes,
     Aggregate(Vec<NativeEqualityField>),
     NicheOption {
         payload: Box<NativeEqualityShape>,
@@ -337,6 +346,17 @@ struct NativeEqualityField {
     offset: i32,
     layout: LayoutId,
     shape: Box<NativeEqualityShape>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum StaticMaterializationPlan {
+    Int(i64),
+    Float(RuntimeFloat),
+    Bool(bool),
+    Text(Box<str>),
+    Bytes(Box<[u8]>),
+    NicheOptionNone,
+    NicheOptionSome(Box<StaticMaterializationPlan>),
 }
 
 impl<'a> CraneliftCompiler<'a> {
@@ -401,6 +421,14 @@ impl<'a> CraneliftCompiler<'a> {
                 }
 
                 let expr = &kernel.exprs()[expr_id];
+                match self.can_materialize_static_expression(kernel_id, kernel, expr_id) {
+                    Ok(true) => continue,
+                    Ok(false) => {}
+                    Err(error) => {
+                        errors.push(error);
+                        continue;
+                    }
+                }
                 match &expr.kind {
                     KernelExprKind::Subject(SubjectRef::Input)
                     | KernelExprKind::Subject(SubjectRef::Inline(_))
@@ -513,6 +541,15 @@ impl<'a> CraneliftCompiler<'a> {
                             Err(error) => {
                                 errors.push(error);
                             }
+                        }
+                    }
+                    KernelExprKind::Tuple(_) | KernelExprKind::Record(_) => {
+                        if let Err(error) = self.require_static_scalar_aggregate_expression(
+                            kernel_id,
+                            kernel,
+                            expr_id,
+                        ) {
+                            errors.push(error);
                         }
                     }
                     KernelExprKind::Projection { base, .. } => {
@@ -743,6 +780,16 @@ impl<'a> CraneliftCompiler<'a> {
                             errors.push(error);
                         }
                     }
+                    KernelExprKind::IntrinsicValue(intrinsic) => {
+                        if let Err(error) = self.require_compilable_intrinsic_value(
+                            kernel_id,
+                            expr_id,
+                            *intrinsic,
+                            expr.layout,
+                        ) {
+                            errors.push(error);
+                        }
+                    }
                     KernelExprKind::Apply { callee, arguments } => {
                         for argument in arguments {
                             work.push(*argument);
@@ -757,17 +804,15 @@ impl<'a> CraneliftCompiler<'a> {
                     | KernelExprKind::DomainMember(_)
                     | KernelExprKind::BuiltinClassMember(_)
                     | KernelExprKind::Builtin(_)
-                    | KernelExprKind::IntrinsicValue(_)
                     | KernelExprKind::SuffixedInteger(_)
-                    | KernelExprKind::Tuple(_)
                     | KernelExprKind::List(_)
                     | KernelExprKind::Map(_)
                     | KernelExprKind::Set(_)
-                    | KernelExprKind::Record(_) => {
+                    => {
                         errors.push(self.unsupported_expression(
                             kernel_id,
                             expr_id,
-                            "the current Cranelift slice lowers direct saturated item calls, representational by-reference domain-member calls, niche Option constructors/carriers, record projection, straight-line inline-pipe transform/tap stages, scalar literals, Int/Bool arithmetic, Int/Float/Bool comparison, and native equality over scalar/Text/record/tuple/niche-Option shapes only",
+                            "the current Cranelift slice lowers direct saturated item calls, selected direct bytes intrinsics, representational by-reference domain-member calls, niche Option constructors/carriers, record projection, straight-line inline-pipe transform/tap stages, scalar literals, static scalar tuple/record literals, Int/Bool arithmetic, Int/Float/Bool comparison, and native equality over scalar/Text/Bytes/record/tuple/niche-Option shapes only",
                         ));
                     }
                 }
@@ -1006,6 +1051,15 @@ impl<'a> CraneliftCompiler<'a> {
             match task {
                 Task::Visit(expr_id) => {
                     let expr = &kernel.exprs()[expr_id];
+                    if let Some(value) = self.materialize_static_expression_if_supported(
+                        kernel_id,
+                        kernel,
+                        expr_id,
+                        builder,
+                    )? {
+                        values.push(value);
+                        continue;
+                    }
                     match &expr.kind {
                         KernelExprKind::Item(item) => {
                             let body =
@@ -1146,6 +1200,14 @@ impl<'a> CraneliftCompiler<'a> {
                                 )?,
                             );
                         }
+                        KernelExprKind::Tuple(_) | KernelExprKind::Record(_) => {
+                            values.push(self.materialize_static_scalar_aggregate_expression(
+                                kernel_id,
+                                kernel,
+                                expr_id,
+                                builder,
+                            )?);
+                        }
                         KernelExprKind::Builtin(BuiltinTerm::True) => {
                             self.require_bool_expression(kernel_id, expr_id, expr.layout, "True")?;
                             values.push(builder.ins().iconst(types::I8, 1));
@@ -1164,6 +1226,15 @@ impl<'a> CraneliftCompiler<'a> {
                                 "None constructor",
                             )?;
                             values.push(builder.ins().iconst(self.pointer_type(), 0));
+                        }
+                        KernelExprKind::IntrinsicValue(intrinsic) => {
+                            values.push(self.lower_intrinsic_value(
+                                kernel_id,
+                                expr_id,
+                                *intrinsic,
+                                expr.layout,
+                                builder,
+                            )?);
                         }
                         KernelExprKind::Projection { base, .. } => match base {
                             crate::ProjectionBase::Subject(subject) => {
@@ -1228,7 +1299,7 @@ impl<'a> CraneliftCompiler<'a> {
                             return Err(self.unsupported_expression(
                                 kernel_id,
                                 expr_id,
-                                "the current Cranelift slice only lowers direct saturated item calls, representational by-reference domain-member calls, niche Option constructors/carriers, record projection, scalar subjects/environment slots, straight-line inline-pipe transform/tap stages, scalar literals, Int/Bool arithmetic, Int/Float/Bool comparison, and native equality over scalar/record/tuple/niche-Option shapes",
+                                "the current Cranelift slice only lowers direct saturated item calls, selected direct bytes intrinsics, representational by-reference domain-member calls, niche Option constructors/carriers, record projection, scalar subjects/environment slots, straight-line inline-pipe transform/tap stages, scalar literals, static scalar tuple/record literals, Int/Bool arithmetic, Int/Float/Bool comparison, and native equality over scalar/Text/Bytes/record/tuple/niche-Option shapes",
                             ));
                         }
                     }
@@ -1507,8 +1578,8 @@ impl<'a> CraneliftCompiler<'a> {
                                     builder.ins().fcmp(FloatCC::NotEqual, lhs, rhs)
                                 }
                                 NativeEqualityShape::Text
-                                |
-                                NativeEqualityShape::Aggregate(_)
+                                | NativeEqualityShape::Bytes
+                                | NativeEqualityShape::Aggregate(_)
                                 | NativeEqualityShape::NicheOption { .. } => {
                                     let equal = self.lower_native_equality_shape(
                                         kernel_id, expr_id, &shape, lhs, rhs, builder,
@@ -1856,6 +1927,15 @@ impl<'a> CraneliftCompiler<'a> {
             KernelExprKind::Builtin(term) => self
                 .require_compilable_builtin_call(kernel_id, expr_id, callee, *term, arguments)
                 .map(DirectApplyPlan::Builtin),
+            KernelExprKind::IntrinsicValue(intrinsic) => self
+                .require_compilable_intrinsic_call(
+                    kernel_id,
+                    expr_id,
+                    callee,
+                    *intrinsic,
+                    arguments,
+                )
+                .map(DirectApplyPlan::Intrinsic),
             KernelExprKind::BuiltinClassMember(intrinsic) => Err(
                 self.unsupported_builtin_class_member_call(
                     kernel_id,
@@ -1867,7 +1947,7 @@ impl<'a> CraneliftCompiler<'a> {
             _ => Err(self.unsupported_expression(
                 kernel_id,
                 expr_id,
-                "the current Cranelift slice only lowers direct saturated item calls, representational by-reference domain-member calls, and niche Option constructors",
+                "the current Cranelift slice only lowers direct saturated item calls, selected direct bytes intrinsics, representational by-reference domain-member calls, and niche Option constructors",
             )),
         }
     }
@@ -1993,6 +2073,74 @@ impl<'a> CraneliftCompiler<'a> {
         }
     }
 
+    fn require_compilable_intrinsic_call(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        callee: KernelExprId,
+        intrinsic: IntrinsicValue,
+        arguments: &[KernelExprId],
+    ) -> Result<IntrinsicCallPlan, CodegenError> {
+        let detail = format!("intrinsic `{intrinsic}`");
+        let (_parameters, result_layout) =
+            self.require_saturated_callable_call(kernel_id, expr_id, callee, arguments, &detail)?;
+        let kernel = &self.program.kernels()[kernel_id];
+        match intrinsic {
+            IntrinsicValue::BytesLength => {
+                let [bytes] = arguments else {
+                    unreachable!("saturated `BytesLength` call should keep exactly one argument");
+                };
+                self.require_bytes_expression(
+                    kernel_id,
+                    *bytes,
+                    kernel.exprs()[*bytes].layout,
+                    "bytes.length argument",
+                )?;
+                self.require_int_expression(kernel_id, expr_id, result_layout, "bytes.length result")?;
+                Ok(IntrinsicCallPlan::BytesLength)
+            }
+            IntrinsicValue::BytesFromText => {
+                let [text] = arguments else {
+                    unreachable!("saturated `BytesFromText` call should keep exactly one argument");
+                };
+                self.require_text_expression(
+                    kernel_id,
+                    *text,
+                    kernel.exprs()[*text].layout,
+                    "bytes.fromText argument",
+                )?;
+                self.require_bytes_expression(
+                    kernel_id,
+                    expr_id,
+                    result_layout,
+                    "bytes.fromText result",
+                )?;
+                if self.program.layouts()[kernel.exprs()[*text].layout].abi != AbiPassMode::ByReference
+                    || self.program.layouts()[result_layout].abi != AbiPassMode::ByReference
+                {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        &format!(
+                            "{detail} currently only lowers when both Text input and Bytes result stay by-reference, found layout{}=`{}` -> layout{result_layout}=`{}`",
+                            kernel.exprs()[*text].layout,
+                            self.program.layouts()[kernel.exprs()[*text].layout],
+                            self.program.layouts()[result_layout]
+                        ),
+                    ));
+                }
+                Ok(IntrinsicCallPlan::BytesFromText)
+            }
+            _ => Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "{detail} still requires backend-owned bytes/runtime lowering beyond the current empty/length/fromText Cranelift subset"
+                ),
+            )),
+        }
+    }
+
     fn require_saturated_callable_call(
         &self,
         kernel_id: KernelId,
@@ -2100,7 +2248,8 @@ impl<'a> CraneliftCompiler<'a> {
                 self.lower_direct_item_call(kernel_id, body, arguments, builder)
             }
             DirectApplyPlan::DomainMember(DomainMemberCallPlan::RepresentationalIdentityUnary)
-            | DirectApplyPlan::Builtin(BuiltinCallPlan::NicheOptionSome) => {
+            | DirectApplyPlan::Builtin(BuiltinCallPlan::NicheOptionSome)
+            | DirectApplyPlan::Intrinsic(IntrinsicCallPlan::BytesFromText) => {
                 let [argument] = arguments else {
                     return Err(self.unsupported_expression(
                         kernel_id,
@@ -2109,6 +2258,16 @@ impl<'a> CraneliftCompiler<'a> {
                     ));
                 };
                 Ok(*argument)
+            }
+            DirectApplyPlan::Intrinsic(IntrinsicCallPlan::BytesLength) => {
+                let [argument] = arguments else {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "direct bytes.length lowering expected exactly one materialized argument",
+                    ));
+                };
+                Ok(builder.ins().load(types::I64, MemFlags::new(), *argument, 0))
             }
         }
     }
@@ -2259,6 +2418,26 @@ impl<'a> CraneliftCompiler<'a> {
         }
     }
 
+    fn require_bytes_expression(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        layout: LayoutId,
+        detail: &str,
+    ) -> Result<(), CodegenError> {
+        match &self.program.layouts()[layout].kind {
+            LayoutKind::Primitive(PrimitiveType::Bytes) => Ok(()),
+            _ => Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "{detail} expects Bytes, found `{}`",
+                    self.program.layouts()[layout]
+                ),
+            )),
+        }
+    }
+
     fn require_text_expression(
         &self,
         kernel_id: KernelId,
@@ -2322,6 +2501,38 @@ impl<'a> CraneliftCompiler<'a> {
             }
         }
         Ok(())
+    }
+
+    fn require_compilable_intrinsic_value(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        intrinsic: IntrinsicValue,
+        layout: LayoutId,
+    ) -> Result<(), CodegenError> {
+        match intrinsic {
+            IntrinsicValue::BytesEmpty => {
+                self.require_bytes_expression(kernel_id, expr_id, layout, "bytes.empty result")?;
+                if self.program.layouts()[layout].abi != AbiPassMode::ByReference {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        &format!(
+                            "bytes.empty currently requires a by-reference Bytes layout, found layout{layout}=`{}`",
+                            self.program.layouts()[layout]
+                        ),
+                    ));
+                }
+                Ok(())
+            }
+            _ => Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "intrinsic `{intrinsic}` still requires direct call lowering; only bytes.empty lowers as a first-class intrinsic value in the current Cranelift slice"
+                ),
+            )),
+        }
     }
 
     fn require_ordered_expression_pair(
@@ -2413,6 +2624,19 @@ impl<'a> CraneliftCompiler<'a> {
                     ));
                 }
                 Ok(NativeEqualityShape::Text)
+            }
+            LayoutKind::Primitive(PrimitiveType::Bytes) => {
+                if self.program.layouts()[layout].abi != AbiPassMode::ByReference {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        &format!(
+                            "Bytes layout{layout}=`{}` must stay by-reference for native equality lowering",
+                            self.program.layouts()[layout]
+                        ),
+                    ));
+                }
+                Ok(NativeEqualityShape::Bytes)
             }
             LayoutKind::Tuple(elements) => {
                 if self.program.layouts()[layout].abi != AbiPassMode::ByReference {
@@ -2593,7 +2817,7 @@ impl<'a> CraneliftCompiler<'a> {
                 kernel_id,
                 expr_id,
                 &format!(
-                    "equality for layout{layout}=`{}` still requires a compiled representation bridge beyond native scalar/Text/record/tuple/niche-Option shapes",
+                    "equality for layout{layout}=`{}` still requires a compiled representation bridge beyond native scalar/Text/Bytes/record/tuple/niche-Option shapes",
                     self.program.layouts()[layout]
                 ),
             )),
@@ -2612,7 +2836,9 @@ impl<'a> CraneliftCompiler<'a> {
         match shape {
             NativeEqualityShape::Integer => Ok(builder.ins().icmp(IntCC::Equal, lhs, rhs)),
             NativeEqualityShape::Float => Ok(builder.ins().fcmp(FloatCC::Equal, lhs, rhs)),
-            NativeEqualityShape::Text => Ok(self.lower_native_text_equality(lhs, rhs, builder)),
+            NativeEqualityShape::Text | NativeEqualityShape::Bytes => {
+                Ok(self.lower_native_byte_sequence_equality(lhs, rhs, builder))
+            }
             NativeEqualityShape::Aggregate(fields) => {
                 let mut equal = builder.ins().iconst(types::I8, 1);
                 for field in fields {
@@ -2675,7 +2901,7 @@ impl<'a> CraneliftCompiler<'a> {
         }
     }
 
-    fn lower_native_text_equality(
+    fn lower_native_byte_sequence_equality(
         &self,
         lhs: Value,
         rhs: Value,
@@ -3057,6 +3283,27 @@ impl<'a> CraneliftCompiler<'a> {
         self.materialize_text_constant(kernel_id, rendered.as_ref(), builder)
     }
 
+    fn lower_intrinsic_value(
+        &mut self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        intrinsic: IntrinsicValue,
+        layout: LayoutId,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<Value, CodegenError> {
+        self.require_compilable_intrinsic_value(kernel_id, expr_id, intrinsic, layout)?;
+        match intrinsic {
+            IntrinsicValue::BytesEmpty => self.materialize_bytes_constant(kernel_id, &[], builder),
+            _ => Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "intrinsic `{intrinsic}` still requires direct call lowering; only bytes.empty lowers as a first-class intrinsic value in the current Cranelift slice"
+                ),
+            )),
+        }
+    }
+
     fn materialize_text_constant(
         &mut self,
         kernel_id: KernelId,
@@ -3066,17 +3313,307 @@ impl<'a> CraneliftCompiler<'a> {
         // Backend-native Text literals use a stable, len-prefixed UTF-8 constant cell.
         // The current Cranelift slice treats the resulting pointer opaquely; richer Text
         // operations still need a shared representation contract at the runtime edge.
-        let bytes = rendered.as_bytes();
+        self.materialize_byte_sequence_constant(kernel_id, "text_literal", rendered.as_bytes(), builder)
+    }
+
+    fn materialize_bytes_constant(
+        &mut self,
+        kernel_id: KernelId,
+        bytes: &[u8],
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<Value, CodegenError> {
+        self.materialize_byte_sequence_constant(kernel_id, "bytes_literal", bytes, builder)
+    }
+
+    fn materialize_byte_sequence_constant(
+        &mut self,
+        kernel_id: KernelId,
+        family: &str,
+        bytes: &[u8],
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<Value, CodegenError> {
         let mut encoded = Vec::with_capacity(8 + bytes.len());
         encoded.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
         encoded.extend_from_slice(bytes);
         self.materialize_literal_pointer(
             kernel_id,
-            "text_literal",
+            family,
             encoded.into_boxed_slice(),
             8,
             builder,
         )
+    }
+
+    fn can_materialize_static_expression(
+        &self,
+        kernel_id: KernelId,
+        kernel: &Kernel,
+        expr_id: KernelExprId,
+    ) -> Result<bool, CodegenError> {
+        let Some(value) = self.evaluate_static_value(kernel_id, kernel, expr_id)? else {
+            return Ok(false);
+        };
+        Ok(self
+            .static_materialization_plan(kernel.exprs()[expr_id].layout, &value)
+            .is_some())
+    }
+
+    fn materialize_static_expression_if_supported(
+        &mut self,
+        kernel_id: KernelId,
+        kernel: &Kernel,
+        expr_id: KernelExprId,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<Option<Value>, CodegenError> {
+        let Some(value) = self.evaluate_static_value(kernel_id, kernel, expr_id)? else {
+            return Ok(None);
+        };
+        let Some(plan) = self.static_materialization_plan(kernel.exprs()[expr_id].layout, &value)
+        else {
+            return Ok(None);
+        };
+        Ok(Some(self.materialize_static_plan(kernel_id, plan, builder)?))
+    }
+
+    fn static_materialization_plan(
+        &self,
+        layout: LayoutId,
+        value: &RuntimeValue,
+    ) -> Option<StaticMaterializationPlan> {
+        match (&self.program.layouts()[layout].kind, value) {
+            (LayoutKind::Primitive(PrimitiveType::Int), RuntimeValue::Int(value)) => {
+                Some(StaticMaterializationPlan::Int(*value))
+            }
+            (LayoutKind::Primitive(PrimitiveType::Float), RuntimeValue::Float(value)) => {
+                Some(StaticMaterializationPlan::Float(*value))
+            }
+            (LayoutKind::Primitive(PrimitiveType::Bool), RuntimeValue::Bool(value)) => {
+                Some(StaticMaterializationPlan::Bool(*value))
+            }
+            (LayoutKind::Primitive(PrimitiveType::Text), RuntimeValue::Text(value)) => {
+                Some(StaticMaterializationPlan::Text(value.clone()))
+            }
+            (LayoutKind::Primitive(PrimitiveType::Bytes), RuntimeValue::Bytes(value)) => {
+                Some(StaticMaterializationPlan::Bytes(value.clone()))
+            }
+            (LayoutKind::Option { element }, RuntimeValue::OptionNone)
+                if self.supports_static_niche_option_payload(*element) =>
+            {
+                Some(StaticMaterializationPlan::NicheOptionNone)
+            }
+            (LayoutKind::Option { element }, RuntimeValue::OptionSome(payload))
+                if self.supports_static_niche_option_payload(*element) =>
+            {
+                self.static_materialization_plan(*element, payload)
+                    .map(|payload| StaticMaterializationPlan::NicheOptionSome(Box::new(payload)))
+            }
+            _ => None,
+        }
+    }
+
+    fn supports_static_niche_option_payload(&self, layout: LayoutId) -> bool {
+        matches!(
+            &self.program.layouts()[layout].kind,
+            LayoutKind::Primitive(PrimitiveType::Text | PrimitiveType::Bytes)
+        ) && self.program.layouts()[layout].abi == AbiPassMode::ByReference
+    }
+
+    fn materialize_static_plan(
+        &mut self,
+        kernel_id: KernelId,
+        plan: StaticMaterializationPlan,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<Value, CodegenError> {
+        match plan {
+            StaticMaterializationPlan::Int(value) => Ok(builder.ins().iconst(types::I64, value)),
+            StaticMaterializationPlan::Float(value) => {
+                Ok(builder.ins().f64const(Ieee64::with_float(value.to_f64())))
+            }
+            StaticMaterializationPlan::Bool(value) => {
+                Ok(builder.ins().iconst(types::I8, i64::from(value)))
+            }
+            StaticMaterializationPlan::Text(value) => {
+                self.materialize_text_constant(kernel_id, value.as_ref(), builder)
+            }
+            StaticMaterializationPlan::Bytes(value) => {
+                self.materialize_bytes_constant(kernel_id, value.as_ref(), builder)
+            }
+            StaticMaterializationPlan::NicheOptionNone => {
+                Ok(builder.ins().iconst(self.pointer_type(), 0))
+            }
+            StaticMaterializationPlan::NicheOptionSome(payload) => {
+                self.materialize_static_plan(kernel_id, *payload, builder)
+            }
+        }
+    }
+
+    fn require_static_scalar_aggregate_expression(
+        &self,
+        kernel_id: KernelId,
+        kernel: &Kernel,
+        expr_id: KernelExprId,
+    ) -> Result<(), CodegenError> {
+        let _ = self.encode_static_scalar_aggregate_constant(kernel_id, kernel, expr_id)?;
+        Ok(())
+    }
+
+    fn materialize_static_scalar_aggregate_expression(
+        &mut self,
+        kernel_id: KernelId,
+        kernel: &Kernel,
+        expr_id: KernelExprId,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<Value, CodegenError> {
+        let (bytes, align) =
+            self.encode_static_scalar_aggregate_constant(kernel_id, kernel, expr_id)?;
+        self.materialize_literal_pointer(kernel_id, "aggregate_literal", bytes, align, builder)
+    }
+
+    fn encode_static_scalar_aggregate_constant(
+        &self,
+        kernel_id: KernelId,
+        kernel: &Kernel,
+        expr_id: KernelExprId,
+    ) -> Result<(Box<[u8]>, u64), CodegenError> {
+        let expr = &kernel.exprs()[expr_id];
+        let Some(value) = self.evaluate_static_value(kernel_id, kernel, expr_id)? else {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                "static aggregate literals currently require every field to fold into a backend-owned by-value scalar constant",
+            ));
+        };
+        match (&expr.kind, &self.program.layouts()[expr.layout].kind, value) {
+            (KernelExprKind::Tuple(_), LayoutKind::Tuple(elements), RuntimeValue::Tuple(values)) => {
+                if elements.len() != values.len() {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "static tuple literal folded into a mismatched runtime field count",
+                    ));
+                }
+                self.encode_static_scalar_aggregate_fields(
+                    kernel_id,
+                    expr_id,
+                    "tuple literal",
+                    elements
+                        .iter()
+                        .copied()
+                        .enumerate()
+                        .map(|(index, layout)| (layout, index.to_string(), &values[index])),
+                )
+            }
+            (
+                KernelExprKind::Record(_),
+                LayoutKind::Record(layout_fields),
+                RuntimeValue::Record(values),
+            ) => {
+                if layout_fields.len() != values.len() {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "static record literal folded into a mismatched runtime field count",
+                    ));
+                }
+                let mut fields = Vec::with_capacity(layout_fields.len());
+                for (layout_field, value_field) in layout_fields.iter().zip(values.iter()) {
+                    if layout_field.name != value_field.label {
+                        return Err(self.unsupported_expression(
+                            kernel_id,
+                            expr_id,
+                            &format!(
+                                "static record literal field `{}` folded into mismatched label `{}`",
+                                layout_field.name, value_field.label
+                            ),
+                        ));
+                    }
+                    fields.push((layout_field.layout, layout_field.name.to_string(), &value_field.value));
+                }
+                self.encode_static_scalar_aggregate_fields(
+                    kernel_id,
+                    expr_id,
+                    "record literal",
+                    fields,
+                )
+            }
+            _ => Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                "static aggregate literals currently require tuple/record layouts that fold into matching native constants",
+            )),
+        }
+    }
+
+    fn encode_static_scalar_aggregate_fields<'b>(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        detail: &str,
+        fields: impl IntoIterator<Item = (LayoutId, String, &'b RuntimeValue)>,
+    ) -> Result<(Box<[u8]>, u64), CodegenError> {
+        let mut encoded = Vec::new();
+        let mut offset = 0u32;
+        let mut max_align = 1u32;
+        for (layout, label, value) in fields {
+            if self.program.layouts()[layout].abi != AbiPassMode::ByValue {
+                return Err(self.unsupported_expression(
+                    kernel_id,
+                    expr_id,
+                    &format!(
+                        "{detail} field `{label}` still requires a native by-reference constant contract for layout{layout}=`{}`",
+                        self.program.layouts()[layout]
+                    ),
+                ));
+            }
+            let abi = self.field_abi_shape(
+                kernel_id,
+                layout,
+                &format!("{detail} field `{label}`"),
+            )?;
+            max_align = max_align.max(abi.align);
+            offset = align_to(offset, abi.align);
+            encoded.resize(offset as usize, 0);
+            encoded.extend_from_slice(
+                &self.encode_static_scalar_field(kernel_id, expr_id, layout, value, detail, &label)?,
+            );
+            offset = offset.checked_add(abi.size).ok_or_else(|| CodegenError::UnsupportedLayout {
+                kernel: kernel_id,
+                layout,
+                detail: format!("{detail} field `{label}` overflows backend constant packing")
+                    .into_boxed_str(),
+            })?;
+        }
+        Ok((encoded.into_boxed_slice(), u64::from(max_align)))
+    }
+
+    fn encode_static_scalar_field(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        layout: LayoutId,
+        value: &RuntimeValue,
+        detail: &str,
+        label: &str,
+    ) -> Result<Vec<u8>, CodegenError> {
+        match (&self.program.layouts()[layout].kind, value) {
+            (LayoutKind::Primitive(PrimitiveType::Int), RuntimeValue::Int(value)) => {
+                Ok(value.to_le_bytes().to_vec())
+            }
+            (LayoutKind::Primitive(PrimitiveType::Float), RuntimeValue::Float(value)) => {
+                Ok(value.to_f64().to_bits().to_le_bytes().to_vec())
+            }
+            (LayoutKind::Primitive(PrimitiveType::Bool), RuntimeValue::Bool(value)) => {
+                Ok(vec![u8::from(*value)])
+            }
+            _ => Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "{detail} field `{label}` expects a static Int/Float/Bool value for layout{layout}=`{}`, found `{value}`",
+                    self.program.layouts()[layout]
+                ),
+            )),
+        }
     }
 
     fn render_static_text_literal(
@@ -3111,6 +3648,21 @@ impl<'a> CraneliftCompiler<'a> {
         enum Task<'a> {
             Visit(KernelExprId),
             BuildOptionSome,
+            BuildBuiltinConstructor {
+                constructor: crate::RuntimeConstructor,
+            },
+            BuildIntrinsicCall {
+                intrinsic: IntrinsicValue,
+            },
+            BuildSumValue {
+                handle: aivi_hir::SumConstructorHandle,
+            },
+            BuildUnary {
+                operator: UnaryOperator,
+            },
+            BuildBinary {
+                operator: BinaryOperator,
+            },
             BuildText {
                 segments: &'a [crate::TextSegment],
             },
@@ -3152,18 +3704,28 @@ impl<'a> CraneliftCompiler<'a> {
                     KernelExprKind::Builtin(BuiltinTerm::None) => {
                         values.push(RuntimeValue::OptionNone);
                     }
+                    KernelExprKind::IntrinsicValue(IntrinsicValue::BytesEmpty) => {
+                        values.push(RuntimeValue::Bytes(Box::new([])));
+                    }
+                    KernelExprKind::SumConstructor(handle) if handle.field_count == 0 => {
+                        values.push(RuntimeValue::Sum(crate::RuntimeSumValue {
+                            item: handle.item,
+                            type_name: handle.type_name.clone(),
+                            variant_name: handle.variant_name.clone(),
+                            fields: Vec::new(),
+                        }));
+                    }
+                    KernelExprKind::SumConstructor(_) => {
+                        return Ok(None);
+                    }
                     KernelExprKind::Builtin(_)
+                    | KernelExprKind::IntrinsicValue(_)
                     | KernelExprKind::Subject(_)
                     | KernelExprKind::Environment(_)
                     | KernelExprKind::Item(_)
-                    | KernelExprKind::SumConstructor(_)
                     | KernelExprKind::DomainMember(_)
                     | KernelExprKind::BuiltinClassMember(_)
-                    | KernelExprKind::IntrinsicValue(_)
                     | KernelExprKind::Projection { .. }
-                    | KernelExprKind::Apply { .. }
-                    | KernelExprKind::Unary { .. }
-                    | KernelExprKind::Binary { .. }
                     | KernelExprKind::Pipe(_) => {
                         return Ok(None);
                     }
@@ -3260,10 +3822,185 @@ impl<'a> CraneliftCompiler<'a> {
                             tasks.push(Task::Visit(field.value));
                         }
                     }
+                    KernelExprKind::Apply { callee, arguments } => match &kernel.exprs()[*callee].kind {
+                        KernelExprKind::Builtin(
+                            BuiltinTerm::Some
+                            | BuiltinTerm::Ok
+                            | BuiltinTerm::Err
+                            | BuiltinTerm::Valid
+                            | BuiltinTerm::Invalid,
+                        ) => {
+                            if arguments.len() != 1 {
+                                return Ok(None);
+                            }
+                            let constructor = match kernel.exprs()[*callee].kind {
+                                KernelExprKind::Builtin(BuiltinTerm::Some) => {
+                                    crate::RuntimeConstructor::Some
+                                }
+                                KernelExprKind::Builtin(BuiltinTerm::Ok) => crate::RuntimeConstructor::Ok,
+                                KernelExprKind::Builtin(BuiltinTerm::Err) => {
+                                    crate::RuntimeConstructor::Err
+                                }
+                                KernelExprKind::Builtin(BuiltinTerm::Valid) => {
+                                    crate::RuntimeConstructor::Valid
+                                }
+                                KernelExprKind::Builtin(BuiltinTerm::Invalid) => {
+                                    crate::RuntimeConstructor::Invalid
+                                }
+                                _ => unreachable!("matched builtin constructor above"),
+                            };
+                            tasks.push(Task::BuildBuiltinConstructor { constructor });
+                            tasks.push(Task::Visit(arguments[0]));
+                        }
+                        KernelExprKind::SumConstructor(handle) => {
+                            if arguments.len() != handle.field_count as usize {
+                                return Ok(None);
+                            }
+                            tasks.push(Task::BuildSumValue {
+                                handle: handle.clone(),
+                            });
+                            for argument in arguments.iter().rev() {
+                                tasks.push(Task::Visit(*argument));
+                            }
+                        }
+                        KernelExprKind::IntrinsicValue(intrinsic) => {
+                            let Some(expected_arity) = static_intrinsic_arity(*intrinsic) else {
+                                return Ok(None);
+                            };
+                            if arguments.len() != expected_arity {
+                                return Ok(None);
+                            }
+                            tasks.push(Task::BuildIntrinsicCall {
+                                intrinsic: *intrinsic,
+                            });
+                            for argument in arguments.iter().rev() {
+                                tasks.push(Task::Visit(*argument));
+                            }
+                        }
+                        _ => return Ok(None),
+                    },
+                    KernelExprKind::Unary { operator, expr } => {
+                        tasks.push(Task::BuildUnary {
+                            operator: *operator,
+                        });
+                        tasks.push(Task::Visit(*expr));
+                    }
+                    KernelExprKind::Binary {
+                        left,
+                        operator,
+                        right,
+                    } => {
+                        tasks.push(Task::BuildBinary {
+                            operator: *operator,
+                        });
+                        tasks.push(Task::Visit(*right));
+                        tasks.push(Task::Visit(*left));
+                    }
                 },
                 Task::BuildOptionSome => {
                     let payload = values.pop().expect("static option payload should exist");
                     values.push(RuntimeValue::OptionSome(Box::new(payload)));
+                }
+                Task::BuildBuiltinConstructor { constructor } => {
+                    let payload = values.pop().expect("static constructor payload should exist");
+                    let value = match constructor {
+                        crate::RuntimeConstructor::Some => RuntimeValue::OptionSome(Box::new(payload)),
+                        crate::RuntimeConstructor::Ok => RuntimeValue::ResultOk(Box::new(payload)),
+                        crate::RuntimeConstructor::Err => RuntimeValue::ResultErr(Box::new(payload)),
+                        crate::RuntimeConstructor::Valid => {
+                            RuntimeValue::ValidationValid(Box::new(payload))
+                        }
+                        crate::RuntimeConstructor::Invalid => {
+                            RuntimeValue::ValidationInvalid(Box::new(payload))
+                        }
+                    };
+                    values.push(value);
+                }
+                Task::BuildSumValue { handle } => {
+                    let fields = drain_tail(&mut values, handle.field_count as usize);
+                    values.push(RuntimeValue::Sum(crate::RuntimeSumValue {
+                        item: handle.item,
+                        type_name: handle.type_name,
+                        variant_name: handle.variant_name,
+                        fields,
+                    }));
+                }
+                Task::BuildIntrinsicCall { intrinsic } => {
+                    let Some(value) = static_evaluate_intrinsic_call(
+                        intrinsic,
+                        drain_tail(
+                            &mut values,
+                            static_intrinsic_arity(intrinsic)
+                                .expect("static intrinsic builder should only use supported arities"),
+                        ),
+                    ) else {
+                        return Ok(None);
+                    };
+                    values.push(value);
+                }
+                Task::BuildUnary { operator } => {
+                    let operand = static_strip_signal(
+                        values.pop().expect("static unary operand should exist"),
+                    );
+                    let Some(value) = (match (operator, operand) {
+                        (UnaryOperator::Not, RuntimeValue::Bool(value)) => {
+                            Some(RuntimeValue::Bool(!value))
+                        }
+                        _ => None,
+                    }) else {
+                        return Ok(None);
+                    };
+                    values.push(value);
+                }
+                Task::BuildBinary { operator } => {
+                    let right = static_strip_signal(
+                        values.pop().expect("static binary rhs should exist"),
+                    );
+                    let left = static_strip_signal(
+                        values.pop().expect("static binary lhs should exist"),
+                    );
+                    let Some(value) = (match (operator, &left, &right) {
+                        (BinaryOperator::GreaterThan, RuntimeValue::Int(left), RuntimeValue::Int(right)) => {
+                            Some(RuntimeValue::Bool(left > right))
+                        }
+                        (BinaryOperator::GreaterThan, RuntimeValue::Float(left), RuntimeValue::Float(right)) => {
+                            Some(RuntimeValue::Bool(left.to_f64() > right.to_f64()))
+                        }
+                        (BinaryOperator::LessThan, RuntimeValue::Int(left), RuntimeValue::Int(right)) => {
+                            Some(RuntimeValue::Bool(left < right))
+                        }
+                        (BinaryOperator::LessThan, RuntimeValue::Float(left), RuntimeValue::Float(right)) => {
+                            Some(RuntimeValue::Bool(left.to_f64() < right.to_f64()))
+                        }
+                        (BinaryOperator::GreaterThanOrEqual, RuntimeValue::Int(left), RuntimeValue::Int(right)) => {
+                            Some(RuntimeValue::Bool(left >= right))
+                        }
+                        (BinaryOperator::GreaterThanOrEqual, RuntimeValue::Float(left), RuntimeValue::Float(right)) => {
+                            Some(RuntimeValue::Bool(left.to_f64() >= right.to_f64()))
+                        }
+                        (BinaryOperator::LessThanOrEqual, RuntimeValue::Int(left), RuntimeValue::Int(right)) => {
+                            Some(RuntimeValue::Bool(left <= right))
+                        }
+                        (BinaryOperator::LessThanOrEqual, RuntimeValue::Float(left), RuntimeValue::Float(right)) => {
+                            Some(RuntimeValue::Bool(left.to_f64() <= right.to_f64()))
+                        }
+                        (BinaryOperator::And, RuntimeValue::Bool(left), RuntimeValue::Bool(right)) => {
+                            Some(RuntimeValue::Bool(*left && *right))
+                        }
+                        (BinaryOperator::Or, RuntimeValue::Bool(left), RuntimeValue::Bool(right)) => {
+                            Some(RuntimeValue::Bool(*left || *right))
+                        }
+                        (BinaryOperator::Equals, left, right) => {
+                            Some(RuntimeValue::Bool(static_structural_eq(left, right)))
+                        }
+                        (BinaryOperator::NotEquals, left, right) => {
+                            Some(RuntimeValue::Bool(!static_structural_eq(left, right)))
+                        }
+                        _ => None,
+                    }) else {
+                        return Ok(None);
+                    };
+                    values.push(value);
                 }
                 Task::BuildText { segments } => {
                     let interpolation_count = segments
@@ -3277,21 +4014,17 @@ impl<'a> CraneliftCompiler<'a> {
                         match segment {
                             crate::TextSegment::Fragment { raw, .. } => rendered.push_str(raw),
                             crate::TextSegment::Interpolation { .. } => {
-                                let mut value = interpolation_values
+                                let value = interpolation_values
                                     .next()
                                     .expect("static text interpolation should align with values");
-                                loop {
-                                    match value {
-                                        RuntimeValue::Signal(inner) => {
-                                            value = *inner;
-                                        }
-                                        RuntimeValue::Callable(_) => return Ok(None),
-                                        other => {
-                                            rendered.push_str(&other.to_string());
-                                            break;
-                                        }
-                                    }
+                                let value = match value {
+                                    RuntimeValue::Signal(inner) => *inner,
+                                    other => other,
+                                };
+                                if matches!(value, RuntimeValue::Callable(_)) {
+                                    return Ok(None);
                                 }
+                                rendered.push_str(&value.to_string());
                             }
                         }
                     }
@@ -3371,8 +4104,198 @@ impl<'a> CraneliftCompiler<'a> {
 }
 
 fn drain_tail<T>(values: &mut Vec<T>, len: usize) -> Vec<T> {
-    let split = values.len() - len;
+    let split = values
+        .len()
+        .checked_sub(len)
+        .expect("static evaluator should never drain more values than it has produced");
     values.drain(split..).collect()
+}
+
+fn static_intrinsic_arity(intrinsic: IntrinsicValue) -> Option<usize> {
+    match intrinsic {
+        IntrinsicValue::BytesLength | IntrinsicValue::BytesFromText | IntrinsicValue::BytesToText => {
+            Some(1)
+        }
+        IntrinsicValue::BytesGet | IntrinsicValue::BytesAppend | IntrinsicValue::BytesRepeat => {
+            Some(2)
+        }
+        IntrinsicValue::BytesSlice => Some(3),
+        _ => None,
+    }
+}
+
+fn static_evaluate_intrinsic_call(
+    intrinsic: IntrinsicValue,
+    arguments: Vec<RuntimeValue>,
+) -> Option<RuntimeValue> {
+    let arguments: Vec<_> = arguments.into_iter().map(static_strip_signal).collect();
+    match (intrinsic, arguments.as_slice()) {
+        (IntrinsicValue::BytesLength, [RuntimeValue::Bytes(bytes)]) => {
+            Some(RuntimeValue::Int(bytes.len() as i64))
+        }
+        (IntrinsicValue::BytesGet, [RuntimeValue::Int(index), RuntimeValue::Bytes(bytes)]) => {
+            Some(
+                usize::try_from(*index)
+                    .ok()
+                    .and_then(|index| bytes.get(index))
+                    .map(|&byte| RuntimeValue::OptionSome(Box::new(RuntimeValue::Int(byte as i64))))
+                    .unwrap_or(RuntimeValue::OptionNone),
+            )
+        }
+        (
+            IntrinsicValue::BytesSlice,
+            [RuntimeValue::Int(from), RuntimeValue::Int(to), RuntimeValue::Bytes(bytes)],
+        ) => {
+            let start = (*from as usize).min(bytes.len());
+            let end = (*to as usize).min(bytes.len());
+            let end = end.max(start);
+            Some(RuntimeValue::Bytes(bytes[start..end].into()))
+        }
+        (IntrinsicValue::BytesAppend, [RuntimeValue::Bytes(left), RuntimeValue::Bytes(right)]) => {
+            let mut combined = left.to_vec();
+            combined.extend_from_slice(right.as_ref());
+            Some(RuntimeValue::Bytes(combined.into()))
+        }
+        (IntrinsicValue::BytesFromText, [RuntimeValue::Text(text)]) => {
+            Some(RuntimeValue::Bytes(text.as_bytes().into()))
+        }
+        (IntrinsicValue::BytesToText, [RuntimeValue::Bytes(bytes)]) => Some(
+            std::str::from_utf8(bytes.as_ref())
+                .ok()
+                .map(|text| RuntimeValue::OptionSome(Box::new(RuntimeValue::Text(text.into()))))
+                .unwrap_or(RuntimeValue::OptionNone),
+        ),
+        (IntrinsicValue::BytesRepeat, [RuntimeValue::Int(byte), RuntimeValue::Int(count)]) => {
+            let byte = (*byte).clamp(0, 255) as u8;
+            let count = (*count).max(0) as usize;
+            Some(RuntimeValue::Bytes(vec![byte; count].into()))
+        }
+        _ => None,
+    }
+}
+
+fn static_strip_signal(value: RuntimeValue) -> RuntimeValue {
+    match value {
+        RuntimeValue::Signal(inner) => *inner,
+        other => other,
+    }
+}
+
+fn static_structural_eq(left: &RuntimeValue, right: &RuntimeValue) -> bool {
+    let left = match left {
+        RuntimeValue::Signal(inner) => inner.as_ref(),
+        other => other,
+    };
+    let right = match right {
+        RuntimeValue::Signal(inner) => inner.as_ref(),
+        other => other,
+    };
+    match (left, right) {
+        (RuntimeValue::Unit, RuntimeValue::Unit) => true,
+        (RuntimeValue::Bool(left), RuntimeValue::Bool(right)) => left == right,
+        (RuntimeValue::Int(left), RuntimeValue::Int(right)) => left == right,
+        (RuntimeValue::Float(left), RuntimeValue::Float(right)) => left == right,
+        (RuntimeValue::Decimal(left), RuntimeValue::Decimal(right)) => left == right,
+        (RuntimeValue::BigInt(left), RuntimeValue::BigInt(right)) => left == right,
+        (RuntimeValue::Text(left), RuntimeValue::Text(right)) => left == right,
+        (RuntimeValue::Bytes(left), RuntimeValue::Bytes(right)) => left == right,
+        (RuntimeValue::Int(left), RuntimeValue::SuffixedInteger { raw, .. })
+        | (RuntimeValue::SuffixedInteger { raw, .. }, RuntimeValue::Int(left)) => {
+            raw.parse::<i64>().ok() == Some(*left)
+        }
+        (
+            RuntimeValue::SuffixedInteger {
+                raw: left_raw,
+                suffix: left_suffix,
+            },
+            RuntimeValue::SuffixedInteger {
+                raw: right_raw,
+                suffix: right_suffix,
+            },
+        ) => left_raw == right_raw && left_suffix == right_suffix,
+        (RuntimeValue::Tuple(left), RuntimeValue::Tuple(right))
+        | (RuntimeValue::List(left), RuntimeValue::List(right)) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right.iter())
+                    .all(|(left, right)| static_structural_eq(left, right))
+        }
+        (RuntimeValue::Set(left), RuntimeValue::Set(right)) => static_unordered_values_eq(left, right),
+        (RuntimeValue::Map(left), RuntimeValue::Map(right)) => static_unordered_map_eq(left, right),
+        (RuntimeValue::Record(left), RuntimeValue::Record(right)) => {
+            left.len() == right.len()
+                && left.iter().zip(right.iter()).all(|(left, right)| {
+                    left.label == right.label && static_structural_eq(&left.value, &right.value)
+                })
+        }
+        (RuntimeValue::Sum(left), RuntimeValue::Sum(right)) => {
+            left.item == right.item
+                && left.variant_name == right.variant_name
+                && left.fields.len() == right.fields.len()
+                && left
+                    .fields
+                    .iter()
+                    .zip(right.fields.iter())
+                    .all(|(left, right)| static_structural_eq(left, right))
+        }
+        (RuntimeValue::OptionNone, RuntimeValue::OptionNone) => true,
+        (RuntimeValue::OptionSome(left), RuntimeValue::OptionSome(right))
+        | (RuntimeValue::ResultOk(left), RuntimeValue::ResultOk(right))
+        | (RuntimeValue::ResultErr(left), RuntimeValue::ResultErr(right))
+        | (RuntimeValue::ValidationValid(left), RuntimeValue::ValidationValid(right))
+        | (RuntimeValue::ValidationInvalid(left), RuntimeValue::ValidationInvalid(right))
+        | (RuntimeValue::Signal(left), RuntimeValue::Signal(right)) => static_structural_eq(left, right),
+        (RuntimeValue::Callable(_), _)
+        | (_, RuntimeValue::Callable(_))
+        | (RuntimeValue::Task(_), _)
+        | (_, RuntimeValue::Task(_))
+        | (RuntimeValue::DbTask(_), _)
+        | (_, RuntimeValue::DbTask(_)) => false,
+        _ => false,
+    }
+}
+
+fn static_unordered_values_eq(left: &[RuntimeValue], right: &[RuntimeValue]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut matched = vec![false; right.len()];
+    'left_values: for left_value in left {
+        for (index, right_value) in right.iter().enumerate() {
+            if matched[index] {
+                continue;
+            }
+            if static_structural_eq(left_value, right_value) {
+                matched[index] = true;
+                continue 'left_values;
+            }
+        }
+        return false;
+    }
+    true
+}
+
+fn static_unordered_map_eq(left: &RuntimeMap, right: &RuntimeMap) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut matched = vec![false; right.len()];
+    'left_entries: for (left_key, left_value) in left {
+        for (index, (right_key, right_value)) in right.iter().enumerate() {
+            if matched[index] {
+                continue;
+            }
+            if static_structural_eq(left_key, right_key)
+                && static_structural_eq(left_value, right_value)
+            {
+                matched[index] = true;
+                continue 'left_entries;
+            }
+        }
+        return false;
+    }
+    true
 }
 
 fn domain_member_binary_operator(member_name: &str) -> Option<BinaryOperator> {
