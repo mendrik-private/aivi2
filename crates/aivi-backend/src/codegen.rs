@@ -275,8 +275,8 @@ impl std::error::Error for CodegenError {}
 ///   plus native equality for `Text`, record/tuple aggregates, and niche `Option` pointers whose
 ///   leaves are already codegen-supported, and
 /// - it explicitly rejects the remaining apply/domain/builtin aggregate/collection/dynamic-text
-///   lowering, plus inline-pipe control-flow/debug stages, until those contracts are owned in this
-///   layer.
+///   lowering, plus inline-pipe `Case`/`TruthyFalsy`/`Debug` stages, until those contracts are
+///   owned in this layer.
 pub fn compile_program(program: &Program) -> Result<CompiledProgram, CodegenErrors> {
     if let Err(errors) = validate_program(program) {
         return Err(CodegenErrors::new(
@@ -648,12 +648,15 @@ impl<'a> CraneliftCompiler<'a> {
                                     ))
                                 }
                                 crate::InlinePipeStageKind::Gate { .. } => {
-                                    errors.push(self.unsupported_inline_pipe_stage(
+                                    if let Err(error) = self.require_inline_pipe_gate_contract(
                                         kernel_id,
                                         expr_id,
                                         stage_index,
-                                        "still requires control-flow/Option branching codegen",
-                                    ))
+                                        stage.input_layout,
+                                        stage.result_layout,
+                                    ) {
+                                        errors.push(error);
+                                    }
                                 }
                                 crate::InlinePipeStageKind::Case { .. } => {
                                     errors.push(self.unsupported_inline_pipe_stage(
@@ -832,7 +835,7 @@ impl<'a> CraneliftCompiler<'a> {
                         errors.push(self.unsupported_expression(
                             kernel_id,
                             expr_id,
-                            "the current Cranelift slice lowers direct saturated item calls, selected direct bytes intrinsics, representational by-reference domain-member calls, niche and inline scalar Option constructors/carriers, record projection, straight-line inline-pipe transform/tap stages, scalar literals, static scalar tuple/record literals, Int/Bool arithmetic, Int/Float/Bool comparison, and native equality over scalar/Text/Bytes/record/tuple/scalar-Option/niche-Option shapes only",
+                            "the current Cranelift slice lowers direct saturated item calls, selected direct bytes intrinsics, representational by-reference domain-member calls, niche and inline scalar Option constructors/carriers, record projection, inline-pipe gate plus straight-line transform/tap stages, scalar literals, static scalar tuple/record literals, Int/Bool arithmetic, Int/Float/Bool comparison, and native equality over scalar/Text/Bytes/record/tuple/scalar-Option/niche-Option shapes only",
                         ));
                     }
                 }
@@ -1021,6 +1024,11 @@ impl<'a> CraneliftCompiler<'a> {
             BuildPipeStage {
                 pipe_expr: KernelExprId,
                 stage_index: usize,
+            },
+            ContinuePipeGate {
+                pipe_expr: KernelExprId,
+                stage_index: usize,
+                current: Value,
             },
             ContinuePipeTransform {
                 pipe_expr: KernelExprId,
@@ -1323,7 +1331,7 @@ impl<'a> CraneliftCompiler<'a> {
                             return Err(self.unsupported_expression(
                                 kernel_id,
                                 expr_id,
-                                "the current Cranelift slice only lowers direct saturated item calls, selected direct bytes intrinsics, representational by-reference domain-member calls, niche and inline scalar Option constructors/carriers, record projection, scalar subjects/environment slots, straight-line inline-pipe transform/tap stages, scalar literals, static scalar tuple/record literals, Int/Bool arithmetic, Int/Float/Bool comparison, and native equality over scalar/Text/Bytes/record/tuple/scalar-Option/niche-Option shapes",
+                                "the current Cranelift slice only lowers direct saturated item calls, selected direct bytes intrinsics, representational by-reference domain-member calls, niche and inline scalar Option constructors/carriers, record projection, scalar subjects/environment slots, inline-pipe gate plus straight-line transform/tap stages, scalar literals, static scalar tuple/record literals, Int/Bool arithmetic, Int/Float/Bool comparison, and native equality over scalar/Text/Bytes/record/tuple/scalar-Option/niche-Option shapes",
                             ));
                         }
                     }
@@ -1709,20 +1717,20 @@ impl<'a> CraneliftCompiler<'a> {
                             });
                             tasks.push(Task::Visit(*expr));
                         }
+                        crate::InlinePipeStageKind::Gate { predicate, .. } => {
+                            tasks.push(Task::ContinuePipeGate {
+                                pipe_expr,
+                                stage_index,
+                                current,
+                            });
+                            tasks.push(Task::Visit(*predicate));
+                        }
                         crate::InlinePipeStageKind::Debug { .. } => {
                             return Err(self.unsupported_inline_pipe_stage(
                                 kernel_id,
                                 pipe_expr,
                                 stage_index,
                                 "still requires runtime-side debug effects",
-                            ));
-                        }
-                        crate::InlinePipeStageKind::Gate { .. } => {
-                            return Err(self.unsupported_inline_pipe_stage(
-                                kernel_id,
-                                pipe_expr,
-                                stage_index,
-                                "still requires control-flow/Option branching codegen",
                             ));
                         }
                         crate::InlinePipeStageKind::Case { .. } => {
@@ -1741,6 +1749,51 @@ impl<'a> CraneliftCompiler<'a> {
                                 "still requires branch selection codegen",
                             ));
                         }
+                    }
+                }
+                Task::ContinuePipeGate {
+                    pipe_expr,
+                    stage_index,
+                    current,
+                } => {
+                    let predicate = values
+                        .pop()
+                        .expect("pipe gate predicate result should exist");
+                    let pipe_expr_ref = &kernel.exprs()[pipe_expr];
+                    let KernelExprKind::Pipe(pipe) = &pipe_expr_ref.kind else {
+                        unreachable!("pipe continuation must only be queued for pipe expressions");
+                    };
+                    let stage = &pipe.stages[stage_index];
+                    let crate::InlinePipeStageKind::Gate {
+                        predicate: predicate_expr,
+                        ..
+                    } = &stage.kind
+                    else {
+                        unreachable!("gate continuation must only be queued for gate stages");
+                    };
+                    self.require_bool_expression(
+                        kernel_id,
+                        *predicate_expr,
+                        kernel.exprs()[*predicate_expr].layout,
+                        &format!("inline-pipe stage {stage_index} predicate"),
+                    )?;
+                    let contract = self.require_inline_pipe_gate_contract(
+                        kernel_id,
+                        pipe_expr,
+                        stage_index,
+                        stage.input_layout,
+                        stage.result_layout,
+                    )?;
+                    let result = self.lower_inline_pipe_gate(contract, current, predicate, builder);
+                    if let Some(slot) = stage.result_memo {
+                        inline_subjects[slot.index()] = Some(result);
+                    }
+                    values.push(result);
+                    if stage_index + 1 < pipe.stages.len() {
+                        tasks.push(Task::BuildPipeStage {
+                            pipe_expr,
+                            stage_index: stage_index + 1,
+                        });
                     }
                 }
                 Task::ContinuePipeTransform {
@@ -2694,6 +2747,66 @@ impl<'a> CraneliftCompiler<'a> {
         }
     }
 
+    fn require_inline_pipe_gate_contract(
+        &self,
+        kernel_id: KernelId,
+        pipe_expr: KernelExprId,
+        stage_index: usize,
+        input_layout: LayoutId,
+        result_layout: LayoutId,
+    ) -> Result<OptionCodegenContract, CodegenError> {
+        let LayoutKind::Option { element } = &self.program.layouts()[result_layout].kind else {
+            return Err(self.unsupported_inline_pipe_stage(
+                kernel_id,
+                pipe_expr,
+                stage_index,
+                &format!(
+                    "requires an Option result layout over input layout{input_layout}=`{}`, found layout{result_layout}=`{}`",
+                    self.program.layouts()[input_layout],
+                    self.program.layouts()[result_layout]
+                ),
+            ));
+        };
+        if *element != input_layout {
+            return Err(self.unsupported_inline_pipe_stage(
+                kernel_id,
+                pipe_expr,
+                stage_index,
+                &format!(
+                    "result layout{result_layout}=`{}` must wrap input layout{input_layout}=`{}`, found payload layout{element}=`{}`",
+                    self.program.layouts()[result_layout],
+                    self.program.layouts()[input_layout],
+                    self.program.layouts()[*element]
+                ),
+            ));
+        }
+        match self.option_codegen_contract(result_layout) {
+            Some(contract) => Ok(contract),
+            None if self.program.layouts()[result_layout].abi == AbiPassMode::ByReference => {
+                Err(self.unsupported_inline_pipe_stage(
+                    kernel_id,
+                    pipe_expr,
+                    stage_index,
+                    &format!(
+                        "result currently requires either a by-reference payload for null-niche lowering or a by-value scalar payload for inline scalar option lowering, found Option layout{result_layout}=`{}` over payload layout{element}=`{}`",
+                        self.program.layouts()[result_layout],
+                        self.program.layouts()[*element]
+                    ),
+                ))
+            }
+            None => Err(self.unsupported_inline_pipe_stage(
+                kernel_id,
+                pipe_expr,
+                stage_index,
+                &format!(
+                    "result still requires aggregate option encoding beyond the current scalar Option contract, found layout{result_layout}=`{}` over payload layout{element}=`{}`",
+                    self.program.layouts()[result_layout],
+                    self.program.layouts()[*element]
+                ),
+            )),
+        }
+    }
+
     fn require_niche_option_expression(
         &self,
         kernel_id: KernelId,
@@ -3293,6 +3406,48 @@ impl<'a> CraneliftCompiler<'a> {
         let tag_i64 = builder.ins().iconst(types::I64, 1);
         let tag = builder.ins().uextend(types::I128, tag_i64);
         builder.ins().bor(shifted, tag)
+    }
+
+    fn lower_inline_pipe_gate(
+        &self,
+        contract: OptionCodegenContract,
+        current: Value,
+        predicate: Value,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Value {
+        let true_block = builder.create_block();
+        let false_block = builder.create_block();
+        let done_block = builder.create_block();
+        let result_ty = match contract {
+            OptionCodegenContract::NicheReference => self.pointer_type(),
+            OptionCodegenContract::InlineScalar(_) => types::I128,
+        };
+        builder.append_block_param(done_block, result_ty);
+        builder
+            .ins()
+            .brif(predicate, true_block, &[], false_block, &[]);
+
+        builder.switch_to_block(true_block);
+        let some = match contract {
+            OptionCodegenContract::NicheReference => current,
+            OptionCodegenContract::InlineScalar(kind) => {
+                self.lower_inline_scalar_option_some(kind, current, builder)
+            }
+        };
+        builder.ins().jump(done_block, &[BlockArg::Value(some)]);
+
+        builder.switch_to_block(false_block);
+        let none = match contract {
+            OptionCodegenContract::NicheReference => builder.ins().iconst(self.pointer_type(), 0),
+            OptionCodegenContract::InlineScalar(_) => self.lower_inline_scalar_option_none(builder),
+        };
+        builder.ins().jump(done_block, &[BlockArg::Value(none)]);
+
+        builder.seal_block(true_block);
+        builder.seal_block(false_block);
+        builder.seal_block(done_block);
+        builder.switch_to_block(done_block);
+        builder.block_params(done_block)[0]
     }
 
     fn lower_bytes_get_option(
