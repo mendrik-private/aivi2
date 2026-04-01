@@ -42,6 +42,7 @@ const guideSections: DocGroup[] = [
       { text: 'Signals', link: '/guide/signals' },
       { text: 'Sources', link: '/guide/sources' },
       { text: 'Source Catalog', link: '/guide/source-catalog' },
+      { text: 'Surface Feature Matrix', link: '/guide/surface-feature-matrix' },
     ],
   },
   {

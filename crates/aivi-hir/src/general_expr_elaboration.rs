@@ -2632,11 +2632,29 @@ impl<'a> GeneralExprElaborator<'a> {
             // Only use the expected type as the definitive expression type when it is fully closed
             // (no open TypeParameters). If it contains TypeParams the IR would get open types,
             // which the backend rejects.
-            if !expected.has_type_params()
-                && (matches!(self.module.exprs()[expr_id].kind, ExprKind::Pipe(_))
-                    || expression_matches(self.module, expr_id, env, expected))
-            {
-                return Ok(expected.clone());
+            if !expected.has_type_params() {
+                if matches!(self.module.exprs()[expr_id].kind, ExprKind::Pipe(_))
+                    || expression_matches(self.module, expr_id, env, expected)
+                {
+                    return Ok(expected.clone());
+                }
+                // If expression_matches failed (e.g. same_shape rejects TypeParam vs concrete),
+                // check whether the inferred type is a polymorphic template that expected
+                // instantiates.  If so, use the closed expected type so the IR stays closed.
+                let info = self.typing.infer_expr(expr_id, env, ambient);
+                if !info.issues.is_empty() {
+                    return Err(self.blockers_from_issues(info.issues));
+                }
+                if let Some(inferred) = info.actual_gate_type().or(info.ty.clone()) {
+                    if inferred.has_type_params() && expected.fits_template(&inferred) {
+                        return Ok(expected.clone());
+                    }
+                }
+                return info.actual_gate_type().or(info.ty).ok_or_else(|| {
+                    vec![GeneralExprBlocker::UnknownExprType {
+                        span: self.module.exprs()[expr_id].span,
+                    }]
+                });
             }
         }
         let info = self.typing.infer_expr(expr_id, env, ambient);
