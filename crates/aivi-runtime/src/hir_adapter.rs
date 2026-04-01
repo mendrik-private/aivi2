@@ -170,6 +170,9 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
             let hir::Item::Signal(signal) = item else {
                 continue;
             };
+            if signal.is_source_capability_handle {
+                continue;
+            }
             let has_source = signal.source_metadata.is_some();
             let has_body = signal.body.is_some();
             let has_reactive_updates = !signal.reactive_updates.is_empty();

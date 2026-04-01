@@ -3,6 +3,7 @@
 //! Milestone 2 HIR boundary with typed IDs, module-owned arenas, and structural validation.
 
 pub mod arena;
+mod capability_handle_elaboration;
 mod decode_elaboration;
 mod decode_generation;
 mod domain_operator_elaboration;

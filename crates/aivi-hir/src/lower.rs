@@ -112,6 +112,10 @@ pub fn lower_module_with_resolver(
     lowerer.resolve_module(&namespaces);
     lowerer.normalize_function_signature_annotations();
     lowerer.validate_cluster_normalization();
+    crate::capability_handle_elaboration::elaborate_capability_handles(
+        &mut lowerer.module,
+        &mut lowerer.diagnostics,
+    );
     crate::signal_metadata_elaboration::populate_signal_metadata(&mut lowerer.module);
     LoweringResult::new(lowerer.module, lowerer.diagnostics)
 }
@@ -665,6 +669,7 @@ impl<'a> Lowerer<'a> {
             reactive_updates: Vec::new(),
             signal_dependencies: Vec::new(),
             source_metadata: None,
+            is_source_capability_handle: false,
         }
     }
 
@@ -2061,11 +2066,14 @@ impl<'a> Lowerer<'a> {
                 SourceProviderRef::Builtin(provider_ref) => Some(provider_ref),
                 SourceProviderRef::Custom(_) => None,
                 SourceProviderRef::InvalidShape(_) => {
-                    self.emit_error(
-                        provider.span(),
-                        "source decorators must name a provider variant such as `timer.every`",
-                        code("invalid-source-provider"),
-                    );
+                    if !crate::capability_handle_elaboration::is_builtin_source_capability_family_path(provider)
+                    {
+                        self.emit_error(
+                            provider.span(),
+                            "source decorators must name a provider variant such as `timer.every`",
+                            code("invalid-source-provider"),
+                        );
+                    }
                     None
                 }
                 SourceProviderRef::Missing => unreachable!(

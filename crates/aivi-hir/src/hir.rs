@@ -891,6 +891,7 @@ pub struct SignalItem {
     pub reactive_updates: Vec<ReactiveUpdateClause>,
     pub signal_dependencies: Vec<ItemId>,
     pub source_metadata: Option<SourceMetadata>,
+    pub is_source_capability_handle: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

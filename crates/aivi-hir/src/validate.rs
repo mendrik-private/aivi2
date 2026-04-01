@@ -1015,7 +1015,10 @@ impl Validator<'_> {
                             Some(DecoratorPayload::Source(_))
                         )
                     });
-                    if has_source_decorator && item.body.is_some() {
+                    if has_source_decorator
+                        && item.body.is_some()
+                        && !item.is_source_capability_handle
+                    {
                         self.diagnostics.push(
                             Diagnostic::error("`@source` signals must be bodyless")
                                 .with_code(code("source-signals-must-be-bodyless"))
@@ -1025,11 +1028,26 @@ impl Validator<'_> {
                                 )),
                         );
                     }
-                    match (has_source_decorator, item.source_metadata.as_ref()) {
-                        (true, Some(metadata)) => {
+                    match (
+                        has_source_decorator,
+                        item.source_metadata.as_ref(),
+                        item.is_source_capability_handle,
+                    ) {
+                        (true, None, true) => {}
+                        (true, Some(_), true) => self.diagnostics.push(
+                            Diagnostic::error(
+                                "source capability handles must not carry executable source metadata",
+                            )
+                            .with_code(code("unexpected-source-capability-metadata"))
+                            .with_label(DiagnosticLabel::primary(
+                                item.header.span,
+                                "lower capability handle use sites into concrete source bindings instead",
+                            )),
+                        ),
+                        (true, Some(metadata), false) => {
                             self.check_source_metadata(item.header.span, metadata)
                         }
-                        (true, None) => self.diagnostics.push(
+                        (true, None, false) => self.diagnostics.push(
                             Diagnostic::error("source-backed signal is missing source metadata")
                                 .with_code(code("missing-source-metadata"))
                                 .with_label(DiagnosticLabel::primary(
@@ -1037,7 +1055,7 @@ impl Validator<'_> {
                                     "populate source metadata after name resolution",
                                 )),
                         ),
-                        (false, Some(_)) => self.diagnostics.push(
+                        (false, Some(_), _) => self.diagnostics.push(
                             Diagnostic::error(
                                 "non-source signal unexpectedly carries source metadata",
                             )
@@ -1047,7 +1065,7 @@ impl Validator<'_> {
                                 "only `@source` signals should carry source metadata",
                             )),
                         ),
-                        (false, None) => {}
+                        (false, None, _) => {}
                     }
                 }
                 Item::Class(item) => {

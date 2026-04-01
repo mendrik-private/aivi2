@@ -57,6 +57,9 @@ fn compute_signal_metadata(
     module: &Module,
     item: &SignalItem,
 ) -> (Vec<ItemId>, Option<SourceMetadata>) {
+    if item.is_source_capability_handle {
+        return (Vec::new(), None);
+    }
     let source = item.header.decorators.iter().find_map(|decorator_id| {
         let decorator = &module.decorators()[*decorator_id];
         match &decorator.payload {

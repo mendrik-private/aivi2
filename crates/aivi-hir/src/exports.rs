@@ -235,13 +235,14 @@ fn explicit_item_exported_name(
             callable_type: exported_function_type(module, item),
             deprecation,
         }),
-        Item::Signal(item) => (item.name.text() == exported_name).then(|| ExportedName {
-            name: exported_name.to_owned(),
-            kind: ExportedNameKind::Signal,
-            metadata: exported_value_metadata(module, item.annotation),
-            callable_type: None,
-            deprecation,
-        }),
+        Item::Signal(item) => (item.name.text() == exported_name && !item.is_source_capability_handle)
+            .then(|| ExportedName {
+                name: exported_name.to_owned(),
+                kind: ExportedNameKind::Signal,
+                metadata: exported_value_metadata(module, item.annotation),
+                callable_type: None,
+                deprecation,
+            }),
         Item::SourceProviderContract(_) | Item::Instance(_) | Item::Use(_) | Item::Export(_) => {
             None
         }
@@ -277,7 +278,7 @@ fn item_to_exported_name(module: &Module, item: &Item) -> Option<ExportedName> {
             callable_type: exported_function_type(module, item),
             deprecation,
         }),
-        Item::Signal(item) => Some(ExportedName {
+        Item::Signal(item) => (!item.is_source_capability_handle).then(|| ExportedName {
             name: item.name.text().to_owned(),
             kind: ExportedNameKind::Signal,
             metadata: exported_value_metadata(module, item.annotation),
