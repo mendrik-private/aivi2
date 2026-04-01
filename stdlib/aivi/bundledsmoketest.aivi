@@ -130,6 +130,7 @@ value flipped : Int = flip clamp 100 0 150
 // Range
 value myRange : RangeInt = makeRange 1 10
 value inRange : Bool = rangeContains myRange 5
+value outRange : Bool = rangeContains myRange 11
 
 // NonEmpty
 value nel : NonEmptyList Int = nelSingleton 42
@@ -169,7 +170,7 @@ value smoke_dict_works : Task Text Bool = pure (dictLookup == Some 1 and dictLen
 value smoke_set_works : Task Text Bool = pure (setHas1 and setLen == 2)
 
 @test
-value smoke_range_works : Task Text Bool = pure (inRange and not (rangeContains myRange 11))
+value smoke_range_works : Task Text Bool = pure (inRange and (outRange == False))
 
 @test
 value smoke_nel_works : Task Text Bool = pure (nelFirst == 42 and nelLen == 1)
@@ -178,4 +179,6 @@ value smoke_nel_works : Task Text Bool = pure (nelFirst == 42 and nelLen == 1)
 value smoke_fn_combinators_work : Task Text Bool = pure (composed == 12)
 
 value bundledSentinel : Text = bundledSupportSentinel
+type BundledToken = BundledSupportToken
 export bundledSentinel
+export BundledToken

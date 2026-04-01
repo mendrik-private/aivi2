@@ -8,4 +8,42 @@ type BytesEncoding =
 
 type BytesTask = (Task BytesDecodeError Bytes)
 
-export (BytesDecodeError, InvalidUtf8, BytesEncoding, Utf8, Base64, Hex, BytesTask)
+use aivi.core.bytes (
+    empty
+    length
+    get
+    slice
+    append
+    fromText
+    toText
+    repeat
+)
+
+type Bytes -> Bool
+func isEmpty = b =>
+    length b == 0
+
+type Bytes -> Bool
+func nonEmpty = b =>
+    length b > 0
+
+type Bytes -> Bytes -> Bytes
+func concatStep = acc b =>
+    append acc b
+
+type List Bytes -> Bytes
+func concat = bs => bs
+  |> reduce concatStep empty
+
+@test
+value isEmpty_empty_bytes : Task Text Bool = pure (isEmpty empty)
+
+@test
+value nonEmpty_rejects_empty : Task Text Bool = pure (nonEmpty empty == False)
+
+@test
+value concat_empty_list : Task Text Bool = pure (isEmpty (concat []))
+
+export (BytesDecodeError, InvalidUtf8, BytesEncoding, Utf8, Base64, Hex, BytesTask,
+        empty, length, get, slice, append, fromText, toText, repeat,
+        isEmpty, nonEmpty, concat)

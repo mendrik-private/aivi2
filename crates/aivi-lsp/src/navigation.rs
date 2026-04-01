@@ -548,6 +548,7 @@ impl NavigationAnalysis {
             ResolutionState::Resolved(ExportResolution::BuiltinType(builtin)) => {
                 self.builtin_type_import_targets(db, name, *builtin)
             }
+            ResolutionState::Resolved(ExportResolution::Import(_)) => Vec::new(),
         }
     }
 
@@ -605,7 +606,8 @@ impl NavigationAnalysis {
             }
             ResolutionState::Unresolved
             | ResolutionState::Resolved(ExportResolution::BuiltinTerm(_))
-            | ResolutionState::Resolved(ExportResolution::BuiltinType(_)) => Vec::new(),
+            | ResolutionState::Resolved(ExportResolution::BuiltinType(_))
+            | ResolutionState::Resolved(ExportResolution::Import(_)) => Vec::new(),
         }
     }
 

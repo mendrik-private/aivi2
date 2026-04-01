@@ -18,6 +18,20 @@ type FsDirTask = (Task Text (List Text))
 type FsExistsTask = (Task Text Bool)
 type FsUnitTask = (Task Text Unit)
 
+use aivi.fs (
+    readText
+    readDir
+    exists
+    readBytes
+    writeText
+    writeBytes
+    createDirAll
+    deleteFile
+    rename
+    copy
+    deleteDir
+)
+
 export (
     FsError, NotFound, PermissionDenied, ReadFailed, WriteFailed, FsProtocolError,
     FsEvent, Created, Changed, Deleted,

@@ -1,5 +1,14 @@
 use aivi.core.dict (Dict)
 
+use aivi.data.json (
+    validate
+    get
+    at
+    keys
+    pretty
+    minify
+)
+
 type JsonError =
   | InvalidJson Text
   | MissingKey Text
@@ -16,4 +25,78 @@ type Json =
 
 type JsonPath = (List Text)
 
-export (JsonError, InvalidJson, MissingKey, IndexOutOfBounds, WrongType, Json, JsonNull, JsonBool, JsonNumber, JsonString, JsonArray, JsonObject, JsonPath)
+type Json -> Bool
+func isNull = json => json
+ ||> JsonNull      -> True
+ ||> JsonBool _    -> False
+ ||> JsonNumber _  -> False
+ ||> JsonString _  -> False
+ ||> JsonArray _   -> False
+ ||> JsonObject _  -> False
+
+type Json -> Bool
+func isObject = json => json
+ ||> JsonNull      -> False
+ ||> JsonBool _    -> False
+ ||> JsonNumber _  -> False
+ ||> JsonString _  -> False
+ ||> JsonArray _   -> False
+ ||> JsonObject _  -> True
+
+type Json -> Bool
+func isArray = json => json
+ ||> JsonNull      -> False
+ ||> JsonBool _    -> False
+ ||> JsonNumber _  -> False
+ ||> JsonString _  -> False
+ ||> JsonArray _   -> True
+ ||> JsonObject _  -> False
+
+type Json -> Bool
+func isBool = json => json
+ ||> JsonNull      -> False
+ ||> JsonBool _    -> True
+ ||> JsonNumber _  -> False
+ ||> JsonString _  -> False
+ ||> JsonArray _   -> False
+ ||> JsonObject _  -> False
+
+type Json -> Bool
+func isNumber = json => json
+ ||> JsonNull      -> False
+ ||> JsonBool _    -> False
+ ||> JsonNumber _  -> True
+ ||> JsonString _  -> False
+ ||> JsonArray _   -> False
+ ||> JsonObject _  -> False
+
+type Json -> Bool
+func isString = json => json
+ ||> JsonNull      -> False
+ ||> JsonBool _    -> False
+ ||> JsonNumber _  -> False
+ ||> JsonString _  -> True
+ ||> JsonArray _   -> False
+ ||> JsonObject _  -> False
+
+@test
+value isNull_on_null : Task Text Bool = pure (isNull JsonNull)
+
+@test
+value isObject_on_object : Task Text Bool = pure (isObject (JsonObject { entries: [] }))
+
+@test
+value isArray_on_array : Task Text Bool = pure (isArray (JsonArray []))
+
+@test
+value isBool_on_bool : Task Text Bool = pure (isBool (JsonBool True))
+
+@test
+value isNumber_on_number : Task Text Bool = pure (isNumber (JsonNumber 0.0))
+
+@test
+value isString_on_string : Task Text Bool = pure (isString (JsonString ""))
+
+export (JsonError, InvalidJson, MissingKey, IndexOutOfBounds, WrongType, Json, JsonNull, JsonBool, JsonNumber, JsonString, JsonArray, JsonObject, JsonPath,
+        validate, get, at, keys, pretty, minify,
+        isNull, isObject, isArray, isBool, isNumber, isString)

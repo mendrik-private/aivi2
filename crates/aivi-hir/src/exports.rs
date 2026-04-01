@@ -1,8 +1,8 @@
 use crate::{
     BuiltinTerm, DecoratorPayload, DeprecatedDecorator, DeprecationNotice, ExportItem,
-    ExportResolution, ImportBindingMetadata, ImportBundleKind, ImportRecordField, ImportValueType,
-    Item, ItemId, Module, RecordExpr, ResolutionState, TypeId, TypeItemBody, TypeKind,
-    TypeReference, TypeResolution,
+    ExportResolution, ImportBindingMetadata, ImportBundleKind, ImportId, ImportRecordField,
+    ImportValueType, Item, ItemId, Module, RecordExpr, ResolutionState, TypeId, TypeItemBody,
+    TypeKind, TypeReference, TypeResolution,
 };
 
 /// The kind of an exported name.
@@ -120,7 +120,31 @@ fn export_item_to_exported_name(module: &Module, export: &ExportItem) -> Option<
         ExportResolution::Item(item_id) => {
             explicit_item_exported_name(module, item_id, exported_name.as_str())
         }
+        ExportResolution::Import(import_id) => {
+            re_exported_import_name(module, import_id, exported_name.as_str())
+        }
     }
+}
+
+fn re_exported_import_name(
+    module: &Module,
+    import_id: ImportId,
+    exported_name: &str,
+) -> Option<ExportedName> {
+    let import = module.imports().get(import_id)?;
+    let kind = match &import.metadata {
+        ImportBindingMetadata::TypeConstructor { .. }
+        | ImportBindingMetadata::BuiltinType(_)
+        | ImportBindingMetadata::AmbientType => ExportedNameKind::Type,
+        _ => ExportedNameKind::Value,
+    };
+    Some(ExportedName {
+        name: exported_name.to_owned(),
+        kind,
+        metadata: import.metadata.clone(),
+        callable_type: import.callable_type.clone(),
+        deprecation: import.deprecation.clone(),
+    })
 }
 
 fn explicit_item_exported_name(
