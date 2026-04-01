@@ -3,34 +3,33 @@ type Screen =
   | Ready Text
   | Failed Text
 
-type NamePair = NamePair Text Text
+type NamePair =
+  | NamePair Text Text
 
-val first = Some "Ada"
-val last = None
+value first = Some "Ada"
+value last = None
 
-val maybePair:Option NamePair =
+value maybePair : Option NamePair =
  &|> first
  &|> last
   |> NamePair
 
-val okFirst = Ok "Ada"
-val errLast = Err "missing"
+value okFirst = Ok "Ada"
+value errLast = Err "missing"
 
-val resultPair:Result Text NamePair =
+value resultPair : Result Text NamePair =
  &|> okFirst
  &|> errLast
   |> NamePair
 
-val current:Screen = Loading
+value current : Screen = Loading
 
-val maybeLabel:Option Text =
-    current
-     ||> Loading => None
-     ||> Ready title => Some title
-     ||> Failed reason => Some reason
+value maybeLabel : Option Text = current
+ ||> Loading       -> None
+ ||> Ready title   -> Some title
+ ||> Failed reason -> Some reason
 
-val resultLabel:Result Text Text =
-    current
-     ||> Loading => Ok "loading"
-     ||> Ready title => Ok title
-     ||> Failed reason => Err reason
+value resultLabel : Result Text Text = current
+ ||> Loading       -> Ok "loading"
+ ||> Ready title   -> Ok title
+ ||> Failed reason -> Err reason

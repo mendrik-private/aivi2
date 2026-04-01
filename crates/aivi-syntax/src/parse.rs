@@ -57,6 +57,18 @@ const MISSING_INSTANCE_TARGET: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-instance-target");
 const MISSING_INSTANCE_MEMBER_BODY: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-instance-member-body");
+const MISSING_CLASS_OPEN_BRACE: DiagnosticCode =
+    DiagnosticCode::new("syntax", "missing-class-open-brace");
+const MISSING_CLASS_EQUALS: DiagnosticCode =
+    DiagnosticCode::new("syntax", "missing-class-equals");
+const MISSING_INSTANCE_OPEN_BRACE: DiagnosticCode =
+    DiagnosticCode::new("syntax", "missing-instance-open-brace");
+const MISSING_INSTANCE_EQUALS: DiagnosticCode =
+    DiagnosticCode::new("syntax", "missing-instance-equals");
+const MISSING_DOMAIN_OPEN_BRACE: DiagnosticCode =
+    DiagnosticCode::new("syntax", "missing-domain-open-brace");
+const MISSING_DOMAIN_EQUALS: DiagnosticCode =
+    DiagnosticCode::new("syntax", "missing-domain-equals");
 const MISSING_DOMAIN_OVER: DiagnosticCode = DiagnosticCode::new("syntax", "missing-domain-over");
 const MISSING_DOMAIN_CARRIER: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-domain-carrier");
@@ -422,15 +434,7 @@ impl<'a> Parser<'a> {
 
         let body = self
             .parse_class_body(&mut cursor, end)
-            .map(NamedItemBody::Class)
-            .or_else(|| {
-                self.missing_body_diagnostic(
-                    keyword_index,
-                    "class declaration is missing its member signatures",
-                    "expected one or more member signatures on following lines",
-                );
-                None
-            });
+            .map(NamedItemBody::Class);
 
         NamedItem {
             base,
@@ -480,14 +484,7 @@ impl<'a> Parser<'a> {
                 );
                 None
             });
-        let body = self.parse_instance_body(&mut cursor, end).or_else(|| {
-            self.missing_body_diagnostic(
-                keyword_index,
-                "instance declaration is missing its member bindings",
-                "expected one or more instance member bindings on following lines",
-            );
-            None
-        });
+        let body = self.parse_instance_body(&mut cursor, end);
         InstanceItem {
             base,
             keyword_span: self.source_span_of_token(keyword_index),
@@ -1249,39 +1246,67 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_class_body(&mut self, cursor: &mut usize, end: usize) -> Option<ClassBody> {
+        // A class body is optional. Only parse (and require `= {`) if `=` is present.
+        let has_equals = self
+            .peek_nontrivia(*cursor, end)
+            .map(|i| self.tokens[i].kind() == TokenKind::Equals)
+            .unwrap_or(false);
+        if !has_equals {
+            return None;
+        }
+        let head_span = self.source_span_of_token(
+            self.peek_nontrivia(*cursor, end).unwrap_or(*cursor),
+        );
+        self.consume_kind(cursor, end, TokenKind::Equals);
+        let lbrace_index = if let Some(idx) = self.consume_kind(cursor, end, TokenKind::LBrace) {
+            idx
+        } else {
+            self.diagnostics.push(
+                Diagnostic::error("class declaration is missing `{` after `=`")
+                    .with_code(MISSING_CLASS_OPEN_BRACE)
+                    .with_primary_label(head_span, "expected `{` to open the class body"),
+            );
+            return None;
+        };
+        let inner_end = match self.find_matching_brace(lbrace_index, end) {
+            Some(idx) => idx,
+            None => end,
+        };
+
         let body_start = *cursor;
         let mut with_decls = Vec::new();
         let mut require_decls = Vec::new();
         let mut members = Vec::new();
 
-        while let Some(index) = self.peek_nontrivia(*cursor, end) {
-            if !self.tokens[index].line_start() {
-                break;
-            }
+        while let Some(index) = self.peek_nontrivia(*cursor, inner_end) {
             // Detect the context-sensitive `with` and `require` soft-keywords.
             // They are treated as declarations only when NOT immediately followed by `:`,
             // which disambiguates them from method names (`with: A -> A`).
             if self.tokens[index].kind() == TokenKind::Identifier {
                 let text = self.tokens[index].text(self.source);
-                if text == "with" && self.peek_kind(index + 1, end) != Some(TokenKind::Colon) {
-                    if let Some(decl) = self.parse_class_with_decl(cursor, end) {
+                if text == "with" && self.peek_kind(index + 1, inner_end) != Some(TokenKind::Colon)
+                {
+                    if let Some(decl) = self.parse_class_with_decl(cursor, inner_end) {
                         with_decls.push(decl);
                         continue;
                     }
                 } else if text == "require"
-                    && self.peek_kind(index + 1, end) != Some(TokenKind::Colon)
+                    && self.peek_kind(index + 1, inner_end) != Some(TokenKind::Colon)
                 {
-                    if let Some(decl) = self.parse_class_require_decl(cursor, end) {
+                    if let Some(decl) = self.parse_class_require_decl(cursor, inner_end) {
                         require_decls.push(decl);
                         continue;
                     }
                 }
             }
-            let Some(member) = self.parse_class_member(cursor, end) else {
+            let Some(member) = self.parse_class_member(cursor, inner_end) else {
                 break;
             };
             members.push(member);
         }
+
+        // Consume closing `}`
+        *cursor = inner_end + 1;
 
         (!with_decls.is_empty() || !require_decls.is_empty() || !members.is_empty()).then_some(
             ClassBody {
@@ -1362,23 +1387,49 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_instance_body(&mut self, cursor: &mut usize, end: usize) -> Option<InstanceBody> {
-        let body_start = *cursor;
-        let first_index = self.peek_nontrivia(*cursor, end)?;
-        if !self.tokens[first_index].line_start() || !self.starts_instance_member(first_index) {
+        // An instance body is optional. Only parse (and require `= {`) if `=` is present.
+        let has_equals = self
+            .peek_nontrivia(*cursor, end)
+            .map(|i| self.tokens[i].kind() == TokenKind::Equals)
+            .unwrap_or(false);
+        if !has_equals {
             return None;
         }
-        let member_indent = self.line_indent_of_token(first_index);
+        let head_span = self.source_span_of_token(
+            self.peek_nontrivia(*cursor, end).unwrap_or(*cursor),
+        );
+        self.consume_kind(cursor, end, TokenKind::Equals);
+        let lbrace_index = if let Some(idx) = self.consume_kind(cursor, end, TokenKind::LBrace) {
+            idx
+        } else {
+            self.diagnostics.push(
+                Diagnostic::error("instance declaration is missing `{` after `=`")
+                    .with_code(MISSING_INSTANCE_OPEN_BRACE)
+                    .with_primary_label(head_span, "expected `{` to open the instance body"),
+            );
+            return None;
+        };
+        let inner_end = match self.find_matching_brace(lbrace_index, end) {
+            Some(idx) => idx,
+            None => end,
+        };
+
+        let body_start = *cursor;
         let mut members = Vec::new();
 
-        while let Some(index) = self.peek_nontrivia(*cursor, end) {
-            if !self.tokens[index].line_start()
-                || self.line_indent_of_token(index) != member_indent
-                || !self.starts_instance_member(index)
-            {
+        // Determine member indent from the first member (if any).
+        let member_indent = self
+            .peek_nontrivia(*cursor, inner_end)
+            .filter(|&i| self.tokens[i].line_start())
+            .map(|i| self.line_indent_of_token(i))
+            .unwrap_or(0);
+
+        while let Some(index) = self.peek_nontrivia(*cursor, inner_end) {
+            if !self.starts_instance_member(index) {
                 break;
             }
             let before = *cursor;
-            let Some(member) = self.parse_instance_member(cursor, end, member_indent) else {
+            let Some(member) = self.parse_instance_member(cursor, inner_end, member_indent) else {
                 break;
             };
             members.push(member);
@@ -1387,6 +1438,9 @@ impl<'a> Parser<'a> {
             }
         }
 
+        // Consume closing `}`
+        *cursor = inner_end + 1;
+
         (!members.is_empty()).then_some(InstanceBody {
             members,
             span: self.source_span_for_range(body_start, *cursor),
@@ -1394,29 +1448,62 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_domain_body(&mut self, cursor: &mut usize, end: usize) -> Option<DomainBody> {
-        let body_start = *cursor;
-        let first_index = self.peek_nontrivia(*cursor, end)?;
-        if !self.tokens[first_index].line_start() || !self.starts_domain_member(first_index) {
+        // A domain body is optional. Only parse (and require `= {`) if `=` is present.
+        let has_equals = self
+            .peek_nontrivia(*cursor, end)
+            .map(|i| self.tokens[i].kind() == TokenKind::Equals)
+            .unwrap_or(false);
+        if !has_equals {
             return None;
         }
-        let member_indent = self.line_indent_of_token(first_index);
+        let head_span = self.source_span_of_token(
+            self.peek_nontrivia(*cursor, end).unwrap_or(*cursor),
+        );
+        self.consume_kind(cursor, end, TokenKind::Equals);
+        let lbrace_index = if let Some(idx) = self.consume_kind(cursor, end, TokenKind::LBrace) {
+            idx
+        } else {
+            self.diagnostics.push(
+                Diagnostic::error("domain declaration is missing `{` after `=`")
+                    .with_code(MISSING_DOMAIN_OPEN_BRACE)
+                    .with_primary_label(head_span, "expected `{` to open the domain body"),
+            );
+            return None;
+        };
+        let inner_end = match self.find_matching_brace(lbrace_index, end) {
+            Some(idx) => idx,
+            None => end,
+        };
+
+        let body_start = *cursor;
         let mut members = Vec::new();
         let mut pending_annotation: Option<TypeExpr> = None;
+        // When we see `name : TypeExpr` (colon annotation), we hold the member back here.
+        // If the very next member has the same name and a body, we merge the annotation in.
+        // Otherwise we flush the held member as-is.
+        let mut pending_colon_member: Option<DomainMember> = None;
 
-        while let Some(index) = self.peek_nontrivia(*cursor, end) {
-            if !self.tokens[index].line_start()
-                || self.line_indent_of_token(index) != member_indent
-                || !self.starts_domain_member(index)
-            {
+        // Determine member indent from the first member (if any).
+        let member_indent = self
+            .peek_nontrivia(*cursor, inner_end)
+            .filter(|&i| self.tokens[i].line_start())
+            .map(|i| self.line_indent_of_token(i))
+            .unwrap_or(0);
+
+        while let Some(index) = self.peek_nontrivia(*cursor, inner_end) {
+            if !self.starts_domain_member(index) {
                 break;
             }
 
             // Handle `type TypeExpr` lines as annotations for the next member
             if self.tokens[index].kind() == TokenKind::TypeKw {
+                if let Some(held) = pending_colon_member.take() {
+                    members.push(held);
+                }
                 *cursor = index + 1;
                 let type_end = self
-                    .find_next_domain_member_start(*cursor, end, member_indent)
-                    .unwrap_or(end);
+                    .find_next_domain_member_start(*cursor, inner_end, member_indent)
+                    .unwrap_or(inner_end);
                 let annotation =
                     self.parse_type_expr(cursor, type_end, TypeStop::default())
                         .or_else(|| {
@@ -1438,16 +1525,55 @@ impl<'a> Parser<'a> {
             }
 
             let before = *cursor;
-            let Some(mut member) = self.parse_domain_member(cursor, end, member_indent) else {
+            let Some(mut member) = self.parse_domain_member(cursor, inner_end, member_indent) else {
                 break;
             };
+
+            // Apply `type TypeExpr` annotation if pending.
             if let Some(annotation) = pending_annotation.take() {
                 member.annotation = Some(annotation);
             }
+
+            // Try to pair a pending `name : TypeExpr` annotation with this implementation.
+            if member.annotation.is_none() {
+                if let Some(held) = pending_colon_member.take() {
+                    let held_name = domain_member_surface_name_str(&held.name);
+                    let this_name = domain_member_surface_name_str(&member.name);
+                    if held_name == this_name {
+                        // Merge: attach the annotation from the held member.
+                        member.annotation = held.annotation;
+                    } else {
+                        // Different name — flush held first.
+                        members.push(held);
+                    }
+                }
+            }
+
+            // If this member is annotation-only (from `name : TypeExpr`), hold it.
+            if member.annotation.is_some()
+                && member.body.is_none()
+                && member.parameters.is_empty()
+                && pending_annotation.is_none()
+            {
+                if let Some(held) = pending_colon_member.take() {
+                    members.push(held);
+                }
+                pending_colon_member = Some(member);
+                if *cursor <= before {
+                    break;
+                }
+                continue;
+            }
+
             members.push(member);
             if *cursor <= before {
                 break;
             }
+        }
+
+        // Flush any held colon-annotation member.
+        if let Some(held) = pending_colon_member.take() {
+            members.push(held);
         }
 
         if let Some(annotation) = pending_annotation {
@@ -1462,6 +1588,9 @@ impl<'a> Parser<'a> {
                 ),
             );
         }
+
+        // Consume closing `}`
+        *cursor = inner_end + 1;
 
         (!members.is_empty()).then_some(DomainBody {
             members,
@@ -1661,6 +1790,28 @@ impl<'a> Parser<'a> {
 
         // Signature members: `name params = body` (binding) or `name` (declaration-only)
         let name = self.parse_signature_member_name(cursor, end)?;
+
+        // Inline colon annotation: `name : TypeExpr` — returns annotation-only member.
+        // The implementation `name params = body` may follow on the next line with the same name.
+        if let Some(colon_idx) = self.peek_nontrivia(*cursor, end) {
+            if self.tokens[colon_idx].kind() == TokenKind::Colon
+                && !self.tokens[colon_idx].line_start()
+            {
+                *cursor = colon_idx + 1;
+                let ann_end = self
+                    .find_next_domain_member_start(*cursor, end, member_indent)
+                    .unwrap_or(end);
+                let annotation = self.parse_type_expr(cursor, ann_end, TypeStop::default());
+                *cursor = ann_end;
+                return Some(DomainMember {
+                    name: DomainMemberName::Signature(name),
+                    annotation,
+                    parameters: Vec::new(),
+                    body: None,
+                    span: self.source_span_for_range(start, *cursor),
+                });
+            }
+        }
 
         let mut parameters = Vec::new();
         while let Some(index) = self.peek_nontrivia(*cursor, end) {
@@ -6346,6 +6497,14 @@ fn text_escape_end(text: &str, start: usize, end: usize) -> usize {
     }
 }
 
+fn domain_member_surface_name_str(name: &DomainMemberName) -> String {
+    match name {
+        DomainMemberName::Signature(ClassMemberName::Identifier(id)) => id.text.clone(),
+        DomainMemberName::Signature(ClassMemberName::Operator(op)) => op.text.clone(),
+        DomainMemberName::Literal(id) => id.text.clone(),
+    }
+}
+
 fn decode_text_fragment(raw: &str) -> String {
     let mut decoded = String::with_capacity(raw.len());
     let mut chars = raw.chars().peekable();
@@ -6458,13 +6617,16 @@ mod tests {
         let mut sources = SourceDatabase::new();
         let file_id = sources.add_file(
             "operators.aivi",
-            r#"class Eq A
+            r#"class Eq A = {
     (==) : A -> A -> Bool
-instance Eq Blob
+}
+instance Eq Blob = {
     (==) left right = same left right
-domain Duration over Int
+}
+domain Duration over Int = {
     literal ms : Int -> Duration
     (*) : Duration -> Int -> Duration
+}
 signal flow = value |> compute ?|> ready ||> Ready -> keep *|> .email &|> build @|> loop <|@ step | debug <|* merge T|> start F|> stop
 value same = left == right
 value different = left != right
@@ -7264,14 +7426,16 @@ signal direction: Signal Direction = keyDown
     #[test]
     fn parser_builds_instance_members_with_parameters_and_multiline_bodies() {
         let (_, parsed) = load(
-            r#"class Eq A
+            r#"class Eq A = {
     (==) : A -> A -> Bool
+}
 
 fun same:Bool = left:Blob right:Blob => True
 
-instance Eq Blob
+instance Eq Blob = {
     (==) left right =
         same left right
+}
 "#,
         );
 
@@ -7352,11 +7516,13 @@ instance Eq Blob
     #[test]
     fn parser_tracks_constraint_prefixes_on_functions_and_instances() {
         let (_, parsed) = load(
-            r#"class Functor F
+            r#"class Functor F = {
     map : (A -> B) -> F A -> F B
+}
 fun same:Eq A -> Bool = v:A => v == v
-instance Eq A -> Eq (Option A)
+instance Eq A -> Eq (Option A) = {
     (==) left right = True
+}
 "#,
         );
         assert!(
@@ -7427,8 +7593,9 @@ instance Eq A -> Eq (Option A)
     #[test]
     fn parser_tracks_constraint_prefixes_on_class_members() {
         let (_, parsed) = load(
-            r#"class Functor F
+            r#"class Functor F = {
     map:Applicative G=>(A -> G B) -> F A -> G (F B)
+}
 "#,
         );
         assert!(
@@ -7455,8 +7622,9 @@ instance Eq A -> Eq (Option A)
     #[test]
     fn parser_rejects_class_head_constraint_prefixes() {
         let (_, parsed) = load(
-            r#"class (Functor F, Foldable F) -> Traversable F
+            r#"class (Functor F, Foldable F) -> Traversable F = {
     traverse : Applicative G -> (A -> G B) -> F A -> G (F B)
+}
 "#,
         );
 
@@ -7535,7 +7703,7 @@ instance Eq A -> Eq (Option A)
     #[test]
     fn parser_distinguishes_compact_literal_suffixes_from_spaced_application() {
         let (_, parsed) = load(
-            "domain Duration over Int\n    literal ms : Int -> Duration\nvalue compact = 250ms\nvalue spaced = 250 ms\n",
+            "domain Duration over Int = {\n    literal ms : Int -> Duration\n}\nvalue compact = 250ms\nvalue spaced = 250 ms\n",
         );
 
         assert!(!parsed.has_errors());
@@ -7685,7 +7853,7 @@ instance Eq A -> Eq (Option A)
         }
 
         let (_, parsed) = load(
-            "domain Duration over Int\n    literal ms : Int -> Duration\nvalue negativeInt = -1\nvalue negativeFloat = -3.4\nvalue negativeDecimal = -19d\nvalue negativePreciseDecimal = -19.25d\nvalue negativeBigInt = -123n\nvalue negativeDuration = -250ms\nvalue subtract = 4 - 3\n",
+            "domain Duration over Int = {\n    literal ms : Int -> Duration\n}\nvalue negativeInt = -1\nvalue negativeFloat = -3.4\nvalue negativeDecimal = -19d\nvalue negativePreciseDecimal = -19.25d\nvalue negativeBigInt = -123n\nvalue negativeDuration = -250ms\nvalue subtract = 4 - 3\n",
         );
 
         assert!(
@@ -7761,9 +7929,10 @@ instance Eq A -> Eq (Option A)
     fn parser_accepts_domain_member_bindings_after_type_annotation() {
         let (_, parsed) = load(
             r#"type Builder = Int -> Duration
-domain Duration over Int
+domain Duration over Int = {
     type Builder
     make raw = raw
+}
 "#,
         );
 

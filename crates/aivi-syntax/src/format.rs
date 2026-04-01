@@ -1332,6 +1332,7 @@ impl Formatter {
             return vec![header];
         };
 
+        header.push_str(" = {");
         let mut lines = vec![header];
         for with_decl in &body.with_decls {
             lines.push(format!(
@@ -1350,6 +1351,7 @@ impl Formatter {
         for member in &body.members {
             lines.extend(self.format_class_member(member));
         }
+        lines.push("}".to_owned());
         lines
     }
 
@@ -1374,10 +1376,12 @@ impl Formatter {
             return vec![header];
         };
 
+        header.push_str(" = {");
         let mut lines = vec![header];
         for member in &body.members {
             lines.extend(self.format_instance_member(member));
         }
+        lines.push("}".to_owned());
         lines
     }
 
@@ -1450,10 +1454,12 @@ impl Formatter {
             return vec![header];
         };
 
+        header.push_str(" = {");
         let mut lines = vec![header];
         for member in &body.members {
             lines.extend(self.format_domain_member(member));
         }
+        lines.push("}".to_owned());
         lines
     }
 
@@ -3333,8 +3339,9 @@ mod tests {
         assert_eq!(
             formatted,
             concat!(
-                "class Eq A\n",
+                "class Eq A = {\n",
                 "    (==) : A -> A -> Bool\n",
+                "}\n",
                 "\n",
                 "type Int -> Int -> Bool\n",
                 "func equivalent = left right =>\n",
@@ -3374,19 +3381,21 @@ value view =
         assert_eq!(
             formatted,
             concat!(
-                "domain Duration over Int\n",
+                "domain Duration over Int = {\n",
                 "    literal ms : Int -> Duration\n",
                 "    type Duration -> Int -> Duration\n",
                 "    (*)\n",
                 "    type Duration -> Int\n",
                 "    unwrap\n",
+                "}\n",
                 "\n",
-                "domain Path over Text\n",
+                "domain Path over Text = {\n",
                 "    literal root : Text -> Path\n",
                 "    type Path -> Text -> Path\n",
                 "    (/)\n",
                 "    type Path -> Text\n",
                 "    unwrap\n",
+                "}\n",
             )
         );
     }
@@ -3394,16 +3403,18 @@ value view =
     #[test]
     fn formatter_normalizes_instance_layout() {
         let formatted = format_text(
-            "class Eq A\n    (==):A -> A -> Bool\n\ninstance Eq Blob\n    (==) left right=\n        same left right\n",
+            "class Eq A = {\n    (==):A -> A -> Bool\n}\n\ninstance Eq Blob = {\n    (==) left right=\n        same left right\n}\n",
         );
         assert_eq!(
             formatted,
             concat!(
-                "class Eq A\n",
+                "class Eq A = {\n",
                 "    (==) : A -> A -> Bool\n",
+                "}\n",
                 "\n",
-                "instance Eq Blob\n",
+                "instance Eq Blob = {\n",
                 "    (==) left right = same left right\n",
+                "}\n",
             )
         );
     }
@@ -3411,16 +3422,17 @@ value view =
     #[test]
     fn formatter_normalizes_domain_member_bindings() {
         let formatted = format_text(
-            "type Builder = Int -> Duration\n\ndomain Duration over Int\n    type Builder\n    make raw=\n        raw\n",
+            "type Builder = Int -> Duration\n\ndomain Duration over Int = {\n    type Builder\n    make raw=\n        raw\n}\n",
         );
         assert_eq!(
             formatted,
             concat!(
                 "type Builder = Int -> Duration\n",
                 "\n",
-                "domain Duration over Int\n",
+                "domain Duration over Int = {\n",
                 "    type Builder\n",
                 "    make raw = raw\n",
+                "}\n",
             )
         );
     }
@@ -3428,15 +3440,16 @@ value view =
     #[test]
     fn formatter_preserves_class_with_and_require_declarations() {
         let formatted = format_text(
-            "class Applicative F\n    with Functor F\n    require Eq A\n    pureInt:F Int\n",
+            "class Applicative F = {\n    with Functor F\n    require Eq A\n    pureInt:F Int\n}\n",
         );
         assert_eq!(
             formatted,
             concat!(
-                "class Applicative F\n",
+                "class Applicative F = {\n",
                 "    with Functor F\n",
                 "    require Eq A\n",
                 "    pureInt : F Int\n",
+                "}\n",
             )
         );
     }
@@ -3470,13 +3483,14 @@ value view =
 
     #[test]
     fn formatter_normalizes_percent_domain_operator_layout() {
-        let formatted = format_text("domain Bucket over Int\n    type Bucket -> Int -> Bucket\n    (%)\n");
+        let formatted = format_text("domain Bucket over Int = {\n    type Bucket -> Int -> Bucket\n    (%)\n}\n");
         assert_eq!(
             formatted,
             concat!(
-                "domain Bucket over Int\n",
+                "domain Bucket over Int = {\n",
                 "    type Bucket -> Int -> Bucket\n",
                 "    (%)\n",
+                "}\n",
             )
         );
     }
@@ -3484,13 +3498,14 @@ value view =
     #[test]
     fn formatter_keeps_compact_domain_literal_suffixes() {
         let formatted = format_text(
-            "domain Duration over Int\n    literal ms:Int -> Duration\nvalue delay:Duration=250ms\nvalue applied=wrap 250ms\n",
+            "domain Duration over Int = {\n    literal ms:Int -> Duration\n}\nvalue delay:Duration=250ms\nvalue applied=wrap 250ms\n",
         );
         assert_eq!(
             formatted,
             concat!(
-                "domain Duration over Int\n",
+                "domain Duration over Int = {\n",
                 "    literal ms : Int -> Duration\n",
+                "}\n",
                 "\n",
                 "value delay : Duration = 250ms\n",
                 "value applied = wrap 250ms\n",
@@ -3631,7 +3646,7 @@ value view =
     #[test]
     fn formatter_spaces_applied_and_constrained_annotations() {
         let formatted = format_text(
-            "fun wrap:Result Text Int = value:(Result Text Int) => value\nvalue active:Signal Bool=True\nclass Functor F\n    map:Applicative G=>(A -> G B) -> F A -> G (F B)\n",
+            "fun wrap:Result Text Int = value:(Result Text Int) => value\nvalue active:Signal Bool=True\nclass Functor F = {\n    map:Applicative G=>(A -> G B) -> F A -> G (F B)\n}\n",
         );
         assert_eq!(
             formatted,
@@ -3642,8 +3657,9 @@ value view =
                 "\n",
                 "value active : Signal Bool = True\n",
                 "\n",
-                "class Functor F\n",
+                "class Functor F = {\n",
                 "    map : Applicative G => (A -> G B) -> F A -> G (F B)\n",
+                "}\n",
             )
         );
     }

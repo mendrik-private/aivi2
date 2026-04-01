@@ -1248,9 +1248,9 @@ signal gated : Signal Int =
         let lowered = lower_text(
             "recurrence-guard.aivi",
             r#"
-domain Duration over Int
+domain Duration over Int = {
     literal sec : Int -> Duration
-
+}
 type Cursor = {
     hasNext: Bool
 }
@@ -1324,9 +1324,9 @@ signal cursor : Signal Cursor =
         let lowered = lower_text(
             "recurrence-step-chain-mismatch.aivi",
             r#"
-domain Duration over Int
+domain Duration over Int = {
     literal sec : Int -> Duration
-
+}
 fun keep = n:Int=>    n
 
 fun asText = n:Int=>    "oops"
@@ -1369,9 +1369,9 @@ signal broken : Signal Int =
         let lowered = lower_text(
             "recurrence-signal-reads-in-update-stages.aivi",
             r#"
-domain Duration over Int
+domain Duration over Int = {
     literal sec : Int -> Duration
-
+}
 fun advance:Int = pressed:Bool n:Int=>    pressed
      T|> n + 1
      F|> n

@@ -1,7 +1,6 @@
-fun step = #value=>    value
+func step = x=>    x
 
 @source custom.feed 0
-sig broken : Signal Int =
-    0
-     @|> step
-     <|@ step
+signal broken : Signal Int = 0
+ @|> step
+ <|@ step

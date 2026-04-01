@@ -1,10 +1,11 @@
 type Status = Idle | Busy
 
-fun statusLabel:Text = #status:Status=>    status
-     ||> Idle => "Idle"
-     ||> Busy => "Busy"
+type Status -> Text
+func statusLabel = status => status
+ ||> Idle -> "Idle"
+ ||> Busy -> "Busy"
 
-val main =
+value main =
     <Window title="Milestone 1">
         <Box orientation={Vertical} spacing={12}>
             <Label text="Frontend fixture corpus" />
@@ -12,5 +13,4 @@ val main =
         </Box>
     </Window>
 
-export statusLabel
-export main
+export (statusLabel, main)

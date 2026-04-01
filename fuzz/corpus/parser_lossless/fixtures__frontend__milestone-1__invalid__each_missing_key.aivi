@@ -1,4 +1,4 @@
-val listView =
+value listView =
     <each of={items} as={item}>
         <Row item={item} />
     </each>

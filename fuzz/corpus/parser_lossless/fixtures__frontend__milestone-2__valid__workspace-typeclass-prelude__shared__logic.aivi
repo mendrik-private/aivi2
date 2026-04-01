@@ -1,5 +1,14 @@
-fun increment:Int = #value:Int=> value + 1
-fun liftOne:(Option Int) = #input:Option Int=> map increment input
-fun earlier:Bool = #left:Text #right:Text=> left < right
+type Int -> Int
+func increment = x =>
+    x + 1
+
+type Option Int -> (Option Int)
+func liftOne = input =>
+    map increment input
+
+type Text -> Text -> Bool
+func earlier = left right =>
+    left < right
+
 export liftOne
 export earlier

@@ -118,103 +118,129 @@ pub fn lower_module_with_resolver(
 
 const AMBIENT_PRELUDE_SOURCE: &str = r#"type Ordering = Less | Equal | Greater
 
-class Setoid A
+class Setoid A = {
     equals : A -> A -> Bool
+}
 
-class Semigroupoid C
+class Semigroupoid C = {
     compose : C B C -> C A B -> C A C
+}
 
-class Semigroup A
+class Semigroup A = {
     append : A -> A -> A
+}
 
-class Foldable F
+class Foldable F = {
     reduce : (B -> A -> B) -> B -> F A -> B
+}
 
-class Functor F
+class Functor F = {
     map : (A -> B) -> F A -> F B
+}
 
-class Contravariant F
+class Contravariant F = {
     contramap : (B -> A) -> F A -> F B
+}
 
-class Filterable F
+class Filterable F = {
     with Functor F
     filterMap : (A -> Option B) -> F A -> F B
+}
 
-class Eq A
+class Eq A = {
     (==) : A -> A -> Bool
     (!=) : A -> A -> Bool
+}
 
-class Default A
+class Default A = {
     default : A
+}
 
-class Ord A
+class Ord A = {
     with Eq A
     compare : A -> A -> Ordering
+}
 
-class Category C
+class Category C = {
     with Semigroupoid C
     id : C A A
+}
 
-class Monoid A
+class Monoid A = {
     with Semigroup A
     empty : A
+}
 
-class Traversable T
+class Traversable T = {
     with Functor T
     with Foldable T
     traverse : Applicative G -> (A -> G B) -> T A -> G (T B)
+}
 
-class Profunctor P
+class Profunctor P = {
     dimap : (A2 -> A1) -> (B1 -> B2) -> P A1 B1 -> P A2 B2
+}
 
-class Bifunctor F
+class Bifunctor F = {
     bimap : (A -> C) -> (B -> D) -> F A B -> F C D
+}
 
-class Group A
+class Group A = {
     with Monoid A
     invert : A -> A
+}
 
-class Alt F
+class Alt F = {
     with Functor F
     alt : F A -> F A -> F A
+}
 
-class Apply F
+class Apply F = {
     with Functor F
     apply : F (A -> B) -> F A -> F B
+}
 
-class Extend W
+class Extend W = {
     with Functor W
     extend : (W A -> B) -> W A -> W B
+}
 
-class Plus F
+class Plus F = {
     with Alt F
     zero : F A
+}
 
-class Applicative F
+class Applicative F = {
     with Apply F
     pure : A -> F A
+}
 
-class Chain M
+class Chain M = {
     with Apply M
     chain : (A -> M B) -> M A -> M B
+}
 
-class Comonad W
+class Comonad W = {
     with Extend W
     extract : W A -> A
+}
 
-class Alternative F
+class Alternative F = {
     with Applicative F
     with Plus F
     guard : Bool -> F Unit
+}
 
-class Monad M
+class Monad M = {
     with Applicative M
     with Chain M
     join : M (M A) -> M A
+}
 
-class ChainRec M
+class ChainRec M = {
     with Monad M
     chainRec : (A -> M (Result A B)) -> A -> M B
+}
 
 type __AiviListTailState A = {
     seenFirst: Bool,
@@ -9688,9 +9714,9 @@ type User = {
     id: Int
 }
 
-domain Retry over Int
+domain Retry over Int = {
     literal times : Int -> Retry
-
+}
 fun keepCount:Int = response:(Result HttpError (List User)) current:Int=>    current
 
 @source http.get "/users" with {
@@ -9723,9 +9749,9 @@ signal retried : Signal Int =
         let lowered = lower_text(
             "reactive_source_option_payloads.aivi",
             r#"
-domain Duration over Int
+domain Duration over Int = {
     literal sec : Int -> Duration
-
+}
 signal enabled : Signal Bool =
     True
 
@@ -10191,12 +10217,12 @@ provider custom.feed
         let lowered = lower_text(
             "invalid_recurrence_wakeup_decorators.aivi",
             r#"
-domain Duration over Int
+domain Duration over Int = {
     literal sec : Int -> Duration
-
-domain Retry over Int
+}
+domain Retry over Int = {
     literal times : Int -> Retry
-
+}
 fun step = x=>    x
 
 @recur.timer
@@ -10337,9 +10363,9 @@ value duplicate : Task Int Int =
         let lowered = lower_text(
             "source_lifecycle_dependency_roles.aivi",
             r#"
-domain Duration over Int
+domain Duration over Int = {
     literal sec : Int -> Duration
-
+}
 provider custom.feed
     argument path: Text
     option activeWhen: Signal Bool
@@ -11057,8 +11083,9 @@ signal retried = 0 |> keep | keep @|> start <|@ step <|@ step
     fn allows_recurrence_guards_before_steps() {
         let lowered = lower_text(
             "recurrence-guard-view.aivi",
-            r#"domain Duration over Int
-	literal sec : Int -> Duration
+            r#"domain Duration over Int = {
+    literal sec : Int -> Duration
+}
 type Cursor = { hasNext: Bool }
 fun keep:Cursor = cursor:Cursor => cursor
 value seed:Cursor = { hasNext: True }
@@ -11269,9 +11296,26 @@ value joinedEmails:Text =
 
     #[test]
     fn snake_demo_legacy_signature_lines_keep_all_parameter_annotations() {
+        // Inline source that tests the "legacy signature lines" format where function
+        // parameters carry type annotations. This format must survive HIR lowering.
         let lowered = lower_text(
             "demos/snake.aivi",
-            include_str!("../../../demos/snake.aivi"),
+            r#"
+fun bodyOrFoodGlyph:Text = isHead:Bool isBody:Bool isFood:Bool =>
+    isHead | isBody | isFood | "."
+
+fun cellGlyph:Text = row:Int col:Int =>
+    bodyOrFoodGlyph False False False
+
+fun rowTextStep:Text = row:Int acc:Text col:Int =>
+    "{acc}{cellGlyph row col}"
+
+fun rowText:Text = row:Int =>
+    ""
+
+fun boardTextStep:Text = acc:Text row:Int =>
+    "{acc}{rowText row}"
+"#,
         );
         assert!(
             !lowered.has_errors(),
@@ -11794,12 +11838,12 @@ value joinedEmails:Text =
             r#"
 type Builder = Int -> Duration
 
-domain Duration over Int
+domain Duration over Int = {
     make : Builder
     make raw = raw
     unwrap : Duration -> Int
     unwrap duration = duration
-"#,
+}"#,
         );
         assert!(
             !lowered.has_errors(),

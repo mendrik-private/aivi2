@@ -521,9 +521,9 @@ mod tests {
         let lowered = lower_text(
             "request_source_lifecycle.aivi",
             r#"
-domain Duration over Int
+domain Duration over Int = {
     literal sec : Int -> Duration
-
+}
 signal apiHost = "https://api.example.com"
 signal refresh = 0
 signal enabled = True

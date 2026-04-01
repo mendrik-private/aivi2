@@ -1,10 +1,11 @@
-domain Amount A over A
+domain Amount A over A = {
     type A -> Amount A
     wrap
     type Amount A -> Amount A -> Amount A
     (+)
     type Amount A -> A
     unwrap
+}
 
 value total : Amount Int = wrap 1 + wrap 2
 value raw : Int = unwrap total

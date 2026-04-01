@@ -2,4 +2,4 @@
     immediate: True,
     immediate: False
 }
-sig tick : Signal Unit
+signal tick : Signal Unit

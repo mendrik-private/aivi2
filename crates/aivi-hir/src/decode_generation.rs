@@ -594,10 +594,10 @@ mod tests {
 type HttpError =
   | Timeout
 
-domain Url over Text
+domain Url over Text = {
     parse : Text -> Result Text Url
     unwrap : Url -> Text
-
+}
 type User = {
     id: Int,
     home: Url
@@ -651,11 +651,11 @@ signal users : Signal (Result HttpError (List User))
         let lowered = lower_text(
             "source_decode_program_parse_preference.aivi",
             r#"
-domain Duration over Int
+domain Duration over Int = {
     parse : Int -> Result Text Duration
     millis : Int -> Duration
     unwrap : Duration -> Int
-
+}
 @source custom.feed
 signal timeout : Signal Duration
 "#,
@@ -690,10 +690,10 @@ signal timeout : Signal Duration
         let lowered = lower_text(
             "source_decode_program_direct_domain.aivi",
             r#"
-domain Duration over Int
+domain Duration over Int = {
     millis : Int -> Duration
     unwrap : Duration -> Int
-
+}
 @source custom.feed
 signal timeout : Signal Duration
 "#,
@@ -728,11 +728,11 @@ signal timeout : Signal Duration
         let lowered = lower_text(
             "source_decode_program_ambiguous_domain.aivi",
             r#"
-domain Duration over Int
+domain Duration over Int = {
     millis : Int -> Duration
     tryMillis : Int -> Result Text Duration
     unwrap : Duration -> Int
-
+}
 @source custom.feed
 signal timeout : Signal Duration
 "#,
@@ -773,10 +773,10 @@ signal timeout : Signal Duration
         let lowered = lower_text(
             "source_decode_program_generic_domain.aivi",
             r#"
-domain NonEmpty A over List A
+domain NonEmpty A over List A = {
     parse : List A -> Result Text (NonEmpty A)
     unwrap : NonEmpty A -> List A
-
+}
 @source custom.feed
 signal names : Signal (NonEmpty Text)
 "#,

@@ -1,7 +1,8 @@
 type User = { active: Bool }
 
-val currentUser:User = { active: True }
+value currentUser : User = {
+    active: True
+}
 
-val activeUser =
-    currentUser
-     ?|> .active
+value activeUser = currentUser
+ ?|> .active

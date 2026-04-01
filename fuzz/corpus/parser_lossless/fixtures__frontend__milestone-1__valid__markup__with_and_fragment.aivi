@@ -3,15 +3,16 @@ type User = {
     email: Text
 }
 
-fun formatUser:Text = #user:User=>    user
-     ||> { name, email } => "{name} <{email}>"
+type User -> Text
+func formatUser = user => user
+ ||> { name, email } -> "{name} <{email}>"
 
-val user:User = {
+value user : User = {
     name: "Ada",
     email: "ada@example.com"
 }
 
-val userCard =
+value userCard =
     <show when={True} keepMounted={True}>
         <fragment>
             <with value={formatUser user} as={label}>

@@ -1,2 +1,2 @@
 @source http.get "/users"
-val users = []
+value users = []

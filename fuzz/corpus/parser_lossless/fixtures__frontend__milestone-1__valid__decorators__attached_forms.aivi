@@ -1,10 +1,12 @@
 @tagged
-type Banner = Banner Text
+type Banner =
+  | Banner Text
 
+type Banner -> Text
 @memoized
 @display
-fun bannerText:Text = #banner:Banner=>    banner
-     ||> Banner text => text
+func bannerText = banner => banner
+ ||> Banner text -> text
 
 @derived
-sig bannerCount = 0
+signal bannerCount = 0

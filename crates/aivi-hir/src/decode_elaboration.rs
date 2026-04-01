@@ -1220,9 +1220,9 @@ signal inbox : Signal Message
         let lowered = lower_text(
             "source_decode_domain.aivi",
             r#"
-domain Url over Text
+domain Url over Text = {
     parse : Text -> Result Text Url
-
+}
 @source custom.feed
 signal url : Signal Url
 "#,

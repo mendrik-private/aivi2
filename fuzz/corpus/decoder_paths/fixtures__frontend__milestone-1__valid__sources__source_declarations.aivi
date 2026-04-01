@@ -7,7 +7,8 @@ type User = {
     name: Text
 }
 
-type Key = Key Text
+type Key =
+  | Key Text
 
 type FsWatchEvent =
   | Created
@@ -29,15 +30,17 @@ type StreamMode =
 type Map K V =
   | EmptyMap
 
-domain Duration over Int
+domain Duration over Int = {
     literal sec : Int -> Duration
+}
 
-domain Retry over Int
+domain Retry over Int = {
     literal times : Int -> Retry
+}
 
-val authHeaders : Map Text Text = EmptyMap
+value authHeaders : Map Text Text = EmptyMap
 
-sig apiHost = "https://api.example.com"
+signal apiHost = "https://api.example.com"
 
 @source http.get "{apiHost}/users" with {
     headers: authHeaders,
@@ -45,27 +48,27 @@ sig apiHost = "https://api.example.com"
     retry: 3times,
     timeout: 5sec
 }
-sig users : Signal (Result HttpError (List User))
+signal users : Signal (Result HttpError (List User))
 
 @source process.spawn "rg" ["TODO", "."] with {
     stdout: Lines,
     stderr: Ignore
 }
-sig grepEvents : Signal ProcessEvent
+signal grepEvents : Signal ProcessEvent
 
 @source timer.every 120 with {
     immediate: True,
     coalesce: True
 }
-sig tick : Signal Unit
+signal tick : Signal Unit
 
 @source window.keyDown with {
     repeat: False,
     focusOnly: True
 }
-sig keyDown : Signal Key
+signal keyDown : Signal Key
 
 @source fs.watch "/tmp/demo.txt" with {
     events: [Created, Changed, Deleted]
 }
-sig fileEvents : Signal FsWatchEvent
+signal fileEvents : Signal FsWatchEvent

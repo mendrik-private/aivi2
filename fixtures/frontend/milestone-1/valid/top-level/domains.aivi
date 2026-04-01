@@ -1,16 +1,18 @@
 domain Duration over Int
 
-domain Path over Text
+domain Path over Text = {
     literal root : Text -> Path
     type Path -> Text -> Path
     (/)
     type Path -> Text
     unwrap
+}
 
-domain NonEmpty A over List A
+domain NonEmpty A over List A = {
     type List A -> Option (NonEmpty A)
     fromList
     type NonEmpty A -> A
     head
     type NonEmpty A -> List A
     tail
+}

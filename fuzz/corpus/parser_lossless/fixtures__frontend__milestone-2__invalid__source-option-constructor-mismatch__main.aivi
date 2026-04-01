@@ -1,9 +1,7 @@
 type HttpError =
   | Timeout
 
-type User = {
-    id: Int
-}
+type User = { id: Int }
 
 type DecodeMode =
   | Strict
@@ -17,4 +15,4 @@ type StreamMode =
 @source http.get "/users" with {
     decode: Lines
 }
-sig users : Signal (Result HttpError (List User))
+signal users : Signal (Result HttpError (List User))

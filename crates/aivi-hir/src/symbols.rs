@@ -230,13 +230,28 @@ fn item_to_lsp_symbol(item: &Item, module: &Module) -> Option<LspSymbol> {
                 (false, None) => Some(params_str),
                 (false, Some(ret)) => Some(format!("{} -> {}", params_str, ret)),
             };
+            let param_children: Vec<LspSymbol> = f
+                .parameters
+                .iter()
+                .filter_map(|p| {
+                    let binding = module.bindings().get(p.binding)?;
+                    Some(LspSymbol {
+                        name: binding.name.text().to_owned(),
+                        kind: LspSymbolKind::Variable,
+                        span: p.span,
+                        selection_span: binding.span,
+                        detail: p.annotation.map(|id| format_type(module, id)),
+                        children: Vec::new(),
+                    })
+                })
+                .collect();
             Some(LspSymbol {
                 name: f.name.text().to_owned(),
                 kind: LspSymbolKind::Function,
                 span: f.header.span,
                 selection_span: f.name.span(),
                 detail,
-                children: Vec::new(),
+                children: param_children,
             })
         }
         Item::Signal(s) => Some(LspSymbol {

@@ -2,9 +2,8 @@ type Screen =
   | Loading
   | Ready Text
 
-val current:Screen = Loading
+value current : Screen = Loading
 
-val broken =
-    current
-     ||> Loading => 0
-     ||> Ready title => title
+value broken = current
+ ||> Loading     -> 0
+ ||> Ready title -> title

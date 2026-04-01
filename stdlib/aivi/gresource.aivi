@@ -4,11 +4,12 @@ type ResourceError =
   | ResourceUnavailable
 
 // Domain type for GResource paths (e.g. "/com/example/app/style.css")
-domain ResourcePath over Text
+domain ResourcePath over Text = {
     type Text -> Result ResourceError ResourcePath
     parse
     type ResourcePath -> Text
     unwrap
+}
 
 type ResourceTask A = (Task ResourceError A)
 

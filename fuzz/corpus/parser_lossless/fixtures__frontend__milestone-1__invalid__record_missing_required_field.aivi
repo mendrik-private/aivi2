@@ -3,6 +3,6 @@ type Config = {
     port: Int
 }
 
-val config:Config = {
+value config : Config = {
     host: "localhost"
 }

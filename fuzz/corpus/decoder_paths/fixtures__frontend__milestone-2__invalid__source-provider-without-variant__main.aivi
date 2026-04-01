@@ -1,2 +1,2 @@
 @source http "/users"
-sig users : Signal Text
+signal users : Signal Text

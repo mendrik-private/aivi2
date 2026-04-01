@@ -1,7 +1,9 @@
-class Applicative F
+class Applicative F = {
     pureInt : F Int
+}
 
-instance Applicative Option
+instance Applicative Option = {
     pureInt = Some 1
+}
 
 value test : Option Int = pureInt

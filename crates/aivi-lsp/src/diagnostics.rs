@@ -25,12 +25,28 @@ pub fn collect_lsp_diagnostics(
     uri: &Url,
 ) -> Vec<lsp::Diagnostic> {
     let analysis = crate::analysis::FileAnalysis::load(db, file);
+    let hir = aivi_query::hir_module(db, file);
 
-    analysis
+    let mut diagnostics: Vec<lsp::Diagnostic> = analysis
         .diagnostics
         .iter()
         .map(|diagnostic| convert_diagnostic(diagnostic, analysis.source.as_ref(), db, uri))
-        .collect()
+        .collect();
+
+    // Append unused-symbol hints only when the file has no errors, to avoid
+    // false positives while the user is actively editing.
+    let has_errors = hir
+        .diagnostics()
+        .iter()
+        .any(|d| d.severity == aivi_base::Severity::Error);
+    if !has_errors {
+        diagnostics.extend(crate::unused::collect_unused_diagnostics(
+            hir.module(),
+            analysis.source.as_ref(),
+        ));
+    }
+
+    diagnostics
 }
 
 fn convert_diagnostic(

@@ -11,11 +11,13 @@ type Map K V =
   | EmptyMap
   | Entry K V (Map K V)
 
-domain Duration over Int
+domain Duration over Int = {
     literal sec : Int -> Duration
+}
 
-domain Retry over Int
+domain Retry over Int = {
     literal times : Int -> Retry
+}
 
 @source http.get "/users" with {
     headers: Entry 1 "Bearer demo" EmptyMap,

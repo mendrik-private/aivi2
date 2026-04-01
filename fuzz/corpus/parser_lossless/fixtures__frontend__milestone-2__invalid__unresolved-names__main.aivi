@@ -1,4 +1,4 @@
-fun statusLabel:Text = #status:Text=>    status
+type Text -> Text
+func statusLabel = status=>    status
 
-val main =
-    <Label text={statusLabel currentStatus} />
+value main = <Label text={statusLabel currentStatus} />

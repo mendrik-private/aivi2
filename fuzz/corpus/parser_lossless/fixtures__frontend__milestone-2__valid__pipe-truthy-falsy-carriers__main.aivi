@@ -1,6 +1,4 @@
-type User = {
-    name: Text
-}
+type User = { name: Text }
 
 type LoadError = {
     message: Text
@@ -10,38 +8,50 @@ type FormError = {
     message: Text
 }
 
-val ready:Bool = True
-val start:Text = "start"
-val wait:Text = "wait"
+value ready : Bool = True
+value start : Text = "start"
+value wait : Text = "wait"
 
-val readyText:Text =
-    ready
-     T|> start
-     F|> wait
+value readyText : Text = ready
+ T|> start
+ F|> wait
 
-val maybeUser:Option User = Some { name: "Ada" }
+value maybeUser : Option User =
+    Some {
+        name: "Ada"
+    }
 
-val greeting:Text =
-    maybeUser
-     T|> .name
-     F|> "guest"
+value greeting : Text = maybeUser
+ T|> .name
+ F|> "guest"
 
-val maybeDisplay:Option Text =
-    maybeUser
-     F|> "guest"
-     T|> .name
-     ?|> True
+value maybeDisplay : Option Text = maybeUser
+ F|> "guest"
+ T|> .name
+ ?|> True
 
-val loaded:Result LoadError User = Err { message: "offline" }
+value loaded : Result LoadError User =
+    Err {
+        message: "offline"
+    }
 
-val rendered:Text =
-    loaded
-     T|> .name
-     F|> .message
+value rendered : Text = loaded
+ T|> .name
+ F|> .message
 
-val submitted:Validation FormError User = Valid { name: "Grace" }
+value loadedText : Text = loaded
+ ||> Ok user      -> user.name
+ ||> Err loadFail -> loadFail.message
 
-val summary:Text =
-    submitted
-     T|> .name
-     F|> .message
+value nestedRendered : Text = ready
+ T|> loadedText
+ F|> wait
+
+value submitted : Validation FormError User =
+    Valid {
+        name: "Grace"
+    }
+
+value summary : Text = submitted
+ T|> .name
+ F|> .message

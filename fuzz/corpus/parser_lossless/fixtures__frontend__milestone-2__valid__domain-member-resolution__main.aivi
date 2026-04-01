@@ -1,23 +1,26 @@
-domain Duration over Int
+domain Duration over Int = {
     literal ms : Int -> Duration
     type Int -> Duration
     make
     type Duration -> Int
-    value
+    unwrap
+}
 
-domain Count over Int
+domain Count over Int = {
     type Int -> Count
     make
+}
 
-domain NonEmpty A over List A
+domain NonEmpty A over List A = {
     type A -> NonEmpty A
     singleton
     type NonEmpty A -> A
     head
+}
 
-val delay : Duration = make 250
-val delayMillis : Int = value delay
-val literalMillis : Int = value 250ms
-val first : Int = head (singleton 1)
+value delay : Duration = make 250
+value delayMillis : Int = unwrap delay
+value literalMillis : Int = unwrap 250ms
+value first : Int = head (singleton 1)
 
 export first

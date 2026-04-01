@@ -1,1 +1,1 @@
-fun prependCells:List Int = #head:Int #tail:List Int=>    head :: tail
+fun prependCells:List Int = head:Int tail:List Int=>    head :: tail

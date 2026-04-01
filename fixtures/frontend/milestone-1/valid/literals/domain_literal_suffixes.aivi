@@ -1,8 +1,9 @@
-domain Duration over Int
+domain Duration over Int = {
     literal ms : Int -> Duration
     literal sec : Int -> Duration
     type Duration -> Duration -> Duration
     (+)
+}
 
 value delay : Duration = 250ms
 value total = 250ms + 3sec

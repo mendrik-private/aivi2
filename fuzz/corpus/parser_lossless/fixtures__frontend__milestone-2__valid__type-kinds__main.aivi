@@ -13,29 +13,40 @@ type Profile = {
 }
 
 type HttpResult A = (Result HttpError A)
+
 type LoadedProfile = (HttpResult Profile)
+
 type HeaderMap = (Map Text Text)
+
 type TagSet = (Set Text)
+
 type PendingProfiles = (Task HttpError (Map Text Profile))
 
-domain ResourceId A over A
+domain ResourceId A over A = {
     type A -> ResourceId A
     wrap
     type ResourceId A -> A
     unwrap
+}
 
-domain HeaderBag over Map Text Text
+domain HeaderBag over Map Text Text = {
     type Text -> HeaderBag -> Option Text
     lookup
+}
 
-domain Tags over Set Text
+domain Tags over Set Text = {
     type Text -> Tags -> Bool
     contains
+}
 
 type ResourceText = (ResourceId Text)
 
-fun keepHeaders:Map Text Text = #headers:Map Text Text=>    headers
+type Map Text Text -> Map Text Text
+func keepHeaders = headers =>
+    headers
 
-fun keepTags:Set Text = #tags:Set Text=>    tags
+type Set Text -> Set Text
+func keepTags = tags =>
+    tags
 
-val defaultNickname : Option Text = None
+value defaultNickname : Option Text = None

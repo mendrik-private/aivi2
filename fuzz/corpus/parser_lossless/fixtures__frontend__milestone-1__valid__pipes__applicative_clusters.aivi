@@ -1,23 +1,26 @@
-type UserDraft = UserDraft Text Text Int
-type NamePair = NamePair Text Text
+type UserDraft =
+  | UserDraft Text Text Int
 
-sig nameText = "Ada"
-sig emailText = "ada@example.com"
-sig ageValue = 36
-sig firstName = "Ada"
-sig lastName = "Lovelace"
+type NamePair =
+  | NamePair Text Text
 
-sig validatedUser =
+signal nameText = "Ada"
+signal emailText = "ada@example.com"
+signal ageValue = 36
+signal firstName = "Ada"
+signal lastName = "Lovelace"
+
+signal validatedUser =
  &|> nameText
  &|> emailText
  &|> ageValue
   |> UserDraft
 
-sig namePair =
+signal namePair =
  &|> firstName
  &|> lastName
   |> NamePair
 
-sig tupledNames =
+signal tupledNames =
  &|> firstName
  &|> lastName

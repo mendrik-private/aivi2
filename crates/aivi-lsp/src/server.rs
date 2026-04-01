@@ -5,11 +5,12 @@ use tower_lsp::{
     jsonrpc::Result,
     lsp_types::request::{GotoImplementationParams, GotoImplementationResponse},
     lsp_types::{
-        CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
-        DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
-        DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
-        Hover, HoverParams, HoverProviderCapability, ImplementationProviderCapability,
-        InitializeParams, InitializeResult, InitializedParams, Location, MessageType, OneOf,
+        CodeLens, CodeLensOptions, CodeLensParams, CompletionOptions, CompletionParams,
+        CompletionResponse, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+        DidOpenTextDocumentParams, DocumentFormattingParams, DocumentSymbolParams,
+        DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
+        HoverProviderCapability, ImplementationProviderCapability, InitializeParams,
+        InitializeResult, InitializedParams, Location, MessageType, OneOf,
         SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
         SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
         ServerCapabilities, SymbolInformation, SymbolKind, TextDocumentSyncCapability,
@@ -74,6 +75,9 @@ impl LanguageServer for Backend {
                 definition_provider: Some(OneOf::Left(true)),
                 implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
+                code_lens_provider: Some(CodeLensOptions {
+                    resolve_provider: Some(false),
+                }),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
                         SemanticTokensOptions {
@@ -253,6 +257,16 @@ impl LanguageServer for Backend {
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
         Ok(crate::semantic_tokens::semantic_tokens_full(params, Arc::clone(&self.state)).await)
+    }
+
+    async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
+        let uri = &params.text_document.uri;
+        let Some(file) = self.state.files.get(uri).map(|f| *f) else {
+            return Ok(None);
+        };
+        let hir = aivi_query::hir_module(&self.state.db, file);
+        let lenses = crate::code_lens::collect_code_lenses(hir.module(), hir.source(), uri);
+        Ok(if lenses.is_empty() { None } else { Some(lenses) })
     }
 }
 

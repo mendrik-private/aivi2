@@ -1,8 +1,10 @@
-class Eq A
+class Eq A = {
     (==) : A -> A -> Bool
+}
 
-class Display A
+class Display A = {
     display : A -> Text
+}
 
 type Int -> Int -> Bool
 func equivalent = left right =>

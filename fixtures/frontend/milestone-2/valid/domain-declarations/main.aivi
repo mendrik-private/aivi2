@@ -1,23 +1,26 @@
-domain Duration over Int
+domain Duration over Int = {
     literal ms : Int -> Duration
     type Duration -> Duration -> Duration
     (+)
     type Duration -> Int
     unwrap
+}
 
-domain Path over Text
+domain Path over Text = {
     literal root : Text -> Path
     type Path -> Text -> Path
     (/)
     type Path -> Text
     unwrap
+}
 
-domain NonEmpty A over List A
+domain NonEmpty A over List A = {
     type List A -> Option (NonEmpty A)
     fromList
     type NonEmpty A -> A
     head
     type NonEmpty A -> List A
     tail
+}
 
 export Path

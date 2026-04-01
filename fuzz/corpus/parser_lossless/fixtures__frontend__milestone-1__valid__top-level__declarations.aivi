@@ -5,15 +5,20 @@ use aivi.network (
 
 type Bool = True | False
 
-type Vec2 = Vec2 Int Int
+type Vec2 =
+  | Vec2 Int Int
 
 type Result A = Err Text | Ok A
 
-val answer = 42
+value answer = 42
 
-fun add:Int = #x:Int #y:Int=>    x + y
+type Int -> Int -> Int
+func add = x y =>
+    x + y
 
-fun defaultResult:Result Int = #value:Int=>    Ok value
+type Int -> Result Int
+func defaultResult = x =>
+    Ok x
 
-sig counter = 0
-sig nextCounter = counter + 1
+signal counter = 0
+signal nextCounter = counter + 1

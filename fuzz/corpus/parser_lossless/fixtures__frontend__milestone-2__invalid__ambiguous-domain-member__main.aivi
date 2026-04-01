@@ -1,9 +1,11 @@
-domain Duration over Int
+domain Duration over Int = {
     type Int -> Duration
     make
+}
 
-domain Count over Int
+domain Count over Int = {
     type Int -> Count
     make
+}
 
-val bad = make 1
+value bad = make 1

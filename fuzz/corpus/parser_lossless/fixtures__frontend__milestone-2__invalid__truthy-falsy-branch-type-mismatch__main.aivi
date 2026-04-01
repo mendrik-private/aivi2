@@ -1,6 +1,5 @@
-val ready:Bool = True
+value ready : Bool = True
 
-val branch =
-    ready
-     T|> "start"
-     F|> 0
+value branch = ready
+ T|> "start"
+ F|> 0

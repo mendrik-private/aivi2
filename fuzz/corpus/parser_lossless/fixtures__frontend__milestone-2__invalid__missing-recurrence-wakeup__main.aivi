@@ -1,6 +1,5 @@
-fun step = #value=>    value
+func step = x=>    x
 
-sig broken : Signal Int =
-    0
-     @|> step
-     <|@ step
+signal broken : Signal Int = 0
+ @|> step
+ <|@ step

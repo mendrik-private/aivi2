@@ -46,6 +46,17 @@ export function registerCommands(
           vscode.window.showInformationMessage("No compiler log found.");
         }
       }
-    })
+    }),
+
+    vscode.commands.registerCommand(
+      "aivi.runTest",
+      async (fileUri: string, testName: string) => {
+        const config = vscode.workspace.getConfiguration("aivi");
+        const aiviPath = config.get<string>("compiler.path") ?? "aivi";
+        const terminal = vscode.window.createTerminal(`AIVI Test: ${testName}`);
+        terminal.sendText(`${aiviPath} test "${fileUri}" "${testName}"`);
+        terminal.show();
+      }
+    )
   );
 }
