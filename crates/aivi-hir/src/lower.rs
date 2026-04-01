@@ -283,6 +283,14 @@ func __aivi_list_any = predicate items =>
     items
       |> reduce (__aivi_list_anyStep predicate) False
 
+type Eq A => A -> A -> Bool
+func __aivi_binary_eq = left right =>
+    left == right
+
+type Eq A => A -> A -> Bool
+func __aivi_binary_neq = left right =>
+    left != right
+
 "#;
 
 const MAX_COMPILE_TIME_RANGE_ELEMENTS: u64 = 4096;
@@ -2313,6 +2321,42 @@ impl<'a> Lowerer<'a> {
                     kind: ExprKind::Markup(markup),
                 })
             }
+            syn::ExprKind::OperatorSection(op) => self.lower_operator_section(*op, expr.span),
+        }
+    }
+
+    fn lower_operator_section(
+        &mut self,
+        op: syn::BinaryOperator,
+        span: aivi_base::SourceSpan,
+    ) -> ExprId {
+        let ambient_name = match op {
+            syn::BinaryOperator::Equals => Some("__aivi_binary_eq"),
+            syn::BinaryOperator::NotEquals => Some("__aivi_binary_neq"),
+            _ => None,
+        };
+        if let Some(name) = ambient_name {
+            let reference =
+                TermReference::unresolved(self.make_path(&[self.make_name(name, span)]));
+            self.alloc_expr(Expr {
+                span,
+                kind: ExprKind::Name(reference),
+            })
+        } else {
+            self.diagnostics.push(
+                aivi_base::Diagnostic::error(
+                    "operator section not supported for this operator",
+                )
+                .with_code(code("unsupported-operator-section"))
+                .with_primary_label(span, "no built-in function backing for this operator section"),
+            );
+            let reference = TermReference::unresolved(
+                self.make_path(&[self.make_name("__aivi_binary_eq", span)]),
+            );
+            self.alloc_expr(Expr {
+                span,
+                kind: ExprKind::Name(reference),
+            })
         }
     }
 

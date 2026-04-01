@@ -4448,6 +4448,21 @@ impl<'a> Parser<'a> {
             });
         }
 
+        // Detect operator section: (op) where the content is a single binary operator token.
+        if let Some(op_index) = self.peek_nontrivia(*cursor, end) {
+            if let Some((op, _)) = self.binary_operator(op_index) {
+                let after_op = self.peek_nontrivia(op_index + 1, end);
+                if after_op.map_or(false, |i| self.tokens[i].kind() == TokenKind::RParen) {
+                    *cursor = op_index + 1;
+                    let _ = self.consume_kind(cursor, end, TokenKind::RParen);
+                    return Some(Expr {
+                        span: self.source_span_for_range(start, *cursor),
+                        kind: ExprKind::OperatorSection(op),
+                    });
+                }
+            }
+        }
+
         loop {
             let element = self.parse_expr(cursor, end, ExprStop::paren_context())?;
             elements.push(element);

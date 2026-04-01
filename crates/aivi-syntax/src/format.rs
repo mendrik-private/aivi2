@@ -2163,6 +2163,9 @@ impl Formatter {
                 );
                 wrap_if_needed(rendered, precedence, parent_prec)
             }
+            ExprKind::OperatorSection(op) => {
+                format!("({})", self.format_binary_operator(*op))
+            }
             ExprKind::ResultBlock(block) => self.format_result_block_inline(block),
             ExprKind::Pipe(pipe) => {
                 wrap_if_needed(self.format_pipe_inline(pipe), EXPR_PIPE_PREC, parent_prec)

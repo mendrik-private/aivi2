@@ -3,6 +3,7 @@ use aivi.list (
     head as listHead
     any
 )
+
 use aivi.option (getOrElse)
 
 type Direction =
@@ -70,13 +71,16 @@ func takeCells = n cells => cells
   |> reduce takeCellStep { remaining: n, cells: [] }
   |> .cells
 
+type Cell -> Cell -> Bool
+func cellEq = a b => a == b
+
 domain Snake over List Cell
     type List Cell -> Snake
     fromCells cells = cells
     type Snake -> Cell
     head snake = getOrElse (Cell 0 0) (listHead snake)
     type Snake -> Cell -> Bool
-    contains snake cell = any ((==) cell) snake
+    contains snake cell = any (cellEq cell) snake
     type Snake -> Int
     length snake = listLength snake
     type Snake -> Cell -> Snake
@@ -106,15 +110,12 @@ func dirLabel = d => d
  ||> East  -> "Right"
  ||> West  -> "Left"
 
-value snake0 : Snake =
-    fromCells [
+value initial : GameState = {
+    snake: fromCells [
         Cell 6 10,
         Cell 5 10,
         Cell 4 10
-    ]
-
-value initial : GameState = {
-    snake: snake0,
+    ],
     dir: East,
     food: spawnFood seed0,
     score: 0,

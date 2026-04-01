@@ -489,6 +489,8 @@ pub enum ExprKind {
         operator: BinaryOperator,
         right: Box<Expr>,
     },
+    /// `(op)` — a binary operator used as a first-class function value.
+    OperatorSection(BinaryOperator),
     ResultBlock(ResultBlockExpr),
     PatchApply {
         target: Box<Expr>,
