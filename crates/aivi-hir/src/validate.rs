@@ -9571,9 +9571,29 @@ impl GateType {
     }
 
     /// Returns true when `self` (a concrete type) is a valid instantiation of `template`, treating
-    /// any `TypeParameter` in `template` as an unconstrained wildcard.  Used to validate that a
-    /// curried partial-application result type satisfies an expected type that still carries open
-    /// type-parameter placeholders from the outer polymorphic context.
+    /// any `TypeParameter` in `template` as an unconstrained wildcard.
+    pub(crate) fn has_type_params(&self) -> bool {
+        match self {
+            Self::TypeParameter { .. } => true,
+            Self::Primitive(_) => false,
+            Self::Arrow { parameter, result } => {
+                parameter.has_type_params() || result.has_type_params()
+            }
+            Self::List(e) | Self::Option(e) | Self::Signal(e) | Self::Set(e) => {
+                e.has_type_params()
+            }
+            Self::Tuple(elements) => elements.iter().any(|e| e.has_type_params()),
+            Self::Record(fields) => fields.iter().any(|f| f.ty.has_type_params()),
+            Self::Map { key, value } => key.has_type_params() || value.has_type_params(),
+            Self::Result { error, value } | Self::Validation { error, value } | Self::Task { error, value } => {
+                error.has_type_params() || value.has_type_params()
+            }
+            Self::Domain { arguments, .. } | Self::OpaqueItem { arguments, .. } => {
+                arguments.iter().any(|a| a.has_type_params())
+            }
+        }
+    }
+
     pub(crate) fn fits_template(&self, template: &Self) -> bool {
         match template {
             Self::TypeParameter { .. } => true,

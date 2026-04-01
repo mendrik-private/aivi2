@@ -2629,8 +2629,12 @@ impl<'a> GeneralExprElaborator<'a> {
         expected: Option<&GateType>,
     ) -> Result<GateType, Vec<GeneralExprBlocker>> {
         if let Some(expected) = expected {
-            if matches!(self.module.exprs()[expr_id].kind, ExprKind::Pipe(_))
-                || expression_matches(self.module, expr_id, env, expected)
+            // Only use the expected type as the definitive expression type when it is fully closed
+            // (no open TypeParameters). If it contains TypeParams the IR would get open types,
+            // which the backend rejects.
+            if !expected.has_type_params()
+                && (matches!(self.module.exprs()[expr_id].kind, ExprKind::Pipe(_))
+                    || expression_matches(self.module, expr_id, env, expected))
             {
                 return Ok(expected.clone());
             }
