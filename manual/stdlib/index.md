@@ -1,421 +1,136 @@
 # Standard Library
 
-The AIVI standard library provides foundational types, classes, and functions. All of the following are available in every AIVI program without any `use` declaration unless noted.
+The AIVI standard library is the set of modules that ships with the language. Some names, such
+as `Option`, `Result`, `Signal`, and `Task`, are built in. Most other tools live in named modules
+that you import with `use`.
 
-## Core Types
+Use this page as a map:
 
-### `Ordering`
+- start with the modules in **Start here** if you are new to AIVI
+- use the grouped lists below when you already know the job you need to do
+- treat each linked page as the source of truth for what the current stdlib actually exposes
 
-The result of a comparison:
+Several modules are intentionally small today, and some are shared type vocabularies rather than
+full runtime clients. Their pages call that out up front so you do not have to guess.
 
-```aivi
-type Ordering =
-  | Less
-  | Equal
-  | Greater
-```
+After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first are
+[`aivi.option`](/stdlib/option), [`aivi.result`](/stdlib/result), [`aivi.list`](/stdlib/list),
+[`aivi.text`](/stdlib/text), and [`aivi.math`](/stdlib/math).
 
-### `Option A`
+## Built-in types you will see often
 
-A value that may or may not be present:
-
-```aivi
-type Option A = None | Some A
-```
-
-| Constructor | Meaning |
-|---|---|
-| `None` | No value |
-| `Some value` | Has a value |
-
-### `Result E A`
-
-Either a success or a failure:
-
-```aivi
-type Result E A = Err E | Ok A
-```
-
-| Constructor | Meaning |
-|---|---|
-| `Err error` | Failed with error of type `E` |
-| `Ok value` | Succeeded with value of type `A` |
-
-### `Validation E A`
-
-Like `Result`, but with an accumulation-oriented applicative slice for independent failures. The current executable accumulation path combines `Validation (NonEmptyList E)` values rather than accumulating arbitrary error payloads:
-
-```aivi
-type Validation E A =
-  | Invalid E
-  | Valid A
-```
-
-### `Signal A`
-
-A reactive node that carries values of type `A` over time.
-
-### `Task E A`
-
-A deferred computation that either produces `A` or fails with `E`.
-
----
-
-## `aivi.option` — Option Utilities
-
-```aivi
-use aivi.option (
-    isSome
-    isNone
-    getOrElse
-    orElse
-    flatMap
-    flatten
-    toList
-    toResult
-)
-```
-
-| Function | Signature | Description |
+| Type | Meaning | More |
 |---|---|---|
-| `isSome` | `Option A -> Bool` | `True` if `Some` |
-| `isNone` | `Option A -> Bool` | `True` if `None` |
-| `getOrElse` | `A -> Option A -> A` | Extract value or return fallback |
-| `orElse` | `Option A -> Option A -> Option A` | Use fallback option if `None` |
-| `flatMap` | `(A -> Option B) -> Option A -> Option B` | Chain `Option`-returning functions |
-| `flatten` | `Option (Option A) -> Option A` | Remove one layer of nesting |
-| `toList` | `Option A -> List A` | `[value]` or `[]` |
-| `toResult` | `E -> Option A -> Result E A` | Convert to `Result` with given error |
+| `Ordering` | The result of comparing two values: `Less`, `Equal`, or `Greater`. | [`aivi.order`](/stdlib/order) |
+| `Option A` | A value that may be missing. | [`aivi.option`](/stdlib/option) |
+| `Result E A` | A success value (`Ok`) or a failure value (`Err`). | [`aivi.result`](/stdlib/result) |
+| `Validation E A` | Like `Result`, but useful when checking several independent inputs. | [`aivi.validation`](/stdlib/validation) |
+| `Signal A` | A reactive value that changes over time. | [Signals guide](/guide/signals) |
+| `Task E A` | Runtime work that may fail with `E` or succeed with `A`. | Used across I/O-oriented stdlib modules |
 
-Example:
+## Browse modules by area
 
-```aivi
-use aivi.option (getOrElse)
+### Start here
 
-type Option Text -> Text
-func displayName = opt =>
-    getOrElse "Anonymous" opt
-```
+- [`aivi.prelude`](/stdlib/prelude) — a good first stop for everyday imports.
+- [`aivi.defaults`](/stdlib/defaults) — named empty/default values for common built-in types.
 
----
+### Core values and collections
 
-## `aivi.result` — Result Utilities
+- [`aivi.bool`](/stdlib/bool) — boolean helpers.
+- [`aivi.option`](/stdlib/option) — values that may be missing.
+- [`aivi.result`](/stdlib/result) — success-or-error values.
+- [`aivi.validation`](/stdlib/validation) — validation values for user input and other checks.
+- [`aivi.core.either`](/stdlib/either) — values that can hold one of two branches.
+- [`aivi.list`](/stdlib/list) — list helpers.
+- [`aivi.nonEmpty`](/stdlib/nonEmpty) — lists that always contain at least one item.
+- [`aivi.pair`](/stdlib/pair) — two values grouped together.
+- [`aivi.order`](/stdlib/order) — comparison results and ordering helpers.
+- [`aivi.core.dict`](/stdlib/dict) — key/value dictionaries.
+- [`aivi.core.set`](/stdlib/set) — collections of unique values.
+- [`aivi.core.range`](/stdlib/range) — numeric ranges.
+- [`aivi.core.fn`](/stdlib/fn) — small function and pipeline helpers.
 
-```aivi
-use aivi.result (
-    isOk
-    isErr
-    mapErr
-    withDefault
-    orElse
-    flatMap
-    flatten
-    toOption
-    toList
-)
-```
+### Numbers, text, and data
 
-| Function | Signature | Description |
+- [`aivi.math`](/stdlib/math) — everyday arithmetic helpers.
+- [`aivi.core.float`](/stdlib/float) — floating-point numbers.
+- [`aivi.bigint`](/stdlib/bigint) — integers that can grow past the normal `Int` range.
+- [`aivi.text`](/stdlib/text) — text helpers.
+- [`aivi.regex`](/stdlib/regex) — regular-expression matching and replacement.
+- [`aivi.core.bytes`](/stdlib/bytes) — byte buffers.
+- [`aivi.data.json`](/stdlib/json) — JSON values and helpers.
+
+### Time, randomness, and scheduling
+
+- [`aivi.duration`](/stdlib/duration) — typed time spans such as `5sec`.
+- [`aivi.time`](/stdlib/time) — clocks, timestamps, and time formatting helpers.
+- [`aivi.timer`](/stdlib/timer) — marker types for timer-backed signals.
+- [`aivi.random`](/stdlib/random) — random bytes and random integers.
+
+### Files, environment, and processes
+
+- [`aivi.fs`](/stdlib/fs) — filesystem events and watcher-related types.
+- [`aivi.path`](/stdlib/path) — checked path values.
+- [`aivi.env`](/stdlib/env) — environment-variable lookups.
+- [`aivi.stdio`](/stdlib/stdio) — write to standard output and standard error.
+- [`aivi.log`](/stdlib/log) — runtime logging helpers.
+- [`aivi.process`](/stdlib/process) — process-related records, results, and errors.
+
+### Network and services
+
+Some modules in this group are full helpers, and some are shared data shapes for integrations.
+The linked pages spell out which functions exist today.
+
+- [`aivi.url`](/stdlib/url) — typed URLs and helpers for their parts.
+- [`aivi.http`](/stdlib/http) — HTTP request helpers.
+- [`aivi.auth`](/stdlib/auth) — OAuth / PKCE sign-in records and state types.
+- [`aivi.db`](/stdlib/db) — database connections, statements, paging, and errors.
+- [`aivi.imap`](/stdlib/imap) — mailbox folders, sync state, and mail events.
+- [`aivi.smtp`](/stdlib/smtp) — outgoing mail settings, messages, and errors.
+
+### Desktop, UI, and GNOME
+
+Many pages in this group describe task aliases, watcher/source shapes, or shared desktop data
+types rather than a full feature API. They are still the right place to look when wiring a Linux
+desktop app together.
+
+- [`aivi.app`](/stdlib/app) — application framework types.
+- [`aivi.app.lifecycle`](/stdlib/lifecycle) — lifecycle state, commands, undo state, and in-app notifications.
+- [`aivi.desktop.xdg`](/stdlib/xdg) — standard Linux app directories.
+- [`aivi.portal`](/stdlib/portal) — desktop portal results for file picking, opening URIs, and screenshots.
+- [`aivi.dbus`](/stdlib/dbus) — D-Bus values, calls, signals, and match rules.
+- [`aivi.gnome.settings`](/stdlib/settings) — GSettings schema, key, and value types.
+- [`aivi.gnome.onlineAccounts`](/stdlib/onlineAccounts) — desktop account and token records.
+- [`aivi.gnome.notifications`](/stdlib/notifications) — desktop notification payloads and responses.
+- [`aivi.clipboard`](/stdlib/clipboard) — clipboard content types and watcher shapes.
+- [`aivi.color`](/stdlib/color) — packed UI colors and channel helpers.
+- [`aivi.image`](/stdlib/image) — image data, metadata, and load errors.
+- [`aivi.gresource`](/stdlib/gresource) — bundled resource paths and load errors.
+- [`aivi.i18n`](/stdlib/i18n) — translation marker helpers.
+
+## Common interfaces (typeclasses)
+
+If you have not used typeclasses before, think of them as shared capabilities that different
+types can implement. The table below describes the current built-in support in the executable
+language/runtime slice.
+
+| Interface | What it gives you | Built-in support includes |
 |---|---|---|
-| `isOk` | `Result E A -> Bool` | `True` if `Ok` |
-| `isErr` | `Result E A -> Bool` | `True` if `Err` |
-| `mapErr` | `(E1 -> E2) -> Result E1 A -> Result E2 A` | Transform the error type |
-| `withDefault` | `A -> Result E A -> A` | Extract value or return fallback |
-| `orElse` | `Result E A -> Result E A -> Result E A` | Use fallback result if `Err` |
-| `flatMap` | `(A -> Result E B) -> Result E A -> Result E B` | Chain `Result`-returning functions |
-| `flatten` | `Result E (Result E A) -> Result E A` | Remove one layer of nesting |
-| `toOption` | `Result E A -> Option A` | Discard error, return `Option` |
-| `toList` | `Result E A -> List A` | `[value]` or `[]` |
-
-Example:
-
-```aivi
-use aivi.result (withDefault)
-
-type Result Text Int -> Int
-func safeScore = result =>
-    withDefault 0 result
-```
-
----
-
-## `aivi.list` — List Utilities
-
-```aivi
-use aivi.list (
-    length
-    head
-    at
-    tail
-    tailOrEmpty
-    last
-    isEmpty
-    nonEmpty
-    replaceAt
-    any
-    all
-    count
-    find
-    findMap
-    zip
-    partition
-)
-```
-
-List operations use the built-in `reduce` and `append` functions (available everywhere).
-
-### Built-In List Functions
-
-| Function | Signature | Description |
-|---|---|---|
-| `append` | `List A -> List A -> List A` | Concatenate two lists |
-| `reduce` | `(B -> A -> B) -> B -> List A -> B` | Fold a list into a single value |
-
-### `aivi.list` Functions
-
-| Function | Signature | Description |
-|---|---|---|
-| `length` | `List A -> Int` | Number of elements |
-| `isEmpty` | `List A -> Bool` | `True` if the list has no elements |
-| `nonEmpty` | `List A -> Bool` | `True` if the list has at least one element |
-| `head` | `List A -> Option A` | First element, or `None` |
-| `at` | `Int -> List A -> Option A` | Element at the given zero-based index, or `None` when out of range |
-| `tail` | `List A -> Option (List A)` | All but first element, or `None` |
-| `tailOrEmpty` | `List A -> List A` | All but first element, or `[]` |
-| `last` | `List A -> Option A` | Last element, or `None` |
-| `replaceAt` | `Int -> A -> List A -> List A` | Replace the element at the given zero-based index, leaving out-of-range lists unchanged |
-| `any` | `(A -> Bool) -> List A -> Bool` | `True` if any element satisfies the predicate |
-| `all` | `(A -> Bool) -> List A -> Bool` | `True` if all elements satisfy the predicate |
-| `count` | `(A -> Bool) -> List A -> Int` | Number of elements satisfying the predicate |
-| `find` | `(A -> Bool) -> List A -> Option A` | First element satisfying the predicate |
-| `findMap` | `(A -> Option B) -> List A -> Option B` | First non-`None` result of applying a function |
-| `zip` | `List A -> List B -> List (A, B)` | Pair up elements from two lists |
-| `partition` | `(A -> Bool) -> List A -> Partition A` | Split into matched and unmatched |
-
-`Partition A` is a record with fields `matched: List A` and `unmatched: List A`.
-
-Example — sum a list:
-
-```aivi
-use aivi.list (sum)
-
-type List Int -> Int
-func sumList = numbers =>
-    sum numbers
-```
-
-Example — collect names from a list of users:
-
-```aivi
-use aivi.list (find)
-
-type User = {
-    id: Int,
-    name: Text
-}
-
-type Int -> User -> Bool
-func hasId = id user =>
-    user.id == id
-
-type Int -> (List User) -> (Option User)
-func findById = id users =>
-    find (hasId id) users
-```
-
----
-
-## `aivi.text` — Text Utilities
-
-```aivi
-use aivi.text (
-    isEmpty
-    nonEmpty
-    join
-    surround
-)
-```
-
-| Function | Signature | Description |
-|---|---|---|
-| `isEmpty` | `Text -> Bool` | `True` if the string is `""` |
-| `nonEmpty` | `Text -> Bool` | `True` if the string is not `""` |
-| `join` | `Text -> List Text -> Text` | Join parts with a separator (`""` concatenates) |
-| `surround` | `Text -> Text -> Text -> Text` | Wrap with prefix and suffix |
-
-Example:
-
-```aivi
-use aivi.text (join)
-
-type List Text -> Text
-func csvLine = fields =>
-    join "," fields
-```
-
----
-
-## `aivi.path` — File Paths
-
-```aivi
-use aivi.path (
-    Path
-    PathError
-)
-```
-
-```aivi
-domain Path over Text
-```
-
-Example:
-
-```aivi
-use aivi.path (Path)
-
-value configPath : Path = root "/etc" / "myapp" / "config.toml"
-```
-
----
-
-## `aivi.fs` — File System Events
-
-```aivi
-use aivi.fs (
-    FsError
-    FsEvent
-    Created
-    Changed
-    Deleted
-)
-```
-
-```aivi
-type FsError =
-  | NotFound Text
-  | PermissionDenied Text
-  | ReadFailed Text
-  | WriteFailed Text
-  | FsProtocolError Text
-
-type FsEvent =
-  | Created
-  | Changed
-  | Deleted
-```
-
-Use with `@source fs.watch`:
-
-```aivi
-@source fs.watch "/tmp/data.txt" with {
-    events: [Created, Changed, Deleted]
-}
-signal fileEvents : Signal FsEvent
-```
-
----
-
-## `aivi.http` — HTTP Client
-
-```aivi
-use aivi.http (
-    HttpError
-    HttpHeaders
-    HttpResponse
-    DecodeMode
-    Strict
-    Permissive
-)
-```
-
-```aivi
-type HttpError =
-  | Timeout
-  | DecodeFailure Text
-  | RequestFailure Text
-
-type DecodeMode =
-  | Strict
-  | Permissive
-
-domain Retry over Int
-```
-
-Use with `@source http.get`:
-
-```aivi
-use aivi.http (
-    HttpError
-    Strict
-)
-
-type User = {
-    id: Int,
-    name: Text
-}
-
-@source http.get "https://api.example.com/users" with {
-    decode: Strict,
-    retry: 2times,
-    timeout: 10sec
-}
-signal users : Signal (Result HttpError (List User))
-```
-
----
-
-## `aivi.nonEmpty` — Non-Empty Lists
-
-```aivi
-use aivi.nonEmpty (
-    NonEmptyList
-    singleton
-    cons
-    head
-    toList
-)
-```
-
-| Function | Signature | Description |
-|---|---|---|
-| `singleton` | `A -> NonEmptyList A` | Create a one-element list |
-| `cons` | `A -> NonEmptyList A -> NonEmptyList A` | Prepend an element |
-| `head` | `NonEmptyList A -> A` | First element (always safe — no `Option`) |
-| `toList` | `NonEmptyList A -> List A` | Convert to a regular list |
-
----
-
-## `aivi.timer`
-
-```aivi
-use aivi.timer (
-    TimerTick
-    TimerReady
-)
-```
-
-Used with `@source timer.every`. The signal type is `Signal Unit`.
-
----
-
-## Typeclasses
-
-The following ambient classes and builtin carrier paths are wired through the current compiler/runtime slice:
-
-| Class | Key operation | Instances include |
-|---|---|---|
-| `Eq A` | `==`, `!=` | primitive scalars, `Ordering`, `Option`, `Result`, `Validation`, `List` |
-| `Ord A` | `compare` | `Int`, `Text`, `Ordering` |
-| `Default A` | `default` | same-module `Default` instances; `Option` omission via `use aivi.defaults (Option)`; `Text` / `Int` / `Bool` omission via `use aivi.defaults (defaultText, defaultInt, defaultBool)` |
-| `Functor F` | `map` (via `*\|>`) | `Option`, `Result`, `List`, `Validation`, `Signal` |
-| `Semigroup A` | `<>` | `Text`, `List` |
-| `Monoid A` | `empty` | `Text`, `List` |
-| `Foldable F` | `reduce` | `List`, `Option`, `Result`, `Validation` |
-| `Filterable F` | `filterMap` | `List`, `Option` |
-| `Apply F` | `apply` | `Option`, `Result`, `List`, `Validation`, `Signal` |
-| `Applicative F` | `pure` | `Option`, `Result`, `List`, `Validation`, `Signal`, `Task` (executable applicative slice) |
-| `Monad F` | `chain`, `join` | `List`, `Option`, `Result` |
-| `Bifunctor F` | `bimap` | `Result`, `Validation` |
-| `Traversable F` | `traverse` | `List`, `Option`, `Result`, `Validation` |
-
-This table describes the current executable builtin slice. For the full higher-kinded hierarchy, support boundaries, and the current same-module-only limits for user-authored higher-kinded classes and instances, see [Typeclasses & Higher-Kinded Support](/guide/typeclasses).
+| `Eq A` | Equality via `==` and `!=` | primitive scalars, `Ordering`, `Option`, `Result`, `Validation`, `List` |
+| `Ord A` | Ordering via `compare` | `Int`, `Text`, `Ordering` |
+| `Default A` | A fallback value via `default` | same-module `Default` instances; `Option` omission via `use aivi.defaults (Option)`; `Text` / `Int` / `Bool` omission via `use aivi.defaults (defaultText, defaultInt, defaultBool)` |
+| `Functor F` | Mapping over a wrapped value | `Option`, `Result`, `List`, `Validation`, `Signal` |
+| `Semigroup A` | Combining two values with `<>` | `Text`, `List` |
+| `Monoid A` | An identity value via `empty` | `Text`, `List` |
+| `Foldable F` | Reducing a structure to one value | `List`, `Option`, `Result`, `Validation` |
+| `Filterable F` | Keeping some values while dropping others | `List`, `Option` |
+| `Apply F` | Applying wrapped functions to wrapped values | `Option`, `Result`, `List`, `Validation`, `Signal` |
+| `Applicative F` | Lifting plain values into a context with `pure` | `Option`, `Result`, `List`, `Validation`, `Signal`, `Task` |
+| `Monad F` | Chaining context-producing steps | `List`, `Option`, `Result` |
+| `Bifunctor F` | Mapping both sides of a two-parameter type | `Result`, `Validation` |
+| `Traversable F` | Walking a structure while building effects | `List`, `Option`, `Result`, `Validation` |
+
+This table describes the current executable built-in slice. For the full higher-kinded hierarchy,
+support boundaries, and the current same-module-only limits for user-authored higher-kinded
+classes and instances, see [Typeclasses & Higher-Kinded Support](/guide/typeclasses).
