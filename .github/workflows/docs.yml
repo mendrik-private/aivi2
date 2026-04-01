@@ -46,11 +46,15 @@ jobs:
         id: manual-base
         shell: bash
         run: |
-          repo_name="${GITHUB_REPOSITORY#*/}"
-          if [[ "${repo_name}" == *.github.io ]]; then
+          if [[ -f "manual/public/CNAME" ]]; then
             echo "base=/" >> "${GITHUB_OUTPUT}"
           else
-            echo "base=/${repo_name}/" >> "${GITHUB_OUTPUT}"
+            repo_name="${GITHUB_REPOSITORY#*/}"
+            if [[ "${repo_name}" == *.github.io ]]; then
+              echo "base=/" >> "${GITHUB_OUTPUT}"
+            else
+              echo "base=/${repo_name}/" >> "${GITHUB_OUTPUT}"
+            fi
           fi
 
       - name: Build docs
