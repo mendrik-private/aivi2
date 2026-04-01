@@ -11,11 +11,9 @@ type Result A = Err Text | Ok A
 
 val answer = 42
 
-fun add:Int #x:Int #y:Int =>
-    x + y
+fun add:Int = #x:Int #y:Int=>    x + y
 
-fun defaultResult:Result Int #value:Int =>
-    Ok value
+fun defaultResult:Result Int = #value:Int=>    Ok value
 
 sig counter = 0
 sig nextCounter = counter + 1

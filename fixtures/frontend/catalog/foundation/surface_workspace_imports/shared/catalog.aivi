@@ -1,10 +1,8 @@
 type Text -> Text
-func greetUser name =>
-    "hello {name}"
+func greetUser = name=>    "hello {name}"
 
 type Text -> Text -> Text
-func joinLabels left right =>
-    "{left} / {right}"
+func joinLabels = left right=>    "{left} / {right}"
 
 value defaultRole : Text = "owner"
 

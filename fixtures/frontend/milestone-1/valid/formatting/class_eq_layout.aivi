@@ -2,5 +2,4 @@ class Eq A
     (==) : A -> A -> Bool
 
 type Int -> Int -> Bool
-func equivalent left right =>
-    left + 1 == right - 1 and left != right
+func equivalent = left right=>    left + 1 == right - 1 and left != right

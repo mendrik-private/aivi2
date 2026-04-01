@@ -1,6 +1,5 @@
 type Int -> Int -> Int
-func add acc x =>
-    acc + x
+func add = acc x=>    acc + x
 
 value maybeInput : Option Int = Some 4
 

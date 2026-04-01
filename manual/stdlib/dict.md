@@ -102,12 +102,10 @@ use aivi.core.dict (
 )
 
 type Int -> Int -> Int
-func addScores total n =>
-    total + n
+func addScores = total n=>    total + n
 
 type Text -> Int -> (Dict Text Int) -> (Dict Text Int)
-func addScore key n d =>
-    insertWith addScores key n d
+func addScore = key n d=>    insertWith addScores key n d
 ```
 
 ---
@@ -307,8 +305,7 @@ use aivi.core.dict (
 )
 
 type Int -> Int
-func double n =>
-    n * 2
+func double = n=>    n * 2
 
 value d : (Dict Text Int) =
     insert "pts" 5 {
@@ -336,8 +333,7 @@ use aivi.core.dict (
 )
 
 type Int -> Bool
-func isHigh n =>
-    n > 50
+func isHigh = n=>    n > 50
 
 value d : (Dict Text Int) = { entries: [] }
   |> insert "low" 3
@@ -364,8 +360,7 @@ use aivi.core.dict (
 )
 
 type Int -> Int -> Int
-func addScores left right =>
-    left + right
+func addScores = left right=>    left + right
 
 value left : (Dict Text Int) =
     insert "a" 1 {

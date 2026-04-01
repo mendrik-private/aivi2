@@ -180,14 +180,11 @@ type Viewport = {
 }
 
 type Viewport -> RangeInt
-func visibleRange viewport => viewport
- ||> { visible, total } -> visible
+func visibleRange = viewport=> viewport ||> { visible, total } -> visible
 
 type Viewport -> Int
-func visibleCount viewport =>
-    length (visibleRange viewport)
+func visibleCount = viewport=>    length (visibleRange viewport)
 
 type Viewport -> Int -> Int
-func clampSelection viewport row =>
-    clampTo (visibleRange viewport) row
+func clampSelection = viewport row=>    clampTo (visibleRange viewport) row
 ```

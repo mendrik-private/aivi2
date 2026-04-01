@@ -84,117 +84,98 @@ value noCandidate : Candidate = {
 value unreachableNode : Node = Detached
 
 type Node -> Text
-func nodeLabel node => node
- ||> Source   -> "source"
+func nodeLabel = node=> node ||> Source   -> "source"
  ||> Relay    -> "relay"
  ||> Scenic   -> "scenic"
  ||> Goal     -> "goal"
  ||> Detached -> "detached"
 
 type List Text => Node -> (List Text)
-func appendNodeLabel parts node =>
-    append parts [
+func appendNodeLabel = parts node=>    append parts [
         nodeLabel node
     ]
 
 type List Node => Text
-func orderLabel nodes => nodes
-  |> reduce appendNodeLabel []
+func orderLabel = nodes=> nodes  |> reduce appendNodeLabel []
   |> join " -> "
 
 type Distance -> Text
-func distanceText distance => distance
- ||> Unreachable -> "unreachable"
+func distanceText = distance=> distance ||> Unreachable -> "unreachable"
  ||> Cost x      -> "{x}"
 
 type Distances -> Node -> Distance
-func distanceOf distances node => node
- ||> Source   -> distances.source
+func distanceOf = distances node=> node ||> Source   -> distances.source
  ||> Relay    -> distances.relay
  ||> Scenic   -> distances.scenic
  ||> Goal     -> distances.goal
  ||> Detached -> distances.detached
 
 type Distances -> Node -> Distance -> Distances
-func setDistance distances node x => node
- ||> Source   -> { source: x, relay: distances.relay, scenic: distances.scenic, goal: distances.goal, detached: distances.detached }
+func setDistance = distances node x=> node ||> Source   -> { source: x, relay: distances.relay, scenic: distances.scenic, goal: distances.goal, detached: distances.detached }
  ||> Relay    -> { source: distances.source, relay: x, scenic: distances.scenic, goal: distances.goal, detached: distances.detached }
  ||> Scenic   -> { source: distances.source, relay: distances.relay, scenic: x, goal: distances.goal, detached: distances.detached }
  ||> Goal     -> { source: distances.source, relay: distances.relay, scenic: distances.scenic, goal: x, detached: distances.detached }
  ||> Detached -> { source: distances.source, relay: distances.relay, scenic: distances.scenic, goal: distances.goal, detached: x }
 
 type Visited -> Node -> Bool
-func visitedOf visited node => node
- ||> Source   -> visited.source
+func visitedOf = visited node=> node ||> Source   -> visited.source
  ||> Relay    -> visited.relay
  ||> Scenic   -> visited.scenic
  ||> Goal     -> visited.goal
  ||> Detached -> visited.detached
 
 type Visited -> Node -> Bool -> Visited
-func setVisited visited node x => node
- ||> Source   -> { source: x, relay: visited.relay, scenic: visited.scenic, goal: visited.goal, detached: visited.detached }
+func setVisited = visited node x=> node ||> Source   -> { source: x, relay: visited.relay, scenic: visited.scenic, goal: visited.goal, detached: visited.detached }
  ||> Relay    -> { source: visited.source, relay: x, scenic: visited.scenic, goal: visited.goal, detached: visited.detached }
  ||> Scenic   -> { source: visited.source, relay: visited.relay, scenic: x, goal: visited.goal, detached: visited.detached }
  ||> Goal     -> { source: visited.source, relay: visited.relay, scenic: visited.scenic, goal: x, detached: visited.detached }
  ||> Detached -> { source: visited.source, relay: visited.relay, scenic: visited.scenic, goal: visited.goal, detached: x }
 
 type Distance -> Distance -> Bool
-func betterDistance left right => (left, right)
- ||> (Cost _, Unreachable) -> True
+func betterDistance = left right=> (left, right) ||> (Cost _, Unreachable) -> True
  ||> (Cost l, Cost r)      -> l < r
  ||> (Unreachable, _)      -> False
 
 type Distance -> Int -> Distance
-func plusDistance distance weight => distance
- ||> Cost x      -> Cost (x + weight)
+func plusDistance = distance weight=> distance ||> Cost x      -> Cost (x + weight)
  ||> Unreachable -> Unreachable
 
 type Candidate -> Node -> Distance -> Candidate
-func selectCandidate candidate node distance => betterDistance distance candidate.distance
- T|> { node: Some node, distance }
+func selectCandidate = candidate node distance=> betterDistance distance candidate.distance T|> { node: Some node, distance }
  F|> candidate
 
 type DijkstraState -> Candidate -> Node -> Candidate
-func chooseCandidate state candidate node => visitedOf state.visited node
- T|> candidate
+func chooseCandidate = state candidate node=> visitedOf state.visited node T|> candidate
  F|> selectCandidate candidate node (distanceOf state.distances node)
 
 type WeightedGraph -> DijkstraState -> (Option Node)
-func nextNode graph state => graph.nodes
-  |> reduce (chooseCandidate state) noCandidate
+func nextNode = graph state=> graph.nodes  |> reduce (chooseCandidate state) noCandidate
   |> .node
 
 type Distances -> Node -> Distance -> Distances
-func relaxTarget distances target candidate => betterDistance candidate (distanceOf distances target)
- T|> setDistance distances target candidate
+func relaxTarget = distances target candidate=> betterDistance candidate (distanceOf distances target) T|> setDistance distances target candidate
  F|> distances
 
 type Node -> Distance -> Distances -> WeightedEdge -> Distances
-func relaxEdge current currentDistance distances edge => edge.from == current
- T|> relaxTarget distances edge.to (plusDistance currentDistance edge.weight)
+func relaxEdge = current currentDistance distances edge=> edge.from == current T|> relaxTarget distances edge.to (plusDistance currentDistance edge.weight)
  F|> distances
 
 type WeightedGraph -> Node -> Distances -> Distances
-func relaxedDistances graph node distances => graph.edges
-  |> reduce (relaxEdge node (distanceOf distances node)) distances
+func relaxedDistances = graph node distances=> graph.edges  |> reduce (relaxEdge node (distanceOf distances node)) distances
 
 type WeightedGraph -> DijkstraState -> Node -> DijkstraState
-func visitNode graph state node =>
-    {
+func visitNode = graph state node=>    {
         distances: relaxedDistances graph node state.distances,
         visited: setVisited state.visited node True,
         order: append state.order [node]
     }
 
 type WeightedGraph -> DijkstraState -> Node -> DijkstraState
-func advance graph state tick => nextNode graph state
- ||> Some current -> visitNode graph state current
+func advance = graph state tick=> nextNode graph state ||> Some current -> visitNode graph state current
  ||> None         -> state
 
 type WeightedGraph -> DijkstraState
-func initialState graph =>
-    {
+func initialState = graph=>    {
         distances: setDistance emptyDistances graph.start (Cost 0),
         visited: noVisited,
         order: []

@@ -30,12 +30,10 @@ type LuCatalog = {
 }
 
 type Int -> Int -> Int -> Int -> Matrix2
-func matrix2 a11 a12 a21 a22 =>
-    { a11, a12, a21, a22 }
+func matrix2 = a11 a12 a21 a22=>    { a11, a12, a21, a22 }
 
 type Matrix2 -> Matrix2 -> Matrix2
-func multiply2 left right =>
-    {
+func multiply2 = left right=>    {
         a11: left.a11 * right.a11 + left.a12 * right.a21,
         a12: left.a11 * right.a12 + left.a12 * right.a22,
         a21: left.a21 * right.a11 + left.a22 * right.a21,
@@ -43,27 +41,22 @@ func multiply2 left right =>
     }
 
 type Matrix2 -> Int -> Int
-func schurComplement matrix lowerLeft =>
-    matrix.a22 - lowerLeft * matrix.a12
+func schurComplement = matrix lowerLeft=>    matrix.a22 - lowerLeft * matrix.a12
 
 type Matrix2 -> Int -> (Result Text LuFactors)
-func exactLu matrix lowerLeft => schurComplement matrix lowerLeft == 0
- T|> Err "singular"
+func exactLu = matrix lowerLeft=> schurComplement matrix lowerLeft == 0 T|> Err "singular"
  F|> Ok { lower: matrix2 1 0 lowerLeft 1, upper: matrix2 matrix.a11 matrix.a12 0 (schurComplement matrix lowerLeft), determinant: matrix.a11 * schurComplement matrix lowerLeft }
 
 type Matrix2 -> (Result Text LuFactors)
-func nonzeroPivotLu matrix => matrix.a21 % matrix.a11 != 0
- T|> Err "fractional-lower-factor"
+func nonzeroPivotLu = matrix=> matrix.a21 % matrix.a11 != 0 T|> Err "fractional-lower-factor"
  F|> exactLu matrix (matrix.a21 / matrix.a11)
 
 type Matrix2 -> (Result Text LuFactors)
-func lu2 matrix => matrix.a11 == 0
- T|> Err "zero-pivot"
+func lu2 = matrix=> matrix.a11 == 0 T|> Err "zero-pivot"
  F|> nonzeroPivotLu matrix
 
 type Text -> Matrix2 -> (Result Text LuSummary)
-func summarizeLu label matrix => lu2 matrix
- ||> Ok factors -> Ok { label, pivot: factors.upper.a11, lowerLeft: factors.lower.a21, schur: factors.upper.a22, determinant: factors.determinant, reconstructionOk: multiply2 factors.lower factors.upper == matrix }
+func summarizeLu = label matrix=> lu2 matrix ||> Ok factors -> Ok { label, pivot: factors.upper.a11, lowerLeft: factors.lower.a21, schur: factors.upper.a22, determinant: factors.determinant, reconstructionOk: multiply2 factors.lower factors.upper == matrix }
  ||> Err reason -> Err "{label}:{reason}"
 
 value stableMatrix : Matrix2 = matrix2 2 3 4 7

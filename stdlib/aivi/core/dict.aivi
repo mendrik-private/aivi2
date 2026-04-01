@@ -15,142 +15,113 @@ type Dict K V = {
 }
 
 type K -> V -> (Dict K V)
-func singleton k v =>
-    {
+func singleton = k v=>    {
         entries: [{ key: k, value: v }]
     }
 
 type Eq K => K -> (DictEntry K V) -> Bool
-func matchesKey k entry =>
-    entry.key == k
+func matchesKey = k entry=>    entry.key == k
 
 type Eq K => K -> (DictEntry K V) -> Bool
-func notMatchesKey k entry => entry.key == k
- T|> False
+func notMatchesKey = k entry=> entry.key == k T|> False
  F|> True
 
 type Eq K => K -> (Dict K V) -> (List (DictEntry K V))
-func filterOldKey k d => d.entries
-  |> filter (notMatchesKey k)
+func filterOldKey = k d=> d.entries  |> filter (notMatchesKey k)
 
 type Eq K => K -> V -> (Dict K V) -> (Dict K V)
-func insert k v d =>
-    {
+func insert = k v d=>    {
         entries: append [{ key: k, value: v }] (filterOldKey k d)
     }
 
 type Eq K => (V -> V -> V) -> K -> V -> (Dict K V) -> (Dict K V)
-func insertWith merge k v d => d.entries
-  |> find (matchesKey k)
+func insertWith = merge k v d=> d.entries  |> find (matchesKey k)
  ||> None          -> { entries: append d.entries [{ key: k, value: v }] }
  ||> Some existing -> insert k (merge existing.value v) d
 
 type Eq K => K -> (Dict K V) -> (Option V)
-func get k d => d.entries
-  |> find (matchesKey k)
+func get = k d=> d.entries  |> find (matchesKey k)
  ||> None       -> None
  ||> Some entry -> Some entry.value
 
 type Eq K => V -> K -> (Dict K V) -> V
-func getWithDefault default k d => d.entries
-  |> find (matchesKey k)
+func getWithDefault = default k d=> d.entries  |> find (matchesKey k)
  ||> None       -> default
  ||> Some entry -> entry.value
 
 type Eq K => K -> (Dict K V) -> Bool
-func member k d => d.entries
-  |> find (matchesKey k)
+func member = k d=> d.entries  |> find (matchesKey k)
  ||> Some _ -> True
  ||> None   -> False
 
 type Eq K => K -> (Dict K V) -> (Dict K V)
-func remove k d =>
-    {
+func remove = k d=>    {
         entries: filterOldKey k d
     }
 
 type Dict K V => Int
-func size d => d.entries
-  |> length
+func size = d=> d.entries  |> length
 
 type DictEntry K V => K
-func extractKey entry =>
-    entry.key
+func extractKey = entry=>    entry.key
 
 type Dict K V => (List K)
-func keys d => d.entries
-  |> map extractKey
+func keys = d=> d.entries  |> map extractKey
 
 type DictEntry K V => V
-func extractValue entry =>
-    entry.value
+func extractValue = entry=>    entry.value
 
 type Dict K V => (List V)
-func values d => d.entries
-  |> map extractValue
+func values = d=> d.entries  |> map extractValue
 
 type DictEntry K V => ((K, V))
-func toPair entry =>
-    (entry.key, entry.value)
+func toPair = entry=>    (entry.key, entry.value)
 
 type Dict K V => (List (K, V))
-func toList d => d.entries
-  |> map toPair
+func toList = d=> d.entries  |> map toPair
 
 type Eq K => (Dict K V) -> (K, V) -> (Dict K V)
-func insertPair acc pair => pair
- ||> (k, v) -> insert k v acc
+func insertPair = acc pair=> pair ||> (k, v) -> insert k v acc
 
 type Eq K => (List (K, V)) -> (Dict K V)
-func fromList items => items
-  |> reduce insertPair { entries: [] }
+func fromList = items=> items  |> reduce insertPair { entries: [] }
 
 type (V1 -> V2) -> (DictEntry K V1) -> (DictEntry K V2)
-func mapEntryValue f entry =>
-    {
+func mapEntryValue = f entry=>    {
         key: entry.key,
         value: f entry.value
     }
 
 type (V1 -> V2) -> (Dict K V1) -> (List (DictEntry K V2))
-func mappedEntries f d => d.entries
-  |> map (mapEntryValue f)
+func mappedEntries = f d=> d.entries  |> map (mapEntryValue f)
 
 type (V1 -> V2) -> (Dict K V1) -> (Dict K V2)
-func mapValues f d =>
-    {
+func mapValues = f d=>    {
         entries: mappedEntries f d
     }
 
 type (V -> Bool) -> (DictEntry K V) -> Bool
-func entryMatchesPredicate predicate entry =>
-    predicate entry.value
+func entryMatchesPredicate = predicate entry=>    predicate entry.value
 
 type (V -> Bool) -> (Dict K V) -> (List (DictEntry K V))
-func filteredValueEntries predicate d => d.entries
-  |> filter (entryMatchesPredicate predicate)
+func filteredValueEntries = predicate d=> d.entries  |> filter (entryMatchesPredicate predicate)
 
 type (V -> Bool) -> (Dict K V) -> (Dict K V)
-func filterValues predicate d =>
-    {
+func filterValues = predicate d=>    {
         entries: filteredValueEntries predicate d
     }
 
 type Eq K => (V -> V -> V) -> (Dict K V) -> (DictEntry K V) -> (Dict K V)
-func mergeStep combine acc entry =>
-    insertWith combine entry.key entry.value acc
+func mergeStep = combine acc entry=>    insertWith combine entry.key entry.value acc
 
 type Eq K => (V -> V -> V) -> (Dict K V) -> (Dict K V) -> (Dict K V)
-func mergeWith combine left right => right.entries
-  |> reduce (mergeStep combine) left
+func mergeWith = combine left right=> right.entries  |> reduce (mergeStep combine) left
 
 type Eq K => (Dict K V) -> (DictEntry K V) -> (Dict K V)
-func insertEntry acc entry =>
-    insert entry.key entry.value acc
+func insertEntry = acc entry=>    insert entry.key entry.value acc
 
 type Eq K => (Dict K V) -> (Dict K V) -> (Dict K V)
-func union left right => right.entries
-  |> reduce insertEntry left
+func union = left right=> right.entries  |> reduce insertEntry left
 
 export Dict
 export singleton

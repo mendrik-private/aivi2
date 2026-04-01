@@ -1,7 +1,6 @@
 type User = { email: Text }
 
-func collect items =>
-    items
+func collect = items=>    items
 
 value ready = True
 value start = "start"

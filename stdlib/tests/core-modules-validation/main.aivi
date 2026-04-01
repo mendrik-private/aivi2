@@ -95,12 +95,10 @@ value eitherFromLeftOnRight : (Option Text) = fromLeft eitherRight
 value eitherFromRightOnLeft : (Option Int) = fromRight eitherLeft
 
 type Text -> Text
-func addExcl s =>
-    "{s}!"
+func addExcl = s=>    "{s}!"
 
 type Int -> Int
-func doubleInt n =>
-    n * 2
+func doubleInt = n=>    n * 2
 
 value eitherMapRight : (Either Text Int) = mapRight doubleInt eitherRight
 value eitherMapLeft : (Either Text Int) = mapLeft addExcl eitherLeft
@@ -166,20 +164,16 @@ value dictFromList : (Dict Text Int) = fromList dictPairs
 value dictToList : (List (Text, Int)) = toList dictFromList
 
 type Int -> Int
-func doubleVal n =>
-    n * 2
+func doubleVal = n=>    n * 2
 
 type Int -> Bool
-func isAboveZero n =>
-    n > 0
+func isAboveZero = n=>    n > 0
 
 type Int -> Bool
-func isAboveFive n =>
-    n > 5
+func isAboveFive = n=>    n > 5
 
 type Int -> Int -> Int
-func sumValues x y =>
-    x + y
+func sumValues = x y=>    x + y
 
 value dictMapped : (Dict Text Int) = mapValues doubleVal dictSingle
 value dictFiltered : (Dict Text Int) = filterValues isAboveZero dictSingle

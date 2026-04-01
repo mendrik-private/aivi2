@@ -1,83 +1,66 @@
 type A -> Bool -> (Option A)
-func filterHelp item keep => keep
- T|> Some item
+func filterHelp = item keep=> keep T|> Some item
  F|> None
 
 type A -> (Option B) -> (Option (A, B))
-func zipHelp a right => right
- ||> None   -> None
+func zipHelp = a right=> right ||> None   -> None
  ||> Some b -> Some (a, b)
 
 type A -> (Option A)
-func keepSome item =>
-    Some item
+func keepSome = item=>    Some item
 
 type A -> (List A)
-func singleton item =>
-    [item]
+func singleton = item=>    [item]
 
 type A -> (Result E A)
-func okValue item =>
-    Ok item
+func okValue = item=>    Ok item
 
 type Option A => Bool
-func isSome opt => opt
- T|> True
+func isSome = opt=> opt T|> True
  F|> False
 
 type Option A => Bool
-func isNone opt => opt
- F|> True
+func isNone = opt=> opt F|> True
  T|> False
 
 type A -> (Option A) -> A
-func getOrElse fallback opt => opt
- ||> Some item -> item
+func getOrElse = fallback opt=> opt ||> Some item -> item
  ||> None      -> fallback
 
 type Option A => (Option A) -> (Option A)
-func orElse fallback opt => opt
- T|> keepSome
+func orElse = fallback opt=> opt T|> keepSome
  F|> fallback
 
 type (A -> Option B) -> (Option A) -> (Option B)
-func flatMap next opt => opt
- T|> next
+func flatMap = next opt=> opt T|> next
  F|> None
 
 type Option (Option A) => (Option A)
-func flatten opt => opt
- ||> Some nested -> nested
+func flatten = opt=> opt ||> Some nested -> nested
  ||> None        -> None
 
 type Option A => (List A)
-func toList opt => opt
- T|> singleton
+func toList = opt=> opt T|> singleton
  F|> []
 
 type E -> (Option A) -> (Result E A)
-func toResult error opt => opt
- T|> okValue
+func toResult = error opt=> opt T|> okValue
  F|> Err error
 
 type (A -> B) -> (Option A) -> (Option B)
-func map transform opt => opt
- ||> Some item -> Some (transform item)
+func map = transform opt=> opt ||> Some item -> Some (transform item)
  ||> None      -> None
 
 type (A -> Bool) -> (Option A) -> (Option A)
-func filter predicate opt => opt
- ||> None      -> None
+func filter = predicate opt=> opt ||> None      -> None
  ||> Some item -> filterHelp item (predicate item)
 
 type Option A => (Option B) -> (Option (A, B))
-func zip left right => left
- ||> None   -> None
+func zip = left right=> left ||> None   -> None
  ||> Some a -> zipHelp a right
 
 type A -> Bool -> (Option A)
-func fromBool item b => b
- T|> Some item
+func fromBool = item b=> b T|> Some item
  F|> None
 
 export isSome

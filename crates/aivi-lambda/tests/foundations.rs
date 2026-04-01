@@ -117,8 +117,7 @@ fn lowers_value_and_function_bodies_into_item_closures() {
         r#"
 value answer = 42
 
-fun add:Int x:Int y:Int =>
-    x + y
+fun add:Int = x:Int y:Int=>    x + y
 "#,
     );
 
@@ -207,11 +206,9 @@ fn lowering_treats_pipe_memos_as_item_locals() {
     let lambda = lower_text(
         "lambda-pipe-memos.aivi",
         r#"
-fun add1:Int x:Int =>
-    x + 1
+fun add1:Int = x:Int=>    x + 1
 
-fun demo:Int x:Int => x
-  |> #before add1 #after
+fun demo:Int = x:Int=> x  |> #before add1 #after
   |> before + after
 "#,
     );

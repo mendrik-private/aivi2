@@ -62,8 +62,7 @@ When a type already has an instance, you can use the operator directly:
 
 ```aivi
 type Int -> Int -> Bool
-func equivalent left right =>
-    left == right and left != 0
+func equivalent = left right=>    left == right and left != 0
 
 value sameNumber = equivalent 4 4
 ```
@@ -79,8 +78,7 @@ type Blob =
   | Blob Bytes
 
 type Blob -> Blob -> Bool
-func blobEquals left right =>
-    True
+func blobEquals = left right=>    True
 
 instance Eq Blob
     (==) left right = blobEquals left right
@@ -107,16 +105,14 @@ When a function needs to compare values of an open type parameter, use a constra
 
 ```aivi
 type Eq K => K -> K -> Bool
-func matchesKey key candidate =>
-    key == candidate
+func matchesKey = key candidate=>    key == candidate
 ```
 
 Multiple constraints use a parenthesized comma-separated list:
 
 ```aivi
 type (Eq A, Eq B) => A -> A -> B -> B -> Bool
-func bothEqual leftA rightA leftB rightB =>
-    leftA == rightA and leftB == rightB
+func bothEqual = leftA rightA leftB rightB=>    leftA == rightA and leftB == rightB
 ```
 
 The constraint ensures the function can only be called when `K` (or `A`, `B`, etc.) has an `Eq` instance. Without the constraint, using `==` on an open type parameter is a type error.

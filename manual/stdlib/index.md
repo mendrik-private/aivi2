@@ -93,8 +93,7 @@ Example:
 use aivi.option (getOrElse)
 
 type Option Text -> Text
-func displayName opt =>
-    getOrElse "Anonymous" opt
+func displayName = opt=>    getOrElse "Anonymous" opt
 ```
 
 ---
@@ -133,8 +132,7 @@ Example:
 use aivi.result (withDefault)
 
 type Result Text Int -> Int
-func safeScore result =>
-    withDefault 0 result
+func safeScore = result=>    withDefault 0 result
 ```
 
 ---
@@ -200,8 +198,7 @@ Example — sum a list:
 use aivi.list (sum)
 
 type List Int -> Int
-func sumList numbers =>
-    sum numbers
+func sumList = numbers=>    sum numbers
 ```
 
 Example — collect names from a list of users:
@@ -215,12 +212,10 @@ type User = {
 }
 
 type Int -> User -> Bool
-func hasId id user =>
-    user.id == id
+func hasId = id user=>    user.id == id
 
 type Int -> (List User) -> (Option User)
-func findById id users =>
-    find (hasId id) users
+func findById = id users=>    find (hasId id) users
 ```
 
 ---
@@ -249,8 +244,7 @@ Example:
 use aivi.text (join)
 
 type List Text -> Text
-func csvLine fields =>
-    join "," fields
+func csvLine = fields=>    join "," fields
 ```
 
 ---

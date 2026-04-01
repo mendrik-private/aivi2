@@ -1,38 +1,29 @@
 type A -> A
-func identity x =>
-    x
+func identity = x=>    x
 
 type A -> B -> A
-func const x ignored =>
-    x
+func const = x ignored=>    x
 
 type (A -> B -> C) -> B -> A -> C
-func flip f b a =>
-    f a b
+func flip = f b a=>    f a b
 
 type (B -> C) -> (A -> B) -> A -> C
-func compose f g x =>
-    f (g x)
+func compose = f g x=>    f (g x)
 
 type (A -> B) -> (B -> C) -> A -> C
-func andThen f g x =>
-    g (f x)
+func andThen = f g x=>    g (f x)
 
 type A -> B -> A
-func always x ignored =>
-    x
+func always = x ignored=>    x
 
 type (B -> B -> C) -> (A -> B) -> A -> A -> C
-func on combine transform x y =>
-    combine (transform x) (transform y)
+func on = combine transform x y=>    combine (transform x) (transform y)
 
 type A -> (A -> B) -> B
-func applyTo arg f =>
-    f arg
+func applyTo = arg f=>    f arg
 
 type (A -> A) -> A -> A
-func applyTwice f x =>
-    f (f x)
+func applyTwice = f x=>    f (f x)
 
 export identity
 export const

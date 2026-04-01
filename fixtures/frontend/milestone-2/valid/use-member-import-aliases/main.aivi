@@ -10,8 +10,7 @@ type PrimaryRequest = (HttpRequest Text)
 type ProviderChannel = (NetworkChannel Text Text)
 
 type Text -> Text -> Text
-func joinProviders left right =>
-    "{left}/{right}"
+func joinProviders = left right=>    "{left}/{right}"
 
 value primaryProvider = primaryHttp
 value fallbackProvider = fallbackSocket

@@ -39,11 +39,9 @@ domain Tags over Set Text
 type ResourceText = (ResourceId Text)
 
 type Map Text Text -> Map Text Text
-func keepHeaders headers =>
-    headers
+func keepHeaders = headers=>    headers
 
 type Set Text -> Set Text
-func keepTags tags =>
-    tags
+func keepTags = tags=>    tags
 
 value defaultNickname : Option Text = None

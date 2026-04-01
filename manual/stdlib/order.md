@@ -18,8 +18,7 @@ A comparator for integers in ascending order looks like this:
 
 ```aivi
 type Int -> Int -> Bool
-func byInt a b =>
-    a < b
+func byInt = a b=>    a < b
 ```
 
 Pass this (or any equivalent) as the `compare` argument to all functions in this module.
@@ -36,12 +35,10 @@ Returns the smaller of two values according to the comparator.
 use aivi.order (min)
 
 type Int -> Int -> Bool
-func byInt a b =>
-    a < b
+func byInt = a b=>    a < b
 
 type Int -> Int -> Int
-func smaller a b =>
-    min byInt a b
+func smaller = a b=>    min byInt a b
 ```
 
 ---
@@ -56,12 +53,10 @@ Returns the larger of two values according to the comparator.
 use aivi.order (max)
 
 type Int -> Int -> Bool
-func byInt a b =>
-    a < b
+func byInt = a b=>    a < b
 
 type Int -> Int -> Int
-func larger a b =>
-    max byInt a b
+func larger = a b=>    max byInt a b
 ```
 
 ---
@@ -76,12 +71,10 @@ Returns the smallest value in a non-empty collection represented as a first elem
 use aivi.order (minOf)
 
 type Int -> Int -> Bool
-func byInt a b =>
-    a < b
+func byInt = a b=>    a < b
 
 type Int -> (List Int) -> Int
-func smallest first rest =>
-    minOf byInt first rest
+func smallest = first rest=>    minOf byInt first rest
 ```
 
 ---
@@ -96,12 +89,10 @@ Returns the largest value in a non-empty collection represented as a first eleme
 use aivi.order (maxOf)
 
 type Int -> Int -> Bool
-func byInt a b =>
-    a < b
+func byInt = a b=>    a < b
 
 type Int -> (List Int) -> Int
-func largest first rest =>
-    maxOf byInt first rest
+func largest = first rest=>    maxOf byInt first rest
 ```
 
 ---
@@ -116,12 +107,10 @@ Constrains a value to the inclusive range `[low, high]`. If the value is below `
 use aivi.order (clamp)
 
 type Int -> Int -> Bool
-func byInt a b =>
-    a < b
+func byInt = a b=>    a < b
 
 type Int -> Int
-func clampScore score =>
-    clamp byInt 0 100 score
+func clampScore = score=>    clamp byInt 0 100 score
 ```
 
 ---
@@ -136,12 +125,10 @@ Flips a comparator so it produces the opposite ordering. Useful for sorting in d
 use aivi.order (reversed)
 
 type Int -> Int -> Bool
-func byInt a b =>
-    a < b
+func byInt = a b=>    a < b
 
 type Int -> Int -> Bool
-func descending a b =>
-    reversed byInt a b
+func descending = a b=>    reversed byInt a b
 ```
 
 Passing `descending` wherever a comparator is expected will produce largest-first results.
@@ -163,16 +150,13 @@ type Person = {
 }
 
 type Int -> Int -> Bool
-func byInt a b =>
-    a < b
+func byInt = a b=>    a < b
 
 type Person -> Int
-func ageOf person =>
-    person.age
+func ageOf = person=>    person.age
 
 type Person -> Person -> Bool
-func youngerFirst p1 p2 =>
-    comparing ageOf byInt p1 p2
+func youngerFirst = p1 p2=>    comparing ageOf byInt p1 p2
 ```
 
 The `.age` shorthand projects a `Person` to its `age` field. You can pass `youngerFirst` anywhere a `(Person -> Person -> Bool)` comparator is expected — for example as the `compare` argument to `minOf` or `clamp`.

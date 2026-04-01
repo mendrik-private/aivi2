@@ -34,38 +34,31 @@ type NfaCatalog = {
 }
 
 type NfaState -> NfaState -> Bool
-func isState expected candidate =>
-    candidate == expected
+func isState = expected candidate=>    candidate == expected
 
 type NfaState -> Text
-func stateName state => state
- ||> Start   -> "start"
+func stateName = state=> state ||> Start   -> "start"
  ||> BranchA -> "branch-a"
  ||> BranchB -> "branch-b"
  ||> Accept  -> "accept"
 
 type List Text => NfaState -> (List Text)
-func collectNames labels state =>
-    append labels [
+func collectNames = labels state=>    append labels [
         stateName state
     ]
 
 type List NfaState => (List Text)
-func collectSubsetNames subset => subset
-  |> reduce collectNames []
+func collectSubsetNames = subset=> subset  |> reduce collectNames []
 
 type List NfaState => Text
-func subsetLabel subset => length subset == 0
- T|> "empty"
+func subsetLabel = subset=> length subset == 0 T|> "empty"
  F|> join "," (collectSubsetNames subset)
 
 type NfaState -> (List NfaState) -> Bool
-func containsState candidate subset => subset
-  |> any (isState candidate)
+func containsState = candidate subset=> subset  |> any (isState candidate)
 
 type List NfaState => NfaState -> (List NfaState)
-func insertState subset state => containsState state subset
- T|> subset
+func insertState = subset state=> containsState state subset T|> subset
  F|> append subset [state]
 
 value transitions : List Edge = [
@@ -92,31 +85,25 @@ value transitions : List Edge = [
 ]
 
 type NfaState -> Symbol -> Edge -> (Option (List NfaState))
-func matchingTargets from symbol edge => (edge.from == from) and (edge.symbol == symbol)
- T|> Some edge.to
+func matchingTargets = from symbol edge=> (edge.from == from) and (edge.symbol == symbol) T|> Some edge.to
  F|> None
 
 type NfaState -> Symbol -> (List NfaState)
-func moveFromState from symbol => transitions
-  |> findMap (matchingTargets from symbol)
+func moveFromState = from symbol=> transitions  |> findMap (matchingTargets from symbol)
  ||> Some targets -> targets
  ||> None         -> []
 
 type Symbol -> (List NfaState) -> NfaState -> (List NfaState)
-func moveStep symbol subset state => moveFromState state symbol
-  |> reduce insertState subset
+func moveStep = symbol subset state=> moveFromState state symbol  |> reduce insertState subset
 
 type List NfaState => Symbol -> (List NfaState)
-func moveSet subset symbol => subset
-  |> reduce (moveStep symbol) []
+func moveSet = subset symbol=> subset  |> reduce (moveStep symbol) []
 
 type List NfaState => Bool
-func acceptingSubset subset => subset
-  |> any (isState Accept)
+func acceptingSubset = subset=> subset  |> any (isState Accept)
 
 type List NfaState => DfaSummary
-func summarize subset =>
-    {
+func summarize = subset=>    {
         label: subsetLabel subset,
         count: length subset,
         accepting: acceptingSubset subset

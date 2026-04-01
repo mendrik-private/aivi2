@@ -5,15 +5,13 @@ type Blob =
   | Blob Bytes
 
 type Blob -> Blob -> Bool
-func blobEquals left right =>
-    True
+func blobEquals = left right=>    True
 
 instance Eq Blob
     (==) left right = blobEquals left right
 
 type Blob -> Blob -> Bool
-func sameBlob left right =>
-    left == right
+func sameBlob = left right=>    left == right
 
 class Compare A
     same : A -> A -> Bool

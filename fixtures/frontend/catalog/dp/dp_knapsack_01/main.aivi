@@ -35,55 +35,45 @@ value emptyPlan : Plan = {
 }
 
 type Plan -> Plan -> Plan
-func choosePlan left right => right.total > left.total
- T|> right
+func choosePlan = left right=> right.total > left.total T|> right
  F|> left
 
 type Int -> Cell -> (Option Cell)
-func selectCell target cell => cell.capacity == target
- T|> Some cell
+func selectCell = target cell=> cell.capacity == target T|> Some cell
  F|> None
 
 type Int -> (List Cell) -> Plan
-func planAt capacity row => row
-  |> findMap (selectCell capacity)
+func planAt = capacity row=> row  |> findMap (selectCell capacity)
  ||> Some cell -> cell.plan
  ||> None      -> emptyPlan
 
 type KnapsackItem -> Plan -> Plan
-func extendPlan item base => base
- ||> { total, picked } -> { total: total + item.value, picked: append picked [item.label] }
+func extendPlan = item base=> base ||> { total, picked } -> { total: total + item.value, picked: append picked [item.label] }
 
 type KnapsackItem -> (List Cell) -> Int -> Plan
-func includePlan item previous capacity => capacity < item.weight
- T|> emptyPlan
+func includePlan = item previous capacity=> capacity < item.weight T|> emptyPlan
  F|> extendPlan item (planAt (capacity - item.weight) previous)
 
 type KnapsackItem -> (List Cell) -> Int -> Cell
-func nextCell item previous capacity =>
-    {
+func nextCell = item previous capacity=>    {
         capacity,
         plan: choosePlan (planAt capacity previous) (includePlan item previous capacity)
     }
 
 type (A -> B) -> (List B) -> A -> (List B)
-func appendBuilt build items x =>
-    append items [build x]
+func appendBuilt = build items x=>    append items [build x]
 
 type List Int => (List Cell) -> KnapsackItem -> (List Cell)
-func stepRow capacities previous item => capacities
-  |> reduce (appendBuilt (nextCell item previous)) []
+func stepRow = capacities previous item=> capacities  |> reduce (appendBuilt (nextCell item previous)) []
 
 type Int -> Cell
-func baseCell capacity =>
-    {
+func baseCell = capacity=>    {
         capacity,
         plan: emptyPlan
     }
 
 type Plan -> Text
-func pickedLabel plan => isEmpty plan.picked
- T|> "none"
+func pickedLabel = plan=> isEmpty plan.picked T|> "none"
  F|> join " + " plan.picked
 
 value capacities : List Int = [

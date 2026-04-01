@@ -4,72 +4,57 @@ type RangeInt = {
 }
 
 type Int -> Int -> (RangeInt)
-func make s e =>
-    { start: s, end: e }
+func make = s e=>    { start: s, end: e }
 
 type RangeInt -> Bool
-func isEmpty r =>
-    r.start > r.end
+func isEmpty = r=>    r.start > r.end
 
 type RangeInt -> Int -> Bool
-func contains r n =>
-    n >= r.start and n <= r.end
+func contains = r n=>    n >= r.start and n <= r.end
 
 type RangeInt -> Int
-func length r => r.start > r.end
- T|> 0
+func length = r=> r.start > r.end T|> 0
  F|> r.end - r.start + 1
 
 type RangeInt -> RangeInt -> Bool
-func overlapsHelper a b =>
-    a.start <= b.end and b.start <= a.end
+func overlapsHelper = a b=>    a.start <= b.end and b.start <= a.end
 
 type RangeInt -> RangeInt -> Bool
-func overlaps a b => isEmpty a
- T|> False
+func overlaps = a b=> isEmpty a T|> False
  F|> overlapsHelper a b
 
 type RangeInt -> Int -> Int
-func clampTo r n => n < r.start
- T|> r.start
+func clampTo = r n=> n < r.start T|> r.start
  F|> clampHigh r.end n
 
 type Int -> Int -> Int
-func clampHigh hi n => n > hi
- T|> hi
+func clampHigh = hi n=> n > hi T|> hi
  F|> n
 
 type RangeInt -> Int
-func startOf r =>
-    r.start
+func startOf = r=>    r.start
 
 type RangeInt -> Int
-func endOf r =>
-    r.end
+func endOf = r=>    r.end
 
 type Int -> RangeInt -> (RangeInt)
-func shift delta r =>
-    {
+func shift = delta r=>    {
         start: r.start + delta,
         end: r.end + delta
     }
 
 type RangeInt -> RangeInt -> (RangeInt)
-func intersect a b =>
-    intersectBounds (max a.start b.start) (min a.end b.end)
+func intersect = a b=>    intersectBounds (max a.start b.start) (min a.end b.end)
 
 type Int -> Int -> (RangeInt)
-func intersectBounds s e =>
-    { start: s, end: e }
+func intersectBounds = s e=>    { start: s, end: e }
 
 type Int -> Int -> Int
-func max a b => a >= b
- T|> a
+func max = a b=> a >= b T|> a
  F|> b
 
 type Int -> Int -> Int
-func min a b => a <= b
- T|> a
+func min = a b=> a <= b T|> a
  F|> b
 
 export RangeInt
@@ -90,37 +75,30 @@ type RangeFloat = {
 }
 
 type Float -> Float -> (RangeFloat)
-func makeFloat s e =>
-    { start: s, end: e }
+func makeFloat = s e=>    { start: s, end: e }
 
 type RangeFloat -> Bool
-func isEmptyFloat r =>
-    r.start > r.end
+func isEmptyFloat = r=>    r.start > r.end
 
 type RangeFloat -> Float -> Bool
-func containsFloat r n =>
-    n >= r.start and n <= r.end
+func containsFloat = r n=>    n >= r.start and n <= r.end
 
 type RangeFloat -> Float -> Float
-func clampToFloat r n => n < r.start
- T|> r.start
+func clampToFloat = r n=> n < r.start T|> r.start
  F|> clampHighFloat r.end n
 
 type Float -> Float -> Float
-func clampHighFloat hi n => n > hi
- T|> hi
+func clampHighFloat = hi n=> n > hi T|> hi
  F|> n
 
 type Float -> RangeFloat -> (RangeFloat)
-func shiftFloat delta r =>
-    {
+func shiftFloat = delta r=>    {
         start: r.start + delta,
         end: r.end + delta
     }
 
 type RangeFloat -> Float -> Float
-func lerpFloat r t =>
-    r.start + (r.end - r.start) * t
+func lerpFloat = r t=>    r.start + (r.end - r.start) * t
 
 export RangeFloat
 export makeFloat

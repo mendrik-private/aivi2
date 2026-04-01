@@ -571,8 +571,7 @@ fn lowers_item_body_kernels_into_backend_items() {
     let backend = lower_text(
         "backend-item-bodies.aivi",
         r#"
-fun addOne:Int n:Int =>
-    n + 1
+fun addOne:Int = n:Int=>    n + 1
 
 value answer =
     addOne 41
@@ -607,8 +606,7 @@ signal refresh = 0
 signal enabled = True
 signal pollInterval = 5
 
-fun addOne:Int n:Int =>
-    n + 1
+fun addOne:Int = n:Int=>    n + 1
 
 value answer =
     addOne 41
@@ -695,8 +693,7 @@ fn runtime_evaluates_builtin_overloaded_class_members() {
     let backend = lower_text(
         "backend-builtin-class-members.aivi",
         r#"
-fun increment:Int n:Int => n + 1
-
+fun increment:Int = n:Int=> n + 1
 value joined:Text =
     append "hel" "lo"
 
@@ -839,11 +836,9 @@ fn runtime_evaluates_builtin_monad_members() {
     let backend = lower_text(
         "backend-builtin-monad-members.aivi",
         r#"
-fun nextOption:(Option Int) n:Int =>
-    Some (n + 1)
+fun nextOption:(Option Int) = n:Int=>    Some (n + 1)
 
-fun nextResult:(Result Text Int) n:Int =>
-    Ok (n + 2)
+fun nextResult:(Result Text Int) = n:Int=>    Ok (n + 2)
 
 value okSeed:Result Text Int =
     Ok 4
@@ -938,8 +933,7 @@ fn runtime_evaluates_applicative_clusters() {
     let backend = lower_text(
         "backend-applicative-clusters.aivi",
         r#"
-fun add:Int left:Int right:Int =>
-    left + right
+fun add:Int = left:Int right:Int=>    left + right
 
 value combinedOption:Option Int =
  &|> Some 2
@@ -979,11 +973,9 @@ fn runtime_evaluates_builtin_foldable_reduce_members() {
     let backend = lower_text(
         "backend-foldable-reduce.aivi",
         r#"
-fun add:Int acc:Int item:Int =>
-    acc + item
+fun add:Int = acc:Int item:Int=>    acc + item
 
-fun joinStep:Text acc:Text item:Text =>
-    append acc item
+fun joinStep:Text = acc:Text item:Text=>    append acc item
 
 value maybeInput:Option Int =
     Some 4
@@ -1112,16 +1104,13 @@ fn runtime_evaluates_extended_builtin_typeclass_members() {
     let backend = lower_text(
         "backend-extended-typeclass-members.aivi",
         r#"
-fun addOne:Int n:Int =>
-    n + 1
+fun addOne:Int = n:Int=>    n + 1
 
-fun keepSmall:(Option Int) n:Int =>
-    n < 3
+fun keepSmall:(Option Int) = n:Int=>    n < 3
      T|> Some n
      F|> None
 
-fun punctuate:Text s:Text =>
-    append s "!"
+fun punctuate:Text = s:Text=>    append s "!"
 
 value okOne:Result Text Int =
     Ok 1
@@ -1357,8 +1346,7 @@ fn runtime_evaluates_validation_apply_through_backend_runtime() {
         r#"
 type Pair = Pair Text Text
 
-fun pair:Pair left:Text right:Text =>
-    Pair left right
+fun pair:Pair = left:Text right:Text=>    Pair left right
 
 value first:Validation Text Text =
     Valid "Ada"
@@ -1420,8 +1408,7 @@ use shared.types (
     Envelope
 )
 
-fun increment:Int n:Int =>
-    n + 1
+fun increment:Int = n:Int=>    n + 1
 
 value lifted:Envelope (Option Int) =
     map increment (Some 1)
@@ -1470,8 +1457,7 @@ instance Semigroup Blob
     append left right =
         left
 
-fun combine:Blob left:Blob right:Blob =>
-    append left right
+fun combine:Blob = left:Blob right:Blob=>    append left right
 
 value combined:Blob =
     combine (Blob 1) (Blob 2)
@@ -1900,8 +1886,7 @@ fn lowers_and_evaluates_inline_pipe_memos_across_stages() {
     let backend = lower_text(
         "backend-pipe-memos.aivi",
         r#"
-fun add1:Int x:Int =>
-    x + 1
+fun add1:Int = x:Int=>    x + 1
 
 value demo = 1
   |> #before add1 #after
@@ -2063,8 +2048,7 @@ fn evaluates_inline_case_pipe_with_pattern_binding_and_parameter_capture() {
         r#"
 value fallback = "guest"
 
-fun greet:Text prefix:Text maybeUser:(Option Text) =>
-    maybeUser
+fun greet:Text = prefix:Text maybeUser:(Option Text)=>    maybeUser
      ||> Some name -> "{prefix}:{name}"
      ||> None -> "{prefix}:{fallback}"
 
@@ -2122,8 +2106,7 @@ fn evaluates_signal_carried_inline_case_pipes_with_committed_snapshots_and_captu
     let backend = lower_text(
         "backend-signal-inline-case-captures.aivi",
         r#"
-fun greetSelected:Signal Text prefix:Text fallback:Text =>
-    selectedUser
+fun greetSelected:Signal Text = prefix:Text fallback:Text=>    selectedUser
      ||> Some name -> "{prefix}:{name}"
      ||> None -> "{prefix}:{fallback}"
 
@@ -2167,8 +2150,7 @@ fn evaluates_signal_carried_inline_truthy_falsy_pipes_with_committed_snapshots()
     let backend = lower_text(
         "backend-signal-inline-truthy-falsy.aivi",
         r#"
-fun renderStatus:Signal Text prefix:Text readyText:Text waitText:Text =>
-    ready
+fun renderStatus:Signal Text = prefix:Text readyText:Text waitText:Text=>    ready
      T|> "{prefix}:{readyText}"
      F|> "{prefix}:{waitText}"
 
@@ -2217,8 +2199,7 @@ type Status =
 
 signal current : Signal Status
 
-fun render:Text status:Status =>
-    status
+fun render:Text = status:Status=>    status
      ||> Idle -> "idle"
      ||> Ready name -> name
      ||> Failed code message -> "{code}:{message}"
@@ -2302,8 +2283,7 @@ domain Duration over Int
 domain Retry over Int
     literal times : Int -> Retry
 
-fun step:Int x:Int =>
-    x
+fun step:Int = x:Int=>    x
 
 @recur.timer 5sec
 signal polled : Signal Int =
@@ -3757,14 +3737,11 @@ fn cranelift_codegen_compiles_float_comparison_and_equality_kernels() {
     let backend = lower_text(
         "backend-float-compare-codegen.aivi",
         r#"
-fun gt:Bool left:Float right:Float =>
-    left > right
+fun gt:Bool = left:Float right:Float=>    left > right
 
-fun eq:Bool left:Float right:Float =>
-    left == right
+fun eq:Bool = left:Float right:Float=>    left == right
 
-fun ne:Bool left:Float right:Float =>
-    left != right
+fun ne:Bool = left:Float right:Float=>    left != right
 "#,
     );
 
@@ -3809,11 +3786,9 @@ fn cranelift_codegen_compiles_native_tuple_equality_kernels() {
     let backend = lower_text(
         "backend-tuple-equality-codegen.aivi",
         r#"
-fun sameTuple:Bool left:(Int, Float, Bool) right:(Int, Float, Bool) =>
-    left == right
+fun sameTuple:Bool = left:(Int, Float, Bool) right:(Int, Float, Bool)=>    left == right
 
-fun differentTuple:Bool left:(Int, Float, Bool) right:(Int, Float, Bool) =>
-    left != right
+fun differentTuple:Bool = left:(Int, Float, Bool) right:(Int, Float, Bool)=>    left != right
 "#,
     );
 
@@ -3863,11 +3838,9 @@ fn cranelift_codegen_compiles_native_record_equality_kernels() {
 type Stats = { count: Int, ratio: Float, active: Bool }
 type Wrapper = { stats: Stats, enabled: Bool }
 
-fun sameStats:Bool left:Stats right:Stats =>
-    left == right
+fun sameStats:Bool = left:Stats right:Stats=>    left == right
 
-fun differentWrapper:Bool left:Wrapper right:Wrapper =>
-    left != right
+fun differentWrapper:Bool = left:Wrapper right:Wrapper=>    left != right
 "#,
     );
 
@@ -3919,11 +3892,9 @@ fn cranelift_codegen_compiles_niche_option_equality_kernels() {
         r#"
 type Stats = { count: Int, active: Bool }
 
-fun sameMaybeStats:Bool left:(Option Stats) right:(Option Stats) =>
-    left == right
+fun sameMaybeStats:Bool = left:(Option Stats) right:(Option Stats)=>    left == right
 
-fun differentMaybeStats:Bool left:(Option Stats) right:(Option Stats) =>
-    left != right
+fun differentMaybeStats:Bool = left:(Option Stats) right:(Option Stats)=>    left != right
 "#,
     );
 
@@ -3976,8 +3947,7 @@ type Stats = {
     maybePair: Option Pair
 }
 
-fun sameStats:Bool left:Stats right:Stats =>
-    left == right
+fun sameStats:Bool = left:Stats right:Stats=>    left == right
 "#,
     );
 
@@ -4007,14 +3977,11 @@ fn cranelift_codegen_compiles_scalar_option_equality_and_constructors() {
     let backend = lower_text(
         "backend-option-int-equality-codegen.aivi",
         r#"
-fun sameMaybeInt:Bool left:(Option Int) right:(Option Int) =>
-    left == right
+fun sameMaybeInt:Bool = left:(Option Int) right:(Option Int)=>    left == right
 
-fun differentMaybeInt:Bool left:(Option Int) right:(Option Int) =>
-    left != right
+fun differentMaybeInt:Bool = left:(Option Int) right:(Option Int)=>    left != right
 
-fun liftMaybeInt:(Option Int) value:Int =>
-    Some value
+fun liftMaybeInt:(Option Int) = value:Int=>    Some value
 
 value missingMaybeInt:(Option Int) =
     None
@@ -4074,19 +4041,16 @@ fn cranelift_codegen_compiles_text_equality_kernels() {
     let backend = lower_text(
         "backend-text-equality-codegen.aivi",
         r#"
-fun sameText:Bool left:Text right:Text =>
-    left == right
+fun sameText:Bool = left:Text right:Text=>    left == right
 
-fun differentText:Bool left:Text right:Text =>
-    left != right
+fun differentText:Bool = left:Text right:Text=>    left != right
 
 type Labels = {
     primary: Text,
     alias: Option Text
 }
 
-fun sameLabels:Bool left:Labels right:Labels =>
-    left == right
+fun sameLabels:Bool = left:Labels right:Labels=>    left == right
 "#,
     );
 
@@ -4149,19 +4113,16 @@ fn cranelift_codegen_compiles_bytes_equality_kernels() {
     let backend = lower_text(
         "backend-bytes-equality-codegen.aivi",
         r#"
-fun sameBytes:Bool left:Bytes right:Bytes =>
-    left == right
+fun sameBytes:Bool = left:Bytes right:Bytes=>    left == right
 
-fun differentBytes:Bool left:Bytes right:Bytes =>
-    left != right
+fun differentBytes:Bool = left:Bytes right:Bytes=>    left != right
 
 type Blobs = {
     primary: Bytes,
     alias: Option Bytes
 }
 
-fun sameBlobs:Bool left:Blobs right:Blobs =>
-    left == right
+fun sameBlobs:Bool = left:Blobs right:Blobs=>    left == right
 "#,
     );
 
@@ -4235,17 +4196,13 @@ use aivi.core.bytes (
 value noBytes:Bytes =
     empty
 
-fun measureBytes:Int bytes:Bytes =>
-    length bytes
+fun measureBytes:Int = bytes:Bytes=>    length bytes
 
-fun firstByte:(Option Int) bytes:Bytes =>
-    get 0 bytes
+fun firstByte:(Option Int) = bytes:Bytes=>    get 0 bytes
 
-fun encodeLabel:Bytes label:Text =>
-    fromText label
+fun encodeLabel:Bytes = label:Text=>    fromText label
 
-fun decodeLabel:(Option Text) bytes:Bytes =>
-    toText bytes
+fun decodeLabel:(Option Text) = bytes:Bytes=>    toText bytes
 "#,
     );
 
@@ -4447,8 +4404,7 @@ use aivi.core.bytes (
     append
 )
 
-fun combine:Bytes left:Bytes right:Bytes =>
-    append left right
+fun combine:Bytes = left:Bytes right:Bytes=>    append left right
 "#,
     );
 
@@ -4468,8 +4424,7 @@ fn cranelift_codegen_rejects_named_domain_equality_without_native_domain_contrac
         r#"
 domain Path over Text
 
-fun samePath:Bool left:Path right:Path =>
-    left == right
+fun samePath:Bool = left:Path right:Path=>    left == right
 "#,
     );
 
@@ -4622,8 +4577,7 @@ fn cranelift_codegen_compiles_item_body_kernels_and_direct_item_calls() {
     let backend = lower_text(
         "backend-item-body-codegen.aivi",
         r#"
-fun addOne:Int n:Int =>
-    n + 1
+fun addOne:Int = n:Int=>    n + 1
 
 value base = 41
 
@@ -4796,11 +4750,9 @@ domain Path over Text
     type Path -> Text
     unwrap
 
-fun wrapPath:Path raw:Text =>
-    fromText raw
+fun wrapPath:Path = raw:Text=>    fromText raw
 
-fun unwrapPath:Text path:Path =>
-    unwrap path
+fun unwrapPath:Text = path:Path=>    unwrap path
 "#,
     );
 
@@ -4901,8 +4853,7 @@ fn cranelift_codegen_rejects_unsaturated_direct_item_apply_calls() {
     let backend = lower_text(
         "backend-item-body-partial-apply-codegen.aivi",
         r#"
-fun add:Int left:Int right:Int =>
-    left + right
+fun add:Int = left:Int right:Int=>    left + right
 
 value addOne =
     add 1
@@ -4922,8 +4873,7 @@ fn cranelift_codegen_rejects_non_option_builtin_constructors_until_aggregate_low
     let backend = lower_text(
         "backend-result-constructor-codegen.aivi",
         r#"
-fun wrapOk:(Result Text Text) text:Text =>
-    Ok text
+fun wrapOk:(Result Text Text) = text:Text=>    Ok text
 "#,
     );
 

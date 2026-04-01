@@ -1,86 +1,68 @@
 type A -> (Result E A)
-func keepOk item =>
-    Ok item
+func keepOk = item=>    Ok item
 
 type E -> (Result E A)
-func keepErr error =>
-    Err error
+func keepErr = error=>    Err error
 
 type (E1 -> E2) -> E1 -> (Result E2 A)
-func mapError transform error =>
-    Err (transform error)
+func mapError = transform error=>    Err (transform error)
 
 type A -> (Option A)
-func keepSome item =>
-    Some item
+func keepSome = item=>    Some item
 
 type A -> (List A)
-func singleton item =>
-    [item]
+func singleton = item=>    [item]
 
 type Result E A => Bool
-func isOk opt => opt
- T|> True
+func isOk = opt=> opt T|> True
  F|> False
 
 type Result E A => Bool
-func isErr opt => opt
- F|> True
+func isErr = opt=> opt F|> True
  T|> False
 
 type (E1 -> E2) -> (Result E1 A) -> (Result E2 A)
-func mapErr transform opt => opt
- T|> keepOk
+func mapErr = transform opt=> opt T|> keepOk
  F|> mapError transform
 
 type A -> (Result E A) -> A
-func withDefault fallback opt => opt
- ||> Ok item -> item
+func withDefault = fallback opt=> opt ||> Ok item -> item
  ||> Err _   -> fallback
 
 type Result E A => (Result E A) -> (Result E A)
-func orElse fallback opt => opt
- ||> Ok item -> Ok item
+func orElse = fallback opt=> opt ||> Ok item -> Ok item
  ||> Err _   -> fallback
 
 type (A -> Result E B) -> (Result E A) -> (Result E B)
-func flatMap next opt => opt
- T|> next
+func flatMap = next opt=> opt T|> next
  F|> keepErr
 
 type Result E (Result E A) => (Result E A)
-func flatten opt => opt
- ||> Ok nested -> nested
+func flatten = opt=> opt ||> Ok nested -> nested
  ||> Err error -> Err error
 
 type Result E A => (Option A)
-func toOption opt => opt
- T|> keepSome
+func toOption = opt=> opt T|> keepSome
  F|> None
 
 type Result E A => (List A)
-func toList opt => opt
- T|> singleton
+func toList = opt=> opt T|> singleton
  F|> []
 
 type (A -> B) -> (Result E A) -> (Result E B)
-func map transform opt => opt
- ||> Err e   -> Err e
+func map = transform opt=> opt ||> Err e   -> Err e
  ||> Ok item -> Ok (transform item)
 
 type (E1 -> E2) -> (A -> B) -> (Result E1 A) -> (Result E2 B)
-func mapBoth onErr onOk opt => opt
- ||> Err e   -> Err (onErr e)
+func mapBoth = onErr onOk opt=> opt ||> Err e   -> Err (onErr e)
  ||> Ok item -> Ok (onOk item)
 
 type (E -> B) -> (A -> B) -> (Result E A) -> B
-func fold onErr onOk opt => opt
- ||> Err e   -> onErr e
+func fold = onErr onOk opt=> opt ||> Err e   -> onErr e
  ||> Ok item -> onOk item
 
 type E -> (Option A) -> (Result E A)
-func fromOption error opt => opt
- ||> Some item -> Ok item
+func fromOption = error opt=> opt ||> Some item -> Ok item
  ||> None      -> Err error
 
 export isOk

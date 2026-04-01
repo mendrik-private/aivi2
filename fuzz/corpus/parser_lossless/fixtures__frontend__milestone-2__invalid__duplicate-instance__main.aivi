@@ -3,8 +3,7 @@ class Eq A
 
 type Blob = Blob Bytes
 
-fun blobEquals:Bool #left:Blob #right:Blob =>
-    True
+fun blobEquals:Bool = #left:Blob #right:Blob=>    True
 
 instance Eq Blob
     (==) left right = blobEquals left right

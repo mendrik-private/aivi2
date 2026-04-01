@@ -1,5 +1,4 @@
-fun step #value =>
-    value
+fun step = #value=>    value
 
 sig refresh = 0
 

@@ -118,6 +118,8 @@ pub enum GtkBoolPropertySetter {
     Hexpand,
     Vexpand,
     Monospace,
+    ButtonCompact,
+    ButtonHasFrame,
     HeaderBarShowTitleButtons,
     EntryEditable,
     SwitchActive,
@@ -154,6 +156,8 @@ pub enum GtkTextOrI64PropertySetter {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GtkI64PropertySetter {
+    WidthRequest,
+    HeightRequest,
     ImagePixelSize,
     RevealerTransitionDuration,
 }
@@ -231,6 +235,7 @@ impl GtkChildContainerKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GtkChildMountRoute {
     WindowContent,
+    WindowTitlebar,
     HeaderBarTitleWidget,
     HeaderBarStart,
     HeaderBarEnd,
@@ -353,6 +358,30 @@ const MONOSPACE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
     setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::Monospace),
 };
 
+const BUTTON_COMPACT_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "compact",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::ButtonCompact),
+};
+
+const BUTTON_HAS_FRAME_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "hasFrame",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::ButtonHasFrame),
+};
+
+const WIDTH_REQUEST_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "widthRequest",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::WidthRequest),
+};
+
+const HEIGHT_REQUEST_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "heightRequest",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::HeightRequest),
+};
+
 const WINDOW_TITLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
     name: "title",
     value_shape: GtkPropertyValueShape::Text,
@@ -463,6 +492,14 @@ const WINDOW_CONTENT_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescrip
     max_children: Some(1),
 };
 
+const WINDOW_TITLEBAR_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "titlebar",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::WindowTitlebar,
+    min_children: 0,
+    max_children: Some(1),
+};
+
 const HEADER_BAR_TITLE_WIDGET_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
     name: "titleWidget",
     container: GtkChildContainerKind::Single,
@@ -547,8 +584,8 @@ const WINDOW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         WINDOW_TITLE_PROPERTY,
     ],
     events: &[],
-    default_child_group_override: None,
-    child_groups: &[WINDOW_CONTENT_CHILD_GROUP],
+    default_child_group_override: Some(&WINDOW_CONTENT_CHILD_GROUP),
+    child_groups: &[WINDOW_CONTENT_CHILD_GROUP, WINDOW_TITLEBAR_CHILD_GROUP],
 };
 
 const HEADER_BAR_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
@@ -677,6 +714,10 @@ const BUTTON_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        BUTTON_COMPACT_PROPERTY,
+        BUTTON_HAS_FRAME_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
         BUTTON_LABEL_PROPERTY,
     ],
     events: &[BUTTON_CLICK_EVENT],
@@ -1078,6 +1119,10 @@ mod tests {
             .expect("Button.label should be part of the catalog");
         assert_eq!(property.value_shape, GtkPropertyValueShape::Text);
         assert!(lookup_widget_property(&button, "text").is_none());
+        assert!(lookup_widget_property(&button, "compact").is_some());
+        assert!(lookup_widget_property(&button, "hasFrame").is_some());
+        assert!(lookup_widget_property(&button, "widthRequest").is_some());
+        assert!(lookup_widget_property(&button, "heightRequest").is_some());
         assert!(lookup_widget_property(&label, "label").is_some());
         assert!(lookup_widget_property(&label, "monospace").is_some());
         assert!(lookup_widget_property(&entry, "text").is_some());
@@ -1127,6 +1172,12 @@ mod tests {
                     && group.accepts_child_count(1)
                     && !group.accepts_child_count(2)
         ));
+        let titlebar = window
+            .child_group("titlebar")
+            .expect("Window should expose an explicit titlebar group");
+        assert_eq!(titlebar.container, GtkChildContainerKind::Single);
+        assert!(titlebar.accepts_child_count(1));
+        assert!(!titlebar.accepts_child_count(2));
 
         let scrolled_window = lookup_widget_schema_by_name("ScrolledWindow")
             .expect("ScrolledWindow schema should exist");

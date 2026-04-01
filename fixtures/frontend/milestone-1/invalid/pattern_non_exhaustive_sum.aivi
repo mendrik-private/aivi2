@@ -4,5 +4,4 @@ type Status =
   | Failed Text
 
 type Status -> Text
-func statusLabel status => status
- ||> Paid -> "paid"
+func statusLabel = status=> status ||> Paid -> "paid"

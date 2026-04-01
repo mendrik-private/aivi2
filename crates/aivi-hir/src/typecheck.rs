@@ -4601,12 +4601,10 @@ mod tests {
             "class Eq A\n\
              \x20\x20\x20\x20(==) : A -> A -> Bool\n\
              type Blob = Blob Bytes\n\
-             fun blobEquals:Bool left:Blob right:Blob =>\n\
-             \x20\x20\x20\x20True\n\
+             fun blobEquals:Bool = left:Blob right:Blob=>\n\             \x20\x20\x20\x20True\n\
              instance Eq Blob\n\
              \x20\x20\x20\x20(==) left right = blobEquals left right\n\
-             fun compare:Bool left:Blob right:Blob =>\n\
-             \x20\x20\x20\x20left == right\n",
+             fun compare:Bool = left:Blob right:Blob=>\n\             \x20\x20\x20\x20left == right\n",
         );
         assert!(
             report.is_ok(),
@@ -4765,8 +4763,7 @@ mod tests {
             "class Container A\n\
              \x20\x20\x20\x20require Eq A\n\
              \x20\x20\x20\x20same : A -> A -> Bool\n\
-             fun delegated:Container A -> Bool left:A right:A =>\n\
-             \x20\x20\x20\x20left == right\n\
+             fun delegated:Container A -> Bool = left:A right:A=>\n\             \x20\x20\x20\x20left == right\n\
              instance Container Text\n\
              \x20\x20\x20\x20same left right = left == right\n\
              value sameText:Bool = delegated \"Ada\" \"Grace\"\n",
@@ -4785,8 +4782,7 @@ mod tests {
             "class Container A\n\
              \x20\x20\x20\x20require Eq A\n\
              \x20\x20\x20\x20same : A -> A -> Bool\n\
-             fun delegated:Container A -> Bool left:A right:A =>\n\
-             \x20\x20\x20\x20left == right\n",
+             fun delegated:Container A -> Bool = left:A right:A=>\n\             \x20\x20\x20\x20left == right\n",
         );
         let function = module
             .items()
@@ -5454,9 +5450,7 @@ value x:Int =
     n: Int,
     items: List A
 }
-fun remaining:Int acc:(TakeAcc A) => acc.n
-fun items:(List A) acc:(TakeAcc A) => acc.items
-"#,
+fun remaining:Int = acc:(TakeAcc A)=> acc.nfun items:(List A) = acc:(TakeAcc A)=> acc.items"#,
         );
         assert!(
             report.is_ok(),
@@ -5870,9 +5864,7 @@ fun items:(List A) acc:(TakeAcc A) => acc.items
         let report = typecheck_text(
             "signal-name-direct-call.aivi",
             "signal direction : Signal Int = 1\n\
-             fun step:Int x:Int => x\n\
-             fun current:Int tick:Unit => step direction\n",
-        );
+             fun step:Int = x:Int=> x\n\             fun current:Int = tick:Unit=> step direction\n",        );
         assert!(
             report.is_ok(),
             "expected direct function application to accept a signal payload name, got diagnostics: {:?}",

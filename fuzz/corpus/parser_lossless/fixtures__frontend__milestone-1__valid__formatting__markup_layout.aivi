@@ -1,5 +1,4 @@
-fun formatCount:Text #count:Int =>
-    "{count} unread"
+fun formatCount:Text = #count:Int=>    "{count} unread"
 
 val count = 3
 

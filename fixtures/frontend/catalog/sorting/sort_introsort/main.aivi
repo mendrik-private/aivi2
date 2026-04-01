@@ -27,103 +27,82 @@ type SortSummary = {
 }
 
 type Int -> Int -> Bool
-func earlier left right =>
-    left < right or left == right
+func earlier = left right=>    left < right or left == right
 
 type Int -> (List Heap) -> Int -> (List Heap) -> Heap
-func mergeNodes leftValue leftChildren rightValue rightChildren => earlier leftValue rightValue
- T|> Node leftValue (append [Node rightValue rightChildren] leftChildren)
+func mergeNodes = leftValue leftChildren rightValue rightChildren=> earlier leftValue rightValue T|> Node leftValue (append [Node rightValue rightChildren] leftChildren)
  F|> Node rightValue (append [Node leftValue leftChildren] rightChildren)
 
 type Heap -> Heap -> Heap
-func mergeHeap left right => (left, right)
- ||> (Empty, other)                                               -> other
+func mergeHeap = left right=> (left, right) ||> (Empty, other)                                               -> other
  ||> (other, Empty)                                               -> other
  ||> (Node leftValue leftChildren, Node rightValue rightChildren) -> mergeNodes leftValue leftChildren rightValue rightChildren
 
 type List Heap => Heap
-func mergePairs children => children
- ||> []                            -> Empty
+func mergePairs = children=> children ||> []                            -> Empty
  ||> [first]                       -> first
  ||> [first, second, ...remaining] -> mergeHeap (mergeHeap first second) (mergePairs remaining)
 
 type Heap -> Int -> Heap
-func heapInsert heap x =>
-    mergeHeap heap (Node x [])
+func heapInsert = heap x=>    mergeHeap heap (Node x [])
 
 type Heap -> HeapPop
-func heapPop heap => heap
- ||> Empty           -> { value: None, rest: Empty }
+func heapPop = heap=> heap ||> Empty           -> { value: None, rest: Empty }
  ||> Node x children -> { value: Some x, rest: mergePairs children }
 
 type Heap -> (List Int)
-func heapDrain heap => heapPop heap
- ||> { value: None }         -> []
+func heapDrain = heap=> heapPop heap ||> { value: None }         -> []
  ||> { value: Some x, rest } -> append [x] (heapDrain rest)
 
 type List Int => (List Int)
-func heapSort items => items
-  |> reduce heapInsert Empty
+func heapSort = items=> items  |> reduce heapInsert Empty
   |> heapDrain
 
 type Int -> Int -> (List Int) -> (List Int)
-func insertAfterFirst x first rest => earlier x first
- T|> append [x, first] rest
+func insertAfterFirst = x first rest=> earlier x first T|> append [x, first] rest
  F|> append [first] (insertOrdered x rest)
 
 type Int -> (List Int) -> (List Int)
-func insertOrdered x items => items
- ||> []               -> [x]
+func insertOrdered = x items=> items ||> []               -> [x]
  ||> [first, ...rest] -> insertAfterFirst x first rest
 
 type List Int => (List Int)
-func insertionSort items => items
-  |> reduce insertOrdered []
+func insertionSort = items=> items  |> reduce insertOrdered []
 
 type Int -> Int -> Bool
-func lowerThan pivot x =>
-    x < pivot
+func lowerThan = pivot x=>    x < pivot
 
 type Int -> Int -> Bool
-func equalTo pivot x =>
-    x == pivot
+func equalTo = pivot x=>    x == pivot
 
 type List Int => Int -> (List Int) -> Buckets
-func classifyRest lower pivot rest => rest
-  |> partition (equalTo pivot)
+func classifyRest = lower pivot rest=> rest  |> partition (equalTo pivot)
  ||> { matched: equal, unmatched: higher } -> { lower, equal, higher }
 
 type Int -> (List Int) -> Buckets
-func classify pivot items => items
-  |> partition (lowerThan pivot)
+func classify = pivot items=> items  |> partition (lowerThan pivot)
  ||> { matched: lower, unmatched: rest } -> classifyRest lower pivot rest
 
 type List Int => (List Int) -> (List Int) -> (List Int)
-func appendThree left middle right =>
-    append left (append middle right)
+func appendThree = left middle right=>    append left (append middle right)
 
 type Int -> (List Int) -> (List Int)
-func introsortAfterBase depth items => depth == 0
- T|> heapSort items
+func introsortAfterBase = depth items=> depth == 0 T|> heapSort items
  F|> introsortAfterDepth depth items
 
 type Int -> (List Int) -> (List Int)
-func introsortAfterDepth depth items => length items < 4
- T|> insertionSort items
+func introsortAfterDepth = depth items=> length items < 4 T|> insertionSort items
  F|> introsortPartition depth items
 
 type Int -> Int -> (List Int) -> (List Int)
-func introsortFromPivot depth pivot items => classify pivot items
- ||> { lower, equal, higher } -> appendThree (introsort (depth - 1) lower) equal (introsort (depth - 1) higher)
+func introsortFromPivot = depth pivot items=> classify pivot items ||> { lower, equal, higher } -> appendThree (introsort (depth - 1) lower) equal (introsort (depth - 1) higher)
 
 type Int -> (List Int) -> (List Int)
-func introsortPartition depth items => items
- ||> []            -> []
+func introsortPartition = depth items=> items ||> []            -> []
  ||> [pivot, ..._] -> introsortFromPivot depth pivot items
 
 type Int -> (List Int) -> (List Int)
-func introsort depth items => length items < 2
- T|> items
+func introsort = depth items=> length items < 2 T|> items
  F|> introsortAfterBase depth items
 
 value sample : List Int = [

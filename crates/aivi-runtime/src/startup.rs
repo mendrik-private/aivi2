@@ -3640,8 +3640,7 @@ value answer = 42
 domain Retry over Int
     literal times : Int -> Retry
 
-fun step:Int n:Int =>
-    n
+fun step:Int = n:Int=>    n
 
 @recur.backoff 3times
 value retried : Task Int Int =
@@ -3680,8 +3679,7 @@ value retried : Task Int Int =
         let lowered = lower_text(
             "runtime-startup-inline-case-helper.aivi",
             r#"
-fun choose:Text maybeName:(Option Text) =>
-    maybeName
+fun choose:Text = maybeName:(Option Text)=>    maybeName
      ||> Some name -> name
      ||> None -> "guest"
 
@@ -3717,8 +3715,7 @@ signal label = choose maybeName
         let lowered = lower_text(
             "runtime-startup-signal-inline-case.aivi",
             r#"
-fun greetSelected:Signal Text prefix:Text fallback:Text selected:Signal (Option Text) =>
-    selected
+fun greetSelected:Signal Text = prefix:Text fallback:Text selected:Signal (Option Text)=>    selected
      ||> Some name -> "{prefix}:{name}"
      ||> None -> "{prefix}:{fallback}"
 
@@ -3756,8 +3753,7 @@ signal greeting : Signal Text =
         let lowered = lower_text(
             "runtime-startup-signal-inline-truthy-falsy.aivi",
             r#"
-fun renderStatus:Signal Text prefix:Text readyText:Text waitText:Text statusReady:Signal Bool =>
-    statusReady
+fun renderStatus:Signal Text = prefix:Text readyText:Text waitText:Text statusReady:Signal Bool=>    statusReady
      T|> "{prefix}:{readyText}"
      F|> "{prefix}:{waitText}"
 
@@ -4065,8 +4061,7 @@ type User = {
     email: Text
 }
 
-fun joinEmails:Text items:List Text =>
-    "joined"
+fun joinEmails:Text = items:List Text=>    "joined"
 
 signal liveUsers : Signal (List User) = [
     { active: True, email: "ada@example.com" }
@@ -4566,8 +4561,7 @@ when ready => current <- incoming
         let lowered = lower_text(
             "runtime-startup-source-recurrence-steps.aivi",
             r#"
-fun bump:Int n:Int =>
-    n + 1
+fun bump:Int = n:Int=>    n + 1
 
 provider custom.feed
     wakeup: providerTrigger
@@ -4629,8 +4623,7 @@ signal counter : Signal Int =
 domain Retry over Int
     literal times : Int -> Retry
 
-fun keep:Int n:Int =>
-    n
+fun keep:Int = n:Int=>    n
 
 @recur.backoff 3times
 value retried : Task Int Int =
@@ -4651,8 +4644,7 @@ value retried : Task Int Int =
         let lowered = lower_text(
             "runtime-startup-accumulate-signal.aivi",
             r#"
-fun step:Int next:Int current:Int =>
-    current + next
+fun step:Int = next:Int current:Int=>    current + next
 
 provider custom.feed
     wakeup: providerTrigger
@@ -4721,11 +4713,9 @@ signal counter : Signal Int =
         let lowered = lower_text(
             "runtime-startup-recurrence-non-wakeup-deps.aivi",
             r#"
-fun setDirection:Int next:Int current:Int =>
-    next
+fun setDirection:Int = next:Int current:Int=>    next
 
-fun stepGame:Int tick:Int current:Int =>
-    current + direction
+fun stepGame:Int = tick:Int current:Int=>    current + direction
 
 provider custom.turn
     wakeup: providerTrigger

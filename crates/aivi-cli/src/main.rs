@@ -40,10 +40,10 @@ use aivi_gtk::{
 };
 use aivi_hir::{
     BuiltinTerm, BuiltinType, DecoratorPayload, ExprId as HirExprId, ExprKind, GeneralExprOutcome,
-    GeneralExprParameter, Item, ItemId as HirItemId, MarkupRuntimeExprSites,
-    Module as HirModule, PatternId as HirPatternId, PatternKind, TermResolution, TypeKind,
-    TypeResolution, ValidationMode, ValueItem, collect_markup_runtime_expr_sites,
-    elaborate_runtime_expr_with_env, signal_payload_type,
+    GeneralExprParameter, Item, ItemId as HirItemId, MarkupRuntimeExprSites, Module as HirModule,
+    PatternId as HirPatternId, PatternKind, TermResolution, TypeKind, TypeResolution,
+    ValidationMode, ValueItem, collect_markup_runtime_expr_sites, elaborate_runtime_expr_with_env,
+    signal_payload_type,
 };
 use aivi_lambda::{lower_module as lower_lambda_module, validate_module as validate_lambda_module};
 use aivi_query::{
@@ -2056,11 +2056,10 @@ fn resolve_run_event_handler(
                     "event handler at {location} must call a direct signal name when providing an explicit payload"
                 ));
             };
-            let payload_expr = arguments
-                .iter()
-                .next()
-                .copied()
-                .expect("single-argument handler applications should expose a payload expression");
+            let payload_expr =
+                arguments.iter().next().copied().expect(
+                    "single-argument handler applications should expose a payload expression",
+                );
             let (item_id, signal, signal_input) =
                 resolve_run_event_signal_target(module, runtime_assembly, reference, &location)?;
             let required_payload = signal_payload_type(module, signal).ok_or_else(|| {
@@ -2104,7 +2103,14 @@ fn resolve_run_event_signal_target<'a>(
     runtime_assembly: &HirRuntimeAssembly,
     reference: &aivi_hir::TermReference,
     location: &str,
-) -> Result<(aivi_hir::ItemId, &'a aivi_hir::SignalItem, RuntimeInputHandle), String> {
+) -> Result<
+    (
+        aivi_hir::ItemId,
+        &'a aivi_hir::SignalItem,
+        RuntimeInputHandle,
+    ),
+    String,
+> {
     let aivi_hir::ResolutionState::Resolved(TermResolution::Item(item_id)) =
         reference.resolution.as_ref()
     else {
@@ -3962,10 +3968,10 @@ fn print_usage() {
 #[cfg(test)]
 mod tests {
     use super::{
-        HydratedRunNode, ResolvedRunEventHandler, ResolvedRunEventPayload,
-        RunHydrationStaticState, WorkspaceHirSnapshot, check_file, execute_file_with_context,
-        plan_run_hydration, prepare_execute_artifact, prepare_run_artifact,
-        run_hydration_globals_ready, test_file_with_context,
+        HydratedRunNode, ResolvedRunEventHandler, ResolvedRunEventPayload, RunHydrationStaticState,
+        WorkspaceHirSnapshot, check_file, execute_file_with_context, plan_run_hydration,
+        prepare_execute_artifact, prepare_run_artifact, run_hydration_globals_ready,
+        test_file_with_context,
     };
     use aivi_backend::{DetachedRuntimeValue, RuntimeTaskPlan, RuntimeValue};
     use aivi_base::SourceDatabase;
@@ -4626,8 +4632,7 @@ signal selectedText : Signal Text = selected
  +|> "None" keepLatest
 
 type Text -> Text -> Text
-func keepLatest next current =>
-    next
+func keepLatest = next current=>    next
 
 value rows = ["Alpha", "Beta"]
 
@@ -4726,7 +4731,11 @@ value view =
                 _ => None,
             })
             .expect("label text should stay dynamic under the with binding");
-        assert!(artifact.hydration_inputs.contains_key(&with_node.value.input));
+        assert!(
+            artifact
+                .hydration_inputs
+                .contains_key(&with_node.value.input)
+        );
         assert!(artifact.hydration_inputs.contains_key(&text_input));
     }
 
@@ -4963,6 +4972,79 @@ value view =
     }
 
     #[test]
+    fn prepare_run_accepts_window_titlebars_and_compact_button_properties() {
+        let artifact = prepare_run_from_text(
+            "window-titlebar-and-button-props.aivi",
+            r#"
+value showButtons = True
+value view =
+    <Window title="Host">
+        <Window.titlebar>
+            <HeaderBar showTitleButtons={showButtons}>
+                <HeaderBar.start>
+                    <Label text="Status" />
+                </HeaderBar.start>
+                <HeaderBar.end>
+                    <Button label="Restart" compact hasFrame={False} widthRequest={26} heightRequest={26} />
+                </HeaderBar.end>
+            </HeaderBar>
+        </Window.titlebar>
+        <Button label="A" compact hasFrame={False} widthRequest={26} heightRequest={26} />
+    </Window>
+"#,
+            None,
+        )
+        .expect("window titlebars and compact button properties should prepare successfully");
+
+        let groups = artifact
+            .bridge
+            .nodes()
+            .iter()
+            .filter_map(|node| match &node.kind {
+                GtkBridgeNodeKind::Group(group) => Some((
+                    group.widget.segments().last().text().to_owned(),
+                    group.descriptor.name.to_owned(),
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(
+            groups
+                .iter()
+                .any(|(widget, group)| widget == "Window" && group == "titlebar")
+        );
+
+        let restart = artifact
+            .bridge
+            .nodes()
+            .iter()
+            .find_map(|node| match &node.kind {
+                GtkBridgeNodeKind::Widget(widget)
+                    if widget.widget.segments().last().text() == "Button"
+                        && widget
+                            .properties
+                            .iter()
+                            .any(|property| property.name.text() == "label")
+                        && widget.event_hooks.is_empty() =>
+                {
+                    Some(widget)
+                }
+                _ => None,
+            })
+            .expect("bridge should retain a content button widget");
+        let property_names = restart
+            .properties
+            .iter()
+            .map(|property| property.name.text().to_owned())
+            .collect::<Vec<_>>();
+        assert!(property_names.iter().any(|name| name == "compact"));
+        assert!(property_names.iter().any(|name| name == "hasFrame"));
+        assert!(property_names.iter().any(|name| name == "widthRequest"));
+        assert!(property_names.iter().any(|name| name == "heightRequest"));
+    }
+
+    #[test]
     fn prepare_run_rejects_non_window_root_widgets() {
         let error = prepare_run_from_text(
             "button-root.aivi",
@@ -5141,8 +5223,7 @@ use aivi.fs (
 @source process.cwd
 signal cwd : Signal Text
 
-fun mockedProbe:Task Text Bool path:Text =>
-    exists "{cwd}/flag.txt"
+fun mockedProbe:Task Text Bool = path:Text=>    exists "{cwd}/flag.txt"
 
 @test
 @mock(probe, mockedProbe)
@@ -5160,8 +5241,7 @@ use aivi.fs (
 @source process.cwd
 signal cwd : Signal Text
 
-fun probe:Task Text Bool path:Text =>
-    exists path
+fun probe:Task Text Bool = path:Text=>    exists path
 
 @test
 value service_smoke : Task Text Bool =

@@ -90,104 +90,89 @@ value cycleEdge : DirectedEdge = {
 }
 
 type Node -> Text
-func nodeLabel node => node
- ||> A -> "A"
+func nodeLabel = node=> node ||> A -> "A"
  ||> B -> "B"
  ||> C -> "C"
  ||> D -> "D"
  ||> E -> "E"
 
 type List Text => Node -> (List Text)
-func appendNodeLabel parts node =>
-    append parts [
+func appendNodeLabel = parts node=>    append parts [
         nodeLabel node
     ]
 
 type List Node => Text
-func nodeListLabel nodes => nodes
-  |> reduce appendNodeLabel []
+func nodeListLabel = nodes=> nodes  |> reduce appendNodeLabel []
   |> join ", "
 
 type List Node => Text
-func componentText component =>
-    join "" [
+func componentText = component=>    join "" [
         "[",
         nodeListLabel component,
         "]"
     ]
 
 type List Text => (List Node) -> (List Text)
-func appendComponentLabel parts component =>
-    append parts [
+func appendComponentLabel = parts component=>    append parts [
         componentText component
     ]
 
 type List (List Node) => Text
-func componentsLabel components => components
-  |> reduce appendComponentLabel []
+func componentsLabel = components=> components  |> reduce appendComponentLabel []
   |> join " | "
 
 type Indexes -> Node -> (Option Int)
-func indexOf indexes node => node
- ||> A -> indexes.a
+func indexOf = indexes node=> node ||> A -> indexes.a
  ||> B -> indexes.b
  ||> C -> indexes.c
  ||> D -> indexes.d
  ||> E -> indexes.e
 
 type Indexes -> Node -> (Option Int) -> Indexes
-func setIndex indexes node x => node
- ||> A -> { a: x, b: indexes.b, c: indexes.c, d: indexes.d, e: indexes.e }
+func setIndex = indexes node x=> node ||> A -> { a: x, b: indexes.b, c: indexes.c, d: indexes.d, e: indexes.e }
  ||> B -> { a: indexes.a, b: x, c: indexes.c, d: indexes.d, e: indexes.e }
  ||> C -> { a: indexes.a, b: indexes.b, c: x, d: indexes.d, e: indexes.e }
  ||> D -> { a: indexes.a, b: indexes.b, c: indexes.c, d: x, e: indexes.e }
  ||> E -> { a: indexes.a, b: indexes.b, c: indexes.c, d: indexes.d, e: x }
 
 type Indexes -> Node -> Int
-func indexValue indexes node => indexOf indexes node
- ||> Some x -> x
+func indexValue = indexes node=> indexOf indexes node ||> Some x -> x
  ||> None   -> 0
 
 type Lowlinks -> Node -> Int
-func lowOf lowlinks node => node
- ||> A -> lowlinks.a
+func lowOf = lowlinks node=> node ||> A -> lowlinks.a
  ||> B -> lowlinks.b
  ||> C -> lowlinks.c
  ||> D -> lowlinks.d
  ||> E -> lowlinks.e
 
 type Lowlinks -> Node -> Int -> Lowlinks
-func setLow lowlinks node x => node
- ||> A -> { a: x, b: lowlinks.b, c: lowlinks.c, d: lowlinks.d, e: lowlinks.e }
+func setLow = lowlinks node x=> node ||> A -> { a: x, b: lowlinks.b, c: lowlinks.c, d: lowlinks.d, e: lowlinks.e }
  ||> B -> { a: lowlinks.a, b: x, c: lowlinks.c, d: lowlinks.d, e: lowlinks.e }
  ||> C -> { a: lowlinks.a, b: lowlinks.b, c: x, d: lowlinks.d, e: lowlinks.e }
  ||> D -> { a: lowlinks.a, b: lowlinks.b, c: lowlinks.c, d: x, e: lowlinks.e }
  ||> E -> { a: lowlinks.a, b: lowlinks.b, c: lowlinks.c, d: lowlinks.d, e: x }
 
 type StackFlags -> Node -> Bool
-func flagOf flags node => node
- ||> A -> flags.a
+func flagOf = flags node=> node ||> A -> flags.a
  ||> B -> flags.b
  ||> C -> flags.c
  ||> D -> flags.d
  ||> E -> flags.e
 
 type StackFlags -> Node -> Bool -> StackFlags
-func setFlag flags node x => node
- ||> A -> { a: x, b: flags.b, c: flags.c, d: flags.d, e: flags.e }
+func setFlag = flags node x=> node ||> A -> { a: x, b: flags.b, c: flags.c, d: flags.d, e: flags.e }
  ||> B -> { a: flags.a, b: x, c: flags.c, d: flags.d, e: flags.e }
  ||> C -> { a: flags.a, b: flags.b, c: x, d: flags.d, e: flags.e }
  ||> D -> { a: flags.a, b: flags.b, c: flags.c, d: x, e: flags.e }
  ||> E -> { a: flags.a, b: flags.b, c: flags.c, d: flags.d, e: x }
 
 type Int -> Int -> Int
-func minInt left right => left < right
- T|> left
+func minInt = left right=> left < right T|> left
  F|> right
 
 type TarjanState -> Node -> Int -> TarjanState
-func discover state node index =>
-    {
+func discover = state node index=>    {
         indexes: setIndex state.indexes node (Some index),
         lowlinks: setLow state.lowlinks node index,
         onStack: setFlag state.onStack node True,
@@ -196,8 +181,7 @@ func discover state node index =>
     }
 
 type TarjanState -> Node -> Node -> TarjanState
-func backEdge state from to =>
-    {
+func backEdge = state from to=>    {
         indexes: state.indexes,
         lowlinks: setLow state.lowlinks from (minInt (lowOf state.lowlinks from) (indexValue state.indexes to)),
         onStack: state.onStack,
@@ -206,8 +190,7 @@ func backEdge state from to =>
     }
 
 type TarjanState -> Node -> Node -> TarjanState
-func mergeLow state parent child =>
-    {
+func mergeLow = state parent child=>    {
         indexes: state.indexes,
         lowlinks: setLow state.lowlinks parent (minInt (lowOf state.lowlinks parent) (lowOf state.lowlinks child)),
         onStack: state.onStack,
@@ -216,16 +199,13 @@ func mergeLow state parent child =>
     }
 
 type StackFlags -> Node -> StackFlags
-func clearMemberFlags flags node =>
-    setFlag flags node False
+func clearMemberFlags = flags node=>    setFlag flags node False
 
 type StackFlags -> (List Node) -> StackFlags
-func clearMembers flags members => members
-  |> reduce clearMemberFlags flags
+func clearMembers = flags members=> members  |> reduce clearMemberFlags flags
 
 type TarjanState -> (List Node) -> (List Node) -> TarjanState
-func emitComponent state members remaining =>
-    {
+func emitComponent = state members remaining=>    {
         indexes: state.indexes,
         lowlinks: state.lowlinks,
         onStack: clearMembers state.onStack members,
@@ -234,12 +214,10 @@ func emitComponent state members remaining =>
     }
 
 type Int -> Bool
-func isZero x =>
-    x == 0
+func isZero = x=>    x == 0
 
 type TarjanState -> Action -> TarjanState
-func step state action => action
- ||> Discover node index         -> discover state node index
+func step = state action=> action ||> Discover node index         -> discover state node index
  ||> BackEdge from to            -> backEdge state from to
  ||> MergeLow parent child       -> mergeLow state parent child
  ||> EmitComponent members stack -> emitComponent state members stack

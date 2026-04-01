@@ -3,14 +3,14 @@ use std::fmt::Write;
 use crate::cst::{
     BinaryOperator, ClassMember, ClassMemberName, Decorator, DecoratorArguments, DecoratorPayload,
     DomainItem, DomainMember, DomainMemberName, ExportItem, Expr, ExprKind, FunctionParam,
-    Identifier, InstanceItem, InstanceMember, Item, MapExpr, MarkupAttribute, MarkupAttributeValue,
-    MarkupNode, Module, NamedItem, PatchBlock, PatchEntry, PatchInstruction, PatchInstructionKind,
-    PatchSelector, PatchSelectorSegment, Pattern, PatternKind, PipeExpr, PipeStage, PipeStageKind,
-    ProjectionPath, QualifiedName, ReactiveUpdateArm, ReactiveUpdateItem, ReactiveUpdateKind,
-    RecordExpr, RecordField, RecordPatternField, ResultBinding, ResultBlockExpr, SourceDecorator,
-    SourceProviderContractItem, SourceProviderContractMember, SourceProviderContractSchemaMember,
-    SuffixedIntegerLiteral, TextLiteral, TextSegment, TypeDeclBody, TypeExpr, TypeExprKind,
-    TypeField, TypeVariant, UnaryOperator, UseItem,
+    FunctionSurfaceForm, Identifier, InstanceItem, InstanceMember, Item, MapExpr, MarkupAttribute,
+    MarkupAttributeValue, MarkupNode, Module, NamedItem, PatchBlock, PatchEntry, PatchInstruction,
+    PatchInstructionKind, PatchSelector, PatchSelectorSegment, Pattern, PatternKind, PipeExpr,
+    PipeStage, PipeStageKind, ProjectionPath, QualifiedName, ReactiveUpdateArm, ReactiveUpdateItem,
+    ReactiveUpdateKind, RecordExpr, RecordField, RecordPatternField, ResultBinding,
+    ResultBlockExpr, SourceDecorator, SourceProviderContractItem, SourceProviderContractMember,
+    SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextLiteral, TextSegment,
+    TypeDeclBody, TypeExpr, TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseItem,
 };
 
 const INDENT_WIDTH: usize = 4;
@@ -331,14 +331,23 @@ impl Formatter {
         }
     }
 
-    /// Format a `func` declaration: always has parameters, uses `=>` body form.
+    /// Format a `func` declaration using the canonical `=` head separator.
     fn format_fun_item(&self, item: &NamedItem) -> Vec<String> {
+        if item.function_form == FunctionSurfaceForm::UnarySubjectSugar
+            && let Some(lines) = self.try_format_unary_subject_fun_item(item)
+        {
+            return lines;
+        }
+        self.format_explicit_fun_item(item)
+    }
+
+    fn format_explicit_fun_item(&self, item: &NamedItem) -> Vec<String> {
         let mut lines = Vec::new();
         if let Some(annotation) = self.format_fun_signature_annotation(item) {
             lines.push(format!("type {annotation}"));
         }
 
-        let mut header = format!("func {}", self.item_name(&item.name));
+        let mut header = format!("func {} =", self.item_name(&item.name));
         for parameter in &item.parameters {
             header.push(' ');
             header.push_str(&self.format_function_param(parameter));
@@ -365,6 +374,49 @@ impl Formatter {
         lines.push(header);
         lines.extend(block.indented(INDENT_WIDTH).into_lines());
         lines
+    }
+
+    fn try_format_unary_subject_fun_item(&self, item: &NamedItem) -> Option<Vec<String>> {
+        let mut lines = Vec::new();
+        if let Some(annotation) = self.format_fun_signature_annotation(item) {
+            lines.push(format!("type {annotation}"));
+        }
+
+        let header = format!("func {} = .", self.item_name(&item.name));
+        let Some(body) = item.expr_body() else {
+            lines.push(header);
+            return Some(lines);
+        };
+        let stage_lines = self.unary_subject_fun_stage_lines(item, body)?;
+        lines.push(header);
+        if !stage_lines.is_empty() {
+            lines.extend(
+                Block::from_lines(stage_lines)
+                    .indented(PIPE_STAGE_INDENT)
+                    .into_lines(),
+            );
+        }
+        Some(lines)
+    }
+
+    fn unary_subject_fun_stage_lines(&self, item: &NamedItem, body: &Expr) -> Option<Vec<String>> {
+        let [parameter] = item.parameters.as_slice() else {
+            return None;
+        };
+        let parameter_name = parameter.name.as_ref()?;
+        match &body.kind {
+            ExprKind::Name(name) if name.text == parameter_name.text => Some(Vec::new()),
+            ExprKind::Pipe(pipe) => {
+                let head = pipe.head.as_ref()?;
+                match &head.kind {
+                    ExprKind::Name(name) if name.text == parameter_name.text => {
+                        Some(self.format_pipe_stage_lines(&pipe.stages))
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
     }
 
     fn format_fun_signature_annotation(&self, item: &NamedItem) -> Option<String> {

@@ -45,8 +45,7 @@ type AhoCatalog = {
 }
 
 type AutomatonState -> Text
-func stateName state => state
- ||> Root   -> "root"
+func stateName = state=> state ||> Root   -> "root"
  ||> SawS   -> "s"
  ||> SawH   -> "h"
  ||> SawSH  -> "sh"
@@ -54,23 +53,20 @@ func stateName state => state
  ||> SawHER -> "her"
 
 type Symbol -> AutomatonState
-func defaultNext symbol => symbol
- ||> U -> Root
+func defaultNext = symbol=> symbol ||> U -> Root
  ||> S -> SawS
  ||> H -> SawH
  ||> E -> Root
  ||> R -> Root
 
 type Symbol -> Advance
-func defaultAdvance symbol =>
-    {
+func defaultAdvance = symbol=>    {
         next: defaultNext symbol,
         emitted: []
     }
 
 type AutomatonState -> Symbol -> Transition -> (Option Advance)
-func matchingAdvance state symbol transition => (transition.from == state) and (transition.symbol == symbol)
- T|> Some { next: transition.next, emitted: transition.emitted }
+func matchingAdvance = state symbol transition=> (transition.from == state) and (transition.symbol == symbol) T|> Some { next: transition.next, emitted: transition.emitted }
  F|> None
 
 value specialTransitions : List Transition = [
@@ -107,27 +103,22 @@ value specialTransitions : List Transition = [
 ]
 
 type AutomatonState -> Symbol -> Advance
-func advance state symbol => specialTransitions
-  |> findMap (matchingAdvance state symbol)
+func advance = state symbol=> specialTransitions  |> findMap (matchingAdvance state symbol)
  ||> Some step -> step
  ||> None      -> defaultAdvance symbol
 
 type List Text => (List Text) -> Advance -> ScanState
-func applyAdvance trail matches step => step
- ||> { next, emitted } -> { state: next, trail: append trail [stateName next], matches: append matches emitted }
+func applyAdvance = trail matches step=> step ||> { next, emitted } -> { state: next, trail: append trail [stateName next], matches: append matches emitted }
 
 type ScanState -> Symbol -> ScanState
-func step scan symbol => scan
- ||> { state, trail, matches } -> applyAdvance trail matches (advance state symbol)
+func step = scan symbol=> scan ||> { state, trail, matches } -> applyAdvance trail matches (advance state symbol)
 
 type List Text => Text -> Text -> Text
-func renderList items separator fallback => length items == 0
- T|> fallback
+func renderList = items separator fallback=> length items == 0 T|> fallback
  F|> join separator items
 
 type ScanState -> ScanSummary
-func summarize scan => scan
- ||> { state, trail, matches } -> { finalState: stateName state, trail: renderList trail " -> " "root", matches: renderList matches ", " "none" }
+func summarize = scan=> scan ||> { state, trail, matches } -> { finalState: stateName state, trail: renderList trail " -> " "root", matches: renderList matches ", " "none" }
 
 value initialScan : ScanState = {
     state: Root,

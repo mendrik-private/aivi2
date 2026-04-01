@@ -19,5 +19,4 @@ value minimalProfile : Profile = {
 }
 
 type Profile -> Text
-func profileName profile => profile
- ||> { name, nickname } -> name
+func profileName = profile=> profile ||> { name, nickname } -> name

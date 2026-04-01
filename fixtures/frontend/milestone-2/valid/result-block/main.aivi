@@ -1,6 +1,5 @@
 type Int -> Result Text Int
-func requirePositive value => value > 0
- T|> Ok value
+func requirePositive = value=> value > 0 T|> Ok value
  F|> Err "non-positive"
 
 value combined : Result Text Int =

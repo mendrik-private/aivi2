@@ -3567,8 +3567,7 @@ mod tests {
             "fun identity:Int x:Int =>\n\
              x\n\
              \n\
-             fun duplicate:List Int values:List Int =>\n\
-             values\n\
+             fun duplicate:List Int = values:List Int=>\n\             values\n\
               *|> identity\n",
         );
         assert!(
@@ -3658,8 +3657,7 @@ instance Semigroup Blob
         let lowered = lower_text(
             "general-expr-generic-append.aivi",
             r#"
-fun appendOne:(List A) items:(List A) item:A =>
-    append items [item]
+fun appendOne:(List A) = items:(List A) item:A=>    append items [item]
 "#,
         );
         assert!(
@@ -3727,11 +3725,9 @@ fun appendOne:(List A) items:(List A) item:A =>
             r#"
 signal direction : Signal Int = 1
 
-fun step:Int n:Int =>
-    n
+fun step:Int = n:Int=>    n
 
-fun current:Int tick:Unit =>
-    step direction
+fun current:Int = tick:Unit=>    step direction
 "#,
         );
         assert!(
@@ -3770,11 +3766,9 @@ fun current:Int tick:Unit =>
         let lowered = lower_text(
             "general-expr-generic-reduce.aivi",
             r#"
-fun lengthStep:Int total:Int item:A =>
-    total + 1
+fun lengthStep:Int = total:Int item:A=>    total + 1
 
-fun length:Int items:(List A) =>
-    items
+fun length:Int = items:(List A)=>    items
      |> reduce lengthStep 0
 "#,
         );
@@ -3957,13 +3951,11 @@ type TakeAcc A = {
     items: List A
 }
 
-fun takeStep:(TakeAcc A) acc:(TakeAcc A) item:A =>
-    acc.n > 0
+fun takeStep:(TakeAcc A) = acc:(TakeAcc A) item:A=>    acc.n > 0
      T|> { n: acc.n - 1, items: append acc.items [item] }
      F|> acc
 
-fun take:(List A) n:Int xs:(List A) =>
-    xs
+fun take:(List A) = n:Int xs:(List A)=>    xs
      |> reduce takeStep { n, items: [] }
      |> .items
 "#,
@@ -4054,13 +4046,11 @@ fun take:(List A) n:Int xs:(List A) =>
         let lowered = lower_text(
             "general-expr-generic-reduce-option-init.aivi",
             r#"
-fun keepFirst:(Option A) found:(Option A) item:A =>
-    found
+fun keepFirst:(Option A) = found:(Option A) item:A=>    found
      T|> found
      F|> Some item
 
-fun head:(Option A) items:(List A) =>
-    items
+fun head:(Option A) = items:(List A)=>    items
      |> reduce keepFirst None
 "#,
         );
@@ -4149,13 +4139,11 @@ fun head:(Option A) items:(List A) =>
         let lowered = lower_text(
             "general-expr-generic-reduce-partial-step.aivi",
             r#"
-fun anyStep:Bool predicate:(A -> Bool) found:Bool item:A =>
-    found
+fun anyStep:Bool = predicate:(A -> Bool) found:Bool item:A=>    found
      T|> True
      F|> predicate item
 
-fun any:Bool predicate:(A -> Bool) items:(List A) =>
-    items
+fun any:Bool = predicate:(A -> Bool) items:(List A)=>    items
      |> reduce (anyStep predicate) False
 "#,
         );

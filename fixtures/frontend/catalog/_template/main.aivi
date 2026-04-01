@@ -13,12 +13,10 @@ type CatalogOutput = {
 }
 
 type Int -> Int -> Int
-func sumStep total value =>
-    total + value
+func sumStep = total value=>    total + value
 
 type Option CatalogUser => Text
-func chooseLabel user => user
- T|> .name
+func chooseLabel = user=> user T|> .name
  F|> "guest"
 
 value sample : CatalogInput = {

@@ -59,8 +59,7 @@ use aivi.nonEmpty (
 )
 
 type Text -> (NonEmptyList Text)
-func wrapOne label =>
-    singleton label
+func wrapOne = label=>    singleton label
 ```
 
 ---
@@ -79,8 +78,7 @@ use aivi.nonEmpty (
 )
 
 type Int -> Int -> (NonEmptyList Int)
-func buildList first second =>
-    cons first (singleton second)
+func buildList = first second=>    cons first (singleton second)
 ```
 
 ---
@@ -99,8 +97,7 @@ use aivi.nonEmpty (
 )
 
 type (NonEmptyList Int) -> Int
-func firstOf nel =>
-    head nel
+func firstOf = nel=>    head nel
 ```
 
 ---
@@ -119,8 +116,7 @@ use aivi.nonEmpty (
 )
 
 type (NonEmptyList Int) -> Int
-func finalItem nel =>
-    last nel
+func finalItem = nel=>    last nel
 ```
 
 ---
@@ -140,8 +136,7 @@ use aivi.nonEmpty (
 )
 
 type (NonEmptyList Int) -> Int
-func countItems nel =>
-    length nel
+func countItems = nel=>    length nel
 ```
 
 ---
@@ -160,8 +155,7 @@ use aivi.nonEmpty (
 )
 
 type (NonEmptyList Int) -> (List Int)
-func asRegularList nel =>
-    toList nel
+func asRegularList = nel=>    toList nel
 ```
 
 ---
@@ -194,12 +188,10 @@ use aivi.nonEmpty (
 )
 
 type Int -> Int
-func double n =>
-    n * 2
+func double = n=>    n * 2
 
 type (NonEmptyList Int) -> (NonEmptyList Int)
-func doubleAll nel =>
-    mapNel double nel
+func doubleAll = nel=>    mapNel double nel
 ```
 
 ---
@@ -217,8 +209,7 @@ use aivi.nonEmpty (
 )
 
 type (List Int) -> (Option (NonEmptyList Int))
-func safeFromList items =>
-    fromList items
+func safeFromList = items=>    fromList items
 ```
 
 Use this when constructing a `NonEmptyList` from data whose size is not statically known, then handle the `None` case for empty input.
@@ -239,8 +230,7 @@ use aivi.nonEmpty (
 )
 
 type (NonEmptyList Text) -> (NonEmptyList Text) -> (NonEmptyList Text)
-func combineErrors a b =>
-    appendNel a b
+func combineErrors = a b=>    appendNel a b
 ```
 
 `appendNel` is used internally by `aivi.validation` to merge error lists from both sides of a failed `zipValidation`.

@@ -1,6 +1,5 @@
 type Int -> Text
-func formatCount count =>
-    "{count} unread"
+func formatCount = count=>    "{count} unread"
 
 value count = 3
 

@@ -13,12 +13,10 @@ type Result A = Err Text | Ok A
 value answer = 42
 
 type Int -> Int -> Int
-func add x y =>
-    x + y
+func add = x y=>    x + y
 
 type Int -> Result Int
-func defaultResult x =>
-    Ok x
+func defaultResult = x=>    Ok x
 
 signal counter = 0
 signal nextCounter = counter + 1

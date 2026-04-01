@@ -1,8 +1,7 @@
 type User = { email: Text }
 
 type User -> Text
-func displayEmail user =>
-    .email
+func displayEmail = user=>    .email
 
 value current = .
 value projection = .email

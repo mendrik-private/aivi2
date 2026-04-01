@@ -142,8 +142,7 @@ use aivi.fs (
 )
 
 type Text -> Text -> Task Text Unit
-func prependHeader path header =>
-    let headerBytes
+func prependHeader = path header=>    let headerBytes
 ```
 
 ::: tip

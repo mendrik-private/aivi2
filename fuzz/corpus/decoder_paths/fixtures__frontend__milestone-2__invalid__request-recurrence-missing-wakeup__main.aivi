@@ -1,5 +1,4 @@
-fun step #value =>
-    value
+fun step = #value=>    value
 
 @source http.get "/users"
 sig broken : Signal Int =

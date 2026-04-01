@@ -16,26 +16,21 @@ type Status =
   | Failed Text
 
 type User -> Option User
-func maybeActiveUser user => user
- ?|> (.active and .age > 18)
+func maybeActiveUser = user=> user ?|> (.active and .age > 18)
 
 type Status -> Text
-func statusLabel status => status
- ||> Paid          -> "paid"
+func statusLabel = status=> status ||> Paid          -> "paid"
  ||> Pending       -> "pending"
  ||> Failed reason -> "failed {reason}"
 
 type Bool -> Text
-func startOrWait ready => ready
- T|> "start"
+func startOrWait = ready=> ready T|> "start"
  F|> "wait"
 
 type Shipping -> Text
-func observeShipping shipping => shipping
-  |> .status
+func observeShipping = shipping=> shipping  |> .status
 
 type Order -> Text
-func shippingStatus order => order
-  |> .shipping
+func shippingStatus = order=> order  |> .shipping
   | observeShipping
   |> .status

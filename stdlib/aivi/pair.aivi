@@ -1,38 +1,29 @@
 type (A, B) -> A
-func fst pair => pair
- ||> (a, _) -> a
+func fst = pair=> pair ||> (a, _) -> a
 
 type (A, B) -> B
-func snd pair => pair
- ||> (_, b) -> b
+func snd = pair=> pair ||> (_, b) -> b
 
 type (A, B) -> (B, A)
-func swap pair => pair
- ||> (a, b) -> (b, a)
+func swap = pair=> pair ||> (a, b) -> (b, a)
 
 type (A -> C) -> (A, B) -> (C, B)
-func mapFst transform pair => pair
- ||> (a, b) -> (transform a, b)
+func mapFst = transform pair=> pair ||> (a, b) -> (transform a, b)
 
 type (B -> C) -> (A, B) -> (A, C)
-func mapSnd transform pair => pair
- ||> (a, b) -> (a, transform b)
+func mapSnd = transform pair=> pair ||> (a, b) -> (a, transform b)
 
 type (A -> C) -> (B -> D) -> (A, B) -> (C, D)
-func mapBoth transformFst transformSnd pair => pair
- ||> (a, b) -> (transformFst a, transformSnd b)
+func mapBoth = transformFst transformSnd pair=> pair ||> (a, b) -> (transformFst a, transformSnd b)
 
 type A -> B -> (A, B)
-func fromPair a b =>
-    (a, b)
+func fromPair = a b=>    (a, b)
 
 type A -> B -> (A, B)
-func toPair a b =>
-    (a, b)
+func toPair = a b=>    (a, b)
 
 type A -> (A, A)
-func duplicate item =>
-    (item, item)
+func duplicate = item=>    (item, item)
 
 export fst
 export snd

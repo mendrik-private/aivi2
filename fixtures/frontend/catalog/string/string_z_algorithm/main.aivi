@@ -27,51 +27,40 @@ type ZSummary = {
 }
 
 type (Text, Text) -> Bool
-func samePair pair => pair
- ||> (left, right) -> left == right
+func samePair = pair=> pair ||> (left, right) -> left == right
 
 type List Text => (List Text) -> Bool
-func pairedTokensMatch left right => zip left right
-  |> all samePair
+func pairedTokensMatch = left right=> zip left right  |> all samePair
 
 type Int -> Int -> Bool
-func sameCount left right =>
-    left == right
+func sameCount = left right=>    left == right
 
 type List Text => (List Text) -> Bool
-func sameTokens left right => sameCount (length left) (length right)
- T|> pairedTokensMatch left right
+func sameTokens = left right=> sameCount (length left) (length right) T|> pairedTokensMatch left right
  F|> False
 
 type Int -> (List Text) -> (List Text) -> (Option Int)
-func matchedWhenEqual matched prefix slice => sameTokens prefix slice
- T|> Some matched
+func matchedWhenEqual = matched prefix slice=> sameTokens prefix slice T|> Some matched
  F|> None
 
 type PrefixCandidate -> (Option Int)
-func matchingLength candidate => candidate
- ||> { matched, prefix, slice } -> matchedWhenEqual matched prefix slice
+func matchingLength = candidate=> candidate ||> { matched, prefix, slice } -> matchedWhenEqual matched prefix slice
 
 type List PrefixCandidate => Int
-func matchedLength candidates => findMap matchingLength candidates
- ||> Some matched -> matched
+func matchedLength = candidates=> findMap matchingLength candidates ||> Some matched -> matched
  ||> None         -> 0
 
 type ZProbe -> Int
-func zValue probe => probe
- ||> { candidates } -> matchedLength candidates
+func zValue = probe=> probe ||> { candidates } -> matchedLength candidates
 
 type List Int => ZProbe -> (List Int)
-func appendZ values probe =>
-    append values [zValue probe]
+func appendZ = values probe=>    append values [zValue probe]
 
 type Int -> ZProbe -> Int
-func probeMatchIndex patternLength probe => probe
- ||> { index } -> index - (patternLength + 1)
+func probeMatchIndex = patternLength probe=> probe ||> { index } -> index - (patternLength + 1)
 
 type Int -> (List Int) -> ZProbe -> (List Int)
-func keepMatch patternLength matches probe => zValue probe == patternLength
- T|> append matches [probeMatchIndex patternLength probe]
+func keepMatch = patternLength matches probe=> zValue probe == patternLength T|> append matches [probeMatchIndex patternLength probe]
  F|> matches
 
 value pattern : Text = "aba"

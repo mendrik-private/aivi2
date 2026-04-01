@@ -32,8 +32,7 @@ Returns `True` if the result is `Ok`.
 use aivi.result (isOk)
 
 type (Result Text Int) -> Bool
-func succeeded result =>
-    isOk result
+func succeeded = result=>    isOk result
 ```
 
 ---
@@ -48,8 +47,7 @@ Returns `True` if the result is `Err`.
 use aivi.result (isErr)
 
 type (Result Text Int) -> Bool
-func failed result =>
-    isErr result
+func failed = result=>    isErr result
 ```
 
 ---
@@ -64,12 +62,10 @@ Transforms the error inside `Err`, leaving `Ok` untouched.
 use aivi.result (mapErr)
 
 type Text -> Int
-func toCode message =>
-    42
+func toCode = message=>    42
 
 type (Result Text Int) -> (Result Int Int)
-func withErrorCode r => r
-  |> mapErr toCode
+func withErrorCode = r=> r  |> mapErr toCode
 ```
 
 ---
@@ -84,8 +80,7 @@ Extracts the value from `Ok`, or returns the fallback if `Err`.
 use aivi.result (withDefault)
 
 type (Result Text Int) -> Int
-func safeScore result =>
-    withDefault 0 result
+func safeScore = result=>    withDefault 0 result
 ```
 
 ---
@@ -100,8 +95,7 @@ Returns the result unchanged if it is `Ok`, otherwise returns the fallback resul
 use aivi.result (orElse)
 
 type (Result Text Int) -> (Result Text Int) -> (Result Text Int)
-func withFallback primary secondary => primary
-  |> orElse secondary
+func withFallback = primary secondary=> primary  |> orElse secondary
 ```
 
 ---
@@ -116,13 +110,11 @@ Chains a `Result`-returning function over an `Ok` value. Propagates `Err` withou
 use aivi.result (flatMap)
 
 type Int -> (Result Text Int)
-func ensurePositive n => n > 0
- T|> Ok n
+func ensurePositive = n=> n > 0 T|> Ok n
  F|> Err "must be positive"
 
 type (Result Text Int) -> (Result Text Int)
-func validateCount result => result
-  |> flatMap ensurePositive
+func validateCount = result=> result  |> flatMap ensurePositive
 ```
 
 ---
@@ -137,8 +129,7 @@ Removes one layer of nesting from a `Result E (Result E A)`.
 use aivi.result (flatten)
 
 type (Result Text (Result Text Int)) -> (Result Text Int)
-func unwrapNested r =>
-    flatten r
+func unwrapNested = r=>    flatten r
 ```
 
 ---
@@ -153,8 +144,7 @@ Converts a `Result` to an `Option`, discarding the error. `Ok value` becomes `So
 use aivi.result (toOption)
 
 type (Result Text Int) -> (Option Int)
-func justValue result =>
-    toOption result
+func justValue = result=>    toOption result
 ```
 
 ---
@@ -169,8 +159,7 @@ Converts `Ok value` to a one-element list, or `Err` to an empty list.
 use aivi.result (toList)
 
 type (Result Text Int) -> (List Int)
-func resultItems result =>
-    toList result
+func resultItems = result=>    toList result
 ```
 
 ---
@@ -185,12 +174,10 @@ Transforms the value inside `Ok` using a function, leaving `Err` untouched.
 use aivi.result (map)
 
 type Int -> Int
-func double n =>
-    n * 2
+func double = n=>    n * 2
 
 type (Result Text Int) -> (Result Text Int)
-func doubleResult result => result
-  |> map double
+func doubleResult = result=> result  |> map double
 ```
 
 ---
@@ -205,16 +192,13 @@ Transforms both sides of a `Result` simultaneously: `onErr` for `Err`, `onOk` fo
 use aivi.result (mapBoth)
 
 type Text -> Int
-func toCode message =>
-    500
+func toCode = message=>    500
 
 type Int -> Int
-func double n =>
-    n * 2
+func double = n=>    n * 2
 
 type (Result Text Int) -> (Result Int Int)
-func normalise result =>
-    mapBoth toCode double result
+func normalise = result=>    mapBoth toCode double result
 ```
 
 ---
@@ -229,16 +213,13 @@ Collapses a `Result` to a single value by applying `onOk` to `Ok` or `onErr` to 
 use aivi.result (fold)
 
 type Text -> Int
-func zero ignored =>
-    0
+func zero = ignored=>    0
 
 type Int -> Int
-func identity n =>
-    n
+func identity = n=>    n
 
 type (Result Text Int) -> Int
-func resultToInt result =>
-    fold zero identity result
+func resultToInt = result=>    fold zero identity result
 ```
 
 ---
@@ -253,6 +234,5 @@ Converts an `Option` to a `Result`. `Some value` becomes `Ok value`; `None` beco
 use aivi.result (fromOption)
 
 type (Option Int) -> (Result Text Int)
-func requireAge opt =>
-    fromOption "Age is required" opt
+func requireAge = opt=>    fromOption "Age is required" opt
 ```

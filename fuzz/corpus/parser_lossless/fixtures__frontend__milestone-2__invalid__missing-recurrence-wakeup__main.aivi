@@ -1,5 +1,4 @@
-fun step #value =>
-    value
+fun step = #value=>    value
 
 sig broken : Signal Int =
     0

@@ -1,46 +1,36 @@
 type (A -> A -> Bool) -> A -> A -> A
-func chooseMin compare best candidate => compare candidate best
- T|> candidate
+func chooseMin = compare best candidate=> compare candidate best T|> candidate
  F|> best
 
 type (A -> A -> Bool) -> A -> A -> A
-func chooseMax compare best candidate => compare best candidate
- T|> candidate
+func chooseMax = compare best candidate=> compare best candidate T|> candidate
  F|> best
 
 type (A -> A -> Bool) -> A -> A -> A
-func min compare left right =>
-    chooseMin compare left right
+func min = compare left right=>    chooseMin compare left right
 
 type (A -> A -> Bool) -> A -> A -> A
-func max compare left right =>
-    chooseMax compare left right
+func max = compare left right=>    chooseMax compare left right
 
 type (A -> A -> Bool) -> A -> (List A) -> A
-func minOf compare first rest => rest
-  |> reduce (chooseMin compare) first
+func minOf = compare first rest=> rest  |> reduce (chooseMin compare) first
 
 type (A -> A -> Bool) -> A -> (List A) -> A
-func maxOf compare first rest => rest
-  |> reduce (chooseMax compare) first
+func maxOf = compare first rest=> rest  |> reduce (chooseMax compare) first
 
 type (A -> A -> Bool) -> A -> A -> A
-func clampToMax compare high value => compare high value
- T|> high
+func clampToMax = compare high value=> compare high value T|> high
  F|> value
 
 type (A -> A -> Bool) -> A -> A -> A -> A
-func clamp compare low high value => compare value low
- T|> low
+func clamp = compare low high value=> compare value low T|> low
  F|> clampToMax compare high value
 
 type (A -> A -> Bool) -> A -> A -> Bool
-func reversed compare left right =>
-    compare right left
+func reversed = compare left right=>    compare right left
 
 type (A -> B) -> (B -> B -> Bool) -> A -> A -> Bool
-func comparing project compare left right =>
-    compare (project left) (project right)
+func comparing = project compare left right=>    compare (project left) (project right)
 
 export min
 export max

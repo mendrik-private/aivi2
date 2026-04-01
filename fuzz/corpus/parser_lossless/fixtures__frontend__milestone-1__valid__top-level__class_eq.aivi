@@ -1,5 +1,4 @@
 class Eq A
     (==) : A -> A -> Bool
 
-fun equivalent:Bool #left:Int #right:Int =>
-    left == right and left != 0
+fun equivalent:Bool = #left:Int #right:Int=>    left == right and left != 0

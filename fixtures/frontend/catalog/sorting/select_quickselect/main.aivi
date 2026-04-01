@@ -19,55 +19,44 @@ type QuickselectSummary = {
 }
 
 type Int -> Int -> Bool
-func lowerThan pivot x =>
-    x < pivot
+func lowerThan = pivot x=>    x < pivot
 
 type Int -> Int -> Bool
-func equalTo pivot x =>
-    x == pivot
+func equalTo = pivot x=>    x == pivot
 
 type List Int => Int -> (List Int) -> Buckets
-func classifyRest lower pivot rest => rest
-  |> partition (equalTo pivot)
+func classifyRest = lower pivot rest=> rest  |> partition (equalTo pivot)
  ||> { matched: equal, unmatched: higher } -> { lower, equal, higher }
 
 type Int -> (List Int) -> Buckets
-func classify pivot items => items
-  |> partition (lowerThan pivot)
+func classify = pivot items=> items  |> partition (lowerThan pivot)
  ||> { matched: lower, unmatched: rest } -> classifyRest lower pivot rest
 
 type Int -> (Option Int) -> Int
-func withFallback fallback x => x
- ||> Some found -> found
+func withFallback = fallback x=> x ||> Some found -> found
  ||> None       -> fallback
 
 type Option Int => Bool
-func isMissing x => x
- ||> None   -> True
+func isMissing = x=> x ||> None   -> True
  ||> Some _ -> False
 
 type Int -> (List Int) -> (List Int) -> (List Int) -> (Option Int)
-func chooseUpper rank lower equal higher => rank > length lower + length equal - 1
- T|> quickselect (rank - length lower - length equal) higher
+func chooseUpper = rank lower equal higher=> rank > length lower + length equal - 1 T|> quickselect (rank - length lower - length equal) higher
  F|> head equal
 
 type Int -> (List Int) -> (List Int) -> (List Int) -> (Option Int)
-func chooseRank rank lower equal higher => rank < length lower
- T|> quickselect rank lower
+func chooseRank = rank lower equal higher=> rank < length lower T|> quickselect rank lower
  F|> chooseUpper rank lower equal higher
 
 type Int -> { lower: (List Int), equal: (List Int), higher: (List Int) } -> (Option Int)
-func selectFromClassified rank classified => classified
- ||> { lower, equal, higher } -> chooseRank rank lower equal higher
+func selectFromClassified = rank classified=> classified ||> { lower, equal, higher } -> chooseRank rank lower equal higher
 
 type Int -> (List Int) -> Int -> (Option Int)
-func classifyAndSelect rank items pivot => items
-  |> classify pivot
+func classifyAndSelect = rank items pivot=> items  |> classify pivot
   |> selectFromClassified rank
 
 type Int -> (List Int) -> (Option Int)
-func quickselect rank items => head items
- ||> None       -> None
+func quickselect = rank items=> head items ||> None       -> None
  ||> Some pivot -> classifyAndSelect rank items pivot
 
 value sample : List Int = [

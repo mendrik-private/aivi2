@@ -30,8 +30,7 @@ identity : A -> A
 use aivi.core.fn (identity)
 
 type Int -> Int
-func keepAsIs n =>
-    identity n
+func keepAsIs = n=>    identity n
 ```
 
 ---
@@ -48,8 +47,7 @@ const : A -> B -> A
 use aivi.core.fn (const)
 
 type Text -> Int
-func alwaysForty ignored =>
-    const 42 ignored
+func alwaysForty = ignored=>    const 42 ignored
 ```
 
 ---
@@ -68,8 +66,7 @@ use aivi.core.fn (flip)
 use aivi.math (clamp)
 
 type Int -> Int -> Int -> Int
-func clampFlipped high low n =>
-    flip clamp high low n
+func clampFlipped = high low n=>    flip clamp high low n
 ```
 
 ---
@@ -91,8 +88,7 @@ use aivi.math (
 )
 
 type Int -> Int
-func negAbs n =>
-    compose negate abs n
+func negAbs = n=>    compose negate abs n
 ```
 
 ---
@@ -114,8 +110,7 @@ use aivi.math (
 )
 
 type Int -> Int
-func absNeg n =>
-    andThen abs negate n
+func absNeg = n=>    andThen abs negate n
 ```
 
 ---
@@ -132,8 +127,7 @@ always : A -> B -> A
 use aivi.core.fn (always)
 
 type Text -> Int
-func constantZero ignored =>
-    always 0 ignored
+func constantZero = ignored=>    always 0 ignored
 ```
 
 ---
@@ -152,12 +146,10 @@ use aivi.core.fn (on)
 use aivi.math (abs)
 
 type Int -> Int -> Bool
-func byInt left right =>
-    left < right
+func byInt = left right=>    left < right
 
 type Int -> Int -> Bool
-func absCompare x y =>
-    on byInt abs x y
+func absCompare = x y=>    on byInt abs x y
 ```
 
 ---
@@ -176,8 +168,7 @@ use aivi.core.fn (applyTo)
 use aivi.math (abs)
 
 type Int -> Int
-func applyAbs n =>
-    applyTo n abs
+func applyAbs = n=>    applyTo n abs
 ```
 
 ---
@@ -196,6 +187,5 @@ use aivi.core.fn (applyTwice)
 use aivi.math (square)
 
 type Int -> Int
-func fourthPower n =>
-    applyTwice square n
+func fourthPower = n=>    applyTwice square n
 ```

@@ -21,43 +21,35 @@ type QueueSummary = {
 }
 
 type Entry -> Entry -> Bool
-func earlier left right =>
-    left.priority < right.priority or left.priority == right.priority
+func earlier = left right=>    left.priority < right.priority or left.priority == right.priority
 
 type Entry -> (List Heap) -> Entry -> (List Heap) -> Heap
-func mergeNodes leftEntry leftChildren rightEntry rightChildren => earlier leftEntry rightEntry
- T|> Node leftEntry (append [Node rightEntry rightChildren] leftChildren)
+func mergeNodes = leftEntry leftChildren rightEntry rightChildren=> earlier leftEntry rightEntry T|> Node leftEntry (append [Node rightEntry rightChildren] leftChildren)
  F|> Node rightEntry (append [Node leftEntry leftChildren] rightChildren)
 
 type Heap -> Heap -> Heap
-func merge left right => (left, right)
- ||> (Empty, other)                                               -> other
+func merge = left right=> (left, right) ||> (Empty, other)                                               -> other
  ||> (other, Empty)                                               -> other
  ||> (Node leftEntry leftChildren, Node rightEntry rightChildren) -> mergeNodes leftEntry leftChildren rightEntry rightChildren
 
 type List Heap => Heap
-func mergePairs children => children
- ||> []                            -> Empty
+func mergePairs = children=> children ||> []                            -> Empty
  ||> [first]                       -> first
  ||> [first, second, ...remaining] -> merge (merge first second) (mergePairs remaining)
 
 type Heap -> Entry -> Heap
-func insert heap entry =>
-    merge heap (Node entry [])
+func insert = heap entry=>    merge heap (Node entry [])
 
 type Heap -> Pop
-func pop heap => heap
- ||> Empty               -> { entry: None, rest: Empty }
+func pop = heap=> heap ||> Empty               -> { entry: None, rest: Empty }
  ||> Node entry children -> { entry: Some entry, rest: mergePairs children }
 
 type Option Entry => Text
-func labelOf x => x
- ||> Some entry -> entry.label
+func labelOf = x=> x ||> Some entry -> entry.label
  ||> None       -> "empty"
 
 type Option Entry => Bool
-func isEmptyEntry x => x
- ||> None   -> True
+func isEmptyEntry = x=> x ||> None   -> True
  ||> Some _ -> False
 
 value tasks : List Entry = [

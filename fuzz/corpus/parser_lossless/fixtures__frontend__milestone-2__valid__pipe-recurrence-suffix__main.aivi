@@ -1,5 +1,4 @@
-fun step #value =>
-    value
+fun step = #value=>    value
 
 @source timer.every 120 with {
     immediate: True

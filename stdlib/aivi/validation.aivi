@@ -7,76 +7,61 @@ type Errors E =
   | NonEmptyList E
 
 type NonEmptyList E => (NonEmptyList E) -> (Validation (NonEmptyList E) (A, B))
-func zipBothInvalid le re =>
-    Invalid (appendNel le re)
+func zipBothInvalid = le re=>    Invalid (appendNel le re)
 
 type NonEmptyList E => (Validation (NonEmptyList E) B) -> (Validation (NonEmptyList E) (A, B))
-func zipInvalidLeft le right => right
- ||> Invalid re -> zipBothInvalid le re
+func zipInvalidLeft = le right=> right ||> Invalid re -> zipBothInvalid le re
  ||> Valid _    -> Invalid le
 
 type A -> B -> (Validation (NonEmptyList E) (A, B))
-func zipValidRight a b =>
-    Valid (a, b)
+func zipValidRight = a b=>    Valid (a, b)
 
 type A -> (Validation (NonEmptyList E) B) -> (Validation (NonEmptyList E) (A, B))
-func zipValidLeft a right => right
- ||> Invalid re -> Invalid re
+func zipValidLeft = a right=> right ||> Invalid re -> Invalid re
  ||> Valid b    -> zipValidRight a b
 
 type Validation E A => Bool
-func isValid opt => opt
- T|> True
+func isValid = opt=> opt T|> True
  F|> False
 
 type Validation E A => Bool
-func isInvalid opt => opt
- F|> True
+func isInvalid = opt=> opt F|> True
  T|> False
 
 type A -> (Validation E A) -> A
-func getOrElse fallback opt => opt
- ||> Valid item -> item
+func getOrElse = fallback opt=> opt ||> Valid item -> item
  ||> Invalid _  -> fallback
 
 type (E1 -> E2) -> (Validation E1 A) -> (Validation E2 A)
-func mapErr transform opt => opt
- ||> Valid item  -> Valid item
+func mapErr = transform opt=> opt ||> Valid item  -> Valid item
  ||> Invalid err -> Invalid (transform err)
 
 type Validation E A => (Result E A)
-func toResult opt => opt
- ||> Valid item  -> Ok item
+func toResult = opt=> opt ||> Valid item  -> Ok item
  ||> Invalid err -> Err err
 
 type Result E A => (Validation E A)
-func fromResult opt => opt
- ||> Ok item   -> Valid item
+func fromResult = opt=> opt ||> Ok item   -> Valid item
  ||> Err error -> Invalid error
 
 type Validation E A => (Option A)
-func toOption opt => opt
- T|> Some
+func toOption = opt=> opt T|> Some
  F|> None
 
 type (A -> B) -> (Validation E A) -> (Validation E B)
-func map transform opt => opt
- ||> Invalid e  -> Invalid e
+func map = transform opt=> opt ||> Invalid e  -> Invalid e
  ||> Valid item -> Valid (transform item)
 
 type (A -> Validation E B) -> (Validation E A) -> (Validation E B)
-func andThen next opt => opt
- ||> Invalid e  -> Invalid e
+func andThen = next opt=> opt ||> Invalid e  -> Invalid e
  ||> Valid item -> next item
 
 type Validation (NonEmptyList E) A => (Validation (NonEmptyList E) B) -> (Validation (NonEmptyList E) (A, B))
-func zipValidation left right => left
- ||> Invalid le -> zipInvalidLeft le right
+func zipValidation = left right=> left ||> Invalid le -> zipInvalidLeft le right
  ||> Valid a    -> zipValidLeft a right
 
 type (E -> B) -> (A -> B) -> (Validation E A) -> B
-func fold onInvalid onValid opt => opt
- ||> Invalid e  -> onInvalid e
+func fold = onInvalid onValid opt=> opt ||> Invalid e  -> onInvalid e
  ||> Valid item -> onValid item
 
 export Errors

@@ -221,60 +221,47 @@ type __AiviListTailState A = {
     items: List A
 }
 
-fun __aivi_option_getOrElse:A fallback:A opt:(Option A) =>
-    opt
+fun __aivi_option_getOrElse:A = fallback:A opt:(Option A)=>    opt
      ||> Some item -> item
      ||> None      -> fallback
 
-fun __aivi_list_keepSome:(Option A) item:A =>
-    Some item
+fun __aivi_list_keepSome:(Option A) = item:A=>    Some item
 
-fun __aivi_list_keepFirst:(Option A) found:(Option A) item:A =>
-    found
+fun __aivi_list_keepFirst:(Option A) = found:(Option A) item:A=>    found
      T|> __aivi_list_keepSome
      F|> Some item
 
-fun __aivi_list_lengthStep:Int total:Int item:A =>
-    total + 1
+fun __aivi_list_lengthStep:Int = total:Int item:A=>    total + 1
 
-fun __aivi_list_length:Int items:(List A) =>
-    items
+fun __aivi_list_length:Int = items:(List A)=>    items
      |> reduce __aivi_list_lengthStep 0
 
-fun __aivi_list_head:(Option A) items:(List A) =>
-    items
+fun __aivi_list_head:(Option A) = items:(List A)=>    items
      |> reduce __aivi_list_keepFirst None
 
-fun __aivi_list_tailState:(__AiviListTailState A) items:(List A) item:A seenFirst:Bool =>
-    seenFirst
+fun __aivi_list_tailState:(__AiviListTailState A) = items:(List A) item:A seenFirst:Bool=>    seenFirst
      T|> { seenFirst: True, items: append items [item] }
      F|> { seenFirst: True, items: [] }
 
-fun __aivi_list_tailStep:(__AiviListTailState A) state:(__AiviListTailState A) item:A =>
-    state
+fun __aivi_list_tailStep:(__AiviListTailState A) = state:(__AiviListTailState A) item:A=>    state
      ||> { seenFirst, items } -> __aivi_list_tailState items item seenFirst
 
-fun __aivi_list_tailItems:(Option (List A)) items:(List A) seenFirst:Bool =>
-    seenFirst
+fun __aivi_list_tailItems:(Option (List A)) = items:(List A) seenFirst:Bool=>    seenFirst
      T|> Some items
      F|> None
 
-fun __aivi_list_tailFromState:(Option (List A)) state:(__AiviListTailState A) =>
-    state
+fun __aivi_list_tailFromState:(Option (List A)) = state:(__AiviListTailState A)=>    state
      ||> { seenFirst, items } -> __aivi_list_tailItems items seenFirst
 
-fun __aivi_list_tail:(Option (List A)) items:(List A) =>
-    items
+fun __aivi_list_tail:(Option (List A)) = items:(List A)=>    items
      |> reduce __aivi_list_tailStep { seenFirst: False, items: [] }
      |> __aivi_list_tailFromState
 
-fun __aivi_list_anyStep:Bool predicate:(A -> Bool) found:Bool item:A =>
-    found
+fun __aivi_list_anyStep:Bool = predicate:(A -> Bool) found:Bool item:A=>    found
      T|> True
      F|> predicate item
 
-fun __aivi_list_any:Bool predicate:(A -> Bool) items:(List A) =>
-    items
+fun __aivi_list_any:Bool = predicate:(A -> Bool) items:(List A)=>    items
      |> reduce (__aivi_list_anyStep predicate) False
 
 "#;
@@ -8799,8 +8786,7 @@ type User = {
 domain Retry over Int
     literal times : Int -> Retry
 
-fun keepCount:Int response:(Result HttpError (List User)) current:Int =>
-    current
+fun keepCount:Int = response:(Result HttpError (List User)) current:Int=>    current
 
 @source http.get "/users" with {
     retry: 3times
@@ -9306,8 +9292,7 @@ domain Duration over Int
 domain Retry over Int
     literal times : Int -> Retry
 
-fun step x =>
-    x
+fun step = x=>    x
 
 @recur.timer
 signal bare : Signal Int =
@@ -9678,8 +9663,7 @@ signal updates : Signal Int
             "signal-helper-dependencies.aivi",
             "signal direction : Signal Int = 1\n\
              signal tick : Signal Int = 0\n\
-             fun stepOnTick:Int tick:Int => direction\n\
-             signal game : Signal Int = stepOnTick tick\n",
+             fun stepOnTick:Int = tick:Int=> direction\n\             signal game : Signal Int = stepOnTick tick\n",
         );
         assert!(
             !lowered.has_errors(),
@@ -10108,9 +10092,7 @@ signal updates : Signal Int
         let lowered = lower_text(
             "recurrence-suffix-view.aivi",
             "fun keep x => x\n\
-             fun start x => x\n\
-             fun step x => x\n\
-             signal retried = 0 |> keep | keep @|> start <|@ step <|@ step\n",
+             fun start = x=> x\n\             fun step = x=> x\n\             signal retried = 0 |> keep | keep @|> start <|@ step <|@ step\n",
         );
         assert!(
             !lowered.has_errors(),
@@ -10168,8 +10150,7 @@ signal updates : Signal Int
             "domain Duration over Int\n\
              \tliteral sec : Int -> Duration\n\
              type Cursor = { hasNext: Bool }\n\
-             fun keep:Cursor cursor:Cursor => cursor\n\
-             value seed:Cursor = { hasNext: True }\n\
+             fun keep:Cursor = cursor:Cursor=> cursor\n\             value seed:Cursor = { hasNext: True }\n\
              @recur.timer 1sec\n\
              signal cursor : Signal Cursor =\n\
               seed\n\
@@ -10204,8 +10185,7 @@ signal updates : Signal Int
         let lowered = lower_text(
             "fanout-filter-before-join.aivi",
             "type User = { email: Text }\n\
-             fun keepText:Bool email:Text => True\n\
-             fun joinEmails:Text items:List Text => \"joined\"\n\
+             fun keepText:Bool = email:Text=> True\n\             fun joinEmails:Text items:List Text => \"joined\"\n\
              value users:List User = [{ email: \"ada@example.com\" }]\n\
              value joinedEmails:Text =\n\
               users\n\
@@ -10225,8 +10205,7 @@ signal updates : Signal Int
         let lowered = lower_text(
             "standalone-function-signature.aivi",
             "type List Text -> Text\n\
-             func joinEmails items => \"joined\"\n",
-        );
+             func joinEmails = items=> \"joined\"\n",        );
         assert!(
             !lowered.has_errors(),
             "standalone function signature lines should lower cleanly: {:?}",
@@ -10302,8 +10281,7 @@ signal updates : Signal Int
         let lowered = lower_text(
             "standalone-function-signature-with-constraint.aivi",
             "type Setoid Text -> Text -> Bool\n\
-             func same text => True\n",
-        );
+             func same = text=> True\n",        );
         assert!(
             !lowered.has_errors(),
             "class constraints should remain intact while normalizing function signatures: {:?}",
@@ -10350,8 +10328,7 @@ signal updates : Signal Int
         let lowered = lower_text(
             "standalone-function-signature-legacy-constraint-arrow.aivi",
             "type List Text => Text\n\
-             func joinEmails items => \"joined\"\n",
-        );
+             func joinEmails = items=> \"joined\"\n",        );
         assert!(
             !lowered.has_errors(),
             "legacy formatter output should still normalize into parameter annotations: {:?}",

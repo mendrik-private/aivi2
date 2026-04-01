@@ -46,30 +46,24 @@ use aivi.text (
 )
 
 type Int -> Bool
-func positive x =>
-    x > 0
+func positive = x=>    x > 0
 
 type Int -> Bool
-func even x =>
-    x == 2 or x == 4
+func even = x=>    x == 2 or x == 4
 
 type Text -> (Option Text)
-func adminIfAda name => name == "Ada"
- T|> Some "admin"
+func adminIfAda = name=> name == "Ada" T|> Some "admin"
  F|> None
 
 type Text -> Text
-func prefixError message =>
-    "error:{message}"
+func prefixError = message=>    "error:{message}"
 
 type Int -> (Result Text Int)
-func lessThanTen x => x < 10
- T|> Ok x
+func lessThanTen = x=> x < 10 T|> Ok x
  F|> Err "too-large"
 
 type Int -> (Option Text)
-func onlyTwo x => x == 2
- T|> Some "two"
+func onlyTwo = x=> x == 2 T|> Some "two"
  F|> None
 
 value emptyNumbers : List Int = []

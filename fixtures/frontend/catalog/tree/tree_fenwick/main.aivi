@@ -24,41 +24,33 @@ type FenwickSummary = {
 }
 
 type Int -> Int -> Bool
-func matchesIndex target x =>
-    x == target
+func matchesIndex = target x=>    x == target
 
 type List Int => Int -> FenwickNode -> Int
-func addIfOnPath path total node => any (matchesIndex node.index) path
- T|> total + node.total
+func addIfOnPath = path total node=> any (matchesIndex node.index) path T|> total + node.total
  F|> total
 
 type Update -> FenwickNode -> Bool
-func withinNode update node =>
-    update.index > node.start - 1 and update.index < node.index + 1
+func withinNode = update node=>    update.index > node.start - 1 and update.index < node.index + 1
 
 type Update -> FenwickNode -> FenwickNode
-func applyNode update node => withinNode update node
- T|> { index: node.index, start: node.start, total: node.total + update.delta }
+func applyNode = update node=> withinNode update node T|> { index: node.index, start: node.start, total: node.total + update.delta }
  F|> node
 
 type Update -> (List FenwickNode) -> FenwickNode -> (List FenwickNode)
-func appendUpdatedNode update nodes node =>
-    append nodes [
+func appendUpdatedNode = update nodes node=>    append nodes [
         applyNode update node
     ]
 
 type List FenwickNode => Update -> (List FenwickNode)
-func applyUpdate tree update => tree
-  |> reduce (appendUpdatedNode update) []
+func applyUpdate = tree update=> tree  |> reduce (appendUpdatedNode update) []
 
 type Int -> Int -> (List Int) -> (Option (List Int))
-func selectKnownPath target index path => index == target
- T|> Some path
+func selectKnownPath = target index path=> index == target T|> Some path
  F|> None
 
 type Int -> (Int, List Int) -> (Option (List Int))
-func selectPrefixPath target entry => entry
- ||> (index, path) -> selectKnownPath target index path
+func selectPrefixPath = target entry=> entry ||> (index, path) -> selectKnownPath target index path
 
 value prefixPaths : List (Int, List Int) = [
     (0, []),
@@ -73,23 +65,19 @@ value prefixPaths : List (Int, List Int) = [
 ]
 
 type Int -> (List Int)
-func prefixPath target => prefixPaths
-  |> findMap (selectPrefixPath target)
+func prefixPath = target=> prefixPaths  |> findMap (selectPrefixPath target)
  ||> Some path -> path
  ||> None      -> []
 
 type List FenwickNode => Int -> Int
-func prefixSum tree target => tree
-  |> reduce (addIfOnPath (prefixPath target)) 0
+func prefixSum = tree target=> tree  |> reduce (addIfOnPath (prefixPath target)) 0
 
 type Int -> FenwickNode -> (Option Int)
-func selectNodeTotal target node => node.index == target
- T|> Some node.total
+func selectNodeTotal = target node=> node.index == target T|> Some node.total
  F|> None
 
 type List FenwickNode => Int -> Int
-func bucketTotal tree target => tree
-  |> findMap (selectNodeTotal target)
+func bucketTotal = tree target=> tree  |> findMap (selectNodeTotal target)
  ||> Some total -> total
  ||> None       -> 0
 

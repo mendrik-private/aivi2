@@ -221,8 +221,7 @@ class Eq A
 value answer = 42
 
 type Int -> Int -> Int
-func add x y =>
-    x + y
+func add = x y=>    x + y
 
 signal counter = 0
 
@@ -261,20 +260,17 @@ value greeting = "hello"
 
 ```aivi
 type Int -> Int -> Int
-func add x y =>
-    x + y
+func add = x y=>    x + y
 
 type Text -> Text
-func greet name =>
-    "Hello, {name}"
+func greet = name=>    "Hello, {name}"
 ```
 
 `value` is a **contextual keyword**: it is also a valid identifier and parameter name. The following is valid AIVI — the parameter is named `value`:
 
 ```aivi
 type Int -> Int
-func absolute value => value < 0
- T|> 0 - value
+func absolute = value=> value < 0 T|> 0 - value
  F|> value
 ```
 
@@ -673,8 +669,7 @@ class Container A
     contains : A -> List A -> Bool
 
 type Eq A => A -> Bool
-func same v =>
-    v == v
+func same = v=>    v == v
 
 instance Eq A => Eq (Option A)
     (==) left right = True
@@ -1336,8 +1331,7 @@ signal counter : Signal Int = tick
  +|> 0 step
 
 type Unit -> Int -> Int
-func step tick current =>
-    current + 1
+func step = tick current=>    current + 1
 ```
 
 Checked form: `signalSource +|> seed step`
@@ -1554,8 +1548,7 @@ signal counter : Signal Int = tick
  +|> 0 step
 
 type Unit -> Int -> Int
-func step tick current =>
-    current + 1
+func step = tick current=>    current + 1
 ```
 
 Normative rules:
@@ -1741,8 +1734,7 @@ signal counter : Signal Int = tick
  +|> 0 step
 
 type Unit -> Int -> Int
-func step tick current =>
-    current + 1
+func step = tick current=>    current + 1
 ```
 
 ### 14.1.3 Recommended source variants

@@ -61,79 +61,64 @@ value negativeWeightEdge : WeightedEdge = {
 value negativeCycleWitness : Text = "mid -> detour -> mid"
 
 type Node -> A -> A -> A -> A -> A -> A
-func chooseNode node source mid detour goal stranded => node
- ||> Source   -> source
+func chooseNode = node source mid detour goal stranded=> node ||> Source   -> source
  ||> Mid      -> mid
  ||> Detour   -> detour
  ||> Goal     -> goal
  ||> Stranded -> stranded
 
 type Distance -> Text
-func distanceText distance => distance
- ||> Unreachable -> "unreachable"
+func distanceText = distance=> distance ||> Unreachable -> "unreachable"
  ||> Cost x      -> "{x}"
 
 type Distances -> Node -> Distance
-func distanceOf distances node =>
-    chooseNode node distances.source distances.mid distances.detour distances.goal distances.stranded
+func distanceOf = distances node=>    chooseNode node distances.source distances.mid distances.detour distances.goal distances.stranded
 
 type Distances -> Node -> Distance -> Distances
-func setDistance distances node x => node
- ||> Source   -> { source: x, mid: distances.mid, detour: distances.detour, goal: distances.goal, stranded: distances.stranded }
+func setDistance = distances node x=> node ||> Source   -> { source: x, mid: distances.mid, detour: distances.detour, goal: distances.goal, stranded: distances.stranded }
  ||> Mid      -> { source: distances.source, mid: x, detour: distances.detour, goal: distances.goal, stranded: distances.stranded }
  ||> Detour   -> { source: distances.source, mid: distances.mid, detour: x, goal: distances.goal, stranded: distances.stranded }
  ||> Goal     -> { source: distances.source, mid: distances.mid, detour: distances.detour, goal: x, stranded: distances.stranded }
  ||> Stranded -> { source: distances.source, mid: distances.mid, detour: distances.detour, goal: distances.goal, stranded: x }
 
 type Distance -> Distance -> Bool
-func betterDistance left right => (left, right)
- ||> (Cost _, Unreachable) -> True
+func betterDistance = left right=> (left, right) ||> (Cost _, Unreachable) -> True
  ||> (Cost l, Cost r)      -> l < r
  ||> (Unreachable, _)      -> False
 
 type Distance -> Int -> Distance
-func plusDistance distance weight => distance
- ||> Cost x      -> Cost (x + weight)
+func plusDistance = distance weight=> distance ||> Cost x      -> Cost (x + weight)
  ||> Unreachable -> Unreachable
 
 type Distances -> WeightedEdge -> Distance
-func candidateDistance distances edge =>
-    plusDistance (distanceOf distances edge.from) edge.weight
+func candidateDistance = distances edge=>    plusDistance (distanceOf distances edge.from) edge.weight
 
 type Distance -> Distance -> Distance
-func preferDistance current candidate => betterDistance candidate current
- T|> candidate
+func preferDistance = current candidate=> betterDistance candidate current T|> candidate
  F|> current
 
 type Distances -> Node -> Distance -> Distances
-func relaxTarget distances target candidate =>
-    setDistance distances target (preferDistance (distanceOf distances target) candidate)
+func relaxTarget = distances target candidate=>    setDistance distances target (preferDistance (distanceOf distances target) candidate)
 
 type Distances -> WeightedEdge -> Distances
-func relaxEdge distances edge =>
-    relaxTarget distances edge.to (candidateDistance distances edge)
+func relaxEdge = distances edge=>    relaxTarget distances edge.to (candidateDistance distances edge)
 
 type WeightedGraph -> Distances -> Node -> Distances
-func runPass graph distances tick => graph.edges
-  |> reduce relaxEdge distances
+func runPass = graph distances tick=> graph.edges  |> reduce relaxEdge distances
 
 type WeightedGraph -> (List Node)
-func passSchedule graph => graph.nodes
-  |> tail
+func passSchedule = graph=> graph.nodes  |> tail
   |> getOrElse []
 
 type Distances -> WeightedEdge -> Bool
-func edgeCanRelax distances edge =>
-    betterDistance (candidateDistance distances edge) (distanceOf distances edge.to)
+func edgeCanRelax = distances edge=>    betterDistance (candidateDistance distances edge) (distanceOf distances edge.to)
 
 type Bool -> Text
-func cycleWitness detected => detected
- T|> negativeCycleWitness
+func cycleWitness = detected=> detected T|> negativeCycleWitness
  F|> "none"
 
 type WeightedGraph -> Distances
-func initialDistances graph =>
-    setDistance emptyDistances graph.source (Cost 0)
+func initialDistances = graph=>    setDistance emptyDistances graph.source (Cost 0)
 
 value stableGraph : WeightedGraph = {
     nodes: [

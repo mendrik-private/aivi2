@@ -6,13 +6,11 @@ type Summary = {
 }
 
 type List Int => Int
-func listLength values => values
- ||> []             -> 0
+func listLength = values=> values ||> []             -> 0
  ||> [_head, ...xs] -> 1 + listLength xs
 
 type List Int => Int
-func prefixScore values => values
- ||> []                       -> 0
+func prefixScore = values=> values ||> []                       -> 0
  ||> [first]                  -> first
  ||> [first, second, ...rest] -> first + second + listLength rest
 

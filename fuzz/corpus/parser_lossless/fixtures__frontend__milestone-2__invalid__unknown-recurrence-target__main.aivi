@@ -1,5 +1,4 @@
-fun step #value =>
-    value
+fun step = #value=>    value
 
 val broken =
     0

@@ -7,11 +7,9 @@ type LoadState =
   | Failed Text
 
 type LoadState -> Text
-func loadedName state => state
- ||> NotAsked             -> "waiting"
+func loadedName = state=> state ||> NotAsked             -> "waiting"
  ||> Loaded (User name _) -> name
  ||> Failed message       -> message
 
 type (Int, Int) -> Int
-func firstOfPair pair => pair
- ||> (first, _) -> first
+func firstOfPair = pair=> pair ||> (first, _) -> first

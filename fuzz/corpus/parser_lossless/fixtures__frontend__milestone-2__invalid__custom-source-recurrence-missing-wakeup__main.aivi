@@ -1,5 +1,4 @@
-fun step #value =>
-    value
+fun step = #value=>    value
 
 @source custom.feed 0
 sig broken : Signal Int =

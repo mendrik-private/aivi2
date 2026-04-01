@@ -1,6 +1,5 @@
 type Unit -> Int -> Int
-func step tick current =>
-    current + 1
+func step = tick current=>    current + 1
 
 @source timer.every 120 with {
     immediate: True

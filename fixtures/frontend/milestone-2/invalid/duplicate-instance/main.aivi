@@ -5,8 +5,7 @@ type Blob =
   | Blob Bytes
 
 type Blob -> Blob -> Bool
-func blobEquals left right =>
-    True
+func blobEquals = left right=>    True
 
 instance Eq Blob
     (==) left right = blobEquals left right

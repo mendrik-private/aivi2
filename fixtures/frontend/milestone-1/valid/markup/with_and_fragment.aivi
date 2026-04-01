@@ -4,8 +4,7 @@ type User = {
 }
 
 type User -> Text
-func formatUser user => user
- ||> { name, email } -> "{name} <{email}>"
+func formatUser = user=> user ||> { name, email } -> "{name} <{email}>"
 
 value user : User = {
     name: "Ada",

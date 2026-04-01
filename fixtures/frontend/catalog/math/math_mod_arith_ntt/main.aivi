@@ -36,82 +36,64 @@ type NttCatalog = {
 }
 
 type Int -> Int -> Int -> Int -> Poly4
-func poly4 c0 c1 c2 c3 =>
-    { c0, c1, c2, c3 }
+func poly4 = c0 c1 c2 c3=>    { c0, c1, c2, c3 }
 
 type Int -> Int -> Int
-func normalizeNonNegative modulus x => x > modulus - 1
- T|> normalize modulus (x - modulus)
+func normalizeNonNegative = modulus x=> x > modulus - 1 T|> normalize modulus (x - modulus)
  F|> x
 
 type Int -> Int -> Int
-func normalize modulus x => x < 0
- T|> normalize modulus (x + modulus)
+func normalize = modulus x=> x < 0 T|> normalize modulus (x + modulus)
  F|> normalizeNonNegative modulus x
 
 type Int -> Int -> Int -> Int
-func addMod modulus left right =>
-    normalize modulus (left + right)
+func addMod = modulus left right=>    normalize modulus (left + right)
 
 type Int -> Int -> Int -> Int
-func subMod modulus left right =>
-    normalize modulus (left - right)
+func subMod = modulus left right=>    normalize modulus (left - right)
 
 type Int -> Int -> Int -> Int
-func mulMod modulus left right =>
-    normalize modulus (left * right)
+func mulMod = modulus left right=>    normalize modulus (left * right)
 
 type Int -> Int -> Int -> Int
-func powMod modulus base exponent => exponent == 0
- T|> 1
+func powMod = modulus base exponent=> exponent == 0 T|> 1
  F|> mulMod modulus base (powMod modulus base (exponent - 1))
 
 type Int -> Int -> Int -> (Int, Int)
-func butterfly2 modulus left right =>
-    (
+func butterfly2 = modulus left right=>    (
         addMod modulus left right,
         subMod modulus left right
     )
 
 type Int -> Int -> Int -> Int -> (Int, Int) -> Spectrum4
-func combineOdd modulus twiddle even0 even1 odd => odd
- ||> (odd0, odd1) -> { k0: addMod modulus even0 odd0, k1: addMod modulus even1 (mulMod modulus twiddle odd1), k2: subMod modulus even0 odd0, k3: subMod modulus even1 (mulMod modulus twiddle odd1) }
+func combineOdd = modulus twiddle even0 even1 odd=> odd ||> (odd0, odd1) -> { k0: addMod modulus even0 odd0, k1: addMod modulus even1 (mulMod modulus twiddle odd1), k2: subMod modulus even0 odd0, k3: subMod modulus even1 (mulMod modulus twiddle odd1) }
 
 type Int -> Int -> (Int, Int) -> (Int, Int) -> Spectrum4
-func combineSpectrum modulus twiddle even odd => even
- ||> (even0, even1) -> combineOdd modulus twiddle even0 even1 odd
+func combineSpectrum = modulus twiddle even odd=> even ||> (even0, even1) -> combineOdd modulus twiddle even0 even1 odd
 
 type Int -> Poly4 -> Poly4
-func normalizePoly modulus values =>
-    poly4 (normalize modulus values.c0) (normalize modulus values.c1) (normalize modulus values.c2) (normalize modulus values.c3)
+func normalizePoly = modulus values=>    poly4 (normalize modulus values.c0) (normalize modulus values.c1) (normalize modulus values.c2) (normalize modulus values.c3)
 
 type Int -> Int -> Poly4 -> Spectrum4
-func ntt4WithRoot modulus twiddle values =>
-    combineSpectrum modulus twiddle (butterfly2 modulus values.c0 values.c2) (butterfly2 modulus values.c1 values.c3)
+func ntt4WithRoot = modulus twiddle values=>    combineSpectrum modulus twiddle (butterfly2 modulus values.c0 values.c2) (butterfly2 modulus values.c1 values.c3)
 
 type Spectrum4 -> Poly4
-func spectrumToPoly spectrum =>
-    poly4 spectrum.k0 spectrum.k1 spectrum.k2 spectrum.k3
+func spectrumToPoly = spectrum=>    poly4 spectrum.k0 spectrum.k1 spectrum.k2 spectrum.k3
 
 type Int -> Int -> Poly4 -> Poly4
-func scalePoly modulus factor values =>
-    poly4 (mulMod modulus factor values.c0) (mulMod modulus factor values.c1) (mulMod modulus factor values.c2) (mulMod modulus factor values.c3)
+func scalePoly = modulus factor values=>    poly4 (mulMod modulus factor values.c0) (mulMod modulus factor values.c1) (mulMod modulus factor values.c2) (mulMod modulus factor values.c3)
 
 type NttParams -> Poly4 -> Spectrum4
-func forwardNtt params values =>
-    ntt4WithRoot params.modulus params.root (normalizePoly params.modulus values)
+func forwardNtt = params values=>    ntt4WithRoot params.modulus params.root (normalizePoly params.modulus values)
 
 type NttParams -> Spectrum4 -> Poly4
-func inverseNtt params spectrum =>
-    scalePoly params.modulus params.inverseLength (spectrumToPoly (ntt4WithRoot params.modulus params.inverseRoot (spectrumToPoly spectrum)))
+func inverseNtt = params spectrum=>    scalePoly params.modulus params.inverseLength (spectrumToPoly (ntt4WithRoot params.modulus params.inverseRoot (spectrumToPoly spectrum)))
 
 type NttParams -> Poly4 -> Spectrum4 -> Bool
-func preservedInput params input spectrum =>
-    inverseNtt params spectrum == normalizePoly params.modulus input
+func preservedInput = params input spectrum=>    inverseNtt params spectrum == normalizePoly params.modulus input
 
 type Text -> NttParams -> Poly4 -> Spectrum4 -> NttSummary
-func summarizeForward label params input spectrum =>
-    {
+func summarizeForward = label params input spectrum=>    {
         label,
         spectrum,
         roundTrip: inverseNtt params spectrum,
@@ -120,8 +102,7 @@ func summarizeForward label params input spectrum =>
     }
 
 type Text -> NttParams -> Poly4 -> NttSummary
-func summarizeNtt label params input =>
-    summarizeForward label params input (forwardNtt params input)
+func summarizeNtt = label params input=>    summarizeForward label params input (forwardNtt params input)
 
 value params : NttParams = {
     modulus: 17,

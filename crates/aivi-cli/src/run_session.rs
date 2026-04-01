@@ -959,8 +959,8 @@ mod tests {
         HydrationRevisionState, MainContextRequestQueue, RunLaunchConfig, RunSessionLifecycle,
         RunSessionPhase, RunSessionScheduleState, start_run_session_with_launch_config,
     };
-    use aivi_base::SourceDatabase;
     use aivi_backend::RuntimeValue;
+    use aivi_base::SourceDatabase;
     use aivi_hir::{ValidationMode, lower_module as lower_hir_module};
     use aivi_syntax::parse_module;
     use gtk::prelude::*;
@@ -1420,8 +1420,7 @@ signal selectedText : Signal Text = selected
  +|> "None" keepLatest
 
 type Text -> Text -> Text
-func keepLatest next current =>
-    next
+func keepLatest = next current=>    next
 
 value rows = ["Alpha", "Beta"]
 

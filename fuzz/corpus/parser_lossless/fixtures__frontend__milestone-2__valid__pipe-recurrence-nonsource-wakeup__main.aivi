@@ -4,8 +4,7 @@ domain Duration over Int
 domain Retry over Int
     literal times : Int -> Retry
 
-fun step #value =>
-    value
+fun step = #value=>    value
 
 @recur.timer 5sec
 sig polled : Signal Int =

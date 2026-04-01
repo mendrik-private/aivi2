@@ -163,12 +163,10 @@ value swappedPair : (Text, Int) = swap testPair
 value duplicated : (Int, Int) = duplicate 5
 
 type Int -> Int
-func doubleNum n =>
-    n * 2
+func doubleNum = n=>    n * 2
 
 type Text -> Text
-func upperFirst t =>
-    append t "!"
+func upperFirst = t=>    append t "!"
 
 value mappedFst : (Int, Text) = mapFst doubleNum testPair
 value mappedSnd : (Int, Text) = mapSnd upperFirst testPair
@@ -207,20 +205,16 @@ value words : List Text = [
 ]
 
 type Int -> Int
-func double n =>
-    n * 2
+func double = n=>    n * 2
 
 type Int -> Bool
-func isPositive n =>
-    n > 0
+func isPositive = n=>    n > 0
 
 type Int -> Bool
-func isSmall n =>
-    n < 4
+func isSmall = n=>    n < 4
 
 type Int -> Int -> Bool
-func smaller a b =>
-    a < b
+func smaller = a b=>    a < b
 
 value doubled : List Int = map double numbers
 value positives : List Int = filter isPositive numbers
@@ -271,8 +265,7 @@ value spacedOut : List Int =
     ]
 
 type Int -> Int -> Int
-func pairUp a b =>
-    a + b
+func pairUp = a b=>    a + b
 
 value zipped : List (Int, Int) =
     zip numbers [
@@ -301,8 +294,7 @@ value nested : List (List Int) = [
 value flattenedList : List Int = flatten nested
 
 type Int -> (List Int)
-func makeRange n =>
-    [n, n + 1]
+func makeRange = n=>    [n, n + 1]
 
 value flatMapped : List Int =
     flatMap makeRange [
@@ -312,8 +304,7 @@ value flatMapped : List Int =
     ]
 
 type Int -> (Option Int)
-func doubleIfSmall n => isSmall n
- T|> Some (double n)
+func doubleIfSmall = n=> isSmall n T|> Some (double n)
  F|> None
 
 value foundDoubled : Option Int = findMap doubleIfSmall numbers
@@ -333,8 +324,7 @@ value fromTrue : Option Int = fromBool 42 True
 value fromFalse : Option Int = fromBool 42 False
 
 type Int -> (Option Int)
-func safeDouble n => isSmall n
- T|> Some (double n)
+func safeDouble = n=> isSmall n T|> Some (double n)
  F|> None
 
 value flatMappedOpt : Option Int = optionFlatMap safeDouble (Some 2)
@@ -349,18 +339,15 @@ value defaultErr : Int = withDefault 0 errResult
 value mappedResult : Result Text Int = resultMap double okResult
 
 type Text -> Text
-func prefixErr msg =>
-    join "" ["error: ", msg]
+func prefixErr = msg=>    join "" ["error: ", msg]
 
 value mappedErrResult : Result Text Int = resultMapErr prefixErr errResult
 
 type Int -> Text
-func onOk n =>
-    join "" ["value: ", ""]
+func onOk = n=>    join "" ["value: ", ""]
 
 type Text -> Text
-func onErr msg =>
-    join "" ["error: ", msg]
+func onErr = msg=>    join "" ["error: ", msg]
 
 value foldedOk : Text = resultFold onErr onOk okResult
 value foldedErr : Text = resultFold onErr onOk errResult
@@ -370,16 +357,14 @@ value fromOpt : Result Text Int = resultFromOption "missing" (Some 5)
 value fromNone : Result Text Int = resultFromOption "missing" None
 
 type Int -> (Result Text Int)
-func resultDouble n =>
-    Ok (double n)
+func resultDouble = n=>    Ok (double n)
 
 value flatMappedResult : Result Text Int = resultFlatMap resultDouble okResult
 value nestedResult : Result Text (Result Text Int) = Ok (Ok 7)
 value flattenedResult : Result Text Int = resultFlatten nestedResult
 
 type Result Text Int => (Result Int Text)
-func swapTypes result => result
- ||> Ok n    -> Err n
+func swapTypes = result=> result ||> Ok n    -> Err n
  ||> Err msg -> Ok msg
 
 value bothMapped : Result Text Int = resultMapBoth prefixErr double okResult
@@ -423,8 +408,7 @@ value clamped : Int = orderClamp smaller 2 8 10
 value reversed1 : Bool = reversed smaller 4 2
 
 type (Int, Text) -> Int
-func getAge person =>
-    fst person
+func getAge = person=>    fst person
 
 value people : List (Int, Text) = [
     (30, "Ada"),
@@ -433,8 +417,7 @@ value people : List (Int, Text) = [
 ]
 
 type (Int, Text) -> (Int, Text) -> Bool
-func byAge a b =>
-    comparing getAge smaller a b
+func byAge = a b=>    comparing getAge smaller a b
 
 @test
 value extended_validation_covers_bool_and_math : Task Text Bool = pure (squareTest == 25)

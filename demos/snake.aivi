@@ -23,8 +23,7 @@ type SnakeTakeState = {
 }
 
 type List Cell -> Snake
-func makeSnake cells =>
-    cells
+func makeSnake = cells=>    fromCells cells
 
 domain Duration over Int
     literal ms : Int -> Duration
@@ -36,57 +35,47 @@ value boardRows = [0..19]
 value seed0 = 2463534242
 
 type Direction -> Direction
-func opposite d => d
- ||> North -> South
+func opposite = d=> d ||> North -> South
  ||> South -> North
  ||> East  -> West
  ||> West  -> East
 
 type Direction -> Cell -> Cell
-func moveDir d c => (d, c)
- ||> (North, Cell x y) -> Cell x (y - 1)
+func moveDir = d c=> (d, c) ||> (North, Cell x y) -> Cell x (y - 1)
  ||> (South, Cell x y) -> Cell x (y + 1)
  ||> (East, Cell x y)  -> Cell (x + 1) y
  ||> (West, Cell x y)  -> Cell (x - 1) y
 
 type Cell -> Bool
-func outside c => c
- ||> Cell x y -> x < 0 or x >= boardW or y < 0 or y >= boardH
+func outside = c=> c ||> Cell x y -> x < 0 or x >= boardW or y < 0 or y >= boardH
 
 type Int -> Int
-func nextSeed s =>
-    (s * 1103515245 + 12345) % 2147483647
+func nextSeed = s=>    (s * 1103515245 + 12345) % 2147483647
 
 type Cell -> Bool -> Cell -> Bool
-func snakeContainsStep target found item => found
- T|> True
+func snakeContainsStep = target found item=> found T|> True
  F|> item == target
 
 type List Cell -> Cell
-func snakeHeadRaw snake => snake
+func snakeHeadRaw = .
  ||> [head, ...rest] -> head
  ||> _               -> Cell 0 0
 
 type List Cell -> Cell -> Bool
-func snakeContainsRaw snake cell => snake
-  |> reduce (snakeContainsStep cell) False
+func snakeContainsRaw = snake cell=> snake  |> reduce (snakeContainsStep cell) False
 
 type Int -> Cell -> Int
-func snakeLengthStep total cell =>
-    total + 1
+func snakeLengthStep = total cell=>    total + 1
 
 type List Cell -> Int
-func snakeLengthRaw snake => snake
-  |> reduce snakeLengthStep 0
+func snakeLengthRaw = snake=> snake  |> reduce snakeLengthStep 0
 
 type SnakeTakeState -> Cell -> SnakeTakeState
-func takeCellStep state item => state.remaining > 0
- T|> { remaining: state.remaining - 1, cells: append state.cells [item] }
+func takeCellStep = state item=> state.remaining > 0 T|> { remaining: state.remaining - 1, cells: append state.cells [item] }
  F|> state
 
 type Int -> (List Cell) -> (List Cell)
-func takeCells n cells => cells
-  |> reduce takeCellStep { remaining: n, cells: [] }
+func takeCells = n cells=> cells  |> reduce takeCellStep { remaining: n, cells: [] }
   |> .cells
 
 domain Snake over List Cell
@@ -121,12 +110,10 @@ type GameState = {
 }
 
 type Snake -> Int -> Cell
-func spawnFood snake s =>
-    Cell (s % boardW) (nextSeed s % boardH)
+func spawnFood = snake s=>    Cell (s % boardW) (nextSeed s % boardH)
 
 type Direction -> Text
-func dirLabel d => d
- ||> North -> "Up"
+func dirLabel = d=> d ||> North -> "Up"
  ||> South -> "Down"
  ||> East  -> "Right"
  ||> West  -> "Left"
@@ -148,77 +135,62 @@ value initial : GameState = {
 }
 
 type Event -> GameState -> GameState
-func step ev st => ev
- ||> Restart -> initial
+func step = ev st=> ev ||> Restart -> initial
  ||> Turn d  -> handleTurn d st
  ||> Tick    -> handleTick st
 
 type Direction -> GameState -> GameState
-func handleTurn d st => st.status
- ||> GameOver -> st
+func handleTurn = d st=> st.status ||> GameOver -> st
  ||> Running  -> applyTurn d st
 
 type Direction -> GameState -> GameState
-func applyTurn d st => d == opposite st.dir
- T|> st
+func applyTurn = d st=> d == opposite st.dir T|> st
  F|> { snake: st.snake, dir: d, food: st.food, score: st.score, seed: st.seed, status: st.status }
 
 type GameState -> GameState
-func handleTick st => st.status
- ||> GameOver -> st
+func handleTick = st=> st.status ||> GameOver -> st
  ||> Running  -> advance st (st.snake.nextHead st.dir)
 
 type GameState -> Cell -> GameState
-func advance st h => outside h or (st.snake.contains h)
- T|> { snake: st.snake, dir: st.dir, food: st.food, score: st.score, seed: st.seed, status: GameOver }
+func advance = st h=> outside h or (st.snake.contains h) T|> { snake: st.snake, dir: st.dir, food: st.food, score: st.score, seed: st.seed, status: GameOver }
  F|> resolveMove st h
 
 type GameState -> Cell -> GameState
-func resolveMove st h => h == st.food
- T|> { snake: st.snake.grow h, dir: st.dir, food: spawnFood (st.snake.grow h) (nextSeed st.seed), score: st.score + 1, seed: nextSeed st.seed, status: Running }
+func resolveMove = st h=> h == st.food T|> { snake: st.snake.grow h, dir: st.dir, food: spawnFood (st.snake.grow h) (nextSeed st.seed), score: st.score + 1, seed: nextSeed st.seed, status: Running }
  F|> { snake: st.snake.move h, dir: st.dir, food: st.food, score: st.score, seed: nextSeed st.seed, status: Running }
 
 type GameState -> Int -> Int -> Text
-func cellGlyph st y x => (Cell x y == st.snake.head, st.snake.contains (Cell x y), Cell x y == st.food)
- ||> (True, _, _)          -> "@"
+func cellGlyph = st y x=> (Cell x y == st.snake.head, st.snake.contains (Cell x y), Cell x y == st.food) ||> (True, _, _)          -> "@"
  ||> (_, True, _)          -> "o"
  ||> (_, _, True)          -> "*"
  ||> (False, False, False) -> "·"
 
 type GameState -> Int -> Text -> Int -> Text
-func rowTextStep st y text x =>
-    "{text}{cellGlyph st y x}"
+func rowTextStep = st y text x=>    "{text}{cellGlyph st y x}"
 
 type GameState -> Int -> Text
-func renderRow st y => boardColumns
-  |> reduce (rowTextStep st y) ""
+func renderRow = st y=> boardColumns  |> reduce (rowTextStep st y) ""
 
 type GameState -> Text -> Int -> Text
-func boardTextStep st text y => text == ""
- T|> renderRow st y
+func boardTextStep = st text y=> text == "" T|> renderRow st y
  F|> "{text}\n{renderRow st y}"
 
 type GameState -> Text
-func renderBoard st => boardRows
-  |> reduce (boardTextStep st) ""
+func renderBoard = st=> boardRows  |> reduce (boardTextStep st) ""
 
 type Status -> Bool
-func isGameOver status => status
- ||> Running  -> False
+func isGameOver = status=> status ||> Running  -> False
  ||> GameOver -> True
 
 type Status -> Text
-func statusLineFor status => status
- ||> Running  -> "Running"
+func statusLineFor = status=> status ||> Running  -> "Running"
  ||> GameOver -> "Game Over"
 
 type Int -> Text
-func scoreLineFor score =>
-    "Score: {score}"
+func scoreLineFor = score=>    "Score: {score}"
 
 type Int -> Text
-func finalScoreLineFor score =>
-    "Final score: {score}"
+func finalScoreLineFor = score=>    "Final score: {score}"
 
 @source timer.every 120ms with {
     immediate: False,

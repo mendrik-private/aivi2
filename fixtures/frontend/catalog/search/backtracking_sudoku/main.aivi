@@ -32,140 +32,110 @@ type SudokuCatalog = {
 }
 
 type List Int => SudokuBoard
-func board cells =>
-    { cells }
+func board = cells=>    { cells }
 
 type Int -> Bool
-func isBlank x =>
-    x == 0
+func isBlank = x=>    x == 0
 
 type List Int => Int -> Int
-func valueAt cells index => at index cells
- ||> Some x -> x
+func valueAt = cells index=> at index cells ||> Some x -> x
  ||> None   -> 0
 
 type Int -> Int
-func rowOf index =>
-    index / 4
+func rowOf = index=>    index / 4
 
 type Int -> Int
-func colOf index =>
-    index % 4
+func colOf = index=>    index % 4
 
 type Int -> Int -> Bool
-func sameRow left right =>
-    rowOf left == rowOf right
+func sameRow = left right=>    rowOf left == rowOf right
 
 type Int -> Int -> Bool
-func sameCol left right =>
-    colOf left == colOf right
+func sameCol = left right=>    colOf left == colOf right
 
 type Int -> Int -> Bool
-func sameBox left right =>
-    rowOf left / 2 == rowOf right / 2 and colOf left / 2 == colOf right / 2
+func sameBox = left right=>    rowOf left / 2 == rowOf right / 2 and colOf left / 2 == colOf right / 2
 
 type Int -> Int -> Bool
-func relatedCell left right =>
-    sameRow left right or sameCol left right or sameBox left right
+func relatedCell = left right=>    sameRow left right or sameCol left right or sameBox left right
 
 type List Int => Int -> Int -> Int -> Bool
-func conflictAtOther cells index candidate other =>
-    valueAt cells other == candidate and relatedCell index other
+func conflictAtOther = cells index candidate other=>    valueAt cells other == candidate and relatedCell index other
 
 type List Int => Int -> Int -> Int -> Bool
-func scanMatchOrContinue cells index candidate other => conflictAtOther cells index candidate other
- T|> True
+func scanMatchOrContinue = cells index candidate other=> conflictAtOther cells index candidate other T|> True
  F|> scanConflicts cells index candidate (other + 1)
 
 type List Int => Int -> Int -> Int -> Bool
-func scanConflictStep cells index candidate other => other == index
- T|> scanConflicts cells index candidate (other + 1)
+func scanConflictStep = cells index candidate other=> other == index T|> scanConflicts cells index candidate (other + 1)
  F|> scanMatchOrContinue cells index candidate other
 
 type List Int => Int -> Int -> Int -> Bool
-func scanConflicts cells index candidate other => other == 16
- T|> False
+func scanConflicts = cells index candidate other=> other == 16 T|> False
  F|> scanConflictStep cells index candidate other
 
 type List Int => Int -> Int -> Bool
-func validPlacement cells index candidate =>
-    scanConflicts cells index candidate 0 == False
+func validPlacement = cells index candidate=>    scanConflicts cells index candidate 0 == False
 
 type List Int => Int -> Bool
-func cellConsistent cells index => valueAt cells index == 0
- T|> True
+func cellConsistent = cells index=> valueAt cells index == 0 T|> True
  F|> validPlacement cells index (valueAt cells index)
 
 type List Int => Int -> Bool
-func boardConsistent cells index => index == 16
- T|> True
+func boardConsistent = cells index=> index == 16 T|> True
  F|> cellConsistent cells index and boardConsistent cells (index + 1)
 
 type List Int => Int -> Int -> (Option Int)
-func advanceFindEmpty cells index current => current == 0
- T|> Some index
+func advanceFindEmpty = cells index current=> current == 0 T|> Some index
  F|> findEmpty (tailOrEmpty cells) (index + 1)
 
 type List Int => Int -> (Option Int)
-func findEmpty cells index => head cells
- ||> Some current -> advanceFindEmpty cells index current
+func findEmpty = cells index=> head cells ||> Some current -> advanceFindEmpty cells index current
  ||> None         -> None
 
 type List Int => Int -> Int -> (Result Text (List Int))
-func nextCandidate cells index candidate =>
-    solveMode cells (TryAt index (candidate + 1))
+func nextCandidate = cells index candidate=>    solveMode cells (TryAt index (candidate + 1))
 
 type List Int => Int -> Int -> (Result Text (List Int)) -> (Result Text (List Int))
-func continueCandidate cells index candidate attempt => attempt
- ||> Ok solved -> Ok solved
+func continueCandidate = cells index candidate attempt=> attempt ||> Ok solved -> Ok solved
  ||> Err _     -> nextCandidate cells index candidate
 
 type List Int => Int -> Int -> (Result Text (List Int))
-func tryCandidate cells index candidate => validPlacement cells index candidate
- T|> continueCandidate cells index candidate (solveMode (replaceAt index candidate cells) FindNext)
+func tryCandidate = cells index candidate=> validPlacement cells index candidate T|> continueCandidate cells index candidate (solveMode (replaceAt index candidate cells) FindNext)
  F|> nextCandidate cells index candidate
 
 type List Int => (Result Text (List Int))
-func startSearch cells => findEmpty cells 0
- ||> Some index -> solveMode cells (TryAt index 1)
+func startSearch = cells=> findEmpty cells 0 ||> Some index -> solveMode cells (TryAt index 1)
  ||> None       -> Ok cells
 
 type List Int => Int -> Int -> (Result Text (List Int))
-func handleTry cells index candidate => candidate == 5
- T|> Err "unsolved"
+func handleTry = cells index candidate=> candidate == 5 T|> Err "unsolved"
  F|> tryCandidate cells index candidate
 
 type List Int => SolveMode -> (Result Text (List Int))
-func solveMode cells mode => mode
- ||> FindNext              -> startSearch cells
+func solveMode = cells mode=> mode ||> FindNext              -> startSearch cells
  ||> TryAt index candidate -> handleTry cells index candidate
 
 type Result Text (List Int) => (Result Text SudokuBoard)
-func wrapSolved result => result
- ||> Ok cells   -> Ok { cells }
+func wrapSolved = result=> result ||> Ok cells   -> Ok { cells }
  ||> Err reason -> Err reason
 
 type SudokuBoard -> (Result Text SudokuBoard)
-func solveIfConsistent board => boardConsistent board.cells 0
- T|> wrapSolved (solveMode board.cells FindNext)
+func solveIfConsistent = board=> boardConsistent board.cells 0 T|> wrapSolved (solveMode board.cells FindNext)
  F|> Err "invalid-givens"
 
 type List Int => Int
-func blankCount cells =>
-    count isBlank cells
+func blankCount = cells=>    count isBlank cells
 
 type List Int => Int
-func givenCount cells =>
-    16 - blankCount cells
+func givenCount = cells=>    16 - blankCount cells
 
 type Bool -> Int -> Text
-func summaryNote consistent blanks => consistent
- T|> "{blanks} blanks"
+func summaryNote = consistent blanks=> consistent T|> "{blanks} blanks"
  F|> "conflicting givens"
 
 type Text -> SudokuBoard -> SudokuSummary
-func summarizeSudoku label board =>
-    {
+func summarizeSudoku = label board=>    {
         label,
         givens: givenCount board.cells,
         blanks: blankCount board.cells,

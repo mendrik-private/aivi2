@@ -35,34 +35,27 @@ type NQueensCatalog = {
 }
 
 type Int -> Int
-func pow2 exponent => exponent == 0
- T|> 1
+func pow2 = exponent=> exponent == 0 T|> 1
  F|> 2 * pow2 (exponent - 1)
 
 type Int -> Int -> Bool
-func bitSet mask index =>
-    (mask / (pow2 index)) % 2 == 1
+func bitSet = mask index=>    (mask / (pow2 index)) % 2 == 1
 
 type Int -> Int -> Int
-func setBit mask index => bitSet mask index
- T|> mask
+func setBit = mask index=> bitSet mask index T|> mask
  F|> mask + pow2 index
 
 type Int -> Int -> Int -> Int
-func diagUpIndex size row col =>
-    row - col + size - 1
+func diagUpIndex = size row col=>    row - col + size - 1
 
 type Int -> Int -> Bool
-func bitClear mask index =>
-    bitSet mask index == False
+func bitClear = mask index=>    bitSet mask index == False
 
 type Int -> Int -> Int -> SearchState -> Bool
-func safeColumn size row col state =>
-    bitClear state.columns col and bitClear state.diagDown (row + col) and bitClear state.diagUp (diagUpIndex size row col)
+func safeColumn = size row col state=>    bitClear state.columns col and bitClear state.diagDown (row + col) and bitClear state.diagUp (diagUpIndex size row col)
 
 type Int -> Int -> Int -> SearchState -> SearchState
-func placeQueen size row col state =>
-    {
+func placeQueen = size row col state=>    {
         columns: setBit state.columns col,
         diagDown: setBit state.diagDown (row + col),
         diagUp: setBit state.diagUp (diagUpIndex size row col),
@@ -70,23 +63,19 @@ func placeQueen size row col state =>
     }
 
 type SolveState -> (List Int) -> SolveState
-func addSolution found placements => found
- ||> { solutions, first: Some board } -> { solutions: solutions + 1, first: Some board }
+func addSolution = found placements=> found ||> { solutions, first: Some board } -> { solutions: solutions + 1, first: Some board }
  ||> { solutions, first: None }       -> { solutions: solutions + 1, first: Some placements }
 
 type Int -> Int -> Int -> SearchState -> SolveState -> SolveState
-func advanceColumn size row col state found => safeColumn size row col state
- T|> search size row (col + 1) state (search size (row + 1) 0 (placeQueen size row col state) found)
+func advanceColumn = size row col state found=> safeColumn size row col state T|> search size row (col + 1) state (search size (row + 1) 0 (placeQueen size row col state) found)
  F|> search size row (col + 1) state found
 
 type Int -> Int -> Int -> SearchState -> SolveState -> SolveState
-func continueRow size row col state found => col == size
- T|> found
+func continueRow = size row col state found=> col == size T|> found
  F|> advanceColumn size row col state found
 
 type Int -> Int -> Int -> SearchState -> SolveState -> SolveState
-func search size row col state found => row == size
- T|> addSolution found state.placements
+func search = size row col state found=> row == size T|> addSolution found state.placements
  F|> continueRow size row col state found
 
 value emptySearchState : SearchState = {
@@ -102,17 +91,14 @@ value emptySolveState : SolveState = {
 }
 
 type Int -> SolveState
-func solveQueens size =>
-    search size 0 0 emptySearchState emptySolveState
+func solveQueens = size=>    search size 0 0 emptySearchState emptySolveState
 
 type Option (List Int) => (Option BoardSummary)
-func summarizeBoard solution => solution
- ||> Some columns -> Some { columns, depth: length columns }
+func summarizeBoard = solution=> solution ||> Some columns -> Some { columns, depth: length columns }
  ||> None         -> None
 
 type Text -> Int -> NQueensSummary
-func summarizeQueens label size => solveQueens size
- ||> { solutions, first } -> { label, size, solutions, first: summarizeBoard first, columnMaskWidth: pow2 size, diagonalMaskWidth: pow2 (size + size - 1) }
+func summarizeQueens = label size=> solveQueens size ||> { solutions, first } -> { label, size, solutions, first: summarizeBoard first, columnMaskWidth: pow2 size, diagonalMaskWidth: pow2 (size + size - 1) }
 
 value nQueensCatalog : NQueensCatalog = {
     single: summarizeQueens "single" 1,

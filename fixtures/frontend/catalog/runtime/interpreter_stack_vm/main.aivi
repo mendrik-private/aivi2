@@ -31,56 +31,46 @@ type VmCatalog = {
 }
 
 type List Int => Int -> (List Int)
-func pushStack stack x =>
-    append stack [x]
+func pushStack = stack x=>    append stack [x]
 
 type List Int => (Option (Int, List Int))
-func pop stack => head stack
- ||> Some x -> Some (x, tailOrEmpty stack)
+func pop = stack=> head stack ||> Some x -> Some (x, tailOrEmpty stack)
  ||> None   -> None
 
 type List Int => Bool -> (List Text) -> Text -> VmState
-func stateWithLog stack halted log entry =>
-    {
+func stateWithLog = stack halted log entry=>    {
         stack,
         halted,
         log: append log [entry]
     }
 
 type List Int => (List Text) -> VmState
-func underflowState stack log =>
-    stateWithLog stack True log "underflow"
+func underflowState = stack log=>    stateWithLog stack True log "underflow"
 
 type List Text => Int -> (List Int) -> (Option (Int, List Int)) -> VmState
-func finishAdd log right afterRight leftStep => leftStep
- ||> Some (left, afterLeft) -> stateWithLog (pushStack afterLeft (left + right)) False log "add"
+func finishAdd = log right afterRight leftStep=> leftStep ||> Some (left, afterLeft) -> stateWithLog (pushStack afterLeft (left + right)) False log "add"
  ||> None                   -> underflowState afterRight log
 
 type List Text => (List Int) -> VmState
-func applyAdd log stack => pop stack
- ||> Some (right, afterRight) -> finishAdd log right afterRight (pop afterRight)
+func applyAdd = log stack=> pop stack ||> Some (right, afterRight) -> finishAdd log right afterRight (pop afterRight)
  ||> None                     -> underflowState stack log
 
 type List Text => (List Int) -> VmState
-func applyNegate log stack => pop stack
- ||> Some (x, remaining) -> stateWithLog (pushStack remaining (0 - x)) False log "negate"
+func applyNegate = log stack=> pop stack ||> Some (x, remaining) -> stateWithLog (pushStack remaining (0 - x)) False log "negate"
  ||> None                -> underflowState stack log
 
 type List Int => (List Text) -> Instruction -> VmState
-func continueStep stack log instruction => instruction
- ||> Push x    -> stateWithLog (pushStack stack x) False log "push {x}"
+func continueStep = stack log instruction=> instruction ||> Push x    -> stateWithLog (pushStack stack x) False log "push {x}"
  ||> Add       -> applyAdd log stack
  ||> Negate    -> applyNegate log stack
  ||> Mark note -> stateWithLog stack False log note
 
 type VmState -> Instruction -> VmState
-func step state instruction => state
- ||> { halted: True }              -> state
+func step = state instruction=> state ||> { halted: True }              -> state
  ||> { stack, log, halted: False } -> continueStep stack log instruction
 
 type VmState -> VmSummary
-func summarize state => state
- ||> { stack, log, halted } -> { top: head stack, depth: length stack, halted, log: join " -> " log }
+func summarize = state=> state ||> { stack, log, halted } -> { top: head stack, depth: length stack, halted, log: join " -> " log }
 
 value initialState : VmState = {
     stack: [],
@@ -89,8 +79,7 @@ value initialState : VmState = {
 }
 
 type List Instruction => VmState
-func runProgram program => program
-  |> reduce step initialState
+func runProgram = program=> program  |> reduce step initialState
 
 value balancedProgram : List Instruction = [
     Push 7,

@@ -5,8 +5,7 @@ type Banner =
 type Banner -> Text
 @memoized
 @display
-func bannerText banner => banner
- ||> Banner text -> text
+func bannerText = banner=> banner ||> Banner text -> text
 
 @derived
 signal bannerCount = 0

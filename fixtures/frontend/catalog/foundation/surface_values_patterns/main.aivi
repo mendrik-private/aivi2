@@ -23,24 +23,20 @@ type SurfaceSummary = {
 }
 
 type Profile -> Text
-func displayName profile => profile
- ||> { nickname: Some alias } -> alias
+func displayName = profile=> profile ||> { nickname: Some alias } -> alias
  ||> { name, nickname: None } -> name
 
 type Role -> Text
-func roleLabel role => role
- ||> Admin  -> "admin"
+func roleLabel = role=> role ||> Admin  -> "admin"
  ||> Member -> "member"
  ||> Guest  -> "guest"
 
 type Bool -> Text
-func readyLabel ready => ready
- T|> "ready"
+func readyLabel = ready=> ready T|> "ready"
  F|> "waiting"
 
 type LoadState -> Text
-func loadLabel state => state
- ||> NotAsked       -> "idle"
+func loadLabel = state=> state ||> NotAsked       -> "idle"
  ||> Loaded profile -> displayName profile
  ||> Failed message -> "error:{message}"
 

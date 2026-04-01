@@ -654,6 +654,14 @@ pub struct FunctionParam {
     pub span: SourceSpan,
 }
 
+/// Surface spelling used for function declarations.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FunctionSurfaceForm {
+    #[default]
+    Explicit,
+    UnarySubjectSugar,
+}
+
 /// Shared body forms for named top-level items.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NamedItemBody {
@@ -672,6 +680,7 @@ pub struct NamedItem {
     pub type_parameters: Vec<Identifier>,
     pub constraints: Vec<TypeExpr>,
     pub annotation: Option<TypeExpr>,
+    pub function_form: FunctionSurfaceForm,
     pub parameters: Vec<FunctionParam>,
     pub body: Option<NamedItemBody>,
 }

@@ -4316,11 +4316,9 @@ mod tests {
         let lowered = lower_text(
             "pipe-memos.aivi",
             r#"
-fun add1:Int x:Int =>
-    x + 1
+fun add1:Int = x:Int=>    x + 1
 
-fun demo:Int x:Int => x
-  |> #before add1 #after
+fun demo:Int = x:Int=> x  |> #before add1 #after
   |> before + after
 "#,
         );
@@ -4599,8 +4597,7 @@ signal users : Signal Int
             r#"
 value answer = 42
 
-fun add:Int x:Int y:Int =>
-    x + y
+fun add:Int = x:Int y:Int=>    x + y
 "#,
         );
         assert!(
@@ -4699,8 +4696,7 @@ domain Duration over Int
 domain Retry over Int
     literal times : Int -> Retry
 
-fun step:Int n:Int =>
-    n
+fun step:Int = n:Int=>    n
 
 @recur.timer 5sec
 signal polled : Signal Int =
@@ -4750,8 +4746,7 @@ type Cursor = {
     hasNext: Bool
 }
 
-fun keep:Cursor cursor:Cursor =>
-    cursor
+fun keep:Cursor = cursor:Cursor=>    cursor
 
 value seed:Cursor = { hasNext: True }
 
@@ -4835,8 +4830,7 @@ signal cursor : Signal Cursor =
         let lowered = lower_text(
             "typed-core-debug.aivi",
             r#"
-fun step:Int n:Int =>
-    n + 1
+fun step:Int = n:Int=>    n + 1
 
 @debug
 value traced : Int =
@@ -5039,11 +5033,9 @@ value chosen:Option Int =
         let lowered = lower_text(
             "typed-core-foldable-reduce.aivi",
             r#"
-fun add:Int acc:Int n:Int =>
-    acc + n
+fun add:Int = acc:Int n:Int=>    acc + n
 
-fun joinStep:Text acc:Text s:Text =>
-    append acc s
+fun joinStep:Text = acc:Text s:Text=>    append acc s
 
 value joined:Text =
     reduce joinStep "" ["hel", "lo"]
@@ -5085,16 +5077,13 @@ value total:Int =
         let lowered = lower_text(
             "typed-core-extended-typeclasses.aivi",
             r#"
-fun addOne:Int n:Int =>
-    n + 1
+fun addOne:Int = n:Int=>    n + 1
 
-fun keepSmall:(Option Int) n:Int =>
-    n < 3
+fun keepSmall:(Option Int) = n:Int=>    n < 3
      T|> Some n
      F|> None
 
-fun punctuate:Text s:Text =>
-    append s "!"
+fun punctuate:Text = s:Text=>    append s "!"
 
 value okOne:Result Text Int =
     Ok 1
@@ -5237,11 +5226,9 @@ value filtered:List Int =
         let lowered = lower_text(
             "typed-core-monad-chain.aivi",
             r#"
-fun nextOption:(Option Int) n:Int =>
-    Some (n + 1)
+fun nextOption:(Option Int) = n:Int=>    Some (n + 1)
 
-fun nextResult:(Result Text Int) n:Int =>
-    Ok (n + 1)
+fun nextResult:(Result Text Int) = n:Int=>    Ok (n + 1)
 
 value okSeed:Result Text Int =
     Ok 4
@@ -5460,8 +5447,7 @@ domain Duration over Int
 domain Retry over Int
     literal times : Int -> Retry
 
-fun step:Int n:Int =>
-    n
+fun step:Int = n:Int=>    n
 
 @recur.timer 5sec
 signal polled : Signal Int =

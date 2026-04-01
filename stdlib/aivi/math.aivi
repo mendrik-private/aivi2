@@ -1,51 +1,40 @@
 type Int -> Int
-func abs n => n < 0
- T|> 0 - n
+func abs = n=> n < 0 T|> 0 - n
  F|> n
 
 type Int -> Int
-func negate n =>
-    0 - n
+func negate = n=>    0 - n
 
 type Int -> Int
-func negOrZero n => n < 0
- T|> 0 - 1
+func negOrZero = n=> n < 0 T|> 0 - 1
  F|> 0
 
 type Int -> Int
-func sign n => n > 0
- T|> 1
+func sign = n=> n > 0 T|> 1
  F|> negOrZero n
 
 type Int -> Bool
-func isEven n =>
-    n % 2 == 0
+func isEven = n=>    n % 2 == 0
 
 type Int -> Bool
-func isOdd n =>
-    n % 2 != 0
+func isOdd = n=>    n % 2 != 0
 
 type Int -> Int
-func square n =>
-    n * n
+func square = n=>    n * n
 
 type Int -> Int -> Int
-func clampTop high n => n > high
- T|> high
+func clampTop = high n=> n > high T|> high
  F|> n
 
 type Int -> Int -> Int -> Int
-func clamp low high n => n < low
- T|> low
+func clamp = low high n=> n < low T|> low
  F|> clampTop high n
 
 type Int -> Int -> Int -> Bool
-func between low high n =>
-    n >= low and n <= high
+func between = low high n=>    n >= low and n <= high
 
 type Int -> Int -> Bool
-func divides divisor n =>
-    n % divisor == 0
+func divides = divisor n=>    n % divisor == 0
 
 @test
 value abs_handles_negative : Task Text Bool = pure (abs (0 - 4) == 4)

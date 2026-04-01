@@ -31,12 +31,10 @@ type CollectionSummary = {
 }
 
 type Int -> Int -> Int
-func add total x =>
-    total + x
+func add = total x=>    total + x
 
 type Int -> Bool
-func even x =>
-    x == 2 or x == 4
+func even = x=>    x == 2 or x == 4
 
 value numbers : List Int = [
     1,

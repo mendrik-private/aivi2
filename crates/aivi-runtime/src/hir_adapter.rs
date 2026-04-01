@@ -2105,8 +2105,7 @@ mod tests {
 domain Duration over Int
     literal sec : Int -> Duration
 
-fun keep value =>
-    value
+fun keep = value=>    value
 
 signal apiHost = "https://api.example.com"
 signal refresh = 0
@@ -2279,8 +2278,7 @@ signal rows : Signal Int
 domain Retry over Int
     literal times : Int -> Retry
 
-fun keep value =>
-    value
+fun keep = value=>    value
 
 @recur.backoff 3times
 value retried : Task Int Int =
@@ -2326,8 +2324,7 @@ value retried : Task Int Int =
         let lowered = lower_text(
             "runtime-hir-adapter-bodyless-source-accumulate.aivi",
             r#"
-fun step:Int n:Int current:Int =>
-    n
+fun step:Int = n:Int current:Int=>    n
 
 signal enabled = True
 

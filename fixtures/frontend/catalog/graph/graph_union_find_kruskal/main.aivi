@@ -44,15 +44,13 @@ value initialParents : Parents = {
 }
 
 type Node -> Text
-func nodeLabel node => node
- ||> A -> "A"
+func nodeLabel = node=> node ||> A -> "A"
  ||> B -> "B"
  ||> C -> "C"
  ||> D -> "D"
 
 type Edge -> Text
-func edgeLabel edge =>
-    join "" [
+func edgeLabel = edge=>    join "" [
         nodeLabel edge.left,
         "-",
         nodeLabel edge.right,
@@ -60,53 +58,43 @@ func edgeLabel edge =>
     ]
 
 type List Text => Edge -> (List Text)
-func appendEdgeLabel parts edge =>
-    append parts [
+func appendEdgeLabel = parts edge=>    append parts [
         edgeLabel edge
     ]
 
 type List Edge => Text
-func edgeListLabel edges => edges
-  |> reduce appendEdgeLabel []
+func edgeListLabel = edges=> edges  |> reduce appendEdgeLabel []
   |> join ", "
 
 type Parents -> Node -> Node
-func parentOf parents node => node
- ||> A -> parents.a
+func parentOf = parents node=> node ||> A -> parents.a
  ||> B -> parents.b
  ||> C -> parents.c
  ||> D -> parents.d
 
 type Parents -> Node -> Node -> Parents
-func setParent parents node x => node
- ||> A -> { a: x, b: parents.b, c: parents.c, d: parents.d }
+func setParent = parents node x=> node ||> A -> { a: x, b: parents.b, c: parents.c, d: parents.d }
  ||> B -> { a: parents.a, b: x, c: parents.c, d: parents.d }
  ||> C -> { a: parents.a, b: parents.b, c: x, d: parents.d }
  ||> D -> { a: parents.a, b: parents.b, c: parents.c, d: x }
 
 type Parents -> Node -> Node
-func rootOf parents node =>
-    parentOf parents (parentOf parents (parentOf parents (parentOf parents node)))
+func rootOf = parents node=>    parentOf parents (parentOf parents (parentOf parents (parentOf parents node)))
 
 type Parents -> Edge -> Bool
-func sameComponent parents edge =>
-    (rootOf parents edge.left) == (rootOf parents edge.right)
+func sameComponent = parents edge=>    (rootOf parents edge.left) == (rootOf parents edge.right)
 
 type Parents -> Node -> Node -> Parents
-func unionParents parents left right =>
-    setParent parents (rootOf parents left) (rootOf parents right)
+func unionParents = parents left right=>    setParent parents (rootOf parents left) (rootOf parents right)
 
 type Int -> Int
-func minusOne x =>
-    x - 1
+func minusOne = x=>    x - 1
 
 type Int -> Int -> Bool
-func sameCount left right =>
-    left == right
+func sameCount = left right=>    left == right
 
 type KruskalState -> Edge -> KruskalState
-func acceptEdge state edge =>
-    {
+func acceptEdge = state edge=>    {
         parents: unionParents state.parents edge.left edge.right,
         chosen: append state.chosen [edge],
         rejected: state.rejected,
@@ -114,8 +102,7 @@ func acceptEdge state edge =>
     }
 
 type KruskalState -> Edge -> KruskalState
-func rejectEdge state edge =>
-    {
+func rejectEdge = state edge=>    {
         parents: state.parents,
         chosen: state.chosen,
         rejected: append state.rejected [edge],
@@ -123,8 +110,7 @@ func rejectEdge state edge =>
     }
 
 type KruskalState -> Edge -> KruskalState
-func step state edge => sameComponent state.parents edge
- T|> rejectEdge state edge
+func step = state edge=> sameComponent state.parents edge T|> rejectEdge state edge
  F|> acceptEdge state edge
 
 value cycleHeavyEdge : Edge = {

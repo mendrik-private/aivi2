@@ -1,33 +1,26 @@
 type Bool -> Bool
-func not b => b
- T|> False
+func not = b=> b T|> False
  F|> True
 
 type Bool -> Bool -> Bool
-func xor a b => a == b
- T|> False
+func xor = a b=> a == b T|> False
  F|> True
 
 type Bool -> Bool -> Bool
-func implies a b => a
- T|> b
+func implies = a b=> a T|> b
  F|> True
 
 type Bool -> Bool -> Bool
-func both a b =>
-    a and b
+func both = a b=>    a and b
 
 type Bool -> Bool -> Bool
-func either a b =>
-    a or b
+func either = a b=>    a or b
 
 type Bool -> Bool -> Bool
-func neither a b =>
-    not a and not b
+func neither = a b=>    not a and not b
 
 type Int -> Bool
-func fromInt n =>
-    n != 0
+func fromInt = n=>    n != 0
 
 @test
 value not_flips_false : Task Text Bool = pure (not False)

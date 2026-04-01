@@ -73,21 +73,17 @@ value firstName : Option Text =
     ]
 
 type Int -> Int -> Bool
-func smaller left right =>
-    left < right
+func smaller = left right=>    left < right
 
 type Int -> (Option Int)
-func keepSmall x => x < 3
- T|> Some x
+func keepSmall = x=> x < 3 T|> Some x
  F|> None
 
 type Int -> Int
-func addOne x =>
-    x + 1
+func addOne = x=>    x + 1
 
 type Text -> Text
-func punctuate x =>
-    append x "!"
+func punctuate = x=>    append x "!"
 
 value leastCount : Int = min smaller 4 2
 value greatestCount : Int = max smaller 4 2

@@ -1,5 +1,4 @@
 type Text -> Text
-func statusLabel status =>
-    status
+func statusLabel = status=>    status
 
 value main = <Label text={statusLabel currentStatus} />

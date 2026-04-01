@@ -18,6 +18,5 @@ val minimalProfile:Profile = {
     name: "Grace"
 }
 
-fun profileName:Text #profile:Profile =>
-    profile
+fun profileName:Text = #profile:Profile=>    profile
      ||> { name, nickname } => name

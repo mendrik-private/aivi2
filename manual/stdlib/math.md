@@ -30,8 +30,7 @@ abs : Int -> Int
 use aivi.math (abs)
 
 type Int -> Int -> Int
-func distance a b =>
-    abs (a - b)
+func distance = a b=>    abs (a - b)
 ```
 
 ---
@@ -48,8 +47,7 @@ negate : Int -> Int
 use aivi.math (negate)
 
 type Int -> Int
-func flipSign n =>
-    negate n
+func flipSign = n=>    negate n
 ```
 
 ---
@@ -66,8 +64,7 @@ sign : Int -> Int
 use aivi.math (sign)
 
 type Int -> Int
-func direction velocity =>
-    sign velocity
+func direction = velocity=>    sign velocity
 ```
 
 ---
@@ -86,8 +83,7 @@ use aivi.list (filter)
 use aivi.math (isEven)
 
 type List Int -> List Int
-func evensOnly numbers =>
-    filter isEven numbers
+func evensOnly = numbers=>    filter isEven numbers
 ```
 
 ---
@@ -106,8 +102,7 @@ use aivi.list (filter)
 use aivi.math (isOdd)
 
 type List Int -> List Int
-func oddsOnly numbers =>
-    filter isOdd numbers
+func oddsOnly = numbers=>    filter isOdd numbers
 ```
 
 ---
@@ -124,8 +119,7 @@ square : Int -> Int
 use aivi.math (square)
 
 type Int -> Int
-func areaOfSquare side =>
-    square side
+func areaOfSquare = side=>    square side
 ```
 
 ---
@@ -142,8 +136,7 @@ clamp : Int -> Int -> Int -> Int
 use aivi.math (clamp)
 
 type Int -> Int
-func normalizedVolume raw =>
-    clamp 0 100 raw
+func normalizedVolume = raw=>    clamp 0 100 raw
 ```
 
 ---
@@ -160,8 +153,7 @@ between : Int -> Int -> Int -> Bool
 use aivi.math (between)
 
 type Int -> Bool
-func isValidAge age =>
-    between 0 150 age
+func isValidAge = age=>    between 0 150 age
 ```
 
 ---
@@ -178,6 +170,5 @@ divides : Int -> Int -> Bool
 use aivi.math (divides)
 
 type Int -> Bool
-func isMultipleOfThree n =>
-    divides 3 n
+func isMultipleOfThree = n=>    divides 3 n
 ```

@@ -115,8 +115,7 @@ value numsTail : Option (List Int) = tail numbers
 value numsLast : Option Int = last numbers
 
 type Int -> Int -> Bool
-func smaller left right =>
-    left < right
+func smaller = left right=>    left < right
 
 value smallestNumber : Int = min smaller 4 2
 value largestNumber : Int = max smaller 4 2
@@ -129,14 +128,12 @@ value smallestFromMany : Int =
     ]
 
 type Int -> Bool
-func positive n =>
-    n > 0
+func positive = n=>    n > 0
 
 value foundPositive : Option Int = find positive numbers
 
 type Int -> Bool
-func even n =>
-    n == 2
+func even = n=>    n == 2
 
 value split : (Partition Int) = partition even numbers
 
@@ -172,8 +169,7 @@ value ageValue : Int = withDefault 0 okAge
 value ageOption : Option Int = toOption okAge
 
 type Text -> Text
-func prefixErr msg =>
-    "error:{msg}"
+func prefixErr = msg=>    "error:{msg}"
 
 value prefixedErr : Result Text Int = mapErr prefixErr errAge
 

@@ -34,28 +34,23 @@ type TreeCatalog = {
 }
 
 type Range -> Int
-func segmentLength cover =>
-    cover.stop - cover.start
+func segmentLength = cover=>    cover.stop - cover.start
 
 type Range -> Range -> Bool
-func sameRange left right =>
-    left.start == right.start and left.stop == right.stop
+func sameRange = left right=>    left.start == right.start and left.stop == right.stop
 
 type Range -> Range -> Bool
-func disjoint left right =>
-    left.stop < right.start or left.stop == right.start or right.stop < left.start or right.stop == left.start
+func disjoint = left right=>    left.stop < right.start or left.stop == right.start or right.stop < left.start or right.stop == left.start
 
 type Int -> Node -> Node
-func applyNode delta node =>
-    {
+func applyNode = delta node=>    {
         cover: node.cover,
         total: node.total + delta * segmentLength node.cover,
         lazy: node.lazy + delta
     }
 
 type Range -> Node -> Node -> LazyTree
-func rebuildTree cover left right =>
-    {
+func rebuildTree = cover left right=>    {
         root: {
             cover,
             total: left.total + right.total,
@@ -66,51 +61,41 @@ func rebuildTree cover left right =>
     }
 
 type LazyTree -> LazyTree
-func pushRoot tree => tree.root.lazy == 0
- T|> tree
+func pushRoot = tree=> tree.root.lazy == 0 T|> tree
  F|> { root: { cover: tree.root.cover, total: tree.root.total, lazy: 0 }, left: applyNode tree.root.lazy tree.left, right: applyNode tree.root.lazy tree.right }
 
 type Range -> Int -> Node -> Node
-func updateChild target delta node => sameRange node.cover target
- T|> applyNode delta node
+func updateChild = target delta node=> sameRange node.cover target T|> applyNode delta node
  F|> node
 
 type Range -> Int -> LazyTree -> LazyTree
-func updateChildren target delta tree =>
-    rebuildTree tree.root.cover (updateChild target delta tree.left) (updateChild target delta tree.right)
+func updateChildren = target delta tree=>    rebuildTree tree.root.cover (updateChild target delta tree.left) (updateChild target delta tree.right)
 
 type Range -> Int -> LazyTree -> LazyTree
-func updateAligned target delta tree => sameRange tree.root.cover target
- T|> { root: applyNode delta tree.root, left: tree.left, right: tree.right }
+func updateAligned = target delta tree=> sameRange tree.root.cover target T|> { root: applyNode delta tree.root, left: tree.left, right: tree.right }
  F|> updateChildren target delta (pushRoot tree)
 
 type Range -> Int -> LazyTree -> Bool
-func skipUpdate target delta tree =>
-    delta == 0 or disjoint tree.root.cover target
+func skipUpdate = target delta tree=>    delta == 0 or disjoint tree.root.cover target
 
 type Range -> Int -> LazyTree -> LazyTree
-func updateRange target delta tree => skipUpdate target delta tree
- T|> tree
+func updateRange = target delta tree=> skipUpdate target delta tree T|> tree
  F|> updateAligned target delta tree
 
 type Range -> LazyTree -> Int
-func queryRightOrZero target tree => sameRange tree.right.cover target
- T|> tree.right.total
+func queryRightOrZero = target tree=> sameRange tree.right.cover target T|> tree.right.total
  F|> 0
 
 type Range -> LazyTree -> Int
-func queryChild target tree => sameRange tree.left.cover target
- T|> tree.left.total
+func queryChild = target tree=> sameRange tree.left.cover target T|> tree.left.total
  F|> queryRightOrZero target tree
 
 type Range -> LazyTree -> Int
-func queryRange target tree => sameRange tree.root.cover target
- T|> tree.root.total
+func queryRange = target tree=> sameRange tree.root.cover target T|> tree.root.total
  F|> queryChild target (pushRoot tree)
 
 type Text -> Range -> LazyTree -> TreeSummary
-func summarizeTree label focus tree => pushRoot tree
- ||> { left, right } -> { label, focusTotal: queryRange focus tree, rootTotal: tree.root.total, pendingRoot: tree.root.lazy, leftTotal: left.total, rightTotal: right.total, note: "focus {focus.start}:{focus.stop}" }
+func summarizeTree = label focus tree=> pushRoot tree ||> { left, right } -> { label, focusTotal: queryRange focus tree, rootTotal: tree.root.total, pendingRoot: tree.root.lazy, leftTotal: left.total, rightTotal: right.total, note: "focus {focus.start}:{focus.stop}" }
 
 value wholeRange : Range = {
     start: 0,

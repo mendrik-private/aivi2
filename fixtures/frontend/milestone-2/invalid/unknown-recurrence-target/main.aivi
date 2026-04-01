@@ -1,5 +1,4 @@
-func step x =>
-    x
+func step = x=>    x
 
 value broken = 0
  @|> step

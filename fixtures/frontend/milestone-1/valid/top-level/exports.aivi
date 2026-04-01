@@ -1,8 +1,7 @@
 type Status = Idle | Busy
 
 type Status -> Text
-func statusLabel status => status
- ||> Idle -> "Idle"
+func statusLabel = status=> status ||> Idle -> "Idle"
  ||> Busy -> "Busy"
 
 value main =

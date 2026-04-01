@@ -1,6 +1,5 @@
 type Int -> Int -> Int
-func step x current =>
-    x
+func step = x current=>    x
 
 signal refresh = 0
 

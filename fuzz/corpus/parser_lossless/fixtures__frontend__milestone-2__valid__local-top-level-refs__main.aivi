@@ -5,8 +5,7 @@ type Screen =
 val screenTitle = "Milestone 2"
 val refreshStep = 10
 
-fun titleFor:Text #screen:Screen =>
-    screen
+fun titleFor:Text = #screen:Screen=>    screen
      ||> Loading => "Loading"
      ||> Ready title => title
 

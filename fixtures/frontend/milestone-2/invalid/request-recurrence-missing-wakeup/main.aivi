@@ -1,5 +1,4 @@
-func step x =>
-    x
+func step = x=>    x
 
 @source http.get "/users"
 signal broken : Signal Int = 0

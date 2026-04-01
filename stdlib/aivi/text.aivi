@@ -4,34 +4,27 @@ type JoinState = {
 }
 
 type Text -> JoinState -> Text -> JoinState
-func joinStep separator state part => state.first
- T|> { first: False, value: part }
+func joinStep = separator state part=> state.first T|> { first: False, value: part }
  F|> { first: False, value: "{state.value}{separator}{part}" }
 
 type JoinState -> Text
-func finishJoin state =>
-    state.value
+func finishJoin = state=>    state.value
 
 type Text -> Bool
-func isEmpty opt =>
-    opt == ""
+func isEmpty = opt=>    opt == ""
 
 type Text -> Bool
-func nonEmpty opt =>
-    opt != ""
+func nonEmpty = opt=>    opt != ""
 
 type Text -> (List Text) -> Text
-func join separator parts => parts
-  |> reduce (joinStep separator) { first: True, value: "" }
+func join = separator parts=> parts  |> reduce (joinStep separator) { first: True, value: "" }
   |> finishJoin
 
 type Text -> Text -> Text -> Text
-func surround prefix suffix opt =>
-    "{prefix}{opt}{suffix}"
+func surround = prefix suffix opt=>    "{prefix}{opt}{suffix}"
 
 type Text -> Text -> Text
-func withDefault fallback s => s == ""
- T|> fallback
+func withDefault = fallback s=> s == "" T|> fallback
  F|> s
 
 @test

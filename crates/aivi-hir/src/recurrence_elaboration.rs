@@ -1196,8 +1196,7 @@ mod tests {
         let lowered = lower_text(
             "accumulate_active_when_source.aivi",
             r#"
-fun step:Int n:Int current:Int =>
-    n
+fun step:Int = n:Int current:Int=>    n
 
 signal enabled = True
 
@@ -1256,8 +1255,7 @@ type Cursor = {
     hasNext: Bool
 }
 
-fun keep:Cursor cursor:Cursor =>
-    cursor
+fun keep:Cursor = cursor:Cursor=>    cursor
 
 value seed:Cursor = { hasNext: True }
 
@@ -1329,11 +1327,9 @@ signal cursor : Signal Cursor =
 domain Duration over Int
     literal sec : Int -> Duration
 
-fun keep n:Int =>
-    n
+fun keep = n:Int=>    n
 
-fun asText n:Int =>
-    "oops"
+fun asText = n:Int=>    "oops"
 
 @recur.timer 5sec
 signal broken : Signal Int =
@@ -1376,13 +1372,11 @@ signal broken : Signal Int =
 domain Duration over Int
     literal sec : Int -> Duration
 
-fun advance:Int pressed:Bool n:Int =>
-    pressed
+fun advance:Int = pressed:Bool n:Int=>    pressed
      T|> n + 1
      F|> n
 
-fun belowLimit:Bool n:Int =>
-    n < 10
+fun belowLimit:Bool = n:Int=>    n < 10
 
 signal ready : Signal Bool = True
 

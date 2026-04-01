@@ -5,8 +5,8 @@ use crate::{
         BigIntLiteral, BinaryOperator, ClassBody, ClassMember, ClassMemberName, ClassRequireDecl,
         ClassWithDecl, DecimalLiteral, Decorator, DecoratorArguments, DecoratorPayload, DomainBody,
         DomainItem, DomainMember, DomainMemberName, ErrorItem, ExportItem, Expr, ExprKind,
-        FloatLiteral, FunctionParam, Identifier, InstanceBody, InstanceItem, InstanceMember,
-        IntegerLiteral, Item, ItemBase, MapExpr, MapExprEntry, MarkupAttribute,
+        FloatLiteral, FunctionParam, FunctionSurfaceForm, Identifier, InstanceBody, InstanceItem,
+        InstanceMember, IntegerLiteral, Item, ItemBase, MapExpr, MapExprEntry, MarkupAttribute,
         MarkupAttributeValue, MarkupNode, Module, NamedItem, NamedItemBody, OperatorName,
         PatchBlock, PatchEntry, PatchInstruction, PatchInstructionKind, PatchSelector,
         PatchSelectorSegment, Pattern, PatternKind, PipeCaseArm, PipeExpr, PipeStage,
@@ -121,6 +121,7 @@ const MISSING_REACTIVE_UPDATE_ARM_BODY: DiagnosticCode =
 const PARSE_DEPTH_EXCEEDED: DiagnosticCode = DiagnosticCode::new("syntax", "parse-depth-exceeded");
 
 const MAX_PARSE_DEPTH: usize = 256;
+const IMPLICIT_FUNCTION_SUBJECT_NAME: &str = "arg1";
 
 /// Parser output retaining the lossless token buffer and recoverable diagnostics.
 #[derive(Clone, Debug)]
@@ -357,6 +358,7 @@ impl<'a> Parser<'a> {
                 type_parameters: Vec::new(),
                 constraints,
                 annotation,
+                function_form: FunctionSurfaceForm::Explicit,
                 parameters: Vec::new(),
                 body: None,
             };
@@ -406,6 +408,7 @@ impl<'a> Parser<'a> {
             type_parameters,
             constraints: Vec::new(),
             annotation: None,
+            function_form: FunctionSurfaceForm::Explicit,
             parameters: Vec::new(),
             body,
         }
@@ -434,6 +437,7 @@ impl<'a> Parser<'a> {
             type_parameters,
             constraints: Vec::new(),
             annotation: None,
+            function_form: FunctionSurfaceForm::Explicit,
             parameters: Vec::new(),
             body,
         }
@@ -613,44 +617,84 @@ impl<'a> Parser<'a> {
             type_parameters: Vec::new(),
             constraints,
             annotation,
+            function_form: FunctionSurfaceForm::Explicit,
             parameters: Vec::new(),
             body,
         }
     }
 
-    /// Parse a `func` declaration: function form with parameters, uses `=>`.
+    /// Parse a `func` declaration: `func name = params => body` or `func name = .`.
     fn parse_fun_item(&mut self, base: ItemBase, keyword_index: usize, end: usize) -> NamedItem {
         let mut cursor = keyword_index + 1;
         let name = self.parse_named_item_name(keyword_index, &mut cursor, end, "func declaration");
         let (constraints, annotation) = self.parse_function_signature_annotation(&mut cursor, end);
 
-        let mut parameters = Vec::new();
-        while self.starts_function_param(cursor, end) {
-            let Some(parameter) = self.parse_function_param(&mut cursor, end) else {
-                break;
-            };
-            parameters.push(parameter);
+        let has_equals = self.consume_kind(&mut cursor, end, TokenKind::Equals).is_some();
+        if !has_equals {
+            if self.peek_nontrivia(cursor, end).is_some_and(|index| {
+                self.is_function_param_token(index)
+                    || self.tokens[index].kind() == TokenKind::Arrow
+                    || self.starts_unary_subject_function(cursor, end)
+            }) {
+                let anchor_span = name
+                    .as_ref()
+                    .map(|identifier| identifier.span)
+                    .unwrap_or_else(|| self.source_span_of_token(keyword_index));
+                self.diagnostics.push(
+                    Diagnostic::error("func declaration is missing `=` before its parameters and body")
+                        .with_code(MISSING_DECLARATION_BODY)
+                        .with_primary_label(
+                            anchor_span,
+                            "insert `=` between the function name and its body",
+                        ),
+                );
+            } else {
+                self.missing_body_diagnostic(
+                    keyword_index,
+                    "func declaration is missing its body",
+                    "expected `=` followed by `.` or parameters and `=>`",
+                );
+            }
         }
 
-        let body = if self
-            .consume_kind(&mut cursor, end, TokenKind::Arrow)
-            .is_some()
-        {
-            self.parse_expression_body(
-                keyword_index,
-                &mut cursor,
-                end,
-                "func declaration",
-                "func declaration is missing its body after `=>`",
-                "expected a body expression after `=>`",
-            )
+        let (function_form, parameters, body) = if self.starts_unary_subject_function(cursor, end) {
+            let dot_index = self
+                .peek_nontrivia(cursor, end)
+                .expect("unary function sugar should start on a dot token");
+            cursor = dot_index + 1;
+            let (parameters, body) =
+                self.parse_unary_subject_function_body(keyword_index, dot_index, &mut cursor, end);
+            (FunctionSurfaceForm::UnarySubjectSugar, parameters, body)
         } else {
-            self.missing_body_diagnostic(
-                keyword_index,
-                "func declaration is missing its body",
-                "expected parameters followed by `=>`",
-            );
-            None
+            let mut parameters = Vec::new();
+            while self.starts_function_param(cursor, end) {
+                let Some(parameter) = self.parse_function_param(&mut cursor, end) else {
+                    break;
+                };
+                parameters.push(parameter);
+            }
+
+            let body = if self
+                .consume_kind(&mut cursor, end, TokenKind::Arrow)
+                .is_some()
+            {
+                self.parse_expression_body(
+                    keyword_index,
+                    &mut cursor,
+                    end,
+                    "func declaration",
+                    "func declaration is missing its body after `=>`",
+                    "expected a body expression after `=>`",
+                )
+            } else {
+                self.missing_body_diagnostic(
+                    keyword_index,
+                    "func declaration is missing its body",
+                    "expected `=>` followed by a body expression",
+                );
+                None
+            };
+            (FunctionSurfaceForm::Explicit, parameters, body)
         };
 
         NamedItem {
@@ -660,6 +704,7 @@ impl<'a> Parser<'a> {
             type_parameters: Vec::new(),
             constraints,
             annotation,
+            function_form,
             parameters,
             body,
         }
@@ -706,6 +751,7 @@ impl<'a> Parser<'a> {
             type_parameters: Vec::new(),
             constraints: Vec::new(),
             annotation,
+            function_form: FunctionSurfaceForm::Explicit,
             parameters: Vec::new(),
             body,
         }
@@ -2203,6 +2249,12 @@ impl<'a> Parser<'a> {
                 return self.parse_optional_signature_annotation(cursor, split);
             }
         }
+        if let Some(body_equals) = self.find_same_line_top_level_equals(*cursor, body_arrow) {
+            return self.parse_optional_signature_annotation(cursor, body_equals);
+        }
+        if let Some(body_equals) = self.find_same_line_top_level_equals(*cursor, end) {
+            return self.parse_optional_signature_annotation(cursor, body_equals);
+        }
         self.parse_optional_signature_annotation(cursor, body_arrow)
     }
 
@@ -2365,6 +2417,70 @@ impl<'a> Parser<'a> {
             annotation,
             span: self.source_span_for_range(name_index, *cursor),
         })
+    }
+
+    fn starts_unary_subject_function(&self, start: usize, end: usize) -> bool {
+        let Some(dot_index) = self.peek_nontrivia(start, end) else {
+            return false;
+        };
+        if self.tokens[dot_index].kind() != TokenKind::Dot {
+            return false;
+        }
+        !matches!(
+            self.peek_kind(dot_index + 1, end),
+            Some(kind) if kind == TokenKind::Identifier || kind.is_keyword()
+        )
+    }
+
+    fn parse_unary_subject_function_body(
+        &mut self,
+        keyword_index: usize,
+        dot_index: usize,
+        cursor: &mut usize,
+        end: usize,
+    ) -> (Vec<FunctionParam>, Option<NamedItemBody>) {
+        let parameter = self.implicit_function_subject_parameter(dot_index);
+        let body = self
+            .parse_pipe_expr_from_head(
+                dot_index,
+                Some(self.implicit_function_subject_expr(&parameter)),
+                cursor,
+                end,
+                ExprStop::default(),
+            )
+            .and_then(|expr| self.finish_expression_body(cursor, end, "func declaration", expr))
+            .or_else(|| {
+                self.missing_body_diagnostic(
+                    keyword_index,
+                    "func declaration is missing its body after `=`",
+                    "expected `.` or parameters followed by `=>`",
+                );
+                None
+            });
+        (vec![parameter], body)
+    }
+
+    fn implicit_function_subject_parameter(&self, dot_index: usize) -> FunctionParam {
+        let span = self.source_span_of_token(dot_index);
+        FunctionParam {
+            name: Some(Identifier {
+                text: IMPLICIT_FUNCTION_SUBJECT_NAME.to_owned(),
+                span,
+            }),
+            annotation: None,
+            span,
+        }
+    }
+
+    fn implicit_function_subject_expr(&self, parameter: &FunctionParam) -> Expr {
+        let name = parameter
+            .name
+            .clone()
+            .expect("implicit unary-function parameter should keep its name");
+        Expr {
+            span: parameter.span,
+            kind: ExprKind::Name(name),
+        }
     }
 
     fn parse_type_decl_body(&mut self, cursor: &mut usize, end: usize) -> Option<TypeDeclBody> {
@@ -2652,15 +2768,23 @@ impl<'a> Parser<'a> {
 
     fn parse_pipe_expr(&mut self, cursor: &mut usize, end: usize, stop: ExprStop) -> Option<Expr> {
         let start = *cursor;
-        let mut head = if self.peek_kind(*cursor, end) == Some(TokenKind::PipeApply) {
+        let head = if self.peek_kind(*cursor, end) == Some(TokenKind::PipeApply) {
             None
         } else {
-            Some(Box::new(self.parse_range_expr(
-                cursor,
-                end,
-                stop.with_pipe_stage(),
-            )?))
+            Some(self.parse_range_expr(cursor, end, stop.with_pipe_stage())?)
         };
+        self.parse_pipe_expr_from_head(start, head, cursor, end, stop)
+    }
+
+    fn parse_pipe_expr_from_head(
+        &mut self,
+        start: usize,
+        head: Option<Expr>,
+        cursor: &mut usize,
+        end: usize,
+        stop: ExprStop,
+    ) -> Option<Expr> {
+        let mut head = head.map(Box::new);
         let mut stages = Vec::new();
         let mut cluster_active = false;
 
@@ -4351,6 +4475,28 @@ impl<'a> Parser<'a> {
         found
     }
 
+    fn find_same_line_top_level_equals(&self, start: usize, end: usize) -> Option<usize> {
+        let mut scan = start;
+        let mut saw_token = false;
+        let mut depth = 0usize;
+        while let Some(index) = self.peek_nontrivia(scan, end) {
+            if saw_token && self.tokens[index].line_start() {
+                break;
+            }
+            saw_token = true;
+            match self.tokens[index].kind() {
+                TokenKind::LParen | TokenKind::LBrace | TokenKind::LBracket => depth += 1,
+                TokenKind::RParen | TokenKind::RBrace | TokenKind::RBracket => {
+                    depth = depth.saturating_sub(1)
+                }
+                TokenKind::Equals if depth == 0 => return Some(index),
+                _ => {}
+            }
+            scan = index + 1;
+        }
+        None
+    }
+
     fn parameter_annotation_end(&self, start: usize, end: usize) -> usize {
         let Some(body_arrow) = self.find_last_same_line_arrow(start, end) else {
             return end;
@@ -4728,6 +4874,16 @@ impl<'a> Parser<'a> {
                 self.missing_body_diagnostic(keyword_index, missing_message, missing_label);
                 None
             })?;
+        self.finish_expression_body(cursor, end, declaration_name, expr)
+    }
+
+    fn finish_expression_body(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+        declaration_name: &str,
+        expr: Expr,
+    ) -> Option<NamedItemBody> {
         if let Some(trailing_index) = self.next_significant_in_range(*cursor, end) {
             self.diagnostics.push(
                 Diagnostic::error(format!(
@@ -5713,8 +5869,7 @@ signal users : Signal User
 
 type Bool = True | False
 value answer = 42
-fun add: Int x:Int y:Int =>
-    x + y
+fun add: Int = x:Int y:Int => x + y
 use aivi.network (
     http
 )
@@ -5988,7 +6143,7 @@ when ready and enabled => total <- 1
   | Left
 type Direction =
   | East
-fun updateDirection:Direction key:Key current:Direction => current
+fun updateDirection:Direction = key:Key current:Direction => current
 signal keyDown: Signal Key = Left
 signal direction: Signal Direction = keyDown
  +|> East updateDirection
@@ -6394,8 +6549,7 @@ signal direction: Signal Direction = keyDown
             r#"class Eq A
     (==) : A -> A -> Bool
 
-fun same:Bool left:Blob right:Blob =>
-    True
+fun same:Bool = left:Blob right:Blob => True
 
 instance Eq Blob
     (==) left right =
@@ -6482,7 +6636,7 @@ instance Eq Blob
         let (_, parsed) = load(
             r#"class Functor F
     map : (A -> B) -> F A -> F B
-fun same:Eq A -> Bool v:A => v == v
+fun same:Eq A -> Bool = v:A => v == v
 instance Eq A -> Eq (Option A)
     (==) left right = True
 "#,
@@ -6860,8 +7014,9 @@ instance Eq A -> Eq (Option A)
 
     #[test]
     fn parser_accepts_negative_integer_patterns() {
-        let (_, parsed) =
-            load("fun isNegativeOne:Bool value:Int => value\n  ||> -1 -> True\n  ||> _ -> False\n");
+        let (_, parsed) = load(
+            "fun isNegativeOne:Bool = value:Int => value\n  ||> -1 -> True\n  ||> _ -> False\n",
+        );
 
         assert!(
             !parsed.has_errors(),
@@ -7149,8 +7304,7 @@ value view =
 value projection = .email
 value span = 1..10
 value values = [1..10]
-fun ignore:Int _ =>
-    0
+fun ignore:Int = _ => 0
 "#,
         );
 

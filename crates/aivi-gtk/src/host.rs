@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     collections::{BTreeMap, BTreeSet, VecDeque},
     error::Error,
     fmt,
@@ -33,6 +34,38 @@ fn assert_gtk_main_thread() {
         "GTK widget operation called from a non-main thread. \
          All GTK widget operations must be performed on the thread that initialised GTK."
     );
+}
+
+const AIVI_WIDGET_STYLE_CSS: &str = r#"
+button.aivi-compact-button {
+    padding: 2px;
+    min-width: 0;
+    min-height: 0;
+}
+"#;
+
+thread_local! {
+    static AIVI_WIDGET_STYLE_PROVIDER: RefCell<Option<gtk::CssProvider>> = const { RefCell::new(None) };
+}
+
+fn ensure_aivi_widget_styles() {
+    assert_gtk_main_thread();
+    let Some(display) = gtk::gdk::Display::default() else {
+        return;
+    };
+    AIVI_WIDGET_STYLE_PROVIDER.with(|slot| {
+        if slot.borrow().is_some() {
+            return;
+        }
+        let provider = gtk::CssProvider::new();
+        provider.load_from_data(AIVI_WIDGET_STYLE_CSS);
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+        *slot.borrow_mut() = Some(provider);
+    });
 }
 
 pub trait GtkHostValue: Clone + 'static {
@@ -329,6 +362,7 @@ where
                 gtk::Separator::new(Orientation::Horizontal).upcast::<gtk::Widget>()
             }
         };
+        ensure_aivi_widget_styles();
         Ok((schema, widget))
     }
 
@@ -461,6 +495,23 @@ where
                 } else {
                     widget.remove_css_class("monospace");
                 }
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::ButtonCompact) => {
+                if value {
+                    widget.add_css_class("aivi-compact-button");
+                } else {
+                    widget.remove_css_class("aivi-compact-button");
+                }
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::ButtonHasFrame) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Button>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Button",
+                    })?
+                    .set_has_frame(value);
             }
             GtkPropertySetter::Bool(GtkBoolPropertySetter::HeaderBarShowTitleButtons) => {
                 widget
@@ -772,6 +823,20 @@ where
         value: i64,
     ) -> Result<(), GtkConcreteHostError> {
         match property.setter {
+            GtkPropertySetter::I64(GtkI64PropertySetter::WidthRequest) => {
+                let size = i32::try_from(value).map_err(|_| {
+                    self.invalid_property_value(schema, property, "signed 32-bit integer")
+                })?;
+                widget.set_width_request(size);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::HeightRequest) => {
+                let size = i32::try_from(value).map_err(|_| {
+                    self.invalid_property_value(schema, property, "signed 32-bit integer")
+                })?;
+                widget.set_height_request(size);
+                Ok(())
+            }
             GtkPropertySetter::TextOrI64(GtkTextOrI64PropertySetter::BoxSpacing) => {
                 let spacing = i32::try_from(value).map_err(|_| {
                     self.invalid_property_value(schema, property, "signed 32-bit integer")
@@ -915,6 +980,16 @@ where
                         expected_type: "gtk::Window",
                     })?
                     .set_child(child);
+            }
+            GtkChildMountRoute::WindowTitlebar => {
+                parent_widget
+                    .clone()
+                    .downcast::<gtk::Window>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "Window".into(),
+                        expected_type: "gtk::Window",
+                    })?
+                    .set_titlebar(child);
             }
             GtkChildMountRoute::HeaderBarTitleWidget => {
                 parent_widget
@@ -2260,6 +2335,69 @@ value view =
                 .expect("window child should be a label");
 
             assert!(label.has_css_class("monospace"));
+        });
+    }
+
+    #[test]
+    fn concrete_host_mounts_window_titlebars_and_compact_borderless_buttons() {
+        gtk::test_synced(|| {
+            let graph = lower_graph(
+                "gtk-host-window-titlebar.aivi",
+                r#"
+value showButtons = True
+value view =
+    <Window title="Host">
+        <Window.titlebar>
+            <HeaderBar showTitleButtons={showButtons}>
+                <HeaderBar.start>
+                    <Label text="Status" />
+                </HeaderBar.start>
+                <HeaderBar.end>
+                    <Button label="Restart" compact hasFrame={False} widthRequest={26} heightRequest={26} />
+                </HeaderBar.end>
+            </HeaderBar>
+        </Window.titlebar>
+        <Button label="A" compact hasFrame={False} widthRequest={26} heightRequest={26} />
+    </Window>
+"#,
+            );
+            let show_title_buttons_input =
+                find_widget_input(&graph, "HeaderBar", "showTitleButtons");
+            let executor = GtkRuntimeExecutor::new_with_values(
+                graph,
+                GtkConcreteHost::<TestValue>::default(),
+                [(show_title_buttons_input, TestValue::Bool(true))],
+            )
+            .expect("concrete GTK host should mount a window titlebar");
+
+            let root = executor
+                .root_widgets()
+                .expect("root widget should exist")
+                .into_iter()
+                .next()
+                .expect("window root should exist");
+            let window = executor
+                .host()
+                .widget(&root)
+                .expect("window handle should resolve")
+                .downcast::<gtk::Window>()
+                .expect("root should be a GTK window");
+            let titlebar = window
+                .titlebar()
+                .expect("window should mount a titlebar child")
+                .downcast::<gtk::HeaderBar>()
+                .expect("titlebar child should be a header bar");
+            assert!(titlebar.property::<bool>("show-title-buttons"));
+
+            let content = window
+                .child()
+                .expect("window should keep the board button as content")
+                .downcast::<gtk::Button>()
+                .expect("window content should be a button");
+            assert!(content.has_css_class("aivi-compact-button"));
+            assert!(!content.has_frame());
+            assert_eq!(content.width_request(), 26);
+            assert_eq!(content.height_request(), 26);
         });
     }
 

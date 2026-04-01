@@ -6,39 +6,32 @@ type Screen =
 value current : Screen = Loading
 
 type Bool -> Text
-func boolLabel ready => ready
- ||> True  -> "ready"
+func boolLabel = ready=> ready ||> True  -> "ready"
  ||> False -> "waiting"
 
 type (Option Text) -> Text
-func maybeLabel maybeUser => maybeUser
- ||> Some name -> name
+func maybeLabel = maybeUser=> maybeUser ||> Some name -> name
  ||> None      -> "login"
 
 type (Result Text Text) -> Text
-func resultLabel status => status
- ||> Ok body     -> body
+func resultLabel = status=> status ||> Ok body     -> body
  ||> Err message -> message
 
 type (Validation Text Text) -> Text
-func validationLabel status => status
- ||> Valid body      -> body
+func validationLabel = status=> status ||> Valid body      -> body
  ||> Invalid message -> message
 
 type Screen -> Text
-func screenLabel screen => screen
- ||> Loading       -> "loading"
+func screenLabel = screen=> screen ||> Loading       -> "loading"
  ||> Ready title   -> title
  ||> Failed reason -> reason
 
 type Text -> Text
-func titleLabel title => title == "Inbox"
- T|> "priority"
+func titleLabel = title=> title == "Inbox" T|> "priority"
  F|> title
 
 type Screen -> Text
-func nestedScreenLabel screen => screen
- ||> Loading       -> "loading"
+func nestedScreenLabel = screen=> screen ||> Loading       -> "loading"
  ||> Ready title   -> titleLabel title
  ||> Failed reason -> reason
 

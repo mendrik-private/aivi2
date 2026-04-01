@@ -70,28 +70,29 @@ value user : User = {
 }
 
 type Int -> Int -> Int
-func add x y =>
+func add = x y =>
     x + y
 
 type Eq A => A -> Bool
-func same v =>
+func same = v =>
     v == v
 ```
 
 Rules:
 
 - `value` = constant binding only; uses `=`.
-- `func` = function declaration; uses `=>`.
+- `func` = function declaration; uses `=` after the name, then either parameters plus `=>` or unary subject sugar `.`.
 - Function signatures live on a preceding `type` line: `type Int -> Int -> Int`.
-- `func` headers keep parameters unannotated: `func add x y => ...`.
+- `func` headers keep parameters unannotated: `func add = x y => ...`.
+- Unary subject sugar is available for single-argument functions whose body starts from that argument: `func headOrFallback = .`.
 - Constraint prefixes, when present, live on the `type` line: `type Eq A => A -> Bool`.
 - `value` is a contextual keyword and can still be a parameter name:
 
 ```aivi
 type Int -> Int
-func absolute value => value < 0
- T|> 0 - value
- F|> value
+func absolute = value =>
+    value < 0 T|> 0 - value
+     F|> value
 ```
 
 ### 2.3 `type`
@@ -744,7 +745,7 @@ signal counter : Signal Int = tick
  +|> 0 step
 
 type Unit -> Int -> Int
-func step tick current =>
+func step = tick current =>
     current + 1
 ```
 
@@ -1099,7 +1100,7 @@ type User = {
 value greeting = "hello"
 
 type User -> Text
-func greet user =>
+func greet = user =>
     "{greeting}, {user.name}"
 ```
 

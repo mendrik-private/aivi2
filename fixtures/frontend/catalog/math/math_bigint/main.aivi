@@ -9,20 +9,16 @@ type BigIntSummary = {
 }
 
 type BigInt -> BigInt -> BigInt
-func addBigInt total x =>
-    total + x
+func addBigInt = total x=>    total + x
 
 type BigInt -> BigInt -> BigInt
-func multiplyBigInt product x =>
-    product * x
+func multiplyBigInt = product x=>    product * x
 
 type List BigInt => BigInt
-func sumBigInts values =>
-    reduce addBigInt 0n values
+func sumBigInts = values=>    reduce addBigInt 0n values
 
 type List BigInt => BigInt
-func productBigInts values =>
-    reduce multiplyBigInt 1n values
+func productBigInts = values=>    reduce multiplyBigInt 1n values
 
 value archiveChunks : List BigInt = [
     9999999999999999999999n,

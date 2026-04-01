@@ -17204,8 +17204,7 @@ value resultLabel =
   | Pending
   | Failed Text
 
-fun statusLabel:Text status:Status =>
-    status
+fun statusLabel:Text = status:Status=>    status
      ||> Paid -> "paid"
 "#,
         );
@@ -17240,18 +17239,15 @@ fun statusLabel:Text status:Status =>
      ||> True -> "ready"
      ||> False -> "waiting"
 
-fun maybeLabel:Text maybeUser:(Option Text) =>
-    maybeUser
+fun maybeLabel:Text = maybeUser:(Option Text)=>    maybeUser
      ||> Some name -> name
      ||> None -> "login"
 
-fun resultLabel:Text status:(Result Text Text) =>
-    status
+fun resultLabel:Text = status:(Result Text Text)=>    status
      ||> Ok body -> body
      ||> Err message -> message
 
-fun validationLabel:Text status:(Validation Text Text) =>
-    status
+fun validationLabel:Text = status:(Validation Text Text)=>    status
      ||> Valid body -> body
      ||> Invalid message -> message
 "#,

@@ -1,5 +1,4 @@
-fun collect #items =>
-    items
+fun collect = #items=>    items
 
 val users = []
 val emails =

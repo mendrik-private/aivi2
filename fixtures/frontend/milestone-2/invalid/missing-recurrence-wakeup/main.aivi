@@ -1,5 +1,4 @@
-func step x =>
-    x
+func step = x=>    x
 
 signal broken : Signal Int = 0
  @|> step

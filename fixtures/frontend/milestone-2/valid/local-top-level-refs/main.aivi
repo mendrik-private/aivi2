@@ -6,8 +6,7 @@ value screenTitle = "Milestone 2"
 value refreshStep = 10
 
 type Screen -> Text
-func titleFor screen => screen
- ||> Loading     -> "Loading"
+func titleFor = screen=> screen ||> Loading     -> "Loading"
  ||> Ready title -> title
 
 value currentScreen = Ready screenTitle

@@ -871,11 +871,9 @@ type User = {
     email: Text
 }
 
-fun keepText:Bool email:Text =>
-    True
+fun keepText:Bool = email:Text=>    True
 
-fun joinEmails:Text items:List Text =>
-    "joined"
+fun joinEmails:Text = items:List Text=>    "joined"
 
 value users:List User = [
     { email: "ada@example.com" }

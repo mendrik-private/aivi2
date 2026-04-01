@@ -1,5 +1,4 @@
-fun double:Int #n:Int => n * 2
-
+fun double:Int = #n:Int=> n * 2
 val testB:Result Text Int =
     Ok 0
      ||> Err msg => Err msg

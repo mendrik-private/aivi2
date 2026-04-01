@@ -2123,8 +2123,7 @@ type User = {
     age: Int
 }
 
-fun isEligible:Bool user:User =>
-    .active and .age > 18
+fun isEligible:Bool = user:User=>    .active and .age > 18
 
 signal users:Signal User = { active: True, age: 21 }
 
@@ -2354,8 +2353,7 @@ type User = {
     email: Text
 }
 
-fun joinEmails:Text items:List Text =>
-    "joined"
+fun joinEmails:Text = items:List Text=>    "joined"
 
 value users:List User = [
     { email: "ada@example.com" }
@@ -2406,11 +2404,9 @@ type User = {
     email: Text
 }
 
-fun keepText:Bool email:Text =>
-    True
+fun keepText:Bool = email:Text=>    True
 
-fun joinEmails:Text items:List Text =>
-    "joined"
+fun joinEmails:Text = items:List Text=>    "joined"
 
 value users:List User = [
     { email: "ada@example.com" }
@@ -2452,8 +2448,7 @@ type Cursor = {
     hasNext: Bool
 }
 
-fun keep:Cursor cursor:Cursor =>
-    cursor
+fun keep:Cursor = cursor:Cursor=>    cursor
 
 value seed:Cursor = { hasNext: True }
 

@@ -1,5 +1,4 @@
-fun step #value =>
-    value
+fun step = #value=>    value
 
 provider custom.feed
     wakeup: providerTrigger

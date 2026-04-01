@@ -8,81 +8,65 @@ type EitherPartition L R = {
 }
 
 type Either L R => Bool
-func isLeft either => either
- ||> Left _  -> True
+func isLeft = either=> either ||> Left _  -> True
  ||> Right _ -> False
 
 type Either L R => Bool
-func isRight either => either
- ||> Left _  -> False
+func isRight = either=> either ||> Left _  -> False
  ||> Right _ -> True
 
 type Either L R => (Option L)
-func fromLeft either => either
- ||> Left v  -> Some v
+func fromLeft = either=> either ||> Left v  -> Some v
  ||> Right _ -> None
 
 type Either L R => (Option R)
-func fromRight either => either
- ||> Left _  -> None
+func fromRight = either=> either ||> Left _  -> None
  ||> Right v -> Some v
 
 type (L1 -> L2) -> (Either L1 R) -> (Either L2 R)
-func mapLeft f either => either
- ||> Left v  -> Left (f v)
+func mapLeft = f either=> either ||> Left v  -> Left (f v)
  ||> Right v -> Right v
 
 type (R1 -> R2) -> (Either L R1) -> (Either L R2)
-func mapRight f either => either
- ||> Left v  -> Left v
+func mapRight = f either=> either ||> Left v  -> Left v
  ||> Right v -> Right (f v)
 
 type (L1 -> L2) -> (R1 -> R2) -> (Either L1 R1) -> (Either L2 R2)
-func mapBoth onLeft onRight either => either
- ||> Left v  -> Left (onLeft v)
+func mapBoth = onLeft onRight either=> either ||> Left v  -> Left (onLeft v)
  ||> Right v -> Right (onRight v)
 
 type (L -> C) -> (R -> C) -> (Either L R) -> C
-func fold onLeft onRight either => either
- ||> Left v  -> onLeft v
+func fold = onLeft onRight either=> either ||> Left v  -> onLeft v
  ||> Right v -> onRight v
 
 type Either L R => (Either R L)
-func swap either => either
- ||> Left v  -> Right v
+func swap = either=> either ||> Left v  -> Right v
  ||> Right v -> Left v
 
 type Either L R => (Option R)
-func toOption either => either
- ||> Left _  -> None
+func toOption = either=> either ||> Left _  -> None
  ||> Right v -> Some v
 
 type Either L R => (Result L R)
-func toResult either => either
- ||> Left e  -> Err e
+func toResult = either=> either ||> Left e  -> Err e
  ||> Right v -> Ok v
 
 type Result E A => (Either E A)
-func fromResult result => result
- ||> Ok v  -> Right v
+func fromResult = result=> result ||> Ok v  -> Right v
  ||> Err e -> Left e
 
 type EitherPartition L R => L -> (EitherPartition L R)
-func addLeftItem acc v => acc
- ||> { lefts, rights } -> { lefts: append lefts [v], rights }
+func addLeftItem = acc v=> acc ||> { lefts, rights } -> { lefts: append lefts [v], rights }
 
 type EitherPartition L R => R -> (EitherPartition L R)
-func addRightItem acc v => acc
- ||> { lefts, rights } -> { lefts, rights: append rights [v] }
+func addRightItem = acc v=> acc ||> { lefts, rights } -> { lefts, rights: append rights [v] }
 
 type EitherPartition L R => (Either L R) -> (EitherPartition L R)
-func partitionStep acc item => item
- ||> Left v  -> addLeftItem acc v
+func partitionStep = acc item=> item ||> Left v  -> addLeftItem acc v
  ||> Right v -> addRightItem acc v
 
 type List (Either L R) => ((List L, List R))
-func partitionEithers items => items
-  |> reduce partitionStep { lefts: [], rights: [] }
+func partitionEithers = items=> items  |> reduce partitionStep { lefts: [], rights: [] }
  ||> { lefts, rights } -> (lefts, rights)
 
 export Either

@@ -53,7 +53,7 @@ A `func` declaration names a pure function:
 
 ```aivi
 type Int -> Int -> Int
-func add x y =>
+func add = x y =>
     x + y
 
 value total = add 3 4
@@ -63,7 +63,7 @@ Function signatures live on a preceding `type` line, and the `func` header keeps
 
 ```aivi
 type Text -> Text
-func greet name =>
+func greet = name =>
     "Hello, {name}!"
 
 value greetingText = greet "Ada"
@@ -75,7 +75,7 @@ Parameters are separated by spaces, not commas:
 
 ```aivi
 type Int -> Int -> Int -> Bool
-func between low high n =>
+func between = low high n =>
     n >= low and n <= high
 
 value scoreAllowed = between 0 100 42
@@ -87,11 +87,22 @@ Function bodies are still just expressions, so multi-line definitions usually le
 
 ```aivi
 type Int -> Text
-func describeScore score => score >= 50
- T|> "good"
- F|> "keep going"
+func describeScore = score =>
+    score >= 50 T|> "good"
+     F|> "keep going"
 
 value scoreLabel = describeScore 88
+```
+
+## Unary subject sugar
+
+When a unary function starts from its argument directly, `func name = .` is shorthand for a single implicit argument whose initial body/head is that argument:
+
+```aivi
+type Text -> Text
+func trimStatus = .
+ ||> " ready " -> "ready"
+ ||> _         -> .
 ```
 
 ## Calling functions
@@ -100,7 +111,7 @@ Call a function by writing the function name followed by its arguments:
 
 ```aivi
 type Int -> Int -> Int
-func area width height =>
+func area = width height =>
     width * height
 
 value roomArea = area 5 8
@@ -110,7 +121,7 @@ If an argument is itself an expression, wrap it in parentheses:
 
 ```aivi
 type Int -> Int -> Int
-func area width height =>
+func area = width height =>
     width * height
 
 value adjustedArea = area (2 + 3) (4 * 2)
@@ -124,7 +135,7 @@ Functions can be partially applied. Supplying fewer arguments returns another fu
 
 ```aivi
 type Int -> Int -> Int
-func multiply left right =>
+func multiply = left right =>
     left * right
 
 value double = multiply 2
@@ -137,12 +148,12 @@ For examples and playground-friendly snippets, prefer a named helper over an inl
 
 ```aivi
 type Text -> Text
-func trimStatus status => status
+func trimStatus = .
  ||> " ready " -> "ready"
- ||> _         -> status
+ ||> _         -> .
 
 type Text -> Text
-func decorateStatus status =>
+func decorateStatus = status =>
     "[{status}]"
 
 value shownStatus = " ready "
@@ -198,7 +209,7 @@ The current checked slice also accepts constructor focus through `Some`, `Ok`, `
 
 ```aivi
 type Int -> Int
-func increment n =>
+func increment = n =>
     n + 1
 
 type Counter = {
@@ -221,7 +232,7 @@ Both `value` and `func` use `:` for type annotations:
 value count : Int = 0
 
 type Int -> Int
-func negate n =>
+func negate = n =>
     0 - n
 ```
 
@@ -230,7 +241,7 @@ func negate n =>
 | Form | Example |
 | --- | --- |
 | Value | `value answer:Int = 42` |
-| Function | `type Int -> Int -> Int` / `func add x y => x + y` |
+| Function | `type Int -> Int -> Int` / `func add = x y => x + y` |
 | Function call | `add 3 4` |
 | Partial application | `value double = multiply 2` |
 | Patch apply | `value promoted = user <| { isAdmin: True }` |

@@ -44,8 +44,7 @@ Returns `True` if the validation holds a value.
 use aivi.validation (isValid)
 
 type (Validation Text Int) -> Bool
-func passed v =>
-    isValid v
+func passed = v=>    isValid v
 ```
 
 ---
@@ -60,8 +59,7 @@ Returns `True` if the validation has failed.
 use aivi.validation (isInvalid)
 
 type (Validation Text Int) -> Bool
-func rejected v =>
-    isInvalid v
+func rejected = v=>    isInvalid v
 ```
 
 ---
@@ -76,8 +74,7 @@ Extracts the value from `Valid`, or returns the fallback if `Invalid`.
 use aivi.validation (getOrElse)
 
 type (Validation Text Int) -> Int
-func safeValue v =>
-    getOrElse 0 v
+func safeValue = v=>    getOrElse 0 v
 ```
 
 ---
@@ -92,12 +89,10 @@ Transforms the error inside `Invalid`, leaving `Valid` untouched.
 use aivi.validation (mapErr)
 
 type Text -> Int
-func toCode message =>
-    42
+func toCode = message=>    42
 
 type (Validation Text Int) -> (Validation Int Int)
-func withErrorCode v => v
-  |> mapErr toCode
+func withErrorCode = v=> v  |> mapErr toCode
 ```
 
 ---
@@ -112,8 +107,7 @@ Converts a `Validation` to a `Result`. `Valid value` becomes `Ok value`; `Invali
 use aivi.validation (toResult)
 
 type (Validation Text Int) -> (Result Text Int)
-func asResult v =>
-    toResult v
+func asResult = v=>    toResult v
 ```
 
 ---
@@ -128,8 +122,7 @@ Converts a `Result` to a `Validation`. `Ok value` becomes `Valid value`; `Err er
 use aivi.validation (fromResult)
 
 type (Result Text Int) -> (Validation Text Int)
-func asValidation r =>
-    fromResult r
+func asValidation = r=>    fromResult r
 ```
 
 ---
@@ -144,8 +137,7 @@ Converts a `Validation` to an `Option`, discarding any errors. `Valid value` bec
 use aivi.validation (toOption)
 
 type (Validation Text Int) -> (Option Int)
-func justValue v =>
-    toOption v
+func justValue = v=>    toOption v
 ```
 
 ---
@@ -160,12 +152,10 @@ Transforms the value inside `Valid` using a function, leaving `Invalid` untouche
 use aivi.validation (map)
 
 type Int -> Int
-func double n =>
-    n * 2
+func double = n=>    n * 2
 
 type (Validation Text Int) -> (Validation Text Int)
-func doubleValid v => v
-  |> map double
+func doubleValid = v=> v  |> map double
 ```
 
 ---
@@ -182,13 +172,11 @@ Unlike `zipValidation`, `andThen` stops at the first failure and does not accumu
 use aivi.validation (andThen)
 
 type Int -> (Validation Text Int)
-func ensurePositive n => n > 0
- T|> Valid n
+func ensurePositive = n=> n > 0 T|> Valid n
  F|> Invalid "must be positive"
 
 type (Validation Text Int) -> (Validation Text Int)
-func validateCount v => v
-  |> andThen ensurePositive
+func validateCount = v=> v  |> andThen ensurePositive
 ```
 
 ---
@@ -212,18 +200,15 @@ type FieldError =
   | InvalidAge
 
 type Text -> (Validation (NonEmptyList FieldError) Text)
-func validateName name => name
- ||> "" -> Invalid (singleton EmptyName)
+func validateName = name=> name ||> "" -> Invalid (singleton EmptyName)
  ||> _  -> Valid name
 
 type Int -> (Validation (NonEmptyList FieldError) Int)
-func validateAge age => age > 0
- T|> Valid age
+func validateAge = age=> age > 0 T|> Valid age
  F|> Invalid (singleton InvalidAge)
 
 type Text -> Int -> (Validation (NonEmptyList FieldError) (Text, Int))
-func validateForm name age =>
-    zipValidation (validateName name) (validateAge age)
+func validateForm = name age=>    zipValidation (validateName name) (validateAge age)
 ```
 
 If both `validateName` and `validateAge` fail, the result is `Invalid` containing both `EmptyName` and `InvalidAge` in a single list.
@@ -245,14 +230,11 @@ use aivi.nonEmpty (
 )
 
 type (NonEmptyList Text) -> Int
-func countErrors errors =>
-    length errors
+func countErrors = errors=>    length errors
 
 type Int -> Int
-func identity n =>
-    n
+func identity = n=>    n
 
 type (Validation (NonEmptyList Text) Int) -> Int
-func scoreOrErrorCount v =>
-    fold countErrors identity v
+func scoreOrErrorCount = v=>    fold countErrors identity v
 ```

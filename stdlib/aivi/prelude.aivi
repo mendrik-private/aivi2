@@ -109,243 +109,183 @@ use aivi.pair (
 )
 
 type Option A => Bool
-func isSome opt =>
-    optionIsSome opt
+func isSome = opt=>    optionIsSome opt
 
 type Option A => Bool
-func isNone opt =>
-    optionIsNone opt
+func isNone = opt=>    optionIsNone opt
 
 type A -> (Option A) -> A
-func getOrElse fallback opt =>
-    optionGetOrElse fallback opt
+func getOrElse = fallback opt=>    optionGetOrElse fallback opt
 
 type (A -> B) -> (Option A) -> (Option B)
-func mapOption transform opt =>
-    optionMap transform opt
+func mapOption = transform opt=>    optionMap transform opt
 
 type (A -> Bool) -> (Option A) -> (Option A)
-func filterOption predicate opt =>
-    optionFilter predicate opt
+func filterOption = predicate opt=>    optionFilter predicate opt
 
 type (A -> Option B) -> (Option A) -> (Option B)
-func flatMapOption next opt =>
-    optionFlatMap next opt
+func flatMapOption = next opt=>    optionFlatMap next opt
 
 type Option A => (Option B) -> (Option (A, B))
-func zipOptions left right =>
-    optionZip left right
+func zipOptions = left right=>    optionZip left right
 
 type A -> Bool -> (Option A)
-func optionFromBool item b =>
-    optionFromBool item b
+func optionFromBool = item b=>    optionFromBool item b
 
 type A -> (Result E A) -> A
-func withDefault fallback opt =>
-    resultWithDefault fallback opt
+func withDefault = fallback opt=>    resultWithDefault fallback opt
 
 type Result E A => Bool
-func isOk opt =>
-    resultIsOk opt
+func isOk = opt=>    resultIsOk opt
 
 type Result E A => Bool
-func isErr opt =>
-    resultIsErr opt
+func isErr = opt=>    resultIsErr opt
 
 type (A -> B) -> (Result E A) -> (Result E B)
-func mapResult transform opt =>
-    resultMap transform opt
+func mapResult = transform opt=>    resultMap transform opt
 
 type (E -> B) -> (A -> B) -> (Result E A) -> B
-func foldResult onErr onOk opt =>
-    resultFold onErr onOk opt
+func foldResult = onErr onOk opt=>    resultFold onErr onOk opt
 
 type (A -> Result E B) -> (Result E A) -> (Result E B)
-func flatMapResult next opt =>
-    resultFlatMap next opt
+func flatMapResult = next opt=>    resultFlatMap next opt
 
 type List A => Int
-func length items =>
-    listLength items
+func length = items=>    listLength items
 
 type List A => (Option A)
-func head items =>
-    listHead items
+func head = items=>    listHead items
 
 type Int -> (List A) -> (Option A)
-func at index items =>
-    listAt index items
+func at = index items=>    listAt index items
 
 type List A => (Option A)
-func last items =>
-    listLast items
+func last = items=>    listLast items
 
 type List A => (List A)
-func tailOrEmpty items =>
-    listTailOrEmpty items
+func tailOrEmpty = items=>    listTailOrEmpty items
 
 type List A => Bool
-func isEmpty items =>
-    listIsEmpty items
+func isEmpty = items=>    listIsEmpty items
 
 type List A => Bool
-func nonEmpty items =>
-    listNonEmpty items
+func nonEmpty = items=>    listNonEmpty items
 
 type List (List A) => (List A)
-func flatten lists =>
-    listFlatten lists
+func flatten = lists=>    listFlatten lists
 
 type List A => (List A)
-func reverse items =>
-    listReverse items
+func reverse = items=>    listReverse items
 
 type Int -> A -> (List A) -> (List A)
-func replaceAt index replacement items =>
-    listReplaceAt index replacement items
+func replaceAt = index replacement items=>    listReplaceAt index replacement items
 
 type Int -> (List A) -> (List A)
-func take n items =>
-    listTake n items
+func take = n items=>    listTake n items
 
 type Int -> (List A) -> (List A)
-func drop n items =>
-    listDrop n items
+func drop = n items=>    listDrop n items
 
 type List Int => Int
-func sum items =>
-    listSum items
+func sum = items=>    listSum items
 
 type A -> (List A) -> Bool
-func contains item items =>
-    listContains item items
+func contains = item items=>    listContains item items
 
 type (A -> Bool) -> (List A) -> Bool
-func any predicate items =>
-    listAny predicate items
+func any = predicate items=>    listAny predicate items
 
 type (A -> Bool) -> (List A) -> Bool
-func all predicate items =>
-    listAll predicate items
+func all = predicate items=>    listAll predicate items
 
 type (A -> Bool) -> (List A) -> (Option A)
-func find predicate items =>
-    listFind predicate items
+func find = predicate items=>    listFind predicate items
 
 type (A -> A -> Bool) -> A -> A -> A
-func min compare left right =>
-    orderMin compare left right
+func min = compare left right=>    orderMin compare left right
 
 type (A -> A -> Bool) -> A -> A -> A
-func max compare left right =>
-    orderMax compare left right
+func max = compare left right=>    orderMax compare left right
 
 type (A -> A -> Bool) -> A -> (List A) -> A
-func minOf compare first rest =>
-    orderMinOf compare first rest
+func minOf = compare first rest=>    orderMinOf compare first rest
 
 type (A -> A -> Bool) -> A -> (List A) -> A
-func maxOf compare first rest =>
-    orderMaxOf compare first rest
+func maxOf = compare first rest=>    orderMaxOf compare first rest
 
 type (A -> B) -> (B -> B -> Bool) -> A -> A -> (A -> A -> Bool)
-func comparing extract compare left right =>
-    orderComparing extract compare left right
+func comparing = extract compare left right=>    orderComparing extract compare left right
 
 type Text -> (List Text) -> Text
-func join separator parts =>
-    textJoin separator parts
+func join = separator parts=>    textJoin separator parts
 
 type Text -> Bool
-func textIsEmpty t =>
-    textIsEmpty t
+func textIsEmpty = t=>    textIsEmpty t
 
 type Text -> Bool
-func textNonEmpty t =>
-    textNonEmpty t
+func textNonEmpty = t=>    textNonEmpty t
 
 type Text -> Text -> Text -> Text
-func surround left right middle =>
-    textSurround left right middle
+func surround = left right middle=>    textSurround left right middle
 
 type Int -> Int
-func abs n =>
-    mathAbs n
+func abs = n=>    mathAbs n
 
 type Int -> Int
-func negate n =>
-    mathNegate n
+func negate = n=>    mathNegate n
 
 type Int -> Int
-func sign n =>
-    mathSign n
+func sign = n=>    mathSign n
 
 type Int -> Bool
-func isEven n =>
-    mathIsEven n
+func isEven = n=>    mathIsEven n
 
 type Int -> Bool
-func isOdd n =>
-    mathIsOdd n
+func isOdd = n=>    mathIsOdd n
 
 type Int -> Int
-func square n =>
-    mathSquare n
+func square = n=>    mathSquare n
 
 type Int -> Int -> Int -> Int
-func clamp low high n =>
-    mathClamp low high n
+func clamp = low high n=>    mathClamp low high n
 
 type Int -> Int -> Int -> Bool
-func between low high n =>
-    mathBetween low high n
+func between = low high n=>    mathBetween low high n
 
 type Int -> Int -> Bool
-func divides divisor n =>
-    mathDivides divisor n
+func divides = divisor n=>    mathDivides divisor n
 
 type Bool -> Bool
-func not b =>
-    boolNot b
+func not = b=>    boolNot b
 
 type Bool -> Bool -> Bool
-func xor a b =>
-    boolXor a b
+func xor = a b=>    boolXor a b
 
 type Bool -> Bool -> Bool
-func implies a b =>
-    boolImplies a b
+func implies = a b=>    boolImplies a b
 
 type Int -> Bool
-func boolFromInt n =>
-    boolFromInt n
+func boolFromInt = n=>    boolFromInt n
 
 type (A, B) -> A
-func fst pair =>
-    pairFst pair
+func fst = pair=>    pairFst pair
 
 type (A, B) -> B
-func snd pair =>
-    pairSnd pair
+func snd = pair=>    pairSnd pair
 
 type (A, B) -> (B, A)
-func swap pair =>
-    pairSwap pair
+func swap = pair=>    pairSwap pair
 
 type (A -> B) -> (A, C) -> (B, C)
-func mapFst f pair =>
-    pairMapFst f pair
+func mapFst = f pair=>    pairMapFst f pair
 
 type (B -> C) -> (A, B) -> (A, C)
-func mapSnd f pair =>
-    pairMapSnd f pair
+func mapSnd = f pair=>    pairMapSnd f pair
 
 type (A -> C) -> (B -> D) -> (A, B) -> (C, D)
-func mapPair f g pair =>
-    pairMapBoth f g pair
+func mapPair = f g pair=>    pairMapBoth f g pair
 
 type A -> (A, A)
-func duplicate item =>
-    pairDuplicate item
+func duplicate = item=>    pairDuplicate item
 
 export (Int, Float, Decimal, BigInt, Bool, Text, Unit, Ordering, List, Option, Result, Validation, Signal, Task, Eq, Default, Functor, Ord, Semigroup, Monoid, Bifunctor, Traversable, Filterable, Applicative, Monad, Foldable, isSome, isNone, getOrElse, mapOption, filterOption, flatMapOption, zipOptions, withDefault, isOk, isErr, mapResult, foldResult, flatMapResult, length, head, at, last, tailOrEmpty, isEmpty, nonEmpty, flatten, reverse, replaceAt, take, drop, sum, contains, any, all, find, min, max, minOf, maxOf, comparing, join, textIsEmpty, textNonEmpty, surround, abs, negate, sign, isEven, isOdd, square, clamp, between, divides, not, xor, implies, boolFromInt, fst, snd, swap, mapFst, mapSnd, mapPair, duplicate)

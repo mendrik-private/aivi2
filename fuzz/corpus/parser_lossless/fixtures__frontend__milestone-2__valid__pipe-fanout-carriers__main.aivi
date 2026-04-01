@@ -3,8 +3,7 @@ type User = {
     email: Text
 }
 
-fun joinEmails:Text #items:List Text =>
-    "joined"
+fun joinEmails:Text = #items:List Text=>    "joined"
 
 val users:List User = [
     { active: True, email: "ada@example.com" }

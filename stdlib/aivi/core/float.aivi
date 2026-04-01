@@ -3,75 +3,59 @@ value e : Float = 2.718281828459045
 value tau : Float = 6.283185307179586
 
 type Float -> Float
-func negate n =>
-    0.0 - n
+func negate = n=>    0.0 - n
 
 type Float -> Float
-func absHelper n => n < 0.0
- T|> 0.0 - n
+func absHelper = n=> n < 0.0 T|> 0.0 - n
  F|> n
 
 type Float -> Float -> Float
-func max a b => a >= b
- T|> a
+func max = a b=> a >= b T|> a
  F|> b
 
 type Float -> Float -> Float
-func min a b => a <= b
- T|> a
+func min = a b=> a <= b T|> a
  F|> b
 
 type Float -> Float -> Float
-func clampHigh hi n => n > hi
- T|> hi
+func clampHigh = hi n=> n > hi T|> hi
  F|> n
 
 type Float -> Float -> Float -> Float
-func clamp lo hi n => n < lo
- T|> lo
+func clamp = lo hi n=> n < lo T|> lo
  F|> clampHigh hi n
 
 type Float -> Float -> Float -> Float
-func lerp a b t =>
-    a + (b - a) * t
+func lerp = a b t=>    a + (b - a) * t
 
 type Float -> Float
-func signNonNeg n => n > 0.0
- T|> 1.0
+func signNonNeg = n=> n > 0.0 T|> 1.0
  F|> 0.0
 
 type Float -> Float
-func sign n => n < 0.0
- T|> 0.0 - 1.0
+func sign = n=> n < 0.0 T|> 0.0 - 1.0
  F|> signNonNeg n
 
 type Float -> Float -> Float -> Bool
-func between lo hi n =>
-    n >= lo and n <= hi
+func between = lo hi n=>    n >= lo and n <= hi
 
 type Float -> Bool
-func isZero n =>
-    n == 0.0
+func isZero = n=>    n == 0.0
 
 type Float -> Bool
-func isPositive n =>
-    n > 0.0
+func isPositive = n=>    n > 0.0
 
 type Float -> Bool
-func isNegative n =>
-    n < 0.0
+func isNegative = n=>    n < 0.0
 
 type Float -> Float
-func square n =>
-    n * n
+func square = n=>    n * n
 
 type Float -> Float
-func toRadians degrees =>
-    degrees * pi / 180.0
+func toRadians = degrees=>    degrees * pi / 180.0
 
 type Float -> Float
-func toDegrees radians =>
-    radians * 180.0 / pi
+func toDegrees = radians=>    radians * 180.0 / pi
 
 @test
 value max_prefers_greater : Task Text Bool = pure (max 3.5 2.0 == 3.5)

@@ -1,5 +1,4 @@
-fun statusLabel:Text #status:Text =>
-    status
+fun statusLabel:Text = #status:Text=>    status
 
 val main =
     <Label text={statusLabel currentStatus} />

@@ -53,8 +53,7 @@ use aivi.app.lifecycle (
 )
 
 type AppLifecycle -> Text
-func describeLifecycle state => state
- ||> Starting  -> "starting"
+func describeLifecycle = state=> state ||> Starting  -> "starting"
  ||> Running   -> "running"
  ||> Suspended -> "suspended"
  ||> Stopping  -> "stopping"
@@ -82,8 +81,7 @@ use aivi.app.lifecycle (
 )
 
 type (AppActionResult Text) -> Text
-func handleSave result => result
- ||> ActionOk v      -> "saved: {v}"
+func handleSave = result=> result ||> ActionOk v      -> "saved: {v}"
  ||> ActionFailed e  -> "failed: {e}"
  ||> ActionCancelled -> "cancelled"
 ```
@@ -186,8 +184,7 @@ use aivi.app.lifecycle (AppLifecycle)
 signal lifecycle : AppLifecycle = source Starting
 
 type AppLifecycle -> Bool
-func isRunning state => state
-  ||> Running -> True
+func isRunning = state=> state  ||> Running -> True
   ||> _       -> False
 ```
 
@@ -197,6 +194,5 @@ func isRunning state => state
 use aivi.app.lifecycle (UndoState)
 
 type UndoState -> Bool
-func undoButtonSensitive undoState => undoState
- ||> { canUndo, canRedo, depth } -> canUndo
+func undoButtonSensitive = undoState=> undoState ||> { canUndo, canRedo, depth } -> canUndo
 ```
