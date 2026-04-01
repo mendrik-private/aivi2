@@ -210,8 +210,7 @@ type Int -> Text
 func scoreLineFor = "Score: {.}"
 
 type Int -> Text
-func finalScoreLineFor = score =>
-    "Final score: {score}"
+func finalScoreLineFor = "Final score: {.}"
 
 @source timer.every 120ms with {
     immediate: False,
@@ -237,38 +236,15 @@ when keyDown (Key "Space") => event <- Restart
 signal state : Signal GameState = event
  +|> initial step
 
-signal boardText : Signal Text = state
-  |> renderBoard
-
-signal dirLine : Signal Text = state
-  |> .dir
-  |> dirLabel
-
-signal statusLine : Signal Text = state
-  |> .status
-  |> statusLineFor
-
-signal gameOver : Signal Bool = state
-  |> .status
-  |> isGameOver
-
-signal scoreLine : Signal Text = state
-  |> .score
-  |> scoreLineFor
-
-signal finalScoreLine : Signal Text = state
-  |> .score
-  |> finalScoreLineFor
-
 value main =
     <Window title="AIVI Snake">
         <Box orientation="vertical" spacing={8}>
-            <Label text={dirLine} />
-            <Label text={scoreLine} />
-            <Label text={statusLine} />
-            <Label text={boardText} monospace />
-            <show when={gameOver}>
-                <Label text={finalScoreLine} />
+            <Label text={dirLabel state.dir} />
+            <Label text={scoreLineFor state.score} />
+            <Label text={statusLineFor state.status} />
+            <Label text={renderBoard state} monospace />
+            <show when={isGameOver state.status}>
+                <Label text={finalScoreLineFor state.score} />
             </show>
         </Box>
     </Window>
