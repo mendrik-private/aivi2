@@ -96,13 +96,31 @@ value scoreLabel = describeScore 88
 
 ## Unary subject sugar
 
-When a unary function starts from its argument directly, `func name = .` is shorthand for a single implicit argument whose initial body/head is that argument:
+When a unary function starts from its argument directly, you can omit the explicit parameter and use `.` as the implicit subject:
 
 ```aivi
 type Text -> Text
 func trimStatus = .
  ||> " ready " -> "ready"
  ||> _         -> .
+```
+
+The same shorthand works for subject projections and text interpolation:
+
+```aivi
+type GameState -> Text
+func statusLineFor = .status
+
+type Int -> Text
+func scoreLineFor = "Score: {.}"
+```
+
+If the unary input is intentionally ignored, write `_ => ...` explicitly:
+
+```aivi
+type Int -> Text
+func constantLabel = _ =>
+    "ready"
 ```
 
 ## Calling functions

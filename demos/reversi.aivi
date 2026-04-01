@@ -130,9 +130,9 @@ func turnLabel = turn=> turn ||> Human    -> "Red (you)"
  ||> Computer -> "Blue (computer)"
 
 type Outcome -> Text
-func outcomeText = outcome=> outcome ||> HumanWins    -> "Red wins."
- ||> ComputerWins -> "Blue wins."
- ||> Draw         -> "Draw."
+func outcomeText = outcome=> outcome ||> HumanWins    -> "You won"
+ ||> ComputerWins -> "Blue won"
+ ||> Draw         -> "Draw"
 
 type Status -> Bool
 func humanToAct = status=> status ||> Active Human     -> True
@@ -632,10 +632,10 @@ type Coord -> Text
 func coordLabel = coord=> coord ||> Coord x y -> "({x + 1}, {y + 1})"
 
 type Status -> Text
-func statusLabel = status=> status ||> Active Human     -> "Red (you) to move"
- ||> Active Computer  -> "Blue (computer) to move"
- ||> Passed Human     -> "Red passes - Blue keeps the move"
- ||> Passed Computer  -> "Blue passes - Red keeps the move"
+func statusLabel = status=> status ||> Active Human     -> "You are red"
+ ||> Active Computer  -> "Blue to move"
+ ||> Passed Human     -> "You pass"
+ ||> Passed Computer  -> "Blue passes"
  ||> Finished outcome -> outcomeText outcome
 
 type GameState -> Text
@@ -705,14 +705,7 @@ value main =
         <Window.titlebar>
             <HeaderBar showTitleButtons={True}>
                 <HeaderBar.start>
-                    <Box orientation="vertical" spacing={0}>
-                        <Label text={statusText} />
-                        <Box orientation="horizontal" spacing={8}>
-                            <Label text={scoreText} />
-                            <Label text={lastMoveText} />
-                            <Label text={titlebarHintText} />
-                        </Box>
-                    </Box>
+                    <Label text={statusText} />
                 </HeaderBar.start>
                 <HeaderBar.end>
                     <Button label="Restart" onClick={restartClick} compact hasFrame={False} />

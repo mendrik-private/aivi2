@@ -221,48 +221,67 @@ type __AiviListTailState A = {
     items: List A
 }
 
-fun __aivi_option_getOrElse:A = fallback:A opt:(Option A)=>    opt
-     ||> Some item -> item
-     ||> None      -> fallback
+type A -> (Option A) -> A
+func __aivi_option_getOrElse = fallback opt => opt
+    ||> Some item -> item
+    ||> None      -> fallback
 
-fun __aivi_list_keepSome:(Option A) = item:A=>    Some item
+type A -> (Option A)
+func __aivi_list_keepSome = item =>
+    Some item
 
-fun __aivi_list_keepFirst:(Option A) = found:(Option A) item:A=>    found
-     T|> __aivi_list_keepSome
-     F|> Some item
+type (Option A) -> A -> (Option A)
+func __aivi_list_keepFirst = found item => found
+    T|> __aivi_list_keepSome
+    F|> Some item
 
-fun __aivi_list_lengthStep:Int = total:Int item:A=>    total + 1
+type Int -> A -> Int
+func __aivi_list_lengthStep = total item =>
+    total + 1
 
-fun __aivi_list_length:Int = items:(List A)=>    items
-     |> reduce __aivi_list_lengthStep 0
+type (List A) -> Int
+func __aivi_list_length = items =>
+    items
+      |> reduce __aivi_list_lengthStep 0
 
-fun __aivi_list_head:(Option A) = items:(List A)=>    items
-     |> reduce __aivi_list_keepFirst None
+type (List A) -> (Option A)
+func __aivi_list_head = items =>
+    items
+      |> reduce __aivi_list_keepFirst None
 
-fun __aivi_list_tailState:(__AiviListTailState A) = items:(List A) item:A seenFirst:Bool=>    seenFirst
-     T|> { seenFirst: True, items: append items [item] }
-     F|> { seenFirst: True, items: [] }
+type (List A) -> A -> Bool -> (__AiviListTailState A)
+func __aivi_list_tailState = items item seenFirst => seenFirst
+    T|> { seenFirst: True, items: append items [item] }
+    F|> { seenFirst: True, items: [] }
 
-fun __aivi_list_tailStep:(__AiviListTailState A) = state:(__AiviListTailState A) item:A=>    state
-     ||> { seenFirst, items } -> __aivi_list_tailState items item seenFirst
+type (__AiviListTailState A) -> A -> (__AiviListTailState A)
+func __aivi_list_tailStep = state item => state
+    ||> { seenFirst, items } -> __aivi_list_tailState items item seenFirst
 
-fun __aivi_list_tailItems:(Option (List A)) = items:(List A) seenFirst:Bool=>    seenFirst
-     T|> Some items
-     F|> None
+type (List A) -> Bool -> (Option (List A))
+func __aivi_list_tailItems = items seenFirst => seenFirst
+    T|> Some items
+    F|> None
 
-fun __aivi_list_tailFromState:(Option (List A)) = state:(__AiviListTailState A)=>    state
-     ||> { seenFirst, items } -> __aivi_list_tailItems items seenFirst
+type (__AiviListTailState A) -> (Option (List A))
+func __aivi_list_tailFromState = state => state
+    ||> { seenFirst, items } -> __aivi_list_tailItems items seenFirst
 
-fun __aivi_list_tail:(Option (List A)) = items:(List A)=>    items
-     |> reduce __aivi_list_tailStep { seenFirst: False, items: [] }
-     |> __aivi_list_tailFromState
+type (List A) -> (Option (List A))
+func __aivi_list_tail = items =>
+    items
+      |> reduce __aivi_list_tailStep { seenFirst: False, items: [] }
+      |> __aivi_list_tailFromState
 
-fun __aivi_list_anyStep:Bool = predicate:(A -> Bool) found:Bool item:A=>    found
-     T|> True
-     F|> predicate item
+type (A -> Bool) -> Bool -> A -> Bool
+func __aivi_list_anyStep = predicate found item => found
+    T|> True
+    F|> predicate item
 
-fun __aivi_list_any:Bool = predicate:(A -> Bool) items:(List A)=>    items
-     |> reduce (__aivi_list_anyStep predicate) False
+type (A -> Bool) -> (List A) -> Bool
+func __aivi_list_any = predicate items =>
+    items
+      |> reduce (__aivi_list_anyStep predicate) False
 
 "#;
 

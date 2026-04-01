@@ -659,6 +659,7 @@ pub struct FunctionParam {
 pub enum FunctionSurfaceForm {
     #[default]
     Explicit,
+    /// `func name = .`, `func name = .field`, or `func name = "Hello {.}"`.
     UnarySubjectSugar,
 }
 

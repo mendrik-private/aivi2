@@ -81,10 +81,11 @@ func same = v =>
 Rules:
 
 - `value` = constant binding only; uses `=`.
-- `func` = function declaration; uses `=` after the name, then either parameters plus `=>` or unary subject sugar `.`.
+- `func` = function declaration; uses `=` after the name, then either parameters plus `=>` or unary subject sugar rooted at `.`.
 - Function signatures live on a preceding `type` line: `type Int -> Int -> Int`.
 - `func` headers keep parameters unannotated: `func add = x y => ...`.
-- Unary subject sugar is available for single-argument functions whose body starts from that argument: `func headOrFallback = .`.
+- Unary subject sugar is available for single-argument functions whose body starts from that argument: `func headOrFallback = .`, `func status = .status`, `func scoreLineFor = "Score: {.}"`.
+- Ignored unary inputs stay explicit: `func constant = _ => ...`.
 - Constraint prefixes, when present, live on the `type` line: `type Eq A => A -> Bool`.
 - `value` is a contextual keyword and can still be a parameter name:
 

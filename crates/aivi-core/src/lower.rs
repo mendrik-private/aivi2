@@ -2602,8 +2602,19 @@ impl<'a> ModuleLowerer<'a> {
         } else {
             ItemKind::Function
         };
+        // Each domain member needs a unique synthetic origin so the backend
+        // linker can build a 1:1 HIR-item → backend-item index without
+        // spurious DuplicateBackendOrigin errors (all members of the same
+        // domain would otherwise share the domain's HIR ItemId).
+        let origin = match self.next_synthetic_item_origin() {
+            Ok(id) => id,
+            Err(overflow) => {
+                self.errors.push(overflow);
+                return None;
+            }
+        };
         let item_id = match self.module.items_mut().alloc(Item {
-            origin: domain,
+            origin,
             span: member.span,
             name: format!(
                 "domain#{}::member#{}::{}",

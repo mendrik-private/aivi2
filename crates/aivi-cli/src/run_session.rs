@@ -405,8 +405,7 @@ impl HydrationRevisionState {
     }
 
     fn should_apply(&self, revision: u64) -> bool {
-        self.latest_requested
-            .map_or(true, |requested| revision >= requested)
+        self.latest_applied.map_or(true, |applied| revision > applied)
     }
 
     fn mark_applied(&mut self, revision: u64) {
@@ -584,10 +583,11 @@ impl RunSessionState {
             // Try to apply immediately: hydration is fast, so the background thread
             // typically responds within microseconds, collapsing the two-cycle pipeline.
             self.hydration.apply_ready_immediate(&mut self.executor)?;
-        } else {
-            // No new outcomes this cycle — apply any response that arrived since last time.
-            self.hydration.apply_ready(&mut self.executor)?;
         }
+        // Always drain completed hydration responses. Hot sources like timers can keep producing
+        // outcomes every cycle, and restricting apply_ready to the no-outcomes branch starves the
+        // GTK tree even after the worker finishes planning a newer revision.
+        self.hydration.apply_ready(&mut self.executor)?;
         self.drain_main_context_requests();
         Ok(())
     }
@@ -1472,7 +1472,6 @@ export main
     fn reversi_board_click_applies_human_move_and_triggers_computer_turn() {
         let path = repo_path("demos/reversi.aivi");
         let artifact = prepare_run_from_path(&path);
-        let last_move_item = required_signal_item(&artifact, "lastMoveText");
         let status_item = required_signal_item(&artifact, "statusText");
         let harness =
             start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
@@ -1483,13 +1482,8 @@ export main
             .expect("presenting the reversi window should release startup-held timers");
         assert_eq!(
             text_signal_for(&harness, status_item),
-            "Red (you) to move",
+            "You are red",
             "reversi should start on the human turn"
-        );
-        assert_eq!(
-            text_signal_for(&harness, last_move_item),
-            "Last move: opening layout",
-            "reversi should start from the opening layout"
         );
 
         let opening_move = harness
@@ -1508,21 +1502,28 @@ export main
                 .process_pending_work()
                 .expect("clicked board move should process in one work cycle");
         });
-        assert_ne!(
-            text_signal_for(&harness, last_move_item),
-            "Last move: opening layout",
-            "clicking a legal board button should apply a human move"
-        );
-        assert_eq!(
-            text_signal_for(&harness, status_item),
-            "Blue (computer) to move",
-            "after a human move, the computer should take the next turn"
+        assert!(
+            pump_until(&context, Duration::from_secs(4), || {
+                opening_move.label().as_deref() == Some("🔴")
+            }),
+            "the clicked board button should redraw as a red disc after hydration"
         );
         assert!(
             pump_until(&context, Duration::from_secs(4), || {
-                text_signal_for(&harness, status_item) != "Blue (computer) to move"
+                let mut labels = Vec::new();
+                for window in harness.root_windows() {
+                    collect_label_texts(&window.clone().upcast::<gtk::Widget>(), &mut labels);
+                }
+                let red = labels.iter().filter(|label| label.as_str() == "🔴").count();
+                let blue = labels.iter().filter(|label| label.as_str() == "🔵").count();
+                red == 3 && blue == 3
             }),
-            "the computer turn should resolve after the human click"
+            "after a human move, the computer should answer and leave six discs on the board"
+        );
+        assert_eq!(
+            text_signal_for(&harness, status_item),
+            "You are red",
+            "after the computer reply, control should return to the human"
         );
 
         harness.shutdown();

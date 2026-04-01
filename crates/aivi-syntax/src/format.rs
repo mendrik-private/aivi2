@@ -3,13 +3,15 @@ use std::fmt::Write;
 use crate::cst::{
     BinaryOperator, ClassMember, ClassMemberName, Decorator, DecoratorArguments, DecoratorPayload,
     DomainItem, DomainMember, DomainMemberName, ExportItem, Expr, ExprKind, FunctionParam,
-    FunctionSurfaceForm, Identifier, InstanceItem, InstanceMember, Item, MapExpr, MarkupAttribute,
+    FunctionSurfaceForm, Identifier, InstanceItem, InstanceMember, Item, MapExpr, MapExprEntry,
+    MarkupAttribute,
     MarkupAttributeValue, MarkupNode, Module, NamedItem, PatchBlock, PatchEntry, PatchInstruction,
     PatchInstructionKind, PatchSelector, PatchSelectorSegment, Pattern, PatternKind, PipeExpr,
     PipeStage, PipeStageKind, ProjectionPath, QualifiedName, ReactiveUpdateArm, ReactiveUpdateItem,
-    ReactiveUpdateKind, RecordExpr, RecordField, RecordPatternField, ResultBinding,
-    ResultBlockExpr, SourceDecorator, SourceProviderContractItem, SourceProviderContractMember,
-    SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextLiteral, TextSegment,
+    ReactiveUpdateKind, RecordExpr, RecordField, RecordPatternField, ResultBinding, ResultBlockExpr,
+    SourceDecorator, SourceProviderContractItem, SourceProviderContractMember,
+    SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextInterpolation, TextLiteral,
+    TextSegment,
     TypeDeclBody, TypeExpr, TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseItem,
 };
 
@@ -382,41 +384,809 @@ impl Formatter {
             lines.push(format!("type {annotation}"));
         }
 
-        let header = format!("func {} = .", self.item_name(&item.name));
         let Some(body) = item.expr_body() else {
-            lines.push(header);
+            lines.push(format!("func {} = .", self.item_name(&item.name)));
             return Some(lines);
         };
-        let stage_lines = self.unary_subject_fun_stage_lines(item, body)?;
-        lines.push(header);
-        if !stage_lines.is_empty() {
-            lines.extend(
-                Block::from_lines(stage_lines)
-                    .indented(PIPE_STAGE_INDENT)
-                    .into_lines(),
-            );
-        }
-        Some(lines)
-    }
-
-    fn unary_subject_fun_stage_lines(&self, item: &NamedItem, body: &Expr) -> Option<Vec<String>> {
         let [parameter] = item.parameters.as_slice() else {
             return None;
         };
         let parameter_name = parameter.name.as_ref()?;
-        match &body.kind {
-            ExprKind::Name(name) if name.text == parameter_name.text => Some(Vec::new()),
-            ExprKind::Pipe(pipe) => {
-                let head = pipe.head.as_ref()?;
-                match &head.kind {
-                    ExprKind::Name(name) if name.text == parameter_name.text => {
-                        Some(self.format_pipe_stage_lines(&pipe.stages))
-                    }
-                    _ => None,
-                }
+
+        if let ExprKind::Pipe(pipe) = &body.kind {
+            let head = pipe.head.as_ref()?;
+            let (head, rewrote_subject) =
+                self.restore_free_function_subject_expr((**head).clone(), parameter_name, false);
+            if !rewrote_subject {
+                return None;
             }
-            _ => None,
+            lines.push(format!(
+                "func {} = {}",
+                self.item_name(&item.name),
+                self.format_expr_inline(&head, 0)
+            ));
+            let stage_lines = self.format_pipe_stage_lines(&pipe.stages);
+            if !stage_lines.is_empty() {
+                lines.extend(
+                    Block::from_lines(stage_lines)
+                        .indented(PIPE_STAGE_INDENT)
+                        .into_lines(),
+                );
+            }
+            return Some(lines);
         }
+
+        let (body, rewrote_subject) =
+            self.restore_free_function_subject_expr(body.clone(), parameter_name, false);
+        if !rewrote_subject {
+            return None;
+        }
+
+        let header = format!("func {} =", self.item_name(&item.name));
+        let force_break = self.should_force_expr_break(INDENT_WIDTH, &body);
+        let block = self.format_expr_block(&body, force_break);
+        if block.is_inline() {
+            lines.push(format!(
+                "{header} {}",
+                block.inline_text().expect("inline function body")
+            ));
+        } else {
+            lines.push(header);
+            lines.extend(block.indented(INDENT_WIDTH).into_lines());
+        }
+        Some(lines)
+    }
+
+    fn restore_free_function_subject_expr(
+        &self,
+        expr: Expr,
+        parameter_name: &Identifier,
+        ambient_allowed: bool,
+    ) -> (Expr, bool) {
+        let span = expr.span;
+        match expr.kind {
+            ExprKind::Name(name) if !ambient_allowed && name.text == parameter_name.text => (
+                Expr {
+                    span,
+                    kind: ExprKind::SubjectPlaceholder,
+                },
+                true,
+            ),
+            ExprKind::Projection { base, path }
+                if !ambient_allowed
+                    && matches!(
+                        base.kind,
+                        ExprKind::Name(ref name) if name.text == parameter_name.text
+                    ) =>
+            (
+                Expr {
+                    span,
+                    kind: ExprKind::AmbientProjection(path),
+                },
+                true,
+            ),
+            ExprKind::Group(inner) => {
+                let (inner, changed) =
+                    self.restore_free_function_subject_expr(*inner, parameter_name, ambient_allowed);
+                (
+                    Expr {
+                        span,
+                        kind: ExprKind::Group(Box::new(inner)),
+                    },
+                    changed,
+                )
+            }
+            ExprKind::Tuple(elements) => {
+                let mut changed = false;
+                let elements = elements
+                    .into_iter()
+                    .map(|element| {
+                        let (element, element_changed) = self.restore_free_function_subject_expr(
+                            element,
+                            parameter_name,
+                            ambient_allowed,
+                        );
+                        changed |= element_changed;
+                        element
+                    })
+                    .collect();
+                (
+                    Expr {
+                        span,
+                        kind: ExprKind::Tuple(elements),
+                    },
+                    changed,
+                )
+            }
+            ExprKind::List(elements) => {
+                let mut changed = false;
+                let elements = elements
+                    .into_iter()
+                    .map(|element| {
+                        let (element, element_changed) = self.restore_free_function_subject_expr(
+                            element,
+                            parameter_name,
+                            ambient_allowed,
+                        );
+                        changed |= element_changed;
+                        element
+                    })
+                    .collect();
+                (
+                    Expr {
+                        span,
+                        kind: ExprKind::List(elements),
+                    },
+                    changed,
+                )
+            }
+            ExprKind::Map(map) => {
+                let (map, changed) =
+                    self.restore_free_function_subject_map_expr(map, parameter_name, ambient_allowed);
+                (
+                    Expr {
+                        span,
+                        kind: ExprKind::Map(map),
+                    },
+                    changed,
+                )
+            }
+            ExprKind::Set(elements) => {
+                let mut changed = false;
+                let elements = elements
+                    .into_iter()
+                    .map(|element| {
+                        let (element, element_changed) = self.restore_free_function_subject_expr(
+                            element,
+                            parameter_name,
+                            ambient_allowed,
+                        );
+                        changed |= element_changed;
+                        element
+                    })
+                    .collect();
+                (
+                    Expr {
+                        span,
+                        kind: ExprKind::Set(elements),
+                    },
+                    changed,
+                )
+            }
+            ExprKind::Record(record) => {
+                let (record, changed) = self.restore_free_function_subject_record_expr(
+                    record,
+                    parameter_name,
+                    ambient_allowed,
+                );
+                (
+                    Expr {
+                        span,
+                        kind: ExprKind::Record(record),
+                    },
+                    changed,
+                )
+            }
+            ExprKind::Text(text) => {
+                let (text, changed) = self.restore_free_function_subject_text_literal(
+                    text,
+                    parameter_name,
+                    ambient_allowed,
+                );
+                (
+                    Expr {
+                        span,
+                        kind: ExprKind::Text(text),
+                    },
+                    changed,
+                )
+            }
+            ExprKind::Range { start, end } => {
+                let (start, start_changed) =
+                    self.restore_free_function_subject_expr(*start, parameter_name, ambient_allowed);
+                let (end, end_changed) =
+                    self.restore_free_function_subject_expr(*end, parameter_name, ambient_allowed);
+                (
+                    Expr {
+                        span,
+                        kind: ExprKind::Range {
+                            start: Box::new(start),
+                            end: Box::new(end),
+                        },
+                    },
+                    start_changed || end_changed,
+                )
+            }
+            ExprKind::Projection { base, path } => {
+                let (base, changed) =
+                    self.restore_free_function_subject_expr(*base, parameter_name, ambient_allowed);
+                (
+                    Expr {
+                        span,
+                        kind: ExprKind::Projection {
+                            base: Box::new(base),
+                            path,
+                        },
+                    },
+                    changed,
+                )
+            }
+            ExprKind::Apply { callee, arguments } => {
+                let (callee, callee_changed) =
+                    self.restore_free_function_subject_expr(*callee, parameter_name, ambient_allowed);
+                let mut changed = callee_changed;
+                let arguments = arguments
+                    .into_iter()
+                    .map(|argument| {
+                        let (argument, argument_changed) = self.restore_free_function_subject_expr(
+                            argument,
+                            parameter_name,
+                            ambient_allowed,
+                        );
+                        changed |= argument_changed;
+                        argument
+                    })
+                    .collect();
+                (
+                    Expr {
+                        span,
+                        kind: ExprKind::Apply {
+                            callee: Box::new(callee),
+                            arguments,
+                        },
+                    },
+                    changed,
+                )
+            }
+            ExprKind::Unary { operator, expr } => {
+                let (expr, changed) =
+                    self.restore_free_function_subject_expr(*expr, parameter_name, ambient_allowed);
+                (
+                    Expr {
+                        span,
+                        kind: ExprKind::Unary {
+                            operator,
+                            expr: Box::new(expr),
+                        },
+                    },
+                    changed,
+                )
+            }
+            ExprKind::Binary {
+                left,
+                operator,
+                right,
+            } => {
+                let (left, left_changed) =
+                    self.restore_free_function_subject_expr(*left, parameter_name, ambient_allowed);
+                let (right, right_changed) =
+                    self.restore_free_function_subject_expr(*right, parameter_name, ambient_allowed);
+                (
+                    Expr {
+                        span,
+                        kind: ExprKind::Binary {
+                            left: Box::new(left),
+                            operator,
+                            right: Box::new(right),
+                        },
+                    },
+                    left_changed || right_changed,
+                )
+            }
+            ExprKind::ResultBlock(block) => {
+                let (block, changed) = self.restore_free_function_subject_result_block(
+                    block,
+                    parameter_name,
+                    ambient_allowed,
+                );
+                (
+                    Expr {
+                        span,
+                        kind: ExprKind::ResultBlock(block),
+                    },
+                    changed,
+                )
+            }
+            ExprKind::PatchApply { target, patch } => {
+                let (target, target_changed) =
+                    self.restore_free_function_subject_expr(*target, parameter_name, ambient_allowed);
+                let (patch, patch_changed) = self.restore_free_function_subject_patch_block(
+                    patch,
+                    parameter_name,
+                    ambient_allowed,
+                );
+                (
+                    Expr {
+                        span,
+                        kind: ExprKind::PatchApply {
+                            target: Box::new(target),
+                            patch,
+                        },
+                    },
+                    target_changed || patch_changed,
+                )
+            }
+            ExprKind::PatchLiteral(patch) => {
+                let (patch, changed) = self.restore_free_function_subject_patch_block(
+                    patch,
+                    parameter_name,
+                    ambient_allowed,
+                );
+                (
+                    Expr {
+                        span,
+                        kind: ExprKind::PatchLiteral(patch),
+                    },
+                    changed,
+                )
+            }
+            ExprKind::Pipe(pipe) => {
+                let (pipe, changed) = self.restore_free_function_subject_pipe_expr(
+                    pipe,
+                    parameter_name,
+                    ambient_allowed,
+                );
+                (
+                    Expr {
+                        span,
+                        kind: ExprKind::Pipe(pipe),
+                    },
+                    changed,
+                )
+            }
+            ExprKind::Markup(node) => {
+                let (node, changed) = self.restore_free_function_subject_markup_node(
+                    node,
+                    parameter_name,
+                    ambient_allowed,
+                );
+                (
+                    Expr {
+                        span,
+                        kind: ExprKind::Markup(node),
+                    },
+                    changed,
+                )
+            }
+            kind => (Expr { span, kind }, false),
+        }
+    }
+
+    fn restore_free_function_subject_text_literal(
+        &self,
+        text: TextLiteral,
+        parameter_name: &Identifier,
+        ambient_allowed: bool,
+    ) -> (TextLiteral, bool) {
+        let mut changed = false;
+        let segments = text
+            .segments
+            .into_iter()
+            .map(|segment| match segment {
+                TextSegment::Text(fragment) => TextSegment::Text(fragment),
+                TextSegment::Interpolation(interpolation) => {
+                    let (expr, expr_changed) = self.restore_free_function_subject_expr(
+                        *interpolation.expr,
+                        parameter_name,
+                        ambient_allowed,
+                    );
+                    changed |= expr_changed;
+                    TextSegment::Interpolation(TextInterpolation {
+                        expr: Box::new(expr),
+                        span: interpolation.span,
+                    })
+                }
+            })
+            .collect();
+        (
+            TextLiteral {
+                span: text.span,
+                segments,
+            },
+            changed,
+        )
+    }
+
+    fn restore_free_function_subject_record_expr(
+        &self,
+        record: RecordExpr,
+        parameter_name: &Identifier,
+        ambient_allowed: bool,
+    ) -> (RecordExpr, bool) {
+        let mut changed = false;
+        let fields = record
+            .fields
+            .into_iter()
+            .map(|field| {
+                let value = field.value.map(|value| {
+                    let (value, value_changed) = self.restore_free_function_subject_expr(
+                        value,
+                        parameter_name,
+                        ambient_allowed,
+                    );
+                    changed |= value_changed;
+                    value
+                });
+                RecordField {
+                    label: field.label,
+                    value,
+                    span: field.span,
+                }
+            })
+            .collect();
+        (
+            RecordExpr {
+                fields,
+                span: record.span,
+            },
+            changed,
+        )
+    }
+
+    fn restore_free_function_subject_map_expr(
+        &self,
+        map: MapExpr,
+        parameter_name: &Identifier,
+        ambient_allowed: bool,
+    ) -> (MapExpr, bool) {
+        let mut changed = false;
+        let entries = map
+            .entries
+            .into_iter()
+            .map(|entry| {
+                let (key, key_changed) = self.restore_free_function_subject_expr(
+                    entry.key,
+                    parameter_name,
+                    ambient_allowed,
+                );
+                let (value, value_changed) = self.restore_free_function_subject_expr(
+                    entry.value,
+                    parameter_name,
+                    ambient_allowed,
+                );
+                changed |= key_changed || value_changed;
+                MapExprEntry {
+                    key,
+                    value,
+                    span: entry.span,
+                }
+            })
+            .collect();
+        (
+            MapExpr {
+                entries,
+                span: map.span,
+            },
+            changed,
+        )
+    }
+
+    fn restore_free_function_subject_result_block(
+        &self,
+        block: ResultBlockExpr,
+        parameter_name: &Identifier,
+        ambient_allowed: bool,
+    ) -> (ResultBlockExpr, bool) {
+        let mut changed = false;
+        let bindings = block
+            .bindings
+            .into_iter()
+            .map(|binding| {
+                let (expr, expr_changed) = self.restore_free_function_subject_expr(
+                    binding.expr,
+                    parameter_name,
+                    ambient_allowed,
+                );
+                changed |= expr_changed;
+                ResultBinding {
+                    name: binding.name,
+                    expr,
+                    span: binding.span,
+                }
+            })
+            .collect();
+        let tail = block.tail.map(|tail| {
+            let (tail, tail_changed) = self.restore_free_function_subject_expr(
+                *tail,
+                parameter_name,
+                ambient_allowed,
+            );
+            changed |= tail_changed;
+            Box::new(tail)
+        });
+        (
+            ResultBlockExpr {
+                bindings,
+                tail,
+                span: block.span,
+            },
+            changed,
+        )
+    }
+
+    fn restore_free_function_subject_patch_block(
+        &self,
+        patch: PatchBlock,
+        parameter_name: &Identifier,
+        ambient_allowed: bool,
+    ) -> (PatchBlock, bool) {
+        let mut changed = false;
+        let entries = patch
+            .entries
+            .into_iter()
+            .map(|entry| {
+                let segments = entry
+                    .selector
+                    .segments
+                    .into_iter()
+                    .map(|segment| match segment {
+                        PatchSelectorSegment::BracketExpr { expr, span } => {
+                            let (expr, expr_changed) = self.restore_free_function_subject_expr(
+                                *expr,
+                                parameter_name,
+                                ambient_allowed,
+                            );
+                            changed |= expr_changed;
+                            PatchSelectorSegment::BracketExpr {
+                                expr: Box::new(expr),
+                                span,
+                            }
+                        }
+                        other => other,
+                    })
+                    .collect();
+                let instruction_kind = match entry.instruction.kind {
+                    PatchInstructionKind::Replace(expr) => {
+                        let (expr, expr_changed) = self.restore_free_function_subject_expr(
+                            *expr,
+                            parameter_name,
+                            ambient_allowed,
+                        );
+                        changed |= expr_changed;
+                        PatchInstructionKind::Replace(Box::new(expr))
+                    }
+                    PatchInstructionKind::Store(expr) => {
+                        let (expr, expr_changed) = self.restore_free_function_subject_expr(
+                            *expr,
+                            parameter_name,
+                            ambient_allowed,
+                        );
+                        changed |= expr_changed;
+                        PatchInstructionKind::Store(Box::new(expr))
+                    }
+                    PatchInstructionKind::Remove => PatchInstructionKind::Remove,
+                };
+                PatchEntry {
+                    selector: PatchSelector {
+                        segments,
+                        span: entry.selector.span,
+                    },
+                    instruction: PatchInstruction {
+                        kind: instruction_kind,
+                        span: entry.instruction.span,
+                    },
+                    span: entry.span,
+                }
+            })
+            .collect();
+        (
+            PatchBlock {
+                entries,
+                span: patch.span,
+            },
+            changed,
+        )
+    }
+
+    fn restore_free_function_subject_pipe_expr(
+        &self,
+        pipe: PipeExpr,
+        parameter_name: &Identifier,
+        ambient_allowed: bool,
+    ) -> (PipeExpr, bool) {
+        let mut changed = false;
+        let head = pipe.head.map(|head| {
+            let (head, head_changed) = self.restore_free_function_subject_expr(
+                *head,
+                parameter_name,
+                ambient_allowed,
+            );
+            changed |= head_changed;
+            Box::new(head)
+        });
+        let stages = pipe
+            .stages
+            .into_iter()
+            .map(|stage| {
+                let (stage, stage_changed) =
+                    self.restore_free_function_subject_pipe_stage(stage, parameter_name);
+                changed |= stage_changed;
+                stage
+            })
+            .collect();
+        (
+            PipeExpr {
+                head,
+                stages,
+                span: pipe.span,
+            },
+            changed,
+        )
+    }
+
+    fn restore_free_function_subject_pipe_stage(
+        &self,
+        stage: PipeStage,
+        parameter_name: &Identifier,
+    ) -> (PipeStage, bool) {
+        let (kind, changed) = match stage.kind {
+            PipeStageKind::Transform { expr } => {
+                let (expr, changed) =
+                    self.restore_free_function_subject_expr(expr, parameter_name, true);
+                (PipeStageKind::Transform { expr }, changed)
+            }
+            PipeStageKind::Gate { expr } => {
+                let (expr, changed) =
+                    self.restore_free_function_subject_expr(expr, parameter_name, true);
+                (PipeStageKind::Gate { expr }, changed)
+            }
+            PipeStageKind::Case(arm) => {
+                let (body, changed) =
+                    self.restore_free_function_subject_expr(arm.body, parameter_name, true);
+                (
+                    PipeStageKind::Case(crate::cst::PipeCaseArm {
+                        pattern: arm.pattern,
+                        body,
+                        span: arm.span,
+                    }),
+                    changed,
+                )
+            }
+            PipeStageKind::Map { expr } => {
+                let (expr, changed) =
+                    self.restore_free_function_subject_expr(expr, parameter_name, true);
+                (PipeStageKind::Map { expr }, changed)
+            }
+            PipeStageKind::Apply { expr } => {
+                let (expr, changed) =
+                    self.restore_free_function_subject_expr(expr, parameter_name, true);
+                (PipeStageKind::Apply { expr }, changed)
+            }
+            PipeStageKind::ClusterFinalizer { expr } => {
+                let (expr, changed) =
+                    self.restore_free_function_subject_expr(expr, parameter_name, true);
+                (PipeStageKind::ClusterFinalizer { expr }, changed)
+            }
+            PipeStageKind::RecurStart { expr } => {
+                let (expr, changed) =
+                    self.restore_free_function_subject_expr(expr, parameter_name, true);
+                (PipeStageKind::RecurStart { expr }, changed)
+            }
+            PipeStageKind::RecurStep { expr } => {
+                let (expr, changed) =
+                    self.restore_free_function_subject_expr(expr, parameter_name, true);
+                (PipeStageKind::RecurStep { expr }, changed)
+            }
+            PipeStageKind::Tap { expr } => {
+                let (expr, changed) =
+                    self.restore_free_function_subject_expr(expr, parameter_name, true);
+                (PipeStageKind::Tap { expr }, changed)
+            }
+            PipeStageKind::FanIn { expr } => {
+                let (expr, changed) =
+                    self.restore_free_function_subject_expr(expr, parameter_name, true);
+                (PipeStageKind::FanIn { expr }, changed)
+            }
+            PipeStageKind::Truthy { expr } => {
+                let (expr, changed) =
+                    self.restore_free_function_subject_expr(expr, parameter_name, true);
+                (PipeStageKind::Truthy { expr }, changed)
+            }
+            PipeStageKind::Falsy { expr } => {
+                let (expr, changed) =
+                    self.restore_free_function_subject_expr(expr, parameter_name, true);
+                (PipeStageKind::Falsy { expr }, changed)
+            }
+            PipeStageKind::Validate { expr } => {
+                let (expr, changed) =
+                    self.restore_free_function_subject_expr(expr, parameter_name, true);
+                (PipeStageKind::Validate { expr }, changed)
+            }
+            PipeStageKind::Previous { expr } => {
+                let (expr, changed) =
+                    self.restore_free_function_subject_expr(expr, parameter_name, true);
+                (PipeStageKind::Previous { expr }, changed)
+            }
+            PipeStageKind::Accumulate { seed, step } => {
+                let (seed, seed_changed) =
+                    self.restore_free_function_subject_expr(seed, parameter_name, true);
+                let (step, step_changed) =
+                    self.restore_free_function_subject_expr(step, parameter_name, true);
+                (
+                    PipeStageKind::Accumulate { seed, step },
+                    seed_changed || step_changed,
+                )
+            }
+            PipeStageKind::Diff { expr } => {
+                let (expr, changed) =
+                    self.restore_free_function_subject_expr(expr, parameter_name, true);
+                (PipeStageKind::Diff { expr }, changed)
+            }
+        };
+        (
+            PipeStage {
+                subject_memo: stage.subject_memo,
+                result_memo: stage.result_memo,
+                kind,
+                span: stage.span,
+            },
+            changed,
+        )
+    }
+
+    fn restore_free_function_subject_markup_node(
+        &self,
+        node: MarkupNode,
+        parameter_name: &Identifier,
+        ambient_allowed: bool,
+    ) -> (MarkupNode, bool) {
+        let mut changed = false;
+        let attributes = node
+            .attributes
+            .into_iter()
+            .map(|attribute| {
+                let value = attribute.value.map(|value| match value {
+                    MarkupAttributeValue::Text(text) => {
+                        let (text, value_changed) = self.restore_free_function_subject_text_literal(
+                            text,
+                            parameter_name,
+                            ambient_allowed,
+                        );
+                        changed |= value_changed;
+                        MarkupAttributeValue::Text(text)
+                    }
+                    MarkupAttributeValue::Expr(expr) => {
+                        let (expr, value_changed) = self.restore_free_function_subject_expr(
+                            expr,
+                            parameter_name,
+                            ambient_allowed,
+                        );
+                        changed |= value_changed;
+                        MarkupAttributeValue::Expr(expr)
+                    }
+                    MarkupAttributeValue::Pattern(pattern) => MarkupAttributeValue::Pattern(pattern),
+                });
+                MarkupAttribute {
+                    name: attribute.name,
+                    value,
+                    span: attribute.span,
+                }
+            })
+            .collect();
+        let children = node
+            .children
+            .into_iter()
+            .map(|child| {
+                let (child, child_changed) = self.restore_free_function_subject_markup_node(
+                    child,
+                    parameter_name,
+                    ambient_allowed,
+                );
+                changed |= child_changed;
+                child
+            })
+            .collect();
+        (
+            MarkupNode {
+                name: node.name,
+                attributes,
+                children,
+                close_name: node.close_name,
+                self_closing: node.self_closing,
+                span: node.span,
+            },
+            changed,
+        )
     }
 
     fn format_fun_signature_annotation(&self, item: &NamedItem) -> Option<String> {
@@ -2797,6 +3567,27 @@ value view =
                 "\n",
                 "value projection = .email\n",
                 "value values = [1..10]\n",
+            )
+        );
+    }
+
+    #[test]
+    fn formatter_preserves_unary_subject_function_bodies() {
+        let formatted = format_text(
+            "fun currentStatus:Text=.status\nfun scoreLineFor:Text=\"Score: { . }\"\nfun label:Text=.status|>trim\n",
+        );
+        assert_eq!(
+            formatted,
+            concat!(
+                "type Text\n",
+                "func currentStatus = .status\n",
+                "\n",
+                "type Text\n",
+                "func scoreLineFor = \"Score: {.}\"\n",
+                "\n",
+                "type Text\n",
+                "func label = .status\n",
+                "  |> trim\n",
             )
         );
     }

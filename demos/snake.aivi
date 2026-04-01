@@ -207,8 +207,7 @@ func statusLineFor = .
  ||> GameOver -> "Game Over"
 
 type Int -> Text
-func scoreLineFor = score =>
-    "Score: {score}"
+func scoreLineFor = "Score: {.}"
 
 type Int -> Text
 func finalScoreLineFor = score =>

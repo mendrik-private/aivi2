@@ -462,13 +462,22 @@ impl McpHostState {
 
     fn settle_session(&self) -> Result<(), String> {
         let session = self.require_session()?;
+        let target_revision = session.harness.with_access(|access| {
+            access.process_pending_work()?;
+            Ok::<Option<u64>, String>(access.latest_requested_hydration())
+        })?;
         let deadline = Instant::now() + HYDRATION_SETTLE_TIMEOUT;
         loop {
             self.process_context_work();
-            let pending = session.harness.with_access(|access| {
-                access.latest_requested_hydration() != access.latest_applied_hydration()
-            });
-            if !pending {
+            let settled = session.harness.with_access(|access| {
+                access.process_pending_work()?;
+                let applied = access.latest_applied_hydration();
+                Ok::<bool, String>(match target_revision {
+                    Some(target) => applied.is_some_and(|revision| revision >= target),
+                    None => true,
+                })
+            })?;
+            if settled {
                 break;
             }
             if Instant::now() >= deadline {
@@ -476,9 +485,6 @@ impl McpHostState {
             }
             thread::sleep(HOST_POLL_INTERVAL);
         }
-        session
-            .harness
-            .with_access(|access| access.process_pending_work())?;
         Ok(())
     }
 
@@ -2041,9 +2047,10 @@ struct EventResult {
 #[cfg(test)]
 mod tests {
     use super::{
-        ConfiguredTarget, EmitGtkEventArgs, JsonRpcError, JsonRpcRequest, JsonRpcTransport,
-        MCP_PROTOCOL_VERSION, McpHostController, detect_json_rpc_transport,
-        handle_json_rpc_request, parse_prefixed_u32, parse_prefixed_u64, read_json_rpc_message,
+        ConfiguredTarget, EmitGtkEventArgs, FindWidgetsArgs, JsonRpcError, JsonRpcRequest,
+        JsonRpcTransport, LaunchSourceArgs, MCP_PROTOCOL_VERSION, McpHostController, McpHostState,
+        WidgetSnapshot, detect_json_rpc_transport, handle_json_rpc_request, parse_prefixed_u32,
+        parse_prefixed_u64, prepare_launch_request, read_json_rpc_message,
         resolve_initial_entry_path, runtime_value_from_json, write_json_rpc_message,
     };
     use aivi_backend::RuntimeValue;
@@ -2285,5 +2292,117 @@ mod tests {
         assert_eq!(args.key.as_deref(), Some("ArrowDown"));
         assert_eq!(args.repeated, Some(false));
         assert!(args.widget_id.is_none());
+    }
+
+    fn repo_path(path: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(path)
+    }
+
+    fn widget_snapshot_by_path<'a>(
+        roots: &'a [WidgetSnapshot],
+        path: &[&str],
+    ) -> Option<&'a WidgetSnapshot> {
+        roots.iter()
+            .find_map(|root| find_widget_snapshot_by_path(root, path))
+    }
+
+    fn find_widget_snapshot_by_path<'a>(
+        node: &'a WidgetSnapshot,
+        path: &[&str],
+    ) -> Option<&'a WidgetSnapshot> {
+        if node
+            .path
+            .iter()
+            .map(|segment| segment.as_str())
+            .eq(path.iter().copied())
+        {
+            return Some(node);
+        }
+        node.children
+            .iter()
+            .find_map(|child| find_widget_snapshot_by_path(child, path))
+    }
+
+    #[gtk::test]
+    fn emit_gtk_event_waits_for_reversi_hydration() {
+        let path = repo_path("demos/reversi.aivi");
+        let prepared =
+            prepare_launch_request(&path, Some("main".to_owned()), LaunchSourceArgs::default())
+                .expect("reversi launch request should prepare");
+        let mut host = McpHostState {
+            context: gtk::glib::MainContext::default(),
+            configured: ConfiguredTarget {
+                entry_path: Some(path.clone()),
+                default_view: Some("main".to_owned()),
+            },
+            session: None,
+            widget_ids: Default::default(),
+            next_widget_id: 0,
+            shutting_down: false,
+        };
+
+        host.launch_prepared(prepared)
+            .expect("reversi should launch through the MCP host");
+        let opening_move = host
+            .find_widgets(FindWidgetsArgs {
+                text_contains: Some("◌".to_owned()),
+                actionable: Some(true),
+                ..Default::default()
+            })
+            .expect("reversi should expose legal opening moves through MCP")
+            .into_iter()
+            .find(|widget| {
+                widget.path
+                    == vec![
+                        "window[0]".to_owned(),
+                        "box[8]".to_owned(),
+                        "box[9]".to_owned(),
+                    ]
+            })
+            .expect("the opening move at row 9 column 10 should be discoverable");
+
+        let result = host
+            .emit_gtk_event(EmitGtkEventArgs {
+                widget_id: Some(opening_move.id),
+                event: "click".to_owned(),
+                text: None,
+                active: None,
+                key: None,
+                repeated: None,
+            })
+            .expect("clicking a legal reversi move should settle fully in MCP");
+
+        assert!(
+            result
+                .session
+                .latest_applied_hydration
+                .is_some_and(|revision| revision > 1),
+            "MCP should keep pumping the run session until GTK applies a new hydration"
+        );
+        assert!(
+            result.changed_signals.iter().any(|signal| {
+                signal.name == "lastMoveText"
+                    && signal.value.as_ref().is_some_and(|value| {
+                        value != &json!("Last move: opening layout")
+                    })
+            }),
+            "the click should update the reversi move summary"
+        );
+
+        let clicked_cell = widget_snapshot_by_path(&result.gtk, &["window[0]", "box[8]", "box[9]"])
+            .expect("the clicked board cell should still exist in the GTK snapshot");
+        assert_eq!(
+            clicked_cell.text.as_deref(),
+            Some("🔴"),
+            "the clicked cell should redraw as the human red disc after hydration settles"
+        );
+        assert!(
+            !clicked_cell.sensitive,
+            "occupied board cells should stop being clickable after the move lands"
+        );
+
+        host.stop_session();
     }
 }
