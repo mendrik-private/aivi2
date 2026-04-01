@@ -3359,7 +3359,7 @@ value folded:Text =
 }
 
 #[test]
-fn cranelift_codegen_rejects_interpolated_text_without_native_formatting_contracts() {
+fn cranelift_codegen_compiles_interpolated_text() {
     let backend = lower_text(
         "backend-interpolated-text-codegen.aivi",
         r#"
@@ -3368,13 +3368,7 @@ value url:Text = "https://{host}/users"
 "#,
     );
 
-    let errors = compile_program(&backend)
-        .expect_err("interpolated text should stay unsupported until formatting is native");
-    assert!(errors.errors().iter().any(|error| matches!(
-        error,
-        CodegenError::UnsupportedExpression { detail, .. }
-            if detail.contains("text interpolation")
-    )));
+    compile_program(&backend).expect("interpolated text should now compile via runtime text concat");
 }
 
 #[test]
@@ -4869,7 +4863,7 @@ value addOne =
 }
 
 #[test]
-fn cranelift_codegen_rejects_non_option_builtin_constructors_until_aggregate_lowering_exists() {
+fn cranelift_codegen_compiles_result_constructors() {
     let backend = lower_text(
         "backend-result-constructor-codegen.aivi",
         r#"
@@ -4877,13 +4871,7 @@ fun wrapOk:(Result Text Text) = text:Text=>    Ok text
 "#,
     );
 
-    let errors =
-        compile_program(&backend).expect_err("Result constructors should stay unsupported");
-    assert!(errors.errors().iter().any(|error| matches!(
-        error,
-        CodegenError::UnsupportedExpression { detail, .. }
-            if detail.contains("builtin constructor `Ok`")
-    )));
+    compile_program(&backend).expect("Result constructors should now compile via SumConstruction");
 }
 
 #[test]
@@ -5191,7 +5179,7 @@ value stats:Stats = { count: 7, ratio: 3.5, active: True }
 }
 
 #[test]
-fn cranelift_codegen_rejects_static_aggregate_literals_with_by_reference_fields() {
+fn cranelift_codegen_compiles_static_aggregate_literals_with_by_reference_fields() {
     let backend = lower_text(
         "backend-static-byref-aggregate-codegen.aivi",
         r#"
@@ -5201,13 +5189,8 @@ value user:User = { name: "Ada", active: True }
 "#,
     );
 
-    let errors = compile_program(&backend)
-        .expect_err("static aggregate literals with by-reference fields should stay unsupported");
-    assert!(errors.errors().iter().any(|error| matches!(
-        error,
-        CodegenError::UnsupportedExpression { detail, .. }
-            if detail.contains("by-reference constant contract") && detail.contains("name")
-    )));
+    compile_program(&backend)
+        .expect("static aggregate literals with by-reference fields should now compile via runtime aggregate building");
 }
 
 #[test]
