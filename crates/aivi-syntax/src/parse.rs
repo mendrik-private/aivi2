@@ -59,16 +59,10 @@ const MISSING_INSTANCE_MEMBER_BODY: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-instance-member-body");
 const MISSING_CLASS_OPEN_BRACE: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-class-open-brace");
-const MISSING_CLASS_EQUALS: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-class-equals");
 const MISSING_INSTANCE_OPEN_BRACE: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-instance-open-brace");
-const MISSING_INSTANCE_EQUALS: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-instance-equals");
 const MISSING_DOMAIN_OPEN_BRACE: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-domain-open-brace");
-const MISSING_DOMAIN_EQUALS: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-domain-equals");
 const MISSING_DOMAIN_OVER: DiagnosticCode = DiagnosticCode::new("syntax", "missing-domain-over");
 const MISSING_DOMAIN_CARRIER: DiagnosticCode =
     DiagnosticCode::new("syntax", "missing-domain-carrier");

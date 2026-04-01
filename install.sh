@@ -28,11 +28,15 @@ if ! echo "$PATH" | tr ':' '\n' | grep -qxF "$INSTALL_DIR"; then
     echo "        export PATH=\"\$HOME/.cargo/bin:\$PATH\""
 fi
 
-# ── 2. Build the TypeScript extension ─────────────────────────────────────
+# ── 2. Install the JavaScript workspace dependencies ──────────────────────
+echo "==> Installing JS workspace dependencies..."
+(cd "$REPO_ROOT/tooling" && pnpm install --frozen-lockfile)
+
+# ── 3. Build the TypeScript extension ─────────────────────────────────────
 echo "==> Building VSCode extension..."
 (cd "$REPO_ROOT/tooling" && pnpm -r build)
 
-# ── 3. Package as .vsix ───────────────────────────────────────────────────
+# ── 4. Package as .vsix ───────────────────────────────────────────────────
 echo "==> Packaging extension..."
 (cd "$EXT_DIR" && pnpm vsce package --no-dependencies --allow-missing-repository 2>&1)
 
@@ -43,7 +47,7 @@ if [[ -z "$VSIX" ]]; then
 fi
 echo "    package: $VSIX"
 
-# ── 4. Write workspace settings so VSCode finds the binary ────────────────
+# ── 5. Write workspace settings so VSCode finds the binary ────────────────
 VSCODE_SETTINGS="$REPO_ROOT/.vscode/settings.json"
 mkdir -p "$REPO_ROOT/.vscode"
 cat > "$VSCODE_SETTINGS" <<SETTINGS_EOF
@@ -53,7 +57,7 @@ cat > "$VSCODE_SETTINGS" <<SETTINGS_EOF
 SETTINGS_EOF
 echo "==> Wrote workspace settings → $VSCODE_SETTINGS"
 
-# ── 5. Install extension into VSCode ──────────────────────────────────────
+# ── 6. Install extension into VSCode ──────────────────────────────────────
 echo "==> Installing extension into VSCode..."
 code --install-extension "$VSIX" --force
 echo ""

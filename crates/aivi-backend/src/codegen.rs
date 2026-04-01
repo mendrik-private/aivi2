@@ -6,7 +6,7 @@ use std::{
 use aivi_hir::IntrinsicValue;
 use cranelift_codegen::{
     ir::{
-        AbiParam, BlockArg, InstBuilder, MemFlags, StackSlotData, StackSlotKind, Type,
+        AbiParam, BlockArg, InstBuilder, MemFlags, Type,
         UserFuncName, Value,
         condcodes::{FloatCC, IntCC},
         immediates::Ieee64,
@@ -303,7 +303,6 @@ struct CraneliftCompiler<'a> {
     declared_signal_slots: BTreeMap<ItemId, DataId>,
     declared_imported_item_slots: BTreeMap<ItemId, DataId>,
     declared_callable_descriptors: BTreeMap<ItemId, DataId>,
-    text_concat_helper: Option<FuncId>,
     declared_external_funcs: BTreeMap<Box<str>, FuncId>,
     function_builder_ctx: FunctionBuilderContext,
     next_data_symbol: u64,
@@ -431,7 +430,6 @@ impl<'a> CraneliftCompiler<'a> {
             declared_signal_slots: BTreeMap::new(),
             declared_imported_item_slots: BTreeMap::new(),
             declared_callable_descriptors: BTreeMap::new(),
-            text_concat_helper: None,
             declared_external_funcs: BTreeMap::new(),
             function_builder_ctx: FunctionBuilderContext::new(),
             next_data_symbol: 0,
@@ -2655,90 +2653,6 @@ impl<'a> CraneliftCompiler<'a> {
         let data_id = self.declare_callable_item_descriptor(item, body, arity)?;
         let global = self.module.declare_data_in_func(data_id, builder.func);
         Ok(builder.ins().symbol_value(self.pointer_type(), global))
-    }
-
-    fn declare_text_concat_helper(&mut self) -> Result<FuncId, CodegenError> {
-        if let Some(func_id) = self.text_concat_helper {
-            return Ok(func_id);
-        }
-
-        let mut signature = self.module.make_signature();
-        signature.params.push(AbiParam::new(self.pointer_type()));
-        signature.params.push(AbiParam::new(types::I64));
-        signature.returns.push(AbiParam::new(self.pointer_type()));
-        let func_id = self
-            .module
-            .declare_function(
-                "aivi_runtime_text_concat_parts_v1",
-                Linkage::Import,
-                &signature,
-            )
-            .map_err(|error| CodegenError::CraneliftModule {
-                kernel: None,
-                message: error.to_string().into_boxed_str(),
-            })?;
-        self.text_concat_helper = Some(func_id);
-        Ok(func_id)
-    }
-
-    fn lower_dynamic_text_concat(
-        &mut self,
-        kernel_id: KernelId,
-        expr_id: KernelExprId,
-        parts: &[Value],
-        builder: &mut FunctionBuilder<'_>,
-    ) -> Result<Value, CodegenError> {
-        if parts.is_empty() {
-            return self.materialize_text_constant(kernel_id, "", builder);
-        }
-        if parts.len() == 1 {
-            return Ok(parts[0]);
-        }
-
-        let pointer_bytes = self.pointer_type().bytes();
-        let slot = builder.create_sized_stack_slot(StackSlotData::new(
-            StackSlotKind::ExplicitSlot,
-            pointer_bytes
-                .checked_mul(u32::try_from(parts.len()).map_err(|_| self.unsupported_expression(
-                    kernel_id,
-                    expr_id,
-                    "dynamic text interpolation produced more parts than the current stack-slot ABI can address",
-                ))?)
-                .ok_or_else(|| {
-                    self.unsupported_expression(
-                        kernel_id,
-                        expr_id,
-                        "dynamic text interpolation overflowed stack-slot sizing",
-                    )
-                })?,
-            pointer_bytes.trailing_zeros() as u8,
-        ));
-        let base = builder.ins().stack_addr(self.pointer_type(), slot, 0);
-        for (index, part) in parts.iter().enumerate() {
-            builder.ins().store(
-                MemFlags::new(),
-                *part,
-                base,
-                i32::try_from(index)
-                    .ok()
-                    .and_then(|index| index.checked_mul(pointer_bytes as i32))
-                    .ok_or_else(|| {
-                        self.unsupported_expression(
-                            kernel_id,
-                            expr_id,
-                            "dynamic text interpolation exceeded the current stack address range",
-                        )
-                    })?,
-            );
-        }
-        let func_id = self.declare_text_concat_helper()?;
-        let local = self.module.declare_func_in_func(func_id, builder.func);
-        let count = builder.ins().iconst(types::I64, parts.len() as i64);
-        let call = builder.ins().call(local, &[base, count]);
-        let [result] = builder.inst_results(call) else {
-            unreachable!("text concat helper should return exactly one pointer");
-        };
-        Ok(*result)
     }
 
     fn resolve_direct_apply_plan(

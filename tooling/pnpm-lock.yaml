@@ -10,8 +10,8 @@ importers:
 
   ../manual:
     dependencies:
-      '@fontsource/jetbrains-mono':
-        specifier: ^5.2.8
+      '@fontsource/inter':
+        specifier: ^5.2.5
         version: 5.2.8
     devDependencies:
       vitepress:
@@ -356,8 +356,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@fontsource/jetbrains-mono@5.2.8':
-    resolution: {integrity: sha512-6w8/SG4kqvIMu7xd7wt6x3idn1Qux3p9N62s6G3rfldOUYHpWcc2FKrqf+Vo44jRvqWj2oAtTHrZXEP23oSKwQ==}
+  '@fontsource/inter@5.2.8':
+    resolution: {integrity: sha512-P6r5WnJoKiNVV+zvW2xM13gNdFhAEpQ9dQJHt3naLvfg+LkF2ldgSLiF4T41lf1SQCM9QmkqPTn4TH568IRagg==}
 
   '@iconify-json/simple-icons@1.2.75':
     resolution: {integrity: sha512-KvcCUbvcBWb0sbqLIxHoY8z5/piXY08wcY9gfMhF+ph3AfzGMaSmZFkUY71HSXAljQngXkgs4bdKdekO0HQWvg==}
@@ -2568,7 +2568,7 @@ snapshots:
   '@esbuild/win32-x64@0.21.5':
     optional: true
 
-  '@fontsource/jetbrains-mono@5.2.8': {}
+  '@fontsource/inter@5.2.8': {}
 
   '@iconify-json/simple-icons@1.2.75':
     dependencies:

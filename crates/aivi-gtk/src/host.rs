@@ -1771,10 +1771,11 @@ mod tests {
 
     use super::*;
 
-    #[derive(Clone, Debug, PartialEq, Eq)]
+    #[derive(Clone, Debug, PartialEq)]
     enum TestValue {
         Bool(bool),
         Int(i64),
+        Float(f64),
         Text(String),
         Unit,
     }
@@ -1802,6 +1803,13 @@ mod tests {
         fn as_i64(&self) -> Option<i64> {
             match self {
                 Self::Int(value) => Some(*value),
+                _ => None,
+            }
+        }
+
+        fn as_f64(&self) -> Option<f64> {
+            match self {
+                Self::Float(value) => Some(*value),
                 _ => None,
             }
         }
@@ -2354,7 +2362,7 @@ value view =
     }
 
     #[test]
-    fn concrete_host_mounts_window_titlebars_and_compact_borderless_buttons() {
+    fn concrete_host_mounts_window_titlebars_and_compact_buttons() {
         gtk::test_synced(|| {
             let graph = lower_graph(
                 "gtk-host-window-titlebar.aivi",
@@ -2372,7 +2380,7 @@ value view =
                 </HeaderBar.end>
             </HeaderBar>
         </Window.titlebar>
-        <Button label="A" compact hasFrame={False} widthRequest={26} heightRequest={26} animateOpacity opacity={0.35} />
+        <Button label="A" compact />
     </Window>
 "#,
             );
@@ -2410,11 +2418,107 @@ value view =
                 .downcast::<gtk::Button>()
                 .expect("window content should be a button");
             assert!(content.has_css_class("aivi-compact-button"));
-            assert!(content.has_css_class("aivi-animate-opacity"));
+        });
+    }
+
+    #[test]
+    fn concrete_host_applies_compact_borderless_button_properties() {
+        gtk::test_synced(|| {
+            let graph = lower_graph(
+                "gtk-host-button-frame.aivi",
+                r#"
+value framed = False
+value width = 26
+value height = 26
+value view =
+    <Window title="Host">
+        <Button label="A" compact hasFrame={framed} widthRequest={width} heightRequest={height} />
+    </Window>
+"#,
+            );
+            let frame_input = find_widget_input(&graph, "Button", "hasFrame");
+            let width_input = find_widget_input(&graph, "Button", "widthRequest");
+            let height_input = find_widget_input(&graph, "Button", "heightRequest");
+            let executor = GtkRuntimeExecutor::new_with_values(
+                graph,
+                GtkConcreteHost::<TestValue>::default(),
+                [
+                    (frame_input, TestValue::Bool(false)),
+                    (width_input, TestValue::Int(26)),
+                    (height_input, TestValue::Int(26)),
+                ],
+            )
+            .expect("concrete GTK host should mount a compact borderless button");
+
+            let root = executor
+                .root_widgets()
+                .expect("root widget should exist")
+                .into_iter()
+                .next()
+                .expect("window root should exist");
+            let window = executor
+                .host()
+                .widget(&root)
+                .expect("window handle should resolve")
+                .downcast::<gtk::Window>()
+                .expect("root should be a GTK window");
+            let content = window
+                .child()
+                .expect("window should keep the button as content")
+                .downcast::<gtk::Button>()
+                .expect("window content should be a button");
+            assert!(content.has_css_class("aivi-compact-button"));
             assert!(!content.has_frame());
             assert_eq!(content.width_request(), 26);
             assert_eq!(content.height_request(), 26);
-            assert!((content.property::<f64>("opacity") - 0.35).abs() < f64::EPSILON);
+        });
+    }
+
+    #[test]
+    fn concrete_host_applies_button_opacity_and_transition_class() {
+        gtk::test_synced(|| {
+            let graph = lower_graph(
+                "gtk-host-button-opacity.aivi",
+                r#"
+value shouldAnimate = True
+value buttonOpacity = 0.35
+value view =
+    <Window title="Host">
+        <Button label="A" animateOpacity={shouldAnimate} opacity={buttonOpacity} />
+    </Window>
+"#,
+            );
+            let animate_input = find_widget_input(&graph, "Button", "animateOpacity");
+            let opacity_input = find_widget_input(&graph, "Button", "opacity");
+            let executor = GtkRuntimeExecutor::new_with_values(
+                graph,
+                GtkConcreteHost::<TestValue>::default(),
+                [
+                    (animate_input, TestValue::Bool(true)),
+                    (opacity_input, TestValue::Float(0.35)),
+                ],
+            )
+            .expect("concrete GTK host should mount an animated opacity button");
+
+            let root = executor
+                .root_widgets()
+                .expect("root widget should exist")
+                .into_iter()
+                .next()
+                .expect("window root should exist");
+            let window = executor
+                .host()
+                .widget(&root)
+                .expect("window handle should resolve")
+                .downcast::<gtk::Window>()
+                .expect("root should be a GTK window");
+            let content = window
+                .child()
+                .expect("window should keep the button as content")
+                .downcast::<gtk::Button>()
+                .expect("window content should be a button");
+            assert!(content.has_css_class("aivi-animate-opacity"));
+            assert!((content.property::<f64>("opacity") - 0.35).abs() < 0.001);
         });
     }
 
