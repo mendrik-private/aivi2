@@ -44,22 +44,24 @@ Returns `True` if the text is valid JSON, `False` otherwise. Never fails — inv
 ```aivi
 use aivi.data.json (validate)
 
-func checkJson = json=>```
+func checkJson = json =>
+```
 
 ### get
 
-```
-get : Text -> Text -> Task Text (Option Text)
 ```aivi
+get : Text -> Text -> Task Text (Option Text)
+```
 
 Retrieve an object field by key. The result is the field value serialised back to JSON text,
 so nested objects and arrays are preserved as `Text`. Returns `None` when the key is absent.
 Fails the task when the input is not valid JSON.
 
-```
+```aivi
 use aivi.data.json (get)
 
-func getName = json=>```
+func getName = json =>
+```
 
 ### at
 
@@ -73,21 +75,23 @@ Fails the task when the input is not valid JSON.
 ```aivi
 use aivi.data.json (at)
 
-func firstItem = json=>```
+func firstItem = json =>
+```
 
 ### keys
 
-```
-keys : Text -> Task Text (List Text)
 ```aivi
+keys : Text -> Task Text (List Text)
+```
 
 Return the keys of a JSON object in insertion order. Returns an empty list for non-objects.
 Fails the task when the input is not valid JSON.
 
-```
+```aivi
 use aivi.data.json (keys)
 
-func objectKeys = json=>```
+func objectKeys = json =>
+```
 
 ### pretty
 
@@ -100,20 +104,22 @@ Re-format JSON with two-space indentation. Fails the task when the input is not 
 ```aivi
 use aivi.data.json (pretty)
 
-func format = json=>```
+func format = json =>
+```
 
 ### minify
 
-```
-minify : Text -> Task Text Text
 ```aivi
+minify : Text -> Task Text Text
+```
 
 Remove all insignificant whitespace from JSON. Fails the task when the input is not valid JSON.
 
-```
+```aivi
 use aivi.data.json (minify)
 
-func compact = json=>```
+func compact = json =>
+```
 
 ## Error type
 
@@ -138,13 +144,14 @@ use aivi.data.json (
 
 use aivi.option (withDefault)
 
-func extractName = json=>```
+func extractName = json =>
+```
 
 ## Example — normalise before storage
 
 Extract each step into a named function so no pipes are nested.
 
-```
+```aivi
 use aivi.data.json (
     minify
     validate
@@ -152,5 +159,6 @@ use aivi.data.json (
 
 use aivi.core (Task)
 
-func minifyIfValid = raw isValid=>
-func storeJson = raw=>```
+func minifyIfValid = raw isValid =>
+func storeJson = raw =>
+```

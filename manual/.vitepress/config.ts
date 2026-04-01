@@ -24,12 +24,6 @@ export default defineConfig({
   description: 'AIVI Language Manual — a reactive, functional, GTK-first language',
   base: manualBase(),
 
-  head: [
-    ['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
-    ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
-    ['link', { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&display=swap' }],
-  ],
-
   markdown: {
     languages: [aiviGrammar as any],
     theme: aiviDarkTheme as any,

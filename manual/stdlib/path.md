@@ -122,10 +122,12 @@ use aivi.fs (
 )
 
 type Text -> Text
-func backupPath = originalPath=>    let base
+func backupPath = originalPath =>
+    let base
 
 type Text -> Task Text Text
-func safeReadConfig = configDir=>    let path
+func safeReadConfig = configDir =>
+    let path
 ```
 
 ::: tip

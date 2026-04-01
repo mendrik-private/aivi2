@@ -59,10 +59,12 @@ use aivi.core.float (
 )
 
 type Float -> Float
-func circleArea = radius=>    pi * radius * radius
+func circleArea = radius =>
+    pi * radius * radius
 
 type Float -> Float
-func circleCircumference = radius=>    tau * radius
+func circleCircumference = radius =>
+    tau * radius
 ```
 
 ---
@@ -92,10 +94,12 @@ use aivi.core.float (
 )
 
 type Float -> Float -> Float
-func hypotenuse = a b=>    sqrt (a * a + b * b)
+func hypotenuse = a b =>
+    sqrt (a * a + b * b)
 
 type Int -> Float
-func roundTrip = n=>    fromInt n
+func roundTrip = n =>
+    fromInt n
 ```
 
 ---
@@ -112,7 +116,8 @@ negate : Float -> Float
 use aivi.core.float (negate)
 
 type Float -> Float
-func flipSign = n=>    negate n
+func flipSign = n =>
+    negate n
 ```
 
 ---
@@ -133,7 +138,8 @@ use aivi.core.float (
 )
 
 type Float -> Float
-func boundedProgress = progress=>    min 1.0 (max 0.0 progress)
+func boundedProgress = progress =>
+    min 1.0 (max 0.0 progress)
 ```
 
 ---
@@ -150,7 +156,8 @@ clamp : Float -> Float -> Float -> Float
 use aivi.core.float (clamp)
 
 type Float -> Float
-func normalizedVolume = raw=>    clamp 0.0 1.0 raw
+func normalizedVolume = raw =>
+    clamp 0.0 1.0 raw
 ```
 
 ---
@@ -167,7 +174,8 @@ lerp : Float -> Float -> Float -> Float
 use aivi.core.float (lerp)
 
 type Float -> Float -> Float -> Float
-func blend = from to t=>    lerp from to t
+func blend = from to t =>
+    lerp from to t
 ```
 
 ---
@@ -184,7 +192,8 @@ sign : Float -> Float
 use aivi.core.float (sign)
 
 type Float -> Float
-func moveDirection = velocity=>    sign velocity
+func moveDirection = velocity =>
+    sign velocity
 ```
 
 ---
@@ -201,7 +210,8 @@ between : Float -> Float -> Float -> Bool
 use aivi.core.float (between)
 
 type Float -> Bool
-func isValidRatio = ratio=>    between 0.0 1.0 ratio
+func isValidRatio = ratio =>
+    between 0.0 1.0 ratio
 ```
 
 ---
@@ -221,11 +231,13 @@ use aivi.core.float (
 )
 
 type Float -> Text
-func describeNonPositive = n=> isNegative n T|> "negative"
+func describeNonPositive = n => isNegative n
+ T|> "negative"
  F|> "zero"
 
 type Float -> Text
-func signum = n=> isPositive n T|> "positive"
+func signum = n => isPositive n
+ T|> "positive"
  F|> describeNonPositive n
 ```
 
@@ -243,10 +255,12 @@ square : Float -> Float
 use aivi.core.float (square)
 
 type Float -> Float -> Float
-func addFloats = left right=>    left + right
+func addFloats = left right =>
+    left + right
 
 type Float -> Float -> Float
-func distanceSquared = dx dy=>    addFloats (square dx) (square dy)
+func distanceSquared = dx dy =>
+    addFloats (square dx) (square dy)
 ```
 
 ---
@@ -267,8 +281,10 @@ use aivi.core.float (
 )
 
 type Unit -> Float
-func halfCircleInRadians = ignored=>    toRadians 180.0
+func halfCircleInRadians = ignored =>
+    toRadians 180.0
 
 type Unit -> Float
-func rightAngleInDegrees = ignored=>    toDegrees 1.5707963267948966
+func rightAngleInDegrees = ignored =>
+    toDegrees 1.5707963267948966
 ```

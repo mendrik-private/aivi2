@@ -125,7 +125,8 @@ use aivi.prelude (
 )
 
 type Int -> Int -> Bool
-func earlier = a b=>    a < b
+func earlier = a b =>
+    a < b
 
 value smallest : Int = min earlier 5 3
 value greatest : Int = max earlier 5 3

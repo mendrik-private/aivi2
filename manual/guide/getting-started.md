@@ -16,7 +16,8 @@ This is a complete, valid AIVI module:
 
 ```aivi
 type Text -> Text
-func formatGreeting = name=>    "Hello, {name}!"
+func formatGreeting = name =>
+    "Hello, {name}!"
 
 value greeting = formatGreeting "Ada"
 ```
@@ -32,7 +33,8 @@ Signals represent values that participate in the reactive graph:
 
 ```aivi
 type Int -> Int
-func double = n=>    n * 2
+func double = n =>
+    n * 2
 
 signal count = 21
 

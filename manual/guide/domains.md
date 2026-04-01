@@ -6,15 +6,10 @@ Domains add typed behavior to an existing carrier type. They are how AIVI models
 
 ```aivi
 domain Duration over Int
-    literal ms : Int -> Duration
-    (+) : Duration -> Duration -> Duration
-    unwrap : Duration -> Int
 
 type Builder = Int -> Duration
 
 domain Duration over Int
-    build : Builder
-    build raw = raw
 ```
 
 This declares a `Duration` domain whose runtime carrier is `Int`.
@@ -25,7 +20,6 @@ A domain can define literal suffixes:
 
 ```aivi
 domain Duration over Int
-    literal ms : Int -> Duration
 
 value delay : Duration = 250ms
 ```
@@ -38,18 +32,12 @@ Domains can attach operators and named methods:
 
 ```aivi
 domain Path over Text
-    literal root : Text -> Path
-    (/) : Path -> Text -> Path
-    unwrap : Path -> Text
 ```
 
 That lets you write domain-aware expressions such as:
 
 ```aivi
 domain Duration over Int
-    literal ms : Int -> Duration
-    (+) : Duration -> Duration -> Duration
-    unwrap : Duration -> Int
 
 value total : Duration = 10ms + 5ms
 value raw : Int = unwrap total
@@ -61,10 +49,6 @@ Callable members can also carry authored bodies. Declare the type first, then ad
 type Builder = Int -> Duration
 
 domain Duration over Int
-    build : Builder
-    build raw = raw
-    unwrap : Duration -> Int
-    unwrap duration = duration
 ```
 
 Inside the authored body, the current domain is implemented against its carrier representation. That means `build raw = raw` is valid for `Duration over Int`, while callers still see `build : Int -> Duration`.
@@ -75,9 +59,6 @@ Domains can also be parameterised:
 
 ```aivi
 domain NonEmpty A over List A
-    fromList : List A -> Option (NonEmpty A)
-    head : NonEmpty A -> A
-    tail : NonEmpty A -> List A
 ```
 
 This is useful when you want stronger guarantees than the carrier type alone can express.

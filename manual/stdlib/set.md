@@ -274,8 +274,10 @@ type TagFilter = {
 }
 
 type TagFilter -> (Set Text) -> Bool
-func matchesTagSet = filter tagSet=> filter ||> { required, excluded } -> isEmpty (difference required tagSet) and isEmpty (intersection excluded tagSet)
+func matchesTagSet = filter tagSet => filter
+ ||> { required, excluded } -> isEmpty (difference required tagSet) and isEmpty (intersection excluded tagSet)
 
 type TagFilter -> (List Text) -> Bool
-func matchesTags = filter tags=>    matchesTagSet filter (fromList tags)
+func matchesTags = filter tags =>
+    matchesTagSet filter (fromList tags)
 ```

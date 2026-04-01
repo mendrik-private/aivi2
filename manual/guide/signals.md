@@ -16,7 +16,8 @@ Signals are often defined from earlier signals with pipes:
 
 ```aivi
 type Int -> Int
-func double = n=>    n * 2
+func double = n =>
+    n * 2
 
 signal count = 21
 
@@ -90,7 +91,9 @@ signal:
 
 ```aivi
 type Event = Tick | Turn Text
-type Key = Key Text
+
+type Key =
+  | Key Text
 
 signal event : Signal Event
 signal tick : Signal Unit
@@ -104,7 +107,10 @@ You can also match a subject value directly and route each matching arm into an 
 
 ```aivi
 type Direction = Up | Down
-type Event = Turn Direction | Tick
+
+type Event =
+  | Turn Direction
+  | Tick
 
 signal event = Turn Down
 signal heading = Up

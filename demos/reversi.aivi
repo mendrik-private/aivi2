@@ -1,16 +1,6 @@
-use aivi.list (
-    head as listHead
-    tailOrEmpty as listTailOrEmpty
-)
+type Disc = Empty | Red | Blue
 
-type Disc =
-  | Empty
-  | Red
-  | Blue
-
-type Turn =
-  | Human
-  | Computer
+type Turn = Human | Computer
 
 type Outcome =
   | HumanWins
@@ -72,7 +62,6 @@ value boardSize = 8
 value lastIndex = 7
 value centerLow = 3
 value centerHigh = 4
-
 value boardIndices = [0..7]
 
 value rays = [
@@ -94,28 +83,36 @@ value corners = [
 ]
 
 type Int -> Int -> Bool
-func smallerInt = left right=>    left < right
+func smallerInt = left right =>
+    left < right
 
 type Coord -> Int
-func coordX = coord=> coord ||> Coord x _ -> x
+func coordX = coord => coord
+ ||> Coord x _ -> x
 
 type Coord -> Int
-func coordY = coord=> coord ||> Coord _ y -> y
+func coordY = coord => coord
+ ||> Coord _ y -> y
 
 type Coord -> Int
-func coordId = coord=> coord ||> Coord x y -> y * boardSize + x
+func coordId = coord => coord
+ ||> Coord x y -> y * boardSize + x
 
 type Coord -> Coord -> Bool
-func sameCoord = target coord=>    target == coord
+func sameCoord = target coord =>
+    target == coord
 
 type Coord -> Bool
-func onBoard = coord=> coord ||> Coord x y -> x >= 0 and x < boardSize and y >= 0 and y < boardSize
+func onBoard = coord => coord
+ ||> Coord x y -> x >= 0 and x < boardSize and y >= 0 and y < boardSize
 
 type Int -> Int -> Coord
-func coordFromRow = y x=>    Coord x y
+func coordFromRow = y x =>
+    Coord x y
 
 type Ray -> Coord -> Coord
-func stepRay = ray coord=> (ray, coord) ||> (NorthWest, Coord x y) -> Coord (x - 1) (y - 1)
+func stepRay = ray coord => (ray, coord)
+ ||> (NorthWest, Coord x y) -> Coord (x - 1) (y - 1)
  ||> (NorthRay, Coord x y)  -> Coord x (y - 1)
  ||> (NorthEast, Coord x y) -> Coord (x + 1) (y - 1)
  ||> (WestRay, Coord x y)   -> Coord (x - 1) y
@@ -125,43 +122,52 @@ func stepRay = ray coord=> (ray, coord) ||> (NorthWest, Coord x y) -> Coord (x -
  ||> (SouthEast, Coord x y) -> Coord (x + 1) (y + 1)
 
 type Turn -> Disc
-func discForTurn = turn=> turn ||> Human    -> Red
+func discForTurn = turn => turn
+ ||> Human    -> Red
  ||> Computer -> Blue
 
 type Turn -> Turn
-func otherTurn = turn=> turn ||> Human    -> Computer
+func otherTurn = turn => turn
+ ||> Human    -> Computer
  ||> Computer -> Human
 
 type Disc -> Disc
-func otherDisc = disc=> disc ||> Red   -> Blue
+func otherDisc = disc => disc
+ ||> Red   -> Blue
  ||> Blue  -> Red
  ||> Empty -> Empty
 
 type Turn -> Text
-func turnLabel = turn=> turn ||> Human    -> "Red (you)"
+func turnLabel = turn => turn
+ ||> Human    -> "Red (you)"
  ||> Computer -> "Blue (computer)"
 
 type Outcome -> Text
-func outcomeText = outcome=> outcome ||> HumanWins    -> "You won"
+func outcomeText = outcome => outcome
+ ||> HumanWins    -> "You won"
  ||> ComputerWins -> "Blue won"
  ||> Draw         -> "Draw"
 
 type Status -> Bool
-func humanToAct = status=> status ||> Active Human     -> True
- ||> Passed Computer  -> True
- ||> _                -> False
+func humanToAct = status => status
+ ||> Active Human    -> True
+ ||> Passed Computer -> True
+ ||> _               -> False
 
 type Status -> Bool
-func computerToAct = status=> status ||> Active Computer -> True
+func computerToAct = status => status
+ ||> Active Computer -> True
  ||> Passed Human    -> True
  ||> _               -> False
 
 type Status -> Bool
-func finished = status=> status ||> Finished _ -> True
+func finished = status => status
+ ||> Finished _ -> True
  ||> _          -> False
 
 type Int -> Disc
-func emptyDisc = ignored=>    Empty
+func emptyDisc = ignored =>
+    Empty
 
 type RowAtState = {
     remaining: Int,
@@ -185,105 +191,130 @@ type ReplaceRowState = {
     board: List (List Disc)
 }
 
-type (List Disc) -> Int -> (List Disc)
-func emptyRowStep = row ignored=>    append row [Empty]
+type List Disc -> Int -> (List Disc)
+func emptyRowStep = row ignored =>
+    append row [Empty]
 
 value emptyRow : (List Disc) = boardIndices
   |> reduce emptyRowStep []
 
-type (List (List Disc)) -> Int -> (List (List Disc))
-func emptyBoardStep = board ignored=>    append board [emptyRow]
+type List (List Disc) -> Int -> (List (List Disc))
+func emptyBoardStep = board ignored =>
+    append board [emptyRow]
 
 value emptyBoard : (List (List Disc)) = boardIndices
   |> reduce emptyBoardStep []
 
 type RowAtState -> (List Disc) -> RowAtState
-func rowAtStep = state row=> (state.found, state.remaining == 0) ||> (Some _, _)   -> state
+func rowAtStep = state row => (state.found, state.remaining == 0)
+ ||> (Some _, _)   -> state
  ||> (None, True)  -> { remaining: -1, found: Some row }
  ||> (None, False) -> { remaining: state.remaining - 1, found: None }
 
 type Option (List Disc) -> (List Disc)
-func rowFromOption = found=> found ||> Some row -> row
+func rowFromOption = found => found
+ ||> Some row -> row
  ||> None     -> []
 
 type Int -> RowAtState -> (List Disc)
-func rowAtResult = y state=> y < 0 T|> []
+func rowAtResult = y state => y < 0
+ T|> []
  F|> rowFromOption state.found
 
 type Int -> (List (List Disc)) -> RowAtState
-func rowAtState = y board=> board  |> reduce rowAtStep { remaining: y, found: None }
+func rowAtState = y board => board
+  |> reduce rowAtStep { remaining: y, found: None }
 
 type Int -> (List (List Disc)) -> (List Disc)
-func rowAt = y board=>    rowAtResult y (rowAtState y board)
+func rowAt = y board =>
+    rowAtResult y (rowAtState y board)
 
 type DiscAtState -> Disc -> DiscAtState
-func discAtStep = state disc=> (state.found, state.remaining == 0) ||> (Some _, _)   -> state
+func discAtStep = state disc => (state.found, state.remaining == 0)
+ ||> (Some _, _)   -> state
  ||> (None, True)  -> { remaining: -1, found: Some disc }
  ||> (None, False) -> { remaining: state.remaining - 1, found: None }
 
 type Option Disc -> Disc
-func discFromOption = found=> found ||> Some disc -> disc
+func discFromOption = found => found
+ ||> Some disc -> disc
  ||> None      -> Empty
 
 type Int -> DiscAtState -> Disc
-func discAtResult = x state=> x < 0 T|> Empty
+func discAtResult = x state => x < 0
+ T|> Empty
  F|> discFromOption state.found
 
 type Int -> (List Disc) -> DiscAtState
-func discAtState = x row=> row  |> reduce discAtStep { remaining: x, found: None }
+func discAtState = x row => row
+  |> reduce discAtStep { remaining: x, found: None }
 
 type Int -> (List Disc) -> Disc
-func discAtX = x row=>    discAtResult x (discAtState x row)
+func discAtX = x row =>
+    discAtResult x (discAtState x row)
 
 type Disc -> ReplaceDiscState -> Disc -> ReplaceDiscState
-func replaceDiscStep = replacement state disc=> (state.replaced, state.remaining == 0) ||> (True, _)      -> { remaining: state.remaining, replaced: True, row: append state.row [disc] }
+func replaceDiscStep = replacement state disc => (state.replaced, state.remaining == 0)
+ ||> (True, _)      -> { remaining: state.remaining, replaced: True, row: append state.row [disc] }
  ||> (False, True)  -> { remaining: -1, replaced: True, row: append state.row [replacement] }
  ||> (False, False) -> { remaining: state.remaining - 1, replaced: False, row: append state.row [disc] }
 
 type Int -> Disc -> (List Disc) -> (List Disc)
-func setDiscAtX = x replacement row=> x < 0 T|> row
+func setDiscAtX = x replacement row => x < 0
+ T|> row
  F|> row
   |> reduce (replaceDiscStep replacement) { remaining: x, replaced: False, row: [] }
   |> .row
 
-type (List Disc) -> ReplaceRowState -> (List Disc) -> ReplaceRowState
-func replaceRowStep = replacement state row=> (state.replaced, state.remaining == 0) ||> (True, _)      -> { remaining: state.remaining, replaced: True, board: append state.board [row] }
+type List Disc -> ReplaceRowState -> (List Disc) -> ReplaceRowState
+func replaceRowStep = replacement state row => (state.replaced, state.remaining == 0)
+ ||> (True, _)      -> { remaining: state.remaining, replaced: True, board: append state.board [row] }
  ||> (False, True)  -> { remaining: -1, replaced: True, board: append state.board [replacement] }
  ||> (False, False) -> { remaining: state.remaining - 1, replaced: False, board: append state.board [row] }
 
 type Int -> (List Disc) -> (List (List Disc)) -> (List (List Disc))
-func setRowAt = y replacement board=> y < 0 T|> board
+func setRowAt = y replacement board => y < 0
+ T|> board
  F|> board
   |> reduce (replaceRowStep replacement) { remaining: y, replaced: False, board: [] }
   |> .board
 
-type (List (List Disc)) -> Coord -> Disc
-func discAt = board coord=>    discAtX (coordX coord) (rowAt (coordY coord) board)
+type List (List Disc) -> Coord -> Disc
+func discAt = board coord =>
+    discAtX (coordX coord) (rowAt (coordY coord) board)
 
-type (List (List Disc)) -> Coord -> Disc -> (List (List Disc))
-func setDisc = board coord disc=>    setRowAt (coordY coord) (setDiscAtX (coordX coord) disc (rowAt (coordY coord) board)) board
+type List (List Disc) -> Coord -> Disc -> (List (List Disc))
+func setDisc = board coord disc =>
+    setRowAt (coordY coord) (setDiscAtX (coordX coord) disc (rowAt (coordY coord) board)) board
 
 type Disc -> (List (List Disc)) -> Coord -> (List (List Disc))
-func setManyStep = disc board coord=>    setDisc board coord disc
+func setManyStep = disc board coord =>
+    setDisc board coord disc
 
-type (List (List Disc)) -> Disc -> (List Coord) -> (List (List Disc))
-func setMany = board disc coords=> coords  |> reduce (setManyStep disc) board
+type List (List Disc) -> Disc -> (List Coord) -> (List (List Disc))
+func setMany = board disc coords => coords
+  |> reduce (setManyStep disc) board
 
 type Coord -> Disc -> (List (List Disc)) -> (List (List Disc))
-func put = coord disc board=>    setDisc board coord disc
+func put = coord disc board =>
+    setDisc board coord disc
 
 type Coord -> (List Coord) -> Bool
-func coordInList = coord coords=> coords  |> reduce (coordInListStep coord) False
+func coordInList = coord coords => coords
+  |> reduce (coordInListStep coord) False
 
 type Coord -> Bool -> Coord -> Bool
-func coordInListStep = target found coord=> found T|> True
+func coordInListStep = target found coord => found
+ T|> True
  F|> sameCoord target coord
 
 type Int -> Coord -> Int
-func coordCountStep = total coord=>    total + 1
+func coordCountStep = total coord =>
+    total + 1
 
-type (List Coord) -> Int
-func coordCount = coords=> coords  |> reduce coordCountStep 0
+type List Coord -> Int
+func coordCount = coords => coords
+  |> reduce coordCountStep 0
 
 type RayScanState = {
     current: Coord,
@@ -299,212 +330,189 @@ type RayLegalState = {
     found: Bool
 }
 
-type (List (List Disc)) -> Disc -> Ray -> RayScanState -> Disc -> RayScanState
-func resolveRayDisc = board disc ray state current=> (current == otherDisc disc, current == disc, coordCount state.captured > 0) ||> (True, _, _)        -> {
-        current: stepRay ray state.current,
-        captured: append state.captured [state.current],
-        resolved: False,
-        flips: []
-    }
- ||> (False, True, True) -> {
-        current: state.current,
-        captured: state.captured,
-        resolved: True,
-        flips: state.captured
-    }
- ||> _                   -> {
-        current: state.current,
-        captured: state.captured,
-        resolved: True,
-        flips: []
-    }
+type List (List Disc) -> Disc -> Ray -> RayScanState -> Disc -> RayScanState
+func resolveRayDisc = board disc ray state current => (current == otherDisc disc, current == disc, coordCount state.captured > 0)
+ ||> (True, _, _)        -> { current: stepRay ray state.current, captured: append state.captured [state.current], resolved: False, flips: [] }
+ ||> (False, True, True) -> { current: state.current, captured: state.captured, resolved: True, flips: state.captured }
+ ||> _                   -> { current: state.current, captured: state.captured, resolved: True, flips: [] }
 
-type (List (List Disc)) -> Disc -> Ray -> RayScanState -> RayScanState
-func scanRayOnBoard = board disc ray state=> discAt board state.current ||> Empty   -> {
-        current: state.current,
-        captured: state.captured,
-        resolved: True,
-        flips: []
-    }
+type List (List Disc) -> Disc -> Ray -> RayScanState -> RayScanState
+func scanRayOnBoard = board disc ray state => discAt board state.current
+ ||> Empty   -> { current: state.current, captured: state.captured, resolved: True, flips: [] }
  ||> current -> resolveRayDisc board disc ray state current
 
-type (List (List Disc)) -> Disc -> Ray -> RayScanState -> RayScanState
-func scanUnresolvedRayStep = board disc ray state=> onBoard state.current T|> scanRayOnBoard board disc ray state
- F|> {
-        current: state.current,
-        captured: state.captured,
-        resolved: True,
-        flips: []
-    }
+type List (List Disc) -> Disc -> Ray -> RayScanState -> RayScanState
+func scanUnresolvedRayStep = board disc ray state => onBoard state.current
+ T|> scanRayOnBoard board disc ray state
+ F|> { current: state.current, captured: state.captured, resolved: True, flips: [] }
 
-type (List (List Disc)) -> Disc -> Ray -> RayScanState -> Int -> RayScanState
-func scanRayStep = board disc ray state ignored=> state.resolved T|> state
+type List (List Disc) -> Disc -> Ray -> RayScanState -> Int -> RayScanState
+func scanRayStep = board disc ray state ignored => state.resolved
+ T|> state
  F|> scanUnresolvedRayStep board disc ray state
 
-type (List (List Disc)) -> Disc -> Coord -> Ray -> (List Coord)
-func flipsInRay = board disc coord ray=>    boardIndices
-      |> reduce (scanRayStep board disc ray) {
-          current: stepRay ray coord,
-          captured: [],
-          resolved: False,
-          flips: []
-      }
-      |> .flips
+type List (List Disc) -> Disc -> Coord -> Ray -> (List Coord)
+func flipsInRay = board disc coord ray => boardIndices
+  |> reduce (scanRayStep board disc ray) { current: stepRay ray coord, captured: [], resolved: False, flips: [] }
+  |> .flips
 
 type Disc -> Ray -> RayLegalState -> Disc -> RayLegalState
-func resolveLegalRayDisc = disc ray state current=> (current == otherDisc disc, current == disc, state.captured > 0) ||> (True, _, _)        -> {
-        current: stepRay ray state.current,
-        captured: state.captured + 1,
-        resolved: False,
-        found: False
-    }
- ||> (False, True, True) -> {
-        current: state.current,
-        captured: state.captured,
-        resolved: True,
-        found: True
-    }
- ||> _                   -> {
-        current: state.current,
-        captured: state.captured,
-        resolved: True,
-        found: False
-    }
+func resolveLegalRayDisc = disc ray state current => (current == otherDisc disc, current == disc, state.captured > 0)
+ ||> (True, _, _)        -> { current: stepRay ray state.current, captured: state.captured + 1, resolved: False, found: False }
+ ||> (False, True, True) -> { current: state.current, captured: state.captured, resolved: True, found: True }
+ ||> _                   -> { current: state.current, captured: state.captured, resolved: True, found: False }
 
-type (List (List Disc)) -> Disc -> Ray -> RayLegalState -> RayLegalState
-func scanLegalRayOnBoard = board disc ray state=> discAt board state.current ||> Empty   -> {
-        current: state.current,
-        captured: state.captured,
-        resolved: True,
-        found: False
-    }
+type List (List Disc) -> Disc -> Ray -> RayLegalState -> RayLegalState
+func scanLegalRayOnBoard = board disc ray state => discAt board state.current
+ ||> Empty   -> { current: state.current, captured: state.captured, resolved: True, found: False }
  ||> current -> resolveLegalRayDisc disc ray state current
 
-type (List (List Disc)) -> Disc -> Ray -> RayLegalState -> RayLegalState
-func scanUnresolvedLegalRayStep = board disc ray state=> onBoard state.current T|> scanLegalRayOnBoard board disc ray state
- F|> {
-        current: state.current,
-        captured: state.captured,
-        resolved: True,
-        found: False
-    }
+type List (List Disc) -> Disc -> Ray -> RayLegalState -> RayLegalState
+func scanUnresolvedLegalRayStep = board disc ray state => onBoard state.current
+ T|> scanLegalRayOnBoard board disc ray state
+ F|> { current: state.current, captured: state.captured, resolved: True, found: False }
 
-type (List (List Disc)) -> Disc -> Ray -> RayLegalState -> Int -> RayLegalState
-func scanLegalRayStep = board disc ray state ignored=> state.resolved T|> state
+type List (List Disc) -> Disc -> Ray -> RayLegalState -> Int -> RayLegalState
+func scanLegalRayStep = board disc ray state ignored => state.resolved
+ T|> state
  F|> scanUnresolvedLegalRayStep board disc ray state
 
-type (List (List Disc)) -> Disc -> Coord -> Ray -> Bool
-func rayHasFlip = board disc coord ray=>    boardIndices
-      |> reduce (scanLegalRayStep board disc ray) {
-          current: stepRay ray coord,
-          captured: 0,
-          resolved: False,
-          found: False
-      }
-      |> .found
+type List (List Disc) -> Disc -> Coord -> Ray -> Bool
+func rayHasFlip = board disc coord ray => boardIndices
+  |> reduce (scanLegalRayStep board disc ray) { current: stepRay ray coord, captured: 0, resolved: False, found: False }
+  |> .found
 
-type (List (List Disc)) -> Disc -> Coord -> Bool -> Ray -> Bool
-func anyRayHasFlipStep = board disc coord found ray=> found T|> True
+type List (List Disc) -> Disc -> Coord -> Bool -> Ray -> Bool
+func anyRayHasFlipStep = board disc coord found ray => found
+ T|> True
  F|> rayHasFlip board disc coord ray
 
-type (List (List Disc)) -> Disc -> Coord -> Bool
-func anyRayHasFlip = board disc coord=> rays  |> reduce (anyRayHasFlipStep board disc coord) False
+type List (List Disc) -> Disc -> Coord -> Bool
+func anyRayHasFlip = board disc coord => rays
+  |> reduce (anyRayHasFlipStep board disc coord) False
 
-type (List (List Disc)) -> Disc -> Coord -> (List Coord)
-func flipsForMove = board disc coord=> rays  |> reduce (flipsForMoveStep board disc coord) []
+type List (List Disc) -> Disc -> Coord -> (List Coord)
+func flipsForMove = board disc coord => rays
+  |> reduce (flipsForMoveStep board disc coord) []
 
-type (List (List Disc)) -> Disc -> Coord -> (List Coord) -> Ray -> (List Coord)
-func flipsForMoveStep = board disc coord acc ray=>    append acc (flipsInRay board disc coord ray)
+type List (List Disc) -> Disc -> Coord -> (List Coord) -> Ray -> (List Coord)
+func flipsForMoveStep = board disc coord acc ray =>
+    append acc (flipsInRay board disc coord ray)
 
-type (List (List Disc)) -> Disc -> Coord -> Bool
-func legalMove = board disc coord=>    discAt board coord == Empty and anyRayHasFlip board disc coord
+type List (List Disc) -> Disc -> Coord -> Bool
+func legalMove = board disc coord =>
+    discAt board coord == Empty and anyRayHasFlip board disc coord
 
-type (List Coord) -> Coord -> (List Coord)
-func appendCoordUnique = coords coord=> coordInList coord coords T|> coords
+type List Coord -> Coord -> (List Coord)
+func appendCoordUnique = coords coord => coordInList coord coords
+ T|> coords
  F|> append coords [coord]
 
-type (List Coord) -> (List Coord) -> (List Coord)
-func appendCoordsUnique = coords more=>    more
-      |> reduce appendCoordUnique coords
+type List Coord -> (List Coord) -> (List Coord)
+func appendCoordsUnique = coords more => more
+  |> reduce appendCoordUnique coords
 
-type (List (List Disc)) -> (List Coord) -> Coord -> (List Coord)
-func addEmptyNeighbor = board coords next=> discAt board next == Empty T|> appendCoordUnique coords next
+type List (List Disc) -> (List Coord) -> Coord -> (List Coord)
+func addEmptyNeighbor = board coords next => discAt board next == Empty
+ T|> appendCoordUnique coords next
  F|> coords
 
-type (List (List Disc)) -> Coord -> (List Coord) -> Ray -> (List Coord)
-func emptyNeighborStep = board coord coords ray=> onBoard (stepRay ray coord) T|> addEmptyNeighbor board coords (stepRay ray coord)
+type List (List Disc) -> Coord -> (List Coord) -> Ray -> (List Coord)
+func emptyNeighborStep = board coord coords ray => onBoard (stepRay ray coord)
+ T|> addEmptyNeighbor board coords (stepRay ray coord)
  F|> coords
 
-type (List (List Disc)) -> Coord -> (List Coord)
-func emptyNeighbors = board coord=> rays  |> reduce (emptyNeighborStep board coord) []
+type List (List Disc) -> Coord -> (List Coord)
+func emptyNeighbors = board coord => rays
+  |> reduce (emptyNeighborStep board coord) []
 
-type (List (List Disc)) -> Disc -> Int -> (List Coord) -> Int -> (List Coord)
-func rowCandidateStep = board disc y candidates x=> discAt board (coordFromRow y x) == otherDisc disc T|> appendCoordsUnique candidates (emptyNeighbors board (coordFromRow y x))
+type List (List Disc) -> Disc -> Int -> (List Coord) -> Int -> (List Coord)
+func rowCandidateStep = board disc y candidates x => discAt board (coordFromRow y x) == otherDisc disc
+ T|> appendCoordsUnique candidates (emptyNeighbors board (coordFromRow y x))
  F|> candidates
 
-type (List (List Disc)) -> Disc -> Int -> (List Coord)
-func rowCandidateCoords = board disc y=> boardIndices  |> reduce (rowCandidateStep board disc y) []
+type List (List Disc) -> Disc -> Int -> (List Coord)
+func rowCandidateCoords = board disc y => boardIndices
+  |> reduce (rowCandidateStep board disc y) []
 
-type (List (List Disc)) -> Disc -> (List Coord) -> Int -> (List Coord)
-func candidateCoordsStep = board disc candidates y=>    appendCoordsUnique candidates (rowCandidateCoords board disc y)
+type List (List Disc) -> Disc -> (List Coord) -> Int -> (List Coord)
+func candidateCoordsStep = board disc candidates y =>
+    appendCoordsUnique candidates (rowCandidateCoords board disc y)
 
-type (List (List Disc)) -> Disc -> (List Coord)
-func candidateCoords = board disc=> boardIndices  |> reduce (candidateCoordsStep board disc) []
+type List (List Disc) -> Disc -> (List Coord)
+func candidateCoords = board disc => boardIndices
+  |> reduce (candidateCoordsStep board disc) []
 
-type (List (List Disc)) -> Disc -> (List Coord) -> Coord -> (List Coord)
-func legalCandidateStep = board disc legal coord=> legalMove board disc coord T|> append legal [coord]
+type List (List Disc) -> Disc -> (List Coord) -> Coord -> (List Coord)
+func legalCandidateStep = board disc legal coord => legalMove board disc coord
+ T|> append legal [coord]
  F|> legal
 
-type (List (List Disc)) -> Disc -> (List Coord)
-func legalMoves = board disc=> candidateCoords board disc  |> reduce (legalCandidateStep board disc) []
+type List (List Disc) -> Disc -> (List Coord)
+func legalMoves = board disc => candidateCoords board disc
+  |> reduce (legalCandidateStep board disc) []
 
-type (List (List Disc)) -> Disc -> Coord -> (List Coord) -> (List (List Disc))
-func boardAfterFlips = board disc coord flips=> flips  |> setMany board disc
+type List (List Disc) -> Disc -> Coord -> (List Coord) -> (List (List Disc))
+func boardAfterFlips = board disc coord flips => flips
+  |> setMany board disc
   |> put coord disc
 
-type (List (List Disc)) -> Disc -> Coord -> (List (List Disc))
-func boardAfterMove = board disc coord=> flipsForMove board disc coord  |> boardAfterFlips board disc coord
+type List (List Disc) -> Disc -> Coord -> (List (List Disc))
+func boardAfterMove = board disc coord => flipsForMove board disc coord
+  |> boardAfterFlips board disc coord
 
 type Disc -> Disc -> Bool
-func sameDisc = target disc=>    target == disc
+func sameDisc = target disc =>
+    target == disc
 
 type Disc -> (List Disc) -> Int
-func countInRow = target row=> row  |> reduce (countInRowStep target) 0
+func countInRow = target row => row
+  |> reduce (countInRowStep target) 0
 
 type Disc -> Int -> Disc -> Int
-func countInRowStep = target total disc=> sameDisc target disc T|> total + 1
+func countInRowStep = target total disc => sameDisc target disc
+ T|> total + 1
  F|> total
 
 type Disc -> Int -> (List Disc) -> Int
-func countDiscStep = target total row=>    total + countInRow target row
+func countDiscStep = target total row =>
+    total + countInRow target row
 
 type Disc -> (List (List Disc)) -> Int
-func countDisc = target board=> board  |> reduce (countDiscStep target) 0
+func countDisc = target board => board
+  |> reduce (countDiscStep target) 0
 
 type Int -> Int -> Outcome
-func outcomeFromCounts = humanCount computerCount=> (humanCount > computerCount, computerCount > humanCount) ||> (True, _)         -> HumanWins
- ||> (False, True)     -> ComputerWins
- ||> _                 -> Draw
+func outcomeFromCounts = humanCount computerCount => (humanCount > computerCount, computerCount > humanCount)
+ ||> (True, _)     -> HumanWins
+ ||> (False, True) -> ComputerWins
+ ||> _             -> Draw
 
-type (List (List Disc)) -> Outcome
-func outcomeForBoard = board=>    outcomeFromCounts (countDisc Red board) (countDisc Blue board)
+type List (List Disc) -> Outcome
+func outcomeForBoard = board =>
+    outcomeFromCounts (countDisc Red board) (countDisc Blue board)
 
-type (List (List Disc)) -> Turn -> (List Coord) -> TurnResolution
-func resolveFallbackTurn = board preferred fallbackMoves=> coordCount fallbackMoves > 0 T|> { status: Passed preferred, legalMoves: fallbackMoves }
+type List (List Disc) -> Turn -> (List Coord) -> TurnResolution
+func resolveFallbackTurn = board preferred fallbackMoves => coordCount fallbackMoves > 0
+ T|> { status: Passed preferred, legalMoves: fallbackMoves }
  F|> { status: Finished (outcomeForBoard board), legalMoves: [] }
 
-type (List (List Disc)) -> Turn -> TurnResolution
-func advanceFallbackTurn = board preferred=>    resolveFallbackTurn board preferred (legalMoves board (discForTurn (otherTurn preferred)))
+type List (List Disc) -> Turn -> TurnResolution
+func advanceFallbackTurn = board preferred =>
+    resolveFallbackTurn board preferred (legalMoves board (discForTurn (otherTurn preferred)))
 
-type (List (List Disc)) -> Turn -> (List Coord) -> TurnResolution
-func resolvePreferredTurn = board preferred preferredMoves=> coordCount preferredMoves > 0 T|> { status: Active preferred, legalMoves: preferredMoves }
+type List (List Disc) -> Turn -> (List Coord) -> TurnResolution
+func resolvePreferredTurn = board preferred preferredMoves => coordCount preferredMoves > 0
+ T|> { status: Active preferred, legalMoves: preferredMoves }
  F|> advanceFallbackTurn board preferred
 
-type (List (List Disc)) -> Turn -> TurnResolution
-func advanceTurn = board preferred=>    resolvePreferredTurn board preferred (legalMoves board (discForTurn preferred))
+type List (List Disc) -> Turn -> TurnResolution
+func advanceTurn = board preferred =>
+    resolvePreferredTurn board preferred (legalMoves board (discForTurn preferred))
 
-type (List (List Disc)) -> Int -> (Option Coord) -> (List Coord) -> Int -> Int -> TurnResolution -> GameState
-func makeState = board moveNumber lastMove lastFlips humanCount computerCount resolution=>    {
+type List (List Disc) -> Int -> (Option Coord) -> (List Coord) -> Int -> Int -> TurnResolution -> GameState
+func makeState = board moveNumber lastMove lastFlips humanCount computerCount resolution =>
+    {
         board: board,
         status: resolution.status,
         legalMoves: resolution.legalMoves,
@@ -516,22 +524,98 @@ func makeState = board moveNumber lastMove lastFlips humanCount computerCount re
         animState: Idle
     }
 
-value initialBoard : (List (List Disc)) =
+value initialBoard : (List (List Disc)) = [
     [
-        [Empty, Empty, Empty, Empty, Empty, Empty, Empty, Empty],
-        [Empty, Empty, Empty, Empty, Empty, Empty, Empty, Empty],
-        [Empty, Empty, Empty, Empty, Empty, Empty, Empty, Empty],
-        [Empty, Empty, Empty, Blue,  Red,   Empty, Empty, Empty],
-        [Empty, Empty, Empty, Red,   Blue,  Empty, Empty, Empty],
-        [Empty, Empty, Empty, Empty, Empty, Empty, Empty, Empty],
-        [Empty, Empty, Empty, Empty, Empty, Empty, Empty, Empty],
-        [Empty, Empty, Empty, Empty, Empty, Empty, Empty, Empty]
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty
+    ],
+    [
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty
+    ],
+    [
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty
+    ],
+    [
+        Empty,
+        Empty,
+        Empty,
+        Blue,
+        Red,
+        Empty,
+        Empty,
+        Empty
+    ],
+    [
+        Empty,
+        Empty,
+        Empty,
+        Red,
+        Blue,
+        Empty,
+        Empty,
+        Empty
+    ],
+    [
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty
+    ],
+    [
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty
+    ],
+    [
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty
     ]
+]
 
 value initial : GameState = {
     board: initialBoard,
     status: Active Human,
-    legalMoves: [Coord 3 2, Coord 2 3, Coord 5 4, Coord 4 5],
+    legalMoves: [
+        Coord 3 2,
+        Coord 2 3,
+        Coord 5 4,
+        Coord 4 5
+    ],
     humanCount: 2,
     computerCount: 2,
     moveNumber: 0,
@@ -546,86 +630,106 @@ value previewBlinkVisibleTicks = 3
 value previewLastTick = 17
 
 type Int -> Bool
-func oneFromEdge = n=>    n == 1 or n == lastIndex - 1
+func oneFromEdge = n =>
+    n == 1 or n == lastIndex - 1
 
 type Int -> Bool
-func twoFromEdge = n=>    n == 2 or n == lastIndex - 2
+func twoFromEdge = n =>
+    n == 2 or n == lastIndex - 2
 
 type Coord -> Bool
-func cornerCoord = coord=>    coordInList coord corners
+func cornerCoord = coord =>
+    coordInList coord corners
 
 type Coord -> Bool
-func cornerBand = coord=> coord ||> Coord x y -> (x <= 1 or x >= lastIndex - 1) and (y <= 1 or y >= lastIndex - 1)
+func cornerBand = coord => coord
+ ||> Coord x y -> (x <= 1 or x >= lastIndex - 1) and (y <= 1 or y >= lastIndex - 1)
 
 type Coord -> Bool
-func edgeCoord = coord=> coord ||> Coord x y -> x == 0 or x == lastIndex or y == 0 or y == lastIndex
+func edgeCoord = coord => coord
+ ||> Coord x y -> x == 0 or x == lastIndex or y == 0 or y == lastIndex
 
 type Coord -> Bool
-func innerRing = coord=> coord ||> Coord x y -> oneFromEdge x or oneFromEdge y
+func innerRing = coord => coord
+ ||> Coord x y -> oneFromEdge x or oneFromEdge y
 
 type Coord -> Bool
-func secondRing = coord=> coord ||> Coord x y -> twoFromEdge x or twoFromEdge y
+func secondRing = coord => coord
+ ||> Coord x y -> twoFromEdge x or twoFromEdge y
 
 type Coord -> Int
-func positionalWeight = coord=> (cornerCoord coord, cornerBand coord, edgeCoord coord, innerRing coord, secondRing coord) ||> (True, _, _, _, _)              -> 160
- ||> (False, True, _, _, _)          -> -60
- ||> (False, False, True, _, _)      -> 18
- ||> (False, False, False, True, _)  -> -4
+func positionalWeight = coord => (cornerCoord coord, cornerBand coord, edgeCoord coord, innerRing coord, secondRing coord)
+ ||> (True, _, _, _, _)                 -> 160
+ ||> (False, True, _, _, _)             -> -60
+ ||> (False, False, True, _, _)         -> 18
+ ||> (False, False, False, True, _)     -> -4
  ||> (False, False, False, False, True) -> 8
- ||> _                               -> 3
+ ||> _                                  -> 3
 
 type Coord -> Int
-func finalCandidateScore = coord=>    positionalWeight coord * 12
+func finalCandidateScore = coord =>
+    positionalWeight coord * 12
 
 type Coord -> Candidate
-func buildCandidate = coord=>    {
+func buildCandidate = coord =>
+    {
         coord: coord,
         flips: 0,
         score: finalCandidateScore coord
     }
 
-type (List (List Disc)) -> Coord -> Candidate
-func candidateForCoord = board coord=>    buildCandidate coord
+type List (List Disc) -> Coord -> Candidate
+func candidateForCoord = board coord =>
+    buildCandidate coord
 
 type Candidate -> Candidate -> Bool
-func betterCandidate = left right=>    left.score < right.score
-        or (left.score == right.score and left.flips < right.flips)
-        or (left.score == right.score and left.flips == right.flips and coordId left.coord > coordId right.coord)
+func betterCandidate = left right =>
+    left.score < right.score or (left.score == right.score and left.flips < right.flips) or (left.score == right.score and left.flips == right.flips and coordId left.coord > coordId right.coord)
 
-type (List (List Disc)) -> (Option Candidate) -> Coord -> (Option Candidate)
-func bestComputerMoveStep = board found coord=> found ||> Some best -> Some (keepBetterCandidate best (candidateForCoord board coord))
+type List (List Disc) -> (Option Candidate) -> Coord -> (Option Candidate)
+func bestComputerMoveStep = board found coord => found
+ ||> Some best -> Some (keepBetterCandidate best (candidateForCoord board coord))
  ||> None      -> Some (candidateForCoord board coord)
 
-type (List (List Disc)) -> (List Coord) -> (Option Candidate)
-func bestComputerMove = board moves=> moves  |> reduce (bestComputerMoveStep board) None
+type List (List Disc) -> (List Coord) -> (Option Candidate)
+func bestComputerMove = board moves => moves
+  |> reduce (bestComputerMoveStep board) None
 
 type Candidate -> Candidate -> Candidate
-func keepBetterCandidate = best candidate=> betterCandidate best candidate T|> candidate
+func keepBetterCandidate = best candidate => betterCandidate best candidate
+ T|> candidate
  F|> best
 
 type Turn -> GameState -> Int -> Int
-func nextHumanCount = turn state flipCount=> turn ||> Human    -> state.humanCount + flipCount + 1
+func nextHumanCount = turn state flipCount => turn
+ ||> Human    -> state.humanCount + flipCount + 1
  ||> Computer -> state.humanCount - flipCount
 
 type Turn -> GameState -> Int -> Int
-func nextComputerCount = turn state flipCount=> turn ||> Human    -> state.computerCount - flipCount
+func nextComputerCount = turn state flipCount => turn
+ ||> Human    -> state.computerCount - flipCount
  ||> Computer -> state.computerCount + flipCount + 1
 
 type GameState -> Turn -> Coord -> Int -> (List Coord) -> (List (List Disc)) -> GameState
-func applyResolvedBoard = state turn coord flipCount flips afterBoard=>    makeState afterBoard (state.moveNumber + 1) (Some coord) flips (nextHumanCount turn state flipCount) (nextComputerCount turn state flipCount) (advanceTurn afterBoard (otherTurn turn))
+func applyResolvedBoard = state turn coord flipCount flips afterBoard =>
+    makeState afterBoard (state.moveNumber + 1) (Some coord) flips (nextHumanCount turn state flipCount) (nextComputerCount turn state flipCount) (advanceTurn afterBoard (otherTurn turn))
 
 type GameState -> Turn -> Coord -> (List Coord) -> GameState
-func applyResolvedTurn = state turn coord flips=> boardAfterFlips state.board (discForTurn turn) coord flips  |> applyResolvedBoard state turn coord (coordCount flips) flips
+func applyResolvedTurn = state turn coord flips => boardAfterFlips state.board (discForTurn turn) coord flips
+  |> applyResolvedBoard state turn coord (coordCount flips) flips
 
 type GameState -> Turn -> Coord -> GameState
-func applyTurnMove = state turn coord=> flipsForMove state.board (discForTurn turn) coord  |> applyResolvedTurn state turn coord
+func applyTurnMove = state turn coord => flipsForMove state.board (discForTurn turn) coord
+  |> applyResolvedTurn state turn coord
 
 type Coord -> GameState -> GameState
-func handleTryPlace = coord state=> (humanToAct state.status, coordInList coord state.legalMoves) ||> (True, True)  -> applyTurnMove state Human coord
- ||> _             -> state
+func handleTryPlace = coord state => (humanToAct state.status, coordInList coord state.legalMoves)
+ ||> (True, True) -> applyTurnMove state Human coord
+ ||> _            -> state
 
 type GameState -> (List (List Disc)) -> AnimState -> GameState
-func computerAnimState = state board animState=>    {
+func computerAnimState = state board animState =>
+    {
         board: board,
         status: Active Computer,
         legalMoves: [],
@@ -638,55 +742,64 @@ func computerAnimState = state board animState=>    {
     }
 
 type GameState -> Coord -> (List Coord) -> GameState
-func beginComputerPreview = state coord flips=>    computerAnimState state state.board (Previewing coord flips 0)
+func beginComputerPreview = state coord flips =>
+    computerAnimState state state.board (Previewing coord flips 0)
 
 type GameState -> Coord -> (List Coord) -> GameState
-func beginComputerFlips = state coord flips=>    computerAnimState state (put coord (discForTurn Computer) state.board) (Flipping coord flips flips)
+func beginComputerFlips = state coord flips =>
+    computerAnimState state (put coord (discForTurn Computer) state.board) (Flipping coord flips flips)
 
 type GameState -> Coord -> (List Coord) -> Int -> GameState
-func advanceComputerPreview = state coord flips tick=> tick >= previewLastTick T|> beginComputerFlips state coord flips
+func advanceComputerPreview = state coord flips tick => tick >= previewLastTick
+ T|> beginComputerFlips state coord flips
  F|> computerAnimState state state.board (Previewing coord flips (tick + 1))
 
 type GameState -> Coord -> (List Coord) -> GameState
-func finishComputerAnimation = state coord flips=>    makeState state.board (state.moveNumber + 1) (Some coord) flips (countDisc Red state.board) (countDisc Blue state.board) (advanceTurn state.board Human)
-
-type GameState -> Coord -> (List Coord) -> Coord -> (List Coord) -> GameState
-func continueComputerFlips = state coord flips nextFlip remaining=>    computerAnimState state (setDisc state.board nextFlip (discForTurn Computer)) (Flipping coord flips (listTailOrEmpty remaining))
+func finishComputerAnimation = state coord flips =>
+    makeState state.board (state.moveNumber + 1) (Some coord) flips (countDisc Red state.board) (countDisc Blue state.board) (advanceTurn state.board Human)
 
 type GameState -> Coord -> (List Coord) -> (List Coord) -> GameState
-func advanceComputerFlips = state coord flips remaining=> listHead remaining ||> Some nextFlip -> continueComputerFlips state coord flips nextFlip remaining
- ||> None          -> finishComputerAnimation state coord flips
+func advanceComputerFlips = state coord flips remaining => remaining
+ ||> [nextFlip, ...rest] -> computerAnimState state (setDisc state.board nextFlip (discForTurn Computer)) (Flipping coord flips rest)
+ ||> []                  -> finishComputerAnimation state coord flips
 
 type GameState -> GameState
-func startComputerAnim = state=> bestComputerMove state.board state.legalMoves ||> Some candidate -> beginComputerPreview state candidate.coord (flipsForMove state.board (discForTurn Computer) candidate.coord)
+func startComputerAnim = state => bestComputerMove state.board state.legalMoves
+ ||> Some candidate -> beginComputerPreview state candidate.coord (flipsForMove state.board (discForTurn Computer) candidate.coord)
  ||> None           -> makeState state.board state.moveNumber state.lastMove noFlips state.humanCount state.computerCount (advanceTurn state.board Computer)
 
 type GameState -> GameState
-func runComputerTurn = state=> state.animState ||> Idle                           -> startComputerAnim state
+func runComputerTurn = state => state.animState
+ ||> Idle                           -> startComputerAnim state
  ||> Previewing coord flips tick    -> advanceComputerPreview state coord flips tick
  ||> Flipping coord flips remaining -> advanceComputerFlips state coord flips remaining
 
 type GameState -> GameState
-func handleComputerTurn = state=> computerToAct state.status T|> runComputerTurn state
+func handleComputerTurn = state => computerToAct state.status
+ T|> runComputerTurn state
  F|> state
 
 type Event -> GameState -> GameState
-func step = event state=> event ||> Restart          -> initial
+func step = event state => event
+ ||> Restart          -> initial
  ||> TryPlaceAt coord -> handleTryPlace coord state
  ||> ComputerTurn     -> handleComputerTurn state
 
 type Coord -> Text
-func coordLabel = coord=> coord ||> Coord x y -> "({x + 1}, {y + 1})"
+func coordLabel = coord => coord
+ ||> Coord x y -> "({x + 1}, {y + 1})"
 
 type Status -> Text
-func statusLabel = status=> status ||> Active Human     -> "You are red"
+func statusLabel = status => status
+ ||> Active Human     -> "You are red"
  ||> Active Computer  -> "Blue to move"
  ||> Passed Human     -> "You pass"
  ||> Passed Computer  -> "Blue passes"
  ||> Finished outcome -> outcomeText outcome
 
 type GameState -> Text
-func titlebarHintLine = state=> (state.status, state.animState) ||> (Active Human, _)              -> "Click a marked cell."
+func titlebarHintLine = state => (state.status, state.animState)
+ ||> (Active Human, _)                   -> "Click a marked cell."
  ||> (Active Computer, Previewing _ _ _) -> "Blue is placing a stone."
  ||> (Active Computer, Flipping _ _ _)   -> "Blue is flipping stones."
  ||> (Active Computer, _)                -> "Blue is thinking."
@@ -695,68 +808,80 @@ func titlebarHintLine = state=> (state.status, state.animState) ||> (Active Huma
  ||> (Finished _, _)                     -> "Restart to play again."
 
 type GameState -> Text
-func scoreLine = state=>    "Red {state.humanCount} | Blue {state.computerCount} | Moves {state.moveNumber}"
+func scoreLine = state =>
+    "Red {state.humanCount} | Blue {state.computerCount} | Moves {state.moveNumber}"
 
 type GameState -> Text
-func lastMoveLine = state=> state.lastMove ||> Some coord -> lastMoveAt coord
+func lastMoveLine = state => state.lastMove
+ ||> Some coord -> lastMoveAt coord
  ||> None       -> "Last move: opening layout"
 
 type Coord -> Text
-func lastMoveAt = coord=>    coord
+func lastMoveAt = coord => coord
  ||> Coord x y -> "Last move: ({x + 1}, {y + 1})"
 
 type Status -> (List Coord) -> Coord -> Text
-func emptyCellLabel = status legalMoves coord=> (coordInList coord legalMoves, humanToAct status, computerToAct status) ||> (True, True, _)    -> "◌"
+func emptyCellLabel = status legalMoves coord => (coordInList coord legalMoves, humanToAct status, computerToAct status)
+ ||> (True, True, _)     -> "◌"
  ||> (True, False, True) -> "◍"
- ||> _                  -> "·"
+ ||> _                   -> "·"
 
-type (Option Coord) -> Coord -> Bool
-func isLastMove = lastMove coord=> lastMove ||> Some lc -> sameCoord lc coord
- ||> None      -> False
+type Option Coord -> Coord -> Bool
+func isLastMove = lastMove coord => lastMove
+ ||> Some lc -> sameCoord lc coord
+ ||> None    -> False
 
 type Int -> Bool
-func animStoneVisible = tick=>    tick % previewBlinkCycleTicks < previewBlinkVisibleTicks
+func animStoneVisible = tick =>
+    tick % previewBlinkCycleTicks < previewBlinkVisibleTicks
 
 type Int -> Float
-func previewOpacityAtTick = tick=>    animStoneVisible tick T|> 1.0
+func previewOpacityAtTick = tick => animStoneVisible tick
+ T|> 1.0
  F|> 0.0
 
 type Coord -> Coord -> (Option Text)
-func previewLabelAt = animCoord coord=>    sameCoord animCoord coord T|> Some "🔵"
+func previewLabelAt = animCoord coord => sameCoord animCoord coord
+ T|> Some "🔵"
  F|> None
 
 type AnimState -> Coord -> (Option Text)
-func previewLabel = animState coord=> animState ||> Previewing animCoord _ _ -> previewLabelAt animCoord coord
- ||> _                         -> None
+func previewLabel = animState coord => animState
+ ||> Previewing animCoord _ _ -> previewLabelAt animCoord coord
+ ||> _                        -> None
 
 type Coord -> Int -> Coord -> Float
-func previewOpacityForCoord = animCoord tick coord=>    sameCoord animCoord coord T|> previewOpacityAtTick tick
+func previewOpacityForCoord = animCoord tick coord => sameCoord animCoord coord
+ T|> previewOpacityAtTick tick
  F|> 1.0
 
 type AnimState -> Coord -> Float
-func cellOpacity = animState coord=> animState ||> Previewing animCoord _ tick -> previewOpacityForCoord animCoord tick coord
- ||> _                         -> 1.0
+func cellOpacity = animState coord => animState
+ ||> Previewing animCoord _ tick -> previewOpacityForCoord animCoord tick coord
+ ||> _                           -> 1.0
 
 type AnimState -> Coord -> Bool
-func cellAnimateOpacity = animState coord=> animState ||> Previewing animCoord _ _ -> sameCoord animCoord coord
- ||> _                         -> False
+func cellAnimateOpacity = animState coord => animState
+ ||> Previewing animCoord _ _ -> sameCoord animCoord coord
+ ||> _                        -> False
 
-type (List (List Disc)) -> Status -> (List Coord) -> (Option Coord) -> (List Coord) -> Coord -> Text
-func baseCellLabel = board status legalMoves lastMove lastFlips coord=>
-    (discAt board coord, computerToAct status, isLastMove lastMove coord, coordInList coord lastFlips)
- ||> (Red, True, True, _) -> "🎯"
+type List (List Disc) -> Status -> (List Coord) -> (Option Coord) -> (List Coord) -> Coord -> Text
+func baseCellLabel = board status legalMoves lastMove lastFlips coord => (discAt board coord, computerToAct status, isLastMove lastMove coord, coordInList coord lastFlips)
+ ||> (Red, True, True, _) -> "🔴"
  ||> (Red, True, _, True) -> "🟠"
  ||> (Red, _, _, _)       -> "🔴"
  ||> (Blue, _, _, _)      -> "🔵"
  ||> (Empty, _, _, _)     -> emptyCellLabel status legalMoves coord
 
-type (List (List Disc)) -> Status -> (List Coord) -> (Option Coord) -> (List Coord) -> AnimState -> Coord -> Text
-func cellLabel = board status legalMoves lastMove lastFlips animState coord=> previewLabel animState coord ||> Some label -> label
+type List (List Disc) -> Status -> (List Coord) -> (Option Coord) -> (List Coord) -> AnimState -> Coord -> Text
+func cellLabel = board status legalMoves lastMove lastFlips animState coord => previewLabel animState coord
+ ||> Some label -> label
  ||> None       -> baseCellLabel board status legalMoves lastMove lastFlips coord
 
 type GameState -> Coord -> Bool
-func cellEnabled = state coord=> (humanToAct state.status, coordInList coord state.legalMoves) ||> (True, True)  -> True
- ||> _             -> False
+func cellEnabled = state coord => (humanToAct state.status, coordInList coord state.legalMoves)
+ ||> (True, True) -> True
+ ||> _            -> False
 
 signal placeCoord : Signal Coord
 signal restartClick : Signal Unit
@@ -774,19 +899,19 @@ signal state : Signal GameState = event
  +|> initial step
 
 signal phase : Signal Status = state
- |> .status
+  |> .status
 
 signal statusText : Signal Text = phase
- |> statusLabel
+  |> statusLabel
 
 signal scoreText : Signal Text = state
- |> scoreLine
+  |> scoreLine
 
 signal lastMoveText : Signal Text = state
- |> lastMoveLine
+  |> lastMoveLine
 
 signal titlebarHintText : Signal Text = state
- |> titlebarHintLine
+  |> titlebarHintLine
 
 value main =
     <Window title="AIVI Reversi">
@@ -806,17 +931,7 @@ value main =
                     <Box orientation="horizontal" spacing={0}>
                         <each of={boardIndices} as={x} key={x}>
                             <with value={Coord x y} as={coord}>
-                                <Button
-                                    label={cellLabel currentState.board currentState.status currentState.legalMoves currentState.lastMove currentState.lastFlips currentState.animState coord}
-                                    onClick={placeCoord coord}
-                                    sensitive={cellEnabled currentState coord}
-                                    animateOpacity={cellAnimateOpacity currentState.animState coord}
-                                    opacity={cellOpacity currentState.animState coord}
-                                    compact
-                                    hasFrame={False}
-                                    widthRequest={52}
-                                    heightRequest={52}
-                                />
+                                <Button label={cellLabel currentState.board currentState.status currentState.legalMoves currentState.lastMove currentState.lastFlips currentState.animState coord} onClick={placeCoord coord} sensitive={cellEnabled currentState coord} animateOpacity={cellAnimateOpacity currentState.animState coord} opacity={cellOpacity currentState.animState coord} compact hasFrame={False} widthRequest={52} heightRequest={52} />
                             </with>
                         </each>
                     </Box>

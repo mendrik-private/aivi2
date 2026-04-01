@@ -1,13 +1,19 @@
 /* ─────────────────────────────────────────────────────────────────────────────
-   Fira Code with ligatures for all code blocks and inline code
+   Manual code typography and surfaces
 ───────────────────────────────────────────────────────────────────────────── */
 
-@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&display=swap');
 :root {
   --vp-font-family-base: 'Inter', sans-serif;
-  font-variant-ligatures: common-ligatures contextual;
-  font-feature-settings: 'liga' 1, 'calt' 1;
-  --vp-font-family-mono: 'Fira Code', 'Fira Mono', 'Cascadia Code', monospace;
+  --vp-font-family-mono:
+    ui-monospace,
+    'SFMono-Regular',
+    'SF Mono',
+    Menlo,
+    Monaco,
+    Consolas,
+    'Liberation Mono',
+    'Courier New',
+    monospace;
 
   /* Ghostty / AIVI Dark palette exposed as CSS custom properties */
   --aivi-bg:      #1D1F21;
@@ -27,15 +33,21 @@
 /* ── Code block container ─────────────────────────────────────────────────── */
 .vp-doc div[class*='language-'],
 .vp-doc [class*='language-'] {
+  margin: 16px 0;
   background-color: var(--aivi-bg) !important;
   border: 1px solid var(--aivi-border);
-  border-radius: 6px;
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 /* Shiki outputs pre with inline background from the theme; match it */
 .vp-doc div[class*='language-'] pre,
 .vp-doc div[class*='language-'] code {
   background-color: var(--aivi-bg) !important;
+}
+
+.vp-doc div[class*='language-'] pre {
+  padding-block: 16px;
 }
 
 /* ── Inline code ──────────────────────────────────────────────────────────── */
@@ -59,31 +71,37 @@
 .vp-doc pre code,
 .vp-doc div[class*='language-'] code {
   font-family: var(--vp-font-family-mono);
-  font-variant-ligatures: common-ligatures contextual;
-  font-feature-settings: 'liga' 1, 'calt' 1, 'ss01' 1, 'ss03' 1, 'ss05' 1;
+  font-variant-ligatures: none;
+  font-feature-settings: normal;
   -webkit-font-smoothing: antialiased;
-  font-size: 0.875em;
-  line-height: 1.65;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  letter-spacing: normal;
+  word-spacing: normal;
 }
 
 /* Inline code */
 .vp-doc :not(pre) > code {
   font-family: var(--vp-font-family-mono);
-  font-variant-ligatures: common-ligatures;
-  font-feature-settings: 'liga' 1, 'calt' 1;
+  font-variant-ligatures: none;
+  font-feature-settings: normal;
+  letter-spacing: normal;
+  word-spacing: normal;
 }
 
 /* Sidebar and nav code */
 .VPSidebar code,
 .VPNav code {
   font-family: var(--vp-font-family-mono);
-  font-feature-settings: 'liga' 1, 'calt' 1;
+  font-variant-ligatures: none;
+  font-feature-settings: normal;
 }
 
 /* ── Pipe operator in prose ───────────────────────────────────────────────── */
 .vp-doc .pipe-op {
   font-family: var(--vp-font-family-mono);
-  font-feature-settings: 'liga' 1, 'calt' 1;
+  font-variant-ligatures: none;
+  font-feature-settings: normal;
   font-size: 0.9em;
 }
 

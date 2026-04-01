@@ -54,7 +54,8 @@ type Direction =
   | Right
 
 type Direction -> Direction
-func opposite = direction=> direction ||> Up    -> Down
+func opposite = direction => direction
+ ||> Up    -> Down
  ||> Down  -> Up
  ||> Left  -> Right
  ||> Right -> Left
@@ -73,7 +74,8 @@ use aivi.network (
 )
 
 type Text -> Text -> Text
-func joinProviders = left right=>    "{left}/{right}"
+func joinProviders = left right =>
+    "{left}/{right}"
 
 value primaryProvider = http
 value fallbackProvider = socket

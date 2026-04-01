@@ -29,6 +29,32 @@ value view =
 
 Anything inside `{...}` is an AIVI expression.
 
+## Typed widget properties
+
+Widget attributes are schema-checked host properties, not an open CSS map. That means you bind ordinary expressions into the properties a widget exposes today.
+
+```aivi
+type Bool -> Float
+func previewOpacity = visible => visible
+ T|> 1.0
+ F|> 0.25
+
+value previewVisible = True
+
+value view =
+    <Window title="Preview">
+        <Button
+            label="Blue"
+            animateOpacity={True}
+            opacity={previewOpacity previewVisible}
+        />
+    </Window>
+```
+
+`Button.opacity` takes a `Float` and the GTK host clamps it into the `0.0` to `1.0` range. `Button.animateOpacity` takes a `Bool` and enables the built-in opacity transition class, so changes to `opacity` fade instead of snapping.
+
+Because these are ordinary attributes, they can be driven by any signal-backed or source-backed expression. Arbitrary `cssProps` maps are not part of the current AIVI surface yet.
+
 ## Conditional rendering with `<show>`
 
 ```aivi

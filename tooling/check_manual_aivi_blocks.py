@@ -295,8 +295,11 @@ def rewrite_blocks(reports: list[BlockReport]) -> None:
                 key = (line, language, block_index)
                 report = target_map.get(key)
                 if report is not None and report.formatted is not None:
+                    formatted = report.formatted
+                    if not formatted.endswith("\n"):
+                        formatted = f"{formatted}\n"
                     rebuilt.append(original[cursor:match.start("body")])
-                    rebuilt.append(report.formatted)
+                    rebuilt.append(formatted)
                     cursor = match.end("body")
         rebuilt.append(original[cursor:])
         markdown_path.write_text("".join(rebuilt), encoding="utf-8")

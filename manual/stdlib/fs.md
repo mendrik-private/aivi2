@@ -57,7 +57,8 @@ Read a file as UTF-8 text.
 use aivi.fs (readText)
 
 type Text -> Task Text Text
-func loadConfig = path=>    readText path
+func loadConfig = path =>
+    readText path
 ```
 
 ### `readBytes : Text -> Task Text Bytes`
@@ -68,7 +69,8 @@ Read a file as raw bytes.
 use aivi.fs (readBytes)
 
 type Text -> Task Text Bytes
-func loadIcon = path=>    readBytes path
+func loadIcon = path =>
+    readBytes path
 ```
 
 ### `readDir : Text -> Task Text (List Text)`
@@ -79,7 +81,8 @@ List the names of entries in a directory (filenames only, not full paths).
 use aivi.fs (readDir)
 
 type Text -> Task Text (List Text)
-func listFiles = dir=>    readDir dir
+func listFiles = dir =>
+    readDir dir
 ```
 
 ### `exists : Text -> Task Text Bool`
@@ -90,7 +93,8 @@ Return `True` if the path exists (file or directory).
 use aivi.fs (exists)
 
 type Text -> Task Text Bool
-func checkCachePresent = cacheDir=>    exists cacheDir
+func checkCachePresent = cacheDir =>
+    exists cacheDir
 ```
 
 ---
@@ -105,7 +109,8 @@ Write UTF-8 text to a file, creating it if necessary.
 use aivi.fs (writeText)
 
 type Text -> Text -> Task Text Unit
-func saveConfig = path content=>    writeText path content
+func saveConfig = path content =>
+    writeText path content
 ```
 
 ### `writeBytes : Text -> Bytes -> Task Text Unit`
@@ -116,7 +121,8 @@ Write raw bytes to a file.
 use aivi.fs (writeBytes)
 
 type Text -> Bytes -> Task Text Unit
-func saveThumbnail = path data=>    writeBytes path data
+func saveThumbnail = path data =>
+    writeBytes path data
 ```
 
 ### `createDirAll : Text -> Task Text Unit`
@@ -127,7 +133,8 @@ Create a directory and any missing parent directories (equivalent to `mkdir -p`)
 use aivi.fs (createDirAll)
 
 type Text -> Task Text Unit
-func ensureCacheDir = dir=>    createDirAll dir
+func ensureCacheDir = dir =>
+    createDirAll dir
 ```
 
 ---
@@ -142,7 +149,8 @@ Rename (or move) a file or directory.
 use aivi.fs (rename)
 
 type Text -> Text -> Task Text Unit
-func moveFile = from to=>    rename from to
+func moveFile = from to =>
+    rename from to
 ```
 
 ### `copy : Text -> Text -> Task Text Unit`
@@ -153,7 +161,8 @@ Copy a file. The destination directory must already exist.
 use aivi.fs (copy)
 
 type Text -> Text -> Task Text Unit
-func backupFile = src dest=>    copy src dest
+func backupFile = src dest =>
+    copy src dest
 ```
 
 ### `deleteFile : Text -> Task Text Unit`
@@ -164,7 +173,8 @@ Delete a single file.
 use aivi.fs (deleteFile)
 
 type Text -> Task Text Unit
-func removeTempFile = path=>    deleteFile path
+func removeTempFile = path =>
+    deleteFile path
 ```
 
 ### `deleteDir : Text -> Task Text Unit`
@@ -175,7 +185,8 @@ Recursively delete a directory and all its contents (equivalent to `rm -rf`).
 use aivi.fs (deleteDir)
 
 type Text -> Task Text Unit
-func cleanCache = cacheDir=>    deleteDir cacheDir
+func cleanCache = cacheDir =>
+    deleteDir cacheDir
 ```
 
 ---

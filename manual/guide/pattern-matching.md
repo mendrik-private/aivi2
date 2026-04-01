@@ -10,7 +10,8 @@ Use `||>` when you want to branch on a value:
 
 ```aivi
 type Int -> Text
-func describeNumber = n=> n ||> 0 -> "zero"
+func describeNumber = n => n
+ ||> 0 -> "zero"
  ||> 1 -> "one"
  ||> _ -> "many"
 
@@ -36,7 +37,8 @@ type Direction =
   | Right
 
 type Direction -> Text
-func directionLabel = direction=> direction ||> Up    -> "up"
+func directionLabel = direction => direction
+ ||> Up    -> "up"
  ||> Down  -> "down"
  ||> Left  -> "left"
  ||> Right -> "right"
@@ -53,7 +55,8 @@ type LoadState =
   | Failed Text
 
 type LoadState -> Text
-func describeLoadState = state=> state ||> NotAsked      -> "waiting"
+func describeLoadState = state => state
+ ||> NotAsked      -> "waiting"
  ||> Loaded name   -> "loaded {name}"
  ||> Failed reason -> "error {reason}"
 
@@ -71,7 +74,8 @@ type Status =
   | Stopped
 
 type Status -> Bool
-func isRunning = status=> status ||> Running -> True
+func isRunning = status => status
+ ||> Running -> True
  ||> _       -> False
 
 value runningNow = isRunning Running
@@ -83,7 +87,8 @@ When the choice is really a boolean condition, calculate the condition first and
 
 ```aivi
 type Int -> Text
-func classifyNumber = n=> n > 0 T|> "positive"
+func classifyNumber = n => n > 0
+ T|> "positive"
  F|> "not positive"
 
 value numberClass = classifyNumber 12
@@ -102,7 +107,8 @@ type Profile = {
 }
 
 type Profile -> Text
-func profileSummary = profile=> profile ||> { name, score } -> "{name} scored {score}"
+func profileSummary = profile => profile
+ ||> { name, score } -> "{name} scored {score}"
 
 value summaryText =
     profileSummary {
@@ -121,7 +127,8 @@ type Profile = {
 }
 
 type Profile -> Bool
-func isTopScore = profile=> profile ||> { score } -> score >= 100
+func isTopScore = profile => profile
+ ||> { score } -> score >= 100
 
 value topScore =
     isTopScore {
@@ -145,7 +152,8 @@ type Direction =
   | Right
 
 type (Point, Direction) -> Point
-func step = move=> move ||> (Point x y, Up)    -> Point x (y - 1)
+func step = move => move
+ ||> (Point x y, Up)    -> Point x (y - 1)
  ||> (Point x y, Down)  -> Point x (y + 1)
  ||> (Point x y, Left)  -> Point (x - 1) y
  ||> (Point x y, Right) -> Point (x + 1) y
@@ -168,7 +176,8 @@ type Outer =
   | Outer Inner
 
 type Outer -> Text
-func describeOuter = outer=> outer ||> Outer A -> "outer A"
+func describeOuter = outer => outer
+ ||> Outer A -> "outer A"
  ||> Outer B -> "outer B"
 
 value outerLabel = describeOuter (Outer A)
@@ -179,16 +188,18 @@ value outerLabel = describeOuter (Outer A)
 `Option` and `Result` are ordinary tagged types, so matching them feels the same:
 
 ```aivi
-type (Option Text) -> Text
-func displayName = maybeName=> maybeName ||> Some name -> name
+type Option Text -> Text
+func displayName = maybeName => maybeName
+ ||> Some name -> name
  ||> None      -> "anonymous"
 
 value shownName = displayName (Some "Ada")
 ```
 
 ```aivi
-type (Result Text Int) -> Text
-func handleResult = result=> result ||> Ok value    -> "got {value}"
+type Result Text Int -> Text
+func handleResult = result => result
+ ||> Ok value    -> "got {value}"
  ||> Err message -> "failed {message}"
 
 value handledResult = handleResult (Ok 42)
@@ -200,7 +211,8 @@ When the subject is already `Bool`, `T|>` and `F|>` are shorter than a full matc
 
 ```aivi
 type Bool -> Text
-func statusLabel = active=> active T|> "active"
+func statusLabel = active => active
+ T|> "active"
  F|> "inactive"
 
 value currentStatus = statusLabel True

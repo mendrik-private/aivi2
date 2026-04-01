@@ -7,7 +7,6 @@ For the current higher-kinded hierarchy, builtin executable support matrix, and 
 
 ```aivi
 class Eq A
-    (==) : A -> A -> Bool
 ```
 
 This says that any type used with `Eq` must support equality.
@@ -16,7 +15,6 @@ You can declare ordinary named methods too:
 
 ```aivi
 class Display A
-    display : A -> Text
 ```
 
 ## Superclass declarations
@@ -26,24 +24,16 @@ Any instance of the derived class must also provide an instance of each supercla
 
 ```aivi
 class Named A
-    name : A -> Text
 
 class Displayed A
-    with Named A
-    display : A -> Text
 
 class Logged A
-    with Displayed A
-    logLine : A -> Text
 ```
 
 Multiple superclasses are listed as separate `with` lines:
 
 ```aivi
 class CacheKey A
-    with Eq A
-    with Default A
-    canonical : A -> A
 ```
 
 ## Parameter constraints
@@ -52,8 +42,6 @@ Use `require` inside the class body to constrain a type parameter. This document
 
 ```aivi
 class Container A
-    require Eq A
-    contains : A -> List A -> Bool
 ```
 
 ## Using class-backed operators
@@ -62,7 +50,8 @@ When a type already has an instance, you can use the operator directly:
 
 ```aivi
 type Int -> Int -> Bool
-func equivalent = left right=>    left == right and left != 0
+func equivalent = left right =>
+    left == right and left != 0
 
 value sameNumber = equivalent 4 4
 ```
@@ -72,16 +61,15 @@ Instances provide the implementation for a concrete type:
 
 ```aivi
 class Eq A
-    (==) : A -> A -> Bool
 
 type Blob =
   | Blob Bytes
 
 type Blob -> Blob -> Bool
-func blobEquals = left right=>    True
+func blobEquals = left right =>
+    True
 
 instance Eq Blob
-    (==) left right = blobEquals left right
 ```
 
 ## Named class methods
@@ -90,13 +78,11 @@ A class can expose named operations instead of operators:
 
 ```aivi
 class Compare A
-    same : A -> A -> Bool
 
 type Label =
   | Label Text
 
 instance Compare Label
-    same left right = left == right
 ```
 
 ## Eq constraints on functions
@@ -105,14 +91,16 @@ When a function needs to compare values of an open type parameter, use a constra
 
 ```aivi
 type Eq K => K -> K -> Bool
-func matchesKey = key candidate=>    key == candidate
+func matchesKey = key candidate =>
+    key == candidate
 ```
 
 Multiple constraints use a parenthesized comma-separated list:
 
 ```aivi
 type (Eq A, Eq B) => A -> A -> B -> B -> Bool
-func bothEqual = leftA rightA leftB rightB=>    leftA == rightA and leftB == rightB
+func bothEqual = leftA rightA leftB rightB =>
+    leftA == rightA and leftB == rightB
 ```
 
 The constraint ensures the function can only be called when `K` (or `A`, `B`, etc.) has an `Eq` instance. Without the constraint, using `==` on an open type parameter is a type error.

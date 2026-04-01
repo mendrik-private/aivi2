@@ -4,7 +4,7 @@ layout: home
 hero:
   name: AIVI
   text: A reactive, functional language for the Linux desktop
-  tagline: Build signal-driven GTK applications — no nulls, no loops, no surprises.
+  tagline: Build signal-driven GTK applications — an experiment by Andreas Herd
   actions:
     - theme: brand
       text: Get Started

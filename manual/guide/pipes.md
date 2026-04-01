@@ -8,10 +8,12 @@ Pipes are the main way to express flow in AIVI. Instead of deeply nested calls, 
 
 ```aivi
 type Int -> Int
-func double = n=>    n * 2
+func double = n =>
+    n * 2
 
 type Int -> Int
-func addOne = n=>    n + 1
+func addOne = n =>
+    n + 1
 
 value result = 5
   |> double
@@ -26,7 +28,8 @@ The piped value becomes the last argument:
 
 ```aivi
 type Int -> Int -> Int
-func multiply = factor n=>    factor * n
+func multiply = factor n =>
+    factor * n
 
 value scaled = 5
   |> multiply 3
@@ -70,7 +73,8 @@ type Status =
   | Archived
 
 type Status -> Text
-func statusLabel = status=> status ||> Draft     -> "draft"
+func statusLabel = status => status
+ ||> Draft     -> "draft"
  ||> Published -> "published"
  ||> Archived  -> "archived"
 
@@ -90,7 +94,8 @@ For `Bool`, the dedicated true/false pipes are shorter than a full match:
 
 ```aivi
 type Bool -> Text
-func availabilityLabel = ready=> ready T|> "ready"
+func availabilityLabel = ready => ready
+ T|> "ready"
  F|> "waiting"
 
 value shownAvailability = availabilityLabel True
@@ -192,11 +197,13 @@ Pipes must stay on the top-level expression spine. If you need a pipe inside ano
 
 ```aivi
 type Text -> Text
-func normalizeTitle = title=> title ||> "Inbox" -> "priority"
+func normalizeTitle = title => title
+ ||> "Inbox" -> "priority"
  ||> _       -> title
 
 type Text -> Text
-func displayTitle = title=>    normalizeTitle title
+func displayTitle = title =>
+    normalizeTitle title
 ```
 
 That keeps pipe flow explicit and matches the compiler's current nesting rule.

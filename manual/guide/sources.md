@@ -63,10 +63,8 @@ type Map K V =
   | EmptyMap
 
 domain Duration over Int
-    literal sec : Int -> Duration
 
 domain Retry over Int
-    literal times : Int -> Retry
 
 value authHeaders : Map Text Text = EmptyMap
 
@@ -137,7 +135,6 @@ type Mode =
   | Stream
 
 domain Duration over Int
-    literal ms : Int -> Duration
 
 provider custom.feed
     argument path : Text

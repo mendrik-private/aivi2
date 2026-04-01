@@ -105,7 +105,7 @@ It answers “what checks, executes, runs, or compiles today?” rather than “
 | Surface form | Check | Execute | Run | Compile | Notes |
 | --- | --- | --- | --- | --- | --- |
 | Core markup roots and reactive attributes | yes | n/a | yes | n/a | `prepare_run_artifact` and bundle tests cover the current markup entry path. |
-| Current widget catalog | yes | n/a | yes | n/a | The syntax-sheet catalog is supported; the repo also has run tests for additional common widgets, but arbitrary non-catalog widgets are still rejected. |
+| Current widget catalog | yes | n/a | yes | n/a | The syntax-sheet catalog is supported; `Button` also exposes typed `opacity: Float` and `animateOpacity: Bool` properties for signal-driven fade transitions, but arbitrary non-catalog widgets and generic CSS-property maps are still rejected. |
 | Event routing to input signals / payload publication | yes | n/a | partial | n/a | Direct signal hooks and payload-publishing event hooks are covered, but unsupported widget/event pairs are still rejected by the run surface. |
 | `<show>` | yes | n/a | yes | n/a | Covered by run/control-node tests. |
 | `<each>` | yes | n/a | yes | n/a | Covered by run/control-node tests and keyed collection handling. |

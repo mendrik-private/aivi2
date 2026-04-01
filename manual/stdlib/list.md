@@ -38,7 +38,8 @@ isEmpty : (List A) -> Bool
 use aivi.list (isEmpty)
 
 type List Int -> Text
-func describe = items=> isEmpty items T|> "empty list"
+func describe = items => isEmpty items
+ T|> "empty list"
  F|> "has elements"
 
 value result : Text = describe []
@@ -64,7 +65,8 @@ nonEmpty : (List A) -> Bool
 use aivi.list (nonEmpty)
 
 type List Int -> Text
-func describeList = items=> nonEmpty items T|> "has elements"
+func describeList = items => nonEmpty items
+ T|> "has elements"
  F|> "empty"
 
 value result : Text =
@@ -108,7 +110,8 @@ head : (List A) -> Option A
 use aivi.list (head)
 
 type List Int -> Int
-func firstOrZero = items=> head items ||> None   -> 0
+func firstOrZero = items => head items
+ ||> None   -> 0
  ||> Some n -> n
 
 value result : Int =
@@ -158,7 +161,8 @@ tail : (List A) -> Option (List A)
 use aivi.list (tail)
 
 type List Int -> List Int
-func restOrEmpty = items=> tail items ||> None           -> []
+func restOrEmpty = items => tail items
+ ||> None           -> []
  ||> Some remaining -> remaining
 
 value result : List Int =
@@ -206,7 +210,8 @@ last : (List A) -> Option A
 use aivi.list (last)
 
 type List Int -> Int
-func finalScore = scores=> last scores ||> None   -> 0
+func finalScore = scores => last scores
+ ||> None   -> 0
  ||> Some n -> n
 
 value result : Int =
@@ -235,7 +240,8 @@ map : (A -> B) -> (List A) -> List B
 use aivi.list (map)
 
 type Int -> Int
-func double = n=>    n * 2
+func double = n =>
+    n * 2
 
 value result : List Int = [1, 2, 3]
   |> map double
@@ -255,7 +261,8 @@ filter : (A -> Bool) -> (List A) -> List A
 use aivi.list (filter)
 
 type Int -> Bool
-func isPositive = n=>    n > 0
+func isPositive = n =>
+    n > 0
 
 value result
 ```
@@ -297,7 +304,8 @@ flatMap : (A -> List B) -> (List A) -> List B
 use aivi.list (flatMap)
 
 type Int -> List Int
-func twice = n=>    [n, n]
+func twice = n =>
+    [n, n]
 
 value result : List Int = [1, 2, 3]
   |> flatMap twice
@@ -412,7 +420,8 @@ takeWhile : (A -> Bool) -> (List A) -> List A
 use aivi.list (takeWhile)
 
 type Int -> Bool
-func isSmall = n=>    n < 10
+func isSmall = n =>
+    n < 10
 
 value result : List Int = [2, 5, 8, 11, 3]
   |> takeWhile isSmall
@@ -432,7 +441,8 @@ dropWhile : (A -> Bool) -> (List A) -> List A
 use aivi.list (dropWhile)
 
 type Int -> Bool
-func isSmall = n=>    n < 10
+func isSmall = n =>
+    n < 10
 
 value result : List Int = [2, 5, 8, 11, 3]
   |> dropWhile isSmall
@@ -478,7 +488,8 @@ any : (A -> Bool) -> (List A) -> Bool
 use aivi.list (any)
 
 type Int -> Bool
-func isNegative = n=>    n < 0
+func isNegative = n =>
+    n < 0
 
 value result
 ```
@@ -497,7 +508,8 @@ all : (A -> Bool) -> (List A) -> Bool
 use aivi.list (all)
 
 type Int -> Bool
-func isPositive = n=>    n > 0
+func isPositive = n =>
+    n > 0
 
 value allPositive : Bool =
     all isPositive [
@@ -523,7 +535,8 @@ count : (A -> Bool) -> (List A) -> Int
 use aivi.list (count)
 
 type Int -> Bool
-func isPositive = n=>    n > 0
+func isPositive = n =>
+    n > 0
 
 value n
 ```
@@ -547,10 +560,12 @@ type User = {
 }
 
 type Int -> User -> Bool
-func hasId = target user=>    user.id == target
+func hasId = target user =>
+    user.id == target
 
 type Int -> List User -> Option User
-func findUser = id users=>    find (hasId id) users
+func findUser = id users =>
+    find (hasId id) users
 ```
 
 ---
@@ -567,8 +582,9 @@ findMap : (A -> Option B) -> (List A) -> Option B
 use aivi.list (findMap)
 
 type Int -> Option Int
-func asPositive = n=> n > 0  T|> Some n
-  F|> None
+func asPositive = n => n > 0
+ T|> Some n
+ F|> None
 
 value result
 ```
@@ -587,7 +603,8 @@ contains : (A -> A -> Bool) -> A -> (List A) -> Bool
 use aivi.list (contains)
 
 type Int -> Int -> Bool
-func intEq = a b=>    a == b
+func intEq = a b =>
+    a == b
 
 value found : Bool =
     contains intEq 3 [
@@ -620,7 +637,8 @@ indexOf : (A -> Bool) -> (List A) -> Option Int
 use aivi.list (indexOf)
 
 type Int -> Bool
-func isThirty = n=>    n == 30
+func isThirty = n =>
+    n == 30
 
 value idx : Option Int =
     indexOf isThirty [
@@ -695,7 +713,8 @@ maximum : (A -> A -> Bool) -> (List A) -> Option A
 use aivi.list (maximum)
 
 type Int -> Int -> Bool
-func isLess = a b=>    a < b
+func isLess = a b =>
+    a < b
 
 value highest : Option Int =
     maximum isLess [
@@ -724,7 +743,8 @@ minimum : (A -> A -> Bool) -> (List A) -> Option A
 use aivi.list (minimum)
 
 type Int -> Int -> Bool
-func isLess = a b=>    a < b
+func isLess = a b =>
+    a < b
 
 value lowest : Option Int =
     minimum isLess [
@@ -757,7 +777,8 @@ unique : (A -> A -> Bool) -> (List A) -> List A
 use aivi.list (unique)
 
 type Int -> Int -> Bool
-func intEq = a b=>    a == b
+func intEq = a b =>
+    a == b
 
 value deduped : List Int =
     unique intEq [
@@ -784,7 +805,8 @@ sortBy : (A -> A -> Bool) -> (List A) -> List A
 use aivi.list (sortBy)
 
 type Int -> Int -> Bool
-func intLt = a b=>    a < b
+func intLt = a b =>
+    a < b
 
 value sorted : List Int =
     sortBy intLt [
@@ -803,7 +825,8 @@ For descending order, reverse the comparison:
 use aivi.list (sortBy)
 
 type Int -> Int -> Bool
-func intGt = a b=>    a > b
+func intGt = a b =>
+    a > b
 
 value descending : List Int =
     sortBy intGt [
@@ -835,7 +858,8 @@ use aivi.list (
 )
 
 type Int -> Bool
-func isPositive = n=>    n > 0
+func isPositive = n =>
+    n > 0
 
 value groups
 value positive : (List Int) = groups.matched
@@ -888,7 +912,8 @@ zipWith : (A -> B -> C) -> (List A) -> (List B) -> List C
 use aivi.list (zipWith)
 
 type Int -> Int -> Int
-func add = a b=>    a + b
+func add = a b =>
+    a + b
 
 value sums : List Int =
     zipWith add [1, 2, 3] [
@@ -916,11 +941,13 @@ use aivi.list (
     unzip
 )
 
-type (UnzipState Text Int) -> (List Text)
-func takeLefts = state=> state ||> { lefts, rights } -> lefts
+type UnzipState Text Int -> (List Text)
+func takeLefts = state => state
+ ||> { lefts, rights } -> lefts
 
-type (UnzipState Text Int) -> (List Int)
-func takeRights = state=> state ||> { lefts, rights } -> rights
+type UnzipState Text Int -> (List Int)
+func takeRights = state => state
+ ||> { lefts, rights } -> rights
 
 value pairs : List (Text, Int) = [
     ("Alice", 95),

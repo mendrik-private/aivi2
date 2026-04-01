@@ -93,7 +93,8 @@ Example:
 use aivi.option (getOrElse)
 
 type Option Text -> Text
-func displayName = opt=>    getOrElse "Anonymous" opt
+func displayName = opt =>
+    getOrElse "Anonymous" opt
 ```
 
 ---
@@ -132,7 +133,8 @@ Example:
 use aivi.result (withDefault)
 
 type Result Text Int -> Int
-func safeScore = result=>    withDefault 0 result
+func safeScore = result =>
+    withDefault 0 result
 ```
 
 ---
@@ -198,7 +200,8 @@ Example — sum a list:
 use aivi.list (sum)
 
 type List Int -> Int
-func sumList = numbers=>    sum numbers
+func sumList = numbers =>
+    sum numbers
 ```
 
 Example — collect names from a list of users:
@@ -212,10 +215,12 @@ type User = {
 }
 
 type Int -> User -> Bool
-func hasId = id user=>    user.id == id
+func hasId = id user =>
+    user.id == id
 
 type Int -> (List User) -> (Option User)
-func findById = id users=>    find (hasId id) users
+func findById = id users =>
+    find (hasId id) users
 ```
 
 ---
@@ -244,7 +249,8 @@ Example:
 use aivi.text (join)
 
 type List Text -> Text
-func csvLine = fields=>    join "," fields
+func csvLine = fields =>
+    join "," fields
 ```
 
 ---
@@ -260,9 +266,6 @@ use aivi.path (
 
 ```aivi
 domain Path over Text
-    parse: Text -> Result PathError Path
-    (/):Path -> Text -> Path
-    unwrap:Path -> Text
 ```
 
 Example:
@@ -270,7 +273,7 @@ Example:
 ```aivi
 use aivi.path (Path)
 
-value configPath:Path = root "/etc" / "myapp" / "config.toml"
+value configPath : Path = root "/etc" / "myapp" / "config.toml"
 ```
 
 ---
@@ -307,7 +310,7 @@ Use with `@source fs.watch`:
 @source fs.watch "/tmp/data.txt" with {
     events: [Created, Changed, Deleted]
 }
-signal fileEvents: Signal FsEvent
+signal fileEvents : Signal FsEvent
 ```
 
 ---
@@ -336,7 +339,6 @@ type DecodeMode =
   | Permissive
 
 domain Retry over Int
-    literal times : Int -> Retry
 ```
 
 Use with `@source http.get`:
@@ -357,7 +359,7 @@ type User = {
     retry: 2times,
     timeout: 10sec
 }
-signal users: Signal (Result HttpError (List User))
+signal users : Signal (Result HttpError (List User))
 ```
 
 ---

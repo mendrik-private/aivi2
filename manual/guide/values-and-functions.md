@@ -87,9 +87,9 @@ Function bodies are still just expressions, so multi-line definitions usually le
 
 ```aivi
 type Int -> Text
-func describeScore = score =>
-    score >= 50 T|> "good"
-     F|> "keep going"
+func describeScore = score => score >= 50
+ T|> "good"
+ F|> "keep going"
 
 value scoreLabel = describeScore 88
 ```
