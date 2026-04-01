@@ -1,3 +1,5 @@
+use aivi.core.float (floor, abs, round, fromInt, toInt, ceil, sqrt, toText, parseText)
+
 value pi : Float = 3.141592653589793
 value e : Float = 2.718281828459045
 value tau : Float = 6.283185307179586
@@ -73,11 +75,77 @@ type Float -> Float
 func toDegrees = radians =>
     radians * 180.0 / pi
 
+type Float -> Float
+func normalizeAngle = angle =>
+    angle - tau * floor (angle / tau)
+
+type Float -> Float -> Float -> Bool
+func approxEq = epsilon a b =>
+    abs (a - b) <= epsilon
+
+type Float -> Float -> Float
+func percentOf = percent total =>
+    total * percent / 100.0
+
+type Int -> Int -> Int
+func pow10Helper = n acc => n == 0
+ T|> acc
+ F|> pow10Helper (n - 1) (acc * 10)
+
+type Int -> Int
+func pow10 = n => n < 0
+ T|> 1
+ F|> pow10Helper n 1
+
+type Int -> Float -> Float
+func roundTo = places n =>
+    round (n * fromInt (pow10 places)) / fromInt (pow10 places)
+
+type Float -> Float -> Float -> Float -> Float -> Float
+func cubicBezier = p0 p1 p2 p3 t =>
+    p0 * (1.0 - t) * (1.0 - t) * (1.0 - t)
+    + 3.0 * p1 * t * (1.0 - t) * (1.0 - t)
+    + 3.0 * p2 * t * t * (1.0 - t)
+    + p3 * t * t * t
+
 @test
 value max_prefers_greater : Task Text Bool = pure (max 3.5 2.0 == 3.5)
 
 @test
 value positive_detects_positive : Task Text Bool = pure (isPositive 1.0)
+
+@test
+value normalize_angle_zero : Task Text Bool = pure (normalizeAngle 0.0 == 0.0)
+
+@test
+value normalize_angle_wraps : Task Text Bool = pure (approxEq 0.001 (normalizeAngle tau) 0.0)
+
+@test
+value approx_eq_within : Task Text Bool = pure (approxEq 0.01 1.0 1.005)
+
+@test
+value approx_eq_outside : Task Text Bool = pure (approxEq 0.001 1.0 1.1 == False)
+
+@test
+value percent_of_quarter : Task Text Bool = pure (percentOf 25.0 200.0 == 50.0)
+
+@test
+value percent_of_all : Task Text Bool = pure (percentOf 100.0 42.0 == 42.0)
+
+@test
+value pow10_zero : Task Text Bool = pure (pow10 0 == 1)
+
+@test
+value pow10_two : Task Text Bool = pure (pow10 2 == 100)
+
+@test
+value round_to_two : Task Text Bool = pure (roundTo 2 3.14159 == 3.14)
+
+@test
+value cubic_bezier_at_zero : Task Text Bool = pure (cubicBezier 0.0 1.0 2.0 3.0 0.0 == 0.0)
+
+@test
+value cubic_bezier_at_one : Task Text Bool = pure (cubicBezier 0.0 1.0 2.0 3.0 1.0 == 3.0)
 
 export pi
 export e
@@ -96,3 +164,18 @@ export isNegative
 export square
 export toRadians
 export toDegrees
+export floor
+export ceil
+export round
+export sqrt
+export abs
+export toInt
+export fromInt
+export toText
+export parseText
+export normalizeAngle
+export approxEq
+export percentOf
+export pow10
+export roundTo
+export cubicBezier
