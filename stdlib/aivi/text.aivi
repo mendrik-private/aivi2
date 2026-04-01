@@ -1,3 +1,27 @@
+use aivi.text (
+    length
+    byteLen
+    slice
+    find
+    contains
+    startsWith
+    endsWith
+    toUpper
+    toLower
+    trim
+    trimStart
+    trimEnd
+    replace
+    replaceAll
+    split
+    repeat
+    fromInt
+    parseInt
+    fromBool
+    parseBool
+    concat
+)
+
 type JoinState = {
     first: Bool,
     value: Text
@@ -13,26 +37,95 @@ func finishJoin = state =>
     state.value
 
 type Text -> Bool
-func isEmpty = opt =>
-    opt == ""
+func isEmpty = t =>
+    t == ""
 
 type Text -> Bool
-func nonEmpty = opt =>
-    opt != ""
+func nonEmpty = t =>
+    t != ""
 
 type Text -> (List Text) -> Text
 func join = separator parts => parts
-  |> reduce (joinStep separator) { first: True, value: "" }
-  |> finishJoin
+    |> reduce (joinStep separator) { first: True, value: "" }
+    |> finishJoin
 
 type Text -> Text -> Text -> Text
-func surround = prefix suffix opt =>
-    "{prefix}{opt}{suffix}"
+func surround = prefix suffix t =>
+    "{prefix}{t}{suffix}"
+
+type Text -> Text -> Text -> Text
+func surroundWith = prefix suffix t =>
+    "{prefix}{t}{suffix}"
 
 type Text -> Text -> Text
-func withDefault = fallback s => s == ""
+func withDefault = fallback t => t == ""
  T|> fallback
- F|> s
+ F|> t
+
+type Text -> Text
+func upper = t =>
+    toUpper t
+
+type Text -> Text
+func lower = t =>
+    toLower t
+
+type Text -> Text
+func capitalizeNonEmpty = t =>
+    concat [toUpper (slice 0 1 t), toLower (slice 1 (length t) t)]
+
+type Text -> Text
+func capitalize = t => isEmpty t
+ T|> t
+ F|> capitalizeNonEmpty t
+
+type Text -> Int -> Bool
+func hasMinLength = t n =>
+    length t >= n
+
+type Text -> Int -> Bool
+func hasMaxLength = t n =>
+    length t <= n
+
+type Text -> Text -> Bool
+func includesText = haystack needle =>
+    contains needle haystack
+
+type Text -> Text
+func stripBlanks = t =>
+    trim t
+
+type Int -> Text -> Text -> Text
+func padStartHelper = targetLen padChar t =>
+    concat [repeat (targetLen - length t) padChar, t]
+
+type Int -> Text -> Text -> Text
+func padStart = targetLen padChar t => length t >= targetLen
+ T|> t
+ F|> padStartHelper targetLen padChar t
+
+type Int -> Text -> Text -> Text
+func padEndHelper = targetLen padChar t =>
+    concat [t, repeat (targetLen - length t) padChar]
+
+type Int -> Text -> Text -> Text
+func padEnd = targetLen padChar t => length t >= targetLen
+ T|> t
+ F|> padEndHelper targetLen padChar t
+
+type Int -> Text -> Int
+func parseIntOrElse = default t =>
+    parseInt t
+    ||> Some n -> n
+    ||> None   -> default
+
+type Text -> List Text
+func lines = t =>
+    split "\n" t
+
+type Text -> List Text
+func words = t =>
+    split " " t
 
 @test
 value plain_text_is_non_empty : Task Text Bool = pure (nonEmpty "Ada")
@@ -51,8 +144,86 @@ value joined_text_is_non_empty : Task Text Bool =
 @test
 value surrounded_text_is_non_empty : Task Text Bool = pure (nonEmpty (surround "[" "]" "Ada"))
 
-export isEmpty
-export nonEmpty
-export join
-export surround
-export withDefault
+@test
+value text_isEmpty_empty : Task Text Bool = pure (isEmpty "")
+
+@test
+value text_isEmpty_nonempty : Task Text Bool = pure (not (isEmpty "hello"))
+
+@test
+value text_length_basic : Task Text Bool = pure (length "hello" == 5)
+
+@test
+value text_concat_basic : Task Text Bool = pure (concat ["a", "b", "c"] == "abc")
+
+@test
+value text_upper_lower : Task Text Bool = pure (toUpper "hello" == "HELLO" and toLower "WORLD" == "world")
+
+@test
+value text_trim_basic : Task Text Bool = pure (trim "  hi  " == "hi")
+
+@test
+value text_contains_basic : Task Text Bool = pure (contains "ell" "hello")
+
+@test
+value text_split_basic : Task Text Bool = pure (split "," "a,b,c" == ["a", "b", "c"])
+
+@test
+value text_parseInt_basic : Task Text Bool = pure (parseInt "42" == Some 42)
+
+@test
+value text_parseInt_invalid : Task Text Bool = pure (parseInt "abc" == None)
+
+@test
+value text_capitalize : Task Text Bool = pure (capitalize "hello" == "Hello")
+
+@test
+value text_surroundWith : Task Text Bool = pure (surroundWith "[" "]" "x" == "[x]")
+
+@test
+value text_padStart : Task Text Bool = pure (padStart 5 "0" "42" == "00042")
+
+@test
+value text_lines : Task Text Bool = pure (lines "a\nb\nc" == ["a", "b", "c"])
+
+export (
+    length
+    byteLen
+    slice
+    find
+    contains
+    startsWith
+    endsWith
+    toUpper
+    toLower
+    trim
+    trimStart
+    trimEnd
+    replace
+    replaceAll
+    split
+    repeat
+    fromInt
+    parseInt
+    fromBool
+    parseBool
+    concat
+    isEmpty
+    nonEmpty
+    join
+    surround
+    surroundWith
+    withDefault
+    upper
+    lower
+    capitalize
+    hasMinLength
+    hasMaxLength
+    includesText
+    stripBlanks
+    padStart
+    padEnd
+    parseIntOrElse
+    lines
+    words
+)

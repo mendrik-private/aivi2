@@ -1,3 +1,4 @@
+use aivi.log (emit, emitContext)
 use aivi.core.dict (Dict)
 
 type LogLevel =
@@ -5,6 +6,7 @@ type LogLevel =
   | Info
   | Warn
   | Error
+  | Fatal
 
 type LogContext = (Dict Text Text)
 
@@ -18,4 +20,89 @@ type LogTask = (Task LogError Unit)
 
 type LogSink = (LogEntry -> LogTask)
 
-export (LogLevel, Debug, Info, Warn, Error, LogContext, LogEntry, LogError, LogTask, LogSink)
+value levelDebug : Text = "DEBUG"
+value levelInfo  : Text = "INFO"
+value levelWarn  : Text = "WARN"
+value levelError : Text = "ERROR"
+value levelFatal : Text = "FATAL"
+
+type LogLevel -> Text
+func levelToText = level =>
+    level
+    ||> Debug -> "DEBUG"
+    ||> Info  -> "INFO"
+    ||> Warn  -> "WARN"
+    ||> Error -> "ERROR"
+    ||> Fatal -> "FATAL"
+
+type Text -> Task Text Unit
+func debug = msg =>
+    emit levelDebug msg
+
+type Text -> Task Text Unit
+func info = msg =>
+    emit levelInfo msg
+
+type Text -> Task Text Unit
+func warn = msg =>
+    emit levelWarn msg
+
+type Text -> Task Text Unit
+func error = msg =>
+    emit levelError msg
+
+type Text -> Task Text Unit
+func fatal = msg =>
+    emit levelFatal msg
+
+type Text -> List (Text, Text) -> Task Text Unit
+func debugCtx = msg ctx =>
+    emitContext levelDebug msg ctx
+
+type Text -> List (Text, Text) -> Task Text Unit
+func infoCtx = msg ctx =>
+    emitContext levelInfo msg ctx
+
+type Text -> List (Text, Text) -> Task Text Unit
+func warnCtx = msg ctx =>
+    emitContext levelWarn msg ctx
+
+type Text -> List (Text, Text) -> Task Text Unit
+func errorCtx = msg ctx =>
+    emitContext levelError msg ctx
+
+type Text -> Text -> (Text, Text)
+func kv = k v =>
+    (k, v)
+
+export (
+    LogLevel
+    Debug
+    Info
+    Warn
+    Error
+    Fatal
+    LogContext
+    LogEntry
+    LogError
+    LogTask
+    LogSink
+    levelDebug
+    levelInfo
+    levelWarn
+    levelError
+    levelFatal
+    levelToText
+    emit
+    emitContext
+    debug
+    info
+    warn
+    error
+    fatal
+    debugCtx
+    infoCtx
+    warnCtx
+    errorCtx
+    kv
+)

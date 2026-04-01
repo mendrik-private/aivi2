@@ -1,0 +1,104 @@
+use aivi.time (nowMs, monotonicMs, format, parse)
+
+type EpochMs = Int
+
+value isoPattern : Text = "%Y-%m-%dT%H:%M:%S"
+value datePattern : Text = "%Y-%m-%d"
+value timePattern : Text = "%H:%M:%S"
+
+type Int -> Task Text Text
+func formatIso = ms =>
+    format ms isoPattern
+
+type Int -> Task Text Text
+func formatDate = ms =>
+    format ms datePattern
+
+type Int -> Task Text Text
+func formatTime = ms =>
+    format ms timePattern
+
+type Text -> Task Text Int
+func parseIso = text =>
+    parse text isoPattern
+
+value msPerSecond : Int = 1000
+value msPerMinute : Int = 60000
+value msPerHour   : Int = 3600000
+value msPerDay    : Int = 86400000
+
+type Int -> Int
+func toSeconds = ms =>
+    ms / 1000
+
+type Int -> Int
+func toMinutes = ms =>
+    ms / 60000
+
+type Int -> Int
+func toHours = ms =>
+    ms / 3600000
+
+type Int -> Int
+func toDays = ms =>
+    ms / 86400000
+
+type Int -> Int
+func fromSeconds = s =>
+    s * 1000
+
+type Int -> Int
+func fromMinutes = m =>
+    m * 60000
+
+type Int -> Int
+func fromHours = h =>
+    h * 3600000
+
+type Int -> Int
+func fromDays = d =>
+    d * 86400000
+
+type Int -> Int -> Int
+func elapsed = start finish =>
+    finish - start
+
+@test
+value time_msPerSecond : Task Text Bool = pure (msPerSecond == 1000)
+
+@test
+value time_toSeconds : Task Text Bool = pure (toSeconds 5000 == 5)
+
+@test
+value time_fromSeconds : Task Text Bool = pure (fromSeconds 3 == 3000)
+
+@test
+value time_elapsed : Task Text Bool = pure (elapsed 1000 4000 == 3000)
+
+export (
+    EpochMs
+    nowMs
+    monotonicMs
+    format
+    parse
+    isoPattern
+    datePattern
+    timePattern
+    formatIso
+    formatDate
+    formatTime
+    parseIso
+    msPerSecond
+    msPerMinute
+    msPerHour
+    msPerDay
+    toSeconds
+    toMinutes
+    toHours
+    toDays
+    fromSeconds
+    fromMinutes
+    fromHours
+    fromDays
+    elapsed
+)
