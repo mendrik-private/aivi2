@@ -9570,6 +9570,131 @@ impl GateType {
         }
     }
 
+    /// Returns true when `self` (a concrete type) is a valid instantiation of `template`, treating
+    /// any `TypeParameter` in `template` as an unconstrained wildcard.  Used to validate that a
+    /// curried partial-application result type satisfies an expected type that still carries open
+    /// type-parameter placeholders from the outer polymorphic context.
+    pub(crate) fn fits_template(&self, template: &Self) -> bool {
+        match template {
+            Self::TypeParameter { .. } => true,
+            Self::Primitive(_) => self == template,
+            Self::Arrow {
+                parameter: tp,
+                result: tr,
+            } => match self {
+                Self::Arrow {
+                    parameter: sp,
+                    result: sr,
+                } => sp.fits_template(tp) && sr.fits_template(tr),
+                _ => false,
+            },
+            Self::List(te) => match self {
+                Self::List(se) => se.fits_template(te),
+                _ => false,
+            },
+            Self::Option(te) => match self {
+                Self::Option(se) => se.fits_template(te),
+                _ => false,
+            },
+            Self::Signal(te) => match self {
+                Self::Signal(se) => se.fits_template(te),
+                _ => false,
+            },
+            Self::Set(te) => match self {
+                Self::Set(se) => se.fits_template(te),
+                _ => false,
+            },
+            Self::Tuple(tes) => match self {
+                Self::Tuple(ses) => {
+                    ses.len() == tes.len()
+                        && ses.iter().zip(tes.iter()).all(|(s, t)| s.fits_template(t))
+                }
+                _ => false,
+            },
+            Self::Record(tfields) => match self {
+                Self::Record(sfields) => {
+                    sfields.len() == tfields.len()
+                        && sfields.iter().zip(tfields.iter()).all(|(s, t)| {
+                            s.name == t.name && s.ty.fits_template(&t.ty)
+                        })
+                }
+                _ => false,
+            },
+            Self::Map {
+                key: tk,
+                value: tv,
+            } => match self {
+                Self::Map {
+                    key: sk,
+                    value: sv,
+                } => sk.fits_template(tk) && sv.fits_template(tv),
+                _ => false,
+            },
+            Self::Result {
+                error: te,
+                value: tv,
+            } => match self {
+                Self::Result {
+                    error: se,
+                    value: sv,
+                } => se.fits_template(te) && sv.fits_template(tv),
+                _ => false,
+            },
+            Self::Validation {
+                error: te,
+                value: tv,
+            } => match self {
+                Self::Validation {
+                    error: se,
+                    value: sv,
+                } => se.fits_template(te) && sv.fits_template(tv),
+                _ => false,
+            },
+            Self::Task {
+                error: te,
+                value: tv,
+            } => match self {
+                Self::Task {
+                    error: se,
+                    value: sv,
+                } => se.fits_template(te) && sv.fits_template(tv),
+                _ => false,
+            },
+            Self::Domain {
+                item: ti,
+                arguments: targs,
+                ..
+            } => match self {
+                Self::Domain {
+                    item: si,
+                    arguments: sargs,
+                    ..
+                } => {
+                    si == ti
+                        && sargs.len() == targs.len()
+                        && sargs.iter().zip(targs.iter()).all(|(s, t)| s.fits_template(t))
+                }
+                _ => false,
+            },
+            Self::OpaqueItem {
+                item: ti,
+                arguments: targs,
+                ..
+            } => match self {
+                Self::OpaqueItem {
+                    item: si,
+                    arguments: sargs,
+                    ..
+                } => {
+                    si == ti
+                        && sargs.len() == targs.len()
+                        && sargs.iter().zip(targs.iter()).all(|(s, t)| s.fits_template(t))
+                }
+                _ => false,
+            },
+        }
+    }
+
     fn same_shape_inner(
         left: &Self,
         right: &Self,
@@ -13308,12 +13433,16 @@ impl<'a> GateTypeContext<'a> {
         argument_types: &[GateType],
         expected_result: Option<&GateType>,
     ) -> Option<(Vec<GateType>, GateType)> {
-        if function.parameters.len() != argument_types.len() || function.annotation.is_none() {
+        if function.parameters.len() < argument_types.len() || function.annotation.is_none() {
             return None;
         }
         let mut bindings = PolyTypeBindings::new();
-        let mut instantiated_parameters = Vec::with_capacity(function.parameters.len());
-        for (parameter, actual) in function.parameters.iter().zip(argument_types.iter()) {
+        let mut instantiated_parameters = Vec::with_capacity(argument_types.len());
+        for (parameter, actual) in function
+            .parameters
+            .iter()
+            .zip(argument_types.iter())
+        {
             let annotation = parameter.annotation?;
             if let Some(lowered) = self.lower_annotation(annotation) {
                 if !lowered.same_shape(actual) {
@@ -13328,19 +13457,48 @@ impl<'a> GateTypeContext<'a> {
             instantiated_parameters.push(self.instantiate_poly_hir_type(annotation, &bindings)?);
         }
         let result_annotation = function.annotation?;
-        if let Some(expected) = expected_result {
-            if let Some(lowered) = self.lower_annotation(result_annotation) {
-                if !lowered.same_shape(expected) {
+        if function.parameters.len() == argument_types.len() {
+            // Full application: check expected result and return concrete result type.
+            if let Some(expected) = expected_result {
+                if let Some(lowered) = self.lower_annotation(result_annotation) {
+                    if !lowered.same_shape(expected) {
+                        return None;
+                    }
+                } else if !self.match_poly_hir_type(result_annotation, expected, &mut bindings) {
                     return None;
                 }
-            } else if !self.match_poly_hir_type(result_annotation, expected, &mut bindings) {
-                return None;
             }
+            let result = self
+                .lower_annotation(result_annotation)
+                .or_else(|| self.instantiate_poly_hir_type(result_annotation, &bindings))?;
+            Some((instantiated_parameters, result))
+        } else {
+            // Partial application: compute curried result type from the remaining parameters
+            // and the declared return type, instantiating any bound type parameters.
+            let remaining_params = &function.parameters[argument_types.len()..];
+            let remaining_types = remaining_params
+                .iter()
+                .map(|p| {
+                    p.annotation.and_then(|ann| {
+                        self.lower_annotation(ann)
+                            .or_else(|| self.instantiate_poly_hir_type_partially(ann, &bindings))
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?;
+            let result_ty = self
+                .lower_annotation(result_annotation)
+                .or_else(|| {
+                    self.instantiate_poly_hir_type_partially(result_annotation, &bindings)
+                })?;
+            let curried = remaining_types
+                .into_iter()
+                .rev()
+                .fold(result_ty, |acc, param| GateType::Arrow {
+                    parameter: Box::new(param),
+                    result: Box::new(acc),
+                });
+            Some((instantiated_parameters, curried))
         }
-        let result = self
-            .lower_annotation(result_annotation)
-            .or_else(|| self.instantiate_poly_hir_type(result_annotation, &bindings))?;
-        Some((instantiated_parameters, result))
     }
 
     fn function_signature(&self, ty: &GateType, arity: usize) -> Option<(Vec<GateType>, GateType)> {

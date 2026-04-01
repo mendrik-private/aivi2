@@ -3227,7 +3227,9 @@ impl<'a> TypeChecker<'a> {
                         .instantiate_poly_hir_type_partially(result_annotation, &bindings)
                 })?;
             let curried_result = self.arrow_type(&remaining_types, &result_ty);
-            if !curried_result.same_shape(expected_result) {
+            if !curried_result.same_shape(expected_result)
+                && !curried_result.fits_template(expected_result)
+            {
                 return None;
             }
             // Collect only constraints whose type parameter is fully resolved.

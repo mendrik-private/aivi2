@@ -527,6 +527,8 @@ value initial : GameState = {
     lastFlips: []
 }
 
+value noFlips : List Coord = []
+
 type Int -> Bool
 func oneFromEdge = n=>    n == 1 or n == lastIndex - 1
 
@@ -608,7 +610,7 @@ func handleTryPlace = coord state=> (humanToAct state.status, coordInList coord 
 
 type GameState -> GameState
 func runComputerTurn = state=> bestComputerMove state.board state.legalMoves ||> Some candidate -> applyTurnMove state Computer candidate.coord
- ||> None           -> makeState state.board state.moveNumber state.lastMove [] state.humanCount state.computerCount (advanceTurn state.board Computer)
+ ||> None           -> makeState state.board state.moveNumber state.lastMove noFlips state.humanCount state.computerCount (advanceTurn state.board Computer)
 
 type GameState -> GameState
 func handleComputerTurn = state=> computerToAct state.status T|> runComputerTurn state
@@ -658,14 +660,12 @@ func isLastMove = lastMove coord=> lastMove ||> Some lc -> sameCoord lc coord
 
 type (List (List Disc)) -> Status -> (List Coord) -> (Option Coord) -> (List Coord) -> Coord -> Text
 func cellLabel = board status legalMoves lastMove lastFlips coord=>
-    (discAt board coord, isLastMove lastMove coord, coordInList coord lastFlips) ||>
-        (Red, True, _)   -> "🎯"
-        (Blue, True, _)  -> "💠"
-        (Red, _, True)   -> "🟠"
-        (Blue, _, True)  -> "🟣"
-        (Red, _, _)      -> "🔴"
-        (Blue, _, _)     -> "🔵"
-        (Empty, _, _)    -> emptyCellLabel status legalMoves coord
+    (discAt board coord, computerToAct status, isLastMove lastMove coord, coordInList coord lastFlips)
+ ||> (Red, True, True, _) -> "🎯"
+ ||> (Red, True, _, True) -> "🟠"
+ ||> (Red, _, _, _)       -> "🔴"
+ ||> (Blue, _, _, _)      -> "🔵"
+ ||> (Empty, _, _, _)     -> emptyCellLabel status legalMoves coord
 
 type GameState -> Coord -> Bool
 func cellEnabled = state coord=> (humanToAct state.status, coordInList coord state.legalMoves) ||> (True, True)  -> True
@@ -702,7 +702,7 @@ signal titlebarHintText : Signal Text = state
  |> titlebarHintLine
 
 value main =
-    <Window title="AIVI Reversi 20x20">
+    <Window title="AIVI Reversi">
         <Window.titlebar>
             <HeaderBar showTitleButtons={True}>
                 <HeaderBar.start>
@@ -720,13 +720,13 @@ value main =
                         <each of={boardIndices} as={x} key={x}>
                             <with value={Coord x y} as={coord}>
                                 <Button
-                                    label={cellLabel currentState.board currentState.status currentState.legalMoves coord}
+                                    label={cellLabel currentState.board currentState.status currentState.legalMoves currentState.lastMove currentState.lastFlips coord}
                                     onClick={placeCoord coord}
                                     sensitive={cellEnabled currentState coord}
                                     compact
                                     hasFrame={False}
-                                    widthRequest={26}
-                                    heightRequest={26}
+                                    widthRequest={52}
+                                    heightRequest={52}
                                 />
                             </with>
                         </each>
