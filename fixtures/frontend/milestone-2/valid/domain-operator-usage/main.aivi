@@ -1,9 +1,10 @@
-domain Duration over Int
+domain Duration over Int = {
     literal ms : Int -> Duration
     type Duration -> Duration -> Duration
     (+)
     type Duration -> Int
     unwrap
+}
 
 value total : Duration = 10ms + 5ms
 value raw : Int = unwrap total

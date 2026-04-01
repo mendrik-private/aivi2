@@ -1,5 +1,4 @@
-val subject = "Ada"
+value subject = "Ada"
 
-val result =
-    subject
-     ||> "{subject}" => 1
+value result = subject
+ ||> "{subject}" -> 1

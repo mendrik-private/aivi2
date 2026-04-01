@@ -1,7 +1,8 @@
 provider custom.feed
- argument path:Text
- option timeout:Duration
- wakeup:providerTrigger
+    argument path : Text
+    option timeout : Duration
+    wakeup: providerTrigger
+
 provider custom.timer
- option activeWhen:Signal Bool
- wakeup:timer
+    option activeWhen : Signal Bool
+    wakeup: timer

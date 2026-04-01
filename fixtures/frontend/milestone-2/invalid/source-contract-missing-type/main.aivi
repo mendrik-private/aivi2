@@ -11,11 +11,13 @@ type DecodeMode =
   | Strict
   | Permissive
 
-domain Duration over Int
+domain Duration over Int = {
     literal sec : Int -> Duration
+}
 
-domain Repeat over Int
+domain Repeat over Int = {
     literal times : Int -> Repeat
+}
 
 @source http.get "/users" with {
     decode: Strict,

@@ -17722,14 +17722,18 @@ value resultLabel =
     fn resolved_validation_accepts_higher_kinded_class_members_and_instance_heads() {
         let report = validate_resolved_text(
             "higher-kinded-class-instance-check.aivi",
-            "class Applicative F\n\
+            "class Applicative F = {\n\
              \x20\x20\x20\x20pureInt : F Int\n\
-             instance Applicative Option\n\
+             }\n\
+             instance Applicative Option = {\n\
              \x20\x20\x20\x20pureInt = Some 1\n\
-             class Functor F\n\
+             }\n\
+             class Functor F = {\n\
              \x20\x20\x20\x20labelInt : F Int\n\
-             instance Functor (Result Text)\n\
-             \x20\x20\x20\x20labelInt = Ok 1\n",
+             }\n\
+             instance Functor (Result Text) = {\n\
+             \x20\x20\x20\x20labelInt = Ok 1\n\
+             }\n",
         );
         assert!(
             report.is_ok(),
@@ -18238,9 +18242,10 @@ value screenView =
     fn resolved_validation_accepts_class_body_require_constraints() {
         let report = validate_resolved_text(
             "class_require_constraints.aivi",
-            r#"class Container A
+            r#"class Container A = {
     require Eq A
     same : A -> A -> Bool
+}
 "#,
         );
 
@@ -18636,8 +18641,9 @@ value screenView =
     fn resolved_validation_accepts_custom_source_parameterized_domain_literal_options() {
         let report = validate_resolved_text(
             "source-option-parameterized-domain-literal-options.aivi",
-            "domain Tagged A B over Int\n\
+            "domain Tagged A B over Int = {\n\
              \x20\x20\x20\x20literal tg : Int -> Tagged Int B\n\
+             }\n\
              \n\
              provider custom.feed\n\
              \x20\x20\x20\x20option tag: Tagged Int Bool\n\
@@ -18660,8 +18666,9 @@ value screenView =
     fn resolved_validation_rejects_custom_source_domain_literal_constraint_mismatches() {
         let report = validate_resolved_text(
             "source-option-domain-literal-constraint-mismatch.aivi",
-            "domain Tagged A B over Int\n\
+            "domain Tagged A B over Int = {\n\
              \x20\x20\x20\x20literal tg : Int -> Tagged Int B\n\
+             }\n\
              \n\
              provider custom.feed\n\
              \x20\x20\x20\x20option tag: Tagged Text Bool\n\
@@ -19538,8 +19545,9 @@ signal login : Signal (Result HttpError Session)
         let mut sources = SourceDatabase::new();
         let file_id = sources.add_file(
             "source-option-domain-literal-constructor-root.aivi",
-            "domain Tagged A B over Int\n\
+            "domain Tagged A B over Int = {\n\
              \x20\x20\x20\x20literal tg : Int -> Tagged Int B\n\
+             }\n\
              \n\
              type Wrap B =\n\
              \x20\x20| Wrap (Tagged Int B) B\n\

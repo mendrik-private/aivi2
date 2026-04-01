@@ -1,7 +1,8 @@
-domain Duration over Int
+domain Duration over Int = {
     literal sec : Int -> Duration
+}
 
 @source timer.every 120 with {
     jitterMs: 5sec
 }
-sig tick : Signal Unit
+signal tick : Signal Unit

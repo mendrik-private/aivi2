@@ -1,6 +1,6 @@
 type DurationError = Text
 
-domain Duration over Int
+domain Duration over Int = {
     literal ms : Int -> Duration
     literal sec : Int -> Duration
     literal min : Int -> Duration
@@ -20,6 +20,7 @@ domain Duration over Int
     (*)
     type Duration -> Duration -> Bool
     (<)
+}
 
 export DurationError
 export Duration

@@ -1,11 +1,15 @@
-class Applicative F
+class Applicative F = {
     pureInt : F Int
+}
 
-instance Applicative Option
+instance Applicative Option = {
     pureInt = Some 1
+}
 
-class Functor F
+class Functor F = {
     labelInt : F Int
+}
 
-instance Functor (Result Text)
+instance Functor (Result Text) = {
     labelInt = Ok 1
+}

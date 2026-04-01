@@ -1,6 +1,6 @@
 type UrlError = Text
 
-domain Url over Text
+domain Url over Text = {
     type Text -> Result UrlError Url
     parse
     type Url -> Text
@@ -21,6 +21,7 @@ domain Url over Text
     withPath
     type Url -> Text -> Url
     withQuery
+}
 
 export UrlError
 export Url

@@ -4,4 +4,5 @@ use shared.types (
 )
 
 type Welcome = Greeting
-val hello:Envelope Text = "hello"
+
+value hello : Envelope Text = "hello"

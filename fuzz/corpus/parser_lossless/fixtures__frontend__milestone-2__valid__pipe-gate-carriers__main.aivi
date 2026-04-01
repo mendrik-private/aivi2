@@ -3,19 +3,20 @@ type User = {
     email: Text
 }
 
-type Session = {
-    user: User
+type Session = { user: User }
+
+value seed : User = {
+    active: True,
+    email: "ada@example.com"
 }
 
-val seed:User = { active: True, email: "ada@example.com" }
+value maybeActive : Option User = seed
+ ?|> .active
 
-val maybeActive:Option User =
-    seed
-     ?|> .active
+signal sessions : Signal Session = {
+    user: seed
+}
 
-sig sessions:Signal Session = { user: seed }
-
-sig activeUsers:Signal User =
-    sessions
-     |> .user
-     ?|> .active
+signal activeUsers : Signal User = sessions
+  |> .user
+ ?|> .active

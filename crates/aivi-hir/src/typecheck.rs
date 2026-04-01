@@ -4637,13 +4637,15 @@ mod tests {
     fn typecheck_accepts_same_module_eq_instances_for_nonstructural_types() {
         let report = typecheck_text(
             "same-module-eq-instance.aivi",
-            r#"class Eq A
+            r#"class Eq A = {
     (==) : A -> A -> Bool
+}
 type Blob = Blob Bytes
 fun blobEquals:Bool = left:Blob right:Blob =>
     True
-instance Eq Blob
+instance Eq Blob = {
     (==) left right = blobEquals left right
+}
 fun compare:Bool = left:Blob right:Blob =>
     left == right
 "#,
@@ -4659,11 +4661,13 @@ fun compare:Bool = left:Blob right:Blob =>
     fn typecheck_accepts_equality_in_instance_member_bodies() {
         let report = typecheck_text(
             "instance-member-equality.aivi",
-            "class Compare A\n\
+            "class Compare A = {\n\
              \x20\x20\x20\x20same : A -> A -> Bool\n\
+             }\n\
              type Label = Label Text\n\
-             instance Compare Label\n\
-             \x20\x20\x20\x20same left right = left == right\n",
+             instance Compare Label = {\n\
+             \x20\x20\x20\x20same left right = left == right\n\
+             }\n",
         );
         assert!(
             report.is_ok(),
@@ -4676,11 +4680,13 @@ fun compare:Bool = left:Blob right:Blob =>
     fn typecheck_accepts_class_requirements_in_generic_instance_bodies() {
         let report = typecheck_text(
             "class-require-instance-context.aivi",
-            "class Container A\n\
+            "class Container A = {\n\
              \x20\x20\x20\x20require Eq A\n\
              \x20\x20\x20\x20same : A -> A -> Bool\n\
-             instance Eq A -> Container A\n\
-             \x20\x20\x20\x20same left right = left == right\n",
+             }\n\
+             instance Eq A -> Container A = {\n\
+             \x20\x20\x20\x20same left right = left == right\n\
+             }\n",
         );
         assert!(
             report.is_ok(),
@@ -4693,11 +4699,13 @@ fun compare:Bool = left:Blob right:Blob =>
     fn typecheck_reports_missing_instance_requirement_for_class_requirements() {
         let report = typecheck_text(
             "class-require-missing-instance.aivi",
-            "class Container A\n\
+            "class Container A = {\n\
              \x20\x20\x20\x20require Eq A\n\
              \x20\x20\x20\x20same : A -> A -> Bool\n\
-             instance Container Bytes\n\
-             \x20\x20\x20\x20same left right = True\n",
+             }\n\
+             instance Container Bytes = {\n\
+             \x20\x20\x20\x20same left right = True\n\
+             }\n",
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
@@ -4712,11 +4720,13 @@ fun compare:Bool = left:Blob right:Blob =>
     fn typecheck_reports_instance_member_operator_operand_mismatch() {
         let report = typecheck_text(
             "instance-member-operator-mismatch.aivi",
-            "class Ready A\n\
+            "class Ready A = {\n\
              \x20\x20\x20\x20ready : A -> Bool\n\
+             }\n\
              type Blob = Blob Bytes\n\
-             instance Ready Blob\n\
-             \x20\x20\x20\x20ready blob = blob and True\n",
+             instance Ready Blob = {\n\
+             \x20\x20\x20\x20ready blob = blob and True\n\
+             }\n",
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
@@ -4802,13 +4812,15 @@ fun compare:Bool = left:Blob right:Blob =>
     fn typecheck_accepts_class_requirements_in_function_contexts() {
         let report = typecheck_text(
             "class-require-function-context.aivi",
-            r#"class Container A
+            r#"class Container A = {
     require Eq A
     same : A -> A -> Bool
+}
 fun delegated:Container A -> Bool = left:A right:A =>
     left == right
-instance Container Text
+instance Container Text = {
     same left right = left == right
+}
 value sameText:Bool = delegated "Ada" "Grace"
 "#,
         );
@@ -4823,9 +4835,10 @@ value sameText:Bool = delegated "Ada" "Grace"
     fn typecheck_expands_class_requirements_into_eq_bindings() {
         let module = lowered_module_text(
             "class-require-expansion.aivi",
-            r#"class Container A
+            r#"class Container A = {
     require Eq A
     same : A -> A -> Bool
+}
 fun delegated:Container A -> Bool = left:A right:A =>
     left == right
 "#,
@@ -5072,11 +5085,13 @@ when ready True => total <- 42
     fn typecheck_accepts_same_module_default_instances_for_record_elision() {
         let report = typecheck_text(
             "same-module-default-instance.aivi",
-            "class Default A\n\
+            "class Default A = {\n\
              \x20\x20\x20\x20default : A\n\
+             }\n\
              type Nickname = Nickname Text\n\
-             instance Default Nickname\n\
+             instance Default Nickname = {\n\
              \x20\x20\x20\x20default = Nickname \"\"\n\
+             }\n\
              type User = {\n\
                  name: Text,\n\
                  nickname: Nickname\n\
@@ -5117,8 +5132,9 @@ when ready True => total <- 42
         let report = typecheck_text(
             "ambient-default-instance.aivi",
             "type Nickname = Nickname Text\n\
-             instance Default Nickname\n\
+             instance Default Nickname = {\n\
              \x20\x20\x20\x20default = Nickname \"\"\n\
+             }\n\
              type User = {\n\
                  name: Text,\n\
                  nickname: Nickname\n\
@@ -5255,11 +5271,13 @@ when ready True => total <- 42
     fn typecheck_elaborates_same_module_default_instances_into_explicit_fields() {
         let (report, module) = typecheck_and_elaborate_text(
             "same-module-default-instance-hir.aivi",
-            "class Default A\n\
+            "class Default A = {\n\
              \x20\x20\x20\x20default : A\n\
+             }\n\
              type Nickname = Nickname Text\n\
-             instance Default Nickname\n\
+             instance Default Nickname = {\n\
              \x20\x20\x20\x20default = Nickname \"\"\n\
+             }\n\
              type User = {\n\
                  name: Text,\n\
                  nickname: Nickname\n\
@@ -5959,14 +5977,18 @@ fun current:Int = tick:Unit => step direction
     fn typecheck_accepts_higher_kinded_instance_member_signatures() {
         let report = typecheck_text(
             "higher-kinded-instance-members.aivi",
-            "class Applicative F\n\
+            "class Applicative F = {\n\
              \x20\x20\x20\x20pureInt : F Int\n\
-             instance Applicative Option\n\
+             }\n\
+             instance Applicative Option = {\n\
              \x20\x20\x20\x20pureInt = Some 1\n\
-             class Functor F\n\
+             }\n\
+             class Functor F = {\n\
              \x20\x20\x20\x20labelInt : F Int\n\
-             instance Functor (Result Text)\n\
-             \x20\x20\x20\x20labelInt = Ok 1\n",
+             }\n\
+             instance Functor (Result Text) = {\n\
+             \x20\x20\x20\x20labelInt = Ok 1\n\
+             }\n",
         );
         assert!(
             report.is_ok(),
@@ -5979,14 +6001,18 @@ fun current:Int = tick:Unit => step direction
     fn typecheck_resolves_partial_same_module_instances_generically() {
         let module = lowered_module_text(
             "partial-same-module-instances.aivi",
-            "class Applicative F\n\
+            "class Applicative F = {\n\
              \x20\x20\x20\x20pureInt : F Int\n\
-             instance Applicative Option\n\
+             }\n\
+             instance Applicative Option = {\n\
              \x20\x20\x20\x20pureInt = Some 1\n\
-             class Monad F\n\
+             }\n\
+             class Monad F = {\n\
              \x20\x20\x20\x20labelInt : F Int\n\
-             instance Monad (Result Text)\n\
-             \x20\x20\x20\x20labelInt = Ok 1\n",
+             }\n\
+             instance Monad (Result Text) = {\n\
+             \x20\x20\x20\x20labelInt = Ok 1\n\
+             }\n",
         );
         let mut checker = TypeChecker::new(&module);
         assert!(
@@ -6047,9 +6073,10 @@ fun current:Int = tick:Unit => step direction
     fn typecheck_accepts_projection_from_domain_values() {
         let report = typecheck_text(
             "projection-from-domain-value.aivi",
-            "domain Path over Text\n\
+            "domain Path over Text = {\n\
              \x20\x20\x20\x20fromText : Text -> Path\n\
              \x20\x20\x20\x20unwrap : Path -> Text\n\
+             }\n\
              value home : Path = fromText \"/tmp/app\"\n\
              value raw : Text = home.unwrap\n",
         );
@@ -6064,9 +6091,10 @@ fun current:Int = tick:Unit => step direction
     fn typecheck_reports_invalid_projection_from_signal_wrapped_domains() {
         let report = typecheck_text(
             "signal-projection-domain-value.aivi",
-            "domain Path over Text\n\
+            "domain Path over Text = {\n\
              \x20\x20\x20\x20fromText : Text -> Path\n\
              \x20\x20\x20\x20unwrap : Path -> Text\n\
+             }\n\
              signal home : Signal Path = fromText \"/tmp/app\"\n\
              signal raw : Signal Text = home.unwrap\n",
         );

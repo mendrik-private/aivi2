@@ -1,7 +1,8 @@
 type User = { email: Text }
 
-val user:User = { email: "ada@example.com" }
+value user : User = {
+    email: "ada@example.com"
+}
 
-val emails =
-    user
-     *|> .email
+value emails = user
+ *|> .email

@@ -1,10 +1,11 @@
-type UserDraft = UserDraft Text Text
+type UserDraft =
+  | UserDraft Text Text
 
-sig nameText = "Ada"
-sig emailText = "ada@example.com"
+signal nameText = "Ada"
+signal emailText = "ada@example.com"
 
-sig brokenDraft =
+signal brokenDraft =
  &|> nameText
  &|> emailText
-  ?|> .ready
-   |> UserDraft
+ ?|> .ready
+  |> UserDraft

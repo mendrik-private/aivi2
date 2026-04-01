@@ -1,12 +1,19 @@
-val directHeaders : Map Text Text =
+value directHeaders : Map Text Text =
     Map {
         "Authorization": "Bearer demo",
         "Accept": "application/json"
     }
 
-val directTags : Set Text =
-    Set ["news", "featured"]
+value directTags : Set Text =
+    Set [
+        "news",
+        "featured"
+    ]
 
-fun keepHeaders : Map Text Text = #headers : Map Text Text=>    headers
+type Map Text Text -> Map Text Text
+func keepHeaders = headers =>
+    headers
 
-fun keepTags : Set Text = #tags : Set Text=>    tags
+type Set Text -> Set Text
+func keepTags = tags =>
+    tags

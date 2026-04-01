@@ -1,3 +1,2 @@
-val broken =
-    0
-     @|> 1
+value broken = 0
+ @|> 1

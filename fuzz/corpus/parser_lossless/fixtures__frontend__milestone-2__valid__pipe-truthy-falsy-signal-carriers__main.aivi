@@ -1,6 +1,4 @@
-type User = {
-    name: Text
-}
+type User = { name: Text }
 
 type LoadError = {
     message: Text
@@ -10,35 +8,39 @@ type FormError = {
     message: Text
 }
 
-sig ready : Signal Bool = True
+signal ready : Signal Bool = True
 
-sig maybeUser : Signal (Option User) = Some { name: "Ada" }
+signal maybeUser : Signal (Option User) =
+    Some {
+        name: "Ada"
+    }
 
-sig loaded : Signal (Result LoadError User) = Err { message: "offline" }
+signal loaded : Signal (Result LoadError User) =
+    Err {
+        message: "offline"
+    }
 
-sig submitted : Signal (Validation FormError User) = Valid { name: "Grace" }
+signal submitted : Signal (Validation FormError User) =
+    Valid {
+        name: "Grace"
+    }
 
-val readyText : Signal Text =
-    ready
-     T|> "start"
-     F|> "wait"
+value readyText : Signal Text = ready
+ T|> "start"
+ F|> "wait"
 
-val greeting : Signal Text =
-    maybeUser
-     T|> .name
-     F|> "guest"
+value greeting : Signal Text = maybeUser
+ T|> .name
+ F|> "guest"
 
-val maybeDisplay : Signal Text =
-    maybeUser
-     F|> "guest"
-     T|> .name
+value maybeDisplay : Signal Text = maybeUser
+ F|> "guest"
+ T|> .name
 
-val rendered : Signal Text =
-    loaded
-     T|> .name
-     F|> .message
+value rendered : Signal Text = loaded
+ T|> .name
+ F|> .message
 
-val summary : Signal Text =
-    submitted
-     T|> .name
-     F|> .message
+value summary : Signal Text = submitted
+ T|> .name
+ F|> .message

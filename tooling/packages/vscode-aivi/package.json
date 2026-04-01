@@ -1,14 +1,24 @@
 {
   "name": "vscode-aivi",
   "displayName": "AIVI",
-  "description": "AIVI language support — syntax, diagnostics, formatting, and intelligence",
+  "description": "AIVI language support \u2014 syntax, diagnostics, formatting, and intelligence",
   "version": "0.1.0",
   "publisher": "aivi-lang",
   "engines": {
     "vscode": "^1.110.0"
   },
-  "categories": ["Programming Languages", "Formatters", "Linters"],
-  "keywords": ["aivi", "functional", "reactive", "gtk", "linux"],
+  "categories": [
+    "Programming Languages",
+    "Formatters",
+    "Linters"
+  ],
+  "keywords": [
+    "aivi",
+    "functional",
+    "reactive",
+    "gtk",
+    "linux"
+  ],
   "license": "GPL-3.0-only",
   "icon": "icons/aivi-a.png",
   "main": "./dist/extension.js",
@@ -19,8 +29,13 @@
     "languages": [
       {
         "id": "aivi",
-        "aliases": ["AIVI", "aivi"],
-        "extensions": [".aivi"],
+        "aliases": [
+          "AIVI",
+          "aivi"
+        ],
+        "extensions": [
+          ".aivi"
+        ],
         "configuration": "./language-configuration.json",
         "icon": {
           "light": "./icons/aivi-file.svg",
@@ -53,7 +68,9 @@
         "editor.defaultFormatter": "aivi-lang.vscode-aivi",
         "editor.fontLigatures": true,
         "editor.fontFamily": "'Fira Code', 'Cascadia Code', 'JetBrains Mono', 'Maple Mono', monospace",
-        "editor.rulers": [100],
+        "editor.rulers": [
+          100
+        ],
         "editor.renderWhitespace": "boundary",
         "editor.semanticHighlighting.enabled": true
       }
@@ -80,6 +97,11 @@
       {
         "command": "aivi.openCompilerLog",
         "title": "AIVI: Open Compiler Log"
+      },
+      {
+        "command": "aivi.runTest",
+        "title": "AIVI: Run Test",
+        "when": "editorLangId == aivi"
       }
     ],
     "configuration": {
@@ -92,7 +114,9 @@
         },
         "aivi.compiler.args": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "Extra arguments passed to the compiler."
         },
@@ -128,7 +152,11 @@
         },
         "aivi.trace.server": {
           "type": "string",
-          "enum": ["off", "messages", "verbose"],
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
           "default": "off",
           "description": "Trace communication between VSCode and the language server."
         },

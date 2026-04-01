@@ -14,13 +14,15 @@ type DecodeMode =
 type Map K =
   | EmptyMap
 
-domain Duration over Int
+domain Duration over Int = {
     literal sec : Int -> Duration
+}
 
-domain Retry over Int
+domain Retry over Int = {
     literal times : Int -> Retry
+}
 
-val authHeaders : Map Text = EmptyMap
+value authHeaders : Map Text = EmptyMap
 
 @source http.get "/users" with {
     headers: authHeaders,
@@ -28,4 +30,4 @@ val authHeaders : Map Text = EmptyMap
     retry: 3times,
     timeout: 5sec
 }
-sig users : Signal (Result HttpError (List User))
+signal users : Signal (Result HttpError (List User))

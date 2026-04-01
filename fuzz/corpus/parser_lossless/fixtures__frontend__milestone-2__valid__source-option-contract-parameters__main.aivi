@@ -1,9 +1,7 @@
 type HttpError =
   | Timeout
 
-type Session = {
-    token: Text
-}
+type Session = { token: Text }
 
 type Credentials =
   | Credentials Text Text
@@ -18,26 +16,21 @@ type FsError =
 type FsWatchEvent =
   | Changed
 
-val loginBody =
-    Credentials "demo" "secret"
+value loginBody = Credentials "demo" "secret"
+value decodeMode = Strict
 
-val decodeMode =
-    Strict
+signal fileEvents : Signal FsWatchEvent = Changed
 
-sig fileEvents : Signal FsWatchEvent =
-    Changed
-
-val reloadTrigger =
-    fileEvents
+value reloadTrigger = fileEvents
 
 @source http.post "/login" with {
     body: loginBody,
     decode: decodeMode
 }
-sig login : Signal (Result HttpError Session)
+signal login : Signal (Result HttpError Session)
 
 @source fs.read "/tmp/demo.txt" with {
     decode: decodeMode,
     reloadOn: reloadTrigger
 }
-sig fileText : Signal (Result FsError Text)
+signal fileText : Signal (Result FsError Text)

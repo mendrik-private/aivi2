@@ -27,11 +27,13 @@ type ProcessEvent =
 type Map K V =
   | EmptyMap
 
-domain Duration over Int
+domain Duration over Int = {
     literal sec : Int -> Duration
+}
 
-domain Retry over Int
+domain Retry over Int = {
     literal times : Int -> Retry
+}
 
 value authHeaders : Map Text Text = EmptyMap
 

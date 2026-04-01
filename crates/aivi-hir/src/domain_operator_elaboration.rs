@@ -207,11 +207,11 @@ mod tests {
         let matched = match_value_binary(
             "domain-operator-duration.aivi",
             r#"
-domain Duration over Int
+domain Duration over Int = {
     literal ms : Int -> Duration
     type Duration -> Duration -> Duration
     (+)
-
+}
 value total = 10ms + 5ms
 "#,
             "total",
@@ -227,11 +227,11 @@ value total = 10ms + 5ms
         let matched = match_value_binary(
             "domain-operator-duration-subtract.aivi",
             r#"
-domain Duration over Int
+domain Duration over Int = {
     literal ms : Int -> Duration
     type Duration -> Duration -> Duration
     (-)
-
+}
 value remaining = 10ms - 5ms
 "#,
             "remaining",
@@ -247,12 +247,12 @@ value remaining = 10ms - 5ms
         let matched = match_value_binary(
             "domain-operator-amount.aivi",
             r#"
-domain Amount A over A
+domain Amount A over A = {
     type A -> Amount A
     wrap
     type Amount A -> Amount A -> Amount A
     (+)
-
+}
 value total = wrap 1 + wrap 2
 "#,
             "total",
@@ -271,12 +271,12 @@ value total = wrap 1 + wrap 2
         let matched = match_value_binary(
             "domain-operator-path.aivi",
             r#"
-domain Path over Text
+domain Path over Text = {
     type Text -> Path
     root
     type Path -> Text -> Path
     (/)
-
+}
 value nested = root "/tmp" / "config"
 "#,
             "nested",
@@ -292,11 +292,11 @@ value nested = root "/tmp" / "config"
         let matched = match_value_binary(
             "domain-operator-scale.aivi",
             r#"
-domain Duration over Int
+domain Duration over Int = {
     literal ms : Int -> Duration
     type Duration -> Int -> Duration
     (*)
-
+}
 value scaled = 10ms * 2
 "#,
             "scaled",

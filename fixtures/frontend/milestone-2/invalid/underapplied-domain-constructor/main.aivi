@@ -1,5 +1,6 @@
-domain ResourceId A over A
+domain ResourceId A over A = {
     type A -> ResourceId A
     wrap
+}
 
 type Broken = ResourceId

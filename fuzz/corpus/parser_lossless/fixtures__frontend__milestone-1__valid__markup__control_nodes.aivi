@@ -8,13 +8,13 @@ type Screen =
   | Ready (List Item)
   | Failed Text
 
-val screen =
+value screen =
     Ready [
         { id: 1, title: "Alpha" },
         { id: 2, title: "Beta" }
     ]
 
-val screenView =
+value screenView =
     <match on={screen}>
         <case pattern={Loading}>
             <Label text="Loading..." />

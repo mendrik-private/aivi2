@@ -1,5 +1,6 @@
-class Eq A
+class Eq A = {
     (==) : A -> A -> Bool
+}
 
 type Blob =
   | Blob Bytes
@@ -7,8 +8,10 @@ type Blob =
 type Blob -> Blob -> Bool
 func blobEquals = left right=>    True
 
-instance Eq Blob
+instance Eq Blob = {
     (==) left right = blobEquals left right
+}
 
-instance Eq Blob
+instance Eq Blob = {
     (==) left right = blobEquals left right
+}

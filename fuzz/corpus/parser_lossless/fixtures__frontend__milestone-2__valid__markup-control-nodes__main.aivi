@@ -8,17 +8,19 @@ type Screen =
   | Ready (List Item)
   | Failed Text
 
-fun itemLabel:Text = #item:Item=>    item.title
+type Item -> Text
+func itemLabel = item =>
+    item.title
 
-val header = "Users"
+value header = "Users"
 
-val screen =
+value screen =
     Ready [
         { id: 1, title: "Alpha" },
         { id: 2, title: "Beta" }
     ]
 
-val screenView =
+value screenView =
     <fragment>
         <Label text={header} />
         <show when={True} keepMounted={True}>
@@ -29,7 +31,7 @@ val screenView =
                     </case>
                     <case pattern={Ready items}>
                         <each of={items} as={item} key={item.id}>
-                            <Row title={itemLabel item} />
+                            <Label text={itemLabel item} />
                             <empty>
                                 <Label text="No items" />
                             </empty>

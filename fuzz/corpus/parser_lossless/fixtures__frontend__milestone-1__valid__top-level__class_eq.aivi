@@ -1,4 +1,7 @@
-class Eq A
+class Eq A = {
     (==) : A -> A -> Bool
+}
 
-fun equivalent:Bool = #left:Int #right:Int=>    left == right and left != 0
+type Int -> Int -> Bool
+func equivalent = left right =>
+    left == right and left != 0

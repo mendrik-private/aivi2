@@ -3699,15 +3699,15 @@ fun duplicate:List Int = values:List Int =>
         let lowered = lower_text(
             "general-expr-instance-member.aivi",
             r#"
-class Semigroup A
+class Semigroup A = {
     append : A -> A -> A
-
+}
 type Blob = Blob Int
 
-instance Semigroup Blob
+instance Semigroup Blob = {
     append left right =
         left
-"#,
+}"#,
         );
         assert!(
             !lowered.has_errors(),
@@ -3951,10 +3951,10 @@ fun length:Int = items:(List A)=>    items
         let lowered = lower_text(
             "general-expr-domain-projection.aivi",
             r#"
-domain Path over Text
+domain Path over Text = {
     fromText : Text -> Path
     unwrap : Path -> Text
-
+}
 value home : Path = fromText "/tmp/app"
 value raw : Text = home.unwrap
 "#,
@@ -4002,12 +4002,12 @@ value raw : Text = home.unwrap
             r#"
 type Builder = Int -> Duration
 
-domain Duration over Int
+domain Duration over Int = {
     make : Builder
     make raw = raw
     unwrap : Duration -> Int
     unwrap duration = duration
-"#,
+}"#,
         );
         assert!(
             !lowered.has_errors(),

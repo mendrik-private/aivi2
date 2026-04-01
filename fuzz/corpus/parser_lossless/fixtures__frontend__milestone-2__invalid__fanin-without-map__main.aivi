@@ -1,6 +1,6 @@
-fun collect = #items=>    items
+func collect = items=>    items
 
-val users = []
-val emails =
-    users
-     <|* collect
+value users = []
+
+value emails = users
+ <|* collect

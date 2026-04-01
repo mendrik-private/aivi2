@@ -1,1 +1,1 @@
-val brokenPattern = rx"(?P<unterminated"
+value brokenPattern = rx"(?P<unterminated"

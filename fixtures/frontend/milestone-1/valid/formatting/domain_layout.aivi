@@ -1,13 +1,15 @@
-domain Duration over Int
+domain Duration over Int = {
     literal ms : Int -> Duration
     type Duration -> Int -> Duration
     (*)
     type Duration -> Int
     unwrap
+}
 
-domain Path over Text
+domain Path over Text = {
     literal root : Text -> Path
     type Path -> Text -> Path
     (/)
     type Path -> Text
     unwrap
+}

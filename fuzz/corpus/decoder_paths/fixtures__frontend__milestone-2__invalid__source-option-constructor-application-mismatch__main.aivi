@@ -1,9 +1,7 @@
 type HttpError =
   | Timeout
 
-type User = {
-    id: Int
-}
+type User = { id: Int }
 
 type DecodeMode =
   | Strict
@@ -13,12 +11,13 @@ type Map K V =
   | EmptyMap
   | Entry K V (Map K V)
 
-domain Duration over Int
+domain Duration over Int = {
     literal sec : Int -> Duration
-    
+}
 
-domain Retry over Int
+domain Retry over Int = {
     literal times : Int -> Retry
+}
 
 @source http.get "/users" with {
     headers: Entry 1 "Bearer demo" EmptyMap,
@@ -26,4 +25,4 @@ domain Retry over Int
     retry: 3times,
     timeout: 5sec
 }
-sig users : Signal (Result HttpError (List User))
+signal users : Signal (Result HttpError (List User))

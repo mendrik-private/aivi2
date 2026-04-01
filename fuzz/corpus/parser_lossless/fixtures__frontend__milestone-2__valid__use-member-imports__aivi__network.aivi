@@ -1,14 +1,9 @@
-val http : Text = "http"
-val socket : Text = "socket"
-val mailbox : Text = "mailbox"
+value http : Text = "http"
+value socket : Text = "socket"
+value mailbox : Text = "mailbox"
 
 type Request A = A
-type Channel A B = {
-    left: A
-    right: B
-}
 
-export http
-export socket
-export Request
-export Channel
+type Channel A B = { left: A }
+
+export (http, socket, Request, Channel)

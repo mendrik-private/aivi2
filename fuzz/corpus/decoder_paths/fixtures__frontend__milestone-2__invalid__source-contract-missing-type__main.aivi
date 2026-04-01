@@ -11,15 +11,17 @@ type DecodeMode =
   | Strict
   | Permissive
 
-domain Duration over Int
+domain Duration over Int = {
     literal sec : Int -> Duration
+}
 
-domain Repeat over Int
-    literal x : Int -> Repeat
+domain Repeat over Int = {
+    literal times : Int -> Repeat
+}
 
 @source http.get "/users" with {
     decode: Strict,
     retry: 3times,
     timeout: 5sec
 }
-sig users : Signal (Result HttpError (List User))
+signal users : Signal (Result HttpError (List User))

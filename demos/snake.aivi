@@ -30,8 +30,9 @@ type SnakeTakeState = {
     cells: List Cell
 }
 
-domain Duration over Int
+domain Duration over Int = {
     literal ms : Int -> Duration
+}
 
 value boardW = 30
 value boardH = 20
@@ -71,7 +72,7 @@ func takeCells = n cells => cells
   |> reduce takeCellStep { remaining: n, cells: [] }
   |> .cells
 
-domain Snake over List Cell
+domain Snake over List Cell = {
     type List Cell -> Snake
     fromCells cells = cells
     type Snake -> Cell
@@ -86,6 +87,7 @@ domain Snake over List Cell
     move snake cell = takeCells (listLength snake) (append [cell] snake)
     type Snake -> Direction -> Cell
     nextHead snake dir = moveDir dir (getOrElse (Cell 0 0) (listHead snake))
+}
 
 type GameState = {
     snake: Snake,

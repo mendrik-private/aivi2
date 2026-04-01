@@ -1,5 +1,3 @@
-use aivi.unknown (
-    http
-)
+use aivi.unknown (http)
 
-val importedHttp = http
+value importedHttp = http

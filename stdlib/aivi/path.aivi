@@ -4,7 +4,7 @@ type PathError =
   | InvalidPath Text
   | PathNotFound Text
 
-domain Path over Text
+domain Path over Text = {
     type Text -> Result PathError Path
     parse
     type Path -> Text
@@ -19,6 +19,7 @@ domain Path over Text
     stem
     type Path -> Option Text
     ext
+}
 
 type Text -> Bool
 func hasExtension = path => extension path

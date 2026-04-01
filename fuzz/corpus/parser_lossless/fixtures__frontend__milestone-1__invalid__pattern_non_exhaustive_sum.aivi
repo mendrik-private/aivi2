@@ -3,5 +3,5 @@ type Status =
   | Pending
   | Failed Text
 
-fun statusLabel:Text = #status:Status=>    status
-     ||> Paid => "paid"
+type Status -> Text
+func statusLabel = status=> status ||> Paid -> "paid"

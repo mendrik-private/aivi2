@@ -1,21 +1,29 @@
-class Eq A
-(==): A -> A -> Bool
+class Eq A = {
+    (==) : A -> A -> Bool
+}
 
-type Blob = Blob Bytes
+type Blob =
+  | Blob Bytes
 
-fun blobEquals: Bool = #left: Blob#right: Blob =>
-  True
+type Blob -> Blob -> Bool
+func blobEquals = left right =>
+    True
 
-instance Eq Blob
-(==) left right = blobEquals left right
+instance Eq Blob = {
+    (==) left right = blobEquals left right
+}
 
-fun sameBlob: Bool = #left: Blob#right: Blob =>
-  left == right
+type Blob -> Blob -> Bool
+func sameBlob = left right =>
+    left == right
 
-class Compare A
-same: A -> A -> Bool
+class Compare A = {
+    same : A -> A -> Bool
+}
 
-type Label = Label Text
+type Label =
+  | Label Text
 
-instance Compare Label
-same left right = left == right
+instance Compare Label = {
+    same left right = left == right
+}

@@ -1,14 +1,17 @@
-type User = User Text Int
+type User =
+  | User Text Int
 
 type LoadState =
   | NotAsked
   | Loaded User
   | Failed Text
 
-fun loadedName:Text = #state:LoadState=>    state
-     ||> NotAsked => "waiting"
-     ||> Loaded (User name _) => name
-     ||> Failed message => message
+type LoadState -> Text
+func loadedName = state => state
+ ||> NotAsked             -> "waiting"
+ ||> Loaded (User name _) -> name
+ ||> Failed message       -> message
 
-fun firstOfPair:Int = #pair:(Int, Int)=>    pair
-     ||> (first, _) => first
+type (Int, Int) -> Int
+func firstOfPair = pair => pair
+ ||> (first, _) -> first

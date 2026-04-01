@@ -2257,11 +2257,11 @@ signal activeUsers:Signal User =
         let lowered = lower_text(
             "signal-gate-domain-operators.aivi",
             r#"
-domain Duration over Int
+domain Duration over Int = {
     literal ms : Int -> Duration
     (+) : Duration -> Duration -> Duration
     (>) : Duration -> Duration -> Bool
-
+}
 type Window = {
     delay: Duration
 }
@@ -2441,9 +2441,9 @@ value joinedEmails:Text =
         let lowered = lower_text(
             "gate-inside-recurrence.aivi",
             r#"
-domain Duration over Int
+domain Duration over Int = {
     literal sec : Int -> Duration
-
+}
 type Cursor = {
     hasNext: Bool
 }

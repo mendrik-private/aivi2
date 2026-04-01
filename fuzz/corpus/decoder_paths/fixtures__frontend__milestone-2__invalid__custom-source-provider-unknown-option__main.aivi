@@ -1,11 +1,12 @@
-domain Duration over Int
+domain Duration over Int = {
     literal ms : Int -> Duration
+}
 
 provider custom.feed
-    option timeout: Duration
+    option timeout : Duration
     wakeup: providerTrigger
 
 @source custom.feed with {
     retry: 5ms
 }
-sig updates : Signal Int
+signal updates : Signal Int

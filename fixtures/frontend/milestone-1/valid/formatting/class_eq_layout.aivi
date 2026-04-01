@@ -1,5 +1,6 @@
-class Eq A
+class Eq A = {
     (==) : A -> A -> Bool
+}
 
 type Int -> Int -> Bool
 func equivalent = left right =>

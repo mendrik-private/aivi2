@@ -6,10 +6,13 @@ use aivi.network (
 )
 
 type PrimaryRequest = (HttpRequest Text)
+
 type ProviderChannel = (NetworkChannel Text Text)
 
-fun joinProviders:Text = #left:Text #right:Text=>    "{left}/{right}"
+type Text -> Text -> Text
+func joinProviders = left right =>
+    "{left}/{right}"
 
-val primaryProvider = primaryHttp
-val fallbackProvider = fallbackSocket
-val providerPair = joinProviders primaryProvider fallbackProvider
+value primaryProvider = primaryHttp
+value fallbackProvider = fallbackSocket
+value providerPair = joinProviders primaryProvider fallbackProvider

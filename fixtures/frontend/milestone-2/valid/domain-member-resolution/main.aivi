@@ -1,19 +1,22 @@
-domain Duration over Int
+domain Duration over Int = {
     literal ms : Int -> Duration
     type Int -> Duration
     make
     type Duration -> Int
     unwrap
+}
 
-domain Count over Int
+domain Count over Int = {
     type Int -> Count
     make
+}
 
-domain NonEmpty A over List A
+domain NonEmpty A over List A = {
     type A -> NonEmpty A
     singleton
     type NonEmpty A -> A
     head
+}
 
 value delay : Duration = make 250
 value delayMillis : Int = unwrap delay

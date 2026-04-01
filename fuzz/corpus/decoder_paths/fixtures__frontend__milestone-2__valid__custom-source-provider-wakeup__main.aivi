@@ -1,10 +1,12 @@
-fun step = #value=>    value
+type Int -> Int -> Int
+func step = x current =>
+    x
 
 provider custom.feed
     wakeup: providerTrigger
 
 @source custom.feed
-sig retried : Signal Int =
-    0
-     @|> step
-     <|@ step
+signal retryEvents : Signal Int
+
+signal retried : Signal Int = retryEvents
+ +|> 0 step

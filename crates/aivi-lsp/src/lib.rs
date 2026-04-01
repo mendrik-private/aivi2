@@ -3,6 +3,7 @@
 //! AIVI Language Server Protocol server.
 
 pub mod analysis;
+pub mod code_lens;
 pub mod completion;
 pub mod definition;
 pub mod diagnostics;
@@ -15,6 +16,7 @@ pub mod semantic_tokens;
 pub mod server;
 pub mod state;
 pub mod symbols;
+pub mod unused;
 
 /// Start the LSP server, listening on stdio.
 pub async fn run() -> anyhow::Result<()> {

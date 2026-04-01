@@ -1,17 +1,19 @@
-type Pair = Pair Text Text
+type Pair =
+  | Pair Text Text
 
 type SaveState =
   | Saved
   | Dirty Text
 
-sig documentTitle = "Notes"
-sig documentBody = "Hello"
+signal documentTitle = "Notes"
+signal documentBody = "Hello"
 
-sig draft =
-   &|> documentTitle
+signal draft =
+ &|> documentTitle
  &|> documentBody
-    |> Pair
+  |> Pair
 
-fun label:Text = #state:SaveState=>  state
-    ||> Saved => "saved"
-   ||> Dirty message => "dirty {message}"
+type SaveState -> Text
+func label = state => state
+ ||> Saved         -> "saved"
+ ||> Dirty message -> "dirty {message}"

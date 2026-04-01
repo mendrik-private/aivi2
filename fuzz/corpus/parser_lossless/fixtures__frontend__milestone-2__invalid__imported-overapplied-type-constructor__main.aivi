@@ -1,5 +1,3 @@
-use aivi.network (
-    Request
-)
+use aivi.network (Request)
 
 type Broken = (Request Text Text)

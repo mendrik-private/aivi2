@@ -1,4 +1,4 @@
 @source timer.every 100 with {
     unknown: True
 }
-sig tick : Signal Unit
+signal tick : Signal Unit

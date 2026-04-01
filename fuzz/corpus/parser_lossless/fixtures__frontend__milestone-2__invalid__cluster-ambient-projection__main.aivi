@@ -1,9 +1,9 @@
-type NamePair = NamePair Text Text
+type NamePair =
+  | NamePair Text Text
 
-sig firstName = "Ada"
-sig lastName = "Lovelace"
+signal firstName = "Ada"
+signal lastName = "Lovelace"
 
-sig broken =
- firstName
-  &|> .display
-   |> NamePair
+signal broken = firstName
+ &|> .display
+  |> NamePair
