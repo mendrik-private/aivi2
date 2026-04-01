@@ -1,3 +1,11 @@
+use aivi.list (
+    length as listLength
+    head as listHead
+    any
+)
+
+use aivi.option (getOrElse)
+
 type Direction =
   | North
   | South
@@ -63,41 +71,21 @@ func takeCells = n cells => cells
   |> reduce takeCellStep { remaining: n, cells: [] }
   |> .cells
 
-type Cell -> Bool -> Cell -> Bool
-func snakeContainsStep = target acc c=> acc or target == c
-
-type Int -> Cell -> Int
-func snakeLengthStep = acc c=> acc + 1
-
-type List Cell -> Int
-func snakeLengthRaw = cells => cells |> reduce snakeLengthStep 0
-
-type Option Cell -> Cell -> Option Cell
-func snakeHeadStep = found cell => found ||> Some _ -> found
- ||> None -> Some cell
-
-type List Cell -> Option Cell
-func snakeHeadRaw = cells => cells |> reduce snakeHeadStep None
-
-type Cell -> Option Cell -> Cell
-func snakeGetOrElse = fallback opt => opt ||> Some c -> c
- ||> None -> fallback
-
 domain Snake over List Cell
     type List Cell -> Snake
     fromCells cells = cells
     type Snake -> Cell
-    head snake = snakeGetOrElse (Cell 0 0) (snakeHeadRaw snake)
+    head snake = getOrElse (Cell 0 0) (listHead snake)
     type Snake -> Cell -> Bool
-    contains snake cell = snake |> reduce (snakeContainsStep cell) False
+    contains snake cell = any ((==) cell) snake
     type Snake -> Int
-    length snake = snakeLengthRaw snake
+    length snake = listLength snake
     type Snake -> Cell -> Snake
     grow snake cell = append [cell] snake
     type Snake -> Cell -> Snake
-    move snake cell = takeCells (snakeLengthRaw snake) (append [cell] snake)
+    move snake cell = takeCells (listLength snake) (append [cell] snake)
     type Snake -> Direction -> Cell
-    nextHead snake dir = moveDir dir (snakeGetOrElse (Cell 0 0) (snakeHeadRaw snake))
+    nextHead snake dir = moveDir dir (getOrElse (Cell 0 0) (listHead snake))
 
 type GameState = {
     snake: Snake,
