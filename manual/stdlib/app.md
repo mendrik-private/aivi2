@@ -152,7 +152,7 @@ Severity of an in-app notification. Maps to libadwaita toast and banner styling.
 
 ### AppNotification
 
-```
+```aivi
 type AppNotification = {
     level: NotificationLevel,
     title: Text,
@@ -178,7 +178,7 @@ value savedNotification : AppNotification = {
 
 ## Example — tracking app lifecycle in a signal
 
-```
+```aivi
 use aivi.app.lifecycle (AppLifecycle)
 
 signal lifecycle : AppLifecycle = source Starting

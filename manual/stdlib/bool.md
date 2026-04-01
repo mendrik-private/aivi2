@@ -20,7 +20,7 @@ use aivi.bool (
 
 Negates a boolean value.
 
-```
+```aivi
 not : Bool -> Bool
 ```
 
@@ -37,7 +37,7 @@ func isInactive = active=>    not active
 
 Returns `True` if exactly one of the two arguments is `True` (exclusive or).
 
-```
+```aivi
 xor : Bool -> Bool -> Bool
 ```
 
@@ -54,7 +54,7 @@ func toggleChanged = previous current=>    xor previous current
 
 Logical implication: `implies a b` is `False` only when `a` is `True` and `b` is `False`.
 
-```
+```aivi
 implies : Bool -> Bool -> Bool
 ```
 
@@ -71,7 +71,7 @@ func checkRule = hasPermission canAccess=>    implies hasPermission canAccess
 
 Returns `True` if both arguments are `True`. Equivalent to `a and b`.
 
-```
+```aivi
 both : Bool -> Bool -> Bool
 ```
 
@@ -88,7 +88,7 @@ func isAdminAndActive = isAdmin isActive=>    both isAdmin isActive
 
 Returns `True` if at least one argument is `True`. Equivalent to `a or b`.
 
-```
+```aivi
 either : Bool -> Bool -> Bool
 ```
 
@@ -105,7 +105,7 @@ func canProceed = hasTokenA hasTokenB=>    either hasTokenA hasTokenB
 
 Returns `True` only if both arguments are `False`.
 
-```
+```aivi
 neither : Bool -> Bool -> Bool
 ```
 
@@ -122,7 +122,7 @@ func isSilent = isPlaying isPaused=>    neither isPlaying isPaused
 
 Converts an integer to a boolean: `0` becomes `False`, any other value becomes `True`.
 
-```
+```aivi
 fromInt : Int -> Bool
 ```
 

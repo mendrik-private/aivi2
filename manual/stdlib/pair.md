@@ -22,7 +22,7 @@ use aivi.pair (
 
 Extracts the first element of a pair.
 
-```
+```aivi
 fst : (A, B) -> A
 ```
 
@@ -39,7 +39,7 @@ func getKey = entry=>    fst entry
 
 Extracts the second element of a pair.
 
-```
+```aivi
 snd : (A, B) -> B
 ```
 
@@ -56,7 +56,7 @@ func getValue = entry=>    snd entry
 
 Swaps the two elements of a pair, returning `(B, A)` from `(A, B)`.
 
-```
+```aivi
 swap : (A, B) -> (B, A)
 ```
 
@@ -73,7 +73,7 @@ func flipEntry = entry=>    swap entry
 
 Applies a function to the first element, leaving the second unchanged.
 
-```
+```aivi
 mapFst : (A -> C) -> (A, B) -> (C, B)
 ```
 
@@ -92,7 +92,7 @@ func squareFst = pair=>    mapFst square pair
 
 Applies a function to the second element, leaving the first unchanged.
 
-```
+```aivi
 mapSnd : (B -> C) -> (A, B) -> (A, C)
 ```
 
@@ -111,7 +111,7 @@ func absValue = entry=>    mapSnd abs entry
 
 Applies one function to the first element and another to the second.
 
-```
+```aivi
 mapBoth : (A -> C) -> (B -> D) -> (A, B) -> (C, D)
 ```
 
@@ -133,7 +133,7 @@ func normalizePair = pair=>    mapBoth abs negate pair
 
 Constructs a pair from two separate values.
 
-```
+```aivi
 fromPair : A -> B -> (A, B)
 ```
 
@@ -150,7 +150,7 @@ func makeEntry = label score=>    fromPair label score
 
 Constructs a pair from two separate values. Useful as a named combinator when pairing results in a pipeline.
 
-```
+```aivi
 toPair : A -> B -> (A, B)
 ```
 
@@ -167,7 +167,7 @@ func labelScore = label score=>    toPair label score
 
 Creates a pair where both elements are the same value.
 
-```
+```aivi
 duplicate : A -> (A, A)
 ```
 

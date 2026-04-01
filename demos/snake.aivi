@@ -77,7 +77,7 @@ domain Snake over List Cell
     type Snake -> Cell
     head snake = getOrElse (Cell 0 0) (listHead snake)
     type Snake -> Cell -> Bool
-    contains snake cell = any ((==) cell) snake
+    contains snake cell = any (. == cell) snake
     type Snake -> Int
     length snake = listLength snake
     type Snake -> Cell -> Snake

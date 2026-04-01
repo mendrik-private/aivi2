@@ -33,6 +33,34 @@ export default defineConfig({
   markdown: {
     languages: [aiviGrammar as any],
     theme: aiviDarkTheme as any,
+    config(md) {
+      md.core.ruler.push('pipe_operator', (state) => {
+        for (const blockToken of state.tokens) {
+          if (blockToken.type !== 'inline' || !blockToken.children) continue
+          const next: typeof blockToken.children = []
+          for (const tok of blockToken.children) {
+            if (tok.type !== 'text' || !tok.content.includes('|>')) {
+              next.push(tok)
+              continue
+            }
+            const parts = tok.content.split('|>')
+            for (let i = 0; i < parts.length; i++) {
+              if (parts[i].length > 0) {
+                const t = new state.Token('text', '', 0)
+                t.content = parts[i]
+                next.push(t)
+              }
+              if (i < parts.length - 1) {
+                const span = new state.Token('html_inline', '', 0)
+                span.content = '<span class="pipe-op">|></span>'
+                next.push(span)
+              }
+            }
+          }
+          blockToken.children = next
+        }
+      })
+    },
   },
 
   vite: {

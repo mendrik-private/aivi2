@@ -22,7 +22,7 @@ use aivi.math (
 
 Returns the absolute value of an integer.
 
-```
+```aivi
 abs : Int -> Int
 ```
 
@@ -39,7 +39,7 @@ func distance = a b=>    abs (a - b)
 
 Negates an integer: `negate n` is equivalent to `0 - n`.
 
-```
+```aivi
 negate : Int -> Int
 ```
 
@@ -56,7 +56,7 @@ func flipSign = n=>    negate n
 
 Returns the sign of an integer as `-1`, `0`, or `1`.
 
-```
+```aivi
 sign : Int -> Int
 ```
 
@@ -73,7 +73,7 @@ func direction = velocity=>    sign velocity
 
 Returns `True` if the integer is divisible by 2.
 
-```
+```aivi
 isEven : Int -> Bool
 ```
 
@@ -92,7 +92,7 @@ func evensOnly = numbers=>    filter isEven numbers
 
 Returns `True` if the integer is not divisible by 2.
 
-```
+```aivi
 isOdd : Int -> Bool
 ```
 
@@ -111,7 +111,7 @@ func oddsOnly = numbers=>    filter isOdd numbers
 
 Multiplies an integer by itself.
 
-```
+```aivi
 square : Int -> Int
 ```
 
@@ -128,7 +128,7 @@ func areaOfSquare = side=>    square side
 
 Constrains a value to lie within `[low, high]`. If `n < low`, returns `low`; if `n > high`, returns `high`; otherwise returns `n`.
 
-```
+```aivi
 clamp : Int -> Int -> Int -> Int
 ```
 
@@ -145,7 +145,7 @@ func normalizedVolume = raw=>    clamp 0 100 raw
 
 Returns `True` if `n` is within the inclusive range `[low, high]`.
 
-```
+```aivi
 between : Int -> Int -> Int -> Bool
 ```
 
@@ -162,7 +162,7 @@ func isValidAge = age=>    between 0 150 age
 
 Returns `True` if `divisor` evenly divides `n` (i.e. `n % divisor == 0`).
 
-```
+```aivi
 divides : Int -> Int -> Bool
 ```
 

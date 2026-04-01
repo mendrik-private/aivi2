@@ -51,7 +51,7 @@ type PathError =
 
 Return the directory containing this path. Returns `None` for a root or empty path.
 
-```
+```aivi
 use aivi.path (parent)
 ```
 
@@ -59,7 +59,7 @@ use aivi.path (parent)
 
 Return the final path component, including its extension. Returns `None` for a root path.
 
-```
+```aivi
 use aivi.path (filename)
 ```
 
@@ -67,7 +67,7 @@ use aivi.path (filename)
 
 Return the final path component without its extension.
 
-```
+```aivi
 use aivi.path (stem)
 ```
 
@@ -75,7 +75,7 @@ use aivi.path (stem)
 
 Return the extension (characters after the last dot in the filename).
 
-```
+```aivi
 use aivi.path (extension)
 ```
 
@@ -83,7 +83,7 @@ use aivi.path (extension)
 
 Append a segment to a base path. If the segment is absolute it replaces the base (POSIX semantics).
 
-```
+```aivi
 use aivi.path (join)
 ```
 
@@ -91,7 +91,7 @@ use aivi.path (join)
 
 Return `True` when the path begins with `/`.
 
-```
+```aivi
 use aivi.path (isAbsolute)
 ```
 
@@ -99,7 +99,7 @@ use aivi.path (isAbsolute)
 
 Resolve `.` (current directory) and `..` (parent directory) segments lexically, without touching the filesystem.
 
-```
+```aivi
 use aivi.path (normalize)
 ```
 
@@ -107,7 +107,7 @@ use aivi.path (normalize)
 
 ## Real-world example
 
-```
+```aivi
 use aivi.path (
     join
     parent

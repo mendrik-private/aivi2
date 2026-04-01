@@ -34,14 +34,14 @@ use aivi.data.json (
 
 ### validate
 
-```
+```aivi
 validate : Text -> Task Text Bool
 ```
 
 Returns `True` if the text is valid JSON, `False` otherwise. Never fails — invalid text yields
 `False`, not a task error.
 
-```
+```aivi
 use aivi.data.json (validate)
 
 func checkJson = json=>```
@@ -50,7 +50,7 @@ func checkJson = json=>```
 
 ```
 get : Text -> Text -> Task Text (Option Text)
-```
+```aivi
 
 Retrieve an object field by key. The result is the field value serialised back to JSON text,
 so nested objects and arrays are preserved as `Text`. Returns `None` when the key is absent.
@@ -63,14 +63,14 @@ func getName = json=>```
 
 ### at
 
-```
+```aivi
 at : Text -> Int -> Task Text (Option Text)
 ```
 
 Retrieve an array element by zero-based index. Returns `None` when the index is out of bounds.
 Fails the task when the input is not valid JSON.
 
-```
+```aivi
 use aivi.data.json (at)
 
 func firstItem = json=>```
@@ -79,7 +79,7 @@ func firstItem = json=>```
 
 ```
 keys : Text -> Task Text (List Text)
-```
+```aivi
 
 Return the keys of a JSON object in insertion order. Returns an empty list for non-objects.
 Fails the task when the input is not valid JSON.
@@ -91,13 +91,13 @@ func objectKeys = json=>```
 
 ### pretty
 
-```
+```aivi
 pretty : Text -> Task Text Text
 ```
 
 Re-format JSON with two-space indentation. Fails the task when the input is not valid JSON.
 
-```
+```aivi
 use aivi.data.json (pretty)
 
 func format = json=>```
@@ -106,7 +106,7 @@ func format = json=>```
 
 ```
 minify : Text -> Task Text Text
-```
+```aivi
 
 Remove all insignificant whitespace from JSON. Fails the task when the input is not valid JSON.
 
@@ -130,7 +130,7 @@ Task failures carry a descriptive `Text` error message (the `Text` in `Task Text
 
 ## Example — decode a simple object
 
-```
+```aivi
 use aivi.data.json (
     get
     keys

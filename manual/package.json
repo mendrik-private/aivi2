@@ -12,6 +12,6 @@
     "vitepress": "^1.6.3"
   },
   "dependencies": {
-    "@fontsource/jetbrains-mono": "^5.2.8"
+    "@fontsource/inter": "^5.2.5"
   }
 }

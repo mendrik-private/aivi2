@@ -6,7 +6,8 @@ use std::{
 use aivi_hir::IntrinsicValue;
 use cranelift_codegen::{
     ir::{
-        AbiParam, BlockArg, InstBuilder, MemFlags, Type, UserFuncName, Value,
+        AbiParam, BlockArg, InstBuilder, MemFlags, StackSlotData, StackSlotKind, Type,
+        UserFuncName, Value,
         condcodes::{FloatCC, IntCC},
         immediates::Ieee64,
         types,
@@ -16,7 +17,7 @@ use cranelift_codegen::{
     verify_function,
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
-use cranelift_module::{DataDescription, FuncId, Linkage, Module, default_libcall_names};
+use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module, default_libcall_names};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 
 use crate::{
@@ -266,6 +267,8 @@ impl std::error::Error for CodegenError {}
 ///   by-reference values as host pointers,
 /// - it materializes `Decimal` / `BigInt` plus fragment-only `Text` literals as immutable
 ///   backend-owned constant cells behind those by-reference pointers,
+/// - it materializes signal item reads as imported current-value slots in that same ABI shape,
+/// - it materializes unsaturated top-level function items as local callable descriptor cells,
 /// - it uses a backend-local pointer niche for `Option` over by-reference payloads,
 /// - it resolves record projection offsets inside backend/codegen,
 /// - it emits backend item-body kernels directly,
@@ -297,6 +300,10 @@ struct CraneliftCompiler<'a> {
     program: &'a Program,
     module: ObjectModule,
     declared_functions: BTreeMap<KernelId, FuncId>,
+    declared_signal_slots: BTreeMap<ItemId, DataId>,
+    declared_imported_item_slots: BTreeMap<ItemId, DataId>,
+    declared_callable_descriptors: BTreeMap<ItemId, DataId>,
+    text_concat_helper: Option<FuncId>,
     function_builder_ctx: FunctionBuilderContext,
     next_data_symbol: u64,
 }
@@ -307,6 +314,14 @@ enum DirectApplyPlan {
     DomainMember(DomainMemberCallPlan),
     Builtin(BuiltinCallPlan),
     Intrinsic(IntrinsicCallPlan),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ItemReferencePlan {
+    DirectValue { body: KernelId },
+    SignalSlot { item: ItemId },
+    ImportedSlot { item: ItemId },
+    CallableDescriptor { item: ItemId, body: KernelId, arity: usize },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -409,6 +424,10 @@ impl<'a> CraneliftCompiler<'a> {
             program,
             module,
             declared_functions: BTreeMap::new(),
+            declared_signal_slots: BTreeMap::new(),
+            declared_imported_item_slots: BTreeMap::new(),
+            declared_callable_descriptors: BTreeMap::new(),
+            text_concat_helper: None,
             function_builder_ctx: FunctionBuilderContext::new(),
             next_data_symbol: 0,
         })
@@ -559,11 +578,19 @@ impl<'a> CraneliftCompiler<'a> {
                         match self.render_static_text_literal(kernel_id, kernel, expr_id, text) {
                             Ok(Some(_)) => {}
                             Ok(None) => {
-                                errors.push(self.unsupported_expression(
-                                    kernel_id,
-                                    expr_id,
-                                    "text interpolation still requires a native text formatting contract beyond static literal folding",
-                                ));
+                                for segment in &text.segments {
+                                    if let crate::TextSegment::Interpolation { expr, .. } = segment {
+                                        work.push(*expr);
+                                        if let Err(error) = self.require_text_expression(
+                                            kernel_id,
+                                            *expr,
+                                            kernel.exprs()[*expr].layout,
+                                            "dynamic text interpolation",
+                                        ) {
+                                            errors.push(error);
+                                        }
+                                    }
+                                }
                             }
                             Err(error) => {
                                 errors.push(error);
@@ -798,9 +825,7 @@ impl<'a> CraneliftCompiler<'a> {
                         }
                     }
                     KernelExprKind::Item(item) => {
-                        if let Err(error) =
-                            self.require_compilable_item_call(kernel_id, expr_id, *item, &[])
-                        {
+                        if let Err(error) = self.plan_item_reference(kernel_id, expr_id, *item) {
                             errors.push(error);
                         }
                     }
@@ -1013,6 +1038,10 @@ impl<'a> CraneliftCompiler<'a> {
         enum Task {
             Visit(KernelExprId),
             BuildOptionSome(KernelExprId),
+            BuildText {
+                expr: KernelExprId,
+                fragments: Vec<Option<Box<str>>>,
+            },
             BuildProjection(KernelExprId),
             BuildDirectApply {
                 expr: KernelExprId,
@@ -1087,14 +1116,31 @@ impl<'a> CraneliftCompiler<'a> {
                     }
                     match &expr.kind {
                         KernelExprKind::Item(item) => {
-                            let body =
-                                self.require_compilable_item_call(kernel_id, expr_id, *item, &[])?;
-                            values.push(self.lower_direct_item_call(
-                                kernel_id,
-                                body,
-                                &[],
-                                builder,
-                            )?);
+                            match self.plan_item_reference(kernel_id, expr_id, *item)? {
+                                ItemReferencePlan::DirectValue { body } => {
+                                    values.push(self.lower_direct_item_call(
+                                        kernel_id,
+                                        body,
+                                        &[],
+                                        builder,
+                                    )?);
+                                }
+                                ItemReferencePlan::SignalSlot { item } => {
+                                    values.push(self.lower_signal_item_slot(
+                                        kernel_id, expr_id, item, builder,
+                                    )?);
+                                }
+                                ItemReferencePlan::ImportedSlot { item } => {
+                                    values.push(self.lower_imported_item_slot(
+                                        kernel_id, expr_id, item, builder,
+                                    )?);
+                                }
+                                ItemReferencePlan::CallableDescriptor { item, body, arity } => {
+                                    values.push(self.lower_item_callable_descriptor(
+                                        kernel_id, item, body, arity, builder,
+                                    )?);
+                                }
+                            }
                         }
                         KernelExprKind::Subject(subject) => {
                             let (value, _) = self.lower_subject_reference(
@@ -1223,9 +1269,41 @@ impl<'a> CraneliftCompiler<'a> {
                                 expr.layout,
                                 "Text literal",
                             )?;
-                            values.push(self.materialize_text_literal(
-                                kernel_id, kernel, expr_id, text, builder,
-                            )?);
+                            match self.render_static_text_literal(kernel_id, kernel, expr_id, text)? {
+                                Some(rendered) => values.push(self.materialize_text_constant(
+                                    kernel_id,
+                                    rendered.as_ref(),
+                                    builder,
+                                )?),
+                                None => {
+                                    let mut fragments = Vec::with_capacity(text.segments.len());
+                                    for segment in &text.segments {
+                                        match segment {
+                                            crate::TextSegment::Fragment { raw, .. } => {
+                                                fragments.push(Some(raw.clone()));
+                                            }
+                                            crate::TextSegment::Interpolation { expr, .. } => {
+                                                self.require_text_expression(
+                                                    kernel_id,
+                                                    *expr,
+                                                    kernel.exprs()[*expr].layout,
+                                                    "dynamic text interpolation",
+                                                )?;
+                                                fragments.push(None);
+                                            }
+                                        }
+                                    }
+                                    tasks.push(Task::BuildText {
+                                        expr: expr_id,
+                                        fragments,
+                                    });
+                                    for segment in text.segments.iter().rev() {
+                                        if let crate::TextSegment::Interpolation { expr, .. } = segment {
+                                            tasks.push(Task::Visit(*expr));
+                                        }
+                                    }
+                                }
+                            }
                         }
                         KernelExprKind::Tuple(_) | KernelExprKind::Record(_) => {
                             values.push(self.materialize_static_scalar_aggregate_expression(
@@ -1357,6 +1435,33 @@ impl<'a> CraneliftCompiler<'a> {
                         }
                     };
                     values.push(value);
+                }
+                Task::BuildText { expr, fragments } => {
+                    let interpolation_count = fragments
+                        .iter()
+                        .filter(|fragment| fragment.is_none())
+                        .count();
+                    let interpolation_values = drain_tail(&mut values, interpolation_count);
+                    let mut interpolation_iter = interpolation_values.into_iter();
+                    let mut parts = Vec::with_capacity(fragments.len());
+                    for fragment in fragments {
+                        match fragment {
+                            Some(raw) if raw.is_empty() => {}
+                            Some(raw) => {
+                                parts.push(self.materialize_text_constant(
+                                    kernel_id,
+                                    raw.as_ref(),
+                                    builder,
+                                )?);
+                            }
+                            None => parts.push(interpolation_iter.next().expect(
+                                "dynamic text interpolation placeholders should align with values",
+                            )),
+                        }
+                    }
+                    values.push(self.lower_dynamic_text_concat(
+                        kernel_id, expr, &parts, builder,
+                    )?);
                 }
                 Task::BuildProjection(expr_id) => {
                     let expr = &kernel.exprs()[expr_id];
@@ -1911,6 +2016,89 @@ impl<'a> CraneliftCompiler<'a> {
         }
     }
 
+    fn plan_item_reference(
+        &self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        item: ItemId,
+    ) -> Result<ItemReferencePlan, CodegenError> {
+        let kernel = &self.program.kernels()[kernel_id];
+        let expr_layout = kernel.exprs()[expr_id].layout;
+        let item_decl = self
+            .program
+            .items()
+            .get(item)
+            .expect("validated backend kernels keep item references aligned with codegen");
+
+        if matches!(item_decl.kind, crate::ItemKind::Signal(_)) {
+            if let Some(body) = item_decl.body {
+                let body_kernel = self.program.kernels().get(body).expect(
+                    "validated backend programs keep signal item body kernels aligned with codegen",
+                );
+                self.require_layout_match(
+                    kernel_id,
+                    expr_id,
+                    expr_layout,
+                    body_kernel.result_layout,
+                    &format!("signal item `{}` current-value slot", item_decl.name),
+                )?;
+            }
+            return Ok(ItemReferencePlan::SignalSlot { item });
+        }
+
+        let Some(body) = item_decl.body else {
+            if item_decl.parameters.is_empty() {
+                return Ok(ItemReferencePlan::ImportedSlot { item });
+            }
+            return Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "item `{}` has no body kernel and still requires an imported callable ABI when referenced without saturation",
+                    item_decl.name
+                ),
+            ));
+        };
+        let body_kernel = self
+            .program
+            .kernels()
+            .get(body)
+            .expect("validated backend programs keep item body kernels aligned with codegen");
+
+        if item_decl.parameters.is_empty() {
+            self.require_layout_match(
+                kernel_id,
+                expr_id,
+                expr_layout,
+                body_kernel.result_layout,
+                &format!("direct item value for `{}`", item_decl.name),
+            )?;
+            return Ok(ItemReferencePlan::DirectValue { body });
+        }
+
+        let (parameters, result_layout) = self.callable_signature(expr_layout);
+        if parameters != item_decl.parameters || result_layout != body_kernel.result_layout {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "item `{}` referenced as a callable expects parameter layouts {:?} and result layout{}, found layout{}=`{}`",
+                    item_decl.name,
+                    item_decl.parameters,
+                    body_kernel.result_layout,
+                    expr_layout,
+                    self.program.layouts()[expr_layout]
+                ),
+            ));
+        }
+
+        Ok(ItemReferencePlan::CallableDescriptor {
+            item,
+            body,
+            arity: item_decl.parameters.len(),
+        })
+    }
+
     fn require_compilable_item_call(
         &self,
         kernel_id: KernelId,
@@ -1929,7 +2117,7 @@ impl<'a> CraneliftCompiler<'a> {
                 kernel_id,
                 expr_id,
                 &format!(
-                    "signal item `{}` still requires signal-aware item codegen",
+                    "signal item `{}` still requires a signal-aware direct-call ABI; use the item as a value so codegen can load its current-value slot instead",
                     item_decl.name
                 ),
             ));
@@ -1992,6 +2180,236 @@ impl<'a> CraneliftCompiler<'a> {
             )?;
         }
         Ok(body)
+    }
+
+    fn declare_signal_item_slot(&mut self, item: ItemId) -> Result<DataId, CodegenError> {
+        if let Some(data_id) = self.declared_signal_slots.get(&item).copied() {
+            return Ok(data_id);
+        }
+
+        let symbol = signal_slot_symbol(self.program, item);
+        let data_id = self
+            .module
+            .declare_data(&symbol, Linkage::Import, false, false)
+            .map_err(|error| CodegenError::CraneliftModule {
+                kernel: None,
+                message: error.to_string().into_boxed_str(),
+            })?;
+        self.declared_signal_slots.insert(item, data_id);
+        Ok(data_id)
+    }
+
+    fn lower_signal_item_slot(
+        &mut self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        item: ItemId,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<Value, CodegenError> {
+        let item_name = self.program.item_name(item).to_owned();
+        let expr_layout = self.program.kernels()[kernel_id].exprs()[expr_id].layout;
+        let abi = self.field_abi_shape(
+            kernel_id,
+            expr_layout,
+            &format!("signal item `{item_name}` current-value slot"),
+        )?;
+        let data_id = self.declare_signal_item_slot(item)?;
+        let global = self.module.declare_data_in_func(data_id, builder.func);
+        let slot = builder.ins().symbol_value(self.pointer_type(), global);
+        Ok(builder.ins().load(abi.ty, MemFlags::new(), slot, 0))
+    }
+
+    fn declare_imported_item_slot(&mut self, item: ItemId) -> Result<DataId, CodegenError> {
+        if let Some(data_id) = self.declared_imported_item_slots.get(&item).copied() {
+            return Ok(data_id);
+        }
+
+        let symbol = imported_item_slot_symbol(self.program, item);
+        let data_id = self
+            .module
+            .declare_data(&symbol, Linkage::Import, false, false)
+            .map_err(|error| CodegenError::CraneliftModule {
+                kernel: None,
+                message: error.to_string().into_boxed_str(),
+            })?;
+        self.declared_imported_item_slots.insert(item, data_id);
+        Ok(data_id)
+    }
+
+    fn lower_imported_item_slot(
+        &mut self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        item: ItemId,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<Value, CodegenError> {
+        let item_name = self.program.item_name(item).to_owned();
+        let expr_layout = self.program.kernels()[kernel_id].exprs()[expr_id].layout;
+        let abi = self.field_abi_shape(
+            kernel_id,
+            expr_layout,
+            &format!("imported item `{item_name}` value slot"),
+        )?;
+        let data_id = self.declare_imported_item_slot(item)?;
+        let global = self.module.declare_data_in_func(data_id, builder.func);
+        let slot = builder.ins().symbol_value(self.pointer_type(), global);
+        Ok(builder.ins().load(abi.ty, MemFlags::new(), slot, 0))
+    }
+
+    fn declare_callable_item_descriptor(
+        &mut self,
+        item: ItemId,
+        body: KernelId,
+        arity: usize,
+    ) -> Result<DataId, CodegenError> {
+        if let Some(data_id) = self.declared_callable_descriptors.get(&item).copied() {
+            return Ok(data_id);
+        }
+
+        let func_id = *self.declared_functions.get(&body).ok_or_else(|| {
+            CodegenError::CraneliftModule {
+                kernel: Some(body),
+                message: format!(
+                    "item callable descriptor for item{item} requires declared body kernel {body}"
+                )
+                .into_boxed_str(),
+            }
+        })?;
+        let symbol = callable_descriptor_symbol(self.program, item);
+        let data_id = self
+            .module
+            .declare_data(&symbol, Linkage::Local, false, false)
+            .map_err(|error| CodegenError::CraneliftModule {
+                kernel: Some(body),
+                message: error.to_string().into_boxed_str(),
+            })?;
+        let pointer_bytes = self.pointer_type().bytes() as usize;
+        let mut bytes = vec![0; pointer_bytes + 16];
+        write_u32_le(&mut bytes, pointer_bytes, item.as_raw());
+        write_u32_le(&mut bytes, pointer_bytes + 4, body.as_raw());
+        write_u32_le(
+            &mut bytes,
+            pointer_bytes + 8,
+            u32::try_from(arity).map_err(|_| CodegenError::CraneliftModule {
+                kernel: Some(body),
+                message: format!(
+                    "item callable descriptor for item{item} exceeds the current 32-bit arity metadata bound"
+                )
+                .into_boxed_str(),
+            })?,
+        );
+        write_u32_le(&mut bytes, pointer_bytes + 12, 1);
+
+        let mut data = DataDescription::new();
+        data.define(bytes.into_boxed_slice());
+        data.set_align(u64::from(self.pointer_type().bytes()).max(8));
+        let func = self.module.declare_func_in_data(func_id, &mut data);
+        data.write_function_addr(0, func);
+        self.module
+            .define_data(data_id, &data)
+            .map_err(|error| CodegenError::CraneliftModule {
+                kernel: Some(body),
+                message: error.to_string().into_boxed_str(),
+            })?;
+        self.declared_callable_descriptors.insert(item, data_id);
+        Ok(data_id)
+    }
+
+    fn lower_item_callable_descriptor(
+        &mut self,
+        _kernel_id: KernelId,
+        item: ItemId,
+        body: KernelId,
+        arity: usize,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<Value, CodegenError> {
+        let data_id = self.declare_callable_item_descriptor(item, body, arity)?;
+        let global = self.module.declare_data_in_func(data_id, builder.func);
+        Ok(builder.ins().symbol_value(self.pointer_type(), global))
+    }
+
+    fn declare_text_concat_helper(&mut self) -> Result<FuncId, CodegenError> {
+        if let Some(func_id) = self.text_concat_helper {
+            return Ok(func_id);
+        }
+
+        let mut signature = self.module.make_signature();
+        signature.params.push(AbiParam::new(self.pointer_type()));
+        signature.params.push(AbiParam::new(types::I64));
+        signature.returns.push(AbiParam::new(self.pointer_type()));
+        let func_id = self
+            .module
+            .declare_function(
+                "aivi_runtime_text_concat_parts_v1",
+                Linkage::Import,
+                &signature,
+            )
+            .map_err(|error| CodegenError::CraneliftModule {
+                kernel: None,
+                message: error.to_string().into_boxed_str(),
+            })?;
+        self.text_concat_helper = Some(func_id);
+        Ok(func_id)
+    }
+
+    fn lower_dynamic_text_concat(
+        &mut self,
+        kernel_id: KernelId,
+        expr_id: KernelExprId,
+        parts: &[Value],
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<Value, CodegenError> {
+        if parts.is_empty() {
+            return self.materialize_text_constant(kernel_id, "", builder);
+        }
+        if parts.len() == 1 {
+            return Ok(parts[0]);
+        }
+
+        let pointer_bytes = self.pointer_type().bytes();
+        let slot = builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            pointer_bytes
+                .checked_mul(u32::try_from(parts.len()).map_err(|_| self.unsupported_expression(
+                    kernel_id,
+                    expr_id,
+                    "dynamic text interpolation produced more parts than the current stack-slot ABI can address",
+                ))?)
+                .ok_or_else(|| {
+                    self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "dynamic text interpolation overflowed stack-slot sizing",
+                    )
+                })?,
+            pointer_bytes.trailing_zeros() as u8,
+        ));
+        let base = builder.ins().stack_addr(self.pointer_type(), slot, 0);
+        for (index, part) in parts.iter().enumerate() {
+            builder.ins().store(
+                MemFlags::new(),
+                *part,
+                base,
+                i32::try_from(index)
+                    .ok()
+                    .and_then(|index| index.checked_mul(pointer_bytes as i32))
+                    .ok_or_else(|| {
+                        self.unsupported_expression(
+                            kernel_id,
+                            expr_id,
+                            "dynamic text interpolation exceeded the current stack address range",
+                        )
+                    })?,
+            );
+        }
+        let func_id = self.declare_text_concat_helper()?;
+        let local = self.module.declare_func_in_func(func_id, builder.func);
+        let count = builder.ins().iconst(types::I64, parts.len() as i64);
+        let call = builder.ins().call(local, &[base, count]);
+        let [result] = builder.inst_results(call) else {
+            unreachable!("text concat helper should return exactly one pointer");
+        };
+        Ok(*result)
     }
 
     fn resolve_direct_apply_plan(
@@ -5224,6 +5642,11 @@ fn align_to(offset: u32, align: u32) -> u32 {
     (offset + (align - 1)) & !(align - 1)
 }
 
+fn write_u32_le(bytes: &mut [u8], offset: usize, value: u32) {
+    let end = offset + 4;
+    bytes[offset..end].copy_from_slice(&value.to_le_bytes());
+}
+
 fn kernel_symbol(program: &Program, kernel_id: KernelId, kernel: &Kernel) -> String {
     format!(
         "aivi_{}_kernel{}_{}",
@@ -5267,6 +5690,30 @@ fn kernel_symbol(program: &Program, kernel_id: KernelId, kernel: &Kernel) -> Str
             }
             KernelOriginKind::SourceOption { index, .. } => format!("source_option_{index}"),
         }
+    )
+}
+
+fn signal_slot_symbol(program: &Program, item: ItemId) -> String {
+    format!(
+        "aivi_{}_signal_slot_{}",
+        sanitize_symbol_component(program.item_name(item)),
+        item.as_raw()
+    )
+}
+
+fn imported_item_slot_symbol(program: &Program, item: ItemId) -> String {
+    format!(
+        "aivi_{}_import_slot_{}",
+        sanitize_symbol_component(program.item_name(item)),
+        item.as_raw()
+    )
+}
+
+fn callable_descriptor_symbol(program: &Program, item: ItemId) -> String {
+    format!(
+        "aivi_{}_callable_item_{}",
+        sanitize_symbol_component(program.item_name(item)),
+        item.as_raw()
     )
 }
 

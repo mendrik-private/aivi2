@@ -35,7 +35,7 @@ use aivi.desktop.xdg (
 
 ### dataHome
 
-```
+```aivi
 dataHome : Text
 ```
 
@@ -53,7 +53,7 @@ value appDataDir = join dataHome "myapp"
 
 ### configHome
 
-```
+```aivi
 configHome : Text
 ```
 
@@ -71,7 +71,7 @@ value appConfigDir = join configHome "myapp"
 
 ### cacheHome
 
-```
+```aivi
 cacheHome : Text
 ```
 
@@ -89,7 +89,7 @@ value appCacheDir = join cacheHome "myapp"
 
 ### stateHome
 
-```
+```aivi
 stateHome : Text
 ```
 
@@ -107,7 +107,7 @@ value appStateDir = join stateHome "myapp"
 
 ### runtimeDir
 
-```
+```aivi
 runtimeDir : Option Text
 ```
 
@@ -116,7 +116,7 @@ The base directory for user-specific non-essential runtime files (sockets, pipes
 Returns `None` when `$XDG_RUNTIME_DIR` is not set. On a running GNOME session this is
 always set (typically `/run/user/1000`).
 
-```
+```aivi
 use aivi.desktop.xdg (runtimeDir)
 
 use aivi.option (withDefault)
@@ -126,7 +126,7 @@ value socketBase = withDefault "/tmp" runtimeDir
 
 ### dataDirs
 
-```
+```aivi
 dataDirs : List Text
 ```
 
@@ -134,7 +134,7 @@ Ordered search path for system-wide data directories.
 
 Default: `["/usr/local/share", "/usr/share"]`
 
-```
+```aivi
 use aivi.desktop.xdg (
     dataDirs
     dataHome
@@ -145,7 +145,7 @@ value allDataDirs
 
 ### configDirs
 
-```
+```aivi
 configDirs : List Text
 ```
 
@@ -153,7 +153,7 @@ Ordered search path for system-wide configuration directories.
 
 Default: `["/etc/xdg"]`
 
-```
+```aivi
 use aivi.desktop.xdg (
     configDirs
     configHome
@@ -193,7 +193,7 @@ value cacheDir = join cacheHome "com.example.MyApp"
 
 ## Example — find a data file across the search path
 
-```
+```aivi
 use aivi.desktop.xdg (
     dataDirs
     dataHome

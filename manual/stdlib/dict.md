@@ -30,7 +30,7 @@ use aivi.core.dict (
 
 ## Dict
 
-```
+```aivi
 type Dict K V = { entries: List (DictEntry K V) }
 type DictEntry K V = { key: K, value: V }
 ```
@@ -51,7 +51,7 @@ value emptyScores : (Dict Text Int) = {
 
 Creates a dict with exactly one entry.
 
-```
+```aivi
 singleton : K -> V -> Dict K V
 ```
 
@@ -70,7 +70,7 @@ value greeting : (Dict Text Text) = singleton "hello" "world"
 
 Inserts or replaces a key. If the key already exists, the old value is discarded.
 
-```
+```aivi
 insert : Eq K -> K -> V -> Dict K V -> Dict K V
 ```
 
@@ -91,7 +91,7 @@ value scores : (Dict Text Int) = { entries: [] }
 
 Inserts a key, combining the new value with the existing one using `merge` if the key is already present.
 
-```
+```aivi
 insertWith : Eq K -> (V -> V -> V) -> K -> V -> Dict K V -> Dict K V
 ```
 
@@ -114,7 +114,7 @@ func addScore = key n d=>    insertWith addScores key n d
 
 Looks up a key. Returns `None` when the key is absent.
 
-```
+```aivi
 get : Eq K -> K -> Dict K V -> Option V
 ```
 
@@ -139,7 +139,7 @@ value found : (Option Int) = get "x" d
 
 Looks up a key, returning a fallback value when the key is absent.
 
-```
+```aivi
 getWithDefault : Eq K -> V -> K -> Dict K V -> V
 ```
 
@@ -164,7 +164,7 @@ value level : Int = getWithDefault 1 "level" d
 
 Returns `True` if the key exists in the dict.
 
-```
+```aivi
 member : Eq K -> K -> Dict K V -> Bool
 ```
 
@@ -189,7 +189,7 @@ value hasIt : Bool = member "exists" d
 
 Removes a key. Has no effect if the key is absent.
 
-```
+```aivi
 remove : Eq K -> K -> Dict K V -> Dict K V
 ```
 
@@ -214,7 +214,7 @@ value cleaned : (Dict Text Int) = remove "temp" d
 
 Returns the number of entries.
 
-```
+```aivi
 size : Dict K V -> Int
 ```
 
@@ -238,7 +238,7 @@ value count : Int = size d
 
 Return the keys or values as a list, in insertion order.
 
-```
+```aivi
 keys   : Dict K V -> List K
 values : Dict K V -> List V
 ```
@@ -266,7 +266,7 @@ value vs : (List Int) = values d
 
 Convert between a `Dict K V` and a list of `(K, V)` pairs.
 
-```
+```aivi
 toList   : Dict K V -> List (K, V)
 fromList : Eq K -> List (K, V) -> Dict K V
 ```
@@ -293,7 +293,7 @@ value back : (List (Text, Int)) = toList d
 
 Applies a function to every value, preserving keys.
 
-```
+```aivi
 mapValues : (V1 -> V2) -> Dict K V1 -> Dict K V2
 ```
 
@@ -321,7 +321,7 @@ value doubled : (Dict Text Int) = mapValues double d
 
 Keeps only entries whose value satisfies a predicate.
 
-```
+```aivi
 filterValues : (V -> Bool) -> Dict K V -> Dict K V
 ```
 
@@ -348,7 +348,7 @@ value highOnly : (Dict Text Int) = filterValues isHigh d
 
 Merges two dicts. When both contain the same key, `combine` is called with the left and right values to produce the merged value.
 
-```
+```aivi
 mergeWith : Eq K -> (V -> V -> V) -> Dict K V -> Dict K V -> Dict K V
 ```
 
@@ -381,7 +381,7 @@ value merged : (Dict Text Int) = mergeWith addScores left right
 
 Merges two dicts. When a key exists in both, the **right** dict wins.
 
-```
+```aivi
 union : Eq K -> Dict K V -> Dict K V -> Dict K V
 ```
 

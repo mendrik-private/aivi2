@@ -30,7 +30,7 @@ Functions that query the structure or contents of a list without changing it.
 
 Returns `True` if the list has no elements.
 
-```
+```aivi
 isEmpty : (List A) -> Bool
 ```
 
@@ -56,7 +56,7 @@ value result2 : Text =
 
 Returns `True` if the list has at least one element.
 
-```
+```aivi
 nonEmpty : (List A) -> Bool
 ```
 
@@ -79,7 +79,7 @@ value result : Text =
 
 Returns the number of elements in a list.
 
-```
+```aivi
 length : (List A) -> Int
 ```
 
@@ -100,7 +100,7 @@ value n : Int =
 
 Returns the first element wrapped in `Some`, or `None` if the list is empty.
 
-```
+```aivi
 head : (List A) -> Option A
 ```
 
@@ -127,7 +127,7 @@ value fallback : Int = firstOrZero []
 
 Returns the element at the given zero-based index wrapped in `Some`, or `None` if the index is negative or out of range.
 
-```
+```aivi
 at : Int -> (List A) -> Option A
 ```
 
@@ -150,7 +150,7 @@ value missing : Option Text = at 9 items
 
 Returns all elements after the first, wrapped in `Some (List A)`, or `None` if the list is empty.
 
-```
+```aivi
 tail : (List A) -> Option (List A)
 ```
 
@@ -175,7 +175,7 @@ value result : List Int =
 
 Returns all elements after the first, or `[]` if the list is empty. A convenient alternative to `tail` when `None` handling is not needed.
 
-```
+```aivi
 tailOrEmpty : (List A) -> List A
 ```
 
@@ -198,7 +198,7 @@ value none : List Int = tailOrEmpty []
 
 Returns the last element wrapped in `Some`, or `None` if the list is empty.
 
-```
+```aivi
 last : (List A) -> Option A
 ```
 
@@ -227,7 +227,7 @@ Functions that produce a new list from an existing one.
 
 Applies a function to every element, returning a new list of the results.
 
-```
+```aivi
 map : (A -> B) -> (List A) -> List B
 ```
 
@@ -247,11 +247,11 @@ value result : List Int = [1, 2, 3]
 
 Returns only the elements that satisfy a predicate.
 
-```
+```aivi
 filter : (A -> Bool) -> (List A) -> List A
 ```
 
-```
+```aivi
 use aivi.list (filter)
 
 type Int -> Bool
@@ -266,7 +266,7 @@ value result
 
 Collapses a list of lists into a single flat list.
 
-```
+```aivi
 flatten : (List (List A)) -> List A
 ```
 
@@ -289,7 +289,7 @@ value flat : List Int = flatten nested
 
 Applies a function returning a list to each element, then flattens the result. Equivalent to `map` followed by `flatten`.
 
-```
+```aivi
 flatMap : (A -> List B) -> (List A) -> List B
 ```
 
@@ -309,7 +309,7 @@ value result : List Int = [1, 2, 3]
 
 Returns the list with its elements in reversed order.
 
-```
+```aivi
 reverse : (List A) -> List A
 ```
 
@@ -333,7 +333,7 @@ value reversed : List Int = reverse original
 
 Returns the first `n` elements. If the list is shorter than `n`, the entire list is returned.
 
-```
+```aivi
 take : Int -> (List A) -> List A
 ```
 
@@ -357,7 +357,7 @@ value first3 : List Int = take 3 items
 
 Skips the first `n` elements and returns the rest.
 
-```
+```aivi
 drop : Int -> (List A) -> List A
 ```
 
@@ -381,7 +381,7 @@ value after2 : List Int = drop 2 items
 
 Returns a new list with the element at the given zero-based index replaced. Negative or out-of-range indices leave the original list unchanged.
 
-```
+```aivi
 replaceAt : Int -> A -> (List A) -> List A
 ```
 
@@ -404,7 +404,7 @@ value unchanged : List Int = replaceAt 9 42 items
 
 Returns the longest prefix of elements that all satisfy the predicate. Stops at the first element that does not match.
 
-```
+```aivi
 takeWhile : (A -> Bool) -> (List A) -> List A
 ```
 
@@ -424,7 +424,7 @@ value result : List Int = [2, 5, 8, 11, 3]
 
 Drops elements from the front as long as they satisfy the predicate, then returns the rest.
 
-```
+```aivi
 dropWhile : (A -> Bool) -> (List A) -> List A
 ```
 
@@ -444,7 +444,7 @@ value result : List Int = [2, 5, 8, 11, 3]
 
 Inserts a separator element between every pair of adjacent elements.
 
-```
+```aivi
 intersperse : A -> (List A) -> List A
 ```
 
@@ -470,11 +470,11 @@ Functions that locate elements or test properties of a list.
 
 Returns `True` if at least one element satisfies the predicate.
 
-```
+```aivi
 any : (A -> Bool) -> (List A) -> Bool
 ```
 
-```
+```aivi
 use aivi.list (any)
 
 type Int -> Bool
@@ -489,11 +489,11 @@ value result
 
 Returns `True` if every element satisfies the predicate.
 
-```
+```aivi
 all : (A -> Bool) -> (List A) -> Bool
 ```
 
-```
+```aivi
 use aivi.list (all)
 
 type Int -> Bool
@@ -515,11 +515,11 @@ value someNeg
 
 Returns the number of elements that satisfy the predicate.
 
-```
+```aivi
 count : (A -> Bool) -> (List A) -> Int
 ```
 
-```
+```aivi
 use aivi.list (count)
 
 type Int -> Bool
@@ -534,7 +534,7 @@ value n
 
 Returns the first element that satisfies the predicate, or `None`.
 
-```
+```aivi
 find : (A -> Bool) -> (List A) -> Option A
 ```
 
@@ -559,11 +559,11 @@ func findUser = id users=>    find (hasId id) users
 
 Applies a function to each element in order and returns the first `Some` result, or `None` if all calls return `None`. Useful for combined search-and-transform.
 
-```
+```aivi
 findMap : (A -> Option B) -> (List A) -> Option B
 ```
 
-```
+```aivi
 use aivi.list (findMap)
 
 type Int -> Option Int
@@ -579,7 +579,7 @@ value result
 
 Returns `True` if any element equals the target, using the provided equality function.
 
-```
+```aivi
 contains : (A -> A -> Bool) -> A -> (List A) -> Bool
 ```
 
@@ -612,7 +612,7 @@ value missing : Bool =
 
 Returns the index of the first element satisfying the predicate, or `None`.
 
-```
+```aivi
 indexOf : (A -> Bool) -> (List A) -> Option Int
 ```
 
@@ -641,7 +641,7 @@ Functions that reduce a list to a single value.
 
 Sums all integers in a list. Returns `0` for an empty list.
 
-```
+```aivi
 sum : (List Int) -> Int
 ```
 
@@ -664,7 +664,7 @@ value total : Int =
 
 Multiplies all integers in a list together. Returns `1` for an empty list.
 
-```
+```aivi
 product : (List Int) -> Int
 ```
 
@@ -687,7 +687,7 @@ value result : Int =
 
 Returns the largest element wrapped in `Some`, or `None` for an empty list. Requires a comparison function `cmp` where `cmp a b = True` means `a` is less than `b`.
 
-```
+```aivi
 maximum : (A -> A -> Bool) -> (List A) -> Option A
 ```
 
@@ -716,7 +716,7 @@ value highest : Option Int =
 
 Returns the smallest element wrapped in `Some`, or `None` for an empty list. Accepts the same kind of comparison function as `maximum`.
 
-```
+```aivi
 minimum : (A -> A -> Bool) -> (List A) -> Option A
 ```
 
@@ -749,7 +749,7 @@ Functions that treat lists as ordered collections with identity constraints.
 
 Removes duplicate elements, keeping only the first occurrence of each. Requires an equality function.
 
-```
+```aivi
 unique : (A -> A -> Bool) -> (List A) -> List A
 ```
 
@@ -776,7 +776,7 @@ value deduped : List Int =
 
 Sorts a list using an ordering function. The function `cmp a b` should return `True` when `a` should appear before `b` in the result.
 
-```
+```aivi
 sortBy : (A -> A -> Bool) -> (List A) -> List A
 ```
 
@@ -822,13 +822,13 @@ value descending : List Int =
 
 Splits a list into two sub-lists: `matched` (elements satisfying the predicate) and `unmatched` (those that do not). Preserves the original order in both sub-lists.
 
-```
+```aivi
 partition : (A -> Bool) -> (List A) -> Partition A
 ```
 
 `Partition A` is a record `{ matched: List A, unmatched: List A }`.
 
-```
+```aivi
 use aivi.list (
     Partition
     partition
@@ -852,7 +852,7 @@ Functions that combine multiple lists element-by-element.
 
 Pairs up elements from two lists into a list of tuples. The result length equals the shorter of the two inputs.
 
-```
+```aivi
 zip : (List A) -> (List B) -> List (A, B)
 ```
 
@@ -880,7 +880,7 @@ value pairs : List (Text, Int) = zip names scores
 
 Like `zip`, but instead of producing tuples it applies a combining function to each pair of elements.
 
-```
+```aivi
 zipWith : (A -> B -> C) -> (List A) -> (List B) -> List C
 ```
 
@@ -904,7 +904,7 @@ value sums : List Int =
 
 Separates a list of pairs into two separate lists. The inverse of `zip`.
 
-```
+```aivi
 unzip : (List (A, B)) -> UnzipState A B
 ```
 

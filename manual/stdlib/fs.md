@@ -182,7 +182,7 @@ func cleanCache = cacheDir=>    deleteDir cacheDir
 
 ## Real-world example
 
-```
+```aivi
 use aivi.fs (
     readText
     writeText

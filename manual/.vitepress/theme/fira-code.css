@@ -4,10 +4,10 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&display=swap');
 :root {
-  --vp-font-family-base: 'JetBrains Mono', monospace;
+  --vp-font-family-base: 'Inter', sans-serif;
   font-variant-ligatures: common-ligatures contextual;
   font-feature-settings: 'liga' 1, 'calt' 1;
-  --vp-font-family-mono: 'Fira Code', 'Fira Mono', 'Cascadia Code', 'JetBrains Mono', monospace;
+  --vp-font-family-mono: 'Fira Code', 'Fira Mono', 'Cascadia Code', monospace;
 
   /* Ghostty / AIVI Dark palette exposed as CSS custom properties */
   --aivi-bg:      #1D1F21;
@@ -78,6 +78,13 @@
 .VPNav code {
   font-family: var(--vp-font-family-mono);
   font-feature-settings: 'liga' 1, 'calt' 1;
+}
+
+/* ── Pipe operator in prose ───────────────────────────────────────────────── */
+.vp-doc .pipe-op {
+  font-family: var(--vp-font-family-mono);
+  font-feature-settings: 'liga' 1, 'calt' 1;
+  font-size: 0.9em;
 }
 
 /* ── Copy button: blend into dark background ──────────────────────────────── */

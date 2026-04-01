@@ -166,7 +166,7 @@ There is currently no exported `fromNonEmpty` helper. Build a `NonEmptyList A` d
 
 **Related constructors:** `singleton`, `cons`, `fromList`
 
-```
+```aivi
 use aivi.nonEmpty (
     singleton
     fromList

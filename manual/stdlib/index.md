@@ -258,7 +258,7 @@ use aivi.path (
 )
 ```
 
-```
+```aivi
 domain Path over Text
     parse: Text -> Result PathError Path
     (/):Path -> Text -> Path
@@ -267,7 +267,7 @@ domain Path over Text
 
 Example:
 
-```
+```aivi
 use aivi.path (Path)
 
 value configPath:Path = root "/etc" / "myapp" / "config.toml"
@@ -303,7 +303,7 @@ type FsEvent =
 
 Use with `@source fs.watch`:
 
-```
+```aivi
 @source fs.watch "/tmp/data.txt" with {
     events: [Created, Changed, Deleted]
 }
@@ -341,7 +341,7 @@ domain Retry over Int
 
 Use with `@source http.get`:
 
-```
+```aivi
 use aivi.http (
     HttpError
     Strict

@@ -127,7 +127,7 @@ use aivi.core.bytes (repeat)
 
 ## Real-world example
 
-```
+```aivi
 use aivi.core.bytes (
     fromText
     toText

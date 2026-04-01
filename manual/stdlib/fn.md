@@ -22,7 +22,7 @@ use aivi.core.fn (
 
 Returns its argument unchanged. Useful as a no-op transformer in pipelines.
 
-```
+```aivi
 identity : A -> A
 ```
 
@@ -39,7 +39,7 @@ func keepAsIs = n=>    identity n
 
 Returns a function that always returns its first argument, ignoring the second. Useful for discarding an input in a pipeline step.
 
-```
+```aivi
 const : A -> B -> A
 ```
 
@@ -56,7 +56,7 @@ func alwaysForty = ignored=>    const 42 ignored
 
 Reverses the order of the first two arguments of a two-argument function.
 
-```
+```aivi
 flip : (A -> B -> C) -> B -> A -> C
 ```
 
@@ -75,7 +75,7 @@ func clampFlipped = high low n=>    flip clamp high low n
 
 Composes two functions, applying `g` first and then `f`. `compose f g x` is equivalent to `f (g x)`.
 
-```
+```aivi
 compose : (B -> C) -> (A -> B) -> A -> C
 ```
 
@@ -97,7 +97,7 @@ func negAbs = n=>    compose negate abs n
 
 Applies `f` first and then `g`. The reverse of `compose`. `andThen f g x` is equivalent to `g (f x)`. Often called "left-to-right composition" or `>>>`.
 
-```
+```aivi
 andThen : (A -> B) -> (B -> C) -> A -> C
 ```
 
@@ -119,7 +119,7 @@ func absNeg = n=>    andThen abs negate n
 
 Returns a function that ignores its argument and always returns the given value. Equivalent to `const` with argument order swapped.
 
-```
+```aivi
 always : A -> B -> A
 ```
 
@@ -136,7 +136,7 @@ func constantZero = ignored=>    always 0 ignored
 
 Applies a transformation `f` to both arguments before combining them with `combine`. Useful for comparing or combining values after mapping.
 
-```
+```aivi
 on : (B -> B -> C) -> (A -> B) -> A -> A -> C
 ```
 
@@ -158,7 +158,7 @@ func absCompare = x y=>    on byInt abs x y
 
 Applies a function to a value. `applyTo x f` is equivalent to `f x`. Useful for making value-first pipelines.
 
-```
+```aivi
 applyTo : A -> (A -> B) -> B
 ```
 
@@ -177,7 +177,7 @@ func applyAbs = n=>    applyTo n abs
 
 Applies a function to itself twice: `applyTwice f x` is equivalent to `f (f x)`.
 
-```
+```aivi
 applyTwice : (A -> A) -> A -> A
 ```
 

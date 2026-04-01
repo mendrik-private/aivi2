@@ -17,7 +17,7 @@ use aivi.text (
 
 Returns `True` if the text is an empty string (`""`).
 
-```
+```aivi
 isEmpty : Text -> Bool
 ```
 
@@ -35,7 +35,7 @@ func showPlaceholder = label=> isEmpty label T|> "Untitled"
 
 Returns `True` if the text is not empty. The negation of `isEmpty`.
 
-```
+```aivi
 nonEmpty : Text -> Bool
 ```
 
@@ -54,7 +54,7 @@ func filterLabels = labels=>    filter nonEmpty labels
 
 Joins a list of `Text` values into a single string, inserting the given separator between each element. Use `join "" parts` when you want concatenation with no separator.
 
-```
+```aivi
 join : Text -> List Text -> Text
 ```
 
@@ -72,7 +72,7 @@ func csvLine = fields=>    join "," fields
 
 Wraps a `Text` value with a prefix and a suffix.
 
-```
+```aivi
 surround : Text -> Text -> Text -> Text
 ```
 
