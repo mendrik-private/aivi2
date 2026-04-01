@@ -405,8 +405,7 @@ impl HydrationRevisionState {
     }
 
     fn should_apply(&self, revision: u64) -> bool {
-        self.latest_requested.is_some_and(|latest| revision == latest)
-            && self.latest_applied.map_or(true, |applied| revision > applied)
+        self.latest_applied.map_or(true, |applied| revision > applied)
     }
 
     fn mark_applied(&mut self, revision: u64) {
@@ -1190,11 +1189,18 @@ mod tests {
         assert_eq!(first, 1);
         assert_eq!(second, 2);
         assert_eq!(revisions.latest_requested(), Some(2));
+        assert!(revisions.should_apply(first));
+        assert!(revisions.should_apply(second));
+
+        revisions.mark_applied(first);
+        assert_eq!(revisions.latest_applied(), Some(first));
         assert!(!revisions.should_apply(first));
         assert!(revisions.should_apply(second));
 
         revisions.mark_applied(second);
         assert_eq!(revisions.latest_applied(), Some(second));
+        assert!(!revisions.should_apply(first));
+        assert!(!revisions.should_apply(second));
     }
 
     #[test]

@@ -1,3 +1,10 @@
+use aivi.list (
+    length as listLength
+    head as listHead
+    any
+)
+use aivi.option (getOrElse)
+
 type Direction =
   | North
   | South
@@ -21,10 +28,6 @@ type SnakeTakeState = {
     remaining: Int,
     cells: List Cell
 }
-
-type List Cell -> Snake
-func makeSnake = cells =>
-    fromCells cells
 
 domain Duration over Int
     literal ms : Int -> Duration
@@ -57,28 +60,6 @@ type Int -> Int
 func nextSeed = s =>
     (s * 1103515245 + 12345) % 2147483647
 
-type Cell -> Bool -> Cell -> Bool
-func snakeContainsStep = target found item => found
- T|> True
- F|> item == target
-
-type List Cell -> Cell
-func snakeHeadRaw = .
- ||> [head, ...rest] -> head
- ||> _               -> Cell 0 0
-
-type List Cell -> Cell -> Bool
-func snakeContainsRaw = snake cell => snake
-  |> reduce (snakeContainsStep cell) False
-
-type Int -> Cell -> Int
-func snakeLengthStep = total cell =>
-    total + 1
-
-type List Cell -> Int
-func snakeLengthRaw = snake => snake
-  |> reduce snakeLengthStep 0
-
 type SnakeTakeState -> Cell -> SnakeTakeState
 func takeCellStep = state item => state.remaining > 0
  T|> { remaining: state.remaining - 1, cells: append state.cells [item] }
@@ -93,17 +74,17 @@ domain Snake over List Cell
     type List Cell -> Snake
     fromCells cells = cells
     type Snake -> Cell
-    head snake = snakeHeadRaw snake
+    head snake = getOrElse (Cell 0 0) (listHead snake)
     type Snake -> Cell -> Bool
-    contains snake cell = snakeContainsRaw snake cell
+    contains snake cell = any ((==) cell) snake
     type Snake -> Int
-    length snake = snakeLengthRaw snake
+    length snake = listLength snake
     type Snake -> Cell -> Snake
     grow snake cell = append [cell] snake
     type Snake -> Cell -> Snake
-    move snake cell = takeCells (snakeLengthRaw snake) (append [cell] snake)
+    move snake cell = takeCells (listLength snake) (append [cell] snake)
     type Snake -> Direction -> Cell
-    nextHead snake dir = moveDir dir (snakeHeadRaw snake)
+    nextHead snake dir = moveDir dir (getOrElse (Cell 0 0) (listHead snake))
 
 type GameState = {
     snake: Snake,
@@ -114,8 +95,8 @@ type GameState = {
     status: Status
 }
 
-type Snake -> Int -> Cell
-func spawnFood = snake s =>
+type Int -> Cell
+func spawnFood = s =>
     Cell (s % boardW) (nextSeed s % boardH)
 
 type Direction -> Text
@@ -126,7 +107,7 @@ func dirLabel = d => d
  ||> West  -> "Left"
 
 value snake0 : Snake =
-    makeSnake [
+    fromCells [
         Cell 6 10,
         Cell 5 10,
         Cell 4 10
@@ -135,7 +116,7 @@ value snake0 : Snake =
 value initial : GameState = {
     snake: snake0,
     dir: East,
-    food: spawnFood snake0 seed0,
+    food: spawnFood seed0,
     score: 0,
     seed: seed0,
     status: Running
@@ -169,7 +150,7 @@ func advance = st h => outside h or (st.snake.contains h)
 
 type GameState -> Cell -> GameState
 func resolveMove = st h => h == st.food
- T|> { snake: st.snake.grow h, dir: st.dir, food: spawnFood (st.snake.grow h) (nextSeed st.seed), score: st.score + 1, seed: nextSeed st.seed, status: Running }
+ T|> { snake: st.snake.grow h, dir: st.dir, food: spawnFood (nextSeed st.seed), score: st.score + 1, seed: nextSeed st.seed, status: Running }
  F|> { snake: st.snake.move h, dir: st.dir, food: st.food, score: st.score, seed: nextSeed st.seed, status: Running }
 
 type GameState -> Int -> Int -> Text
