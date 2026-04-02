@@ -1226,15 +1226,6 @@ where
                 event: route.binding.name.text().to_owned().into_boxed_str(),
             }
         })?;
-        // NOTE: Signal handler IDs are stored in `MountedEvent` but are only
-        // disconnected when `disconnect_event` is explicitly called. If a widget
-        // is destroyed without going through `disconnect_event`, the handler ID
-        // becomes stale and can cause use-after-free or ghost callbacks if the
-        // handler closure captures live state (e.g. an Rc to the event queue).
-        //
-        // TODO: Track handler IDs alongside widget lifetimes and disconnect them
-        // automatically in `release_widget`, before the GTK object is dropped.
-        // Consider hooking into the widget's `destroy` signal as a safety net.
         let signal = match event.signal {
             GtkEventSignal::ButtonClicked => widget
                 .clone()

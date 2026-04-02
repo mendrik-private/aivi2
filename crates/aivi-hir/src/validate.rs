@@ -149,6 +149,7 @@ pub fn validate_types(module: &Module, mode: ValidationMode) -> ValidationReport
     v.validate_instance_items();
     v.validate_source_contract_types();
     v.validate_expression_types();
+    v.validate_regex_expression_positions();
     v.validate_constructor_arity();
     v.validate_pipe_semantics();
     ValidationReport::new(v.diagnostics)
@@ -8196,6 +8197,34 @@ impl Validator<'_> {
         }
     }
 
+    fn validate_regex_expression_positions(&mut self) {
+        if self.mode != ValidationMode::RequireResolvedNames {
+            return;
+        }
+        let source_option_exprs = collect_source_decorator_expr_ids(self.module);
+        for (expr_id, expr) in self.module.exprs().iter() {
+            let ExprKind::Regex(_) = &expr.kind else {
+                continue;
+            };
+            if source_option_exprs.contains(&expr_id) {
+                continue;
+            }
+            self.diagnostics.push(
+                Diagnostic::error(
+                    "regex literals cannot appear in expression position; use the `aivi.regex` module for runtime pattern matching",
+                )
+                .with_code(code("regex-in-expression"))
+                .with_primary_label(
+                    expr.span,
+                    "regex literals are only valid as @source option values",
+                )
+                .with_note(
+                    "for runtime pattern matching, use the `aivi.regex` module instead of a bare regex literal",
+                ),
+            );
+        }
+    }
+
     fn check_source_metadata(&mut self, span: SourceSpan, metadata: &SourceMetadata) {
         self.check_source_dependency_list(span, "source metadata", &metadata.signal_dependencies);
         self.check_source_dependency_list(
@@ -8715,6 +8744,72 @@ fn code(name: &'static str) -> DiagnosticCode {
 fn regex_literal_body(raw: &str) -> Option<&str> {
     raw.strip_prefix("rx\"")
         .and_then(|pattern| pattern.strip_suffix('\"'))
+}
+
+/// Collects all expression IDs that are reachable from `@source` decorator
+/// arguments and option expressions. These are the only positions where a
+/// regex literal is a valid HIR node.
+fn collect_source_decorator_expr_ids(module: &Module) -> HashSet<ExprId> {
+    let mut ids = HashSet::new();
+    for (_, decorator) in module.decorators().iter() {
+        let DecoratorPayload::Source(source) = &decorator.payload else {
+            continue;
+        };
+        for &arg in &source.arguments {
+            collect_expr_subtree(module, arg, &mut ids);
+        }
+        if let Some(options) = source.options {
+            collect_expr_subtree(module, options, &mut ids);
+        }
+    }
+    ids
+}
+
+fn collect_expr_subtree(module: &Module, expr_id: ExprId, ids: &mut HashSet<ExprId>) {
+    if !ids.insert(expr_id) {
+        return;
+    }
+    match &module.exprs()[expr_id].kind {
+        ExprKind::Record(record) => {
+            for field in &record.fields {
+                collect_expr_subtree(module, field.value, ids);
+            }
+        }
+        ExprKind::Map(map) => {
+            for entry in &map.entries {
+                collect_expr_subtree(module, entry.key, ids);
+                collect_expr_subtree(module, entry.value, ids);
+            }
+        }
+        ExprKind::List(elements) | ExprKind::Set(elements) => {
+            for &elem in elements {
+                collect_expr_subtree(module, elem, ids);
+            }
+        }
+        ExprKind::Tuple(elements) => {
+            for &elem in elements.iter() {
+                collect_expr_subtree(module, elem, ids);
+            }
+        }
+        ExprKind::Apply { callee, arguments } => {
+            collect_expr_subtree(module, *callee, ids);
+            for &arg in arguments.iter() {
+                collect_expr_subtree(module, arg, ids);
+            }
+        }
+        ExprKind::Unary { expr, .. } => {
+            collect_expr_subtree(module, *expr, ids);
+        }
+        ExprKind::Binary { left, right, .. } => {
+            collect_expr_subtree(module, *left, ids);
+            collect_expr_subtree(module, *right, ids);
+        }
+        // Leaf expressions (Name, Integer, Float, Decimal, BigInt, SuffixedInteger,
+        // Text, Regex, AmbientSubject) and complex expressions not valid in source
+        // option position (Projection, Pipe, Cluster, Markup, PatchApply,
+        // PatchLiteral) — treat as leaves and stop.
+        _ => {}
+    }
 }
 
 fn invalid_regex_literal_diagnostic(

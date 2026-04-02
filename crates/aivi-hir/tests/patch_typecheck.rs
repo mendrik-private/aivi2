@@ -1,4 +1,4 @@
-use aivi_base::{DiagnosticCode, SourceDatabase};
+use aivi_base::SourceDatabase;
 use aivi_hir::{lower_module, typecheck_module};
 use aivi_syntax::parse_module;
 
@@ -103,7 +103,7 @@ fn reports_patch_remove_as_unsupported() {
     );
     assert!(
         report.diagnostics().iter().any(|diagnostic| {
-            diagnostic.code == Some(DiagnosticCode::new("hir", "unsupported-patch-remove"))
+            diagnostic.code == Some(aivi_hir::codes::UNSUPPORTED_PATCH_REMOVE)
         }),
         "expected unsupported patch removal diagnostic, got diagnostics: {:?}",
         report.diagnostics()

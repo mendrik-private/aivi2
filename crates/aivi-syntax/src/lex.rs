@@ -1,10 +1,6 @@
-use aivi_base::{Diagnostic, DiagnosticCode, SourceFile, Span};
+use aivi_base::{Diagnostic, SourceFile, Span};
 
-const UNEXPECTED_CHARACTER: DiagnosticCode = DiagnosticCode::new("syntax", "unexpected-character");
-const UNTERMINATED_STRING: DiagnosticCode = DiagnosticCode::new("syntax", "unterminated-string");
-const UNTERMINATED_REGEX: DiagnosticCode = DiagnosticCode::new("syntax", "unterminated-regex");
-const INVALID_ESCAPE_SEQUENCE: DiagnosticCode =
-    DiagnosticCode::new("syntax", "invalid-escape-sequence");
+use crate::codes::{INVALID_ESCAPE_SEQUENCE, UNEXPECTED_CHARACTER, UNTERMINATED_REGEX, UNTERMINATED_STRING};
 
 /// Token kinds required for the Milestone 1 surface grammar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

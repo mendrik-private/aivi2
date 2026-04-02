@@ -573,9 +573,6 @@ where
             .map_err(GtkEventDispatchError::Sink)
     }
 
-    // NOTE: No transaction semantics. If this update partially succeeds and then
-    // fails, the executor is left in an inconsistent state with no rollback.
-    // TODO: Wrap multi-step widget updates in a transaction that rolls back on error.
     pub fn update_show(
         &mut self,
         instance: &GtkNodeInstance,
@@ -596,9 +593,7 @@ where
             .bridge
             .show_transition(instance.node, previous, when, keep_mounted)
             .map_err(GtkExecutorError::Bridge)?;
-        for edit in transition.edits.iter() {
-            self.apply_group_edit(instance, edit)?;
-        }
+        self.apply_group_edits_with_rollback(instance, &transition.edits)?;
         match &mut self.instance_state_mut(instance)?.kind {
             MountedNodeKind::Show(show) => show.state = transition.next,
             _ => unreachable!(),
@@ -606,9 +601,6 @@ where
         Ok(())
     }
 
-    // NOTE: No transaction semantics. If this update partially succeeds and then
-    // fails, the executor is left in an inconsistent state with no rollback.
-    // TODO: Wrap multi-step widget updates in a transaction that rolls back on error.
     pub fn update_match(
         &mut self,
         instance: &GtkNodeInstance,
@@ -628,9 +620,7 @@ where
             .bridge
             .match_transition(instance.node, previous_case, next_case)
             .map_err(GtkExecutorError::Bridge)?;
-        for edit in transition.edits.iter() {
-            self.apply_group_edit(instance, edit)?;
-        }
+        self.apply_group_edits_with_rollback(instance, &transition.edits)?;
         match &mut self.instance_state_mut(instance)?.kind {
             MountedNodeKind::Match(match_state) => {
                 match_state.active_case = Some(next_case);
@@ -754,6 +744,52 @@ where
         match &mut self.instance_state_mut(instance)?.kind {
             MountedNodeKind::Each(each) => each.empty_branch = Some(empty_instance),
             _ => unreachable!(),
+        }
+        Ok(())
+    }
+
+    /// Apply a sequence of [`GtkChildGroupEdit`]s with snapshot-and-rollback semantics.
+    ///
+    /// If edit `N` fails, edits `0..N` are reversed in reverse order before returning
+    /// the original error, keeping the executor state consistent with its pre-call state.
+    ///
+    /// Rollback rules per edit kind:
+    /// - `Mount`   → `Unmount` the just-created subtree.
+    /// - `Unmount` → `Mount` from scratch (creates fresh widget instances; original
+    ///               widget handles are unrecoverable once torn down).
+    /// - `SetVisibility` → re-apply the opposite visibility.
+    ///
+    /// Rollback errors are suppressed so the primary error is always returned.
+    fn apply_group_edits_with_rollback(
+        &mut self,
+        context: &GtkNodeInstance,
+        edits: &[GtkChildGroupEdit],
+    ) -> Result<(), GtkExecutorError<H::Error>> {
+        let mut applied: Vec<GtkChildGroupEdit> = Vec::with_capacity(edits.len());
+        for edit in edits {
+            match self.apply_group_edit(context, edit) {
+                Ok(()) => applied.push(edit.clone()),
+                Err(err) => {
+                    for rollback_edit in applied.iter().rev() {
+                        let reverse = match rollback_edit {
+                            GtkChildGroupEdit::Mount { group } => GtkChildGroupEdit::Unmount {
+                                group: group.clone(),
+                            },
+                            GtkChildGroupEdit::Unmount { group } => GtkChildGroupEdit::Mount {
+                                group: group.clone(),
+                            },
+                            GtkChildGroupEdit::SetVisibility { group, visible } => {
+                                GtkChildGroupEdit::SetVisibility {
+                                    group: group.clone(),
+                                    visible: !visible,
+                                }
+                            }
+                        };
+                        let _ = self.apply_group_edit(context, &reverse);
+                    }
+                    return Err(err);
+                }
+            }
         }
         Ok(())
     }
@@ -2062,6 +2098,139 @@ mod tests {
         }
     }
 
+    /// A host that wraps [`TestHost`] and can inject a one-shot visibility failure.
+    struct FallibleTestHost {
+        inner: TestHost,
+        fail_next_visibility: bool,
+    }
+
+    impl FallibleTestHost {
+        fn with_pending_visibility_failure() -> Self {
+            Self {
+                inner: TestHost::default(),
+                fail_next_visibility: true,
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    enum FallibleTestHostError {
+        InjectedVisibilityFailure,
+    }
+
+    impl GtkRuntimeHost<TestValue> for FallibleTestHost {
+        type Widget = TestWidget;
+        type EventHandle = TestEventHandle;
+        type Error = FallibleTestHostError;
+
+        fn create_widget(
+            &mut self,
+            instance: &GtkNodeInstance,
+            widget: &aivi_hir::NamePath,
+        ) -> Result<Self::Widget, Self::Error> {
+            self.inner
+                .create_widget(instance, widget)
+                .map_err(|e| match e {})
+        }
+
+        fn apply_static_property(
+            &mut self,
+            widget: &Self::Widget,
+            property: &StaticPropertyPlan,
+        ) -> Result<(), Self::Error> {
+            self.inner
+                .apply_static_property(widget, property)
+                .map_err(|e| match e {})
+        }
+
+        fn apply_dynamic_property(
+            &mut self,
+            widget: &Self::Widget,
+            binding: &RuntimeSetterBinding,
+            value: &TestValue,
+        ) -> Result<(), Self::Error> {
+            self.inner
+                .apply_dynamic_property(widget, binding, value)
+                .map_err(|e| match e {})
+        }
+
+        fn connect_event(
+            &mut self,
+            widget: &Self::Widget,
+            route: &GtkEventRoute,
+        ) -> Result<Self::EventHandle, Self::Error> {
+            self.inner
+                .connect_event(widget, route)
+                .map_err(|e| match e {})
+        }
+
+        fn disconnect_event(
+            &mut self,
+            widget: &Self::Widget,
+            event: &Self::EventHandle,
+        ) -> Result<(), Self::Error> {
+            self.inner
+                .disconnect_event(widget, event)
+                .map_err(|e| match e {})
+        }
+
+        fn insert_children(
+            &mut self,
+            parent: &Self::Widget,
+            group: &'static GtkChildGroupDescriptor,
+            index: usize,
+            children: &[Self::Widget],
+        ) -> Result<(), Self::Error> {
+            self.inner
+                .insert_children(parent, group, index, children)
+                .map_err(|e| match e {})
+        }
+
+        fn remove_children(
+            &mut self,
+            parent: &Self::Widget,
+            group: &'static GtkChildGroupDescriptor,
+            index: usize,
+            children: &[Self::Widget],
+        ) -> Result<(), Self::Error> {
+            self.inner
+                .remove_children(parent, group, index, children)
+                .map_err(|e| match e {})
+        }
+
+        fn move_children(
+            &mut self,
+            parent: &Self::Widget,
+            group: &'static GtkChildGroupDescriptor,
+            from: usize,
+            count: usize,
+            to: usize,
+            children: &[Self::Widget],
+        ) -> Result<(), Self::Error> {
+            self.inner
+                .move_children(parent, group, from, count, to, children)
+                .map_err(|e| match e {})
+        }
+
+        fn set_widget_visibility(
+            &mut self,
+            widget: &Self::Widget,
+            visible: bool,
+        ) -> Result<(), Self::Error> {
+            if self.fail_next_visibility {
+                self.fail_next_visibility = false;
+                return Err(FallibleTestHostError::InjectedVisibilityFailure);
+            }
+            self.inner
+                .set_widget_visibility(widget, visible)
+                .map_err(|e| match e {})
+        }
+
+        fn release_widget(&mut self, widget: Self::Widget) -> Result<(), Self::Error> {
+            self.inner.release_widget(widget).map_err(|e| match e {})
+        }
+    }
+
     #[derive(Default)]
     struct TestSink {
         dispatched: Vec<(GtkEventRouteId, GtkNodeInstance, u32, TestValue)>,
@@ -2617,6 +2786,145 @@ value view =
                 .dynamic_props
                 .get("text"),
             Some(&TestValue::Text("Beta".to_string()))
+        );
+    }
+
+    #[test]
+    fn executor_rolls_back_show_mount_when_set_visibility_fails() {
+        // Transition: Unmounted → MountedHidden = [Mount, SetVisibility(false)].
+        // With the visibility failure injected, the Mount must be undone by the rollback,
+        // leaving the tree in the same state it was in before the call.
+        let graph = lower_graph(
+            "rollback-show.aivi",
+            r#"
+value view =
+    <Box>
+        <show when={True} keepMounted={True}>
+            <Button label="Save" />
+        </show>
+    </Box>
+"#,
+        );
+        let root = graph.root_node();
+        let GtkBridgeNodeKind::Widget(root_widget_data) = &root.kind else {
+            panic!("expected root widget");
+        };
+        let show_instance = GtkNodeInstance::root(root_widget_data.default_children.roots[0]);
+
+        let host = FallibleTestHost::with_pending_visibility_failure();
+        let mut executor =
+            GtkRuntimeExecutor::<FallibleTestHost, TestValue>::new(graph, host)
+                .expect("executor should mount the root box");
+
+        let root_widget = executor
+            .root_widgets()
+            .expect("root widget should exist")
+            .into_iter()
+            .next()
+            .expect("root widget list should contain the box");
+        assert!(
+            executor.host().inner.child_ids(&root_widget).is_empty(),
+            "box should start with no children"
+        );
+
+        // when=false, keep_mounted=true → Unmounted → MountedHidden = [Mount, SetVisibility(false)].
+        // SetVisibility is the second edit; injecting a failure there should trigger rollback of Mount.
+        let err = executor
+            .update_show(&show_instance, false, true)
+            .expect_err("update_show should propagate the injected visibility error");
+        assert!(
+            matches!(
+                err,
+                GtkExecutorError::Host(FallibleTestHostError::InjectedVisibilityFailure)
+            ),
+            "error should be the injected visibility failure, got: {:?}",
+            err
+        );
+
+        // After rollback the Box must have no children: the Button subtree was torn down.
+        assert!(
+            executor.host().inner.child_ids(&root_widget).is_empty(),
+            "rollback should have removed the Button from the Box"
+        );
+
+        // teardown_subtrees releases every widget it tears down, so the Button must appear
+        // in `released` exactly once.
+        assert_eq!(
+            executor.host().inner.released.len(),
+            1,
+            "rollback should have released the Button widget via teardown"
+        );
+
+        // The show state must not have advanced: a second call should be able to successfully
+        // mount the subtree (failure flag is already consumed).
+        executor
+            .update_show(&show_instance, false, true)
+            .expect("second update_show should succeed now that the failure is consumed");
+        assert!(
+            !executor.host().inner.child_ids(&root_widget).is_empty(),
+            "Box should have children after successful mount"
+        );
+    }
+
+    #[test]
+    fn executor_disconnects_event_handlers_when_show_node_unmounts() {
+        // Verifies that `teardown_subtrees` explicitly disconnects every event handler
+        // registered for widgets in the unmounted subtree.  This locks down the lifecycle
+        // contract described in the NOTE that was removed from `host.rs::connect_event`.
+        let graph = lower_graph(
+            "handler-lifecycle.aivi",
+            r#"
+value click = True
+value view =
+    <Box>
+        <show when={True} keepMounted={False}>
+            <Button label="Save" onClick={click} />
+        </show>
+    </Box>
+"#,
+        );
+        let root = graph.root_node();
+        let GtkBridgeNodeKind::Widget(root_widget_data) = &root.kind else {
+            panic!("expected root widget");
+        };
+        let show_instance = GtkNodeInstance::root(root_widget_data.default_children.roots[0]);
+
+        let mut executor =
+            GtkRuntimeExecutor::<TestHost, TestValue>::new(graph, TestHost::default())
+                .expect("executor should mount the root box");
+
+        // Mount the show subtree (contains a Button with an onClick handler).
+        executor
+            .update_show(&show_instance, true, false)
+            .expect("show should mount the button");
+
+        let root_widget = executor
+            .root_widgets()
+            .expect("root widget should exist")
+            .into_iter()
+            .next()
+            .expect("root widget list should contain the box");
+        let button_widget = {
+            let children = executor.host().widget(&root_widget).children.clone();
+            assert_eq!(children.len(), 1, "Box should have one child after show mount");
+            children[0].clone()
+        };
+        let routes = executor.host().widget(&button_widget).routes.clone();
+        assert_eq!(routes.len(), 1, "Button should have one connected event handler");
+        let route_id = routes[0];
+
+        // Unmount the show subtree.
+        executor
+            .update_show(&show_instance, false, false)
+            .expect("show should unmount the button");
+
+        assert!(
+            executor.host().child_ids(&root_widget).is_empty(),
+            "Box should have no children after unmount"
+        );
+        assert!(
+            executor.host().disconnected.contains(&route_id),
+            "onClick handler should have been disconnected when the Button was unmounted"
         );
     }
 }

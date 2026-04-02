@@ -1,4 +1,4 @@
-use aivi_base::{Diagnostic, DiagnosticCode, Severity, SourceFile, SourceSpan, Span};
+use aivi_base::{Diagnostic, Severity, SourceFile, SourceSpan, Span};
 
 use crate::{
     cst::{
@@ -21,112 +21,7 @@ use crate::{
     lex::{LexedModule, Token, TokenKind, lex_fragment, lex_module},
 };
 
-const UNEXPECTED_TOP_LEVEL_TOKEN: DiagnosticCode =
-    DiagnosticCode::new("syntax", "unexpected-top-level-token");
-const MISSING_DECORATOR_NAME: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-decorator-name");
-const DANGLING_DECORATOR_BLOCK: DiagnosticCode =
-    DiagnosticCode::new("syntax", "dangling-decorator-block");
-const MISSING_ITEM_NAME: DiagnosticCode = DiagnosticCode::new("syntax", "missing-item-name");
-const MISSING_USE_PATH: DiagnosticCode = DiagnosticCode::new("syntax", "missing-use-path");
-const MISSING_USE_ALIAS: DiagnosticCode = DiagnosticCode::new("syntax", "missing-use-alias");
-const MISSING_EXPORT_NAME: DiagnosticCode = DiagnosticCode::new("syntax", "missing-export-name");
-const MISSING_DECLARATION_BODY: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-declaration-body");
-const MISSING_STANDALONE_TYPE_ANNOTATION: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-standalone-type-annotation");
-const ORPHAN_STANDALONE_TYPE_ANNOTATION: DiagnosticCode =
-    DiagnosticCode::new("syntax", "orphan-standalone-type-annotation");
-const DUPLICATE_STANDALONE_TYPE_ANNOTATION: DiagnosticCode =
-    DiagnosticCode::new("syntax", "duplicate-standalone-type-annotation");
-const DIRECT_FUNCTION_PARAMETER_ANNOTATION: DiagnosticCode =
-    DiagnosticCode::new("syntax", "direct-function-parameter-annotation");
-const TRAILING_DECLARATION_BODY_TOKEN: DiagnosticCode =
-    DiagnosticCode::new("syntax", "trailing-declaration-body-token");
-const MISSING_CLASS_MEMBER_TYPE: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-class-member-type");
-const MISSING_CLASS_WITH_TYPE: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-class-with-type");
-const MISSING_CLASS_REQUIRE_TYPE: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-class-require-type");
-const UNSUPPORTED_CLASS_HEAD_CONSTRAINTS: DiagnosticCode =
-    DiagnosticCode::new("syntax", "unsupported-class-head-constraints");
-const MISSING_INSTANCE_CLASS: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-instance-class");
-const MISSING_INSTANCE_TARGET: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-instance-target");
-const MISSING_INSTANCE_MEMBER_BODY: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-instance-member-body");
-const MISSING_CLASS_OPEN_BRACE: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-class-open-brace");
-const MISSING_INSTANCE_OPEN_BRACE: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-instance-open-brace");
-const MISSING_DOMAIN_OPEN_BRACE: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-domain-open-brace");
-const MISSING_DOMAIN_OVER: DiagnosticCode = DiagnosticCode::new("syntax", "missing-domain-over");
-const MISSING_DOMAIN_CARRIER: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-domain-carrier");
-const MISSING_DOMAIN_MEMBER_NAME: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-domain-member-name");
-const MISSING_DOMAIN_MEMBER_TYPE: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-domain-member-type");
-const MISSING_DOMAIN_MEMBER_BODY: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-domain-member-body");
-const MISSING_PROVIDER_CONTRACT_NAME: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-provider-contract-name");
-const MISSING_PROVIDER_CONTRACT_MEMBER_VALUE: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-provider-contract-member-value");
-const MISSING_PROVIDER_CONTRACT_SCHEMA_NAME: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-provider-contract-schema-name");
-const MISSING_PROVIDER_CONTRACT_SCHEMA_TYPE: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-provider-contract-schema-type");
-const MISMATCHED_MARKUP_CLOSE: DiagnosticCode =
-    DiagnosticCode::new("syntax", "mismatched-markup-close");
-const UNTERMINATED_MARKUP_NODE: DiagnosticCode =
-    DiagnosticCode::new("syntax", "unterminated-markup-node");
-const INVALID_MARKUP_CHILD_CONTENT: DiagnosticCode =
-    DiagnosticCode::new("syntax", "invalid-markup-child-content");
-const INVALID_TEXT_INTERPOLATION: DiagnosticCode =
-    DiagnosticCode::new("syntax", "invalid-text-interpolation");
-const UNTERMINATED_TEXT_INTERPOLATION: DiagnosticCode =
-    DiagnosticCode::new("syntax", "unterminated-text-interpolation");
-const INVALID_DISCARD_EXPR: DiagnosticCode = DiagnosticCode::new("syntax", "invalid-discard-expr");
-const MISSING_PIPE_MEMO_NAME: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-pipe-memo-name");
-const EMPTY_RESULT_BLOCK: DiagnosticCode = DiagnosticCode::new("syntax", "empty-result-block");
-const MISSING_RESULT_BINDING_EXPR: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-result-binding-expr");
-const MISSING_RESULT_BLOCK_TAIL: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-result-block-tail");
-const MISSING_REACTIVE_UPDATE_GUARD: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-reactive-update-guard");
-const MISSING_REACTIVE_UPDATE_SUBJECT: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-reactive-update-subject");
-const MISSING_REACTIVE_UPDATE_SOURCE: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-reactive-update-source");
-const MISSING_REACTIVE_UPDATE_SOURCE_PATTERN: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-reactive-update-source-pattern");
-const MISSING_REACTIVE_UPDATE_TARGET: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-reactive-update-target");
-const MISSING_REACTIVE_UPDATE_BODY: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-reactive-update-body");
-const MISSING_REACTIVE_UPDATE_ARROW: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-reactive-update-arrow");
-const MISSING_REACTIVE_UPDATE_LEFT_ARROW: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-reactive-update-left-arrow");
-const MISSING_REACTIVE_UPDATE_ARM_PATTERN: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-reactive-update-arm-pattern");
-const MISSING_REACTIVE_UPDATE_ARM_ARROW: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-reactive-update-arm-arrow");
-const MISSING_REACTIVE_UPDATE_ARM_TARGET: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-reactive-update-arm-target");
-const MISSING_REACTIVE_UPDATE_ARM_LEFT_ARROW: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-reactive-update-arm-left-arrow");
-const MISSING_REACTIVE_UPDATE_ARM_BODY: DiagnosticCode =
-    DiagnosticCode::new("syntax", "missing-reactive-update-arm-body");
-const NULLARY_FUNCTION_DECLARATION: DiagnosticCode =
-    DiagnosticCode::new("syntax", "nullary-function-declaration");
-const PARSE_DEPTH_EXCEEDED: DiagnosticCode = DiagnosticCode::new("syntax", "parse-depth-exceeded");
+use crate::codes::*;
 
 const MAX_PARSE_DEPTH: usize = 256;
 const IMPLICIT_FUNCTION_SUBJECT_NAME: &str = "arg1";

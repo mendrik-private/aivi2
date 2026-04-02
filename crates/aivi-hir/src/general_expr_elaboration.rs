@@ -303,6 +303,12 @@ impl fmt::Display for GeneralExprBlocker {
             Self::UnknownExprType { .. } => {
                 f.write_str("expression type could not be determined for typed-core general-expression lowering")
             }
+            Self::UnsupportedRuntimeExpr {
+                kind: GateRuntimeUnsupportedKind::RegexLiteral,
+                ..
+            } => f.write_str(
+                "regex literals are only valid as @source option values; use the `aivi.regex` module for pattern matching at runtime",
+            ),
             Self::UnsupportedRuntimeExpr { kind, .. } => {
                 write!(f, "{kind} is not supported in typed-core general expressions")
             }
@@ -3645,7 +3651,7 @@ mod tests {
                 ));
                 assert_eq!(
                     blocked.to_string(),
-                    "regex literal is not supported in typed-core general expressions"
+                    "regex literals are only valid as @source option values; use the `aivi.regex` module for pattern matching at runtime",
                 );
             }
             other => panic!("expected blocked pattern body, found {other:?}"),

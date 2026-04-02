@@ -56,7 +56,7 @@ It answers “what checks, executes, runs, or compiles today?” rather than “
 | Numeric literals (`Int`, `Float`, `Decimal`, `BigInt`) | yes | yes | yes | partial | Scalar literals compile in the first slice; some wider aggregate/codegen uses still stop at codegen. |
 | Domain suffix literals (`250ms`, `10sec`, `3min`) | yes | yes | yes | partial | Surface and runtime support are real; compile still depends on the domain-member/codegen subset. |
 | Text interpolation | yes | yes | yes | no | Runtime-backed, but current codegen explicitly rejects remaining dynamic-text lowering (`crates/aivi-backend/src/codegen.rs`). |
-| Regex literals | yes | no | no | no | Regex literals are validated in HIR, but general-expression elaboration still blocks them before typed-core lowering (`crates/aivi-hir/src/general_expr_elaboration.rs`). |
+| Regex literals | partial | no | no | no | Regex literals in expression position produce `hir::regex-in-expression`; the only valid use is as `@source` option values (e.g. `pattern: rx"..."` in an HTTP or filesystem source). Use the `aivi.regex` module for runtime pattern matching. |
 | Record / tuple / list literals | yes | yes | yes | partial | Runtime support is broad; compile only covers part of the aggregate lowering space. |
 | `Map { ... }` / `Set [ ... ]` literals | yes | yes | yes | no | The checker/runtime know these literals, but codegen still rejects remaining collection lowering in the first Cranelift slice. |
 | Type-level record row transforms (`Pick`, `Omit`, `Rename`, `Optional`, `Required`, `Defaulted`) | yes | yes | yes | yes | These are type-surface features; once checking succeeds, the later runtime/compile path sees the elaborated shape. |
@@ -126,6 +126,6 @@ It answers “what checks, executes, runs, or compiles today?” rather than “
 - `compile` is still a first-slice AOT boundary. It emits object code only and explicitly rejects inline `Case`, `TruthyFalsy`, tap/debug, remaining aggregate/collection lowering, and dynamic text.
 - Imported user-authored higher-kinded instances and imported polymorphic class-member execution are still deferred.
 - Custom `provider` declarations are currently contract/lowering features, not runtime-executable providers.
-- Regex literals currently stop at checking/HIR; they do not lower through typed-core general expressions.
+- Regex literals are only valid as `@source` option values; regex literals in expression position produce `hir::regex-in-expression`. Use the `aivi.regex` module for runtime pattern matching. Regex literals do not lower through typed-core general expressions.
 - Structural patch removal is not implemented yet, and broader patch lowering remains only partial.
 - The source catalog is broad, but several options are still accepted-by-contract and not fully executed yet. Use `/guide/source-catalog` for the option-level truth table.

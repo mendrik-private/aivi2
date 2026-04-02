@@ -2,6 +2,7 @@
 
 //! Milestone 1 surface frontend: lexer, CST, parser, and formatter.
 
+pub mod codes;
 pub mod cst;
 pub mod format;
 pub mod lex;
