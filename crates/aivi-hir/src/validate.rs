@@ -9318,6 +9318,7 @@ mod tests {
         TypeVariant, ValidationMode,
     };
 
+    use crate::source_contract_resolution::{ResolvedSourceContractType, ResolvedSourceTypeConstructor};
     use super::*;
 
     fn span(file: u32, start: u32, end: u32) -> SourceSpan {
