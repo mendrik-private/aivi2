@@ -5260,11 +5260,11 @@ impl<'a> GateTypeContext<'a> {
                 .zip(signal_payload_arguments.iter())
                 .all(|((argument, expected_parameter), reads_signal_payload)| {
                     let argument_info = self.infer_expr(*argument, env, Some(ambient));
-                    argument_info
-                        .actual_gate_type()
-                        .or(argument_info.ty.clone())
-                        .as_ref()
-                        .is_some_and(|actual| {
+                    let arg_ty = argument_info.actual_gate_type().or(argument_info.ty.clone());
+                    // If we have no type information for the argument, we can't prove it
+                    // doesn't match — accept it and let downstream lowering verify.
+                    arg_ty.is_none()
+                        || arg_ty.as_ref().is_some_and(|actual| {
                             actual.same_shape(expected_parameter)
                                 || (*reads_signal_payload
                                     && matches!(
@@ -5782,9 +5782,12 @@ impl<'a> GateTypeContext<'a> {
             .zip(plan.signal_payload_arguments.iter())
         {
             let argument_info = self.infer_expr(*argument, env, Some(ambient));
-            let argument_ty = argument_info
-                .actual_gate_type()
-                .or(argument_info.ty.clone());
+            let argument_actual = argument_info.actual_gate_type();
+            let argument_annot = argument_info.ty.clone();
+            // Prefer actual type; also keep the annotated type as a fallback for
+            // generic functions whose actual inference produces Hole placeholders
+            // in place of type parameters (e.g. `lengthStep : Int -> A -> Int`).
+            let argument_ty = argument_actual.or(argument_annot.clone());
             info.merge(argument_info);
             let matches_expected = argument_ty.as_ref().is_some_and(|actual| {
                 actual.same_shape(expected)
@@ -5793,7 +5796,10 @@ impl<'a> GateTypeContext<'a> {
                             actual,
                             GateType::Signal(payload) if payload.same_shape(expected)
                         ))
-            }) || expression_matches(self.module, *argument, env, expected);
+            }) || argument_annot
+                .as_ref()
+                .is_some_and(|ty| ty.same_shape(expected))
+                || expression_matches(self.module, *argument, env, expected);
             if !matches_expected {
                 return Some(info);
             }

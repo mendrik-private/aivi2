@@ -766,7 +766,19 @@ impl<'a> GeneralExprElaborator<'a> {
         let mut domain_members = Vec::new();
         let mut instance_members = Vec::new();
         for (item_id, item) in self.module.items().iter() {
-            if self.module.ambient_items().contains(&item_id) {
+            let is_ambient = self.module.ambient_items().contains(&item_id);
+            // Skip ambient non-executable items (types, classes, etc.) and ambient
+            // signals. But DO elaborate ambient functions and values — they serve as
+            // the compiled runtime bodies for polymorphic stdlib imports that resolve
+            // through the AmbientValue mechanism (e.g. __aivi_option_getOrElse).
+            if is_ambient {
+                match item {
+                    Item::Value(value) => items.push(self.elaborate_value(item_id, value)),
+                    Item::Function(function) => {
+                        items.push(self.elaborate_function(item_id, function))
+                    }
+                    _ => {}
+                }
                 continue;
             }
             match item {
@@ -2381,7 +2393,55 @@ impl<'a> GeneralExprElaborator<'a> {
             .match_pipe_function_signature(expr_id, env, ambient, expected)
             .ok_or_else(|| vec![GeneralExprBlocker::UnknownExprType { span: expr.span }])?;
         let callee_ty = self.arrow_type(plan.parameter_types.clone(), plan.result_type.clone());
-        let callee = self.lower_expr(plan.callee_expr, env, Some(ambient), Some(&callee_ty))?;
+
+        // For class member callees, dispatch with all argument types (explicit + ambient)
+        // because `infer_name` returns no type for class members, making `lower_expr` fail
+        // when the callee type is open (contains TypeParameters).
+        let callee = if let ExprKind::Name(reference) = &self.module.exprs()[plan.callee_expr].kind
+        {
+            if matches!(
+                reference.resolution.as_ref(),
+                ResolutionState::Resolved(TermResolution::ClassMember(_))
+                    | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_))
+            ) {
+                let mut arg_types: Vec<GateType> = plan
+                    .explicit_arguments
+                    .iter()
+                    .zip(plan.parameter_types.iter())
+                    .map(|(arg, expected_param)| {
+                        // Use the plan's parameter type as a hint; fall back to inferred.
+                        let info = self.typing.infer_expr(*arg, env, Some(ambient));
+                        info.actual_gate_type()
+                            .or(info.ty)
+                            .unwrap_or_else(|| expected_param.clone())
+                    })
+                    .collect();
+                arg_types.push(ambient.clone());
+                let callee_span = self.module.exprs()[plan.callee_expr].span;
+                let Some(dispatch) = resolve_class_member_dispatch(
+                    self.module,
+                    reference,
+                    &arg_types,
+                    Some(&plan.result_type),
+                ) else {
+                    return Err(vec![GeneralExprBlocker::UnknownExprType {
+                        span: callee_span,
+                    }]);
+                };
+                GateRuntimeExpr {
+                    span: callee_span,
+                    ty: callee_ty,
+                    kind: GateRuntimeExprKind::Reference(GateRuntimeReference::ClassMember(
+                        dispatch,
+                    )),
+                }
+            } else {
+                self.lower_expr(plan.callee_expr, env, Some(ambient), Some(&callee_ty))?
+            }
+        } else {
+            self.lower_expr(plan.callee_expr, env, Some(ambient), Some(&callee_ty))?
+        };
+
         let mut arguments = Vec::with_capacity(plan.explicit_arguments.len() + 1);
         for (argument, expected_parameter) in plan
             .explicit_arguments

@@ -1700,18 +1700,36 @@ impl<'a> Lowerer<'a> {
     ) {
         match module_resolution {
             ImportModuleResolution::Resolved(exports) => match exports.find(imported_name.text()) {
-                Some(exported) => (
-                    ImportBindingResolution::Resolved,
-                    exported.metadata.clone(),
-                    exported.callable_type.clone(),
-                    exported.deprecation.clone(),
-                ),
-                None => (
-                    ImportBindingResolution::MissingExport,
-                    ImportBindingMetadata::Unknown,
-                    None,
-                    None,
-                ),
+                Some(exported) => {
+                    // For polymorphic functions, the stdlib module exports them with OpaqueValue
+                    // metadata (since ImportValueType has no TypeParameter variant). Fall back to
+                    // known_import_metadata to get the AmbientValue metadata, which resolves to
+                    // the ambient prelude copy with full polymorphic type information.
+                    if matches!(exported.metadata, ImportBindingMetadata::OpaqueValue) {
+                        if let Some(metadata) =
+                            known_import_metadata(module_name, imported_name.text())
+                        {
+                            return (ImportBindingResolution::Resolved, metadata, None, None);
+                        }
+                    }
+                    (
+                        ImportBindingResolution::Resolved,
+                        exported.metadata.clone(),
+                        exported.callable_type.clone(),
+                        exported.deprecation.clone(),
+                    )
+                }
+                // Fall back to compiler-known intrinsics when the stdlib file exists but
+                // does not re-export the builtin function (e.g. aivi.stdio.stdoutWrite).
+                None => match known_import_metadata(module_name, imported_name.text()) {
+                    Some(metadata) => (ImportBindingResolution::Resolved, metadata, None, None),
+                    None => (
+                        ImportBindingResolution::MissingExport,
+                        ImportBindingMetadata::Unknown,
+                        None,
+                        None,
+                    ),
+                },
             },
             ImportModuleResolution::Missing => {
                 match known_import_metadata(module_name, imported_name.text()) {

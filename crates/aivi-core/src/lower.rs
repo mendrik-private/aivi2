@@ -717,6 +717,37 @@ impl<'a> ModuleLowerer<'a> {
             .is_none_or(|included| included.contains(&item))
     }
 
+    /// Seed an ambient prelude function or value item on demand, so that ambient items
+    /// referenced by non-ambient compiled code can receive compiled bodies.
+    fn seed_ambient_item(&mut self, hir_id: HirItemId) -> Option<ItemId> {
+        if let Some(existing) = self.item_map.get(&hir_id).copied() {
+            return Some(existing);
+        }
+        let item = self.hir.items().get(hir_id)?;
+        let (span, name, kind) = match item {
+            HirItem::Value(item) => (item.header.span, item.name.text().into(), ItemKind::Value),
+            HirItem::Function(item) => {
+                (item.header.span, item.name.text().into(), ItemKind::Function)
+            }
+            _ => return None,
+        };
+        let item_id = self
+            .module
+            .items_mut()
+            .alloc(Item {
+                origin: hir_id,
+                span,
+                name,
+                kind,
+                parameters: Vec::new(),
+                body: None,
+                pipes: Vec::new(),
+            })
+            .ok()?;
+        self.item_map.insert(hir_id, item_id);
+        Some(item_id)
+    }
+
     fn debug_label(&self, owner: HirItemId, stage: Option<usize>) -> Box<str> {
         let owner_name = match self.hir.items().get(owner) {
             Some(HirItem::Value(item)) => item.name.text(),
@@ -971,10 +1002,20 @@ impl<'a> ModuleLowerer<'a> {
             ));
         let (items, domain_members, instance_members) = report.into_parts();
         for item in items {
-            if !self.includes_item(item.owner) {
+            let is_ambient = self.hir.ambient_items().contains(&item.owner);
+            if !self.includes_item(item.owner) && !is_ambient {
                 continue;
             }
-            let Some(owner) = self.item_map.get(&item.owner).copied() else {
+            // Ambient items may not have been pre-seeded — seed on demand so their
+            // bodies can be populated and referenced by non-ambient compiled code.
+            let owner = if let Some(existing) = self.item_map.get(&item.owner).copied() {
+                existing
+            } else if is_ambient {
+                let Some(seeded) = self.seed_ambient_item(item.owner) else {
+                    continue;
+                };
+                seeded
+            } else {
                 self.errors
                     .push(LoweringError::UnknownOwner { owner: item.owner });
                 continue;
