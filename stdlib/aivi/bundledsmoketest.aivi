@@ -1,17 +1,3 @@
-/* @source type safety invariants for AIVI stdlib:
- * 1. Every @source signal must have an explicit Signal T annotation
- * 2. T must be a typed Result E V — never raw Text or Bytes
- * 3. E must be a named error sum type from the relevant stdlib module
- * 4. V must be a typed record or sum — never an untyped primitive
- * 5. Decode programs must be compiler-derived from the declared type T
- * 6. No @source signal may bypass the type-checker via Option fallback on mandatory fields
- * Example (correct):
- *   @source http.get "/users"
- *   signal users : Signal (Result HttpError (List User))
- * Example (wrong — raw text):
- *   @source http.get "/users"
- *   signal users : Signal Text
- */
 use aivi.bundledsmokesupport (
     bundledSupportSentinel
     BundledSupportToken
@@ -22,79 +8,194 @@ use aivi.bundledsmokesupport (
     textSentinel
     floatSentinel
 )
-use aivi.bool (not, xor, both, either as boolEither)
-use aivi.math (abs, negate, sign, isEven, isOdd, clamp, between, divides)
-use aivi.list (length, head, tail, map, filter, any, all, find, sum, zip)
-use aivi.option (isSome, isNone, getOrElse, map as optMap)
-use aivi.result (isOk, isErr, withDefault)
-use aivi.text (join, isEmpty, nonEmpty, surround)
-use aivi.pair (fst, snd, swap)
-use aivi.order (min, max)
-use aivi.validation (isValid, isInvalid, getOrElse as valGetOrElse)
-use aivi.core.float (pi, e, tau, clamp as floatClamp, lerp, abs as floatAbs, floor, ceil, round, sqrt, toInt, fromInt)
-use aivi.core.dict (Dict, singleton as dictSingleton, insert as dictInsert, get as dictGet, size as dictSize)
-use aivi.core.set (Set, singleton as setSingleton, member as setMember, insert as setInsert, size as setSize)
-use aivi.core.fn (identity, compose, flip, const as constFn)
-use aivi.core.range (RangeInt, make as makeRange, contains as rangeContains)
-use aivi.nonEmpty (NonEmptyList, singleton as nelSingleton, head as nelHead, length as nelLength)
-use aivi.fs (FsError, NotFound)
-use aivi.http (HttpError, Timeout)
+
+use aivi.bool (
+    not
+    xor
+    both
+    either as boolEither
+)
+
+use aivi.math (
+    abs
+    negate
+    sign
+    isEven
+    isOdd
+    clamp
+    between
+    divides
+)
+
+use aivi.list (
+    length
+    head
+    tail
+    map
+    filter
+    any
+    all
+    find
+    sum
+    zip
+)
+
+use aivi.option (
+    isSome
+    isNone
+    getOrElse
+    map as optMap
+)
+
+use aivi.result (
+    isOk
+    isErr
+    withDefault
+)
+
+use aivi.text (
+    join
+    isEmpty
+    nonEmpty
+    surround
+)
+
+use aivi.pair (
+    fst
+    snd
+    swap
+)
+
+use aivi.order (
+    min
+    max
+)
+
+use aivi.validation (
+    isValid
+    isInvalid
+    getOrElse as valGetOrElse
+)
+
+use aivi.core.float (
+    pi
+    e
+    tau
+    clamp as floatClamp
+    lerp
+    abs as floatAbs
+    floor
+    ceil
+    round
+    sqrt
+    toInt
+    fromInt
+)
+
+use aivi.core.dict (
+    Dict
+    singleton as dictSingleton
+    insert as dictInsert
+    get as dictGet
+    size as dictSize
+)
+
+use aivi.core.set (
+    Set
+    singleton as setSingleton
+    member as setMember
+    insert as setInsert
+    size as setSize
+)
+
+use aivi.core.fn (
+    identity
+    compose
+    flip
+    const as constFn
+)
+
+use aivi.core.range (
+    RangeInt
+    make as makeRange
+    contains as rangeContains
+)
+
+use aivi.nonEmpty (
+    NonEmptyList
+    singleton as nelSingleton
+    head as nelHead
+    length as nelLength
+)
+
+use aivi.fs (
+    FsError
+    NotFound
+)
+
+use aivi.http (
+    HttpError
+    Timeout
+)
+
 use aivi.duration (Duration)
 
-// Sentinel
 value sentinel : Text = bundledSupportSentinel
-
-// Bool
 value notTrue : Bool = not True
 value notFalse : Bool = not False
 value xorResult : Bool = xor True False
 value bothResult : Bool = both True True
-
-// Math
 value absResult : Int = abs (0 - 7)
 value signResult : Int = sign (0 - 3)
 value clampResult : Int = clamp 0 100 150
 value isEvenResult : Bool = isEven 4
 value betweenResult : Bool = between 1 10 5
 
-// List
-value nums : List Int = [1, 2, 3, 4, 5]
+value nums : List Int = [
+    1,
+    2,
+    3,
+    4,
+    5
+]
+
 value lenResult : Int = length nums
 value headResult : Option Int = head nums
 
 type Int -> Int
-func double = n => n * 2
+func double = n =>
+    n * 2
 
 type Int -> Bool
-func isSmall = n => n < 3
+func isSmall = n =>
+    n < 3
 
 value doubled : List Int = map double nums
 value filtered : List Int = filter isSmall nums
 value totalSum : Int = sum nums
 value anySmall : Bool = any isSmall nums
 value allPos : Bool = all isSmall nums
-
-// Option
 value someVal : Option Int = Some 42
 value noneVal : Option Int = None
 value hasSome : Bool = isSome someVal
 value hasNone : Bool = isNone noneVal
 value gotten : Int = getOrElse 0 someVal
-
-// Result
 value okVal : Result Text Int = Ok 99
 value errVal : Result Text Int = Err "fail"
 value okCheck : Bool = isOk okVal
 value errCheck : Bool = isErr errVal
 value withDef : Int = withDefault 0 okVal
 
-// Text
-value joinResult : Text = join ", " ["a", "b", "c"]
+value joinResult : Text =
+    join ", " [
+        "a",
+        "b",
+        "c"
+    ]
+
 value emptyCheck : Bool = isEmpty ""
 value nonEmptyCheck : Bool = nonEmpty "hi"
 value surroundResult : Text = surround "[" "]" "x"
-
-// Float
 value piVal : Float = pi
 value floorResult : Float = floor 3.7
 value ceilResult : Float = ceil 3.2
@@ -104,44 +205,34 @@ value toIntResult : Int = toInt 3.9
 value fromIntResult : Float = fromInt 5
 value lerpResult : Float = lerp 0.0 10.0 0.5
 value floatAbsResult : Float = floatAbs (0.0 - 3.5)
-
-// Dict
 value myDict : Dict Text Int = dictSingleton "x" 1
 value dictWithTwo : Dict Text Int = dictInsert "y" 2 myDict
 value dictLookup : Option Int = dictGet "x" dictWithTwo
 value dictLen : Int = dictSize dictWithTwo
-
-// Set
 value mySet : Set Int = setSingleton 1
 value setWith2 : Set Int = setInsert 2 mySet
 value setHas1 : Bool = setMember 1 setWith2
 value setLen : Int = setSize setWith2
 
-// Fn combinators
 type Int -> Int
-func increment = n => n + 1
+func increment = n =>
+    n + 1
 
 type Int -> Int
-func doubled2 = n => n * 2
+func doubled2 = n =>
+    n * 2
 
 value composed : Int = compose doubled2 increment 5
 value flipped : Int = flip clamp 100 0 150
-
-// Range
 value myRange : RangeInt = makeRange 1 10
 value inRange : Bool = rangeContains myRange 5
 value outRange : Bool = rangeContains myRange 11
-
-// NonEmpty
 value nel : NonEmptyList Int = nelSingleton 42
 value nelFirst : Int = nelHead nel
 value nelLen : Int = nelLength nel
-
-// Effect types (just confirm they typecheck)
 value fsErr : FsError = NotFound "missing"
 value httpErr : HttpError = Timeout
 
-// @test suite
 @test
 value smoke_bool_works : Task Text Bool = pure (notTrue == False and notFalse == True)
 
@@ -179,6 +270,8 @@ value smoke_nel_works : Task Text Bool = pure (nelFirst == 42 and nelLen == 1)
 value smoke_fn_combinators_work : Task Text Bool = pure (composed == 12)
 
 value bundledSentinel : Text = bundledSupportSentinel
+
 type BundledToken = BundledSupportToken
+
 export bundledSentinel
 export BundledToken

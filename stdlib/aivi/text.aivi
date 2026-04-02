@@ -46,8 +46,8 @@ func nonEmpty = t =>
 
 type Text -> (List Text) -> Text
 func join = separator parts => parts
-    |> reduce (joinStep separator) { first: True, value: "" }
-    |> finishJoin
+  |> reduce (joinStep separator) { first: True, value: "" }
+  |> finishJoin
 
 type Text -> Text -> Text -> Text
 func surround = prefix suffix t =>
@@ -72,7 +72,10 @@ func lower = t =>
 
 type Text -> Text
 func capitalizeNonEmpty = t =>
-    concat [toUpper (slice 0 1 t), toLower (slice 1 (length t) t)]
+    concat [
+        toUpper (slice 0 1 t),
+        toLower (slice 1 (length t) t)
+    ]
 
 type Text -> Text
 func capitalize = t => isEmpty t
@@ -97,7 +100,10 @@ func stripBlanks = t =>
 
 type Int -> Text -> Text -> Text
 func padStartHelper = targetLen padChar t =>
-    concat [repeat (targetLen - length t) padChar, t]
+    concat [
+        repeat (targetLen - length t) padChar,
+        t
+    ]
 
 type Int -> Text -> Text -> Text
 func padStart = targetLen padChar t => length t >= targetLen
@@ -106,7 +112,10 @@ func padStart = targetLen padChar t => length t >= targetLen
 
 type Int -> Text -> Text -> Text
 func padEndHelper = targetLen padChar t =>
-    concat [t, repeat (targetLen - length t) padChar]
+    concat [
+        t,
+        repeat (targetLen - length t) padChar
+    ]
 
 type Int -> Text -> Text -> Text
 func padEnd = targetLen padChar t => length t >= targetLen
@@ -114,10 +123,9 @@ func padEnd = targetLen padChar t => length t >= targetLen
  F|> padEndHelper targetLen padChar t
 
 type Int -> Text -> Int
-func parseIntOrElse = default t =>
-    parseInt t
-    ||> Some n -> n
-    ||> None   -> default
+func parseIntOrElse = default t => parseInt t
+ ||> Some n -> n
+ ||> None   -> default
 
 type Text -> List Text
 func lines = t =>
@@ -186,44 +194,4 @@ value text_padStart : Task Text Bool = pure (padStart 5 "0" "42" == "00042")
 @test
 value text_lines : Task Text Bool = pure (lines "a\nb\nc" == ["a", "b", "c"])
 
-export (
-    length
-    byteLen
-    slice
-    find
-    contains
-    startsWith
-    endsWith
-    toUpper
-    toLower
-    trim
-    trimStart
-    trimEnd
-    replace
-    replaceAll
-    split
-    repeat
-    fromInt
-    parseInt
-    fromBool
-    parseBool
-    concat
-    isEmpty
-    nonEmpty
-    join
-    surround
-    surroundWith
-    withDefault
-    upper
-    lower
-    capitalize
-    hasMinLength
-    hasMaxLength
-    includesText
-    stripBlanks
-    padStart
-    padEnd
-    parseIntOrElse
-    lines
-    words
-)
+export (length, byteLen, slice, find, contains, startsWith, endsWith, toUpper, toLower, trim, trimStart, trimEnd, replace, replaceAll, split, repeat, fromInt, parseInt, fromBool, parseBool, concat, isEmpty, nonEmpty, join, surround, surroundWith, withDefault, upper, lower, capitalize, hasMinLength, hasMaxLength, includesText, stripBlanks, padStart, padEnd, parseIntOrElse, lines, words)

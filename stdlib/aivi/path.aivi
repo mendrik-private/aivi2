@@ -1,4 +1,12 @@
-use aivi.path (parent, filename, stem, extension, join, isAbsolute, normalize)
+use aivi.path (
+    parent
+    filename
+    stem
+    extension
+    join
+    isAbsolute
+    normalize
+)
 
 type PathSource = Unit
 

@@ -339,6 +339,13 @@ impl<'a> TypeChecker<'a> {
             let Some(Item::Use(use_item)) = module.items().get(item_id) else {
                 continue;
             };
+            let is_defaults_module = {
+                let segments = use_item.module.segments();
+                let mut seg_iter = segments.iter();
+                seg_iter.next().is_some_and(|s| s.text() == "aivi")
+                    && seg_iter.next().is_some_and(|s| s.text() == "defaults")
+                    && seg_iter.next().is_none()
+            };
             for import_id in use_item.imports.iter().copied() {
                 let import = &module.imports()[import_id];
                 match import.imported_name.text() {
@@ -346,7 +353,11 @@ impl<'a> TypeChecker<'a> {
                         if matches!(
                             &import.metadata,
                             ImportBindingMetadata::Bundle(ImportBundleKind::BuiltinOption)
-                        ) =>
+                        ) || (is_defaults_module
+                            && matches!(
+                                &import.metadata,
+                                ImportBindingMetadata::BuiltinType(BuiltinType::Option)
+                            )) =>
                     {
                         option_default_in_scope = true;
                     }
@@ -1196,16 +1207,14 @@ impl<'a> TypeChecker<'a> {
         let left_ok = self.check_expr(left, env, Some(&operand_ty), value_stack);
         let right_ok = self.check_expr(right, env, Some(&operand_ty), value_stack);
         if !left_ok || !right_ok {
-            if self.diagnostics.len() == checkpoint {
-                self.emit_invalid_binary_operator(
-                    self.module.exprs()[expr_id].span,
-                    operator,
-                    left_actual.as_ref(),
-                    right_actual.as_ref(),
-                    BinaryOperatorExpectation::CommonTypeOperands,
-                );
+            if self.diagnostics.len() > checkpoint {
+                // At least one side emitted a concrete type error; propagate it.
+                return false;
             }
-            return false;
+            // No diagnostics were added: one or both operand types are unresolvable
+            // (e.g. an imported generic function whose return type cannot be inferred
+            // at the gate level). Treat as valid rather than emitting a spurious
+            // invalid-binary-operator diagnostic.
         }
 
         self.handle_constraints(&[TypeConstraint::eq(

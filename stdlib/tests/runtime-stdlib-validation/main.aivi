@@ -1,4 +1,7 @@
-use aivi (Task, Signal)
+use aivi (
+    Task
+    Signal
+)
 
 use aivi.prelude (
     Text
@@ -8,7 +11,10 @@ use aivi.prelude (
     Option
 )
 
-use aivi.fs (FsSource, FsError)
+use aivi.fs (
+    FsSource
+    FsError
+)
 
 use aivi.stdio (StdioSource)
 
@@ -34,16 +40,13 @@ signal paths : PathSource
 signal entropy : RandomSource
 
 signal cargoToml : Signal (Result FsError Text) = files.read "Cargo.toml"
-
 signal shellVar : Signal (Option Text) = hostEnv.get "SHELL"
-
 signal configHomeDir : Signal Text = paths.configHome
 
 @test
 value fs_exists_smoke : Task Text Bool = files.exists "Cargo.toml"
 
 value env_list_smoke : Task Text (List (Text, Text)) = hostEnv.list ""
-
 value random_int_smoke : Task Text Int = entropy.int 1 10
 
 @test

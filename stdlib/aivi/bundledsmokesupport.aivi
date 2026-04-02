@@ -1,38 +1,125 @@
 use aivi.bool (not)
-use aivi.math (abs, clamp)
-use aivi.list (length, head, map, filter)
-use aivi.option (isSome, isNone, getOrElse)
-use aivi.result (isOk, isErr)
-use aivi.text (join, isEmpty, nonEmpty)
-use aivi.core.float (pi, e, tau, clamp as floatClamp)
-use aivi.core.dict (Dict, singleton, get as dictGet)
-use aivi.core.set (Set, insert as setInsert)
-use aivi.core.either (Either, Left, Right)
-use aivi.core.fn (identity, compose, flip)
-use aivi.core.range (RangeInt, make as makeRange)
-use aivi.nonEmpty (NonEmptyList, singleton as nelSingleton)
-use aivi.order (min, max)
-use aivi.pair (fst, snd)
-use aivi.validation (isValid, isInvalid, getOrElse as valGetOrElse)
+
+use aivi.math (
+    abs
+    clamp
+)
+
+use aivi.list (
+    length
+    head
+    map
+    filter
+)
+
+use aivi.option (
+    isSome
+    isNone
+    getOrElse
+)
+
+use aivi.result (
+    isOk
+    isErr
+)
+
+use aivi.text (
+    join
+    isEmpty
+    nonEmpty
+)
+
+use aivi.core.float (
+    pi
+    e
+    tau
+    clamp as floatClamp
+)
+
+use aivi.core.dict (
+    Dict
+    singleton
+    get as dictGet
+)
+
+use aivi.core.set (
+    Set
+    insert as setInsert
+)
+
+use aivi.core.either (
+    Either
+    Left
+    Right
+)
+
+use aivi.core.fn (
+    identity
+    compose
+    flip
+)
+
+use aivi.core.range (
+    RangeInt
+    make as makeRange
+)
+
+use aivi.nonEmpty (
+    NonEmptyList
+    singleton as nelSingleton
+)
+
+use aivi.order (
+    min
+    max
+)
+
+use aivi.pair (
+    fst
+    snd
+)
+
+use aivi.validation (
+    isValid
+    isInvalid
+    getOrElse as valGetOrElse
+)
+
 use aivi.duration (Duration)
+
 use aivi.color (Color)
+
 use aivi.url (Url)
+
 use aivi.path (Path)
+
 use aivi.fs (FsError)
+
 use aivi.http (HttpError)
+
 use aivi.timer (TimerMode)
+
 use aivi.dbus (DbusError)
+
 use aivi.random (RandomError)
+
 use aivi.stdio (WriteError)
+
 use aivi.log (LogLevel)
 
 value bundledSupportSentinel : Text = "bundled-stdlib-v2"
 
 type BundledSupportToken = Text
 
-// Type-level sentinels confirming module shape
 value coreSentinel : Int = abs (0 - 5)
-value listSentinel : Int = length [1, 2, 3]
+
+value listSentinel : Int =
+    length [
+        1,
+        2,
+        3
+    ]
+
 value mathSentinel : Int = clamp 0 100 50
 value boolSentinel : Bool = not False
 value textSentinel : Bool = nonEmpty "hello"
