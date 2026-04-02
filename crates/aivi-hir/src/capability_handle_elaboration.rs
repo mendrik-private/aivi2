@@ -4,9 +4,12 @@ use aivi_base::{Diagnostic, DiagnosticCode, DiagnosticLabel, SourceSpan};
 use aivi_typing::BuiltinSourceProvider;
 
 use crate::{
-    Decorator, DecoratorPayload, Expr, ExprId, ExprKind, IntrinsicValue, Item, ItemId, Module,
-    Name, NamePath, NonEmpty, ProjectionBase, ResolutionState, SignalItem, SourceDecorator,
-    SourceProviderRef, TermReference, TermResolution, ValueItem, signal_payload_type,
+    BuiltinType, Decorator, DecoratorPayload, Expr, ExprId, ExprKind, IntrinsicValue, Item, ItemId,
+    Module, Name, NamePath, NonEmpty, ProjectionBase, ResolutionState, SignalItem, SourceDecorator,
+    SourceProviderRef, TermReference, TermResolution, TypeKind, TypeResolution, ValueItem,
+    custom_source_capabilities::{
+        CustomSourceCapabilityKind, resolve_custom_source_capability_member,
+    },
 };
 
 pub(crate) fn is_builtin_source_capability_family_path(path: &NamePath) -> bool {
@@ -77,7 +80,7 @@ fn collect_capability_handles(
         let Some(provider_path) = source.provider.as_ref() else {
             continue;
         };
-        let annotation_is_signal = signal_payload_type(module, signal).is_some();
+        let annotation_is_signal = signal_annotation_is_signal(module, signal);
         let classification = classify_handle_provider(provider_path);
         let is_candidate =
             signal.body.is_none() && signal.reactive_updates.is_empty() && !annotation_is_signal;
@@ -160,6 +163,31 @@ fn collect_capability_handles(
         signal.is_source_capability_handle = true;
     }
     handles
+}
+
+fn signal_annotation_is_signal(module: &Module, signal: &SignalItem) -> bool {
+    let Some(annotation) = signal.annotation else {
+        return false;
+    };
+    type_annotation_is_signal(module, annotation)
+}
+
+fn type_annotation_is_signal(module: &Module, type_id: crate::TypeId) -> bool {
+    match &module.types()[type_id].kind {
+        TypeKind::Apply { callee, .. } => type_reference_is_signal(module, *callee),
+        TypeKind::Name(_) => type_reference_is_signal(module, type_id),
+        _ => false,
+    }
+}
+
+fn type_reference_is_signal(module: &Module, type_id: crate::TypeId) -> bool {
+    let TypeKind::Name(reference) = &module.types()[type_id].kind else {
+        return false;
+    };
+    matches!(
+        reference.resolution,
+        ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Signal))
+    ) || reference.path.segments().last().text() == "Signal"
 }
 
 fn rewrite_capability_uses(
@@ -336,17 +364,56 @@ fn lower_signal_capability_use(
             })
         }
         CapabilityHandleProvider::Custom(_) => {
-            diagnostics.push(
-                Diagnostic::error(
-                    "custom provider capability operations are parsed, but runtime lowering is not implemented yet",
-                )
-                .with_code(code("unsupported-custom-source-capability"))
-                .with_label(DiagnosticLabel::primary(
-                    invocation.span,
-                    "use an explicit `@source provider.variant ...` binding until custom capability execution lands",
-                )),
-            );
-            None
+            let CapabilityHandleProvider::Custom(key) = &handle.provider else {
+                unreachable!("custom capability lowering should preserve its provider kind");
+            };
+            let Some(resolved) = resolve_custom_source_capability_member(
+                module,
+                key.as_ref(),
+                invocation.member.as_str(),
+            ) else {
+                diagnostics.push(
+                    Diagnostic::error(format!(
+                        "unknown capability member `{}` for custom provider `{key}`",
+                        invocation.member
+                    ))
+                    .with_code(code("unknown-source-capability-member"))
+                    .with_label(DiagnosticLabel::primary(
+                        invocation.span,
+                        "declare this capability member on the provider contract before using it through the handle",
+                    )),
+                );
+                return None;
+            };
+            match resolved.kind {
+                CustomSourceCapabilityKind::Operation => Some(SignalRewritePlan {
+                    decorator: synthesize_source_decorator(
+                        invocation.span,
+                        SourceDecorator {
+                            provider: Some(provider_key_name_path(
+                                invocation.span,
+                                resolved.provider_key.as_ref(),
+                            )),
+                            arguments: inherited_arguments(handle, &invocation.arguments),
+                            options: handle.options,
+                        },
+                    ),
+                }),
+                CustomSourceCapabilityKind::Command => {
+                    diagnostics.push(
+                        Diagnostic::error(format!(
+                            "capability member `{}` is a one-shot custom command; direct custom command execution through handle values is not implemented yet",
+                            invocation.member
+                        ))
+                        .with_code(code("invalid-source-capability-signal-member"))
+                        .with_label(DiagnosticLabel::primary(
+                            invocation.span,
+                            "bind custom source operations as `signal`; custom commands still need an explicit runtime path",
+                        )),
+                    );
+                    None
+                }
+            }
         }
     }
 }
@@ -393,17 +460,54 @@ fn lower_value_capability_use(
             None
         }
         CapabilityHandleProvider::Custom(key) => {
-            diagnostics.push(
-                Diagnostic::error(format!(
-                    "custom provider capability `{key}` is not executable through handle members yet"
-                ))
-                .with_code(code("unsupported-custom-source-capability"))
-                .with_label(DiagnosticLabel::primary(
-                    invocation.span,
-                    "use the existing explicit runtime surface until custom capability execution lands",
-                )),
-            );
-            None
+            let Some(resolved) = resolve_custom_source_capability_member(
+                module,
+                key.as_ref(),
+                invocation.member.as_str(),
+            ) else {
+                diagnostics.push(
+                    Diagnostic::error(format!(
+                        "unknown capability member `{}` for custom provider `{key}`",
+                        invocation.member
+                    ))
+                    .with_code(code("unknown-source-capability-member"))
+                    .with_label(DiagnosticLabel::primary(
+                        invocation.span,
+                        "declare this capability member on the provider contract before using it through the handle",
+                    )),
+                );
+                return None;
+            };
+            match resolved.kind {
+                CustomSourceCapabilityKind::Operation => {
+                    diagnostics.push(
+                        Diagnostic::error(format!(
+                            "capability member `{}` is a reactive source operation; use `signal` instead of `value`",
+                            invocation.member
+                        ))
+                        .with_code(code("invalid-source-capability-value-member"))
+                        .with_label(DiagnosticLabel::primary(
+                            invocation.span,
+                            "bind the result as a `signal` so the source lifecycle can own it",
+                        )),
+                    );
+                    None
+                }
+                CustomSourceCapabilityKind::Command => {
+                    diagnostics.push(
+                        Diagnostic::error(format!(
+                            "custom provider capability `{}` is not executable through handle command values yet",
+                            resolved.provider_key
+                        ))
+                        .with_code(code("unsupported-custom-source-capability"))
+                        .with_label(DiagnosticLabel::primary(
+                            invocation.span,
+                            "custom commands still need a generic task runtime before handle values can execute them",
+                        )),
+                    );
+                    None
+                }
+            }
         }
     }
 }
@@ -1205,6 +1309,11 @@ fn intrinsic_name_path(intrinsic: IntrinsicValue, span: SourceSpan) -> NamePath 
 
 fn provider_name_path(span: SourceSpan, provider: BuiltinSourceProvider) -> NamePath {
     let segments = provider.key().split('.').collect::<Vec<_>>();
+    name_path(span, &segments)
+}
+
+fn provider_key_name_path(span: SourceSpan, key: &str) -> NamePath {
+    let segments = key.split('.').collect::<Vec<_>>();
     name_path(span, &segments)
 }
 

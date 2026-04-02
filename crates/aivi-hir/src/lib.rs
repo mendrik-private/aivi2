@@ -4,6 +4,7 @@
 
 pub mod arena;
 mod capability_handle_elaboration;
+mod custom_source_capabilities;
 mod decode_elaboration;
 mod decode_generation;
 mod domain_operator_elaboration;

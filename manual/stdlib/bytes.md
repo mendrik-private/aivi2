@@ -130,20 +130,24 @@ use aivi.core.bytes (repeat)
 ```aivi
 use aivi.core.bytes (
     fromText
-    toText
     length
-    slice
-    append
 )
 
 use aivi.fs (
-    readBytes
-    writeBytes
+    FsSource
+    FsBytesTask
+    FsUnitTask
 )
 
-type Text -> Text -> Task Text Unit
-func prependHeader = path header =>
-    let headerBytes
+value assetRoot : Text = "/tmp/assets"
+value headerBytes : Bytes = fromText "AIVI"
+
+@source fs assetRoot
+signal files : FsSource
+
+value iconBytes : FsBytesTask = files.readBytes "icon.bin"
+value saveHeader : FsUnitTask = files.writeBytes "header.bin" headerBytes
+value headerLength : Int = length headerBytes
 ```
 
 ::: tip

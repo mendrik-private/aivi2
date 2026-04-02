@@ -1,22 +1,50 @@
-use aivi (Task)
+use aivi (Task, Signal)
 
 use aivi.prelude (
     Text
     Bool
     Unit
+    List
+    Option
 )
 
-use aivi.fs (exists)
+use aivi.fs (FsSource, FsError)
 
-use aivi.data.json (validate)
+use aivi.stdio (StdioSource)
 
-use aivi.stdio (stdoutWrite)
+use aivi.env (EnvSource)
+
+use aivi.path (PathSource)
+
+use aivi.random (RandomSource)
+
+@source fs "."
+signal files : FsSource
+
+@source stdio
+signal console : StdioSource
+
+@source env
+signal hostEnv : EnvSource
+
+@source path
+signal paths : PathSource
+
+@source random
+signal entropy : RandomSource
+
+signal cargoToml : Signal (Result FsError Text) = files.read "Cargo.toml"
+
+signal shellVar : Signal (Option Text) = hostEnv.get "SHELL"
+
+signal configHomeDir : Signal Text = paths.configHome
 
 @test
-value fs_exists_smoke : Task Text Bool = exists "."
+value fs_exists_smoke : Task Text Bool = files.exists "Cargo.toml"
+
+value env_list_smoke : Task Text (List (Text, Text)) = hostEnv.list ""
+
+value random_int_smoke : Task Text Int = entropy.int 1 10
 
 @test
-value json_validate_accepts_array : Task Text Bool = validate "[]"
-
-@test
-value stdout_write_empty : Task Text Unit = stdoutWrite ""
+value stdout_write_empty : Task Text Unit = console.stdoutWrite ""

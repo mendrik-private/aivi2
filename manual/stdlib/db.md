@@ -2,16 +2,18 @@
 
 Database records, query payloads, and task aliases.
 
-This module is the data vocabulary for database-backed features. It describes connections, statements, parameters, paging options, and errors. The current stdlib file does not execute queries on its own.
+This module is the data vocabulary for database-backed features. It describes connections,
+statements, parameters, paging options, errors, and the `DbSource` handle marker. The current
+stdlib file does not export public `query` or `commit` functions on its own.
 
-Current status: the database surface is split today between source-backed pieces such as
-`db.connect` / `db.live` and task/query vocabulary documented here. The target architecture is to
-unify both under provider capabilities so connect/live/query/commit belong to one database boundary.
+Current status: public database access is centered on `@source db`; this module is the shared
+vocabulary for that capability family.
 
 ## Import
 
 ```aivi
 use aivi.db (
+    DbSource
     DbError
     SchemaMismatch
     QueryFailed
@@ -43,7 +45,8 @@ use aivi.db (
 | `SortDir` | Sort direction |
 | `DbPageOpts` | Limit/offset paging options |
 | `DbError` | Structured database failures |
-| `DbTask A` | Background database work returning `A` |
+| `DbSource` | Handle annotation for `@source db` |
+| `DbTask A` | Current one-shot database task alias |
 
 ---
 
@@ -276,7 +279,8 @@ func describeDbError = error => error
 ## `DbTask`
 
 ```aivi
-type DbTask A = Task DbError A
+type DbTask A = Task Text A
 ```
 
-Alias for background database work that either returns `A` or fails with `DbError`.
+Alias for the current one-shot database task path. Structured `DbError` is still the signal/result
+vocabulary used by `db.connect` / `db.live`.

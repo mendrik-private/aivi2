@@ -182,25 +182,7 @@ fn resolve_custom_source_contract(
     provider: &SourceProviderRef,
 ) -> Option<CustomSourceContractMetadata> {
     let key = provider.custom_key()?;
-    let matches = module
-        .items()
-        .iter()
-        .filter_map(|(_, item)| {
-            if let Item::SourceProviderContract(contract) = item {
-                if contract.provider.custom_key().as_deref() == Some(key) {
-                    Some(contract)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-    match matches.as_slice() {
-        [item] => Some(item.contract.clone()),
-        _ => None,
-    }
+    crate::custom_source_capabilities::resolve_custom_source_binding_contract(module, key)
 }
 
 #[derive(Clone, Copy)]

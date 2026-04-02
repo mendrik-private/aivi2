@@ -1695,25 +1695,20 @@ impl<'a> Lowerer<'a> {
         Option<crate::DeprecationNotice>,
     ) {
         match module_resolution {
-            ImportModuleResolution::Resolved(exports) => {
-                match known_import_metadata(module_name, imported_name.text()) {
-                    Some(metadata) => (ImportBindingResolution::Resolved, metadata, None, None),
-                    None => match exports.find(imported_name.text()) {
-                        Some(exported) => (
-                            ImportBindingResolution::Resolved,
-                            exported.metadata.clone(),
-                            exported.callable_type.clone(),
-                            exported.deprecation.clone(),
-                        ),
-                        None => (
-                            ImportBindingResolution::MissingExport,
-                            ImportBindingMetadata::Unknown,
-                            None,
-                            None,
-                        ),
-                    },
-                }
-            }
+            ImportModuleResolution::Resolved(exports) => match exports.find(imported_name.text()) {
+                Some(exported) => (
+                    ImportBindingResolution::Resolved,
+                    exported.metadata.clone(),
+                    exported.callable_type.clone(),
+                    exported.deprecation.clone(),
+                ),
+                None => (
+                    ImportBindingResolution::MissingExport,
+                    ImportBindingMetadata::Unknown,
+                    None,
+                    None,
+                ),
+            },
             ImportModuleResolution::Missing => {
                 match known_import_metadata(module_name, imported_name.text()) {
                     Some(metadata) => (ImportBindingResolution::Resolved, metadata, None, None),
@@ -11082,6 +11077,135 @@ value cleanup = files.delete "cache.txt"
             join_arguments.len(),
             2,
             "path joins should combine the inherited handle root with the member path"
+        );
+    }
+
+    #[test]
+    fn lowers_custom_source_capability_operations_into_member_qualified_custom_sources() {
+        let lowered = lower_text(
+            "custom_source_capability_operations.aivi",
+            r#"
+type FeedSource = Unit
+
+signal root = "/tmp/demo"
+signal enabled = True
+
+provider custom.feed
+    argument path: Text
+    option activeWhen: Signal Bool
+    operation read : Text -> Signal Int
+    command delete : Text -> Task Text Unit
+
+@source custom.feed root with {
+    activeWhen: enabled
+}
+signal feed : FeedSource
+
+signal config : Signal Int = feed.read "config"
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "custom capability operations should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let feed = find_signal(lowered.module(), "feed");
+        assert!(
+            feed.is_source_capability_handle,
+            "bodyless custom @source anchors should lower as capability handles"
+        );
+
+        let config = find_signal(lowered.module(), "config");
+        assert!(
+            config.body.is_none(),
+            "custom capability operations should lower into bodyless source bindings"
+        );
+        let metadata = config
+            .source_metadata
+            .as_ref()
+            .expect("lowered custom capability operation should carry source metadata");
+        assert_eq!(
+            metadata.provider,
+            SourceProviderRef::Custom("custom.feed.read".into())
+        );
+        assert_eq!(
+            signal_dependency_names(lowered.module(), config),
+            vec!["root".to_owned(), "enabled".to_owned()],
+            "custom capability operations should depend on inherited arguments/options, not the handle anchor"
+        );
+        let contract = metadata
+            .custom_contract
+            .as_ref()
+            .expect("member-qualified custom sources should attach a derived contract");
+        assert_eq!(
+            contract.arguments.len(),
+            2,
+            "derived custom source contracts should include both provider arguments and member arguments"
+        );
+        assert_eq!(
+            contract.options.len(),
+            1,
+            "member-qualified custom sources should preserve provider options"
+        );
+
+        let report = lowered
+            .module()
+            .validate(ValidationMode::RequireResolvedNames);
+        assert!(
+            report.is_ok(),
+            "member-qualified custom sources should validate against the derived contract, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+    }
+
+    #[test]
+    fn custom_source_capability_operations_require_signal_bindings() {
+        let lowered = lower_text(
+            "custom_source_capability_operation_value.aivi",
+            r#"
+type FeedSource = Unit
+
+provider custom.feed
+    operation read : Text -> Signal Int
+
+@source custom.feed
+signal feed : FeedSource
+
+value load = feed.read "config"
+"#,
+        );
+        assert!(
+            lowered.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code == Some(super::code("invalid-source-capability-value-member"))
+            }),
+            "custom capability operations should reject `value` bindings, got diagnostics: {:?}",
+            lowered.diagnostics()
+        );
+    }
+
+    #[test]
+    fn custom_source_capability_commands_remain_unsupported_in_values() {
+        let lowered = lower_text(
+            "custom_source_capability_command_value.aivi",
+            r#"
+type FeedSource = Unit
+
+provider custom.feed
+    command delete : Text -> Task Text Unit
+
+@source custom.feed
+signal feed : FeedSource
+
+value cleanup : Task Text Unit = feed.delete "config"
+"#,
+        );
+        assert!(
+            lowered.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code == Some(super::code("unsupported-custom-source-capability"))
+            }),
+            "custom capability commands should keep an explicit unsupported diagnostic until the task runtime exists, got diagnostics: {:?}",
+            lowered.diagnostics()
         );
     }
 

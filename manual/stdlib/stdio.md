@@ -1,18 +1,14 @@
 # aivi.stdio
 
-Write text to standard output and standard error.
+Standard I/O vocabulary plus the `StdioSource` capability-handle type.
 
-These functions are useful in CLI-style programs and quick debugging tasks. The current
-runtime writes the text immediately and flushes the stream right away.
-
-Current status: this page documents the **compatibility** stdio surface. The target architecture is
-to keep stdin/stdout/stderr under provider capabilities as host snapshots and sink commands instead
-of exposing a separate global task API.
+Public `stdoutWrite` / `stderrWrite` imports have been folded into `@source stdio`.
 
 ## Import
 
 ```aivi
 use aivi.stdio (
+    StdioSource
     WriteError
     StdioUnavailable
     Stream
@@ -21,110 +17,23 @@ use aivi.stdio (
     StdioTask
     StdoutTask
     StderrTask
-    stdoutWrite
-    stderrWrite
-    writeLine
-    writeErrorLine
 )
 ```
 
-## Overview
-
-| Value | Type | Description |
-| --- | --- | --- |
-| `stdoutWrite` | `Text -> Task Text Unit` | Write text to standard output |
-| `stderrWrite` | `Text -> Task Text Unit` | Write text to standard error |
-| `writeLine` | `Text -> Task Text Unit` | Write a line to stdout and append `\n` |
-| `writeErrorLine` | `Text -> Task Text Unit` | Write a line to stderr and append `\n` |
-
-## Core functions
-
-### `stdoutWrite`
+## Capability handle
 
 ```aivi
-stdoutWrite : Text -> Task Text Unit
+@source stdio
+signal console : StdioSource
+
+signal stdinText : Signal Text = console.read
+value prompt : StdoutTask = console.stdoutWrite "Name: "
+value failure : StderrTask = console.stderrWrite "Missing config\n"
 ```
 
-Write text exactly as given. No newline is added for you.
+## Exported vocabulary
 
-```aivi
-use aivi.stdio (stdoutWrite)
-
-value prompt : Task Text Unit = stdoutWrite "Name: "
-```
-
-### `stderrWrite`
-
-```aivi
-stderrWrite : Text -> Task Text Unit
-```
-
-Write text to the error stream. This is a good fit for warnings and failures.
-
-```aivi
-use aivi.stdio (stderrWrite)
-
-value warning : Task Text Unit = stderrWrite "missing config\n"
-```
-
-## Line helpers
-
-### `writeLine`
-
-```aivi
-writeLine : Text -> Task Text Unit
-```
-
-Convenience wrapper around `stdoutWrite` that adds a trailing newline.
-
-### `writeErrorLine`
-
-```aivi
-writeErrorLine : Text -> Task Text Unit
-```
-
-Convenience wrapper around `stderrWrite` that adds a trailing newline.
-
-```aivi
-use aivi.stdio (
-    writeLine
-    writeErrorLine
-)
-
-value done : Task Text Unit = writeLine "Finished"
-value failed : Task Text Unit = writeErrorLine "Something went wrong"
-```
-
-## Supporting types
-
-```aivi
-type WriteError =
-  | StdioUnavailable
-
-type Stream = Stdout | Stderr
-
-type StdioTask = (Task WriteError Unit)
-type StdoutTask = (Task Text Unit)
-type StderrTask = (Task Text Unit)
-```
-
-`Stream` is handy when your own code needs to remember where output should go.
-
-**Current behavior note:** the callable functions `stdoutWrite` and `stderrWrite` currently
-return `Task Text Unit`. The exported `StdioTask` alias uses `WriteError`, so treat it as a
-separate vocabulary type rather than the exact function return type.
-
-## Example — progress plus failure output
-
-```aivi
-use aivi.stdio (
-    writeLine
-    writeErrorLine
-)
-
-value started : Task Text Unit = writeLine "Starting sync"
-value badToken : Task Text Unit = writeErrorLine "ACCESS_TOKEN is missing"
-```
-
-If you need input from standard input, pair this module with the source form
-`@source stdio.read`.
+- `StdioSource` — nominal handle annotation for `@source stdio`.
+- `WriteError` / `StdioUnavailable` — stdio failure vocabulary.
+- `Stream`, `Stdout`, `Stderr` — stream-selection vocabulary.
+- `StdioTask`, `StdoutTask`, `StderrTask` — current one-shot task aliases.

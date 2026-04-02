@@ -2015,8 +2015,9 @@ Current implementation status:
   `value = handle.member ...` forms onto the existing source-provider/task/intrinsic code paths
 - capability-handle anchors are compile-time-only and therefore do not export or assemble as runtime
   graph signals
-- custom provider contracts can already declare capability members, but direct custom handle-member
-  execution is still pending
+- custom provider contracts can already declare capability members; direct custom handle operations
+  now lower to member-qualified custom source bindings, while custom handle commands still need a
+  generic task runtime
 
 This direction deliberately avoids requiring arbitrary signal-wrapped domain/member application.
 Current language support only guarantees record projection through `Signal` payloads plus narrow

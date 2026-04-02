@@ -1,6 +1,3 @@
-use aivi.log (emit, emitContext)
-use aivi.core.dict (Dict)
-
 type LogLevel =
   | Debug
   | Info
@@ -8,10 +5,12 @@ type LogLevel =
   | Error
   | Fatal
 
-type LogContext = (Dict Text Text)
+type LogContext = (Map Text Text)
 
 type LogEntry = {
-    level: LogLevel
+    level: LogLevel,
+    message: Text,
+    context: LogContext
 }
 
 type LogError = Text
@@ -37,42 +36,6 @@ func levelToText = level =>
     ||> Error -> "ERROR"
     ||> Fatal -> "FATAL"
 
-type Text -> Task Text Unit
-func debug = msg =>
-    emit levelDebug msg
-
-type Text -> Task Text Unit
-func info = msg =>
-    emit levelInfo msg
-
-type Text -> Task Text Unit
-func warn = msg =>
-    emit levelWarn msg
-
-type Text -> Task Text Unit
-func error = msg =>
-    emit levelError msg
-
-type Text -> Task Text Unit
-func fatal = msg =>
-    emit levelFatal msg
-
-type Text -> List (Text, Text) -> Task Text Unit
-func debugCtx = msg ctx =>
-    emitContext levelDebug msg ctx
-
-type Text -> List (Text, Text) -> Task Text Unit
-func infoCtx = msg ctx =>
-    emitContext levelInfo msg ctx
-
-type Text -> List (Text, Text) -> Task Text Unit
-func warnCtx = msg ctx =>
-    emitContext levelWarn msg ctx
-
-type Text -> List (Text, Text) -> Task Text Unit
-func errorCtx = msg ctx =>
-    emitContext levelError msg ctx
-
 type Text -> Text -> (Text, Text)
 func kv = k v =>
     (k, v)
@@ -96,16 +59,5 @@ export (
     levelError
     levelFatal
     levelToText
-    emit
-    emitContext
-    debug
-    info
-    warn
-    error
-    fatal
-    debugCtx
-    infoCtx
-    warnCtx
-    errorCtx
     kv
 )

@@ -205,6 +205,39 @@ fn hir_queries_fallback_to_bundled_stdlib_modules() {
 }
 
 #[test]
+fn hir_queries_prefer_bundled_stdlib_exports_over_known_imports() {
+    let workspace = TempDir::new("bundled-stdlib-export-precedence");
+    let main_path = workspace.write(
+        "main.aivi",
+        "use aivi.fs (\n    FsError\n    readText\n)\n\ntype Alias = FsError\n",
+    );
+
+    let db = RootDatabase::new();
+    let main = SourceFile::new(
+        &db,
+        main_path.clone(),
+        fs::read_to_string(&main_path).expect("main fixture should exist"),
+    );
+
+    let hir = hir_module(&db, main);
+    assert!(
+        hir.hir_diagnostics()
+            .iter()
+            .filter_map(|diagnostic| diagnostic.code.as_ref())
+            .any(|code| code.to_string() == "hir::unknown-imported-name"),
+        "bundled stdlib exports should hide non-exported compiler-known members: {:?}",
+        hir.hir_diagnostics()
+    );
+
+    let fs_module = db
+        .file_at_path(&stdlib_path("aivi/fs.aivi"))
+        .expect("bundled stdlib module should be loaded lazily");
+    let exported = exported_names(&db, fs_module);
+    assert!(exported.find("FsError").is_some());
+    assert!(exported.find("readText").is_none());
+}
+
+#[test]
 fn hir_queries_fallback_to_bundled_root_and_prelude_modules() {
     let workspace = TempDir::new("bundled-root-prelude-fallback");
     let main_path = workspace.write(
@@ -267,6 +300,7 @@ use aivi.http (
     DecodeMode
     Strict
     Retry
+    HttpSource
 )
 
 use aivi.timer (
@@ -305,11 +339,13 @@ value decodeMode:DecodeMode =
 
 type RetryBudget = Retry
 
-type UsersResponse = HttpResponse (List User)
-type UsersTask = HttpTask (List User)
+type UsersResponse = (HttpResponse (List User))
+type UsersTask = (HttpTask (List User))
 
-@source http.get "https://api.example.com/users"
-signal users : Signal UsersResponse
+@source http "https://api.example.com"
+signal api : HttpSource
+
+signal users : Signal UsersResponse = api.get "/users"
 
 @source timer.every 120 with {
     immediate: True,

@@ -2,18 +2,17 @@
 
 Process-related shared types.
 
-`aivi.process` currently exports process records, result types, and error variants. It does
-**not** export a function that starts a process today, so think of this module as a shared
-vocabulary for process work rather than a full process API.
+`aivi.process` exports process records, result types, error variants, and the `ProcessSource`
+handle marker. Public process work now goes through `@source process`.
 
-Current status: process work is already split between source-backed runtime pieces and shared types.
-The target architecture is one provider capability family for process context, spawning, streams,
-and commands rather than separate source/task/type-only surfaces.
+Current status: `ProcessSource` is the public capability-handle surface for process context and
+spawning; this module remains the shared vocabulary for that work.
 
 ## Import
 
 ```aivi
 use aivi.process (
+    ProcessSource
     ProcessError
     SpawnFailed
     ProcessTimeout
@@ -36,6 +35,7 @@ use aivi.process (
 | `ProcessStatus` | How the process finished |
 | `ProcessOutput` | Captured stdout, stderr, and final status |
 | `ProcessConfig` | Command, arguments, working directory, environment, and timeout |
+| `ProcessSource` | Handle annotation for `@source process` |
 | `ProcessTask` | Alias for `Task ProcessError ProcessOutput` |
 
 ## `ProcessError`
@@ -150,5 +150,14 @@ func describeFailure = error => error
  ||> ProcessProtocolError detail -> "runtime process error: {detail}"
 ```
 
-If you want reactive process launching today, see the source forms `@source process.spawn`,
-`@source process.args`, and `@source process.cwd` in the source guide.
+For public process access, prefer a handle such as:
+
+```aivi
+use aivi.process (ProcessSource)
+
+@source process
+signal runtime : ProcessSource
+
+signal cliArgs : Signal (List Text) = runtime.args
+signal cwd : Signal Text = runtime.cwd
+```

@@ -12,33 +12,16 @@ type FsEvent =
 
 type FsSource = Unit
 
-// Task type aliases for ergonomic use
-type FsReadTask = (Task FsError Text)
-type FsWriteTask = (Task FsError Unit)
+type FsReadTask = (Task Text Text)
+type FsWriteTask = (Task Text Unit)
 type FsBytesTask = (Task Text Bytes)
 type FsDirTask = (Task Text (List Text))
 type FsExistsTask = (Task Text Bool)
 type FsUnitTask = (Task Text Unit)
 
-use aivi.fs (
-    readText
-    readDir
-    exists
-    readBytes
-    writeText
-    writeBytes
-    createDirAll
-    deleteFile
-    rename
-    copy
-    deleteDir
-)
-
 export (
     FsError, NotFound, PermissionDenied, ReadFailed, WriteFailed, FsProtocolError,
     FsSource,
     FsEvent, Created, Changed, Deleted,
-    FsReadTask, FsWriteTask, FsBytesTask, FsDirTask, FsExistsTask, FsUnitTask,
-    readText, readDir, exists, readBytes,
-    writeText, writeBytes, createDirAll, deleteFile, rename, copy, deleteDir
+    FsReadTask, FsWriteTask, FsBytesTask, FsDirTask, FsExistsTask, FsUnitTask
 )

@@ -2278,6 +2278,43 @@ value cleanup : Task Text Unit = files.delete "cache.txt"
     }
 
     #[test]
+    fn custom_capability_operations_assemble_as_member_qualified_custom_sources() {
+        let lowered = lower_text(
+            "runtime-hir-custom-capability-operations.aivi",
+            r#"
+type FeedSource = Unit
+
+signal root = "/tmp/demo"
+
+provider custom.feed
+    argument path: Text
+    operation read : Text -> Signal Int
+
+@source custom.feed root
+signal feed : FeedSource
+
+signal config : Signal Int = feed.read "config"
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "custom capability operation fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let assembly = assemble_hir_runtime(lowered.module())
+            .expect("custom capability operation fixture should assemble");
+        let config_id = item_id(lowered.module(), "config");
+        let binding = assembly
+            .source_by_owner(config_id)
+            .expect("custom capability operation should assemble as a source binding");
+        assert_eq!(
+            binding.spec.provider,
+            RuntimeSourceProvider::custom("custom.feed.read")
+        );
+    }
+
+    #[test]
     fn assembles_db_live_refresh_from_changed_projection() {
         let lowered = lower_text(
             "runtime-hir-adapter-db-live-changed.aivi",

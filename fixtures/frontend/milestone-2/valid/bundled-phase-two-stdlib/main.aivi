@@ -12,6 +12,7 @@ use aivi.http (
     DecodeMode
     Strict
     Retry
+    HttpSource
 )
 
 use aivi.timer (
@@ -46,14 +47,14 @@ value decodeMode : DecodeMode = Strict
 
 type RetryBudget = Retry
 
-type UsersResponse =
-  | HttpResponse (List User)
+type UsersResponse = (HttpResponse (List User))
 
-type UsersTask =
-  | HttpTask (List User)
+type UsersTask = (HttpTask (List User))
 
-@source http.get "https://api.example.com/users"
-signal users : Signal UsersResponse
+@source http "https://api.example.com"
+signal api : HttpSource
+
+signal users : Signal UsersResponse = api.get "/users"
 
 @source timer.every 120 with {
     immediate: True

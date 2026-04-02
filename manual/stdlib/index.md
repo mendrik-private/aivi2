@@ -13,11 +13,9 @@ Use this page as a map:
 Several modules are intentionally small today, and some are shared type vocabularies rather than
 full runtime clients. Their pages call that out up front so you do not have to guess.
 
-For external systems, a few pages still describe **compatibility** task modules rather than the
-target architecture. The long-term direction is to converge filesystem, HTTP, database, IMAP,
-D-Bus, environment/process context, logging, stdio, randomness, and similar integrations under
-provider capabilities defined through `@source`, with typed decode at the source boundary and
-provider-owned commands for mutations.
+For external systems, prefer provider capabilities defined through `@source`. The related stdlib
+modules now mainly carry shared data vocabulary and handle-marker types such as `FsSource`,
+`HttpSource`, `EnvSource`, and `LogSource`.
 
 After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first are
 [`aivi.option`](/stdlib/option), [`aivi.result`](/stdlib/result), [`aivi.list`](/stdlib/list),
@@ -65,22 +63,22 @@ After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first
 - [`aivi.text`](/stdlib/text) — text helpers.
 - [`aivi.regex`](/stdlib/regex) — regular-expression matching and replacement.
 - [`aivi.core.bytes`](/stdlib/bytes) — byte buffers.
-- [`aivi.data.json`](/stdlib/json) — JSON types plus legacy JSON-as-text compatibility helpers.
+- [`aivi.data.json`](/stdlib/json) — JSON structural types and predicates.
 
 ### Time, randomness, and scheduling
 
 - [`aivi.duration`](/stdlib/duration) — typed time spans such as `5sec`.
 - [`aivi.time`](/stdlib/time) — clocks, timestamps, and time formatting helpers.
 - [`aivi.timer`](/stdlib/timer) — marker types for timer-backed signals.
-- [`aivi.random`](/stdlib/random) — host-randomness compatibility tasks.
+- [`aivi.random`](/stdlib/random) — randomness vocabulary plus `RandomSource`.
 
 ### Files, environment, and processes
 
-- [`aivi.fs`](/stdlib/fs) — filesystem types plus compatibility task helpers.
+- [`aivi.fs`](/stdlib/fs) — filesystem vocabulary plus `FsSource`.
 - [`aivi.path`](/stdlib/path) — checked path values.
-- [`aivi.env`](/stdlib/env) — environment compatibility lookups.
-- [`aivi.stdio`](/stdlib/stdio) — terminal I/O compatibility commands.
-- [`aivi.log`](/stdlib/log) — runtime logging compatibility commands.
+- [`aivi.env`](/stdlib/env) — environment vocabulary plus `EnvSource`.
+- [`aivi.stdio`](/stdlib/stdio) — stdio vocabulary plus `StdioSource`.
+- [`aivi.log`](/stdlib/log) — logging vocabulary plus `LogSource`.
 - [`aivi.process`](/stdlib/process) — process vocabulary plus future capability shapes.
 
 ### Network and services
@@ -89,9 +87,9 @@ Some modules in this group are full helpers, and some are shared data shapes for
 The linked pages spell out which functions exist today.
 
 - [`aivi.url`](/stdlib/url) — typed URLs and helpers for their parts.
-- [`aivi.http`](/stdlib/http) — HTTP compatibility request helpers.
+- [`aivi.http`](/stdlib/http) — HTTP vocabulary plus `HttpSource`.
 - [`aivi.auth`](/stdlib/auth) — OAuth / PKCE sign-in records and state types.
-- [`aivi.db`](/stdlib/db) — database vocabulary plus transitional task/query types.
+- [`aivi.db`](/stdlib/db) — database vocabulary plus `DbSource`.
 - [`aivi.imap`](/stdlib/imap) — mailbox types for current integrations and future source capabilities.
 - [`aivi.smtp`](/stdlib/smtp) — outgoing mail settings, messages, and errors.
 
@@ -103,9 +101,9 @@ desktop app together.
 
 - [`aivi.app`](/stdlib/app) — application framework types.
 - [`aivi.app.lifecycle`](/stdlib/lifecycle) — lifecycle state, commands, undo state, and in-app notifications.
-- [`aivi.desktop.xdg`](/stdlib/xdg) — standard Linux app directories.
+- [`aivi.desktop.xdg`](/stdlib/xdg) — XDG error vocabulary; actual directories come from `PathSource`.
 - [`aivi.portal`](/stdlib/portal) — desktop portal results for file picking, opening URIs, and screenshots.
-- [`aivi.dbus`](/stdlib/dbus) — D-Bus vocabulary plus transitional source/task shapes.
+- [`aivi.dbus`](/stdlib/dbus) — D-Bus vocabulary plus `DbusSource`.
 - [`aivi.gnome.settings`](/stdlib/settings) — GSettings schema, key, and value types.
 - [`aivi.gnome.onlineAccounts`](/stdlib/onlineAccounts) — desktop account and token records.
 - [`aivi.gnome.notifications`](/stdlib/notifications) — desktop notification payloads and responses.

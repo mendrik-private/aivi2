@@ -1,14 +1,5 @@
 use aivi.core.dict (Dict)
 
-use aivi.data.json (
-    validate
-    get
-    at
-    keys
-    pretty
-    minify
-)
-
 type JsonError =
   | InvalidJson Text
   | MissingKey Text
@@ -98,5 +89,4 @@ value isNumber_on_number : Task Text Bool = pure (isNumber (JsonNumber 0.0))
 value isString_on_string : Task Text Bool = pure (isString (JsonString ""))
 
 export (JsonError, InvalidJson, MissingKey, IndexOutOfBounds, WrongType, Json, JsonNull, JsonBool, JsonNumber, JsonString, JsonArray, JsonObject, JsonPath,
-        validate, get, at, keys, pretty, minify,
         isNull, isObject, isArray, isBool, isNumber, isString)

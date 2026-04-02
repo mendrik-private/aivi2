@@ -1,6 +1,8 @@
 # aivi.path
 
-Lexical path manipulation on `Text` strings. All functions are **synchronous and pure** — they perform no I/O and never touch the filesystem.
+Lexical path manipulation on `Text` strings plus the `PathSource` handle marker for host directory
+snapshots. The functions in this module are **synchronous and pure** — they perform no I/O and
+never touch the filesystem.
 
 ```aivi
 use aivi.path (
@@ -110,26 +112,27 @@ use aivi.path (normalize)
 ```aivi
 use aivi.path (
     join
-    parent
-    stem
-    extension
-    isAbsolute
+    normalize
 )
 
 use aivi.fs (
-    readText
-    writeText
+    FsSource
+    FsReadTask
+    FsWriteTask
 )
 
-type Text -> Text
-func backupPath = originalPath =>
-    let base
+value configDir : Text = "/etc/demo"
 
-type Text -> Task Text Text
-func safeReadConfig = configDir =>
-    let path
+@source fs configDir
+signal files : FsSource
+
+value configPath : Text = join configDir "app.conf"
+value backupPath : Text = normalize (join configDir "../demo/app.conf.bak")
+value readConfig : FsReadTask = files.read "app.conf"
+value writeBackup : FsWriteTask = files.writeText "app.conf.bak" "..."
 ```
 
 ::: tip
-Combine `aivi.path` with `aivi.fs` for complete file management: use the path functions to build and manipulate path strings, then pass them to filesystem tasks.
+Combine `aivi.path` with `FsSource` handles: use the pure path functions to build lexical path text,
+then use `@source fs ...` for the actual read/write/delete boundary.
 :::

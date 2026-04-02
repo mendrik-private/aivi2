@@ -2,26 +2,28 @@
 
 Sources are how AIVI connects the reactive graph to the outside world. Timers, HTTP requests, keyboard events, file watching, and subprocess events are all modeled as source-backed signals.
 
-Current limitation: source syntax, provider contracts, and built-in capability-handle lowering are implemented, but scheduler-owned recurrence execution is still only partially wired. The forms in this guide reflect what the parser/compiler accept today; more advanced recurrence wakeup behavior and custom capability-member execution are still explicit work items in the runtime/compiler pipeline.
+Current limitation: source syntax, provider contracts, built-in capability-handle lowering, and custom handle operation lowering are implemented, but scheduler-owned recurrence execution is still only partially wired. The forms in this guide reflect what the parser/compiler accept today; more advanced recurrence wakeup behavior and custom handle commands are still explicit work items in the runtime/compiler pipeline.
 
 For the current compiler-and-runtime-backed reference, including every built-in source kind and option-level support notes, see the [Built-in Source Catalog](/guide/source-catalog).
 
-## Target architecture
+## Unified external boundary
 
-The shipped compiler still exposes some task-first or type-only compatibility modules such as
-`aivi.fs`, `aivi.http`, `aivi.data.json`, `aivi.env`, `aivi.log`, `aivi.stdio`, `aivi.dbus`, and
-part of the database/process surface. The intended direction is to collapse those parallel entry
-points into **provider capabilities under `@source`** so each external system has one boundary.
+Built-in capability handles are now the public external surface for the built-in families that have
+both reactive reads and one-shot commands. Modules such as `aivi.fs`, `aivi.http`, `aivi.env`,
+`aivi.log`, `aivi.stdio`, `aivi.random`, and `aivi.data.json` remain as shared type/helper
+vocabularies, but they no longer expose parallel effectful entry points.
 
-Illustrative end-state shape:
+Current shape:
 
 ```aivi
+use aivi.fs (FsSource, FsError, FsEvent, FsUnitTask)
+
 @source fs projectRoot
 signal files : FsSource
 
 signal config : Signal (Result FsError AppConfig) = files.read configPath
 signal changes : Signal FsEvent = files.watch configPath
-value cleanup : Task FsError Unit = files.delete cachePath
+value cleanup : FsUnitTask = files.deleteFile cachePath
 ```
 
 In that model:
@@ -31,7 +33,7 @@ In that model:
 - incoming data decodes directly into the annotated target type
 - host snapshots such as environment/process/XDG data use the same provider boundary
 - sink-style effects such as logging, stdio writes, D-Bus method calls, and outbound sends do too
-- raw JSON-as-text helper workflows are compatibility paths, not the design target
+- raw JSON-as-text helper workflows are not the public external design anymore
 
 ## Built-in capability handles
 
@@ -51,8 +53,7 @@ signal config : Signal (Result FsError Text) = files.read "config.json"
 value cleanup = files.delete "cache.txt"
 ```
 
-Today this lowering is implemented for the built-in families that currently straddle `@source` and
-compatibility stdlib/task surfaces: `fs`, `http`, `db`, `env`, `log`, `stdio`, `random`,
+Today this lowering is implemented for `fs`, `http`, `db`, `env`, `log`, `stdio`, `random`,
 `process`, `path`, and `dbus`.
 
 Current rules:
@@ -61,11 +62,13 @@ Current rules:
 - direct `signal name : Signal T = handle.member ...` forms lower to ordinary bodyless source
   bindings with synthesized `@source provider.variant ...` metadata
 - direct `value name = handle.member ...` forms lower to the existing one-shot runtime intrinsic
-  path for commands, queries, and host snapshots
+  path for built-in commands, queries, and host snapshots
 - capability handles are compile-time anchors, not exported runtime signals
-- custom provider contracts may declare `operation` and `command` members already, but direct
-  handle-member execution for custom providers is not wired yet; keep using explicit
-  `@source provider.variant ...` declarations there for now
+- custom provider contracts may declare `operation` and `command` members already
+- direct `signal name : Signal T = handle.member ...` lowering now works for custom provider
+  operations too; those lower to member-qualified custom source bindings such as
+  `@source custom.feed.read ...`
+- direct custom command handle values are still pending a generic task/runtime bridge
 
 ## Source-backed signals with `@source`
 
