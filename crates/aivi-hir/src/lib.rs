@@ -25,6 +25,7 @@ pub mod symbols;
 mod temporal_elaboration;
 mod truthy_falsy_elaboration;
 mod typecheck;
+mod typecheck_context;
 mod validate;
 
 pub use arena::{Arena, ArenaId, ArenaOverflow};
