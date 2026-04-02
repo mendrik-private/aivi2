@@ -63,7 +63,6 @@ After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first
 - [`aivi.text`](/stdlib/text) — text helpers.
 - [`aivi.regex`](/stdlib/regex) — regular-expression matching and replacement.
 - [`aivi.core.bytes`](/stdlib/bytes) — byte buffers.
-- [`aivi.data.json`](/stdlib/json) — JSON structural types and predicates.
 
 ### Time, randomness, and scheduling
 
@@ -74,7 +73,6 @@ After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first
 
 ### Files, environment, and processes
 
-- [`aivi.fs`](/stdlib/fs) — filesystem vocabulary plus `FsSource`.
 - [`aivi.path`](/stdlib/path) — checked path values.
 - [`aivi.env`](/stdlib/env) — environment vocabulary plus `EnvSource`.
 - [`aivi.stdio`](/stdlib/stdio) — stdio vocabulary plus `StdioSource`.

@@ -149,7 +149,7 @@
         "meta.type.declaration.aivi punctuation",
         "meta.type.declaration.aivi constant"
       ],
-      "settings": { "foreground": "#2B2B40" }
+      "settings": { "foreground": "#7a7ab3" }
     },
     {
       "name": "Pipe — transform |>",

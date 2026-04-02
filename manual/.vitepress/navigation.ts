@@ -88,7 +88,6 @@ const stdlibSections: DocGroup[] = [
       { text: 'Text Processing', link: '/stdlib/text' },
       { text: 'Regular Expressions', link: '/stdlib/regex' },
       { text: 'Byte Buffers', link: '/stdlib/bytes' },
-      { text: 'JSON', link: '/stdlib/json' },
     ],
   },
   {
@@ -105,7 +104,6 @@ const stdlibSections: DocGroup[] = [
     text: 'Files, Environment & Processes',
     collapsed: true,
     items: [
-      { text: 'File System', link: '/stdlib/fs' },
       { text: 'Paths', link: '/stdlib/path' },
       { text: 'Environment Variables', link: '/stdlib/env' },
       { text: 'Standard I/O', link: '/stdlib/stdio' },
