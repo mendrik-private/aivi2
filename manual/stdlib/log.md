@@ -2,8 +2,8 @@
 
 Logging vocabulary plus the `LogSource` capability-handle type.
 
-`aivi.log` now exports typed levels, log-entry data, and pure helpers. Emit operations happen
-through `@source log`.
+`aivi.log` exports typed levels, log-entry data, and pure helpers. Emitting logs happens through
+`@source log` handles.
 
 ## Import
 
@@ -19,7 +19,6 @@ use aivi.log (
     LogContext
     LogEntry
     LogError
-    LogTask
     LogSink
     levelDebug
     levelInfo
@@ -37,8 +36,8 @@ use aivi.log (
 @source log
 signal logger : LogSource
 
-value started : LogTask = logger.emit levelInfo "Started"
-value slowQuery : LogTask =
+value started : Task LogError Unit = logger.emit levelInfo "Started"
+value slowQuery : Task LogError Unit =
     logger.emitContext levelWarn "Slow query" [
         kv "mailbox" "primary"
     ]
@@ -46,8 +45,10 @@ value slowQuery : LogTask =
 
 ## Exported vocabulary
 
-- `LogLevel` — typed severity values.
-- `LogContext` — `Map Text Text`.
-- `LogEntry` — `{ level, message, context }`.
-- `LogTask` / `LogSink` — current command/task aliases.
-- `level*`, `levelToText`, and `kv` — pure helper values.
+- `LogSource` - nominal handle annotation for `@source log`.
+- `LogLevel` - typed severity values.
+- `LogContext` - `Map Text Text`.
+- `LogEntry` - `{ level, message, context }`.
+- `LogError` - current log command failure surface.
+- `LogSink` - `LogEntry -> Task LogError Unit`.
+- `level*`, `levelToText`, and `kv` - pure helper values.

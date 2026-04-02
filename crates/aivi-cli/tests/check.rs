@@ -645,6 +645,7 @@ fn check_accepts_stdlib_validation_files() {
         "aivi/timer.aivi",
         "aivi/log.aivi",
         "aivi/list.aivi",
+        "aivi/matrix.aivi",
         "aivi/option.aivi",
         "aivi/result.aivi",
         "aivi/bool.aivi",
@@ -666,6 +667,7 @@ fn check_accepts_stdlib_validation_files() {
         "tests/foundation-validation/main.aivi",
         "tests/boundary-validation/main.aivi",
         "tests/extended-stdlib-validation/main.aivi",
+        "tests/matrix-validation/main.aivi",
         "tests/core-modules-validation/main.aivi",
         "tests/path-fs-validation/main.aivi",
         "tests/runtime-stdlib-validation/main.aivi",
@@ -718,6 +720,29 @@ fn check_accepts_order_helper_surfaces() {
         assert!(
             String::from_utf8_lossy(&output.stdout).contains("syntax + HIR passed"),
             "expected success output for {label}, got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+#[test]
+fn check_accepts_matrix_stdlib_module_and_validation_fixture() {
+    for relative in ["aivi/matrix.aivi", "tests/matrix-validation/main.aivi"] {
+        let path = stdlib_path(relative);
+        let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+            .arg("check")
+            .arg(&path)
+            .output()
+            .expect("check command should run");
+
+        assert!(
+            output.status.success(),
+            "expected {relative} to pass check, stderr was: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("syntax + HIR passed"),
+            "expected success output for {relative}, got stdout: {}",
             String::from_utf8_lossy(&output.stdout)
         );
     }
@@ -1067,7 +1092,6 @@ use aivi.http (
     HttpHeaders
     HttpQuery
     HttpResponse
-    HttpTask
     DecodeMode
     Strict
     Retry
@@ -1085,7 +1109,6 @@ use aivi.log (
     LogContext
     LogEntry
     LogError
-    LogTask
     LogSink
 )
 
@@ -1110,7 +1133,7 @@ value decodeMode:DecodeMode =
 type RetryBudget = Retry
 
 type UsersResponse = HttpResponse (List User)
-type UsersTask = HttpTask (List User)
+type UsersTask = (Task Text (List User))
 
 @source http.get "https://api.example.com/users"
 signal users : Signal UsersResponse
@@ -1148,7 +1171,7 @@ value entry:LogEntry = {
 }
 
 type Writer = LogSink
-type CurrentLogTask = LogTask
+type CurrentLogTask = (Task LogError Unit)
 type CurrentLogError = LogError
 
 type PollDelay = Duration

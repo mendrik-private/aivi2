@@ -159,3 +159,12 @@ type Url -> Text
 func avatarEndpoint = base =>
     unwrap (withPath base "/api/avatar")
 ```
+
+## Current limits
+
+`aivi.url` is still a small `Text`-backed domain:
+
+- no path-segment composition helpers
+- no query-parameter merge/split helpers
+- no `withScheme`, `withHost`, `withPort`, or `withFragment`
+- no record-patch style field updates over URL parts

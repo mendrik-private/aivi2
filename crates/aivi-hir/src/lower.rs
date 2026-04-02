@@ -7466,95 +7466,6 @@ fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMeta
         ("aivi.random", "RandomError") => Some(ImportBindingMetadata::TypeConstructor {
             kind: Kind::constructor(0),
         }),
-        ("aivi.random", "randomBytes") => Some(intrinsic_import_value(
-            IntrinsicValue::RandomBytes,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Int),
-                task_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    primitive_import_type(BuiltinType::Bytes),
-                ),
-            ),
-        )),
-        ("aivi.random", "randomInt") => Some(intrinsic_import_value(
-            IntrinsicValue::RandomInt,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Int),
-                arrow_import_type(
-                    primitive_import_type(BuiltinType::Int),
-                    task_import_type(
-                        primitive_import_type(BuiltinType::Text),
-                        primitive_import_type(BuiltinType::Int),
-                    ),
-                ),
-            ),
-        )),
-        ("aivi.stdio", "stdoutWrite") => Some(intrinsic_import_value(
-            IntrinsicValue::StdoutWrite,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                task_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    primitive_import_type(BuiltinType::Unit),
-                ),
-            ),
-        )),
-        ("aivi.stdio", "stderrWrite") => Some(intrinsic_import_value(
-            IntrinsicValue::StderrWrite,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                task_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    primitive_import_type(BuiltinType::Unit),
-                ),
-            ),
-        )),
-        ("aivi.fs", "writeText") => Some(intrinsic_import_value(
-            IntrinsicValue::FsWriteText,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                arrow_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    task_import_type(
-                        primitive_import_type(BuiltinType::Text),
-                        primitive_import_type(BuiltinType::Unit),
-                    ),
-                ),
-            ),
-        )),
-        ("aivi.fs", "writeBytes") => Some(intrinsic_import_value(
-            IntrinsicValue::FsWriteBytes,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                arrow_import_type(
-                    primitive_import_type(BuiltinType::Bytes),
-                    task_import_type(
-                        primitive_import_type(BuiltinType::Text),
-                        primitive_import_type(BuiltinType::Unit),
-                    ),
-                ),
-            ),
-        )),
-        ("aivi.fs", "createDirAll") => Some(intrinsic_import_value(
-            IntrinsicValue::FsCreateDirAll,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                task_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    primitive_import_type(BuiltinType::Unit),
-                ),
-            ),
-        )),
-        ("aivi.fs", "deleteFile") => Some(intrinsic_import_value(
-            IntrinsicValue::FsDeleteFile,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                task_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    primitive_import_type(BuiltinType::Unit),
-                ),
-            ),
-        )),
         ("aivi.db", "paramBool") => Some(intrinsic_import_value(
             IntrinsicValue::DbParamBool,
             arrow_import_type(
@@ -7611,38 +7522,6 @@ fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMeta
                 arrow_import_type(
                     list_import_type(db_param_import_type()),
                     db_statement_import_type(),
-                ),
-            ),
-        )),
-        ("aivi.db", "query") => Some(intrinsic_import_value(
-            IntrinsicValue::DbQuery,
-            arrow_import_type(
-                db_connection_import_type(),
-                arrow_import_type(
-                    db_statement_import_type(),
-                    task_import_type(
-                        primitive_import_type(BuiltinType::Text),
-                        list_import_type(map_import_type(
-                            primitive_import_type(BuiltinType::Text),
-                            primitive_import_type(BuiltinType::Text),
-                        )),
-                    ),
-                ),
-            ),
-        )),
-        ("aivi.db", "commit") => Some(intrinsic_import_value(
-            IntrinsicValue::DbCommit,
-            arrow_import_type(
-                db_connection_import_type(),
-                arrow_import_type(
-                    list_import_type(primitive_import_type(BuiltinType::Text)),
-                    arrow_import_type(
-                        list_import_type(db_statement_import_type()),
-                        task_import_type(
-                            primitive_import_type(BuiltinType::Text),
-                            primitive_import_type(BuiltinType::Unit),
-                        ),
-                    ),
                 ),
             ),
         )),
@@ -7708,83 +7587,6 @@ fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMeta
             arrow_import_type(
                 primitive_import_type(BuiltinType::Text),
                 option_import_type(primitive_import_type(BuiltinType::Float)),
-            ),
-        )),
-        // Extended FS intrinsics
-        ("aivi.fs", "readText") => Some(intrinsic_import_value(
-            IntrinsicValue::FsReadText,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                task_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    primitive_import_type(BuiltinType::Text),
-                ),
-            ),
-        )),
-        ("aivi.fs", "readDir") => Some(intrinsic_import_value(
-            IntrinsicValue::FsReadDir,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                task_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    list_import_type(primitive_import_type(BuiltinType::Text)),
-                ),
-            ),
-        )),
-        ("aivi.fs", "exists") => Some(intrinsic_import_value(
-            IntrinsicValue::FsExists,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                task_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    primitive_import_type(BuiltinType::Bool),
-                ),
-            ),
-        )),
-        ("aivi.fs", "readBytes") => Some(intrinsic_import_value(
-            IntrinsicValue::FsReadBytes,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                task_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    primitive_import_type(BuiltinType::Bytes),
-                ),
-            ),
-        )),
-        ("aivi.fs", "rename") => Some(intrinsic_import_value(
-            IntrinsicValue::FsRename,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                arrow_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    task_import_type(
-                        primitive_import_type(BuiltinType::Text),
-                        primitive_import_type(BuiltinType::Unit),
-                    ),
-                ),
-            ),
-        )),
-        ("aivi.fs", "copy") => Some(intrinsic_import_value(
-            IntrinsicValue::FsCopy,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                arrow_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    task_import_type(
-                        primitive_import_type(BuiltinType::Text),
-                        primitive_import_type(BuiltinType::Unit),
-                    ),
-                ),
-            ),
-        )),
-        ("aivi.fs", "deleteDir") => Some(intrinsic_import_value(
-            IntrinsicValue::FsDeleteDir,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                task_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    primitive_import_type(BuiltinType::Unit),
-                ),
             ),
         )),
         // Path intrinsics — synchronous, operate on Text path strings
@@ -8345,71 +8147,6 @@ fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMeta
                 ),
             ),
         )),
-        // Env intrinsics
-        ("aivi.env", "get") => Some(intrinsic_import_value(
-            IntrinsicValue::EnvGet,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                task_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    option_import_type(primitive_import_type(BuiltinType::Text)),
-                ),
-            ),
-        )),
-        ("aivi.env", "list") => Some(intrinsic_import_value(
-            IntrinsicValue::EnvList,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                task_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    list_import_type(ImportValueType::Tuple(vec![
-                        primitive_import_type(BuiltinType::Text),
-                        primitive_import_type(BuiltinType::Text),
-                    ])),
-                ),
-            ),
-        )),
-        // Log intrinsics
-        ("aivi.log", "emit") => Some(intrinsic_import_value(
-            IntrinsicValue::LogEmit,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                arrow_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    task_import_type(
-                        primitive_import_type(BuiltinType::Text),
-                        primitive_import_type(BuiltinType::Unit),
-                    ),
-                ),
-            ),
-        )),
-        ("aivi.log", "emitContext") => Some(intrinsic_import_value(
-            IntrinsicValue::LogEmitContext,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                arrow_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    arrow_import_type(
-                        list_import_type(ImportValueType::Tuple(vec![
-                            primitive_import_type(BuiltinType::Text),
-                            primitive_import_type(BuiltinType::Text),
-                        ])),
-                        task_import_type(
-                            primitive_import_type(BuiltinType::Text),
-                            primitive_import_type(BuiltinType::Unit),
-                        ),
-                    ),
-                ),
-            ),
-        )),
-        // Random float intrinsic
-        ("aivi.random", "randomFloat") => Some(intrinsic_import_value(
-            IntrinsicValue::RandomFloat,
-            task_import_type(
-                primitive_import_type(BuiltinType::Text),
-                primitive_import_type(BuiltinType::Float),
-            ),
-        )),
         // Regex intrinsics
         ("aivi.regex", "isMatch") => Some(intrinsic_import_value(
             IntrinsicValue::RegexIsMatch,
@@ -8511,105 +8248,6 @@ fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMeta
                     primitive_import_type(BuiltinType::Text),
                     arrow_import_type(
                         primitive_import_type(BuiltinType::Int),
-                        primitive_import_type(BuiltinType::Text),
-                    ),
-                ),
-            ),
-        )),
-        // HTTP intrinsics (Task-returning, runs on worker thread via ureq)
-        ("aivi.http", "get") => Some(intrinsic_import_value(
-            IntrinsicValue::HttpGet,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                task_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    primitive_import_type(BuiltinType::Text),
-                ),
-            ),
-        )),
-        ("aivi.http", "getBytes") => Some(intrinsic_import_value(
-            IntrinsicValue::HttpGetBytes,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                task_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    primitive_import_type(BuiltinType::Bytes),
-                ),
-            ),
-        )),
-        ("aivi.http", "getStatus") => Some(intrinsic_import_value(
-            IntrinsicValue::HttpGetStatus,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                task_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    primitive_import_type(BuiltinType::Int),
-                ),
-            ),
-        )),
-        ("aivi.http", "post") => Some(intrinsic_import_value(
-            IntrinsicValue::HttpPost,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                arrow_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    arrow_import_type(
-                        primitive_import_type(BuiltinType::Text),
-                        task_import_type(
-                            primitive_import_type(BuiltinType::Text),
-                            primitive_import_type(BuiltinType::Text),
-                        ),
-                    ),
-                ),
-            ),
-        )),
-        ("aivi.http", "put") => Some(intrinsic_import_value(
-            IntrinsicValue::HttpPut,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                arrow_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    arrow_import_type(
-                        primitive_import_type(BuiltinType::Text),
-                        task_import_type(
-                            primitive_import_type(BuiltinType::Text),
-                            primitive_import_type(BuiltinType::Text),
-                        ),
-                    ),
-                ),
-            ),
-        )),
-        ("aivi.http", "delete") => Some(intrinsic_import_value(
-            IntrinsicValue::HttpDelete,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                task_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    primitive_import_type(BuiltinType::Text),
-                ),
-            ),
-        )),
-        ("aivi.http", "head") => Some(intrinsic_import_value(
-            IntrinsicValue::HttpHead,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                task_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    list_import_type(ImportValueType::Tuple(vec![
-                        primitive_import_type(BuiltinType::Text),
-                        primitive_import_type(BuiltinType::Text),
-                    ])),
-                ),
-            ),
-        )),
-        ("aivi.http", "postJson") => Some(intrinsic_import_value(
-            IntrinsicValue::HttpPostJson,
-            arrow_import_type(
-                primitive_import_type(BuiltinType::Text),
-                arrow_import_type(
-                    primitive_import_type(BuiltinType::Text),
-                    task_import_type(
-                        primitive_import_type(BuiltinType::Text),
                         primitive_import_type(BuiltinType::Text),
                     ),
                 ),
@@ -8801,20 +8439,6 @@ fn option_import_type(element: ImportValueType) -> ImportValueType {
 
 fn list_import_type(element: ImportValueType) -> ImportValueType {
     ImportValueType::List(Box::new(element))
-}
-
-fn map_import_type(key: ImportValueType, value: ImportValueType) -> ImportValueType {
-    ImportValueType::Map {
-        key: Box::new(key),
-        value: Box::new(value),
-    }
-}
-
-fn db_connection_import_type() -> ImportValueType {
-    record_import_type(vec![record_import_field(
-        "database",
-        primitive_import_type(BuiltinType::Text),
-    )])
 }
 
 fn db_param_import_type() -> ImportValueType {
@@ -12009,10 +11633,10 @@ fun boardTextStep:Text = acc:Text row:Int =>
     }
 
     #[test]
-    fn use_db_imports_preserve_intrinsic_metadata_for_builder_surface() {
+    fn use_db_imports_preserve_intrinsic_metadata_for_builder_helpers() {
         let lowered = lower_text(
-            "db-builder-imports.aivi",
-            "use aivi.db (paramInt, statement, query, commit)\n",
+            "db-builder-helper-imports.aivi",
+            "use aivi.db (paramInt, statement)\n",
         );
         assert!(
             !lowered.has_errors(),
@@ -12051,44 +11675,6 @@ fun boardTextStep:Text = acc:Text row:Int =>
                     super::arrow_import_type(
                         super::list_import_type(super::db_param_import_type()),
                         super::db_statement_import_type(),
-                    ),
-                ),
-            })
-        );
-        assert_eq!(
-            imported.get("query"),
-            Some(&ImportBindingMetadata::IntrinsicValue {
-                value: IntrinsicValue::DbQuery,
-                ty: super::arrow_import_type(
-                    super::db_connection_import_type(),
-                    super::arrow_import_type(
-                        super::db_statement_import_type(),
-                        super::task_import_type(
-                            super::primitive_import_type(BuiltinType::Text),
-                            super::list_import_type(super::map_import_type(
-                                super::primitive_import_type(BuiltinType::Text),
-                                super::primitive_import_type(BuiltinType::Text),
-                            )),
-                        ),
-                    ),
-                ),
-            })
-        );
-        assert_eq!(
-            imported.get("commit"),
-            Some(&ImportBindingMetadata::IntrinsicValue {
-                value: IntrinsicValue::DbCommit,
-                ty: super::arrow_import_type(
-                    super::db_connection_import_type(),
-                    super::arrow_import_type(
-                        super::list_import_type(super::primitive_import_type(BuiltinType::Text)),
-                        super::arrow_import_type(
-                            super::list_import_type(super::db_statement_import_type()),
-                            super::task_import_type(
-                                super::primitive_import_type(BuiltinType::Text),
-                                super::primitive_import_type(BuiltinType::Unit),
-                            ),
-                        ),
                     ),
                 ),
             })

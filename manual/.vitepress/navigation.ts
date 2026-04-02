@@ -69,6 +69,7 @@ const stdlibSections: DocGroup[] = [
       { text: 'Validation', link: '/stdlib/validation' },
       { text: 'Either Values', link: '/stdlib/either' },
       { text: 'Lists', link: '/stdlib/list' },
+      { text: 'Matrices', link: '/stdlib/matrix' },
       { text: 'Non-Empty Lists', link: '/stdlib/nonEmpty' },
       { text: 'Pairs', link: '/stdlib/pair' },
       { text: 'Ordering & Comparison', link: '/stdlib/order' },
@@ -104,6 +105,7 @@ const stdlibSections: DocGroup[] = [
     text: 'Files, Environment & Processes',
     collapsed: true,
     items: [
+      { text: 'File System', link: '/stdlib/fs' },
       { text: 'Paths', link: '/stdlib/path' },
       { text: 'Environment Variables', link: '/stdlib/env' },
       { text: 'Standard I/O', link: '/stdlib/stdio' },

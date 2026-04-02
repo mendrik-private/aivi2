@@ -8,14 +8,9 @@ type Text -> Text -> Int -> Text
 func translatePlural = singular plural count =>
     trn singular plural count
 
-type Text -> Text
-func t_ = key =>
-    tr key
-
 export (
     tr
     trn
     translate
     translatePlural
-    t_
 )

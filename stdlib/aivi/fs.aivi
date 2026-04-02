@@ -12,16 +12,8 @@ type FsEvent =
 
 type FsSource = Unit
 
-type FsReadTask = (Task Text Text)
-type FsWriteTask = (Task Text Unit)
-type FsBytesTask = (Task Text Bytes)
-type FsDirTask = (Task Text (List Text))
-type FsExistsTask = (Task Text Bool)
-type FsUnitTask = (Task Text Unit)
-
 export (
     FsError, NotFound, PermissionDenied, ReadFailed, WriteFailed, FsProtocolError,
     FsSource,
-    FsEvent, Created, Changed, Deleted,
-    FsReadTask, FsWriteTask, FsBytesTask, FsDirTask, FsExistsTask, FsUnitTask
+    FsEvent, Created, Changed, Deleted
 )

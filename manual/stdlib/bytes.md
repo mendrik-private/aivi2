@@ -133,11 +133,7 @@ use aivi.core.bytes (
     length
 )
 
-use aivi.fs (
-    FsSource
-    FsBytesTask
-    FsUnitTask
-)
+use aivi.fs (FsSource)
 
 value assetRoot : Text = "/tmp/assets"
 value headerBytes : Bytes = fromText "AIVI"
@@ -145,8 +141,8 @@ value headerBytes : Bytes = fromText "AIVI"
 @source fs assetRoot
 signal files : FsSource
 
-value iconBytes : FsBytesTask = files.readBytes "icon.bin"
-value saveHeader : FsUnitTask = files.writeBytes "header.bin" headerBytes
+value iconBytes : Task Text Bytes = files.readBytes "icon.bin"
+value saveHeader : Task Text Unit = files.writeBytes "header.bin" headerBytes
 value headerLength : Int = length headerBytes
 ```
 

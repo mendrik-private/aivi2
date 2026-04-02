@@ -44,6 +44,4 @@ type DbPageOpts = {
     offset: Int
 }
 
-type DbTask A = (Task Text A)
-
-export (DbSource, DbError, SchemaMismatch, QueryFailed, ConstraintViolation, NestedTransaction, ConnectionFailed, SortDir, Asc, Desc, Connection, TableRef, DbRow, DbParam, DbStatement, DbPageOpts, DbTask)
+export (DbSource, DbError, SchemaMismatch, QueryFailed, ConstraintViolation, NestedTransaction, ConnectionFailed, SortDir, Asc, Desc, Connection, TableRef, DbRow, DbParam, DbStatement, DbPageOpts)

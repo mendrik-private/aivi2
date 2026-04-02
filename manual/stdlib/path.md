@@ -117,8 +117,7 @@ use aivi.path (
 
 use aivi.fs (
     FsSource
-    FsReadTask
-    FsWriteTask
+    FsError
 )
 
 value configDir : Text = "/etc/demo"
@@ -128,8 +127,8 @@ signal files : FsSource
 
 value configPath : Text = join configDir "app.conf"
 value backupPath : Text = normalize (join configDir "../demo/app.conf.bak")
-value readConfig : FsReadTask = files.read "app.conf"
-value writeBackup : FsWriteTask = files.writeText "app.conf.bak" "..."
+value readConfig : Signal (Result FsError Text) = files.read "app.conf"
+value writeBackup : Task Text Unit = files.writeText "app.conf.bak" "..."
 ```
 
 ::: tip

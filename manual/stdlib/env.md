@@ -1,8 +1,9 @@
 # aivi.env
 
-Environment capability vocabulary plus the `EnvSource` handle type.
+Environment vocabulary plus the `EnvSource` capability-handle type.
 
-Environment lookups now belong to `@source env`, not to public `get`/`list` imports.
+Environment access now lives on `@source env` handles. The module itself is shared data vocabulary
+for that handle family.
 
 ## Import
 
@@ -10,8 +11,6 @@ Environment lookups now belong to `@source env`, not to public `get`/`list` impo
 use aivi.env (
     EnvSource
     EnvEntry
-    EnvLookupTask
-    EnvListTask
 )
 ```
 
@@ -22,12 +21,19 @@ use aivi.env (
 signal environment : EnvSource
 
 signal shell : Signal (Option Text) = environment.get "SHELL"
-value xdgVars : EnvListTask = environment.list "XDG_"
+value xdgVars : Task Text (List EnvEntry) = environment.list "XDG_"
 ```
 
 ## Exported vocabulary
 
-- `EnvSource` — nominal handle annotation for `@source env`.
-- `EnvEntry` — one `(name, value)` environment pair.
-- `EnvLookupTask` — current one-shot lookup task shape.
-- `EnvListTask` — current one-shot prefix-list task shape.
+- `EnvSource` - nominal handle annotation for `@source env`.
+- `EnvEntry` - one `(name, value)` environment pair.
+
+## Handle members
+
+| Member | Type | Description |
+| --- | --- | --- |
+| `environment.get key` | `Signal (Option Text)` | Snapshot one environment variable as a signal |
+| `environment.list prefix` | `Task Text (List EnvEntry)` | Read matching entries on demand |
+
+For option-level details on `env.get`, see the [Built-in Source Catalog](/guide/source-catalog).

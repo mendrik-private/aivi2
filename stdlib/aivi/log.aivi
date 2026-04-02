@@ -17,9 +17,7 @@ type LogError = Text
 
 type LogSource = Unit
 
-type LogTask = (Task LogError Unit)
-
-type LogSink = (LogEntry -> LogTask)
+type LogSink = (LogEntry -> (Task LogError Unit))
 
 value levelDebug : Text = "DEBUG"
 value levelInfo  : Text = "INFO"
@@ -51,7 +49,6 @@ export (
     LogEntry
     LogError
     LogSource
-    LogTask
     LogSink
     levelDebug
     levelInfo

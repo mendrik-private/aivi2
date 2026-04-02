@@ -47,6 +47,7 @@ After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first
 - [`aivi.validation`](/stdlib/validation) — validation values for user input and other checks.
 - [`aivi.core.either`](/stdlib/either) — values that can hold one of two branches.
 - [`aivi.list`](/stdlib/list) — list helpers.
+- [`aivi.matrix`](/stdlib/matrix) — rectangular two-dimensional collections.
 - [`aivi.nonEmpty`](/stdlib/nonEmpty) — lists that always contain at least one item.
 - [`aivi.pair`](/stdlib/pair) — two values grouped together.
 - [`aivi.order`](/stdlib/order) — comparison results and ordering helpers.
@@ -73,6 +74,7 @@ After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first
 
 ### Files, environment, and processes
 
+- [`aivi.fs`](/stdlib/fs) — filesystem vocabulary plus `FsSource`.
 - [`aivi.path`](/stdlib/path) — checked path values.
 - [`aivi.env`](/stdlib/env) — environment vocabulary plus `EnvSource`.
 - [`aivi.stdio`](/stdlib/stdio) — stdio vocabulary plus `StdioSource`.
@@ -93,9 +95,9 @@ The linked pages spell out which functions exist today.
 
 ### Desktop, UI, and GNOME
 
-Many pages in this group describe task aliases, watcher/source shapes, or shared desktop data
-types rather than a full feature API. They are still the right place to look when wiring a Linux
-desktop app together.
+Many pages in this group describe handle vocabularies, watcher/source shapes, partial runtime
+surfaces, or shared desktop data types rather than a full feature API. They are still the right
+place to look when wiring a Linux desktop app together.
 
 - [`aivi.app`](/stdlib/app) — application framework types.
 - [`aivi.app.lifecycle`](/stdlib/lifecycle) — lifecycle state, commands, undo state, and in-app notifications.

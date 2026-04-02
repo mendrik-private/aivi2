@@ -43,14 +43,14 @@ use aivi.list (
     map
     filter
     reverse
-    at
+    at as listAt
     take
     drop
     takeWhile
     dropWhile
     flatten
     flatMap
-    replaceAt
+    replaceAt as listReplaceAt
     zip
     zipWith
     unzip
@@ -116,6 +116,21 @@ use aivi.nonEmpty (
     mapNel
     fromList as nelFromList
     appendNel
+)
+
+use aivi.matrix (
+    Matrix
+    MatrixError
+    NegativeWidth
+    NegativeHeight
+    RaggedRows
+    init
+    fromRows
+    width
+    height
+    at
+    replaceAt
+    rows
 )
 
 use aivi.order (
@@ -225,10 +240,10 @@ func smaller = a b =>
 value doubled : List Int = map double numbers
 value positives : List Int = filter isPositive numbers
 value reversed : List Int = reverse numbers
-value secondNumber : Option Int = at 1 numbers
-value missingNumber : Option Int = at 99 numbers
-value replacedNumbers : List Int = replaceAt 2 99 numbers
-value unchangedNumbers : List Int = replaceAt 99 42 numbers
+value secondNumber : Option Int = listAt 1 numbers
+value missingNumber : Option Int = listAt 99 numbers
+value replacedNumbers : List Int = listReplaceAt 2 99 numbers
+value unchangedNumbers : List Int = listReplaceAt 99 42 numbers
 value firstThree : List Int = take 3 numbers
 value afterTwo : List Int = drop 2 numbers
 value smallOnes : List Int = takeWhile isSmall numbers
@@ -436,6 +451,43 @@ type (Int, Text) -> (Int, Text) -> Bool
 func byAge = a b =>
     comparing getAge smaller a b
 
+type Int -> Int -> Int
+func matrixValue = x y =>
+    x + y * 10
+
+type MatrixError -> Bool
+func isRaggedMatrixError = error => error
+ ||> RaggedRows rowIndex expected actual ->
+        rowIndex == 1 and expected == 2 and actual == 1
+ ||> NegativeWidth _  -> False
+ ||> NegativeHeight _ -> False
+
+type Result MatrixError (Matrix Int) -> Bool
+func raggedMatrixRejected = result => result
+ ||> Ok _      -> False
+ ||> Err error -> isRaggedMatrixError error
+
+value coordinateMatrix : Result MatrixError (Matrix Int) =
+    init 3 2 matrixValue
+
+value raggedMatrix : Result MatrixError (Matrix Int) =
+    fromRows [
+        [1, 2],
+        [3]
+    ]
+
+value matrixUpdateOk : Result MatrixError Bool = coordinateMatrix
+ ||> Err error -> Err error
+ ||> Ok matrix -> replaceAt matrix (1, 1) 99
+  ||> None -> Ok False
+  ||> Some updated ->
+        Ok (
+            width updated == 3 and
+            height updated == 2 and
+            at updated 1 1 == Some 99 and
+            rows updated == [[0, 1, 2], [10, 99, 12]]
+        )
+
 @test
 value extended_validation_covers_bool_and_math : Task Text Bool = pure (squareTest == 25)
 
@@ -450,3 +502,11 @@ value extended_validation_covers_result_ops : Task Text Bool = pure (mappedErrRe
 
 @test
 value extended_validation_covers_order_ops : Task Text Bool = pure (greatestOf == 9)
+
+@test
+value extended_validation_covers_matrix_ops : Task Text Bool =
+    pure (withDefault False matrixUpdateOk)
+
+@test
+value extended_validation_rejects_ragged_matrix_rows : Task Text Bool =
+    pure (raggedMatrixRejected raggedMatrix)

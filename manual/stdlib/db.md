@@ -1,6 +1,6 @@
 # aivi.db
 
-Database records, query payloads, and task aliases.
+Database records, query payloads, and handle vocabulary.
 
 This module is the data vocabulary for database-backed features. It describes connections,
 statements, parameters, paging options, errors, and the `DbSource` handle marker. The current
@@ -29,7 +29,6 @@ use aivi.db (
     DbParam
     DbStatement
     DbPageOpts
-    DbTask
 )
 ```
 
@@ -46,7 +45,6 @@ use aivi.db (
 | `DbPageOpts` | Limit/offset paging options |
 | `DbError` | Structured database failures |
 | `DbSource` | Handle annotation for `@source db` |
-| `DbTask A` | Current one-shot database task alias |
 
 ---
 
@@ -276,11 +274,32 @@ func describeDbError = error => error
 
 ---
 
-## `DbTask`
+## Using the handle
 
 ```aivi
-type DbTask A = Task Text A
+use aivi.db (
+    DbSource
+    Connection
+    DbRow
+    DbStatement
+)
+
+value connection : Connection = {
+    database: "data/app.db"
+}
+
+@source db connection
+signal database : DbSource
+
+value loadUsersQuery : DbStatement = {
+    sql: "select * from users",
+    arguments: []
+}
+
+value loadUsers : Task Text (List DbRow) =
+    database.query loadUsersQuery
 ```
 
-Alias for the current one-shot database task path. Structured `DbError` is still the signal/result
-vocabulary used by `db.connect` / `db.live`.
+The source-backed side of the family stays on `db.connect` / `db.live`. On-demand database work
+uses handle members such as `database.query ...` and `database.commit ...`, which return ordinary
+`Task Text ...` values on the current command path.

@@ -11,7 +11,6 @@ type Header = (Text, Text)
 type HttpHeaders = (Map Text Text)
 type HttpQuery = (Map Text Text)
 type HttpResponse A = (Result HttpError A)
-type HttpTask A = (Task Text A)
 
 type DecodeMode =
   | Strict
@@ -36,7 +35,6 @@ export (
     HttpHeaders,
     HttpQuery,
     HttpResponse,
-    HttpTask,
     DecodeMode,
     Strict,
     Permissive,

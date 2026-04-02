@@ -5232,13 +5232,19 @@ fn runtime_evaluates_db_query_builder_flow_into_db_task_plan() {
     let backend = lower_text(
         "backend-db-query-runtime.aivi",
         r#"
-use aivi.db (paramInt, statement, query)
+use aivi.db (paramInt, statement)
+
+type DatabaseHandle = {
+    database: Text
+}
 
 value conn = { database: "app.sqlite" }
 
+@source db conn
+signal database : DatabaseHandle
+
 value selectUsers: Task Text (List (Map Text Text)) =
-    statement "select * from users where id = ?" [paramInt 7]
-     |> query conn
+    database.query (statement "select * from users where id = ?" [paramInt 7])
 "#,
     );
     let mut evaluator = KernelEvaluator::new(&backend);
@@ -5265,16 +5271,22 @@ fn runtime_evaluates_db_commit_builder_flow_into_db_task_plan() {
     let backend = lower_text(
         "backend-db-commit-runtime.aivi",
         r#"
-use aivi.db (paramBool, paramInt, paramText, statement, commit)
+use aivi.db (paramBool, paramInt, paramText, statement)
+
+type DatabaseHandle = {
+    database: Text
+}
 
 value conn = { database: "app.sqlite" }
 
+@source db conn
+signal database : DatabaseHandle
+
 value activateUser: Task Text Unit =
-    [
+    database.commit ["users", "audit_log", "users"] [
         statement "update users set active = ? where id = ?" [paramBool True, paramInt 7],
         statement "insert into audit_log(message) values (?)" [paramText "activated user"]
     ]
-     |> commit conn ["users", "audit_log", "users"]
 "#,
     );
     let mut evaluator = KernelEvaluator::new(&backend);

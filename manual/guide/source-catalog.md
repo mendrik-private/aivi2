@@ -36,13 +36,13 @@ These families now have a preferred public handle surface:
 
 | Family | Preferred public surface | Lowered implementation |
 | --- | --- | --- |
-| File system | `@source fs ...` + `FsSource` | `fs.read`, `fs.watch`, plus filesystem command intrinsics |
-| HTTP | `@source http ...` + `HttpSource` | `http.get` plus current one-shot request intrinsics |
-| Database | `@source db ...` + `DbSource` | `db.connect`, `db.live`, plus current query/commit intrinsics |
-| Environment | `@source env` + `EnvSource` | `env.get` plus environment snapshot/list intrinsics |
-| Logging / stdio | `@source log`, `@source stdio` | log sink intrinsics plus `stdio.read` / stdio write intrinsics |
-| Randomness | `@source random` + `RandomSource` | current random number / bytes intrinsics |
-| Process / path / D-Bus | `@source process`, `@source path`, `@source dbus` | existing built-in providers and host snapshot intrinsics |
+| File system | `@source fs ...` + `FsSource` | `fs.read`, `fs.watch`, plus handle-member tasks such as `files.delete` |
+| HTTP | `@source http ...` + `HttpSource` | `http.get`, `http.post`, plus handle-member request tasks such as `api.get` |
+| Database | `@source db ...` + `DbSource` | `db.connect`, `db.live`, plus handle-member `database.query` / `database.commit` tasks |
+| Environment | `@source env` + `EnvSource` | `env.get` plus handle-member environment snapshots/listing |
+| Logging / stdio | `@source log`, `@source stdio` | log/stdio handle members plus `stdio.read` |
+| Randomness | `@source random` + `RandomSource` | handle-member random tasks such as `entropy.bytes` |
+| Process / path / D-Bus | `@source process`, `@source path`, `@source dbus` | existing built-in providers plus handle-member host snapshots |
 
 Incoming payloads decode directly into the annotated target type. JSON-as-text helpers are no
 longer part of the public external boundary.

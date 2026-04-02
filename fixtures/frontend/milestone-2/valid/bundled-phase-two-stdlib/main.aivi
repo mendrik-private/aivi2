@@ -8,7 +8,6 @@ use aivi.http (
     HttpHeaders
     HttpQuery
     HttpResponse
-    HttpTask
     DecodeMode
     Strict
     Retry
@@ -27,7 +26,6 @@ use aivi.log (
     LogContext
     LogEntry
     LogError
-    LogTask
     LogSink
 )
 
@@ -49,7 +47,7 @@ type RetryBudget = Retry
 
 type UsersResponse = (HttpResponse (List User))
 
-type UsersTask = (HttpTask (List User))
+type UsersTask = (Task Text (List User))
 
 @source http "https://api.example.com"
 signal api : HttpSource
@@ -82,7 +80,7 @@ value entry : LogEntry = {
 
 type Writer = LogSink
 
-type CurrentLogTask = LogTask
+type CurrentLogTask = (Task LogError Unit)
 
 type CurrentLogError = LogError
 

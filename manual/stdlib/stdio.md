@@ -2,7 +2,7 @@
 
 Standard I/O vocabulary plus the `StdioSource` capability-handle type.
 
-Public `stdoutWrite` / `stderrWrite` imports have been folded into `@source stdio`.
+Public stdio work now goes through `@source stdio` handles.
 
 ## Import
 
@@ -14,9 +14,6 @@ use aivi.stdio (
     Stream
     Stdout
     Stderr
-    StdioTask
-    StdoutTask
-    StderrTask
 )
 ```
 
@@ -27,13 +24,15 @@ use aivi.stdio (
 signal console : StdioSource
 
 signal stdinText : Signal Text = console.read
-value prompt : StdoutTask = console.stdoutWrite "Name: "
-value failure : StderrTask = console.stderrWrite "Missing config\n"
+value prompt : Task Text Unit = console.stdoutWrite "Name: "
+value failure : Task Text Unit = console.stderrWrite "Missing config\n"
 ```
 
 ## Exported vocabulary
 
-- `StdioSource` — nominal handle annotation for `@source stdio`.
-- `WriteError` / `StdioUnavailable` — stdio failure vocabulary.
-- `Stream`, `Stdout`, `Stderr` — stream-selection vocabulary.
-- `StdioTask`, `StdoutTask`, `StderrTask` — current one-shot task aliases.
+- `StdioSource` - nominal handle annotation for `@source stdio`.
+- `WriteError` / `StdioUnavailable` - stdio failure vocabulary.
+- `Stream`, `Stdout`, `Stderr` - stream-selection vocabulary.
+
+`console.read` is the source-backed snapshot side. `console.stdoutWrite` and
+`console.stderrWrite` are the command side and return ordinary `Task Text Unit` values.

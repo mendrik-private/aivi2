@@ -5,10 +5,4 @@ type WriteError =
 
 type Stream = Stdout | Stderr
 
-type StdioTask = (Task Text Unit)
-
-type StdoutTask = (Task Text Unit)
-
-type StderrTask = (Task Text Unit)
-
-export (StdioSource, WriteError, StdioUnavailable, Stream, Stdout, Stderr, StdioTask, StdoutTask, StderrTask)
+export (StdioSource, WriteError, StdioUnavailable, Stream, Stdout, Stderr)

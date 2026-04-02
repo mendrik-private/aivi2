@@ -1141,11 +1141,16 @@ signal keyDown : Signal Text
                     "glib-runtime-db-live-commit-refresh.aivi",
                     &format!(
                         r#"
-use aivi.db (paramInt, paramText, statement, commit)
-use aivi.random (randomBytes)
+use aivi.db (paramInt, paramText, statement)
 
 signal primaryChanged : Signal Unit
 signal secondaryChanged : Signal Unit
+
+type DatabaseHandle = {{
+    database: Text
+}}
+
+type RandomHandle = Unit
 
 value primaryConn = {{
     database: "{}"
@@ -1154,6 +1159,15 @@ value primaryConn = {{
 value secondaryConn = {{
     database: "{}"
 }}
+
+@source db primaryConn
+signal primaryDb : DatabaseHandle
+
+@source db secondaryConn
+signal secondaryDb : DatabaseHandle
+
+@source random
+signal entropy : RandomHandle
 
 value primaryUsers = {{
     name: "users",
@@ -1168,10 +1182,10 @@ value secondaryUsers = {{
 }}
 
 value samplePrimary : Task Text Bytes =
-    randomBytes 16
+    entropy.bytes 16
 
 value sampleSecondary : Task Text Bytes =
-    randomBytes 16
+    entropy.bytes 16
 
 @source db.live samplePrimary with {{
     refreshOn: primaryUsers.changed
@@ -1184,10 +1198,9 @@ signal primaryBytes : Signal (Result Text Bytes)
 signal secondaryBytes : Signal (Result Text Bytes)
 
 value addPrimary : Task Text Unit =
-    [
+    primaryDb.commit ["users"] [
         statement "insert into users(id, name) values (?, ?)" [paramInt 1, paramText "Ada"]
     ]
-     |> commit primaryConn ["users"]
 "#,
                         primary_db.display(),
                         secondary_db.display(),
@@ -1354,14 +1367,25 @@ value addPrimary : Task Text Unit =
                     "glib-runtime-db-live-commit-failure.aivi",
                     &format!(
                         r#"
-use aivi.db (paramInt, statement, commit)
-use aivi.random (randomBytes)
+use aivi.db (paramInt, statement)
 
 signal usersChanged : Signal Unit
+
+type DatabaseHandle = {{
+    database: Text
+}}
+
+type RandomHandle = Unit
 
 value conn = {{
     database: "{}"
 }}
+
+@source db conn
+signal database : DatabaseHandle
+
+@source random
+signal entropy : RandomHandle
 
 value users = {{
     name: "users",
@@ -1370,7 +1394,7 @@ value users = {{
 }}
 
 value sampleUsers : Task Text Bytes =
-    randomBytes 16
+    entropy.bytes 16
 
 @source db.live sampleUsers with {{
     refreshOn: users.changed
@@ -1378,10 +1402,9 @@ value sampleUsers : Task Text Bytes =
 signal rows : Signal (Result Text Bytes)
 
 value failInsert : Task Text Unit =
-    [
+    database.commit ["users"] [
         statement "insert into missing_table(id) values (?)" [paramInt 1]
     ]
-     |> commit conn ["users"]
 "#,
                         database.display(),
                     ),

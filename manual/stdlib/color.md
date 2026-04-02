@@ -140,3 +140,9 @@ func hoverColor = theme =>
 
 This module does not currently include named colors or a text parser such as `#RRGGBB`.
 Work with the packed integer form, or convert from text before reaching this module.
+
+Current limits:
+
+- no lightness / hue / saturation algebra
+- no domain operators for adjustments such as `+ 10lightness` or `- 20hue`
+- no alternate color-space helpers such as HSL or OKLCH

@@ -16,14 +16,14 @@ vocabularies, but they no longer expose parallel effectful entry points.
 Current shape:
 
 ```aivi
-use aivi.fs (FsSource, FsError, FsEvent, FsUnitTask)
+use aivi.fs (FsSource, FsError, FsEvent)
 
 @source fs projectRoot
 signal files : FsSource
 
 signal config : Signal (Result FsError AppConfig) = files.read configPath
 signal changes : Signal FsEvent = files.watch configPath
-value cleanup : FsUnitTask = files.deleteFile cachePath
+value cleanup : Task Text Unit = files.delete "cache.txt"
 ```
 
 In that model:
@@ -61,8 +61,8 @@ Current rules:
 - handle anchors must stay bodyless and use a nominal non-`Signal` annotation such as `FsSource`
 - direct `signal name : Signal T = handle.member ...` forms lower to ordinary bodyless source
   bindings with synthesized `@source provider.variant ...` metadata
-- direct `value name = handle.member ...` forms lower to the existing one-shot runtime intrinsic
-  path for built-in commands, queries, and host snapshots
+- direct `value name = handle.member ...` forms lower through the built-in handle task path for
+  commands, queries, and host snapshots
 - capability handles are compile-time anchors, not exported runtime signals
 - custom provider contracts may declare `operation` and `command` members already
 - direct `signal name : Signal T = handle.member ...` lowering now works for custom provider

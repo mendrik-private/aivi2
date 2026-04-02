@@ -8,7 +8,6 @@ use aivi.http (
     HttpHeaders
     HttpQuery
     HttpResponse
-    HttpTask
     DecodeMode
     Strict
     Retry
@@ -27,7 +26,6 @@ use aivi.log (
     LogContext
     LogEntry
     LogError
-    LogTask
     LogSink
     LogSource
     levelInfo
@@ -53,7 +51,7 @@ use aivi.process (ProcessSource)
 
 use aivi.env (EnvSource)
 
-use aivi.random (RandomSource, RandomIntTask)
+use aivi.random (RandomSource)
 
 use aivi.auth (
     PkceConfig
@@ -112,7 +110,6 @@ use aivi.db (
     DbParam
     DbStatement
     DbPageOpts
-    DbTask
 )
 
 use aivi.imap (
@@ -159,7 +156,7 @@ type RetryBudget = Retry
 
 type UsersResponse = (HttpResponse (List User))
 
-type UsersTask = (HttpTask (List User))
+type UsersTask = (Task Text (List User))
 
 @source http "https://api.example.com"
 signal api : HttpSource
@@ -192,7 +189,7 @@ value entry : LogEntry = {
 
 type Writer = LogSink
 
-type CurrentLogTask = LogTask
+type CurrentLogTask = (Task LogError Unit)
 
 type CurrentLogError = LogError
 
@@ -281,7 +278,7 @@ value userQuery : DbStatement = {
     arguments: [userIdParam]
 }
 
-value liveUsersQuery : DbTask (List DbRow) = pure []
+value liveUsersQuery : Task Text (List DbRow) = pure []
 
 @source db.connect connection with {
     pool: 2,
@@ -335,7 +332,7 @@ signal logger : LogSource
 @source random
 signal entropy : RandomSource
 
-value healthCheck : HttpTask Text = api.get "/health"
+value healthCheck : Task Text Text = api.get "/health"
 signal cargoToml : Signal (Result FsError Text) = workspaceFiles.read "Cargo.toml"
 value fsExistsTask : Task Text Bool = workspaceFiles.exists "Cargo.toml"
 value stdoutTask : Task Text Unit = console.stdoutWrite "stdout"
@@ -343,8 +340,8 @@ value stderrTask : Task Text Unit = console.stderrWrite "stderr"
 value mkdirTask : Task Text Unit = tempFiles.createDirAll "aivi-boundary"
 value writeTextTask : Task Text Unit = tempFiles.writeText "aivi-boundary/out.txt" "ok"
 value deleteTask : Task Text Unit = tempFiles.deleteFile "aivi-boundary/out.txt"
-value logTask : LogTask = logger.emit levelInfo "loaded"
-value randomIntTask : RandomIntTask = entropy.int 1 10
+value logTask : Task LogError Unit = logger.emit levelInfo "loaded"
+value randomIntTask : Task Text Int = entropy.int 1 10
 value envListTask : Task Text (List (Text, Text)) = hostEnv.list ""
 
 signal cliArgs : Signal (List Text) = runtime.args

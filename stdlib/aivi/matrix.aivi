@@ -1,0 +1,141 @@
+use aivi.list (
+    at as listAt
+    head as listHead
+    length as listLength
+    map as listMap
+    replaceAt as listReplaceAt
+)
+
+type MatrixError =
+  | NegativeWidth Int
+  | NegativeHeight Int
+  | RaggedRows Int Int Int
+
+type Matrix A =
+  | MkMatrix Int Int (List (List A))
+
+type RowValidationState = {
+    rowIndex: Int,
+    error: Option MatrixError
+}
+
+type Int -> (List Int) -> (List Int)
+func descendingIndicesStep = current acc => current < 0
+ T|> acc
+ F|> descendingIndicesStep (current - 1) (append [current] acc)
+
+type Int -> (List Int)
+func indices = n => n <= 0
+ T|> []
+ F|> descendingIndicesStep (n - 1) []
+
+type (Int -> Int -> A) -> Int -> Int -> A
+func initCellAt = build y x =>
+    build x y
+
+type Int -> (Int -> Int -> A) -> Int -> (List A)
+func buildRow = width build y =>
+    listMap (initCellAt build y) (indices width)
+
+type Int -> Int -> (Int -> Int -> A) -> (List (List A))
+func buildRows = width height build =>
+    listMap (buildRow width build) (indices height)
+
+type Int -> Int -> (Int -> Int -> A) -> Result MatrixError (List (List A))
+func validateInitWidth = width height build => width < 0
+ T|> Err (NegativeWidth width)
+ F|> validateInitHeight width height build
+
+type Int -> Int -> (Int -> Int -> A) -> Result MatrixError (List (List A))
+func validateInitHeight = width height build => height < 0
+ T|> Err (NegativeHeight height)
+ F|> Ok (buildRows width height build)
+
+type List (List A) -> Int
+func rowWidth = inputRows => listHead inputRows
+ ||> None     -> 0
+ ||> Some row -> listLength row
+
+type Int -> Int -> (List A) -> MatrixError
+func raggedRowsError = rowIndex expected row =>
+    RaggedRows rowIndex expected (listLength row)
+
+type Int -> RowValidationState -> (List A) -> Bool -> RowValidationState
+func finishRowValidation = expected state row matches => matches
+ T|> {
+        rowIndex: state.rowIndex + 1,
+        error: None
+    }
+ F|> {
+        rowIndex: state.rowIndex + 1,
+        error: Some (raggedRowsError state.rowIndex expected row)
+    }
+
+type Int -> RowValidationState -> (List A) -> RowValidationState
+func validateRowWidth = expected state row => state.error
+ ||> Some _ -> state
+ ||> None   -> finishRowValidation expected state row ((listLength row) == expected)
+
+type List (List A) -> RowValidationState -> Result MatrixError (List (List A))
+func finalizeRows = inputRows state => state.error
+ ||> Some error -> Err error
+ ||> None       -> Ok inputRows
+
+type List (List A) -> Result MatrixError (List (List A))
+func validateRows = inputRows =>
+    finalizeRows inputRows (reduce (validateRowWidth (rowWidth inputRows)) { rowIndex: 0, error: None } inputRows)
+
+type (List A) -> Int -> A -> Option (List A)
+func setRowCell = inputRow x value => listAt x inputRow
+ ||> None   -> None
+ ||> Some _ -> Some (listReplaceAt x value inputRow)
+
+type Int -> Int -> (List (List A)) -> Matrix A
+func buildMatrix = width height inputRows =>
+    MkMatrix width height inputRows
+
+type Int -> Int -> (Int -> Int -> A) -> Result MatrixError (Matrix A)
+func init = width height build => validateInitWidth width height build
+ ||> Ok builtRows -> Ok (buildMatrix width height builtRows)
+ ||> Err error    -> Err error
+
+type List (List A) -> Result MatrixError (Matrix A)
+func fromRows = inputRows => validateRows inputRows
+ ||> Ok validRows -> Ok (buildMatrix (rowWidth validRows) (listLength validRows) validRows)
+ ||> Err error    -> Err error
+
+type Matrix A -> Int
+func width = matrix => matrix
+ ||> MkMatrix w ignored ignoredRows -> w
+
+type Matrix A -> Int
+func height = matrix => matrix
+ ||> MkMatrix ignored h ignoredRows -> h
+
+type Matrix A -> (List (List A))
+func rows = matrix => matrix
+ ||> MkMatrix ignoredWidth ignoredHeight inputRows -> inputRows
+
+type Matrix A -> Int -> Option (List A)
+func row = matrix y =>
+    listAt y (rows matrix)
+
+type Matrix A -> Int -> Int -> (Option A)
+func at = matrix x y => row matrix y
+ ||> None       -> None
+ ||> Some cells -> listAt x cells
+
+type Matrix A -> Int -> Int -> A -> (Option (Matrix A))
+func replaceAtCoords = matrix x y value => row matrix y
+ ||> None            -> None
+ ||> Some targetRow  -> setRowCell targetRow x value
+  ||> None         -> None
+  ||> Some newRow  ->
+        Some (buildMatrix (width matrix) (height matrix) (listReplaceAt y newRow (rows matrix)))
+
+type Matrix A -> (Int, Int) -> A -> (Option (Matrix A))
+func replaceAt = matrix coord value => coord
+ ||> (x, y) -> replaceAtCoords matrix x y value
+
+export (MatrixError, NegativeWidth, NegativeHeight, RaggedRows,
+        Matrix, init, fromRows, width, height, rows, row, at, replaceAt)

@@ -3,12 +3,4 @@ type RandomError =
 
 type RandomSource = Unit
 
-type RandomTask = (Task Text Bytes)
-
-type RandomIntTask = (Task Text Int)
-
-type RandomBytesTask = (Task Text Bytes)
-
-type RandomFloatTask = (Task Text Float)
-
-export (RandomError, InsufficientEntropy, RandomSource, RandomTask, RandomIntTask, RandomBytesTask, RandomFloatTask)
+export (RandomError, InsufficientEntropy, RandomSource)

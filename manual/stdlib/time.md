@@ -7,6 +7,9 @@ Clock, timestamp, and millisecond helpers.
 - task-based functions that ask the runtime for clock or timestamp work
 - pure helpers for doing ordinary millisecond math in your own code
 
+Unlike [`aivi.duration`](/stdlib/duration), this module does **not** define a time domain today.
+`EpochMs` is still just an `Int` alias.
+
 ## Import
 
 ```aivi
@@ -86,6 +89,12 @@ The API surface is already present, but the current runtime behavior is intentio
 
 That means `formatIso`, `formatDate`, `formatTime`, and `parseIso` currently share the same
 fallback behavior.
+
+## Current limits
+
+- timestamps are raw epoch-millisecond `Int` values, not a dedicated domain
+- `format` and `parse` are still partial runtime stubs
+- there is no richer calendar/date-time domain surface yet
 
 ### `format`
 

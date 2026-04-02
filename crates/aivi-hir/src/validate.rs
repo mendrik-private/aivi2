@@ -2,10 +2,10 @@ use std::collections::{HashMap, HashSet, hash_map::Entry};
 
 use aivi_base::{ByteIndex, Diagnostic, DiagnosticCode, DiagnosticLabel, SourceSpan, Span};
 use aivi_typing::{
-    BuiltinSourceProvider, BuiltinSourceWakeupCause, CustomSourceRecurrenceWakeupContext, FanoutPlanner, FanoutStageKind,
-    GatePlanner, Kind, KindCheckError, KindCheckErrorKind, KindChecker, KindExprId,
-    KindParameterId as TypingKindParameterId, KindRecordField, KindStore, NonSourceWakeupCause,
-    RecurrencePlanner, RecurrenceTargetEvidence, RecurrenceWakeupPlanner,
+    BuiltinSourceProvider, BuiltinSourceWakeupCause, CustomSourceRecurrenceWakeupContext,
+    FanoutPlanner, FanoutStageKind, GatePlanner, Kind, KindCheckError, KindCheckErrorKind,
+    KindChecker, KindExprId, KindParameterId as TypingKindParameterId, KindRecordField, KindStore,
+    NonSourceWakeupCause, RecurrencePlanner, RecurrenceTargetEvidence, RecurrenceWakeupPlanner,
     SourceContractType, SourceRecurrenceWakeupContext, SourceTypeParameter,
     builtin_source_option_wakeup_cause,
 };
@@ -16,51 +16,44 @@ use regex_syntax::{
 use crate::{
     arena::{Arena, ArenaId},
     hir::{
-        ApplicativeSpineHead, BuiltinTerm, BuiltinType, ControlNode,
-        ControlNodeKind, DecoratorPayload, DeprecationNotice, DomainMemberKind, DomainMemberResolution, ExportResolution, ExprKind,
-        ImportBindingMetadata, ImportBindingResolution, Item,
+        ApplicativeSpineHead, BuiltinTerm, BuiltinType, ControlNode, ControlNodeKind,
+        DecoratorPayload, DeprecationNotice, DomainMemberKind, DomainMemberResolution,
+        ExportResolution, ExprKind, ImportBindingMetadata, ImportBindingResolution, Item,
         LiteralSuffixResolution, MarkupAttributeValue, MarkupNodeKind, Module, Name, NamePath,
-        PatternKind, PipeStageKind, RecordExpr,
-        RecurrenceWakeupDecoratorKind, ResolutionState, SignalItem, SourceDecorator,
-        SourceMetadata, SourceProviderRef, TermReference, TermResolution, TextLiteral, TextSegment,
-        TypeItemBody, TypeKind, TypeReference, TypeResolution,
+        PatternKind, PipeStageKind, RecordExpr, RecurrenceWakeupDecoratorKind, ResolutionState,
+        SignalItem, SourceDecorator, SourceMetadata, SourceProviderRef, TermReference,
+        TermResolution, TextLiteral, TextSegment, TypeItemBody, TypeKind, TypeReference,
+        TypeResolution,
     },
     ids::{
         BindingId, ClusterId, ControlNodeId, DecoratorId, ExprId, ImportId, ItemId, MarkupNodeId,
         PatternId, TypeId, TypeParameterId,
     },
     signal_metadata_elaboration::expr_signal_dependencies,
-    source_contract_resolution::{
-        SourceContractResolutionErrorKind, SourceContractTypeResolver,
-    },
+    source_contract_resolution::{SourceContractResolutionErrorKind, SourceContractTypeResolver},
     typecheck::typecheck_module,
 };
 
+pub(crate) use crate::typecheck_context::{
+    ClassConstraintBinding, ClassMemberCallMatch, DomainMemberSelection, GateExprEnv, GateIssue,
+    GateProjectionStep, GateTypeContext, PipeFunctionSignatureMatch, PipeSubjectStepOutcome,
+    PipeSubjectWalker, PolyTypeBindings, TruthyFalsyPairStages, extend_pipe_env_with_stage_memos,
+    gate_env_for_function, pipe_stage_expr_env, truthy_falsy_pair_stages,
+};
 pub use crate::typecheck_context::{
     GateType, TypeBinding, TypeConstructorBinding, TypeConstructorHead, case_pattern_field_types,
 };
-pub(crate) use crate::typecheck_context::{
-    ClassConstraintBinding, ClassMemberCallMatch, DomainMemberSelection,
-    GateExprEnv, GateIssue, GateProjectionStep, GateTypeContext,
-    PipeFunctionSignatureMatch, PipeSubjectStepOutcome, PipeSubjectWalker,
-    PolyTypeBindings, TruthyFalsyPairStages,
-    extend_pipe_env_with_stage_memos, gate_env_for_function,
-    pipe_stage_expr_env, truthy_falsy_pair_stages,
-};
 use crate::typecheck_context::{
-    item_type_name,
-    SourceOptionExpectedType, SourceOptionActualType, SourceOptionTypeCheck,
-    SourceOptionTypeBindings, SourceOptionTypeMismatch, SourceOptionActualRecordField,
-    SourceOptionConstructorActual, SourceOptionExpectedRecordField,
-    SourceOptionGenericConstructorRootCheck, SourceOptionNamedType, SourceOptionTypeSurface,
-    PendingSourceOptionValue,
+    PendingSourceOptionValue, SourceOptionActualRecordField, SourceOptionActualType,
+    SourceOptionConstructorActual, SourceOptionExpectedRecordField, SourceOptionExpectedType,
+    SourceOptionGenericConstructorRootCheck, SourceOptionNamedType, SourceOptionTypeBindings,
+    SourceOptionTypeCheck, SourceOptionTypeMismatch, SourceOptionTypeSurface,
     custom_source_contract_expected, custom_source_contract_expected_type,
-    custom_source_wakeup_kind, is_db_changed_trigger_projection,
+    custom_source_wakeup_kind, is_db_changed_trigger_projection, item_type_name,
     missing_case_label, missing_case_list, source_option_contract_parameter_phrase,
     source_option_expected_matches_actual_type, source_option_expected_to_gate_type,
     source_option_unresolved_contract_parameters, type_argument_phrase,
 };
-
 
 /// Validation strictness for HIR modules.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -9413,8 +9406,10 @@ mod tests {
         TypeVariant, ValidationMode,
     };
 
-    use crate::source_contract_resolution::{ResolvedSourceContractType, ResolvedSourceTypeConstructor};
     use super::*;
+    use crate::source_contract_resolution::{
+        ResolvedSourceContractType, ResolvedSourceTypeConstructor,
+    };
 
     fn span(file: u32, start: u32, end: u32) -> SourceSpan {
         SourceSpan::new(
@@ -9508,8 +9503,7 @@ mod tests {
             .diagnostics()
             .iter()
             .filter(|diagnostic| {
-                diagnostic.code
-                    == Some(crate::codes::REACTIVE_UPDATE_SELF_REFERENCE)
+                diagnostic.code == Some(crate::codes::REACTIVE_UPDATE_SELF_REFERENCE)
             })
             .count();
         assert_eq!(
@@ -10197,9 +10191,12 @@ value resultLabel =
         let _ = module.push_item(item).expect("item allocation should fit");
 
         let report = validate_module(&module, ValidationMode::RequireResolvedNames);
-        assert!(report.diagnostics().iter().any(
-            |diagnostic| diagnostic.code == Some(crate::codes::UNRESOLVED_NAME)
-        ));
+        assert!(
+            report
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code == Some(crate::codes::UNRESOLVED_NAME))
+        );
     }
 
     #[test]
@@ -10271,9 +10268,7 @@ value resultLabel =
         let diagnostic = report
             .diagnostics()
             .iter()
-            .find(|diagnostic| {
-                diagnostic.code == Some(crate::codes::INVALID_REGEX_LITERAL)
-            })
+            .find(|diagnostic| diagnostic.code == Some(crate::codes::INVALID_REGEX_LITERAL))
             .expect("invalid regex literal should produce a HIR diagnostic");
 
         assert_eq!(
@@ -10424,9 +10419,7 @@ fun statusLabel:Text = status:Status=>    status
         let diagnostic = report
             .diagnostics()
             .iter()
-            .find(|diagnostic| {
-                diagnostic.code == Some(crate::codes::NON_EXHAUSTIVE_CASE_PATTERN)
-            })
+            .find(|diagnostic| diagnostic.code == Some(crate::codes::NON_EXHAUSTIVE_CASE_PATTERN))
             .expect("non-exhaustive sum cases should produce a HIR diagnostic");
 
         assert_eq!(
@@ -10501,9 +10494,7 @@ value screenView =
         let diagnostic = report
             .diagnostics()
             .iter()
-            .find(|diagnostic| {
-                diagnostic.code == Some(crate::codes::NON_EXHAUSTIVE_CASE_PATTERN)
-            })
+            .find(|diagnostic| diagnostic.code == Some(crate::codes::NON_EXHAUSTIVE_CASE_PATTERN))
             .expect("non-exhaustive markup match should produce a HIR diagnostic");
 
         assert_eq!(
@@ -11108,23 +11099,28 @@ value screenView =
     }
 
     #[test]
-    fn resolved_validation_accepts_db_query_and_commit_builder_flows() {
+    fn resolved_validation_accepts_db_handle_query_and_commit_builder_flows() {
         let report = validate_resolved_text(
-            "db-query-commit-builder-flows.aivi",
-            "use aivi.db (paramBool, paramInt, paramText, statement, query, commit)\n\
-             \n\
-             value conn = { database: \"app.sqlite\" }\n\
-             \n\
-             value selectUsers: Task Text (List (Map Text Text)) =\n\
-             \x20\x20\x20\x20statement \"select * from users where id = ?\" [paramInt 7]\n\
-             \x20\x20\x20\x20 |> query conn\n\
-             \n\
-             value activateUser: Task Text Unit =\n\
-             \x20\x20\x20\x20[\n\
-             \x20\x20\x20\x20\x20\x20\x20\x20statement \"update users set active = ? where id = ?\" [paramBool True, paramInt 7],\n\
-             \x20\x20\x20\x20\x20\x20\x20\x20statement \"insert into audit_log(message) values (?)\" [paramText \"activated user\"]\n\
-             \x20\x20\x20\x20]\n\
-             \x20\x20\x20\x20 |> commit conn [\"users\", \"audit_log\"]\n",
+            "db-handle-query-commit-builder-flows.aivi",
+            "use aivi.db (paramBool, paramInt, paramText, statement)\n\
+              \n\
+              type DatabaseHandle = {\n\
+              \x20\x20\x20\x20database: Text\n\
+              }\n\
+              \n\
+              value conn = { database: \"app.sqlite\" }\n\
+              \n\
+              @source db conn\n\
+              signal database : DatabaseHandle\n\
+              \n\
+              value selectUsers: Task Text (List (Map Text Text)) =\n\
+              \x20\x20\x20\x20database.query (statement \"select * from users where id = ?\" [paramInt 7])\n\
+              \n\
+              value activateUser: Task Text Unit =\n\
+              \x20\x20\x20\x20database.commit [\"users\", \"audit_log\"] [\n\
+              \x20\x20\x20\x20\x20\x20\x20\x20statement \"update users set active = ? where id = ?\" [paramBool True, paramInt 7],\n\
+              \x20\x20\x20\x20\x20\x20\x20\x20statement \"insert into audit_log(message) values (?)\" [paramText \"activated user\"]\n\
+              \x20\x20\x20\x20]\n",
         );
 
         assert!(
@@ -11203,9 +11199,7 @@ value screenView =
         let diagnostic = report
             .diagnostics()
             .iter()
-            .find(|diagnostic| {
-                diagnostic.code == Some(crate::codes::SOURCE_OPTION_TYPE_MISMATCH)
-            })
+            .find(|diagnostic| diagnostic.code == Some(crate::codes::SOURCE_OPTION_TYPE_MISMATCH))
             .expect("expected source option mismatch diagnostic");
         assert_eq!(
             diagnostic.message,
@@ -11241,8 +11235,7 @@ signal login : Signal (Result HttpError Session)
             .diagnostics()
             .iter()
             .find(|diagnostic| {
-                diagnostic.code
-                    == Some(crate::codes::SOURCE_OPTION_UNBOUND_CONTRACT_PARAMETER)
+                diagnostic.code == Some(crate::codes::SOURCE_OPTION_UNBOUND_CONTRACT_PARAMETER)
             })
             .expect("expected unbound source option contract parameter diagnostic");
         assert_eq!(
@@ -11385,9 +11378,7 @@ signal login : Signal (Result HttpError Session)
         let diagnostic = validator
             .diagnostics
             .iter()
-            .find(|diagnostic| {
-                diagnostic.code == Some(crate::codes::SOURCE_OPTION_TYPE_MISMATCH)
-            })
+            .find(|diagnostic| diagnostic.code == Some(crate::codes::SOURCE_OPTION_TYPE_MISMATCH))
             .expect("expected conflicting source option binding mismatch");
         assert_eq!(
             diagnostic.message,

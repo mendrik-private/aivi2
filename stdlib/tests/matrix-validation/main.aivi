@@ -1,0 +1,74 @@
+use aivi.matrix (
+    Matrix
+    MatrixError
+    NegativeWidth
+    NegativeHeight
+    RaggedRows
+    init
+    fromRows
+    width
+    height
+    rows
+    row
+    at
+    replaceAt
+)
+
+type Int -> Int -> Int
+func matrixValue = x y =>
+    x + y * 10
+
+type MatrixError -> Bool
+func negativeWidthRejectedError = error => error
+ ||> NegativeWidth width -> width == (0 - 1)
+ ||> NegativeHeight _    -> False
+ ||> RaggedRows _ _ _    -> False
+
+type MatrixError -> Bool
+func raggedRowsRejectedError = error => error
+ ||> RaggedRows rowIndex expected actual ->
+        rowIndex == 1 and expected == 2 and actual == 1
+ ||> NegativeWidth _  -> False
+ ||> NegativeHeight _ -> False
+
+value matrixCoordinatesOk : Bool = init 3 2 matrixValue
+ ||> Err _ -> False
+ ||> Ok matrix ->
+        width matrix == 3 and
+        height matrix == 2 and
+        row matrix 1 == Some [10, 11, 12] and
+        at matrix 1 1 == Some 11 and
+        rows matrix == [[0, 1, 2], [10, 11, 12]]
+
+value matrixReplaceOk : Bool = init 3 2 matrixValue
+ ||> Err _ -> False
+ ||> Ok matrix -> replaceAt matrix (1, 0) 99
+  ||> None         -> False
+  ||> Some updated -> row updated 0 == Some [0, 99, 2] and at updated 1 0 == Some 99
+
+value negativeWidthRejected : Bool = init (0 - 1) 2 matrixValue
+ ||> Ok _      -> False
+ ||> Err error -> negativeWidthRejectedError error
+
+value raggedRowsRejected : Bool = fromRows [
+    [1, 2],
+    [3]
+]
+ ||> Ok _      -> False
+ ||> Err error -> raggedRowsRejectedError error
+
+@test
+value matrix_init_uses_coordinates : Task Text Bool =
+    pure matrixCoordinatesOk
+
+@test
+value matrix_replaceAt_updates_one_cell : Task Text Bool =
+    pure matrixReplaceOk
+
+@test
+value matrix_init_rejects_negative_width : Task Text Bool =
+    pure negativeWidthRejected
+
+@test
+value matrix_fromRows_rejects_ragged_input : Task Text Bool =
+    pure raggedRowsRejected

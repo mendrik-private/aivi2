@@ -205,7 +205,7 @@ fn hir_queries_fallback_to_bundled_stdlib_modules() {
 }
 
 #[test]
-fn hir_queries_prefer_bundled_stdlib_exports_over_known_imports() {
+fn hir_queries_reject_non_exported_legacy_stdlib_names() {
     let workspace = TempDir::new("bundled-stdlib-export-precedence");
     let main_path = workspace.write(
         "main.aivi",
@@ -225,7 +225,7 @@ fn hir_queries_prefer_bundled_stdlib_exports_over_known_imports() {
             .iter()
             .filter_map(|diagnostic| diagnostic.code.as_ref())
             .any(|code| code.to_string() == "hir::unknown-imported-name"),
-        "bundled stdlib exports should hide non-exported compiler-known members: {:?}",
+        "legacy standalone names that are not exported by the bundled stdlib should stay unknown: {:?}",
         hir.hir_diagnostics()
     );
 
@@ -235,6 +235,72 @@ fn hir_queries_prefer_bundled_stdlib_exports_over_known_imports() {
     let exported = exported_names(&db, fs_module);
     assert!(exported.find("FsError").is_some());
     assert!(exported.find("readText").is_none());
+}
+
+#[test]
+fn hir_queries_matrix_module_exports_public_api() {
+    let workspace = TempDir::new("bundled-stdlib-matrix-api");
+    let main_path = workspace.write(
+        "main.aivi",
+        concat!(
+            "use aivi.matrix (\n",
+            "    Matrix\n",
+            "    MatrixError\n",
+            "    init\n",
+            "    width\n",
+            "    replaceAt\n",
+            ")\n",
+            "\n",
+            "type Int -> Int -> Int\n",
+            "func cell = x y =>\n",
+            "    x + y\n",
+            "\n",
+            "value board : Result MatrixError (Matrix Int) = init 2 2 cell\n",
+        ),
+    );
+
+    let db = RootDatabase::new();
+    let main = SourceFile::new(
+        &db,
+        main_path.clone(),
+        fs::read_to_string(&main_path).expect("main fixture should exist"),
+    );
+
+    let hir = hir_module(&db, main);
+    assert!(
+        hir.hir_diagnostics().is_empty(),
+        "matrix stdlib import surface should lower cleanly: {:?}",
+        hir.hir_diagnostics()
+    );
+
+    let matrix_module = db
+        .file_at_path(&stdlib_path("aivi/matrix.aivi"))
+        .expect("bundled matrix module should be loaded lazily");
+    let exported = exported_names(&db, matrix_module);
+    for name in [
+        "Matrix",
+        "MatrixError",
+        "NegativeWidth",
+        "NegativeHeight",
+        "RaggedRows",
+        "init",
+        "fromRows",
+        "width",
+        "height",
+        "rows",
+        "row",
+        "at",
+        "replaceAt",
+    ] {
+        assert!(
+            exported.find(name).is_some(),
+            "expected matrix module to export `{name}`"
+        );
+    }
+    assert!(
+        exported.find("MkMatrix").is_none(),
+        "opaque matrix constructor should stay hidden"
+    );
 }
 
 #[test]
@@ -296,7 +362,6 @@ use aivi.http (
     HttpHeaders
     HttpQuery
     HttpResponse
-    HttpTask
     DecodeMode
     Strict
     Retry
@@ -315,7 +380,6 @@ use aivi.log (
     LogContext
     LogEntry
     LogError
-    LogTask
     LogSink
 )
 
@@ -340,7 +404,7 @@ value decodeMode:DecodeMode =
 type RetryBudget = Retry
 
 type UsersResponse = (HttpResponse (List User))
-type UsersTask = (HttpTask (List User))
+type UsersTask = (Task Text (List User))
 
 @source http "https://api.example.com"
 signal api : HttpSource
@@ -380,7 +444,7 @@ value entry:LogEntry = {
 }
 
 type Writer = LogSink
-type CurrentLogTask = LogTask
+type CurrentLogTask = (Task LogError Unit)
 type CurrentLogError = LogError
 
 type PollDelay = Duration
