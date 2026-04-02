@@ -9414,7 +9414,7 @@ mod tests {
             .iter()
             .filter(|diagnostic| {
                 diagnostic.code
-                    == Some(DiagnosticCode::new("hir", "reactive-update-self-reference"))
+                    == Some(crate::codes::REACTIVE_UPDATE_SELF_REFERENCE)
             })
             .count();
         assert_eq!(
@@ -9436,7 +9436,7 @@ mod tests {
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "circular-signal-dependency"))
+                diagnostic.code == Some(crate::codes::CIRCULAR_SIGNAL_DEPENDENCY)
             }),
             "expected reactive update dependencies to participate in cycle detection, got diagnostics: {:?}",
             report.diagnostics()
@@ -10103,7 +10103,7 @@ value resultLabel =
 
         let report = validate_module(&module, ValidationMode::RequireResolvedNames);
         assert!(report.diagnostics().iter().any(
-            |diagnostic| diagnostic.code == Some(DiagnosticCode::new("hir", "unresolved-name"))
+            |diagnostic| diagnostic.code == Some(crate::codes::UNRESOLVED_NAME)
         ));
     }
 
@@ -10136,7 +10136,7 @@ value resultLabel =
         let report = validate_module(&module, ValidationMode::RequireResolvedNames);
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "invalid-type-application"))
+                diagnostic.code == Some(crate::codes::INVALID_TYPE_APPLICATION)
             }),
             "expected imported constructor kind metadata to trigger over-application diagnostics, got {:?}",
             report.diagnostics()
@@ -10177,7 +10177,7 @@ value resultLabel =
             .diagnostics()
             .iter()
             .find(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "invalid-regex-literal"))
+                diagnostic.code == Some(crate::codes::INVALID_REGEX_LITERAL)
             })
             .expect("invalid regex literal should produce a HIR diagnostic");
 
@@ -10297,17 +10297,17 @@ value resultLabel =
             .filter_map(|diagnostic| diagnostic.code)
             .collect::<Vec<_>>();
         assert!(
-            codes.contains(&DiagnosticCode::new("hir", "unknown-record-row-field")),
+            codes.contains(&crate::codes::UNKNOWN_RECORD_ROW_FIELD),
             "expected missing-field transform diagnostic, got {:?}",
             report.diagnostics()
         );
         assert!(
-            codes.contains(&DiagnosticCode::new("hir", "record-row-transform-source")),
+            codes.contains(&crate::codes::RECORD_ROW_TRANSFORM_SOURCE),
             "expected non-record transform source diagnostic, got {:?}",
             report.diagnostics()
         );
         assert!(
-            codes.contains(&DiagnosticCode::new("hir", "record-row-rename-collision")),
+            codes.contains(&crate::codes::RECORD_ROW_RENAME_COLLISION),
             "expected rename collision diagnostic, got {:?}",
             report.diagnostics()
         );
@@ -10330,7 +10330,7 @@ fun statusLabel:Text = status:Status=>    status
             .diagnostics()
             .iter()
             .find(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "non-exhaustive-case-pattern"))
+                diagnostic.code == Some(crate::codes::NON_EXHAUSTIVE_CASE_PATTERN)
             })
             .expect("non-exhaustive sum cases should produce a HIR diagnostic");
 
@@ -10407,7 +10407,7 @@ value screenView =
             .diagnostics()
             .iter()
             .find(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "non-exhaustive-case-pattern"))
+                diagnostic.code == Some(crate::codes::NON_EXHAUSTIVE_CASE_PATTERN)
             })
             .expect("non-exhaustive markup match should produce a HIR diagnostic");
 
@@ -11109,7 +11109,7 @@ value screenView =
             .diagnostics()
             .iter()
             .find(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "source-option-type-mismatch"))
+                diagnostic.code == Some(crate::codes::SOURCE_OPTION_TYPE_MISMATCH)
             })
             .expect("expected source option mismatch diagnostic");
         assert_eq!(
@@ -11147,10 +11147,7 @@ signal login : Signal (Result HttpError Session)
             .iter()
             .find(|diagnostic| {
                 diagnostic.code
-                    == Some(DiagnosticCode::new(
-                        "hir",
-                        "source-option-unbound-contract-parameter",
-                    ))
+                    == Some(crate::codes::SOURCE_OPTION_UNBOUND_CONTRACT_PARAMETER)
             })
             .expect("expected unbound source option contract parameter diagnostic");
         assert_eq!(
@@ -11294,7 +11291,7 @@ signal login : Signal (Result HttpError Session)
             .diagnostics
             .iter()
             .find(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "source-option-type-mismatch"))
+                diagnostic.code == Some(crate::codes::SOURCE_OPTION_TYPE_MISMATCH)
             })
             .expect("expected conflicting source option binding mismatch");
         assert_eq!(

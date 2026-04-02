@@ -4591,7 +4591,7 @@ mod tests {
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "missing-eq-instance"))
+                diagnostic.code == Some(crate::codes::MISSING_EQ_INSTANCE)
             }),
             "expected missing Eq diagnostic, got diagnostics: {:?}",
             report.diagnostics()
@@ -4608,7 +4608,7 @@ mod tests {
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "missing-eq-instance"))
+                diagnostic.code == Some(crate::codes::MISSING_EQ_INSTANCE)
             }),
             "expected missing Eq diagnostic for !=, got diagnostics: {:?}",
             report.diagnostics()
@@ -4710,7 +4710,7 @@ fun compare:Bool = left:Blob right:Blob =>
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "missing-instance-requirement"))
+                diagnostic.code == Some(crate::codes::MISSING_INSTANCE_REQUIREMENT)
             }),
             "expected class `require` constraints to reject unsatisfied instances, got diagnostics: {:?}",
             report.diagnostics()
@@ -4731,7 +4731,7 @@ fun compare:Bool = left:Blob right:Blob =>
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "type-mismatch"))
+                diagnostic.code == Some(crate::codes::TYPE_MISMATCH)
             }),
             "expected instance member operator mismatch diagnostic, got diagnostics: {:?}",
             report.diagnostics()
@@ -4746,7 +4746,7 @@ fun compare:Bool = left:Blob right:Blob =>
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "invalid-unary-operator"))
+                diagnostic.code == Some(crate::codes::INVALID_UNARY_OPERATOR)
             }),
             "expected invalid unary operator diagnostic, got diagnostics: {:?}",
             report.diagnostics()
@@ -4893,7 +4893,7 @@ fun delegated:Container A -> Bool = left:A right:A =>
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "invalid-binary-operator"))
+                diagnostic.code == Some(crate::codes::INVALID_BINARY_OPERATOR)
             }),
             "expected invalid binary operator diagnostic, got diagnostics: {:?}",
             report.diagnostics()
@@ -4905,7 +4905,7 @@ fun delegated:Container A -> Bool = left:A right:A =>
         let report = typecheck_text("value-mismatch.aivi", "value answer:Text = 42\n");
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "type-mismatch"))
+                diagnostic.code == Some(crate::codes::TYPE_MISMATCH)
             }),
             "expected type mismatch diagnostic, got diagnostics: {:?}",
             report.diagnostics()
@@ -4938,7 +4938,7 @@ fun delegated:Container A -> Bool = left:A right:A =>
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "type-mismatch"))
+                diagnostic.code == Some(crate::codes::TYPE_MISMATCH)
             }),
             "expected non-bool reactive update guard to report a type mismatch, got diagnostics: {:?}",
             report.diagnostics()
@@ -4955,7 +4955,7 @@ fun delegated:Container A -> Bool = left:A right:A =>
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "type-mismatch"))
+                diagnostic.code == Some(crate::codes::TYPE_MISMATCH)
             }),
             "expected reactive update body mismatch to report a type mismatch, got diagnostics: {:?}",
             report.diagnostics()
@@ -5053,7 +5053,7 @@ when ready True => total <- 42
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "type-mismatch"))
+                diagnostic.code == Some(crate::codes::TYPE_MISMATCH)
             }),
             "expected type mismatch diagnostic, got diagnostics: {:?}",
             report.diagnostics()
@@ -5074,7 +5074,7 @@ when ready True => total <- 42
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "missing-default-instance"))
+                diagnostic.code == Some(crate::codes::MISSING_DEFAULT_INSTANCE)
                     && diagnostic.message.contains("nickname")
             }),
             "expected missing Default diagnostic from constraint solver, got diagnostics: {:?}",
@@ -5323,7 +5323,7 @@ when ready True => total <- 42
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "type-mismatch"))
+                diagnostic.code == Some(crate::codes::TYPE_MISMATCH)
             }),
             "expected same-module constructor mismatch diagnostic, got diagnostics: {:?}",
             report.diagnostics()
@@ -5344,7 +5344,7 @@ when ready True => total <- 42
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "applicative-cluster-mismatch"))
+                diagnostic.code == Some(crate::codes::APPLICATIVE_CLUSTER_MISMATCH)
             }),
             "expected applicative cluster mismatch diagnostic, got diagnostics: {:?}",
             report.diagnostics()
@@ -5392,7 +5392,7 @@ value broken =
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "case-branch-type-mismatch"))
+                diagnostic.code == Some(crate::codes::CASE_BRANCH_TYPE_MISMATCH)
             }),
             "expected case branch type mismatch diagnostic, got diagnostics: {:?}",
             report.diagnostics()
@@ -5413,10 +5413,7 @@ value broken =
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| diagnostic.code
-                == Some(DiagnosticCode::new(
-                    "hir",
-                    "result-block-binding-not-result"
-                ))),
+                == Some(crate::codes::RESULT_BLOCK_BINDING_NOT_RESULT)),
             "expected non-Result result-block binding diagnostic, got diagnostics: {:?}",
             report.diagnostics()
         );
@@ -5437,7 +5434,7 @@ value broken =
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| diagnostic.code
-                == Some(DiagnosticCode::new("hir", "result-block-error-mismatch"))),
+                == Some(crate::codes::RESULT_BLOCK_ERROR_MISMATCH)),
             "expected result-block error mismatch diagnostic, got diagnostics: {:?}",
             report.diagnostics()
         );
@@ -5951,7 +5948,7 @@ fun current:Int = tick:Unit => step direction
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "invalid-pipe-stage-input"))
+                diagnostic.code == Some(crate::codes::INVALID_PIPE_STAGE_INPUT)
             }),
             "expected invalid pipe stage input diagnostic, got diagnostics: {:?}",
             report.diagnostics()
@@ -5967,7 +5964,7 @@ fun current:Int = tick:Unit => step direction
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "invalid-pipe-stage-input"))
+                diagnostic.code == Some(crate::codes::INVALID_PIPE_STAGE_INPUT)
             }),
             "expected invalid pipe stage input diagnostic for tap, got diagnostics: {:?}",
             report.diagnostics()
@@ -6101,7 +6098,7 @@ fun current:Int = tick:Unit => step direction
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "invalid-projection"))
+                diagnostic.code == Some(crate::codes::INVALID_PROJECTION)
             }),
             "expected signal-wrapped domain projections to stay invalid until pointwise runtime support exists, got diagnostics: {:?}",
             report.diagnostics()
@@ -6118,7 +6115,7 @@ fun current:Int = tick:Unit => step direction
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "unknown-projection-field"))
+                diagnostic.code == Some(crate::codes::UNKNOWN_PROJECTION_FIELD)
             }),
             "expected unknown projection field diagnostic from a signal projection, got diagnostics: {:?}",
             report.diagnostics()
@@ -6134,7 +6131,7 @@ fun current:Int = tick:Unit => step direction
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "invalid-projection"))
+                diagnostic.code == Some(crate::codes::INVALID_PROJECTION)
             }),
             "expected invalid projection diagnostic from a signal payload projection, got diagnostics: {:?}",
             report.diagnostics()
@@ -6150,7 +6147,7 @@ fun current:Int = tick:Unit => step direction
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "unknown-projection-field"))
+                diagnostic.code == Some(crate::codes::UNKNOWN_PROJECTION_FIELD)
             }),
             "expected unknown projection field diagnostic, got diagnostics: {:?}",
             report.diagnostics()
@@ -6186,7 +6183,7 @@ fun current:Int = tick:Unit => step direction
             .diagnostics()
             .iter()
             .filter(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "type-mismatch"))
+                diagnostic.code == Some(crate::codes::TYPE_MISMATCH)
             })
             .count();
         assert!(
@@ -6224,7 +6221,7 @@ fun current:Int = tick:Unit => step direction
             .diagnostics()
             .iter()
             .filter(|diagnostic| {
-                diagnostic.code == Some(DiagnosticCode::new("hir", "type-mismatch"))
+                diagnostic.code == Some(crate::codes::TYPE_MISMATCH)
             })
             .count();
         assert!(

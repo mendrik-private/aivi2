@@ -894,10 +894,7 @@ mod tests {
             .validate(ValidationMode::RequireResolvedNames);
         assert!(report.diagnostics().iter().any(|diagnostic| {
             diagnostic.code
-                == Some(DiagnosticCode::new(
-                    "hir",
-                    "truthy-falsy-subject-not-canonical",
-                ))
+                == Some(crate::codes::TRUTHY_FALSY_SUBJECT_NOT_CANONICAL)
         }));
 
         let lowered =
@@ -907,10 +904,7 @@ mod tests {
             .validate(ValidationMode::RequireResolvedNames);
         assert!(report.diagnostics().iter().any(|diagnostic| {
             diagnostic.code
-                == Some(DiagnosticCode::new(
-                    "hir",
-                    "truthy-falsy-branch-type-mismatch",
-                ))
+                == Some(crate::codes::TRUTHY_FALSY_BRANCH_TYPE_MISMATCH)
         }));
 
         let lowered =
@@ -920,10 +914,7 @@ mod tests {
             .validate(ValidationMode::RequireResolvedNames);
         assert!(report.diagnostics().iter().any(|diagnostic| {
             diagnostic.code
-                == Some(DiagnosticCode::new(
-                    "hir",
-                    "invalid-truthy-falsy-projection",
-                ))
+                == Some(crate::codes::INVALID_TRUTHY_FALSY_PROJECTION)
         }));
 
         let lowered = lower_fixture("milestone-2/invalid/truthy-falsy-signal-misuse/main.aivi");
@@ -932,17 +923,11 @@ mod tests {
             .validate(ValidationMode::RequireResolvedNames);
         assert!(report.diagnostics().iter().any(|diagnostic| {
             diagnostic.code
-                == Some(DiagnosticCode::new(
-                    "hir",
-                    "truthy-falsy-subject-not-canonical",
-                ))
+                == Some(crate::codes::TRUTHY_FALSY_SUBJECT_NOT_CANONICAL)
         }));
         assert!(report.diagnostics().iter().any(|diagnostic| {
             diagnostic.code
-                == Some(DiagnosticCode::new(
-                    "hir",
-                    "invalid-truthy-falsy-projection",
-                ))
+                == Some(crate::codes::INVALID_TRUTHY_FALSY_PROJECTION)
         }));
     }
 }

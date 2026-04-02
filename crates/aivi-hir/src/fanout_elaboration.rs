@@ -993,7 +993,7 @@ value joinedEmails:Text =
             .module()
             .validate(ValidationMode::RequireResolvedNames);
         assert!(report.diagnostics().iter().any(|diagnostic| {
-            diagnostic.code == Some(DiagnosticCode::new("hir", "fanout-subject-not-list"))
+            diagnostic.code == Some(crate::codes::FANOUT_SUBJECT_NOT_LIST)
         }));
 
         let lowered = lower_fixture("milestone-2/invalid/fanin-invalid-projection/main.aivi");
@@ -1001,7 +1001,7 @@ value joinedEmails:Text =
             .module()
             .validate(ValidationMode::RequireResolvedNames);
         assert!(report.diagnostics().iter().any(|diagnostic| {
-            diagnostic.code == Some(DiagnosticCode::new("hir", "invalid-fanin-projection"))
+            diagnostic.code == Some(crate::codes::INVALID_FANIN_PROJECTION)
         }));
     }
 }
