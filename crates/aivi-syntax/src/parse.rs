@@ -1137,38 +1137,66 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_class_body(&mut self, cursor: &mut usize, end: usize) -> Option<ClassBody> {
-        // A class body is optional. Only parse (and require `= {`) if `=` is present.
-        let has_equals = self
-            .peek_nontrivia(*cursor, end)
-            .map(|i| self.tokens[i].kind() == TokenKind::Equals)
-            .unwrap_or(false);
-        if !has_equals {
-            return None;
-        }
-        let head_span =
-            self.source_span_of_token(self.peek_nontrivia(*cursor, end).unwrap_or(*cursor));
-        self.consume_kind(cursor, end, TokenKind::Equals);
-        let lbrace_index = if let Some(idx) = self.consume_kind(cursor, end, TokenKind::LBrace) {
-            idx
+        // A class body may be written as `= { ... }` (brace syntax) or as an
+        // indented block (indentation syntax, no `=` or `{`).
+        let first = self.peek_nontrivia(*cursor, end)?;
+        let has_equals = self.tokens[first].kind() == TokenKind::Equals;
+
+        let (body_start, inner_end, brace_syntax) = if has_equals {
+            let head_span = self.source_span_of_token(first);
+            self.consume_kind(cursor, end, TokenKind::Equals);
+            let lbrace_index =
+                if let Some(idx) = self.consume_kind(cursor, end, TokenKind::LBrace) {
+                    idx
+                } else {
+                    self.diagnostics.push(
+                        Diagnostic::error("class declaration is missing `{` after `=`")
+                            .with_code(MISSING_CLASS_OPEN_BRACE)
+                            .with_primary_label(head_span, "expected `{` to open the class body"),
+                    );
+                    return None;
+                };
+            let inner_end = self.find_matching_brace(lbrace_index, end).unwrap_or(end);
+            let body_start = *cursor;
+            (body_start, inner_end, true)
         } else {
-            self.diagnostics.push(
-                Diagnostic::error("class declaration is missing `{` after `=`")
-                    .with_code(MISSING_CLASS_OPEN_BRACE)
-                    .with_primary_label(head_span, "expected `{` to open the class body"),
-            );
-            return None;
-        };
-        let inner_end = match self.find_matching_brace(lbrace_index, end) {
-            Some(idx) => idx,
-            None => end,
+            // Indentation syntax: the first token must be a line-start class member token
+            // at non-zero indentation (otherwise there is no body).
+            if !self.tokens[first].line_start()
+                || !matches!(
+                    self.tokens[first].kind(),
+                    TokenKind::Identifier | TokenKind::LParen
+                )
+            {
+                return None;
+            }
+            let member_indent = self.line_indent_of_token(first);
+            if member_indent == 0 {
+                return None;
+            }
+            let body_start = *cursor;
+            (body_start, end, false)
         };
 
-        let body_start = *cursor;
+        // Determine member indent from the first member (if any).
+        let member_indent = self
+            .peek_nontrivia(*cursor, inner_end)
+            .filter(|&i| self.tokens[i].line_start())
+            .map(|i| self.line_indent_of_token(i))
+            .unwrap_or(0);
+
         let mut with_decls = Vec::new();
         let mut require_decls = Vec::new();
         let mut members = Vec::new();
 
         while let Some(index) = self.peek_nontrivia(*cursor, inner_end) {
+            // In indented mode, stop at any line-start token not at the member indent level.
+            if !brace_syntax
+                && self.tokens[index].line_start()
+                && self.line_indent_of_token(index) != member_indent
+            {
+                break;
+            }
             // Detect the context-sensitive `with` and `require` soft-keywords.
             // They are treated as declarations only when NOT immediately followed by `:`,
             // which disambiguates them from method names (`with: A -> A`).
@@ -1189,14 +1217,20 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
+            let before = *cursor;
             let Some(member) = self.parse_class_member(cursor, inner_end) else {
                 break;
             };
             members.push(member);
+            if *cursor <= before {
+                break;
+            }
         }
 
-        // Consume closing `}`
-        *cursor = inner_end + 1;
+        // Consume closing `}` only in brace syntax.
+        if brace_syntax {
+            *cursor = inner_end + 1;
+        }
 
         (!with_decls.is_empty() || !require_decls.is_empty() || !members.is_empty()).then_some(
             ClassBody {
@@ -1277,34 +1311,41 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_instance_body(&mut self, cursor: &mut usize, end: usize) -> Option<InstanceBody> {
-        // An instance body is optional. Only parse (and require `= {`) if `=` is present.
-        let has_equals = self
-            .peek_nontrivia(*cursor, end)
-            .map(|i| self.tokens[i].kind() == TokenKind::Equals)
-            .unwrap_or(false);
-        if !has_equals {
-            return None;
-        }
-        let head_span =
-            self.source_span_of_token(self.peek_nontrivia(*cursor, end).unwrap_or(*cursor));
-        self.consume_kind(cursor, end, TokenKind::Equals);
-        let lbrace_index = if let Some(idx) = self.consume_kind(cursor, end, TokenKind::LBrace) {
-            idx
-        } else {
-            self.diagnostics.push(
-                Diagnostic::error("instance declaration is missing `{` after `=`")
-                    .with_code(MISSING_INSTANCE_OPEN_BRACE)
-                    .with_primary_label(head_span, "expected `{` to open the instance body"),
-            );
-            return None;
-        };
-        let inner_end = match self.find_matching_brace(lbrace_index, end) {
-            Some(idx) => idx,
-            None => end,
-        };
+        // An instance body may be written as `= { ... }` (brace syntax) or as an
+        // indented block (indentation syntax, no `=` or `{`).
+        let first = self.peek_nontrivia(*cursor, end)?;
+        let has_equals = self.tokens[first].kind() == TokenKind::Equals;
 
-        let body_start = *cursor;
-        let mut members = Vec::new();
+        let (body_start, inner_end, brace_syntax) = if has_equals {
+            let head_span = self.source_span_of_token(first);
+            self.consume_kind(cursor, end, TokenKind::Equals);
+            let lbrace_index =
+                if let Some(idx) = self.consume_kind(cursor, end, TokenKind::LBrace) {
+                    idx
+                } else {
+                    self.diagnostics.push(
+                        Diagnostic::error("instance declaration is missing `{` after `=`")
+                            .with_code(MISSING_INSTANCE_OPEN_BRACE)
+                            .with_primary_label(head_span, "expected `{` to open the instance body"),
+                    );
+                    return None;
+                };
+            let inner_end = self.find_matching_brace(lbrace_index, end).unwrap_or(end);
+            let body_start = *cursor;
+            (body_start, inner_end, true)
+        } else {
+            // Indentation syntax: the first token must be a line-start instance member token
+            // at non-zero indentation (otherwise there is no body).
+            if !self.tokens[first].line_start() || !self.starts_instance_member(first) {
+                return None;
+            }
+            let member_indent = self.line_indent_of_token(first);
+            if member_indent == 0 {
+                return None;
+            }
+            let body_start = *cursor;
+            (body_start, end, false)
+        };
 
         // Determine member indent from the first member (if any).
         let member_indent = self
@@ -1313,7 +1354,16 @@ impl<'a> Parser<'a> {
             .map(|i| self.line_indent_of_token(i))
             .unwrap_or(0);
 
+        let mut members = Vec::new();
+
         while let Some(index) = self.peek_nontrivia(*cursor, inner_end) {
+            // In indented mode, stop at any line-start token not at the member indent level.
+            if !brace_syntax
+                && self.tokens[index].line_start()
+                && self.line_indent_of_token(index) != member_indent
+            {
+                break;
+            }
             if !self.starts_instance_member(index) {
                 break;
             }
@@ -1327,8 +1377,10 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // Consume closing `}`
-        *cursor = inner_end + 1;
+        // Consume closing `}` only in brace syntax.
+        if brace_syntax {
+            *cursor = inner_end + 1;
+        }
 
         (!members.is_empty()).then_some(InstanceBody {
             members,
@@ -1337,33 +1389,42 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_domain_body(&mut self, cursor: &mut usize, end: usize) -> Option<DomainBody> {
-        // A domain body is optional. Only parse (and require `= {`) if `=` is present.
-        let has_equals = self
-            .peek_nontrivia(*cursor, end)
-            .map(|i| self.tokens[i].kind() == TokenKind::Equals)
-            .unwrap_or(false);
-        if !has_equals {
-            return None;
-        }
-        let head_span =
-            self.source_span_of_token(self.peek_nontrivia(*cursor, end).unwrap_or(*cursor));
-        self.consume_kind(cursor, end, TokenKind::Equals);
-        let lbrace_index = if let Some(idx) = self.consume_kind(cursor, end, TokenKind::LBrace) {
-            idx
+        // A domain body may be written as `= { ... }` (brace syntax) or as an
+        // indented block (indentation syntax, no `=` or `{`).
+        let first = self.peek_nontrivia(*cursor, end)?;
+        let has_equals = self.tokens[first].kind() == TokenKind::Equals;
+
+        let (body_start, inner_end, brace_syntax) = if has_equals {
+            let head_span = self.source_span_of_token(first);
+            self.consume_kind(cursor, end, TokenKind::Equals);
+            let lbrace_index =
+                if let Some(idx) = self.consume_kind(cursor, end, TokenKind::LBrace) {
+                    idx
+                } else {
+                    self.diagnostics.push(
+                        Diagnostic::error("domain declaration is missing `{` after `=`")
+                            .with_code(MISSING_DOMAIN_OPEN_BRACE)
+                            .with_primary_label(head_span, "expected `{` to open the domain body"),
+                    );
+                    return None;
+                };
+            let inner_end = self.find_matching_brace(lbrace_index, end).unwrap_or(end);
+            let body_start = *cursor;
+            (body_start, inner_end, true)
         } else {
-            self.diagnostics.push(
-                Diagnostic::error("domain declaration is missing `{` after `=`")
-                    .with_code(MISSING_DOMAIN_OPEN_BRACE)
-                    .with_primary_label(head_span, "expected `{` to open the domain body"),
-            );
-            return None;
-        };
-        let inner_end = match self.find_matching_brace(lbrace_index, end) {
-            Some(idx) => idx,
-            None => end,
+            // Indentation syntax: the first token must be a line-start domain member token
+            // at non-zero indentation (otherwise there is no body).
+            if !self.tokens[first].line_start() || !self.starts_domain_member(first) {
+                return None;
+            }
+            let member_indent = self.line_indent_of_token(first);
+            if member_indent == 0 {
+                return None;
+            }
+            let body_start = *cursor;
+            (body_start, end, false)
         };
 
-        let body_start = *cursor;
         let mut members = Vec::new();
         let mut pending_annotation: Option<TypeExpr> = None;
         // When we see `name : TypeExpr` (colon annotation), we hold the member back here.
@@ -1379,6 +1440,13 @@ impl<'a> Parser<'a> {
             .unwrap_or(0);
 
         while let Some(index) = self.peek_nontrivia(*cursor, inner_end) {
+            // In indented mode, stop at any line-start token not at the member indent level.
+            if !brace_syntax
+                && self.tokens[index].line_start()
+                && self.line_indent_of_token(index) != member_indent
+            {
+                break;
+            }
             if !self.starts_domain_member(index) {
                 break;
             }
@@ -1476,8 +1544,10 @@ impl<'a> Parser<'a> {
             );
         }
 
-        // Consume closing `}`
-        *cursor = inner_end + 1;
+        // Consume closing `}` only in brace syntax.
+        if brace_syntax {
+            *cursor = inner_end + 1;
+        }
 
         (!members.is_empty()).then_some(DomainBody {
             members,
