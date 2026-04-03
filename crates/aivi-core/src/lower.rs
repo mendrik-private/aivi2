@@ -2403,6 +2403,9 @@ impl<'a> ModuleLowerer<'a> {
                         aivi_hir::Item::Class(item) => item.name.text().to_owned(),
                         _ => "<constructor>".to_owned(),
                     },
+                    TypeConstructorHead::Import(import_id) => {
+                        self.hir.imports()[import_id].local_name.text().to_owned()
+                    }
                 };
                 if binding.arguments().is_empty() {
                     head

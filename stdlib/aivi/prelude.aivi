@@ -216,9 +216,9 @@ type List Int -> Int
 func sum = items =>
     listSum items
 
-type A -> (List A) -> Bool
-func contains = item items =>
-    listContains item items
+type (A -> A -> Bool) -> A -> (List A) -> Bool
+func contains = eq item items =>
+    listContains eq item items
 
 type (A -> Bool) -> (List A) -> Bool
 func any = predicate items =>
@@ -248,7 +248,7 @@ type (A -> A -> Bool) -> A -> (List A) -> A
 func maxOf = compare first rest =>
     orderMaxOf compare first rest
 
-type (A -> B) -> (B -> B -> Bool) -> A -> A -> (A -> A -> Bool)
+type (A -> B) -> (B -> B -> Bool) -> A -> A -> Bool
 func comparing = extract compare left right =>
     orderComparing extract compare left right
 

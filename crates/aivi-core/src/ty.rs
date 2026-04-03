@@ -1,8 +1,8 @@
 use std::fmt;
 
 use aivi_hir::{
-    BuiltinType, GateType as HirGateType, ImportValueType, ItemId as HirItemId,
-    TypeParameterId as HirTypeParameterId,
+    BuiltinType, GateType as HirGateType, ImportId as HirImportId, ImportValueType,
+    ItemId as HirItemId, TypeParameterId as HirTypeParameterId,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -54,6 +54,11 @@ pub enum Type {
         name: Box<str>,
         arguments: Vec<Type>,
     },
+    OpaqueImport {
+        import: HirImportId,
+        name: Box<str>,
+        arguments: Vec<Type>,
+    },
 }
 
 impl Type {
@@ -78,6 +83,11 @@ impl Type {
             },
             BuildOpaqueItem {
                 item: HirItemId,
+                name: Box<str>,
+                arguments: usize,
+            },
+            BuildOpaqueImport {
+                import: HirImportId,
                 name: Box<str>,
                 arguments: usize,
             },
@@ -175,6 +185,20 @@ impl Type {
                     } => {
                         tasks.push(Task::BuildOpaqueItem {
                             item: *item,
+                            name: name.clone().into_boxed_str(),
+                            arguments: arguments.len(),
+                        });
+                        for argument in arguments.iter().rev() {
+                            tasks.push(Task::Visit(argument));
+                        }
+                    }
+                    HirGateType::OpaqueImport {
+                        import,
+                        name,
+                        arguments,
+                    } => {
+                        tasks.push(Task::BuildOpaqueImport {
+                            import: *import,
                             name: name.clone().into_boxed_str(),
                             arguments: arguments.len(),
                         });
@@ -281,6 +305,18 @@ impl Type {
                         arguments,
                     });
                 }
+                Task::BuildOpaqueImport {
+                    import,
+                    name,
+                    arguments,
+                } => {
+                    let arguments = drain_tail(&mut values, arguments);
+                    values.push(Self::OpaqueImport {
+                        import,
+                        name,
+                        arguments,
+                    });
+                }
             }
         }
 
@@ -366,6 +402,13 @@ impl Type {
                         tasks.push(Task::BuildTask);
                         tasks.push(Task::Visit(value));
                         tasks.push(Task::Visit(error));
+                    }
+                    ImportValueType::TypeVariable { .. } | ImportValueType::Named { .. } => {
+                        values.push(Self::OpaqueImport {
+                            import: aivi_hir::ImportId::from_raw(u32::MAX),
+                            name: "".into(),
+                            arguments: Vec::new(),
+                        });
                     }
                 },
                 Task::BuildTuple(len) => {
@@ -511,6 +554,9 @@ impl fmt::Display for Type {
                 name, arguments, ..
             }
             | Type::OpaqueItem {
+                name, arguments, ..
+            }
+            | Type::OpaqueImport {
                 name, arguments, ..
             } => {
                 write!(f, "{name}")?;

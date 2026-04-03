@@ -53,6 +53,13 @@ pub(crate) fn type_constructor_arity(head: TypeConstructorHead, module: &Module)
             Item::Domain(item) => item.parameters.len(),
             _ => 0,
         },
+        TypeConstructorHead::Import(import_id) => {
+            match &module.imports()[import_id].metadata {
+                ImportBindingMetadata::TypeConstructor { kind }
+                | ImportBindingMetadata::Domain { kind, .. } => kind.arity(),
+                _ => 0,
+            }
+        }
     }
 }
 
@@ -568,6 +575,12 @@ pub enum GateType {
         name: String,
         arguments: Vec<GateType>,
     },
+    /// An imported type constructor or domain from another module.
+    OpaqueImport {
+        import: ImportId,
+        name: String,
+        arguments: Vec<GateType>,
+    },
 }
 
 impl GateType {
@@ -717,6 +730,18 @@ impl GateType {
                     .map(|a| a.substitute_type_parameters(subs))
                     .collect(),
             },
+            Self::OpaqueImport {
+                import,
+                name,
+                arguments,
+            } => Self::OpaqueImport {
+                import: *import,
+                name: name.clone(),
+                arguments: arguments
+                    .iter()
+                    .map(|a| a.substitute_type_parameters(subs))
+                    .collect(),
+            },
         }
     }
 
@@ -736,7 +761,7 @@ impl GateType {
             Self::Result { error, value }
             | Self::Validation { error, value }
             | Self::Task { error, value } => error.has_type_params() || value.has_type_params(),
-            Self::Domain { arguments, .. } | Self::OpaqueItem { arguments, .. } => {
+            Self::Domain { arguments, .. } | Self::OpaqueItem { arguments, .. } | Self::OpaqueImport { arguments, .. } => {
                 arguments.iter().any(|a| a.has_type_params())
             }
         }
@@ -858,6 +883,184 @@ impl GateType {
                             .iter()
                             .zip(targs.iter())
                             .all(|(s, t)| s.fits_template(t))
+                }
+                _ => false,
+            },
+            Self::OpaqueImport {
+                import: ti,
+                arguments: targs,
+                ..
+            } => match self {
+                Self::OpaqueImport {
+                    import: si,
+                    arguments: sargs,
+                    ..
+                } => {
+                    si == ti
+                        && sargs.len() == targs.len()
+                        && sargs
+                            .iter()
+                            .zip(targs.iter())
+                            .all(|(s, t)| s.fits_template(t))
+                }
+                _ => false,
+            },
+        }
+    }
+
+    /// Structurally match `self` (concrete) against `template` (may contain TypeParameter nodes),
+    /// collecting the bindings.  Returns `true` when matching succeeds and all TypeParameter
+    /// nodes receive consistent bindings.
+    pub(crate) fn unify_type_params(
+        &self,
+        template: &Self,
+        bindings: &mut HashMap<TypeParameterId, GateType>,
+    ) -> bool {
+        match template {
+            Self::TypeParameter { parameter, .. } => match bindings.get(parameter) {
+                Some(existing) => existing.same_shape(self),
+                None => {
+                    bindings.insert(*parameter, self.clone());
+                    true
+                }
+            },
+            Self::Primitive(_) => self == template,
+            Self::Arrow {
+                parameter: tp,
+                result: tr,
+            } => match self {
+                Self::Arrow {
+                    parameter: sp,
+                    result: sr,
+                } => sp.unify_type_params(tp, bindings) && sr.unify_type_params(tr, bindings),
+                _ => false,
+            },
+            Self::List(te) => match self {
+                Self::List(se) => se.unify_type_params(te, bindings),
+                _ => false,
+            },
+            Self::Option(te) => match self {
+                Self::Option(se) => se.unify_type_params(te, bindings),
+                _ => false,
+            },
+            Self::Signal(te) => match self {
+                Self::Signal(se) => se.unify_type_params(te, bindings),
+                _ => false,
+            },
+            Self::Set(te) => match self {
+                Self::Set(se) => se.unify_type_params(te, bindings),
+                _ => false,
+            },
+            Self::Tuple(tes) => match self {
+                Self::Tuple(ses) => {
+                    ses.len() == tes.len()
+                        && ses
+                            .iter()
+                            .zip(tes.iter())
+                            .all(|(s, t)| s.unify_type_params(t, bindings))
+                }
+                _ => false,
+            },
+            Self::Record(tfields) => match self {
+                Self::Record(sfields) => {
+                    sfields.len() == tfields.len()
+                        && sfields
+                            .iter()
+                            .zip(tfields.iter())
+                            .all(|(s, t)| s.name == t.name && s.ty.unify_type_params(&t.ty, bindings))
+                }
+                _ => false,
+            },
+            Self::Map { key: tk, value: tv } => match self {
+                Self::Map { key: sk, value: sv } => {
+                    sk.unify_type_params(tk, bindings) && sv.unify_type_params(tv, bindings)
+                }
+                _ => false,
+            },
+            Self::Result {
+                error: te,
+                value: tv,
+            } => match self {
+                Self::Result {
+                    error: se,
+                    value: sv,
+                } => se.unify_type_params(te, bindings) && sv.unify_type_params(tv, bindings),
+                _ => false,
+            },
+            Self::Validation {
+                error: te,
+                value: tv,
+            } => match self {
+                Self::Validation {
+                    error: se,
+                    value: sv,
+                } => se.unify_type_params(te, bindings) && sv.unify_type_params(tv, bindings),
+                _ => false,
+            },
+            Self::Task {
+                error: te,
+                value: tv,
+            } => match self {
+                Self::Task {
+                    error: se,
+                    value: sv,
+                } => se.unify_type_params(te, bindings) && sv.unify_type_params(tv, bindings),
+                _ => false,
+            },
+            Self::Domain {
+                item: ti,
+                arguments: targs,
+                ..
+            } => match self {
+                Self::Domain {
+                    item: si,
+                    arguments: sargs,
+                    ..
+                } => {
+                    si == ti
+                        && sargs.len() == targs.len()
+                        && sargs
+                            .iter()
+                            .zip(targs.iter())
+                            .all(|(s, t)| s.unify_type_params(t, bindings))
+                }
+                _ => false,
+            },
+            Self::OpaqueItem {
+                item: ti,
+                arguments: targs,
+                ..
+            } => match self {
+                Self::OpaqueItem {
+                    item: si,
+                    arguments: sargs,
+                    ..
+                } => {
+                    si == ti
+                        && sargs.len() == targs.len()
+                        && sargs
+                            .iter()
+                            .zip(targs.iter())
+                            .all(|(s, t)| s.unify_type_params(t, bindings))
+                }
+                _ => false,
+            },
+            Self::OpaqueImport {
+                import: ti,
+                arguments: targs,
+                ..
+            } => match self {
+                Self::OpaqueImport {
+                    import: si,
+                    arguments: sargs,
+                    ..
+                } => {
+                    si == ti
+                        && sargs.len() == targs.len()
+                        && sargs
+                            .iter()
+                            .zip(targs.iter())
+                            .all(|(s, t)| s.unify_type_params(t, bindings))
                 }
                 _ => false,
             },
@@ -1015,6 +1218,27 @@ impl GateType {
                             Self::same_shape_inner(left, right, left_to_right, right_to_left)
                         })
             }
+            (
+                Self::OpaqueImport {
+                    import: left_import,
+                    arguments: left_arguments,
+                    ..
+                },
+                Self::OpaqueImport {
+                    import: right_import,
+                    arguments: right_arguments,
+                    ..
+                },
+            ) => {
+                left_import == right_import
+                    && left_arguments.len() == right_arguments.len()
+                    && left_arguments
+                        .iter()
+                        .zip(right_arguments.iter())
+                        .all(|(left, right)| {
+                            Self::same_shape_inner(left, right, left_to_right, right_to_left)
+                        })
+            }
             _ => false,
         }
     }
@@ -1059,6 +1283,9 @@ impl GateType {
             | Self::OpaqueItem {
                 item, arguments, ..
             } => Some((TypeConstructorHead::Item(*item), arguments.clone())),
+            Self::OpaqueImport {
+                import, arguments, ..
+            } => Some((TypeConstructorHead::Import(*import), arguments.clone())),
             Self::Primitive(_)
             | Self::TypeParameter { .. }
             | Self::Tuple(_)
@@ -1108,6 +1335,9 @@ impl fmt::Display for GateType {
                 name, arguments, ..
             }
             | GateType::OpaqueItem {
+                name, arguments, ..
+            }
+            | GateType::OpaqueImport {
                 name, arguments, ..
             } => {
                 write!(f, "{name}")?;
@@ -1168,7 +1398,8 @@ impl ApplicativeClusterKind {
             | SourceOptionActualType::Map { .. }
             | SourceOptionActualType::Set(_)
             | SourceOptionActualType::Domain { .. }
-            | SourceOptionActualType::OpaqueItem { .. } => None,
+            | SourceOptionActualType::OpaqueItem { .. }
+            | SourceOptionActualType::OpaqueImport { .. } => None,
         }
     }
 
@@ -1270,6 +1501,7 @@ impl TypeConstructorBinding {
 pub enum TypeConstructorHead {
     Builtin(BuiltinType),
     Item(ItemId),
+    Import(ImportId),
 }
 
 pub(crate) type PolyTypeBindings = HashMap<TypeParameterId, TypeBinding>;
@@ -1344,7 +1576,8 @@ impl<'a> GateTypeContext<'a> {
             | GateType::Signal(_)
             | GateType::Task { .. }
             | GateType::Domain { .. }
-            | GateType::OpaqueItem { .. } => None,
+            | GateType::OpaqueItem { .. }
+            | GateType::OpaqueImport { .. } => None,
         }
     }
 
@@ -1449,7 +1682,8 @@ impl<'a> GateTypeContext<'a> {
             | GateType::Set(_)
             | GateType::Signal(_)
             | GateType::Task { .. }
-            | GateType::Domain { .. } => None,
+            | GateType::Domain { .. }
+            | GateType::OpaqueImport { .. } => None,
         }
     }
 
@@ -2136,6 +2370,50 @@ impl<'a> GateTypeContext<'a> {
                 error: Box::new(self.lower_import_value_type(error)),
                 value: Box::new(self.lower_import_value_type(value)),
             },
+            ImportValueType::TypeVariable { index, name } => GateType::TypeParameter {
+                parameter: TypeParameterId::from_raw(u32::MAX - *index as u32),
+                name: name.clone(),
+            },
+            ImportValueType::Named {
+                type_name,
+                arguments,
+            } => {
+                let lowered_args: Vec<GateType> = arguments
+                    .iter()
+                    .map(|arg| self.lower_import_value_type(arg))
+                    .collect();
+                // Find the import that provides this type name.
+                let import_id = self
+                    .module
+                    .imports()
+                    .iter()
+                    .find(|(_, binding)| {
+                        binding.imported_name.text() == type_name
+                            && matches!(
+                                &binding.metadata,
+                                ImportBindingMetadata::TypeConstructor { .. }
+                                    | ImportBindingMetadata::AmbientType
+                                    | ImportBindingMetadata::BuiltinType(_)
+                                    | ImportBindingMetadata::Domain { .. }
+                            )
+                    })
+                    .map(|(id, _)| id);
+                if let Some(import) = import_id {
+                    GateType::OpaqueImport {
+                        import,
+                        name: type_name.clone(),
+                        arguments: lowered_args,
+                    }
+                } else {
+                    // Fallback: create an opaque import with a sentinel; the type checker
+                    // will treat this as an unknown opaque type.
+                    GateType::OpaqueImport {
+                        import: ImportId::from_raw(u32::MAX),
+                        name: type_name.clone(),
+                        arguments: lowered_args,
+                    }
+                }
+            }
         }
     }
 
@@ -3277,9 +3555,23 @@ impl<'a> GateTypeContext<'a> {
                     }),
                 _ => false,
             },
+            ResolutionState::Resolved(TypeResolution::Import(import_id)) => match actual {
+                GateType::OpaqueImport {
+                    import,
+                    arguments: actual_arguments,
+                    ..
+                } if *import == *import_id && arguments.len() == actual_arguments.len() => {
+                    arguments
+                        .iter()
+                        .zip(actual_arguments.iter())
+                        .all(|(argument, actual)| {
+                            self.match_hir_type(*argument, actual, substitutions, item_stack)
+                        })
+                }
+                _ => false,
+            },
             ResolutionState::Unresolved
             | ResolutionState::Resolved(TypeResolution::TypeParameter(_))
-            | ResolutionState::Resolved(TypeResolution::Import(_))
             | ResolutionState::Resolved(TypeResolution::Builtin(_)) => false,
         }
     }
@@ -3542,7 +3834,17 @@ impl<'a> GateTypeContext<'a> {
             ResolutionState::Resolved(TypeResolution::Item(item_id)) => {
                 self.lower_type_item(*item_id, &[], item_stack, allow_open_type_parameters)
             }
-            ResolutionState::Resolved(TypeResolution::Import(_)) => None,
+            ResolutionState::Resolved(TypeResolution::Import(import_id)) => {
+                let name = self.module.imports()[*import_id]
+                    .local_name
+                    .text()
+                    .to_owned();
+                Some(GateType::OpaqueImport {
+                    import: *import_id,
+                    name,
+                    arguments: Vec::new(),
+                })
+            }
         }
     }
 
@@ -3600,8 +3902,18 @@ impl<'a> GateTypeContext<'a> {
             ResolutionState::Resolved(TypeResolution::TypeParameter(parameter)) => {
                 substitutions.get(parameter).cloned()
             }
-            ResolutionState::Resolved(TypeResolution::Import(_))
-            | ResolutionState::Resolved(TypeResolution::Builtin(
+            ResolutionState::Resolved(TypeResolution::Import(import_id)) => {
+                let name = self.module.imports()[*import_id]
+                    .local_name
+                    .text()
+                    .to_owned();
+                Some(GateType::OpaqueImport {
+                    import: *import_id,
+                    name,
+                    arguments: arguments.to_vec(),
+                })
+            }
+            ResolutionState::Resolved(TypeResolution::Builtin(
                 BuiltinType::Int
                 | BuiltinType::Float
                 | BuiltinType::Decimal
@@ -4119,6 +4431,17 @@ impl<'a> GateTypeContext<'a> {
             TypeConstructorHead::Item(item_id) => {
                 self.lower_type_item(item_id, arguments, item_stack, false)
             }
+            TypeConstructorHead::Import(import_id) => {
+                let name = self.module.imports()[import_id]
+                    .local_name
+                    .text()
+                    .to_owned();
+                Some(GateType::OpaqueImport {
+                    import: import_id,
+                    name,
+                    arguments: arguments.to_vec(),
+                })
+            }
         }
     }
 
@@ -4213,7 +4536,10 @@ impl<'a> GateTypeContext<'a> {
                 }
                 info
             }
-            ExprKind::Regex(_) => GateExprInfo::default(),
+            ExprKind::Regex(_) => GateExprInfo {
+                ty: Some(GateType::Primitive(BuiltinType::Text)),
+                ..GateExprInfo::default()
+            },
             ExprKind::Tuple(elements) => {
                 let mut info = GateExprInfo::default();
                 let mut lowered = Vec::with_capacity(elements.len());
@@ -6400,6 +6726,15 @@ impl<'a> GateTypeContext<'a> {
         {
             return Some(result.substitute_type_parameter(*param_id, argument));
         }
+        // Structural unification: the parameter may be a compound type containing TypeParameter
+        // nodes (e.g. OpaqueImport(NEL, [TypeParam(A)])). Match structurally against the argument,
+        // collect bindings, and substitute them into the result.
+        if parameter.has_type_params() {
+            let mut bindings = HashMap::new();
+            if argument.unify_type_params(parameter, &mut bindings) && !bindings.is_empty() {
+                return Some(result.substitute_type_parameters(&bindings));
+            }
+        }
         None
     }
 
@@ -6641,6 +6976,11 @@ pub(crate) enum SourceOptionActualType {
     },
     OpaqueItem {
         item: ItemId,
+        name: String,
+        arguments: Vec<Self>,
+    },
+    OpaqueImport {
+        import: ImportId,
         name: String,
         arguments: Vec<Self>,
     },
@@ -6946,7 +7286,8 @@ impl SourceOptionExpectedType {
             | GateType::Option(_)
             | GateType::Result { .. }
             | GateType::Validation { .. }
-            | GateType::Task { .. } => None,
+            | GateType::Task { .. }
+            | GateType::OpaqueImport { .. } => None,
         }
     }
 
@@ -7029,6 +7370,15 @@ impl SourceOptionActualType {
                 name: name.clone(),
                 arguments: arguments.iter().map(Self::from_gate_type).collect(),
             },
+            GateType::OpaqueImport {
+                import,
+                name,
+                arguments,
+            } => Self::OpaqueImport {
+                import: *import,
+                name: name.clone(),
+                arguments: arguments.iter().map(Self::from_gate_type).collect(),
+            },
         }
     }
 
@@ -7095,6 +7445,18 @@ impl SourceOptionActualType {
                 arguments,
             } => Some(GateType::OpaqueItem {
                 item: *item,
+                name: name.clone(),
+                arguments: arguments
+                    .iter()
+                    .map(Self::to_gate_type)
+                    .collect::<Option<Vec<_>>>()?,
+            }),
+            Self::OpaqueImport {
+                import,
+                name,
+                arguments,
+            } => Some(GateType::OpaqueImport {
+                import: *import,
                 name: name.clone(),
                 arguments: arguments
                     .iter()
@@ -7250,6 +7612,28 @@ impl SourceOptionActualType {
                         .collect::<Option<Vec<_>>>()?,
                 })
             }
+            (
+                Self::OpaqueImport {
+                    import: left_import,
+                    name,
+                    arguments: left_arguments,
+                },
+                Self::OpaqueImport {
+                    import: right_import,
+                    arguments: right_arguments,
+                    ..
+                },
+            ) if left_import == right_import && left_arguments.len() == right_arguments.len() => {
+                Some(Self::OpaqueImport {
+                    import: *left_import,
+                    name: name.clone(),
+                    arguments: left_arguments
+                        .iter()
+                        .zip(right_arguments)
+                        .map(|(left, right)| left.unify(right))
+                        .collect::<Option<Vec<_>>>()?,
+                })
+            }
             _ => None,
         }
     }
@@ -7293,6 +7677,9 @@ impl fmt::Display for SourceOptionActualType {
                 name, arguments, ..
             }
             | Self::OpaqueItem {
+                name, arguments, ..
+            }
+            | Self::OpaqueImport {
                 name, arguments, ..
             } => {
                 if arguments.is_empty() {

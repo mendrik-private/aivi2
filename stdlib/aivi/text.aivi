@@ -135,6 +135,10 @@ type Text -> List Text
 func words = t =>
     split " " t
 
+type (List Text) -> Text
+func unlines = items =>
+    join "\n" items
+
 @test
 value plain_text_is_non_empty : Task Text Bool = pure (nonEmpty "Ada")
 
@@ -194,4 +198,4 @@ value text_padStart : Task Text Bool = pure (padStart 5 "0" "42" == "00042")
 @test
 value text_lines : Task Text Bool = pure (lines "a\nb\nc" == ["a", "b", "c"])
 
-export (length, byteLen, slice, find, contains, startsWith, endsWith, toUpper, toLower, trim, trimStart, trimEnd, replace, replaceAll, split, repeat, fromInt, parseInt, fromBool, parseBool, concat, isEmpty, nonEmpty, join, surround, surroundWith, withDefault, upper, lower, capitalize, hasMinLength, hasMaxLength, includesText, stripBlanks, padStart, padEnd, parseIntOrElse, lines, words)
+export (length, byteLen, slice, find, contains, startsWith, endsWith, toUpper, toLower, trim, trimStart, trimEnd, replace, replaceAll, split, repeat, fromInt, parseInt, fromBool, parseBool, concat, isEmpty, nonEmpty, join, surround, surroundWith, withDefault, upper, lower, capitalize, hasMinLength, hasMaxLength, includesText, stripBlanks, padStart, padEnd, parseIntOrElse, lines, words, unlines)

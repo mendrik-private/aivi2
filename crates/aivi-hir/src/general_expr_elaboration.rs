@@ -303,12 +303,6 @@ impl fmt::Display for GeneralExprBlocker {
             Self::UnknownExprType { .. } => {
                 f.write_str("expression type could not be determined for typed-core general-expression lowering")
             }
-            Self::UnsupportedRuntimeExpr {
-                kind: GateRuntimeUnsupportedKind::RegexLiteral,
-                ..
-            } => f.write_str(
-                "regex literals are only valid as @source option values; use the `aivi.regex` module for pattern matching at runtime",
-            ),
             Self::UnsupportedRuntimeExpr { kind, .. } => {
                 write!(f, "{kind} is not supported in typed-core general expressions")
             }
@@ -615,6 +609,20 @@ fn rewrite_domain_carrier_view(
                 })
                 .collect(),
         },
+        GateType::OpaqueImport {
+            import,
+            name,
+            arguments,
+        } => GateType::OpaqueImport {
+            import: *import,
+            name: name.clone(),
+            arguments: arguments
+                .iter()
+                .map(|argument| {
+                    rewrite_domain_carrier_view(argument, domain_item, domain_parameters, carrier)
+                })
+                .collect(),
+        },
     }
 }
 
@@ -693,6 +701,18 @@ fn substitute_gate_type(
             arguments,
         } => GateType::OpaqueItem {
             item: *item,
+            name: name.clone(),
+            arguments: arguments
+                .iter()
+                .map(|argument| substitute_gate_type(argument, substitutions))
+                .collect(),
+        },
+        GateType::OpaqueImport {
+            import,
+            name,
+            arguments,
+        } => GateType::OpaqueImport {
+            import: *import,
             name: name.clone(),
             arguments: arguments
                 .iter()
@@ -1462,12 +1482,6 @@ impl<'a> GeneralExprElaborator<'a> {
             }
         }
         match &expr.kind {
-            ExprKind::Regex(_) => {
-                return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
-                    span: expr.span,
-                    kind: GateRuntimeUnsupportedKind::RegexLiteral,
-                }]);
-            }
             ExprKind::Markup(_) => {
                 return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
                     span: expr.span,
@@ -1503,6 +1517,19 @@ impl<'a> GeneralExprElaborator<'a> {
             ExprKind::SuffixedInteger(literal) => GateRuntimeExprKind::SuffixedInteger(literal),
             ExprKind::Text(text) => {
                 GateRuntimeExprKind::Text(self.lower_text_literal(&text, env, ambient)?)
+            }
+            ExprKind::Regex(regex) => {
+                let pattern = regex
+                    .raw
+                    .strip_prefix("rx\"")
+                    .and_then(|s| s.strip_suffix('"'))
+                    .unwrap_or(&regex.raw);
+                GateRuntimeExprKind::Text(GateRuntimeTextLiteral {
+                    segments: vec![GateRuntimeTextSegment::Fragment(crate::TextFragment {
+                        raw: pattern.into(),
+                        span: expr.span,
+                    })],
+                })
             }
             ExprKind::Tuple(elements) => {
                 let expected_elements = match expected {
@@ -1663,11 +1690,10 @@ impl<'a> GeneralExprElaborator<'a> {
                 PipeLoweringMode::Full,
                 None,
             )?),
-            ExprKind::Regex(_)
-            | ExprKind::Markup(_)
+            ExprKind::Markup(_)
             | ExprKind::PatchApply { .. }
             | ExprKind::PatchLiteral(_) => {
-                unreachable!("patch/regex/markup are handled before type inference")
+                unreachable!("patch/markup are handled before type inference")
             }
             ExprKind::Cluster(cluster) => {
                 return self.lower_cluster_expr(expr_id, cluster, env, ambient, expected);
@@ -3566,12 +3592,13 @@ mod tests {
 
     use super::{
         ExprKind, GateRuntimeExprKind, GateRuntimePipeStageKind, GateRuntimeReference,
-        GeneralExprBlocker, GeneralExprOutcome, Item, elaborate_general_expressions,
+        GateRuntimeTextSegment, GeneralExprBlocker, GeneralExprOutcome, Item,
+        elaborate_general_expressions,
     };
     use crate::{
         BuiltinType, PipeTransformMode,
         typecheck::resolve_class_member_dispatch,
-        validate::{GateExprEnv, GateTypeContext},
+        validate::{GateExprEnv, GateType, GateTypeContext},
     };
 
     fn item_name(module: &crate::Module, item: crate::ItemId) -> Option<&str> {
@@ -3970,9 +3997,9 @@ mod tests {
     }
 
     #[test]
-    fn blocks_regex_literals_in_general_expr_bodies() {
+    fn lowers_regex_literal_as_text_in_general_expr_bodies() {
         let lowered = lower_text(
-            "general-expr-blocked-regex.aivi",
+            "general-expr-regex-as-text.aivi",
             "value pattern = rx\"a+\"",
         );
         assert!(
@@ -3988,20 +4015,22 @@ mod tests {
             .find(|item| item_name(lowered.module(), item.owner) == Some("pattern"))
             .expect("expected pattern elaboration");
         match &pattern.outcome {
-            GeneralExprOutcome::Blocked(blocked) => {
-                assert!(matches!(
-                    blocked.blockers.as_slice(),
-                    [GeneralExprBlocker::UnsupportedRuntimeExpr {
-                        kind: crate::GateRuntimeUnsupportedKind::RegexLiteral,
-                        ..
-                    }]
-                ));
-                assert_eq!(
-                    blocked.to_string(),
-                    "regex literals are only valid as @source option values; use the `aivi.regex` module for pattern matching at runtime",
-                );
+            GeneralExprOutcome::Lowered(body) => {
+                assert_eq!(body.ty, GateType::Primitive(crate::BuiltinType::Text));
+                match &body.kind {
+                    GateRuntimeExprKind::Text(text) => {
+                        assert_eq!(text.segments.len(), 1);
+                        match &text.segments[0] {
+                            GateRuntimeTextSegment::Fragment(fragment) => {
+                                assert_eq!(&*fragment.raw, "a+");
+                            }
+                            other => panic!("expected text fragment, found {other:?}"),
+                        }
+                    }
+                    other => panic!("expected Text runtime kind, found {other:?}"),
+                }
             }
-            other => panic!("expected blocked pattern body, found {other:?}"),
+            other => panic!("expected lowered pattern body, found {other:?}"),
         }
     }
 
@@ -4708,6 +4737,42 @@ fun any:Bool = predicate:(A -> Bool) items:(List A)=>    items
         assert!(
             blocked.is_empty(),
             "snake demo should lower all non-markup general expressions cleanly, found blocked items: {blocked:?}"
+        );
+
+        let blocked_domain_members = report
+            .domain_members()
+            .iter()
+            .filter_map(|dm| match &dm.outcome {
+                GeneralExprOutcome::Blocked(blocked) => {
+                    // Snake.contains uses point-free `(. == cell)` which hits the known
+                    // ApplicativeCluster limitation — skip it.
+                    let is_applicative_only = blocked.blockers.iter().all(|b| {
+                        matches!(
+                            b,
+                            GeneralExprBlocker::UnsupportedRuntimeExpr {
+                                kind: crate::GateRuntimeUnsupportedKind::ApplicativeCluster,
+                                ..
+                            }
+                        )
+                    });
+                    if is_applicative_only {
+                        return None;
+                    }
+                    let domain_name = match &lowered.module().items()[dm.domain_owner] {
+                        crate::Item::Domain(d) => d.name.text().to_owned(),
+                        _ => "<unknown>".to_owned(),
+                    };
+                    Some((
+                        format!("{}[{}]", domain_name, dm.member_index),
+                        blocked.blockers.clone(),
+                    ))
+                }
+                GeneralExprOutcome::Lowered(_) => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            blocked_domain_members.is_empty(),
+            "snake demo should lower all domain member expressions cleanly, found blocked domain members: {blocked_domain_members:?}"
         );
     }
 }

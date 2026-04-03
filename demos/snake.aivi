@@ -1,10 +1,23 @@
+use aivi.nonEmpty (
+    NonEmptyList
+    singleton
+    head as nelHead
+    cons as nelCons
+    length as nelLength
+    toList as nelToList
+    init as nelInit
+    fromHeadTail as nelFromHeadTail
+)
+
 use aivi.list (
-    length as listLength
-    head as listHead
+    contains as listContains
     any
 )
 
-use aivi.option (getOrElse)
+use aivi.text (
+    join
+    concat
+)
 
 use aivi.duration (Duration)
 
@@ -33,11 +46,6 @@ type Event =
 type Key =
   | Key Text
 
-type SnakeTakeState = {
-    remaining: Int,
-    cells: List Cell
-}
-
 value boardW = 30
 value boardH = 20
 value seed0 = 2463534242
@@ -64,31 +72,24 @@ type Int -> Int
 func nextSeed = s =>
     (s * 1103515245 + 12345) % 2147483647
 
-type SnakeTakeState -> Cell -> SnakeTakeState
-func takeCellStep = state item => state.remaining > 0
- T|> { remaining: state.remaining - 1, cells: append state.cells [item] }
- F|> state
+type Cell -> Cell -> Bool
+func cellEq = a b => a == b
 
-type Int -> (List Cell) -> (List Cell)
-func takeCells = n cells => cells
-  |> reduce takeCellStep { remaining: n, cells: [] }
-  |> .cells
-
-domain Snake over List Cell = {
-    type List Cell -> Snake
+domain Snake over NonEmptyList Cell = {
+    type NonEmptyList Cell -> Snake
     fromCells cells = cells
     type Cell
-    head = getOrElse (Cell 0 0) (listHead self)
+    head = nelHead self
     type Cell -> Bool
-    contains cell = any (. == cell) self
+    contains cell = listContains cellEq cell (nelToList self)
     type Int
-    length = listLength self
+    length = nelLength self
     type Cell -> Snake
-    grow cell = append [cell] self
+    grow cell = nelCons cell self
     type Cell -> Snake
-    move cell = takeCells (listLength self) (append [cell] self)
+    move cell = nelFromHeadTail cell (nelInit self)
     type Direction -> Cell
-    nextHead dir = moveDir dir (getOrElse (Cell 0 0) (listHead self))
+    nextHead dir = moveDir dir (nelHead self)
 }
 
 type GameState = {
@@ -112,11 +113,7 @@ func dirLabel = .
  ||> West  -> "Left"
 
 value initial : GameState = {
-    snake: fromCells [
-        Cell 6 10,
-        Cell 5 10,
-        Cell 4 10
-    ],
+    snake: fromCells (nelCons (Cell 6 10) (nelCons (Cell 5 10) (singleton (Cell 4 10)))),
     dir: East,
     food: spawnFood seed0,
     score: 0,
@@ -156,38 +153,21 @@ func resolveMove = st h => h == st.food
  F|> st <| { snake: st.snake.move h, seed: nextSeed st.seed }
 
 type GameState -> Int -> Int -> Text
-func cellGlyph = st x y => (Cell x y == st.snake.head, st.snake.contains (Cell x y), Cell x y == st.food)
+func cellGlyph = st y x => (Cell x y == st.snake.head, st.snake.contains (Cell x y), Cell x y == st.food)
  ||> (True, _, _)          -> "@"
  ||> (_, True, _)          -> "o"
  ||> (_, _, True)          -> "*"
  ||> (False, False, False) -> "·"
 
-type Text -> Text -> Text
-func appendCell = row cell =>
-    "{row}{cell}"
-
-type List Text -> Text
-func joinRow = cells =>
-    reduce appendCell "" cells
-
-type Text -> Text -> Text
-func appendRow = board row => board == ""
- T|> row
- F|> "{board}\n{row}"
-
-type GameState -> Int -> Int -> Text
-func cellAt = st y x =>
-    cellGlyph st x y
-
 type GameState -> Int -> Text
 func renderRowAt = st y => matrixIndices boardW
-  |> map (cellAt st y)
-  |> joinRow
+  |> map (cellGlyph st y)
+  |> concat
 
 type GameState -> Text
 func renderBoard = st => matrixIndices boardH
   |> map (renderRowAt st)
-  |> reduce appendRow ""
+  |> join "\n"
 
 type Status -> Bool
 func isGameOver = .

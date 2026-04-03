@@ -66,6 +66,26 @@ type NonEmptyList A -> (NonEmptyList A) -> (NonEmptyList A)
 func appendNel = left right => left
  ||> MkNEL h t -> MkNEL h (append t (toList right))
 
+type A -> (List A) -> (NonEmptyList A)
+func fromHeadTail = h t =>
+    MkNEL h t
+
+type InitState A = {
+    result: List A,
+    prev: Option A
+}
+
+type InitState A -> A -> (InitState A)
+func initStep = state item => state.prev
+ ||> None   -> { result: state.result, prev: Some item }
+ ||> Some p -> { result: append state.result [p], prev: Some item }
+
+type NonEmptyList A -> (List A)
+func init = nel =>
+  toList nel
+    |> reduce initStep { result: [], prev: None }
+    |> .result
+
 export NonEmptyList
 export singleton
 export cons
@@ -76,3 +96,5 @@ export toList
 export mapNel
 export fromList
 export appendNel
+export fromHeadTail
+export init

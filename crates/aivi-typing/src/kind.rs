@@ -22,6 +22,14 @@ impl Kind {
         }
         kind
     }
+
+    /// Number of type parameters this kind accepts (e.g. `* -> * -> *` has arity 2).
+    pub fn arity(&self) -> usize {
+        match self {
+            Self::Type => 0,
+            Self::Arrow(_, result) => 1 + result.arity(),
+        }
+    }
 }
 
 impl fmt::Display for Kind {

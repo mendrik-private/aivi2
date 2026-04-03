@@ -1,8 +1,11 @@
+use std::collections::HashMap;
+
 use crate::{
     BuiltinTerm, DecoratorPayload, DeprecatedDecorator, DeprecationNotice, DomainMemberKind,
     ExportItem, ExportResolution, ImportBindingMetadata, ImportBundleKind, ImportId,
     ImportRecordField, ImportValueType, ImportedDomainLiteralSuffix, Item, ItemId, Module,
-    RecordExpr, ResolutionState, TypeId, TypeItemBody, TypeKind, TypeReference, TypeResolution,
+    RecordExpr, ResolutionState, TypeId, TypeItemBody, TypeKind, TypeParameterId, TypeReference,
+    TypeResolution,
 };
 
 /// The kind of an exported name.
@@ -363,19 +366,26 @@ fn exported_value_metadata(module: &Module, annotation: Option<TypeId>) -> Impor
 }
 
 fn exported_function_type(module: &Module, item: &crate::FunctionItem) -> Option<ImportValueType> {
-    if !item.type_parameters.is_empty() || !item.context.is_empty() {
+    if !item.context.is_empty() {
         return None;
     }
+    // Build a mapping from TypeParameterId → index for polymorphic functions.
+    let type_param_map: HashMap<TypeParameterId, usize> = item
+        .type_parameters
+        .iter()
+        .enumerate()
+        .map(|(i, &p)| (p, i))
+        .collect();
     let Some(mut result) = item
         .annotation
-        .and_then(|annotation| import_value_type(module, annotation))
+        .and_then(|annotation| poly_import_value_type(module, annotation, &type_param_map))
     else {
         return None;
     };
     for parameter in item.parameters.iter().rev() {
         let Some(parameter_ty) = parameter
             .annotation
-            .and_then(|annotation| import_value_type(module, annotation))
+            .and_then(|annotation| poly_import_value_type(module, annotation, &type_param_map))
         else {
             return None;
         };
@@ -547,6 +557,18 @@ enum ResolvedTypeConstructor {
     Bundle(ImportBundleKind),
 }
 
+fn item_type_name(item: &Item) -> String {
+    match item {
+        Item::Type(item) => item.name.text().to_owned(),
+        Item::Class(item) => item.name.text().to_owned(),
+        Item::Domain(item) => item.name.text().to_owned(),
+        Item::SourceProviderContract(item) => {
+            item.provider.key().unwrap_or("<provider>").to_owned()
+        }
+        other => format!("{:?}", other.kind()),
+    }
+}
+
 fn flatten_type_application(
     module: &Module,
     ty: TypeId,
@@ -697,6 +719,201 @@ fn resolve_type_constructor(
         ResolutionState::Resolved(TypeResolution::Item(_))
         | ResolutionState::Resolved(TypeResolution::TypeParameter(_))
         | ResolutionState::Unresolved => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Polymorphic-aware import value type conversion
+// ---------------------------------------------------------------------------
+
+type TypeParamMap = HashMap<TypeParameterId, usize>;
+
+/// Convert a HIR type to `ImportValueType`, supporting type parameters and named types.
+fn poly_import_value_type(
+    module: &Module,
+    ty: TypeId,
+    params: &TypeParamMap,
+) -> Option<ImportValueType> {
+    let type_node = module.types().get(ty)?;
+    match &type_node.kind {
+        TypeKind::Name(reference) => poly_name_import_value_type(module, reference, params),
+        TypeKind::Tuple(elements) => Some(ImportValueType::Tuple(
+            elements
+                .iter()
+                .map(|element| poly_import_value_type(module, *element, params))
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        TypeKind::Record(fields) => Some(ImportValueType::Record(
+            fields
+                .iter()
+                .map(|field| {
+                    Some(ImportRecordField {
+                        name: field.label.text().into(),
+                        ty: poly_import_value_type(module, field.ty, params)?,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        TypeKind::RecordTransform { transform, source } => {
+            let source = poly_import_value_type(module, *source, params)?;
+            apply_record_row_transform_import_value_type(transform, source)
+        }
+        TypeKind::Arrow { parameter, result } => Some(ImportValueType::Arrow {
+            parameter: Box::new(poly_import_value_type(module, *parameter, params)?),
+            result: Box::new(poly_import_value_type(module, *result, params)?),
+        }),
+        TypeKind::Apply { .. } => poly_applied_import_value_type(module, ty, params),
+    }
+}
+
+/// Handle a bare name reference: builtin primitives, type parameters, or same-module items.
+fn poly_name_import_value_type(
+    module: &Module,
+    reference: &TypeReference,
+    params: &TypeParamMap,
+) -> Option<ImportValueType> {
+    match reference.resolution.as_ref() {
+        ResolutionState::Resolved(TypeResolution::Builtin(builtin)) => {
+            primitive_import_value_type_from_builtin(*builtin)
+        }
+        ResolutionState::Resolved(TypeResolution::TypeParameter(param_id)) => {
+            let &index = params.get(param_id)?;
+            let name = module
+                .type_parameters()
+                .get(*param_id)
+                .map(|p| p.name.text().to_owned())
+                .unwrap_or_else(|| format!("T{}", index + 1));
+            Some(ImportValueType::TypeVariable { index, name })
+        }
+        ResolutionState::Resolved(TypeResolution::Item(item_id)) => {
+            let type_name = item_type_name(&module.items()[*item_id]);
+            Some(ImportValueType::Named {
+                type_name,
+                arguments: Vec::new(),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn primitive_import_value_type_from_builtin(
+    builtin: crate::BuiltinType,
+) -> Option<ImportValueType> {
+    match builtin {
+        crate::BuiltinType::Int
+        | crate::BuiltinType::Float
+        | crate::BuiltinType::Decimal
+        | crate::BuiltinType::BigInt
+        | crate::BuiltinType::Bool
+        | crate::BuiltinType::Text
+        | crate::BuiltinType::Unit
+        | crate::BuiltinType::Bytes => Some(ImportValueType::Primitive(builtin)),
+        _ => None,
+    }
+}
+
+/// Handle type application: builtin constructors, same-module named types, and named fallback.
+fn poly_applied_import_value_type(
+    module: &Module,
+    ty: TypeId,
+    params: &TypeParamMap,
+) -> Option<ImportValueType> {
+    let (constructor, arguments) = poly_flatten_type_application(module, ty)?;
+    // Try builtin constructor first
+    match &constructor {
+        PolyTypeConstructor::Resolved(ResolvedTypeConstructor::Builtin(builtin)) => {
+            let result = match (builtin, arguments.len()) {
+                (crate::BuiltinType::List, 1) => Some(ImportValueType::List(Box::new(
+                    poly_import_value_type(module, arguments[0], params)?,
+                ))),
+                (crate::BuiltinType::Map, 2) => Some(ImportValueType::Map {
+                    key: Box::new(poly_import_value_type(module, arguments[0], params)?),
+                    value: Box::new(poly_import_value_type(module, arguments[1], params)?),
+                }),
+                (crate::BuiltinType::Set, 1) => Some(ImportValueType::Set(Box::new(
+                    poly_import_value_type(module, arguments[0], params)?,
+                ))),
+                (crate::BuiltinType::Option, 1) => Some(ImportValueType::Option(Box::new(
+                    poly_import_value_type(module, arguments[0], params)?,
+                ))),
+                (crate::BuiltinType::Result, 2) => Some(ImportValueType::Result {
+                    error: Box::new(poly_import_value_type(module, arguments[0], params)?),
+                    value: Box::new(poly_import_value_type(module, arguments[1], params)?),
+                }),
+                (crate::BuiltinType::Validation, 2) => Some(ImportValueType::Validation {
+                    error: Box::new(poly_import_value_type(module, arguments[0], params)?),
+                    value: Box::new(poly_import_value_type(module, arguments[1], params)?),
+                }),
+                (crate::BuiltinType::Signal, 1) => Some(ImportValueType::Signal(Box::new(
+                    poly_import_value_type(module, arguments[0], params)?,
+                ))),
+                (crate::BuiltinType::Task, 2) => Some(ImportValueType::Task {
+                    error: Box::new(poly_import_value_type(module, arguments[0], params)?),
+                    value: Box::new(poly_import_value_type(module, arguments[1], params)?),
+                }),
+                _ => None,
+            };
+            if result.is_some() {
+                return result;
+            }
+        }
+        PolyTypeConstructor::Resolved(ResolvedTypeConstructor::Bundle(
+            ImportBundleKind::BuiltinOption,
+        )) if arguments.len() == 1 => {
+            return Some(ImportValueType::Option(Box::new(
+                poly_import_value_type(module, arguments[0], params)?,
+            )));
+        }
+        _ => {}
+    }
+    // Named type constructor (same-module item or fallback)
+    let type_name = match constructor {
+        PolyTypeConstructor::Named(name) => name,
+        _ => return None,
+    };
+    let args = arguments
+        .iter()
+        .map(|arg| poly_import_value_type(module, *arg, params))
+        .collect::<Option<Vec<_>>>()?;
+    Some(ImportValueType::Named {
+        type_name,
+        arguments: args,
+    })
+}
+
+enum PolyTypeConstructor {
+    Resolved(ResolvedTypeConstructor),
+    Named(String),
+}
+
+fn poly_flatten_type_application(
+    module: &Module,
+    ty: TypeId,
+) -> Option<(PolyTypeConstructor, Vec<TypeId>)> {
+    let type_node = module.types().get(ty)?;
+    match &type_node.kind {
+        TypeKind::Apply { callee, arguments } => {
+            let (constructor, mut flattened) = poly_flatten_type_application(module, *callee)?;
+            flattened.extend(arguments.iter().copied());
+            Some((constructor, flattened))
+        }
+        TypeKind::Name(reference) => {
+            if let Some(resolved) = resolve_type_constructor(module, reference) {
+                return Some((PolyTypeConstructor::Resolved(resolved), Vec::new()));
+            }
+            // Same-module item: extract type name
+            if let ResolutionState::Resolved(TypeResolution::Item(item_id)) =
+                reference.resolution.as_ref()
+            {
+                let name = item_type_name(&module.items()[*item_id]);
+                return Some((PolyTypeConstructor::Named(name), Vec::new()));
+            }
+            None
+        }
+        TypeKind::Tuple(_)
+        | TypeKind::Record(_)
+        | TypeKind::RecordTransform { .. }
+        | TypeKind::Arrow { .. } => None,
     }
 }
 

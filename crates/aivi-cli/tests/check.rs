@@ -507,8 +507,8 @@ fn check_rejects_invalid_hir_fixtures() {
 }
 
 #[test]
-fn check_reports_regex_in_expression_position_from_hir() {
-    let path = fixture_path("milestone-1/invalid/regex_in_expression.aivi");
+fn check_accepts_regex_in_expression_position() {
+    let path = fixture_path("milestone-1/valid/strings/regex_in_expression.aivi");
     let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
         .arg("check")
         .arg(&path)
@@ -516,21 +516,14 @@ fn check_reports_regex_in_expression_position_from_hir() {
         .expect("check command should run");
 
     assert!(
-        !output.status.success(),
-        "expected regex-in-expression fixture to fail check"
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("hir::regex-in-expression"),
-        "expected hir::regex-in-expression diagnostic code, got stderr: {stderr}"
+        output.status.success(),
+        "expected regex-in-expression fixture to pass check, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
     assert!(
-        stderr.contains("regex literals cannot appear in expression position"),
-        "expected explicit regex-in-expression message, got stderr: {stderr}"
-    );
-    assert!(
-        stderr.contains("aivi.regex"),
-        "expected aivi.regex module reference in diagnostic, got stderr: {stderr}"
+        String::from_utf8_lossy(&output.stdout).contains("syntax + HIR passed"),
+        "expected success output, got stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
     );
 }
 

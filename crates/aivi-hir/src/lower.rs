@@ -1796,10 +1796,19 @@ impl<'a> Lowerer<'a> {
         match module_resolution {
             ImportModuleResolution::Resolved(exports) => match exports.find(imported_name.text()) {
                 Some(exported) => {
-                    // For polymorphic functions, the stdlib module exports them with OpaqueValue
-                    // metadata (since ImportValueType has no TypeParameter variant). Fall back to
-                    // known_import_metadata to get the AmbientValue metadata, which resolves to
-                    // the ambient prelude copy with full polymorphic type information.
+                    // Ambient values provide full polymorphic type inference through the
+                    // prelude item system. Always prefer them over exported callable_type,
+                    // which only carries the portable ImportValueType representation.
+                    if let Some(metadata) =
+                        known_import_metadata(module_name, imported_name.text())
+                    {
+                        if matches!(metadata, ImportBindingMetadata::AmbientValue { .. }) {
+                            return (ImportBindingResolution::Resolved, metadata, None, None);
+                        }
+                    }
+                    // For non-ambient exports, fall back to known_import_metadata when
+                    // the export is opaque (e.g. stdlib modules that can't resolve their
+                    // own self-imports).
                     if matches!(exported.metadata, ImportBindingMetadata::OpaqueValue) {
                         if let Some(metadata) =
                             known_import_metadata(module_name, imported_name.text())

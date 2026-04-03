@@ -1111,10 +1111,23 @@ fn lower_gate_runtime_expr_with_purity(
                             kind: GateRuntimeExprKind::Text(lowered),
                         });
                     }
-                    ExprKind::Regex(_) => {
-                        return Err(GateElaborationBlocker::UnsupportedRuntimeExpr {
+                    ExprKind::Regex(regex) => {
+                        let pattern = regex
+                            .raw
+                            .strip_prefix("rx\"")
+                            .and_then(|s| s.strip_suffix('"'))
+                            .unwrap_or(&regex.raw);
+                        results.push(GateRuntimeExpr {
                             span: expr.span,
-                            kind: GateRuntimeUnsupportedKind::RegexLiteral,
+                            ty,
+                            kind: GateRuntimeExprKind::Text(GateRuntimeTextLiteral {
+                                segments: vec![GateRuntimeTextSegment::Fragment(
+                                    TextFragment {
+                                        raw: pattern.into(),
+                                        span: expr.span,
+                                    },
+                                )],
+                            }),
                         });
                     }
                     ExprKind::Cluster(cluster_id) => {

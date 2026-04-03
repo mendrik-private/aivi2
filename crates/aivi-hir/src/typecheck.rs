@@ -2123,7 +2123,55 @@ impl<'a> TypeChecker<'a> {
             Some(callee_ty) => {
                 let (parameter_types, result_ty) =
                     self.expected_function_signature(&callee_ty, arguments.len())?;
-                if !result_ty.same_shape(expected) {
+                let has_poly = result_ty.has_type_params()
+                    || parameter_types.iter().any(|p| p.has_type_params());
+                if result_ty.same_shape(expected) && !has_poly {
+                    parameter_types
+                } else if has_poly {
+                    // The callee has a polymorphic signature (e.g. imported with TypeVariables).
+                    // Collect bindings from:
+                    //   1. result type vs expected type
+                    //   2. each argument's inferred type vs parameter type
+                    // Then substitute all bindings into parameter types.
+                    let mut bindings = HashMap::new();
+                    expected.unify_type_params(&result_ty, &mut bindings);
+                    for (argument, param) in arguments.iter().zip(parameter_types.iter()) {
+                        if param.has_type_params() {
+                            let arg_info = self.typing.infer_expr(*argument, env, None);
+                            if let Some(arg_ty) = arg_info.ty.as_ref() {
+                                arg_ty.unify_type_params(param, &mut bindings);
+                            }
+                        }
+                    }
+                    if !bindings.is_empty() {
+                        let resolved: Vec<GateType> = parameter_types
+                            .iter()
+                            .map(|p| p.substitute_type_parameters(&bindings))
+                            .collect();
+                        let resolved_result = result_ty.substitute_type_parameters(&bindings);
+                        if !resolved_result.same_shape(expected) {
+                            self.emit_type_mismatch(
+                                self.module.exprs()[expr_id].span,
+                                expected,
+                                &resolved_result,
+                            );
+                            return Some(false);
+                        }
+                        resolved
+                    } else if result_ty.same_shape(expected) {
+                        // All type params are in parameters only (e.g. `length : List A -> Int`).
+                        // No bindings could be collected — fall back to checking arguments
+                        // directly (the check_expr below will handle type param matching).
+                        parameter_types
+                    } else {
+                        self.emit_type_mismatch(
+                            self.module.exprs()[expr_id].span,
+                            expected,
+                            &result_ty,
+                        );
+                        return Some(false);
+                    }
+                } else {
                     self.emit_type_mismatch(
                         self.module.exprs()[expr_id].span,
                         expected,
@@ -2131,7 +2179,6 @@ impl<'a> TypeChecker<'a> {
                     );
                     return Some(false);
                 }
-                parameter_types
             }
             None => {
                 let parameter_types =
@@ -3476,6 +3523,9 @@ impl<'a> TypeChecker<'a> {
             | GateType::Task { .. } => Err(format!(
                 "`{ty}` does not have a compiler-derived `Eq` instance in v1"
             )),
+            // Imported types are opaque; their Eq derivation is checked in their
+            // defining module, so we optimistically accept them here.
+            GateType::OpaqueImport { .. } => Ok(()),
         }
     }
 
@@ -3537,6 +3587,9 @@ impl<'a> TypeChecker<'a> {
                         Item::Class(item) => item.name.text().to_owned(),
                         _ => "<constructor>".to_owned(),
                     }
+                }
+                crate::validate::TypeConstructorHead::Import(import_id) => {
+                    self.module.imports()[import_id].local_name.text().to_owned()
                 }
             },
         }
@@ -4336,6 +4389,20 @@ fn rewrite_domain_carrier_view(
                 })
                 .collect(),
         },
+        GateType::OpaqueImport {
+            import,
+            name,
+            arguments,
+        } => GateType::OpaqueImport {
+            import: *import,
+            name: name.clone(),
+            arguments: arguments
+                .iter()
+                .map(|argument| {
+                    rewrite_domain_carrier_view(argument, domain_item, domain_parameters, carrier)
+                })
+                .collect(),
+        },
     }
 }
 
@@ -4414,6 +4481,18 @@ fn substitute_gate_type(
             arguments,
         } => GateType::OpaqueItem {
             item: *item,
+            name: name.clone(),
+            arguments: arguments
+                .iter()
+                .map(|argument| substitute_gate_type(argument, substitutions))
+                .collect(),
+        },
+        GateType::OpaqueImport {
+            import,
+            name,
+            arguments,
+        } => GateType::OpaqueImport {
+            import: *import,
             name: name.clone(),
             arguments: arguments
                 .iter()

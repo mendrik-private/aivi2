@@ -657,11 +657,12 @@ pub struct ImportRecordField {
     pub ty: ImportValueType,
 }
 
-/// Closed imported value-type surface that HIR can use before real module-linked nominal typing
+/// Portable imported value-type surface that HIR uses before real module-linked nominal typing
 /// exists.
 ///
-/// This intentionally mirrors only the shapes the current validator can lower directly into
-/// `GateType` without cross-module item identities.
+/// Supports both closed (monomorphic) and open (polymorphic) function signatures.
+/// `TypeVariable` and `Named` extend the original closed surface to allow polymorphic
+/// function types to cross module boundaries.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ImportValueType {
     Primitive(BuiltinType),
@@ -690,6 +691,15 @@ pub enum ImportValueType {
     Task {
         error: Box<Self>,
         value: Box<Self>,
+    },
+    /// A type variable from a polymorphic function's implicit type parameters.
+    /// `index` is the position in the originating function's `type_parameters` list.
+    TypeVariable { index: usize, name: String },
+    /// A user-defined (non-builtin) type constructor applied to arguments.
+    /// The `type_name` is the name in the source module.
+    Named {
+        type_name: String,
+        arguments: Vec<Self>,
     },
 }
 

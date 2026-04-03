@@ -2901,6 +2901,9 @@ impl<'a> ProgramLowerer<'a> {
                         }
                         core::Type::OpaqueItem {
                             name, arguments, ..
+                        }
+                        | core::Type::OpaqueImport {
+                            name, arguments, ..
                         } => {
                             tasks.push(Task::Build(
                                 ty.clone(),
