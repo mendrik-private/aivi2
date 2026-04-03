@@ -1,8 +1,20 @@
 # Typeclasses & Higher-Kinded Support
 
-This page is the current manual source of truth for AIVI's higher-kinded class hierarchy and support boundaries.
-It describes the **executable** compiler/runtime slice that exists today, not just surface syntax or checker acceptance.
+If you have never used typeclasses, here is the core idea: sometimes you want to write code that works with **any type that supports a certain operation**. For example, you want to `map` over both lists and optional values, or compare any two values for equality. Typeclasses let you describe that capability once and use it everywhere.
+
+If you have used interfaces in Java, traits in Rust, or protocols in Swift, typeclasses are a similar idea — but they also work at a higher level, letting you abstract over type constructors like `List`, `Option`, and `Signal`, not just concrete types.
+
+This page documents the **executable** compiler/runtime slice that exists today, not just surface syntax.
 For class declaration and instance syntax, see [Classes](/guide/classes).
+
+## When to use what
+
+| Abstraction | Use when... | Example |
+| --- | --- | --- |
+| A concrete type | You know exactly what the data is | `type Score = Int` |
+| A domain | You want a branded wrapper with its own operators | `domain Duration over Int` |
+| A class | You want to write generic code over types sharing a capability | `class Eq A` |
+| A higher-kinded class | You want to abstract over containers like `List`, `Option`, `Signal` | `class Functor F` |
 
 ## Current hierarchy
 

@@ -1,6 +1,20 @@
 # Domains
 
-Domains add typed behavior to an existing carrier type. They are how AIVI models things like durations, retries, paths, and other value families that should have their own operators or literal syntax.
+A duration is not just an integer. A URL is not just a string. A file path is not just text. When you treat them as their raw types, mistakes happen: you pass milliseconds where seconds were expected, or a URL where a file path belongs.
+
+Domains solve this by wrapping a **carrier type** with a **semantic name** and its own operations. The compiler prevents you from mixing them up.
+
+```aivi
+domain Duration over Int
+domain Url over Text
+domain Path over Text
+
+value timeout : Duration = 5sec
+value endpoint : Url = ...
+value config : Path = ...
+```
+
+You cannot pass a `Duration` where a `Path` is expected, even though both are backed by primitive types.
 
 ## Declaring a domain
 

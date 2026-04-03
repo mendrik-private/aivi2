@@ -1,10 +1,20 @@
 # Sources
 
-Sources are how AIVI connects the reactive graph to the outside world. Timers, HTTP requests, keyboard events, file watching, and subprocess events are all modeled as source-backed signals.
+Pure functions cannot read files, make HTTP requests, or listen for keyboard input. They take values and return values — that is their strength.
 
-Current limitation: source syntax, provider contracts, built-in capability-handle lowering, and direct custom handle operation/command lowering are implemented, but scheduler-owned recurrence execution is still only partially wired. The forms in this guide reflect what the parser/compiler accept today; more advanced recurrence wakeup behavior remains an explicit runtime/compiler work item.
+But a desktop application needs to talk to the outside world. **Sources** are how AIVI bridges that gap. A source is a typed, declared entry point that feeds external data into the reactive graph:
 
-For the current compiler-and-runtime-backed reference, including every built-in source kind and option-level support notes, see the [Built-in Source Catalog](/guide/source-catalog).
+```
+Outside world  →  @source  →  Signal  →  Pure derivations  →  UI
+  (keyboard,      (typed      (reactive    (your functions)    (GTK
+   HTTP,           boundary)   graph)                          widgets)
+   timers,
+   files)
+```
+
+Inside the boundary, everything is deterministic. Outside, the runtime handles the mess.
+
+For the current compiler-and-runtime-backed reference of every built-in source kind and option, see the [Built-in Source Catalog](/guide/source-catalog).
 
 ## Unified external boundary
 

@@ -1,6 +1,14 @@
 # Pipes & Operators
 
-Pipes are the main way to express flow in AIVI. Instead of deeply nested calls, you write a left-to-right transformation pipeline.
+In most languages, you nest function calls: `addOne(double(5))`. The deeper the nesting, the harder it is to read. In AIVI, you write the same thing as a left-to-right pipeline:
+
+```aivi
+value result = 5
+  |> double
+  |> addOne
+```
+
+This is not just syntax sugar. Pipes are the **primary control flow** in AIVI. They replace `if`/`else` (with pattern matching pipes), loops (with collection combinators in pipes), and nested calls (with transform pipes). Understanding pipes is understanding how AIVI programs are structured.
 
 ## The basic pipe `|>`
 

@@ -25,35 +25,45 @@ function group(section: DocGroup): DefaultTheme.SidebarItem {
 
 const guideSections: DocGroup[] = [
   {
-    text: 'Introduction',
+    text: 'Getting Started',
     collapsed: false,
     items: [
+      { text: 'Why AIVI?', link: '/guide/why-aivi' },
       { text: 'What is AIVI?', link: '/guide/getting-started' },
-      { text: 'Values & Functions', link: '/guide/values-and-functions' },
-      { text: 'Types', link: '/guide/types' },
+      { text: 'Thinking in AIVI', link: '/guide/thinking-in-aivi' },
     ],
   },
   {
-    text: 'Core Language',
+    text: 'Tutorials',
     collapsed: false,
     items: [
+      { text: 'Your First App', link: '/guide/your-first-app' },
+      { text: 'Building Snake', link: '/guide/building-snake' },
+    ],
+  },
+  {
+    text: 'Language Guide',
+    collapsed: false,
+    items: [
+      { text: 'Values & Functions', link: '/guide/values-and-functions' },
+      { text: 'Types', link: '/guide/types' },
       { text: 'Pattern Matching', link: '/guide/pattern-matching' },
       { text: 'Pipes & Operators', link: '/guide/pipes' },
       { text: 'Signals', link: '/guide/signals' },
       { text: 'Sources', link: '/guide/sources' },
-      { text: 'Source Catalog', link: '/guide/source-catalog' },
-      { text: 'Surface Feature Matrix', link: '/guide/surface-feature-matrix' },
+      { text: 'Markup & UI', link: '/guide/markup' },
     ],
   },
   {
     text: 'Advanced',
     collapsed: false,
     items: [
-      { text: 'Markup & UI', link: '/guide/markup' },
       { text: 'Domains', link: '/guide/domains' },
       { text: 'Classes', link: '/guide/classes' },
       { text: 'Typeclasses & HKTs', link: '/guide/typeclasses' },
       { text: 'Modules', link: '/guide/modules' },
+      { text: 'Source Catalog', link: '/guide/source-catalog' },
+      { text: 'Surface Feature Matrix', link: '/guide/surface-feature-matrix' },
     ],
   },
 ]
@@ -147,7 +157,7 @@ const stdlibSections: DocGroup[] = [
 ]
 
 export const nav: DefaultTheme.NavItem[] = [
-  { text: 'Guide', link: '/guide/getting-started' },
+  { text: 'Guide', link: '/guide/why-aivi' },
   { text: 'Standard Library', link: '/stdlib/' },
 ]
 
@@ -177,7 +187,7 @@ export const sidebar: DefaultTheme.SidebarMulti = {
       text: 'Manual',
       collapsed: false,
       items: [
-        { text: 'Guide', link: '/guide/getting-started' },
+        { text: 'Guide', link: '/guide/why-aivi' },
         { text: 'Standard Library Overview', link: '/stdlib/' },
       ],
     }),

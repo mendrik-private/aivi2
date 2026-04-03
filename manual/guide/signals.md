@@ -1,6 +1,15 @@
 # Signals
 
-Signals are the reactive core of AIVI. A signal is a named value in the dependency graph: when its inputs change, the signal is recomputed by the runtime.
+In most languages, you manage changing state with mutable variables and manual update logic. When the state grows, you spend time tracking *who changed what, when, and why*.
+
+AIVI replaces mutable state with **signals** — reactive values in a dependency graph. A signal declares what it depends on, and the runtime handles the updates. You describe the relationships; the runtime does the work.
+
+```
+value  →  computed once, never changes
+signal →  recomputes when its dependencies change
+```
+
+Think of signals as cells in a spreadsheet. When you change one cell, every cell that references it recalculates automatically. You never manually propagate changes.
 
 ## Declaring a signal
 
