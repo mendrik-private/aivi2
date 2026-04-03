@@ -6,6 +6,8 @@ use aivi.list (
     replaceAt as listReplaceAt
 )
 
+use aivi.option (flatMap as optionFlatMap)
+
 type MatrixError =
   | NegativeWidth Int
   | NegativeHeight Int
@@ -125,13 +127,14 @@ func at = matrix x y => row matrix y
  ||> None       -> None
  ||> Some cells -> listAt x cells
 
+type Matrix A -> Int -> (List A) -> (Option (Matrix A))
+func rebuildWithRow = matrix y newRow =>
+    Some (buildMatrix (width matrix) (height matrix) (listReplaceAt y newRow (rows matrix)))
+
 type Matrix A -> Int -> Int -> A -> (Option (Matrix A))
 func replaceAtCoords = matrix x y value => row matrix y
  ||> None            -> None
- ||> Some targetRow  -> setRowCell targetRow x value
-  ||> None         -> None
-  ||> Some newRow  ->
-        Some (buildMatrix (width matrix) (height matrix) (listReplaceAt y newRow (rows matrix)))
+ ||> Some targetRow  -> optionFlatMap (rebuildWithRow matrix y) (setRowCell targetRow x value)
 
 type Matrix A -> (Int, Int) -> A -> (Option (Matrix A))
 func replaceAt = matrix coord value => coord

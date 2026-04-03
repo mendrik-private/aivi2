@@ -1041,6 +1041,37 @@ fn check_accepts_bundled_stdlib_fallback() {
 }
 
 #[test]
+fn check_accepts_cross_module_domain_literal_suffix_imports() {
+    let workspace = TempDir::new("check-domain-literal-cross-module");
+    workspace.write("aivi.toml", "");
+    workspace.write(
+        "shared/timing.aivi",
+        "domain Duration over Int = {\n    literal ms : Int -> Duration\n    literal sec : Int -> Duration\n    type Duration -> Duration -> Duration\n    (+)\n    type Duration -> Int\n    unwrap\n}\n\nexport Duration\n",
+    );
+    let main = workspace.write(
+        "main.aivi",
+        "use shared.timing (Duration)\n\ntype MyDuration = Duration\n",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&main)
+        .current_dir(workspace.path())
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        output.status.success(),
+        "expected cross-module domain literal suffix import to pass check, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("syntax + HIR passed"),
+        "expected success output, got stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
 fn check_accepts_bundled_root_and_prelude_stdlib_imports() {
     let workspace = TempDir::new("check-root-prelude-stdlib");
     workspace.write("aivi.toml", "");

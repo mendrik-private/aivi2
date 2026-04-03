@@ -895,6 +895,9 @@ impl Validator<'_> {
             if self.module.ambient_items().contains(&item_id) {
                 continue;
             }
+            if !self.module.root_items().contains(&item_id) {
+                continue;
+            }
             self.check_span("item", item.span());
             for decorator in item.decorators() {
                 self.require_decorator(item.span(), "item", "decorator", *decorator);

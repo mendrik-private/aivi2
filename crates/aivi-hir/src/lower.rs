@@ -5026,12 +5026,17 @@ impl<'a> Lowerer<'a> {
         literal_suffixes: &[ImportedDomainLiteralSuffix],
         target: &mut HashMap<String, Vec<NamedSite<LiteralSuffixResolution>>>,
     ) {
-        // Allocate a placeholder carrier type.
+        // Allocate a placeholder carrier type — resolved to Unit so validation
+        // does not report spurious "unresolved-name" errors on synthetic stubs.
+        let stub_path = self.make_path(&[self.make_name("Unit", span)]);
+        let stub_type_kind = || TypeKind::Name(TypeReference {
+            path: stub_path.clone(),
+            resolution: ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Unit)),
+        });
+
         let carrier = self.alloc_type(TypeNode {
             span,
-            kind: TypeKind::Name(TypeReference::unresolved(
-                self.make_path(&[self.make_name("Unit", span)]),
-            )),
+            kind: stub_type_kind(),
         });
 
         // Build stub members — one per literal suffix, in member_index order.
@@ -5047,9 +5052,7 @@ impl<'a> Lowerer<'a> {
         for suffix in literal_suffixes {
             let annotation = self.alloc_type(TypeNode {
                 span,
-                kind: TypeKind::Name(TypeReference::unresolved(
-                    self.make_path(&[self.make_name("Unit", span)]),
-                )),
+                kind: stub_type_kind(),
             });
             members[suffix.member_index] = Some(DomainMember {
                 span,
@@ -5067,9 +5070,7 @@ impl<'a> Lowerer<'a> {
             .map(|(i, m)| m.unwrap_or_else(|| {
                 let annotation = self.alloc_type(TypeNode {
                     span,
-                    kind: TypeKind::Name(TypeReference::unresolved(
-                        self.make_path(&[self.make_name("Unit", span)]),
-                    )),
+                    kind: stub_type_kind(),
                 });
                 DomainMember {
                     span,

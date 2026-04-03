@@ -14,6 +14,11 @@ use aivi.matrix (
     replaceAt
 )
 
+use aivi.option (
+    map as optMap
+    getOrElse as optGetOrElse
+)
+
 type Int -> Int -> Int
 func matrixValue = x y =>
     x + y * 10
@@ -40,11 +45,13 @@ value matrixCoordinatesOk : Bool = init 3 2 matrixValue
         at matrix 1 1 == Some 11 and
         rows matrix == [[0, 1, 2], [10, 11, 12]]
 
+type (Matrix Int) -> Bool
+func checkReplaced = updated =>
+    row updated 0 == Some [0, 99, 2] and at updated 1 0 == Some 99
+
 value matrixReplaceOk : Bool = init 3 2 matrixValue
  ||> Err _ -> False
- ||> Ok matrix -> replaceAt matrix (1, 0) 99
-  ||> None         -> False
-  ||> Some updated -> row updated 0 == Some [0, 99, 2] and at updated 1 0 == Some 99
+ ||> Ok matrix -> optGetOrElse False (optMap checkReplaced (replaceAt matrix (1, 0) 99))
 
 value negativeWidthRejected : Bool = init (0 - 1) 2 matrixValue
  ||> Ok _      -> False

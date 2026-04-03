@@ -16,6 +16,11 @@ use aivi.list (
     sum as listSum
 )
 
+use aivi.option (
+    getOrElse as optGetOrElse
+    map as optMap
+)
+
 type Disc = Empty | Red | Blue
 
 type Turn = Human | Computer
@@ -186,16 +191,12 @@ func finished = .
 type List (List Disc) -> Coord -> Disc
 func discAt = board coord => (matrixFromRows board, coordX coord, coordY coord)
  ||> (Err _, _, _) -> Empty
- ||> (Ok m, x, y) -> matrixAt m x y
-  ||> None  -> Empty
-  ||> Some d -> d
+ ||> (Ok m, x, y) -> optGetOrElse Empty (matrixAt m x y)
 
 type List (List Disc) -> Coord -> Disc -> (List (List Disc))
 func setDisc = board coord disc => (matrixFromRows board, coordX coord, coordY coord)
  ||> (Err _, _, _) -> board
- ||> (Ok m, x, y) -> matrixReplaceAt m (x, y) disc
-  ||> None    -> board
-  ||> Some nm -> matrixRows nm
+ ||> (Ok m, x, y) -> optGetOrElse board (optMap matrixRows (matrixReplaceAt m (x, y) disc))
 
 type Disc -> (List (List Disc)) -> Coord -> (List (List Disc))
 func setManyStep = disc board coord =>
