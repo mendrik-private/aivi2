@@ -42,7 +42,7 @@ It answers “what checks, executes, runs, or compiles today?” rather than “
 | Built-in `@source ...` on a body-less signal | yes | partial | partial | partial | Broadly lowered and runtime-backed, but option-level support is intentionally narrower; see the source rows below and `/guide/source-catalog`. |
 | Custom `provider qualified.name` declarations | yes | no | no | partial | Contract checking and lowering exist, but the runtime provider manager still rejects unsupported/custom providers (`crates/aivi-runtime/src/providers.rs`). |
 | `use` / `export` for types and constructors | yes | yes | yes | yes | Workspace type imports are covered by passing `run` and `compile` tests. |
-| Imported executable values across modules | yes | partial | partial | no | Checking passes, but `compile_accepts_workspace_value_imports` is currently red; cross-module executable value coverage is still narrower than type imports. |
+| Imported executable values across modules | yes | partial | partial | partial | Checking passes and the primary workspace-import compile test succeeds; coverage still narrows for cross-module values whose bodies use unsupported codegen forms. |
 | Top-level markup roots via `value` | yes | n/a | yes | n/a | `run` and `build` treat markup-valued top-level `value`s as the deployment surface. |
 
 ## Types And Literals
@@ -75,6 +75,7 @@ It answers “what checks, executes, runs, or compiles today?” rather than “
 | Truthy/falsy branches `T|>` / `F|>` | yes | yes | yes | partial | Runtime-backed. Codegen emits Cranelift IR for inline-pipe `TruthyFalsy` stages with boolean branching and merge blocks; coverage is still narrower than the full runtime carrier set. |
 | Fan-out `*|>` / join `<|*` | yes | yes | yes | no | Fan-out and join now work in both derived signal pipelines and general expression contexts. Codegen still rejects FanOut stages because they require runtime list iteration; the runtime evaluator handles them fully. |
 | Tap `|` | yes | yes | yes | partial | Runtime-backed as an observing stage. Codegen emits the tap body and discards the result, preserving the pipeline subject; coverage is narrower than the runtime for side-effect-heavy tap expressions. |
+| Debug stage | yes | yes | yes | no | Runtime-backed debugging/logging stage. Codegen rejects debug stages because they require runtime-side debug effects. |
 | Validation stage `!|>` | yes | yes | yes | no | The validation stage is fully elaborated for general expression contexts (lowered as a Transform with `Replace` mode) and for signal pipelines (remains a scheduler boundary). Codegen does not compile validation bodies independently. |
 | Accumulation `+|>` | yes | partial | yes | partial | Runtime startup tests prove accumulation works; `aivi execute` is not a long-lived signal host, and compile coverage is still narrower than the runtime slice. |
 | Previous / diff `~|>` / `-|>` | yes | partial | yes | partial | Full pipeline through core → lambda → backend → runtime; `startup.rs` implements temporal state caching for derived signals. `aivi execute` is one-shot and not a long-lived signal host. Compile accepts temporal signal programs. |
