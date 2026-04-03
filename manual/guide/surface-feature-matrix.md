@@ -53,15 +53,15 @@ It answers “what checks, executes, runs, or compiles today?” rather than “
 | Extended scalar/runtime types (`Decimal`, `BigInt`, `Bytes`) | yes | yes | yes | partial | Runtime-backed, but compile support stays within the current literal-cell / narrow ABI contracts in `codegen.rs`. |
 | Collection and effect types (`List`, `Map`, `Set`, `Option`, `Result`, `Validation`, `Signal`, `Task`) | yes | yes | yes | partial | The checker/runtime know these shapes; compile coverage remains narrower for aggregate and effect-heavy lowering. |
 | Partial type-constructor application / HKTs | yes | partial | partial | partial | Checked and same-module executable in the current higher-kinded slice, but not yet a general cross-module evidence system. |
-| Numeric literals (`Int`, `Float`, `Decimal`, `BigInt`) | yes | yes | yes | partial | Scalar literals compile in the first slice; some wider aggregate/codegen uses still stop at codegen. |
-| Domain suffix literals (`250ms`, `10sec`, `3min`) | yes | yes | yes | partial | Surface and runtime support are real; compile still depends on the domain-member/codegen subset. |
+| Numeric literals (`Int`, `Float`, `Decimal`, `BigInt`) | yes | yes | yes | yes | All four numeric types have passing compile tests with verified Cranelift emission (Int/Float as immediates, Decimal/BigInt as symbol-value pointers). |
+| Domain suffix literals (`250ms`, `10sec`, `3min`) | yes | yes | yes | partial | Domain suffix literals compile as values. Domain member operations on suffixed values in gate/pipe contexts still hit codegen slice limits. |
 | Text interpolation | yes | yes | yes | partial | Static text interpolation compiles. Dynamic interpolation still relies on `Reduce(List)` / `Append(List)` lowering which remains outside the current codegen slice. |
 | Regex literals | partial | no | no | no | Regex literals in expression position produce `hir::regex-in-expression`; the only valid use is as `@source` option values (e.g. `pattern: rx"..."` in an HTTP or filesystem source). Use the `aivi.regex` module for runtime pattern matching. |
-| Record / tuple / list literals | yes | yes | yes | partial | Runtime support is broad; compile covers scalar/by-reference aggregates and list literals via runtime constructor calls. |
-| `Map { ... }` / `Set [ ... ]` literals | yes | yes | yes | partial | Compile emits runtime constructor calls (`aivi_list_new`, `aivi_set_new`, `aivi_map_new`); element evaluation and stack marshalling are code-generated. |
+| Record / tuple / list literals | yes | yes | yes | yes | Records and tuples compile for scalar and by-reference fields. List literals compile via `aivi_list_new` runtime constructor calls. |
+| `Map { ... }` / `Set [ ... ]` literals | yes | yes | yes | yes | Compile emits runtime constructor calls (`aivi_list_new`, `aivi_set_new`, `aivi_map_new`); element evaluation and stack marshalling are code-generated. |
 | Type-level record row transforms (`Pick`, `Omit`, `Rename`, `Optional`, `Required`, `Defaulted`) | yes | yes | yes | yes | These are type-surface features; once checking succeeds, the later runtime/compile path sees the elaborated shape. |
-| `Default` and record omission | yes | yes | yes | partial | Omission elaborates in the checker, but the resulting record-heavy runtime values still inherit aggregate codegen limits. |
-| Record shorthand | yes | yes | yes | partial | Checked and runtime-backed; compile inherits record/aggregate narrowing. |
+| `Default` and record omission | yes | yes | yes | yes | Omission and defaults elaborate at check time, producing fully-specified records that compile through the standard aggregate codegen path. |
+| Record shorthand | yes | yes | yes | yes | Shorthand desugars at check time before reaching the backend; resulting records compile successfully. |
 
 ## Pipe Algebra And Expression Surface
 
