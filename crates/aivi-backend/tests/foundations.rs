@@ -4881,6 +4881,70 @@ fun wrapOk:(Result Text Text) = text:Text=>    Ok text
 }
 
 #[test]
+fn cranelift_codegen_compiles_result_ok() {
+    let backend = lower_text(
+        "result-ok.aivi",
+        r#"
+fun make_ok:(Result Text Int) = x:Int =>
+    Ok x
+"#,
+    );
+    let body = backend.items()[find_item(&backend, "make_ok")]
+        .body
+        .expect("should have body");
+    let compiled = compile_program(&backend).expect("Result Ok should compile");
+    assert!(compiled.kernel(body).unwrap().code_size > 0);
+}
+
+#[test]
+fn cranelift_codegen_compiles_result_err() {
+    let backend = lower_text(
+        "result-err.aivi",
+        r#"
+fun make_err:(Result Text Int) = msg:Text =>
+    Err msg
+"#,
+    );
+    let body = backend.items()[find_item(&backend, "make_err")]
+        .body
+        .expect("should have body");
+    let compiled = compile_program(&backend).expect("Result Err should compile");
+    assert!(compiled.kernel(body).unwrap().code_size > 0);
+}
+
+#[test]
+fn cranelift_codegen_compiles_validation_valid() {
+    let backend = lower_text(
+        "validation-valid.aivi",
+        r#"
+fun make_valid:(Validation Text Int) = x:Int =>
+    Valid x
+"#,
+    );
+    let body = backend.items()[find_item(&backend, "make_valid")]
+        .body
+        .expect("should have body");
+    let compiled = compile_program(&backend).expect("Validation Valid should compile");
+    assert!(compiled.kernel(body).unwrap().code_size > 0);
+}
+
+#[test]
+fn cranelift_codegen_compiles_validation_invalid() {
+    let backend = lower_text(
+        "validation-invalid.aivi",
+        r#"
+fun make_invalid:(Validation Text Int) = msg:Text =>
+    Invalid msg
+"#,
+    );
+    let body = backend.items()[find_item(&backend, "make_invalid")]
+        .body
+        .expect("should have body");
+    let compiled = compile_program(&backend).expect("Validation Invalid should compile");
+    assert!(compiled.kernel(body).unwrap().code_size > 0);
+}
+
+#[test]
 fn cranelift_codegen_prevalidates_invalid_projection_paths() {
     let backend = lower_fixture("milestone-2/valid/pipe-gate-carriers/main.aivi");
     let active_users = find_item(&backend, "activeUsers");
@@ -5447,6 +5511,180 @@ fun strip_active:{ name: Text, age: Int } = u:User =>
         .kernel(body)
         .expect("compiled program should retain patch-removal kernel metadata");
     assert!(artifact.code_size > 0);
+    assert!(!compiled.object().is_empty());
+}
+
+#[test]
+fn cranelift_codegen_compiles_decimal_arithmetic() {
+    let backend = lower_text(
+        "decimal-arith.aivi",
+        r#"
+fun add_decimals:Decimal = a:Decimal => b:Decimal =>
+    a + b
+"#,
+    );
+    let body = backend.items()[find_item(&backend, "add_decimals")]
+        .body
+        .expect("should have body");
+    let compiled = compile_program(&backend).expect("decimal arithmetic should compile");
+    let artifact = compiled
+        .kernel(body)
+        .expect("compiled program should retain decimal add kernel metadata");
+    assert!(artifact.code_size > 0);
+    assert!(artifact.clif.contains("call"));
+}
+
+#[test]
+fn cranelift_codegen_compiles_bigint_arithmetic() {
+    let backend = lower_text(
+        "bigint-arith.aivi",
+        r#"
+fun add_bigints:BigInt = a:BigInt => b:BigInt =>
+    a + b
+"#,
+    );
+    let body = backend.items()[find_item(&backend, "add_bigints")]
+        .body
+        .expect("should have body");
+    let compiled = compile_program(&backend).expect("bigint arithmetic should compile");
+    let artifact = compiled
+        .kernel(body)
+        .expect("compiled program should retain bigint add kernel metadata");
+    assert!(artifact.code_size > 0);
+    assert!(artifact.clif.contains("call"));
+}
+
+#[test]
+fn cranelift_codegen_compiles_decimal_all_arithmetic_ops() {
+    let ptr = clif_pointer_ty();
+    let backend = lower_text(
+        "decimal-all-arith.aivi",
+        r#"
+fun dec_add:Decimal = a:Decimal => b:Decimal => a + b
+fun dec_sub:Decimal = a:Decimal => b:Decimal => a - b
+fun dec_mul:Decimal = a:Decimal => b:Decimal => a * b
+fun dec_div:Decimal = a:Decimal => b:Decimal => a / b
+fun dec_mod:Decimal = a:Decimal => b:Decimal => a % b
+"#,
+    );
+
+    let compiled =
+        compile_program(&backend).expect("all decimal arithmetic ops should compile");
+
+    for name in &["dec_add", "dec_sub", "dec_mul", "dec_div", "dec_mod"] {
+        let body = backend.items()[find_item(&backend, name)]
+            .body
+            .expect("should have body");
+        let artifact = compiled
+            .kernel(body)
+            .unwrap_or_else(|| panic!("compiled program should retain {name} kernel metadata"));
+        assert!(artifact.code_size > 0, "{name} should have non-zero code");
+        assert!(
+            artifact.clif.contains(&format!("({ptr}, {ptr}) -> {ptr}")),
+            "{name} CLIF should reference (ptr, ptr) -> ptr signature"
+        );
+    }
+    assert!(!compiled.object().is_empty());
+}
+
+#[test]
+fn cranelift_codegen_compiles_bigint_all_arithmetic_ops() {
+    let ptr = clif_pointer_ty();
+    let backend = lower_text(
+        "bigint-all-arith.aivi",
+        r#"
+fun big_add:BigInt = a:BigInt => b:BigInt => a + b
+fun big_sub:BigInt = a:BigInt => b:BigInt => a - b
+fun big_mul:BigInt = a:BigInt => b:BigInt => a * b
+fun big_div:BigInt = a:BigInt => b:BigInt => a / b
+fun big_mod:BigInt = a:BigInt => b:BigInt => a % b
+"#,
+    );
+
+    let compiled =
+        compile_program(&backend).expect("all bigint arithmetic ops should compile");
+
+    for name in &["big_add", "big_sub", "big_mul", "big_div", "big_mod"] {
+        let body = backend.items()[find_item(&backend, name)]
+            .body
+            .expect("should have body");
+        let artifact = compiled
+            .kernel(body)
+            .unwrap_or_else(|| panic!("compiled program should retain {name} kernel metadata"));
+        assert!(artifact.code_size > 0, "{name} should have non-zero code");
+        assert!(
+            artifact.clif.contains(&format!("({ptr}, {ptr}) -> {ptr}")),
+            "{name} CLIF should reference (ptr, ptr) -> ptr signature"
+        );
+    }
+    assert!(!compiled.object().is_empty());
+}
+
+#[test]
+fn cranelift_codegen_compiles_decimal_comparison() {
+    let ptr = clif_pointer_ty();
+    let backend = lower_text(
+        "decimal-compare.aivi",
+        r#"
+fun dec_gt:Bool = a:Decimal => b:Decimal => a > b
+fun dec_lt:Bool = a:Decimal => b:Decimal => a < b
+fun dec_gte:Bool = a:Decimal => b:Decimal => a >= b
+fun dec_lte:Bool = a:Decimal => b:Decimal => a <= b
+fun dec_eq:Bool = a:Decimal => b:Decimal => a == b
+fun dec_ne:Bool = a:Decimal => b:Decimal => a != b
+"#,
+    );
+
+    let compiled =
+        compile_program(&backend).expect("decimal comparison ops should compile");
+
+    for name in &["dec_gt", "dec_lt", "dec_gte", "dec_lte", "dec_eq", "dec_ne"] {
+        let body = backend.items()[find_item(&backend, name)]
+            .body
+            .expect("should have body");
+        let artifact = compiled
+            .kernel(body)
+            .unwrap_or_else(|| panic!("compiled program should retain {name} kernel metadata"));
+        assert!(artifact.code_size > 0, "{name} should have non-zero code");
+        assert!(
+            artifact.clif.contains(&format!("({ptr}, {ptr}) -> i8")),
+            "{name} CLIF should reference (ptr, ptr) -> i8 comparison signature"
+        );
+    }
+    assert!(!compiled.object().is_empty());
+}
+
+#[test]
+fn cranelift_codegen_compiles_bigint_comparison() {
+    let ptr = clif_pointer_ty();
+    let backend = lower_text(
+        "bigint-compare.aivi",
+        r#"
+fun big_gt:Bool = a:BigInt => b:BigInt => a > b
+fun big_lt:Bool = a:BigInt => b:BigInt => a < b
+fun big_gte:Bool = a:BigInt => b:BigInt => a >= b
+fun big_lte:Bool = a:BigInt => b:BigInt => a <= b
+fun big_eq:Bool = a:BigInt => b:BigInt => a == b
+fun big_ne:Bool = a:BigInt => b:BigInt => a != b
+"#,
+    );
+
+    let compiled =
+        compile_program(&backend).expect("bigint comparison ops should compile");
+
+    for name in &["big_gt", "big_lt", "big_gte", "big_lte", "big_eq", "big_ne"] {
+        let body = backend.items()[find_item(&backend, name)]
+            .body
+            .expect("should have body");
+        let artifact = compiled
+            .kernel(body)
+            .unwrap_or_else(|| panic!("compiled program should retain {name} kernel metadata"));
+        assert!(artifact.code_size > 0, "{name} should have non-zero code");
+        assert!(
+            artifact.clif.contains(&format!("({ptr}, {ptr}) -> i8")),
+            "{name} CLIF should reference (ptr, ptr) -> i8 comparison signature"
+        );
+    }
     assert!(!compiled.object().is_empty());
 }
 

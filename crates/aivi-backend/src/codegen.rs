@@ -345,12 +345,23 @@ enum OptionCodegenContract {
 enum NativeCompareKind {
     Integer,
     Float,
+    Decimal,
+    BigInt,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativeArithmeticKind {
+    Integer,
+    Decimal,
+    BigInt,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum NativeEqualityShape {
     Integer,
     Float,
+    Decimal,
+    BigInt,
     Text,
     Bytes,
     Aggregate(Vec<NativeEqualityField>),
@@ -725,27 +736,8 @@ impl<'a> CraneliftCompiler<'a> {
                             | BinaryOperator::Multiply
                             | BinaryOperator::Divide
                             | BinaryOperator::Modulo => {
-                                if let Err(error) = self.require_int_expression(
-                                    kernel_id,
-                                    *left,
-                                    kernel.exprs()[*left].layout,
-                                    "binary lhs",
-                                ) {
-                                    errors.push(error);
-                                }
-                                if let Err(error) = self.require_int_expression(
-                                    kernel_id,
-                                    *right,
-                                    kernel.exprs()[*right].layout,
-                                    "binary rhs",
-                                ) {
-                                    errors.push(error);
-                                }
-                                if let Err(error) = self.require_int_expression(
-                                    kernel_id,
-                                    expr_id,
-                                    expr.layout,
-                                    "binary result",
+                                if let Err(error) = self.require_arithmetic_expression_triple(
+                                    kernel_id, kernel, expr_id, *left, *right,
                                 ) {
                                     errors.push(error);
                                 }
@@ -1699,109 +1691,109 @@ impl<'a> CraneliftCompiler<'a> {
                     };
                     let lowered = match operator {
                         BinaryOperator::Add => {
-                            self.require_int_expression(
-                                kernel_id,
-                                *left,
-                                kernel.exprs()[*left].layout,
-                                "add lhs",
-                            )?;
-                            self.require_int_expression(
-                                kernel_id,
-                                *right,
-                                kernel.exprs()[*right].layout,
-                                "add rhs",
-                            )?;
-                            self.require_int_expression(
-                                kernel_id,
-                                expr_id,
-                                expr.layout,
-                                "add result",
-                            )?;
-                            builder.ins().iadd(lhs, rhs)
+                            match self.require_arithmetic_expression_triple(
+                                kernel_id, kernel, expr_id, *left, *right,
+                            )? {
+                                NativeArithmeticKind::Integer => builder.ins().iadd(lhs, rhs),
+                                NativeArithmeticKind::Decimal => {
+                                    let func_ref = self.declare_ptr_binop_func(
+                                        "aivi_decimal_add", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
+                                }
+                                NativeArithmeticKind::BigInt => {
+                                    let func_ref = self.declare_ptr_binop_func(
+                                        "aivi_bigint_add", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
+                                }
+                            }
                         }
                         BinaryOperator::Subtract => {
-                            self.require_int_expression(
-                                kernel_id,
-                                *left,
-                                kernel.exprs()[*left].layout,
-                                "subtract lhs",
-                            )?;
-                            self.require_int_expression(
-                                kernel_id,
-                                *right,
-                                kernel.exprs()[*right].layout,
-                                "subtract rhs",
-                            )?;
-                            self.require_int_expression(
-                                kernel_id,
-                                expr_id,
-                                expr.layout,
-                                "subtract result",
-                            )?;
-                            builder.ins().isub(lhs, rhs)
+                            match self.require_arithmetic_expression_triple(
+                                kernel_id, kernel, expr_id, *left, *right,
+                            )? {
+                                NativeArithmeticKind::Integer => builder.ins().isub(lhs, rhs),
+                                NativeArithmeticKind::Decimal => {
+                                    let func_ref = self.declare_ptr_binop_func(
+                                        "aivi_decimal_sub", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
+                                }
+                                NativeArithmeticKind::BigInt => {
+                                    let func_ref = self.declare_ptr_binop_func(
+                                        "aivi_bigint_sub", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
+                                }
+                            }
                         }
                         BinaryOperator::Multiply => {
-                            self.require_int_expression(
-                                kernel_id,
-                                *left,
-                                kernel.exprs()[*left].layout,
-                                "multiply lhs",
-                            )?;
-                            self.require_int_expression(
-                                kernel_id,
-                                *right,
-                                kernel.exprs()[*right].layout,
-                                "multiply rhs",
-                            )?;
-                            self.require_int_expression(
-                                kernel_id,
-                                expr_id,
-                                expr.layout,
-                                "multiply result",
-                            )?;
-                            builder.ins().imul(lhs, rhs)
+                            match self.require_arithmetic_expression_triple(
+                                kernel_id, kernel, expr_id, *left, *right,
+                            )? {
+                                NativeArithmeticKind::Integer => builder.ins().imul(lhs, rhs),
+                                NativeArithmeticKind::Decimal => {
+                                    let func_ref = self.declare_ptr_binop_func(
+                                        "aivi_decimal_mul", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
+                                }
+                                NativeArithmeticKind::BigInt => {
+                                    let func_ref = self.declare_ptr_binop_func(
+                                        "aivi_bigint_mul", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
+                                }
+                            }
                         }
                         BinaryOperator::Divide => {
-                            self.require_int_expression(
-                                kernel_id,
-                                *left,
-                                kernel.exprs()[*left].layout,
-                                "divide lhs",
-                            )?;
-                            self.require_int_expression(
-                                kernel_id,
-                                *right,
-                                kernel.exprs()[*right].layout,
-                                "divide rhs",
-                            )?;
-                            self.require_int_expression(
-                                kernel_id,
-                                expr_id,
-                                expr.layout,
-                                "divide result",
-                            )?;
-                            builder.ins().sdiv(lhs, rhs)
+                            match self.require_arithmetic_expression_triple(
+                                kernel_id, kernel, expr_id, *left, *right,
+                            )? {
+                                NativeArithmeticKind::Integer => builder.ins().sdiv(lhs, rhs),
+                                NativeArithmeticKind::Decimal => {
+                                    let func_ref = self.declare_ptr_binop_func(
+                                        "aivi_decimal_div", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
+                                }
+                                NativeArithmeticKind::BigInt => {
+                                    let func_ref = self.declare_ptr_binop_func(
+                                        "aivi_bigint_div", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
+                                }
+                            }
                         }
                         BinaryOperator::Modulo => {
-                            self.require_int_expression(
-                                kernel_id,
-                                *left,
-                                kernel.exprs()[*left].layout,
-                                "modulo lhs",
-                            )?;
-                            self.require_int_expression(
-                                kernel_id,
-                                *right,
-                                kernel.exprs()[*right].layout,
-                                "modulo rhs",
-                            )?;
-                            self.require_int_expression(
-                                kernel_id,
-                                expr_id,
-                                expr.layout,
-                                "modulo result",
-                            )?;
-                            builder.ins().srem(lhs, rhs)
+                            match self.require_arithmetic_expression_triple(
+                                kernel_id, kernel, expr_id, *left, *right,
+                            )? {
+                                NativeArithmeticKind::Integer => builder.ins().srem(lhs, rhs),
+                                NativeArithmeticKind::Decimal => {
+                                    let func_ref = self.declare_ptr_binop_func(
+                                        "aivi_decimal_mod", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
+                                }
+                                NativeArithmeticKind::BigInt => {
+                                    let func_ref = self.declare_ptr_binop_func(
+                                        "aivi_bigint_mod", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
+                                }
+                            }
                         }
                         BinaryOperator::GreaterThan => {
                             match self.require_ordered_expression_pair(
@@ -1812,6 +1804,20 @@ impl<'a> CraneliftCompiler<'a> {
                                 }
                                 NativeCompareKind::Float => {
                                     builder.ins().fcmp(FloatCC::GreaterThan, lhs, rhs)
+                                }
+                                NativeCompareKind::Decimal => {
+                                    let func_ref = self.declare_ptr_cmp_func(
+                                        "aivi_decimal_gt", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
+                                }
+                                NativeCompareKind::BigInt => {
+                                    let func_ref = self.declare_ptr_cmp_func(
+                                        "aivi_bigint_gt", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
                                 }
                             }
                         }
@@ -1824,6 +1830,20 @@ impl<'a> CraneliftCompiler<'a> {
                                 }
                                 NativeCompareKind::Float => {
                                     builder.ins().fcmp(FloatCC::LessThan, lhs, rhs)
+                                }
+                                NativeCompareKind::Decimal => {
+                                    let func_ref = self.declare_ptr_cmp_func(
+                                        "aivi_decimal_lt", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
+                                }
+                                NativeCompareKind::BigInt => {
+                                    let func_ref = self.declare_ptr_cmp_func(
+                                        "aivi_bigint_lt", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
                                 }
                             }
                         }
@@ -1839,6 +1859,20 @@ impl<'a> CraneliftCompiler<'a> {
                                 NativeCompareKind::Float => {
                                     builder.ins().fcmp(FloatCC::GreaterThanOrEqual, lhs, rhs)
                                 }
+                                NativeCompareKind::Decimal => {
+                                    let func_ref = self.declare_ptr_cmp_func(
+                                        "aivi_decimal_gte", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
+                                }
+                                NativeCompareKind::BigInt => {
+                                    let func_ref = self.declare_ptr_cmp_func(
+                                        "aivi_bigint_gte", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
+                                }
                             }
                         }
                         BinaryOperator::LessThanOrEqual => {
@@ -1851,15 +1885,45 @@ impl<'a> CraneliftCompiler<'a> {
                                 NativeCompareKind::Float => {
                                     builder.ins().fcmp(FloatCC::LessThanOrEqual, lhs, rhs)
                                 }
+                                NativeCompareKind::Decimal => {
+                                    let func_ref = self.declare_ptr_cmp_func(
+                                        "aivi_decimal_lte", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
+                                }
+                                NativeCompareKind::BigInt => {
+                                    let func_ref = self.declare_ptr_cmp_func(
+                                        "aivi_bigint_lte", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
+                                }
                             }
                         }
                         BinaryOperator::Equals => {
                             let shape = self.require_equatable_expression_pair(
                                 kernel_id, kernel, expr_id, *left, *right,
                             )?;
-                            self.lower_native_equality_shape(
-                                kernel_id, expr_id, &shape, lhs, rhs, builder,
-                            )?
+                            match &shape {
+                                NativeEqualityShape::Decimal => {
+                                    let func_ref = self.declare_ptr_cmp_func(
+                                        "aivi_decimal_eq", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
+                                }
+                                NativeEqualityShape::BigInt => {
+                                    let func_ref = self.declare_ptr_cmp_func(
+                                        "aivi_bigint_eq", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    builder.inst_results(call)[0]
+                                }
+                                _ => self.lower_native_equality_shape(
+                                    kernel_id, expr_id, &shape, lhs, rhs, builder,
+                                )?,
+                            }
                         }
                         BinaryOperator::NotEquals => {
                             let shape = self.require_equatable_expression_pair(
@@ -1871,6 +1935,24 @@ impl<'a> CraneliftCompiler<'a> {
                                 }
                                 NativeEqualityShape::Float => {
                                     builder.ins().fcmp(FloatCC::NotEqual, lhs, rhs)
+                                }
+                                NativeEqualityShape::Decimal => {
+                                    let func_ref = self.declare_ptr_cmp_func(
+                                        "aivi_decimal_eq", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    let equal = builder.inst_results(call)[0];
+                                    let one = builder.ins().iconst(types::I8, 1);
+                                    builder.ins().bxor(equal, one)
+                                }
+                                NativeEqualityShape::BigInt => {
+                                    let func_ref = self.declare_ptr_cmp_func(
+                                        "aivi_bigint_eq", kernel_id, builder,
+                                    )?;
+                                    let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                                    let equal = builder.inst_results(call)[0];
+                                    let one = builder.ins().iconst(types::I8, 1);
+                                    builder.ins().bxor(equal, one)
                                 }
                                 NativeEqualityShape::Text
                                 | NativeEqualityShape::Bytes
@@ -3413,17 +3495,19 @@ impl<'a> CraneliftCompiler<'a> {
                 )?;
                 Ok(BuiltinCallPlan::OptionSome(contract))
             }
-            BuiltinTerm::None
-            | BuiltinTerm::Ok
-            | BuiltinTerm::Err
-            | BuiltinTerm::Valid
-            | BuiltinTerm::Invalid => Err(self.unsupported_expression(
+            BuiltinTerm::None => Err(self.unsupported_expression(
                 kernel_id,
                 expr_id,
-                &format!(
-                    "builtin constructor `{term}` still requires backend-owned aggregate constructor lowering; the current Cranelift slice only lowers Bool literals plus niche and inline scalar Option None/Some forms"
-                ),
+                "None is not callable; it should appear as a standalone Builtin expression, not as a callee in Apply",
             )),
+            // Ok/Err/Valid/Invalid are handled as SumConstruction in
+            // resolve_direct_apply_plan before this fallback is reached.
+            BuiltinTerm::Ok
+            | BuiltinTerm::Err
+            | BuiltinTerm::Valid
+            | BuiltinTerm::Invalid => unreachable!(
+                "builtin constructor `{term}` should be handled as SumConstruction in resolve_direct_apply_plan"
+            ),
             BuiltinTerm::True | BuiltinTerm::False => Err(self.unsupported_expression(
                 kernel_id,
                 expr_id,
@@ -3929,6 +4013,53 @@ impl<'a> CraneliftCompiler<'a> {
         }
     }
 
+    fn require_arithmetic_expression_triple(
+        &self,
+        kernel_id: KernelId,
+        kernel: &Kernel,
+        expr_id: KernelExprId,
+        left: KernelExprId,
+        right: KernelExprId,
+    ) -> Result<NativeArithmeticKind, CodegenError> {
+        let left_layout = &self.program.layouts()[kernel.exprs()[left].layout];
+        let right_layout = &self.program.layouts()[kernel.exprs()[right].layout];
+        let result_layout = &self.program.layouts()[kernel.exprs()[expr_id].layout];
+        let left_layout_id = kernel.exprs()[left].layout;
+        let right_layout_id = kernel.exprs()[right].layout;
+        let result_layout_id = kernel.exprs()[expr_id].layout;
+        match (
+            &left_layout.kind,
+            &right_layout.kind,
+            &result_layout.kind,
+        ) {
+            (
+                LayoutKind::Primitive(PrimitiveType::Int),
+                LayoutKind::Primitive(PrimitiveType::Int),
+                LayoutKind::Primitive(PrimitiveType::Int),
+            ) => Ok(NativeArithmeticKind::Integer),
+            (
+                LayoutKind::Primitive(PrimitiveType::Decimal),
+                LayoutKind::Primitive(PrimitiveType::Decimal),
+                LayoutKind::Primitive(PrimitiveType::Decimal),
+            ) => Ok(NativeArithmeticKind::Decimal),
+            (
+                LayoutKind::Primitive(PrimitiveType::BigInt),
+                LayoutKind::Primitive(PrimitiveType::BigInt),
+                LayoutKind::Primitive(PrimitiveType::BigInt),
+            ) => Ok(NativeArithmeticKind::BigInt),
+            _ => Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "arithmetic expects matching Int/Decimal/BigInt operands, found \
+                     layout{left_layout_id}=`{left_layout}`, \
+                     layout{right_layout_id}=`{right_layout}`, \
+                     result layout{result_layout_id}=`{result_layout}`"
+                ),
+            )),
+        }
+    }
+
     fn require_bool_expression(
         &self,
         kernel_id: KernelId,
@@ -4247,12 +4378,20 @@ impl<'a> CraneliftCompiler<'a> {
                 LayoutKind::Primitive(PrimitiveType::Float),
                 LayoutKind::Primitive(PrimitiveType::Float),
             ) => NativeCompareKind::Float,
+            (
+                LayoutKind::Primitive(PrimitiveType::Decimal),
+                LayoutKind::Primitive(PrimitiveType::Decimal),
+            ) => NativeCompareKind::Decimal,
+            (
+                LayoutKind::Primitive(PrimitiveType::BigInt),
+                LayoutKind::Primitive(PrimitiveType::BigInt),
+            ) => NativeCompareKind::BigInt,
             _ => {
                 return Err(self.unsupported_expression(
                     kernel_id,
                     expr_id,
                     &format!(
-                        "comparison expects matching Int/Float operands, found layout{left_layout_id}=`{left_layout}` and layout{right_layout_id}=`{right_layout}`"
+                        "comparison expects matching Int/Float/Decimal/BigInt operands, found layout{left_layout_id}=`{left_layout}` and layout{right_layout_id}=`{right_layout}`"
                     ),
                 ));
             }
@@ -4310,6 +4449,8 @@ impl<'a> CraneliftCompiler<'a> {
             LayoutKind::Primitive(PrimitiveType::Int)
             | LayoutKind::Primitive(PrimitiveType::Bool) => Ok(NativeEqualityShape::Integer),
             LayoutKind::Primitive(PrimitiveType::Float) => Ok(NativeEqualityShape::Float),
+            LayoutKind::Primitive(PrimitiveType::Decimal) => Ok(NativeEqualityShape::Decimal),
+            LayoutKind::Primitive(PrimitiveType::BigInt) => Ok(NativeEqualityShape::BigInt),
             LayoutKind::Primitive(PrimitiveType::Text) => {
                 if self.program.layouts()[layout].abi != AbiPassMode::ByReference {
                     return Err(self.unsupported_expression(
@@ -4547,6 +4688,13 @@ impl<'a> CraneliftCompiler<'a> {
         match shape {
             NativeEqualityShape::Integer => Ok(builder.ins().icmp(IntCC::Equal, lhs, rhs)),
             NativeEqualityShape::Float => Ok(builder.ins().fcmp(FloatCC::Equal, lhs, rhs)),
+            NativeEqualityShape::Decimal | NativeEqualityShape::BigInt => {
+                Err(self.unsupported_expression(
+                    kernel_id,
+                    expr_id,
+                    "Decimal/BigInt equality inside aggregate fields requires runtime dispatch; use standalone == instead",
+                ))
+            }
             NativeEqualityShape::InlineScalarOption(_) => {
                 Ok(builder.ins().icmp(IntCC::Equal, lhs, rhs))
             }
@@ -5448,6 +5596,95 @@ impl<'a> CraneliftCompiler<'a> {
         Ok(self.module.declare_func_in_func(func_id, builder.func))
     }
 
+    /// Declare an imported runtime function with signature `(ptr, ptr) -> ptr`.
+    /// Used for Decimal/BigInt binary arithmetic (add, sub, mul, div, mod).
+    fn declare_ptr_binop_func(
+        &mut self,
+        sym: &str,
+        kernel_id: KernelId,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<cranelift_codegen::ir::FuncRef, CodegenError> {
+        let func_id = if let Some(&fid) = self.declared_external_funcs.get(sym) {
+            fid
+        } else {
+            let ptr = self.pointer_type();
+            let mut sig = self.module.make_signature();
+            sig.params.push(AbiParam::new(ptr));
+            sig.params.push(AbiParam::new(ptr));
+            sig.returns.push(AbiParam::new(ptr));
+            let fid = self
+                .module
+                .declare_function(sym, Linkage::Import, &sig)
+                .map_err(|e| CodegenError::CraneliftModule {
+                    kernel: Some(kernel_id),
+                    message: e.to_string().into_boxed_str(),
+                })?;
+            self.declared_external_funcs
+                .insert(sym.to_owned().into_boxed_str(), fid);
+            fid
+        };
+        Ok(self.module.declare_func_in_func(func_id, builder.func))
+    }
+
+    /// Declare an imported runtime function with signature `(ptr) -> ptr`.
+    /// Used for Decimal/BigInt unary negate.
+    fn declare_ptr_unop_func(
+        &mut self,
+        sym: &str,
+        kernel_id: KernelId,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<cranelift_codegen::ir::FuncRef, CodegenError> {
+        let func_id = if let Some(&fid) = self.declared_external_funcs.get(sym) {
+            fid
+        } else {
+            let ptr = self.pointer_type();
+            let mut sig = self.module.make_signature();
+            sig.params.push(AbiParam::new(ptr));
+            sig.returns.push(AbiParam::new(ptr));
+            let fid = self
+                .module
+                .declare_function(sym, Linkage::Import, &sig)
+                .map_err(|e| CodegenError::CraneliftModule {
+                    kernel: Some(kernel_id),
+                    message: e.to_string().into_boxed_str(),
+                })?;
+            self.declared_external_funcs
+                .insert(sym.to_owned().into_boxed_str(), fid);
+            fid
+        };
+        Ok(self.module.declare_func_in_func(func_id, builder.func))
+    }
+
+    /// Declare an imported runtime function with signature `(ptr, ptr) -> i8`.
+    /// Used for Decimal/BigInt comparison (eq, lt).
+    fn declare_ptr_cmp_func(
+        &mut self,
+        sym: &str,
+        kernel_id: KernelId,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<cranelift_codegen::ir::FuncRef, CodegenError> {
+        let func_id = if let Some(&fid) = self.declared_external_funcs.get(sym) {
+            fid
+        } else {
+            let ptr = self.pointer_type();
+            let mut sig = self.module.make_signature();
+            sig.params.push(AbiParam::new(ptr));
+            sig.params.push(AbiParam::new(ptr));
+            sig.returns.push(AbiParam::new(types::I8));
+            let fid = self
+                .module
+                .declare_function(sym, Linkage::Import, &sig)
+                .map_err(|e| CodegenError::CraneliftModule {
+                    kernel: Some(kernel_id),
+                    message: e.to_string().into_boxed_str(),
+                })?;
+            self.declared_external_funcs
+                .insert(sym.to_owned().into_boxed_str(), fid);
+            fid
+        };
+        Ok(self.module.declare_func_in_func(func_id, builder.func))
+    }
+
     /// `aivi_list_new(count: i64, elements_ptr: ptr, element_size: i64) -> ptr`
     fn declare_list_new_func(
         &mut self,
@@ -5591,6 +5828,35 @@ impl<'a> CraneliftCompiler<'a> {
         Ok(self.module.declare_func_in_func(func_id, builder.func))
     }
 
+    /// `aivi_list_slice(list_ptr: ptr, start: i64, element_size: i64) -> ptr`
+    fn declare_list_slice_func(
+        &mut self,
+        kernel_id: KernelId,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<cranelift_codegen::ir::FuncRef, CodegenError> {
+        let sym = "aivi_list_slice";
+        let func_id = if let Some(&fid) = self.declared_external_funcs.get(sym) {
+            fid
+        } else {
+            let mut sig = self.module.make_signature();
+            sig.params.push(AbiParam::new(self.pointer_type()));
+            sig.params.push(AbiParam::new(types::I64));
+            sig.params.push(AbiParam::new(types::I64));
+            sig.returns.push(AbiParam::new(self.pointer_type()));
+            let fid = self
+                .module
+                .declare_function(sym, Linkage::Import, &sig)
+                .map_err(|e| CodegenError::CraneliftModule {
+                    kernel: Some(kernel_id),
+                    message: e.to_string().into_boxed_str(),
+                })?;
+            self.declared_external_funcs
+                .insert(sym.to_owned().into_boxed_str(), fid);
+            fid
+        };
+        Ok(self.module.declare_func_in_func(func_id, builder.func))
+    }
+
     fn emit_truthy_falsy_condition(
         &self,
         kernel_id: KernelId,
@@ -5663,7 +5929,7 @@ impl<'a> CraneliftCompiler<'a> {
     }
 
     fn emit_pattern_test(
-        &self,
+        &mut self,
         kernel_id: KernelId,
         current: Value,
         pattern: &crate::InlinePipePattern,
@@ -5845,12 +6111,60 @@ impl<'a> CraneliftCompiler<'a> {
                 }
                 Ok(test)
             }
-            _ => Ok(builder.ins().iconst(types::I8, 1)),
+            crate::InlinePipePatternKind::List { elements, rest } => {
+                let element_layout = match &self.program.layouts()[input_layout].kind {
+                    LayoutKind::List { element } => *element,
+                    _ => return Ok(builder.ins().iconst(types::I8, 1)),
+                };
+                let list_len_func = self.declare_list_len_func(kernel_id, builder)?;
+                let len_call = builder.ins().call(list_len_func, &[current]);
+                let len = builder.inst_results(len_call)[0];
+                let expected = elements.len() as i64;
+                let len_test = if rest.is_some() {
+                    builder
+                        .ins()
+                        .icmp_imm(IntCC::SignedGreaterThanOrEqual, len, expected)
+                } else {
+                    builder.ins().icmp_imm(IntCC::Equal, len, expected)
+                };
+                let mut test = if builder.func.dfg.value_type(len_test) == types::I8 {
+                    len_test
+                } else {
+                    builder.ins().ireduce(types::I8, len_test)
+                };
+                let elem_abi =
+                    self.field_abi_shape(kernel_id, element_layout, "list pattern element")?;
+                for (i, sub_pat) in elements.iter().enumerate() {
+                    let list_get_func = self.declare_list_get_func(kernel_id, builder)?;
+                    let idx = builder.ins().iconst(types::I64, i as i64);
+                    let get_call = builder.ins().call(list_get_func, &[current, idx]);
+                    let elem_ptr = builder.inst_results(get_call)[0];
+                    let elem_val =
+                        builder
+                            .ins()
+                            .load(elem_abi.ty, MemFlags::new(), elem_ptr, 0);
+                    let sub_test = self.emit_pattern_test(
+                        kernel_id,
+                        elem_val,
+                        sub_pat,
+                        element_layout,
+                        inline_subjects,
+                        builder,
+                    )?;
+                    let sub8 = if builder.func.dfg.value_type(sub_test) == types::I8 {
+                        sub_test
+                    } else {
+                        builder.ins().ireduce(types::I8, sub_test)
+                    };
+                    test = builder.ins().band(test, sub8);
+                }
+                Ok(test)
+            }
         }
     }
 
     fn apply_pattern_bindings(
-        &self,
+        &mut self,
         kernel_id: KernelId,
         current: Value,
         pattern: &crate::InlinePipePattern,
@@ -6067,10 +6381,64 @@ impl<'a> CraneliftCompiler<'a> {
                     );
                 }
             }
+            crate::InlinePipePatternKind::List { elements, rest } => {
+                let element_layout = match &self.program.layouts()[input_layout].kind {
+                    LayoutKind::List { element } => *element,
+                    _ => return,
+                };
+                let elem_abi =
+                    match self.field_abi_shape(kernel_id, element_layout, "list binding element") {
+                        Ok(a) => a,
+                        Err(_) => return,
+                    };
+                for (i, sub_pat) in elements.iter().enumerate() {
+                    let list_get_func =
+                        match self.declare_list_get_func(kernel_id, builder) {
+                            Ok(f) => f,
+                            Err(_) => return,
+                        };
+                    let idx = builder.ins().iconst(types::I64, i as i64);
+                    let get_call = builder.ins().call(list_get_func, &[current, idx]);
+                    let elem_ptr = builder.inst_results(get_call)[0];
+                    let elem_val =
+                        builder
+                            .ins()
+                            .load(elem_abi.ty, MemFlags::new(), elem_ptr, 0);
+                    self.apply_pattern_bindings(
+                        kernel_id,
+                        elem_val,
+                        sub_pat,
+                        element_layout,
+                        inline_subjects,
+                        builder,
+                    );
+                }
+                if let Some(rest_pat) = rest {
+                    let list_slice_func =
+                        match self.declare_list_slice_func(kernel_id, builder) {
+                            Ok(f) => f,
+                            Err(_) => return,
+                        };
+                    let start = builder.ins().iconst(types::I64, elements.len() as i64);
+                    let stride = builder.ins().iconst(types::I64, elem_abi.size as i64);
+                    let slice_call =
+                        builder
+                            .ins()
+                            .call(list_slice_func, &[current, start, stride]);
+                    let rest_list = builder.inst_results(slice_call)[0];
+                    self.apply_pattern_bindings(
+                        kernel_id,
+                        rest_list,
+                        rest_pat,
+                        input_layout,
+                        inline_subjects,
+                        builder,
+                    );
+                }
+            }
             crate::InlinePipePatternKind::Wildcard
             | crate::InlinePipePatternKind::Integer(_)
-            | crate::InlinePipePatternKind::Text(_)
-            | crate::InlinePipePatternKind::List { .. } => {}
+            | crate::InlinePipePatternKind::Text(_) => {}
         }
     }
 
