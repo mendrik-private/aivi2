@@ -612,6 +612,9 @@ pub enum InlinePipeStageKind {
         truthy: InlinePipeTruthyFalsyBranch,
         falsy: InlinePipeTruthyFalsyBranch,
     },
+    FanOut {
+        map_expr: KernelExprId,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

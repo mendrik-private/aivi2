@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     fmt,
 };
 
@@ -14,7 +14,7 @@ use crate::{
     GateRuntimeTextLiteral, GateRuntimeTextSegment, GateRuntimeTruthyFalsyBranch,
     GateRuntimeUnsupportedKind, GateRuntimeUnsupportedPipeStageKind, InstanceItem, InstanceMember,
     IntrinsicValue, Item, ItemId, Module, Name, NamePath, PatchInstructionKind,
-    PatchSelectorSegment, PipeExpr, PipeStageKind, ProjectionBase, ResolutionState, SignalItem,
+    PatchSelectorSegment, PipeExpr, PipeStageKind, PipeTransformMode, ProjectionBase, ResolutionState, SignalItem,
     TermReference, TermResolution, TypeItemBody, TypeParameterId, TypeResolution, ValueItem,
     gate_elaboration::{GateElaborationBlocker, GateRuntimeMapEntry},
     typecheck::{expression_matches, resolve_class_member_dispatch, signal_payload_type},
@@ -447,7 +447,8 @@ fn signal_pipe_body_runtime_supported(expr: &GateRuntimeExpr) -> bool {
         GateRuntimePipeStageKind::Transform { .. }
         | GateRuntimePipeStageKind::Tap { .. }
         | GateRuntimePipeStageKind::Case { .. }
-        | GateRuntimePipeStageKind::TruthyFalsy { .. } => true,
+        | GateRuntimePipeStageKind::TruthyFalsy { .. }
+        | GateRuntimePipeStageKind::FanOut { .. } => true,
         GateRuntimePipeStageKind::Gate { .. } => !stage.input_subject.is_signal(),
     })
 }
@@ -1780,9 +1781,9 @@ impl<'a> GeneralExprElaborator<'a> {
 
     /// Lower `target <| { f1: v1, f2: v2, ... }` for flat single-field-name Replace patches.
     ///
-    /// Invariant: only `PatchInstructionKind::Replace` with a single `Named` selector segment
-    /// on a closed record type is supported. Any other patch shape falls back to
-    /// `UnsupportedRuntimeExpr`.
+    /// Invariant: only `PatchInstructionKind::Replace` and `PatchInstructionKind::Remove`
+    /// with a single `Named` selector segment on a closed record type are supported.
+    /// Any other patch shape falls back to `UnsupportedRuntimeExpr`.
     fn lower_patch_apply_expr(
         &mut self,
         expr_id: ExprId,
@@ -1794,14 +1795,17 @@ impl<'a> GeneralExprElaborator<'a> {
     ) -> Result<GateRuntimeExpr, Vec<GeneralExprBlocker>> {
         let span = self.module.exprs()[expr_id].span;
 
-        // Validate: all patch entries must be simple single-segment Named Replace.
+        // Validate: all patch entries must be simple single-segment Named Replace or Remove.
         for entry in &patch.entries {
             let single_named = matches!(
                 entry.selector.segments.as_slice(),
                 [PatchSelectorSegment::Named { .. }]
             );
-            let is_replace = matches!(entry.instruction.kind, PatchInstructionKind::Replace(_));
-            if !single_named || !is_replace {
+            let is_replace_or_remove = matches!(
+                entry.instruction.kind,
+                PatchInstructionKind::Replace(_) | PatchInstructionKind::Remove
+            );
+            if !single_named || !is_replace_or_remove {
                 return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
                     span,
                     kind: GateRuntimeUnsupportedKind::PatchExpr,
@@ -1821,24 +1825,24 @@ impl<'a> GeneralExprElaborator<'a> {
             }]);
         };
 
-        // Build a map of patch entries: field_name → replacement ExprId.
-        let patch_map: HashMap<String, ExprId> = patch
-            .entries
-            .iter()
-            .filter_map(|entry| {
-                if let (
-                    [PatchSelectorSegment::Named { name, .. }],
-                    PatchInstructionKind::Replace(value_id),
-                ) = (
-                    entry.selector.segments.as_slice(),
-                    &entry.instruction.kind,
-                ) {
-                    Some((name.text().to_owned(), *value_id))
-                } else {
-                    None
+        // Build a map of patch entries: field_name → replacement ExprId or removal marker.
+        let mut replace_map: HashMap<String, ExprId> = HashMap::new();
+        let mut remove_set: HashSet<String> = HashSet::new();
+        for entry in &patch.entries {
+            if let [PatchSelectorSegment::Named { name, .. }] =
+                entry.selector.segments.as_slice()
+            {
+                match &entry.instruction.kind {
+                    PatchInstructionKind::Replace(value_id) => {
+                        replace_map.insert(name.text().to_owned(), *value_id);
+                    }
+                    PatchInstructionKind::Remove => {
+                        remove_set.insert(name.text().to_owned());
+                    }
+                    _ => {}
                 }
-            })
-            .collect();
+            }
+        }
 
         // Lower the target expression once so we can project from it.
         let lowered_target = self.lower_expr(target, env, ambient, Some(&target_gate_ty))?;
@@ -1851,7 +1855,12 @@ impl<'a> GeneralExprElaborator<'a> {
             let field_name = field.name.as_str();
             let field_ty = &field.ty;
 
-            if let Some(replacement_id) = patch_map.get(field_name) {
+            if remove_set.contains(field_name) {
+                // Removed field: omit from the result record.
+                continue;
+            }
+
+            if let Some(replacement_id) = replace_map.get(field_name) {
                 // Patched field: lower the replacement value.
                 match self.lower_expr(*replacement_id, env, ambient, Some(field_ty)) {
                     Ok(value) => {
@@ -1886,8 +1895,16 @@ impl<'a> GeneralExprElaborator<'a> {
 
         let result_ty = if let Some(exp) = expected {
             exp.clone()
-        } else {
+        } else if remove_set.is_empty() {
             target_gate_ty.clone()
+        } else {
+            // Compute the result type with removed fields omitted.
+            let remaining_fields: Vec<GateRecordField> = record_fields
+                .iter()
+                .filter(|f| !remove_set.contains(f.name.as_str()))
+                .cloned()
+                .collect();
+            GateType::Record(remaining_fields)
         };
 
         Ok(GateRuntimeExpr {
@@ -2136,16 +2153,43 @@ impl<'a> GeneralExprElaborator<'a> {
                     lowered.push(lowered_stage);
                     stage_index = pair.next_index;
                 }
-                PipeStageKind::Map { .. } => {
+                PipeStageKind::Map { expr } => {
                     if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary) {
                         break;
                     }
-                    return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
+                    let stage_env = pipe_stage_expr_env(&pipe_env, stage, &current);
+                    let element = current.fanout_element().ok_or_else(|| {
+                        vec![GeneralExprBlocker::UnknownExprType { span: stage.span }]
+                    })?;
+                    let body = self.lower_body_expr(
+                        *expr,
+                        &stage_env,
+                        Some(element),
+                        None,
+                    )?;
+                    let result_subject = self
+                        .typing
+                        .infer_fanout_map_stage_info(*expr, &stage_env, &current)
+                        .ty
+                        .ok_or_else(|| {
+                            vec![GeneralExprBlocker::UnknownExprType { span: stage.span }]
+                        })?;
+                    lowered.push(GateRuntimePipeStage {
                         span: stage.span,
-                        kind: GateRuntimeUnsupportedKind::PipeStage(
-                            GateRuntimeUnsupportedPipeStageKind::Map,
-                        ),
-                    }]);
+                        subject_memo: stage.subject_memo,
+                        result_memo: stage.result_memo,
+                        input_subject: current.gate_payload().clone(),
+                        result_subject: result_subject.clone(),
+                        kind: GateRuntimePipeStageKind::FanOut { map_expr: body },
+                    });
+                    extend_pipe_env_with_stage_memos(
+                        &mut pipe_env,
+                        stage,
+                        &current,
+                        &result_subject,
+                    );
+                    current = result_subject;
+                    stage_index += 1;
                 }
                 PipeStageKind::Apply { .. } => {
                     return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
@@ -2155,16 +2199,43 @@ impl<'a> GeneralExprElaborator<'a> {
                         ),
                     }]);
                 }
-                PipeStageKind::FanIn { .. } => {
+                PipeStageKind::FanIn { expr } => {
                     if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary) {
                         break;
                     }
-                    return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
+                    let stage_env = pipe_stage_expr_env(&pipe_env, stage, &current);
+                    let body = self.lower_body_expr(
+                        *expr,
+                        &stage_env,
+                        Some(current.gate_payload()),
+                        None,
+                    )?;
+                    let result_subject = self
+                        .typing
+                        .infer_fanin_stage_info(*expr, &stage_env, &current)
+                        .ty
+                        .ok_or_else(|| {
+                            vec![GeneralExprBlocker::UnknownExprType { span: stage.span }]
+                        })?;
+                    lowered.push(GateRuntimePipeStage {
                         span: stage.span,
-                        kind: GateRuntimeUnsupportedKind::PipeStage(
-                            GateRuntimeUnsupportedPipeStageKind::FanIn,
-                        ),
-                    }]);
+                        subject_memo: stage.subject_memo,
+                        result_memo: stage.result_memo,
+                        input_subject: current.gate_payload().clone(),
+                        result_subject: result_subject.clone(),
+                        kind: GateRuntimePipeStageKind::Transform {
+                            mode: PipeTransformMode::Replace,
+                            expr: body,
+                        },
+                    });
+                    extend_pipe_env_with_stage_memos(
+                        &mut pipe_env,
+                        stage,
+                        &current,
+                        &result_subject,
+                    );
+                    current = result_subject;
+                    stage_index += 1;
                 }
                 PipeStageKind::RecurStart { .. } => {
                     if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary) {
@@ -2188,8 +2259,46 @@ impl<'a> GeneralExprElaborator<'a> {
                         ),
                     }]);
                 }
-                PipeStageKind::Validate { .. }
-                | PipeStageKind::Previous { .. }
+                PipeStageKind::Validate { expr } => {
+                    if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary)
+                        && current.is_signal()
+                    {
+                        break;
+                    }
+                    let stage_env = pipe_stage_expr_env(&pipe_env, stage, &current);
+                    let result_subject = self
+                        .typing
+                        .infer_transform_stage(*expr, &stage_env, &current)
+                        .ok_or_else(|| {
+                            vec![GeneralExprBlocker::UnknownExprType { span: stage.span }]
+                        })?;
+                    let body = self.lower_body_expr(
+                        *expr,
+                        &stage_env,
+                        Some(current.gate_payload()),
+                        None,
+                    )?;
+                    lowered.push(GateRuntimePipeStage {
+                        span: stage.span,
+                        subject_memo: stage.subject_memo,
+                        result_memo: stage.result_memo,
+                        input_subject: current.gate_payload().clone(),
+                        result_subject: result_subject.clone(),
+                        kind: GateRuntimePipeStageKind::Transform {
+                            mode: PipeTransformMode::Replace,
+                            expr: body,
+                        },
+                    });
+                    extend_pipe_env_with_stage_memos(
+                        &mut pipe_env,
+                        stage,
+                        &current,
+                        &result_subject,
+                    );
+                    current = result_subject;
+                    stage_index += 1;
+                }
+                PipeStageKind::Previous { .. }
                 | PipeStageKind::Diff { .. }
                 | PipeStageKind::Accumulate { .. } => {
                     if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary) {
@@ -3897,7 +4006,7 @@ mod tests {
     }
 
     #[test]
-    fn blocks_map_pipe_stages_in_general_expr_bodies() {
+    fn elaborates_map_pipe_stages_in_general_expr_bodies() {
         let lowered = lower_text(
             "general-expr-blocked-map-stage.aivi",
             r#"fun identity:Int = x:Int => x
@@ -3920,22 +4029,18 @@ fun duplicate:List Int = values:List Int =>
             .find(|item| item_name(lowered.module(), item.owner) == Some("duplicate"))
             .expect("expected duplicate elaboration");
         match &duplicate.outcome {
-            GeneralExprOutcome::Blocked(blocked) => {
-                assert!(matches!(
-                    blocked.blockers.as_slice(),
-                    [GeneralExprBlocker::UnsupportedRuntimeExpr {
-                        kind: crate::GateRuntimeUnsupportedKind::PipeStage(
-                            crate::GateRuntimeUnsupportedPipeStageKind::Map
-                        ),
-                        ..
-                    }]
-                ));
-                assert_eq!(
-                    blocked.to_string(),
-                    "map pipe stage is not supported in typed-core general expressions"
+            GeneralExprOutcome::Lowered(expr) => {
+                let GateRuntimeExprKind::Pipe(pipe) = &expr.kind else {
+                    panic!("expected pipe expression, got {:?}", expr.kind);
+                };
+                assert_eq!(pipe.stages.len(), 1, "expected one stage");
+                assert!(
+                    matches!(&pipe.stages[0].kind, GateRuntimePipeStageKind::FanOut { .. }),
+                    "expected FanOut stage, got {:?}",
+                    pipe.stages[0].kind
                 );
             }
-            other => panic!("expected blocked duplicate body, found {other:?}"),
+            other => panic!("expected lowered duplicate body, found {other:?}"),
         }
     }
 

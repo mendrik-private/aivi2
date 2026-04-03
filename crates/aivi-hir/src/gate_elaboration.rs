@@ -325,6 +325,9 @@ pub enum GateRuntimePipeStageKind {
         truthy: GateRuntimeTruthyFalsyBranch,
         falsy: GateRuntimeTruthyFalsyBranch,
     },
+    FanOut {
+        map_expr: GateRuntimeExpr,
+    },
 }
 
 impl GateCoreExpr {
@@ -1775,11 +1778,21 @@ fn lower_runtime_pipe_expr(
                     GateRuntimeUnsupportedPipeStageKind::Case,
                 ));
             }
-            PipeStageKind::Map { .. } => {
-                return Err(unsupported_runtime_pipe_stage(
-                    stage.span,
-                    GateRuntimeUnsupportedPipeStageKind::Map,
-                ));
+            PipeStageKind::Map { expr } => {
+                let element = current.fanout_element().cloned().ok_or(
+                    GateElaborationBlocker::UnknownRuntimeExprType { span: stage.span },
+                )?;
+                let body = lower_gate_pipe_body_runtime_expr_with_purity(
+                    module, *expr, &stage_env, &element, typing, purity,
+                )?;
+                let result_subject = typing
+                    .infer_fanout_map_stage_info(*expr, &stage_env, &current)
+                    .ty
+                    .ok_or(GateElaborationBlocker::UnknownRuntimeExprType { span: stage.span })?;
+                (
+                    GateRuntimePipeStageKind::FanOut { map_expr: body },
+                    result_subject,
+                )
             }
             PipeStageKind::Apply { .. } => {
                 return Err(unsupported_runtime_pipe_stage(
@@ -1787,11 +1800,21 @@ fn lower_runtime_pipe_expr(
                     GateRuntimeUnsupportedPipeStageKind::Apply,
                 ));
             }
-            PipeStageKind::FanIn { .. } => {
-                return Err(unsupported_runtime_pipe_stage(
-                    stage.span,
-                    GateRuntimeUnsupportedPipeStageKind::FanIn,
-                ));
+            PipeStageKind::FanIn { expr } => {
+                let body = lower_gate_pipe_body_runtime_expr_with_purity(
+                    module, *expr, &stage_env, &current, typing, purity,
+                )?;
+                let result_subject = typing
+                    .infer_fanin_stage_info(*expr, &stage_env, &current)
+                    .ty
+                    .ok_or(GateElaborationBlocker::UnknownRuntimeExprType { span: stage.span })?;
+                (
+                    GateRuntimePipeStageKind::Transform {
+                        mode: PipeTransformMode::Replace,
+                        expr: body,
+                    },
+                    result_subject,
+                )
             }
             PipeStageKind::Truthy { .. } => {
                 return Err(unsupported_runtime_pipe_stage(
@@ -1817,11 +1840,20 @@ fn lower_runtime_pipe_expr(
                     GateRuntimeUnsupportedPipeStageKind::RecurStep,
                 ));
             }
-            PipeStageKind::Validate { .. } => {
-                return Err(unsupported_runtime_pipe_stage(
-                    stage.span,
-                    GateRuntimeUnsupportedPipeStageKind::RecurStart,
-                ));
+            PipeStageKind::Validate { expr } => {
+                let body = lower_gate_pipe_body_runtime_expr_with_purity(
+                    module, *expr, &stage_env, &current, typing, purity,
+                )?;
+                let result_subject = typing
+                    .infer_transform_stage(*expr, &stage_env, &current)
+                    .ok_or(GateElaborationBlocker::UnknownRuntimeExprType { span: stage.span })?;
+                (
+                    GateRuntimePipeStageKind::Transform {
+                        mode: PipeTransformMode::Replace,
+                        expr: body,
+                    },
+                    result_subject,
+                )
             }
             PipeStageKind::Previous { .. } => {
                 return Err(unsupported_runtime_pipe_stage(

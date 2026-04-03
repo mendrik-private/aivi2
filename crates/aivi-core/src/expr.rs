@@ -260,7 +260,7 @@ impl PipeStage {
     pub const fn supports_memos(&self) -> bool {
         matches!(
             self.kind,
-            PipeStageKind::Transform { .. } | PipeStageKind::Tap { .. }
+            PipeStageKind::Transform { .. } | PipeStageKind::Tap { .. } | PipeStageKind::FanOut { .. }
         )
     }
 }
@@ -307,4 +307,7 @@ pub enum PipeStageKind {
         arms: Vec<PipeCaseArm>,
     },
     TruthyFalsy(PipeTruthyFalsyStage),
+    FanOut {
+        map_expr: ExprId,
+    },
 }

@@ -148,7 +148,10 @@ pub(crate) fn capture_free_bindings(
                         | PipeStageKind::Tap { expr }
                         | PipeStageKind::Gate {
                             predicate: expr, ..
-                        } => stage_frames.push((*expr, stage_scope.clone())),
+                        }
+                        | PipeStageKind::FanOut { map_expr: expr } => {
+                            stage_frames.push((*expr, stage_scope.clone()))
+                        }
                         PipeStageKind::Debug { .. } => {}
                         PipeStageKind::Case { arms } => {
                             for arm in arms {

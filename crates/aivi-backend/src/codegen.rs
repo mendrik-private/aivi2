@@ -419,10 +419,21 @@ impl<'a> CraneliftCompiler<'a> {
         })
     }
 
+    /// Ambient prelude kernels (e.g. `__aivi_list_*`) use runtime-only
+    /// intrinsics (`Reduce`, `Append`) and are interpreted, never compiled.
+    fn is_ambient_kernel(&self, kernel: &Kernel) -> bool {
+        self.program.items()[kernel.origin.item]
+            .name
+            .starts_with("__aivi_")
+    }
+
     fn prevalidate(&self) -> Result<(), CodegenErrors> {
         let mut errors = Vec::new();
 
         for (kernel_id, kernel) in self.program.kernels().iter() {
+            if self.is_ambient_kernel(kernel) {
+                continue;
+            }
             match kernel.convention.kind {
                 CallingConventionKind::RuntimeKernelV1 => {}
             }
@@ -671,6 +682,14 @@ impl<'a> CraneliftCompiler<'a> {
                                     work.push(truthy.body);
                                     work.push(falsy.body);
                                 }
+                                crate::InlinePipeStageKind::FanOut { .. } => {
+                                    errors.push(self.unsupported_inline_pipe_stage(
+                                        kernel_id,
+                                        expr_id,
+                                        stage_index,
+                                        "fan-out requires runtime list iteration",
+                                    ))
+                                }
                             }
                             current_layout = stage.result_layout;
                         }
@@ -852,6 +871,7 @@ impl<'a> CraneliftCompiler<'a> {
             .program
             .kernels()
             .iter()
+            .filter(|(_, kernel)| !self.is_ambient_kernel(kernel))
             .map(|(kernel_id, _)| kernel_id)
             .collect::<Vec<_>>();
         let mut declaration_errors = Vec::new();
@@ -2024,6 +2044,14 @@ impl<'a> CraneliftCompiler<'a> {
                                 falsy_block,
                             });
                             tasks.push(Task::Visit(truthy_body));
+                        }
+                        crate::InlinePipeStageKind::FanOut { .. } => {
+                            return Err(self.unsupported_inline_pipe_stage(
+                                kernel_id,
+                                pipe_expr,
+                                stage_index,
+                                "fan-out requires runtime list iteration",
+                            ));
                         }
                     }
                 }

@@ -358,7 +358,8 @@ impl<'a> ProgramLowerer<'a> {
                         for stage in &pipe.stages {
                             match &stage.kind {
                                 core::PipeStageKind::Transform { expr, .. }
-                                | core::PipeStageKind::Tap { expr } => work.push(*expr),
+                                | core::PipeStageKind::Tap { expr }
+                                | core::PipeStageKind::FanOut { map_expr: expr } => work.push(*expr),
                                 core::PipeStageKind::Debug { .. } => {}
                                 core::PipeStageKind::Gate { predicate, .. } => {
                                     work.push(*predicate);
@@ -1447,7 +1448,8 @@ impl<'a> ProgramLowerer<'a> {
                     for stage in pipe.stages.iter().rev() {
                         match &stage.kind {
                             core::PipeStageKind::Transform { expr, .. }
-                            | core::PipeStageKind::Tap { expr } => {
+                            | core::PipeStageKind::Tap { expr }
+                            | core::PipeStageKind::FanOut { map_expr: expr } => {
                                 work.push((*expr, SubjectKind::Inline));
                             }
                             core::PipeStageKind::Debug { .. } => {}
@@ -1591,6 +1593,7 @@ impl<'a> ProgramLowerer<'a> {
                 truthy: InlinePipeTruthyFalsyBranchSpec,
                 falsy: InlinePipeTruthyFalsyBranchSpec,
             },
+            FanOut,
         }
 
         impl InlinePipeStageSpec {
@@ -1598,7 +1601,8 @@ impl<'a> ProgramLowerer<'a> {
                 match &self.kind {
                     InlinePipeStageBuild::Transform { .. }
                     | InlinePipeStageBuild::Tap
-                    | InlinePipeStageBuild::Gate { .. } => 1,
+                    | InlinePipeStageBuild::Gate { .. }
+                    | InlinePipeStageBuild::FanOut => 1,
                     InlinePipeStageBuild::Debug { .. } => 0,
                     InlinePipeStageBuild::Case { arms } => arms.len(),
                     InlinePipeStageBuild::TruthyFalsy { .. } => 2,
@@ -2050,6 +2054,14 @@ impl<'a> ProgramLowerer<'a> {
                                         });
                                         InlinePipeStageBuild::TruthyFalsy { truthy, falsy }
                                     }
+                                    core::PipeStageKind::FanOut { map_expr } => {
+                                        children.push(PipeChildSpec {
+                                            expr: *map_expr,
+                                            subject: child_subject,
+                                            locals: stage_locals.clone(),
+                                        });
+                                        InlinePipeStageBuild::FanOut
+                                    }
                                 };
                                 if let Some((binding, slot)) = result_memo {
                                     pipe_locals.insert(
@@ -2352,6 +2364,11 @@ impl<'a> ProgramLowerer<'a> {
                                                 .expect("falsy branch child should exist"),
                                         },
                                     }
+                                }
+                                InlinePipeStageBuild::FanOut => {
+                                    let map_expr =
+                                        iter.next().expect("fanout map child should exist");
+                                    InlinePipeStageKind::FanOut { map_expr }
                                 }
                             },
                         })

@@ -817,6 +817,7 @@ impl<'a> ModuleLowerer<'a> {
                             falsy: TruthyFalsyArmSpec::from_hir(falsy),
                         }
                     }
+                    GateRuntimePipeStageKind::FanOut { .. } => PipeStageKindSpec::FanOut,
                 },
             });
             if debug {
@@ -3157,6 +3158,9 @@ impl<'a> ModuleLowerer<'a> {
                                         tasks.push(Task::Visit(&falsy.body));
                                         tasks.push(Task::Visit(&truthy.body));
                                     }
+                                    GateRuntimePipeStageKind::FanOut { map_expr } => {
+                                        tasks.push(Task::Visit(map_expr));
+                                    }
                                 }
                             }
                             tasks.push(Task::Visit(&pipe.head));
@@ -3424,6 +3428,10 @@ impl<'a> ModuleLowerer<'a> {
                                             },
                                         )
                                     }
+                                    PipeStageKindSpec::FanOut => {
+                                        let map_expr = children[0];
+                                        crate::expr::PipeStageKind::FanOut { map_expr }
+                                    }
                                 },
                             }
                         })
@@ -3645,12 +3653,13 @@ enum PipeStageKindSpec {
         truthy: TruthyFalsyArmSpec,
         falsy: TruthyFalsyArmSpec,
     },
+    FanOut,
 }
 
 impl PipeStageKindSpec {
     fn child_expr_count(&self) -> usize {
         match self {
-            Self::Transform { .. } | Self::Tap | Self::Gate { .. } => 1,
+            Self::Transform { .. } | Self::Tap | Self::Gate { .. } | Self::FanOut => 1,
             Self::Debug { .. } => 0,
             Self::Case { arms } => arms.len(),
             Self::TruthyFalsy { .. } => 2,
@@ -4369,7 +4378,8 @@ fn referenced_hir_dependencies(root: &GateRuntimeExpr) -> HirDependencies {
                         | GateRuntimePipeStageKind::Tap { expr }
                         | GateRuntimePipeStageKind::Gate {
                             predicate: expr, ..
-                        } => work.push(expr),
+                        }
+                        | GateRuntimePipeStageKind::FanOut { map_expr: expr } => work.push(expr),
                         GateRuntimePipeStageKind::Case { arms } => {
                             for arm in arms.iter().rev() {
                                 work.push(&arm.body);

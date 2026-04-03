@@ -55,7 +55,7 @@ It answers “what checks, executes, runs, or compiles today?” rather than “
 | Partial type-constructor application / HKTs | yes | partial | partial | partial | Checked and same-module executable in the current higher-kinded slice, but not yet a general cross-module evidence system. |
 | Numeric literals (`Int`, `Float`, `Decimal`, `BigInt`) | yes | yes | yes | partial | Scalar literals compile in the first slice; some wider aggregate/codegen uses still stop at codegen. |
 | Domain suffix literals (`250ms`, `10sec`, `3min`) | yes | yes | yes | partial | Surface and runtime support are real; compile still depends on the domain-member/codegen subset. |
-| Text interpolation | yes | yes | yes | no | Runtime-backed, but current codegen explicitly rejects remaining dynamic-text lowering (`crates/aivi-backend/src/codegen.rs`). |
+| Text interpolation | yes | yes | yes | partial | Static text interpolation compiles. Dynamic interpolation still relies on `Reduce(List)` / `Append(List)` lowering which remains outside the current codegen slice. |
 | Regex literals | partial | no | no | no | Regex literals in expression position produce `hir::regex-in-expression`; the only valid use is as `@source` option values (e.g. `pattern: rx"..."` in an HTTP or filesystem source). Use the `aivi.regex` module for runtime pattern matching. |
 | Record / tuple / list literals | yes | yes | yes | partial | Runtime support is broad; compile only covers part of the aggregate lowering space. |
 | `Map { ... }` / `Set [ ... ]` literals | yes | yes | yes | no | The checker/runtime know these literals, but codegen still rejects remaining collection lowering in the first Cranelift slice. |
@@ -71,17 +71,17 @@ It answers “what checks, executes, runs, or compiles today?” rather than “
 | Basic transform pipe `|>` | yes | yes | yes | yes | Core transform pipelines are compile-safe when their stage bodies stay inside the codegen slice. |
 | `result { ... }` | yes | yes | yes | partial | Checked and runtime-backed; compile still depends on the payload/body shapes used inside the block. |
 | Gate `?|>` | yes | yes | yes | partial | Simple gate compilation works, but domain/operator-rich gate expressions still hit codegen limits (`crates/aivi-cli/tests/compile.rs`). |
-| Case split `||>` | yes | yes | yes | no | Runtime-backed, but codegen explicitly rejects inline-pipe `Case` stages in the current slice (`crates/aivi-backend/src/codegen.rs`). |
-| Truthy/falsy branches `T|>` / `F|>` | yes | yes | yes | no | Runtime-backed, but codegen explicitly rejects inline-pipe `TruthyFalsy` stages in the current slice. |
-| Fan-out `*|>` / join `<|*` | yes | yes | yes | no | The checker/runtime know these stages, but compile still lacks collection-lowering support for this slice. |
-| Tap `|` | yes | yes | yes | no | Runtime-backed as an observing stage; codegen explicitly rejects inline-pipe debug/tap stages today. |
-| Validation stage `!|>` | yes | partial | partial | no | The operator is in the surface/HIR, but there is no direct end-to-end runtime/codegen coverage yet, and general-expression elaboration blocks validate stages outside the supported scheduler boundary. |
+| Case split `||>` | yes | yes | yes | partial | Runtime-backed. Codegen emits Cranelift IR for inline-pipe `Case` stages with pattern matching, branching, and merge blocks; coverage is still narrower than the full runtime pattern set. |
+| Truthy/falsy branches `T|>` / `F|>` | yes | yes | yes | partial | Runtime-backed. Codegen emits Cranelift IR for inline-pipe `TruthyFalsy` stages with boolean branching and merge blocks; coverage is still narrower than the full runtime carrier set. |
+| Fan-out `*|>` / join `<|*` | yes | yes | yes | no | Fan-out and join now work in both derived signal pipelines and general expression contexts. Codegen still rejects FanOut stages because they require runtime list iteration; the runtime evaluator handles them fully. |
+| Tap `|` | yes | yes | yes | partial | Runtime-backed as an observing stage. Codegen emits the tap body and discards the result, preserving the pipeline subject; coverage is narrower than the runtime for side-effect-heavy tap expressions. |
+| Validation stage `!|>` | yes | yes | yes | no | The validation stage is fully elaborated for general expression contexts (lowered as a Transform with `Replace` mode) and for signal pipelines (remains a scheduler boundary). Codegen does not compile validation bodies independently. |
 | Accumulation `+|>` | yes | partial | yes | partial | Runtime startup tests prove accumulation works; `aivi execute` is not a long-lived signal host, and compile coverage is still narrower than the runtime slice. |
-| Previous / diff `~|>` / `-|>` | yes | no | no | no | The operators are lexed and carried in HIR, but no current runtime/codegen path is evidenced in the repo. |
+| Previous / diff `~|>` / `-|>` | yes | partial | yes | partial | Full pipeline through core → lambda → backend → runtime; `startup.rs` implements temporal state caching for derived signals. `aivi execute` is one-shot and not a long-lived signal host. Compile accepts temporal signal programs. |
 | Applicative clusters `&|>` | yes | yes | yes | partial | Runtime coverage is strong for builtin carriers, but `Task` is applicative-only and compile still depends on the first-slice builtin table. |
 | Explicit recurrence `@|> ... <|@` | yes | no | partial | partial | Linked-runtime tests prove source-backed recurrence steps, but `syntax.md` already flags this area as cautionary and standalone compile/startup coverage is still narrower. |
 | Structural patch apply / `patch { ... }` | partial | partial | partial | no | The checker accepts useful subsets, including list/map predicates and single-payload constructor focus, but the surface is still partial end to end. |
-| Patch removal `field: -` | yes | no | no | no | The checker accepts patch removal and computes the result type via field omission; runtime/compile execution paths are still blocked by the general-expression patch gate. |
+| Patch removal `field: -` | yes | yes | yes | no | The checker accepts patch removal and computes the result type via field omission. The runtime elaborator now omits removed fields from the result record construction. Codegen does not cover patch apply in the current slice. |
 
 ## Signals, Tasks, And Sources
 
@@ -98,7 +98,7 @@ It answers “what checks, executes, runs, or compiles today?” rather than “
 | Host-context sources (`process.args`, `process.cwd`, `env.get`, `stdio.read`, `path.*`) | yes | yes | partial | partial | This is the best-covered `execute` source subset: `execute_reads_host_context_sources_and_writes_stdout` exercises it directly. |
 | `db.connect` / `db.live` | yes | partial | yes | partial | Runtime tests exist; `optimistic` and `onRollback` are now accepted. `pool` is only validated. |
 | `window.keyDown` | yes | n/a | yes | partial | GTK-backed runtime tests exist; `capture` and `focusOnly` options are now accepted and stored for the GTK event controller. |
-| `dbus.ownName` / `dbus.signal` / `dbus.method` | yes | partial | partial | partial | Runtime tests exist; `dbus.method` still replies with `Unit` immediately and defers non-`Unit` reply payloads. |
+| `dbus.ownName` / `dbus.signal` / `dbus.method` | yes | partial | partial | partial | Runtime tests exist. `dbus.method` supports `reply` with static GLib variant strings; dynamic runtime-computed reply payloads are not yet supported. |
 
 ## Markup / GTK Surface
 
@@ -123,9 +123,11 @@ It answers “what checks, executes, runs, or compiles today?” rather than “
 
 ## Biggest Gaps
 
-- `compile` is still a first-slice AOT boundary. It emits object code only and explicitly rejects inline `Case`, `TruthyFalsy`, tap/debug, remaining aggregate/collection lowering, and dynamic text.
+- `compile` is still a first-slice AOT boundary. It emits object code only and explicitly rejects remaining aggregate/collection lowering (`Map`/`Set`/`List` literals), fan-out stages, debug stages, and dynamic text interpolation relying on `Reduce(List)`/`Append(List)`.
+- Inline-pipe `Case`, `TruthyFalsy`, and `Tap` stages now have Cranelift emission code but coverage is still narrower than the runtime pattern/carrier set.
+- `Previous`/`Diff` temporal stages work end to end for derived signals in the live runtime. General-expression contexts still block them (by design: temporal state requires a signal host).
 - Imported user-authored higher-kinded instances and imported polymorphic class-member execution are still deferred.
 - Custom `provider` declarations are currently contract/lowering features, not runtime-executable providers.
-- Regex literals are only valid as `@source` option values; regex literals in expression position produce `hir::regex-in-expression`. Use the `aivi.regex` module for runtime pattern matching. Regex literals do not lower through typed-core general expressions.
-- Structural patch removal is now accepted at check time with proper result-type omission, but runtime/compile patch execution remains blocked by the general-expression patch gate.
-- The source catalog is now broadly executed. The main remaining contract-only option is `dbus.method` non-`Unit` reply payloads. Use `/guide/source-catalog` for the option-level truth table.
+- Regex literals are only valid as `@source` option values; regex literals in expression position produce `hir::regex-in-expression`. Use the `aivi.regex` module for runtime pattern matching.
+- Structural patch apply supports single-segment `Named Replace` and `Named Remove` on closed records. Replace substitutes the field value; Remove omits the field from the result record with a narrowed result type. More complex patch selectors and nested patches are not yet supported.
+- The source catalog is now broadly executed. The main remaining contract-only option is `dbus.method` dynamic runtime-computed reply payloads. Use `/guide/source-catalog` for the option-level truth table.

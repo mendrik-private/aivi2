@@ -1370,7 +1370,8 @@ fn validate_kernel(
                     }
                     match &stage.kind {
                         InlinePipeStageKind::Transform { expr, .. }
-                        | InlinePipeStageKind::Tap { expr } => {
+                        | InlinePipeStageKind::Tap { expr }
+                        | InlinePipeStageKind::FanOut { map_expr: expr } => {
                             push_expr(kernel_id, *expr, kernel, &mut work, errors)
                         }
                         InlinePipeStageKind::Debug { .. } => {}

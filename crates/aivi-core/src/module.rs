@@ -875,6 +875,10 @@ fn format_expr(module: &Module, expr_id: ExprId, f: &mut fmt::Formatter<'_>) -> 
                         write!(f, " F|>[{}] ", constructor_name(falsy.constructor))?;
                         format_expr(module, falsy.body, f)?;
                     }
+                    crate::expr::PipeStageKind::FanOut { map_expr } => {
+                        f.write_str(" *|> ")?;
+                        format_expr(module, *map_expr, f)?;
+                    }
                 }
             }
             Ok(())

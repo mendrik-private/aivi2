@@ -2743,7 +2743,7 @@ fn lowering_rejects_unsupported_local_references_in_source_kernels() {
 }
 
 #[test]
-fn lowering_rejects_open_type_parameters_in_backend_contracts() {
+fn lowering_maps_open_type_parameters_to_erased_domain_layouts() {
     let open = CoreType::TypeParameter {
         parameter: HirTypeParameterId::from_raw(0),
         name: "a".into(),
@@ -2781,12 +2781,17 @@ fn lowering_rejects_open_type_parameters_in_backend_contracts() {
     validate_core_module(&core).expect("manual open-type module should validate");
     let lambda = lower_lambda_module(&core).expect("typed lambda lowering should succeed");
     validate_lambda_module(&lambda).expect("typed lambda should validate");
-    let errors = lower_backend_module(&lambda)
-        .expect_err("open type parameters should fail backend lowering");
-    assert!(errors.errors().iter().any(|error| matches!(
-        error,
-        LoweringError::OpenTypeParameter { name } if name.as_ref() == "a"
-    )));
+    let backend = lower_backend_module(&lambda)
+        .expect("open type parameters should lower via erased Domain layouts");
+    // The open type parameter `a` maps to a Domain layout so the kernel can be compiled;
+    // call sites are monomorphic by the time they reach the runtime.
+    let has_domain_a = backend.layouts().iter().any(|(_, layout)| {
+        matches!(&layout.kind, LayoutKind::Domain { name, .. } if name.as_ref() == "a")
+    });
+    assert!(
+        has_domain_a,
+        "open type parameter should be lowered to an erased Domain layout"
+    );
 }
 
 #[test]

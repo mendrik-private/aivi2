@@ -6213,10 +6213,13 @@ impl<'a> GateTypeContext<'a> {
                 }
                 PipeStageKind::Apply { .. }
                 | PipeStageKind::RecurStart { .. }
-                | PipeStageKind::RecurStep { .. }
-                | PipeStageKind::Validate { .. } => {
+                | PipeStageKind::RecurStep { .. } => {
                     stage_index += 1;
                     GateExprInfo::default()
+                }
+                PipeStageKind::Validate { expr } => {
+                    stage_index += 1;
+                    self.infer_transform_stage_info(*expr, &pipe_env, &subject)
                 }
             };
             if let Some(result_subject) = stage_info.ty.as_ref() {

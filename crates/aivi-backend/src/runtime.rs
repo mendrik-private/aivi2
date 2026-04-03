@@ -1926,6 +1926,33 @@ impl<'a> KernelEvaluator<'a> {
                         globals,
                     )?
                 }
+                InlinePipeStageKind::FanOut { map_expr } => {
+                    let elements = match current {
+                        RuntimeValue::List(ref items) => items.clone(),
+                        _ => {
+                            return Err(EvaluationError::UnsupportedInlinePipePattern {
+                                kernel: kernel_id,
+                                expr: expr_id,
+                            });
+                        }
+                    };
+                    let mapped = elements
+                        .iter()
+                        .map(|element| {
+                            let mut element_subjects = stage_subjects.clone();
+                            element_subjects[stage.subject.index()] = Some(element.clone());
+                            self.evaluate_expr(
+                                kernel_id,
+                                *map_expr,
+                                input_subject,
+                                environment,
+                                &element_subjects,
+                                globals,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    RuntimeValue::List(mapped)
+                }
             };
             let result_found = result.clone();
             current = coerce_inline_pipe_value(self.program, result, stage.result_layout).ok_or(
