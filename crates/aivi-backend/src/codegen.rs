@@ -5875,6 +5875,7 @@ impl<'a> CraneliftCompiler<'a> {
 
     /// Declare an imported runtime function with signature `(ptr) -> ptr`.
     /// Used for Decimal/BigInt unary negate.
+    #[allow(dead_code)]
     fn declare_ptr_unop_func(
         &mut self,
         sym: &str,

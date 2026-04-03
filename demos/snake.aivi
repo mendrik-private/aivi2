@@ -35,16 +35,14 @@ type Direction =
 
 type Status = Running | GameOver
 
-type Cell =
-  | Cell Int Int
+type Cell = Cell Int Int
 
 type Event =
   | Tick
   | Turn Direction
   | Restart
 
-type Key =
-  | Key Text
+type Key = Key Text
 
 value boardW = 30
 value boardH = 20
@@ -73,7 +71,8 @@ func nextSeed = s =>
     (s * 1103515245 + 12345) % 2147483647
 
 type Cell -> Cell -> Bool
-func cellEq = a b => a == b
+func cellEq = a b =>
+    a == b
 
 domain Snake over NonEmptyList Cell = {
     type NonEmptyList Cell -> Snake

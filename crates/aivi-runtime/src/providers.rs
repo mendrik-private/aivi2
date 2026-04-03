@@ -1342,6 +1342,7 @@ impl DbConnectPlan {
 struct DbLivePlan {
     task: RuntimeValue,
     debounce: Duration,
+    #[allow(dead_code)]
     optimistic: bool,
     result: Option<RequestResultPlan>,
 }
