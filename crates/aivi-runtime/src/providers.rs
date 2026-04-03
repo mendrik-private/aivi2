@@ -326,6 +326,13 @@ enum ActiveProviderState {
         allow_repeat: bool,
         port: DetachedRuntimePublicationPort,
     },
+    /// Custom (user-declared) provider. Registered so the source instance is
+    /// accepted at runtime, but no worker thread or I/O is spawned — the
+    /// provider is inert until a real custom-provider execution mechanism is
+    /// implemented.
+    Custom {
+        provider: RuntimeSourceProvider,
+    },
 }
 
 impl ActiveProviderState {
@@ -333,7 +340,8 @@ impl ActiveProviderState {
         match self {
             Self::Passive { provider, .. }
             | Self::Mailbox { provider, .. }
-            | Self::Window { provider, .. } => provider,
+            | Self::Window { provider, .. }
+            | Self::Custom { provider, .. } => provider,
         }
     }
 }
@@ -896,12 +904,9 @@ impl SourceProviderManager {
                     port,
                 }
             }
-            provider => {
-                return Err(SourceProviderExecutionError::UnsupportedProvider {
-                    instance,
-                    provider: provider.clone(),
-                });
-            }
+            RuntimeSourceProvider::Custom(_) => ActiveProviderState::Custom {
+                provider: config.provider.clone(),
+            },
         };
         self.active.insert(instance, state);
         Ok(())
@@ -930,7 +935,7 @@ impl SourceProviderManager {
                     .expect("mailbox hub mutex should not be poisoned")
                     .unsubscribe(mailbox, *subscriber_id);
             }
-            ActiveProviderState::Window { .. } => {}
+            ActiveProviderState::Window { .. } | ActiveProviderState::Custom { .. } => {}
         }
         // Join any worker threads associated with this instance.  The stop flag
         // was already set above so each thread should exit on its next iteration;
