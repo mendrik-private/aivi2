@@ -186,18 +186,18 @@ func finished = status => status
 type List (List Disc) -> Coord -> Disc
 func discAt = board coord => coord
  ||> Coord x y -> matrixFromRows board
-  ||> Err _  -> Empty
-  ||> Ok m   -> matrixAt m x y
-   ||> None   -> Empty
-   ||> Some d -> d
+ ||> Err _     -> Empty
+ ||> Ok m      -> matrixAt m x y
+ ||> None      -> Empty
+ ||> Some d    -> d
 
 type List (List Disc) -> Coord -> Disc -> (List (List Disc))
 func setDisc = board coord disc => coord
  ||> Coord x y -> matrixFromRows board
-  ||> Err _  -> board
-  ||> Ok m   -> matrixReplaceAt m (x, y) disc
-   ||> None    -> board
-   ||> Some nm -> matrixRows nm
+ ||> Err _     -> board
+ ||> Ok m      -> matrixReplaceAt m (x, y) disc
+ ||> None      -> board
+ ||> Some nm   -> matrixRows nm
 
 type Disc -> (List (List Disc)) -> Coord -> (List (List Disc))
 func setManyStep = disc board coord =>
