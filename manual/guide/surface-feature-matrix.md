@@ -129,6 +129,6 @@ It answers “what checks, executes, runs, or compiles today?” rather than “
 - `Previous`/`Diff` temporal stages compile and work end to end for derived signals in the live runtime. General-expression contexts still block them (by design: temporal state requires a signal host).
 - Imported user-authored higher-kinded instances and imported polymorphic class-member execution are still deferred.
 - Custom `provider` declarations are currently contract/lowering features, not runtime-executable providers.
-- Regex literals are only valid as `@source` option values; regex literals in expression position produce `hir::regex-in-expression`. Use the `aivi.regex` module for runtime pattern matching.
+- Regex literals `rx"..."` evaluate to Text values and can be used in expression position. Use the `aivi.regex` module for runtime pattern matching.
 - Structural patch apply supports single-segment `Named Replace` and `Named Remove` on closed records. Replace substitutes the field value; Remove omits the field from the result record with a narrowed result type. More complex patch selectors and nested patches are not yet supported.
 - The source catalog is now broadly executed. The main remaining contract-only option is `dbus.method` dynamic runtime-computed reply payloads. Use `/guide/source-catalog` for the option-level truth table.
