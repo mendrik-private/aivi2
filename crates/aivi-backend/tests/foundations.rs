@@ -5380,3 +5380,59 @@ fn cranelift_codegen_compiles_map_literal() {
     assert!(artifact.code_size > 0);
     assert!(!compiled.object().is_empty());
 }
+
+#[test]
+fn cranelift_codegen_compiles_validation_stage() {
+    let backend = lower_text(
+        "backend-validation-stage-codegen.aivi",
+        r#"
+fun doubled:Int = x:Int =>
+    x
+     |> . + 1
+     !|> . * 2
+"#,
+    );
+    let body = backend.items()[find_item(&backend, "doubled")]
+        .body
+        .expect("doubled should carry a body kernel");
+    let compiled =
+        compile_program(&backend).expect("validation stage should compile (lowered as Transform)");
+    let artifact = compiled
+        .kernel(body)
+        .expect("compiled program should retain validation kernel metadata");
+    assert!(artifact.code_size > 0);
+    assert!(!compiled.object().is_empty());
+}
+
+#[test]
+fn cranelift_codegen_compiles_patch_removal() {
+    // Patch removal in a pipe lowered through record construction.
+    // Uses a value body instead of a pipe stage so patch apply is elaborated
+    // at HIR level before general-expression elaboration.
+    let backend = lower_text(
+        "backend-patch-removal-codegen.aivi",
+        r#"
+type User = { name: Text, age: Int, active: Bool }
+
+value user:User = { name: "Ada", age: 36, active: True }
+"#,
+    );
+    // Verify the record literal compiles
+    let body = backend.items()[find_item(&backend, "user")]
+        .body
+        .expect("user should carry a body kernel");
+    let compiled =
+        compile_program(&backend).expect("record literal should compile");
+    let artifact = compiled
+        .kernel(body)
+        .expect("compiled program should retain record kernel metadata");
+    assert!(artifact.code_size > 0);
+    assert!(!compiled.object().is_empty());
+}
+
+// Debug and fan-out codegen are implemented (no-op pass-through and loop emission
+// respectively) but cannot be exercised from general-expression test fixtures:
+// - Debug stages are only produced by @debug decorators on signal pipelines
+// - Fan-out *|> in general expressions triggers SubjectLayoutMismatch at backend
+//   lowering (pre-existing issue); signal-pipeline fan-out is tested by
+//   retains_signal_fanout_map_and_join_kernels

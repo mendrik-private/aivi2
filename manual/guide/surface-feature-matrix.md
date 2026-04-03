@@ -73,10 +73,10 @@ It answers “what checks, executes, runs, or compiles today?” rather than “
 | Gate `?|>` | yes | yes | yes | partial | Simple gate compilation works, but domain/operator-rich gate expressions still hit codegen limits (`crates/aivi-cli/tests/compile.rs`). |
 | Case split `||>` | yes | yes | yes | partial | Runtime-backed. Codegen emits Cranelift IR for inline-pipe `Case` stages with pattern matching, branching, and merge blocks; coverage is still narrower than the full runtime pattern set. |
 | Truthy/falsy branches `T|>` / `F|>` | yes | yes | yes | partial | Runtime-backed. Codegen emits Cranelift IR for inline-pipe `TruthyFalsy` stages with boolean branching and merge blocks; coverage is still narrower than the full runtime carrier set. |
-| Fan-out `*|>` / join `<|*` | yes | yes | yes | no | Fan-out and join now work in both derived signal pipelines and general expression contexts. Codegen still rejects FanOut stages because they require runtime list iteration; the runtime evaluator handles them fully. |
+| Fan-out `*|>` / join `<|*` | yes | yes | yes | partial | Fan-out and join work in both derived signal pipelines and general expression contexts. Codegen now emits Cranelift loop IR for FanOut stages (list length, indexed get, map body, result construction); backend lowering for general-expression fan-out still has layout constraints. |
 | Tap `|` | yes | yes | yes | partial | Runtime-backed as an observing stage. Codegen emits the tap body and discards the result, preserving the pipeline subject; coverage is narrower than the runtime for side-effect-heavy tap expressions. |
-| Debug stage | yes | yes | yes | no | Runtime-backed debugging/logging stage. Codegen rejects debug stages because they require runtime-side debug effects. |
-| Validation stage `!|>` | yes | yes | yes | no | The validation stage is fully elaborated for general expression contexts (lowered as a Transform with `Replace` mode) and for signal pipelines (remains a scheduler boundary). Codegen does not compile validation bodies independently. |
+| Debug stage | yes | yes | yes | yes | Runtime-backed debugging/logging stage. Codegen emits debug stages as no-op pass-throughs, preserving the pipeline subject value. |
+| Validation stage `!|>` | yes | yes | yes | yes | The validation stage is fully elaborated for general expression contexts (lowered as a Transform with `Replace` mode) and compiles through the standard transform codegen path. For signal pipelines it remains a scheduler boundary. |
 | Accumulation `+|>` | yes | partial | yes | partial | Runtime startup tests prove accumulation works; `aivi execute` is not a long-lived signal host, and compile coverage is still narrower than the runtime slice. |
 | Previous / diff `~|>` / `-|>` | yes | partial | yes | partial | Full pipeline through core → lambda → backend → runtime; `startup.rs` implements temporal state caching for derived signals. `aivi execute` is one-shot and not a long-lived signal host. Compile accepts temporal signal programs. |
 | Applicative clusters `&|>` | yes | yes | yes | partial | Runtime coverage is strong for builtin carriers, but `Task` is applicative-only and compile still depends on the first-slice builtin table. |
@@ -124,7 +124,7 @@ It answers “what checks, executes, runs, or compiles today?” rather than “
 
 ## Biggest Gaps
 
-- `compile` is a first-slice AOT boundary. It emits object code with runtime constructor imports for collection literals (`aivi_list_new`/`aivi_set_new`/`aivi_map_new`). Fan-out stages, debug stages, and dynamic text interpolation relying on `Reduce(List)`/`Append(List)` remain outside the codegen slice.
+- `compile` is a first-slice AOT boundary. It emits object code with runtime constructor imports for collection literals (`aivi_list_new`/`aivi_set_new`/`aivi_map_new`). Fan-out stages now have Cranelift loop emission but backend lowering still constrains general-expression fan-out. Dynamic text interpolation relying on `Reduce(List)`/`Append(List)` remains outside the codegen slice.
 - Inline-pipe `Case`, `TruthyFalsy`, and `Tap` stages now have Cranelift emission code but coverage is still narrower than the runtime pattern/carrier set.
 - `Previous`/`Diff` temporal stages work end to end for derived signals in the live runtime. General-expression contexts still block them (by design: temporal state requires a signal host).
 - Imported user-authored higher-kinded instances and imported polymorphic class-member execution are still deferred.

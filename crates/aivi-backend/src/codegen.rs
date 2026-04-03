@@ -655,12 +655,7 @@ impl<'a> CraneliftCompiler<'a> {
                                     }
                                 }
                                 crate::InlinePipeStageKind::Debug { .. } => {
-                                    errors.push(self.unsupported_inline_pipe_stage(
-                                        kernel_id,
-                                        expr_id,
-                                        stage_index,
-                                        "still requires runtime-side debug effects",
-                                    ))
+                                    // Debug is a no-op in compiled code (observability only).
                                 }
                                 crate::InlinePipeStageKind::Gate { .. } => {
                                     if let Err(error) = self.require_inline_pipe_gate_contract(
@@ -682,13 +677,8 @@ impl<'a> CraneliftCompiler<'a> {
                                     work.push(truthy.body);
                                     work.push(falsy.body);
                                 }
-                                crate::InlinePipeStageKind::FanOut { .. } => {
-                                    errors.push(self.unsupported_inline_pipe_stage(
-                                        kernel_id,
-                                        expr_id,
-                                        stage_index,
-                                        "fan-out requires runtime list iteration",
-                                    ))
+                                crate::InlinePipeStageKind::FanOut { map_expr } => {
+                                    work.push(*map_expr);
                                 }
                             }
                             current_layout = stage.result_layout;
@@ -1110,6 +1100,15 @@ impl<'a> CraneliftCompiler<'a> {
                 next_block: Option<cranelift_codegen::ir::Block>,
             },
             RestoreInlineSubjects(Vec<(usize, Option<Value>)>),
+            FinalizePipeFanOut {
+                pipe_expr: KernelExprId,
+                stage_index: usize,
+                count: Value,
+                result_array_ptr: Value,
+                result_stride: u32,
+                loop_header: cranelift_codegen::ir::Block,
+                loop_exit: cranelift_codegen::ir::Block,
+            },
         }
 
         fn snapshot_pipe_subjects(
@@ -1982,12 +1981,24 @@ impl<'a> CraneliftCompiler<'a> {
                             tasks.push(Task::Visit(*predicate));
                         }
                         crate::InlinePipeStageKind::Debug { .. } => {
-                            return Err(self.unsupported_inline_pipe_stage(
+                            // Debug is a no-op in compiled code: pass through input unchanged.
+                            self.require_layout_match(
                                 kernel_id,
                                 pipe_expr,
-                                stage_index,
-                                "still requires runtime-side debug effects",
-                            ));
+                                stage.result_layout,
+                                stage.input_layout,
+                                &format!("inline-pipe debug stage {stage_index} result"),
+                            )?;
+                            if let Some(slot) = stage.result_memo {
+                                inline_subjects[slot.index()] = Some(current);
+                            }
+                            values.push(current);
+                            if stage_index + 1 < pipe.stages.len() {
+                                tasks.push(Task::BuildPipeStage {
+                                    pipe_expr,
+                                    stage_index: stage_index + 1,
+                                });
+                            }
                         }
                         crate::InlinePipeStageKind::Case { arms } => {
                             if arms.is_empty() {
@@ -2098,13 +2109,111 @@ impl<'a> CraneliftCompiler<'a> {
                             });
                             tasks.push(Task::Visit(truthy_body));
                         }
-                        crate::InlinePipeStageKind::FanOut { .. } => {
-                            return Err(self.unsupported_inline_pipe_stage(
-                                kernel_id,
+                        crate::InlinePipeStageKind::FanOut { map_expr } => {
+                            // Fan-out: iterate list, apply map_expr to each element,
+                            // collect results into a new list.
+                            let input_layout = stage.input_layout;
+                            let result_layout = stage.result_layout;
+                            let LayoutKind::List { element: input_elem } =
+                                &self.program.layouts()[input_layout].kind.clone()
+                            else {
+                                return Err(self.unsupported_inline_pipe_stage(
+                                    kernel_id,
+                                    pipe_expr,
+                                    stage_index,
+                                    "fan-out input must be List",
+                                ));
+                            };
+                            let LayoutKind::List { element: result_elem } =
+                                &self.program.layouts()[result_layout].kind.clone()
+                            else {
+                                return Err(self.unsupported_inline_pipe_stage(
+                                    kernel_id,
+                                    pipe_expr,
+                                    stage_index,
+                                    "fan-out result must be List",
+                                ));
+                            };
+                            let _input_elem_abi =
+                                self.field_abi_shape(kernel_id, *input_elem, "fanout input element")?;
+                            let result_elem_abi =
+                                self.field_abi_shape(kernel_id, *result_elem, "fanout result element")?;
+                            let result_stride = result_elem_abi.size.max(1);
+
+                            // Get list length
+                            let list_len_func =
+                                self.declare_list_len_func(kernel_id, builder)?;
+                            let len_call =
+                                builder.ins().call(list_len_func, &[current]);
+                            let count =
+                                builder.inst_results(len_call)[0];
+
+                            // Allocate result array (count * stride, minimum 8 bytes)
+                            // Use a generous fixed upper bound for the stack slot;
+                            // the actual iteration uses count at runtime.
+                            let max_static_slots = 64u32;
+                            let array_size = max_static_slots * result_stride;
+                            let array_slot = builder.create_sized_stack_slot(
+                                cranelift_codegen::ir::StackSlotData::new(
+                                    cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                                    array_size.max(8),
+                                    result_elem_abi.align.max(1).ilog2() as u8,
+                                ),
+                            );
+                            let result_array_ptr =
+                                builder.ins().stack_addr(self.pointer_type(), array_slot, 0);
+
+                            // Create loop blocks
+                            let loop_header = builder.create_block();
+                            let loop_body = builder.create_block();
+                            let loop_exit = builder.create_block();
+
+                            // loop_header takes the counter as block param
+                            builder.append_block_param(loop_header, types::I64);
+
+                            // Jump to loop header with counter = 0
+                            let zero = builder.ins().iconst(types::I64, 0);
+                            builder.ins().jump(loop_header, &[BlockArg::Value(zero)]);
+
+                            // Loop header: check counter < count
+                            builder.switch_to_block(loop_header);
+                            let counter = builder.block_params(loop_header)[0];
+                            let cond =
+                                builder
+                                    .ins()
+                                    .icmp(IntCC::SignedLessThan, counter, count);
+                            builder.ins().brif(
+                                cond,
+                                loop_body,
+                                &[],
+                                loop_exit,
+                                &[],
+                            );
+
+                            // Loop body: get element, set subject, evaluate map_expr
+                            builder.switch_to_block(loop_body);
+                            let list_get_func =
+                                self.declare_list_get_func(kernel_id, builder)?;
+                            let get_call = builder.ins().call(
+                                list_get_func,
+                                &[current, counter],
+                            );
+                            let element = builder.inst_results(get_call)[0];
+
+                            // Set the stage subject to the element
+                            inline_subjects[stage.subject.index()] = Some(element);
+
+                            // Push finalization task, then visit map_expr
+                            tasks.push(Task::FinalizePipeFanOut {
                                 pipe_expr,
                                 stage_index,
-                                "fan-out requires runtime list iteration",
-                            ));
+                                count,
+                                result_array_ptr,
+                                result_stride,
+                                loop_header,
+                                loop_exit,
+                            });
+                            tasks.push(Task::Visit(*map_expr));
                         }
                     }
                 }
@@ -2221,6 +2330,57 @@ impl<'a> CraneliftCompiler<'a> {
                 Task::RestoreInlineSubjects(saved) => {
                     for (index, value) in saved {
                         inline_subjects[index] = value;
+                    }
+                }
+                Task::FinalizePipeFanOut {
+                    pipe_expr,
+                    stage_index,
+                    count,
+                    result_array_ptr,
+                    result_stride,
+                    loop_header,
+                    loop_exit,
+                } => {
+                    // map_expr result is on the values stack
+                    let map_result = values.pop().expect("fanout map result");
+
+                    let pipe_expr_ref = &kernel.exprs()[pipe_expr];
+                    let KernelExprKind::Pipe(pipe) = &pipe_expr_ref.kind else {
+                        unreachable!();
+                    };
+                    let stage = &pipe.stages[stage_index];
+
+                    // Store mapped element at result_array[counter * stride]
+                    let counter = builder.block_params(loop_header)[0];
+                    let offset = builder.ins().imul_imm(counter, result_stride as i64);
+                    let dest = builder.ins().iadd(result_array_ptr, offset);
+                    builder.ins().store(MemFlags::new(), map_result, dest, 0);
+
+                    // Increment counter and jump back to loop header
+                    let next_counter = builder.ins().iadd_imm(counter, 1);
+                    builder.ins().jump(loop_header, &[BlockArg::Value(next_counter)]);
+
+                    // Exit block: construct result list
+                    builder.switch_to_block(loop_exit);
+                    let list_new_func =
+                        self.declare_list_new_func(kernel_id, builder)?;
+                    let stride_val =
+                        builder.ins().iconst(types::I64, result_stride as i64);
+                    let new_list_call = builder.ins().call(
+                        list_new_func,
+                        &[count, result_array_ptr, stride_val],
+                    );
+                    let result_list = builder.inst_results(new_list_call)[0];
+
+                    if let Some(slot) = stage.result_memo {
+                        inline_subjects[slot.index()] = Some(result_list);
+                    }
+                    values.push(result_list);
+                    if stage_index + 1 < pipe.stages.len() {
+                        tasks.push(Task::BuildPipeStage {
+                            pipe_expr,
+                            stage_index: stage_index + 1,
+                        });
                     }
                 }
                 Task::BuildRuntimeAggregate { expr_id, count } => {
@@ -5360,6 +5520,61 @@ impl<'a> CraneliftCompiler<'a> {
             sig.params.push(AbiParam::new(types::I64));
             sig.params.push(AbiParam::new(self.pointer_type()));
             sig.params.push(AbiParam::new(types::I64));
+            sig.params.push(AbiParam::new(types::I64));
+            sig.returns.push(AbiParam::new(self.pointer_type()));
+            let fid = self
+                .module
+                .declare_function(sym, Linkage::Import, &sig)
+                .map_err(|e| CodegenError::CraneliftModule {
+                    kernel: Some(kernel_id),
+                    message: e.to_string().into_boxed_str(),
+                })?;
+            self.declared_external_funcs
+                .insert(sym.to_owned().into_boxed_str(), fid);
+            fid
+        };
+        Ok(self.module.declare_func_in_func(func_id, builder.func))
+    }
+
+    /// `aivi_list_len(list_ptr: ptr) -> i64`
+    fn declare_list_len_func(
+        &mut self,
+        kernel_id: KernelId,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<cranelift_codegen::ir::FuncRef, CodegenError> {
+        let sym = "aivi_list_len";
+        let func_id = if let Some(&fid) = self.declared_external_funcs.get(sym) {
+            fid
+        } else {
+            let mut sig = self.module.make_signature();
+            sig.params.push(AbiParam::new(self.pointer_type()));
+            sig.returns.push(AbiParam::new(types::I64));
+            let fid = self
+                .module
+                .declare_function(sym, Linkage::Import, &sig)
+                .map_err(|e| CodegenError::CraneliftModule {
+                    kernel: Some(kernel_id),
+                    message: e.to_string().into_boxed_str(),
+                })?;
+            self.declared_external_funcs
+                .insert(sym.to_owned().into_boxed_str(), fid);
+            fid
+        };
+        Ok(self.module.declare_func_in_func(func_id, builder.func))
+    }
+
+    /// `aivi_list_get(list_ptr: ptr, index: i64) -> ptr`
+    fn declare_list_get_func(
+        &mut self,
+        kernel_id: KernelId,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<cranelift_codegen::ir::FuncRef, CodegenError> {
+        let sym = "aivi_list_get";
+        let func_id = if let Some(&fid) = self.declared_external_funcs.get(sym) {
+            fid
+        } else {
+            let mut sig = self.module.make_signature();
+            sig.params.push(AbiParam::new(self.pointer_type()));
             sig.params.push(AbiParam::new(types::I64));
             sig.returns.push(AbiParam::new(self.pointer_type()));
             let fid = self
