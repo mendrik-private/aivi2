@@ -46,8 +46,7 @@ type User = {
 }
 
 type User -> Text
-func userName = user =>
-    user.name
+func userName = .name
 
 value shownName =
     userName {
@@ -100,7 +99,7 @@ type LoadState =
   | Failed Text
 
 type LoadState -> Text
-func loadLabel = state => state
+func loadLabel = .
  ||> NotAsked      -> "idle"
  ||> Loading       -> "loading"
  ||> Loaded name   -> "ready {name}"
@@ -171,7 +170,7 @@ You usually unpack tuples with pattern matching:
 
 ```aivi
 type (Int, Int) -> Int
-func firstInt = pair => pair
+func firstInt = .
  ||> (first, _) -> first
 
 value firstValue =

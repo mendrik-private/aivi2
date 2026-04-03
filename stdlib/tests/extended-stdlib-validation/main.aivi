@@ -105,7 +105,6 @@ use aivi.result (
 )
 
 use aivi.nonEmpty (
-    NonEmpty
     NonEmptyList
     singleton as nelSingleton
     cons as nelCons

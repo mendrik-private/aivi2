@@ -42,7 +42,7 @@ In AIVI, branching is done through the values themselves. For boolean conditions
 
 ```aivi
 type Int -> Text
-func classify = score => score >= 50
+func classify = . >= 50
   T|> "pass"
   F|> "fail"
 ```
@@ -57,7 +57,7 @@ type Direction =
   | West
 
 type Direction -> Text
-func label = dir => dir
+func label = .
   ||> North -> "up"
   ||> South -> "down"
   ||> East  -> "right"
@@ -83,9 +83,9 @@ Or use a pipe chain that builds up from simpler checks:
 
 ```aivi
 type Int -> Text
-func tier = score => score >= 90
+func tier = . >= 90
   T|> "gold"
-  F|> score >= 50
+  F|> . >= 50
     T|> "silver"
     F|> "bronze"
 ```

@@ -4,7 +4,6 @@ Types and utilities for non-empty lists — collections that are **guaranteed to
 
 ```aivi
 use aivi.nonEmpty (
-    NonEmpty
     NonEmptyList
     singleton
     cons
@@ -17,19 +16,6 @@ use aivi.nonEmpty (
     appendNel
 )
 ```
-
----
-
-## NonEmpty
-
-A structural non-empty container holding a head element and a (possibly empty) tail list.
-
-```aivi
-type NonEmpty A =
-  | MkNonEmpty A (List A)
-```
-
-`NonEmpty A` is the generic non-empty container. Use `singleton`, `cons`, or `fromList` when you need to build a `NonEmptyList A`.
 
 ---
 
@@ -162,21 +148,6 @@ use aivi.nonEmpty (
 type NonEmptyList Int -> (List Int)
 func asRegularList = nel =>
     toList nel
-```
-
----
-
-## NonEmpty conversion
-
-There is currently no exported `fromNonEmpty` helper. Build a `NonEmptyList A` directly with `singleton`, `cons`, or `fromList`.
-
-**Related constructors:** `singleton`, `cons`, `fromList`
-
-```aivi
-use aivi.nonEmpty (
-    singleton
-    fromList
-)
 ```
 
 ---

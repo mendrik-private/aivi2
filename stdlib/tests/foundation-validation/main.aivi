@@ -1,7 +1,6 @@
 use aivi.defaults (Option)
 
 use aivi.nonEmpty (
-    NonEmpty
     NonEmptyList
     singleton
     head as nelHead

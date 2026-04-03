@@ -17,6 +17,29 @@ You can declare ordinary named methods too:
 class Display A
 ```
 
+## Block body syntax
+
+When a class has multiple members, group them inside `= { ... }`:
+
+```aivi
+class Eq A = {
+    (==) : A -> A -> Bool
+}
+
+class Display A = {
+    display : A -> Text
+    label   : A -> Text
+}
+```
+
+Instance declarations use the same block form:
+
+```aivi
+instance Eq Blob = {
+    (==) left right = blobEquals left right
+}
+```
+
 ## Superclass declarations
 
 Use `with` inside the class body to declare that your class extends another class.
@@ -120,3 +143,4 @@ Classes let generic code talk about capability instead of one hard-coded type. T
 | `require Eq A` | Constrain a class type parameter |
 | `instance Eq Blob` | Implement a class for one concrete type |
 | `Eq K -> Bool` | Require `K` to have `Eq` in a function annotation |
+| `class Name A = { ... }` | Group class members in a block |

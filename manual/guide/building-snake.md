@@ -56,7 +56,7 @@ Every piece of game logic is a pure function. Let us start with direction:
 
 ```aivi
 type Direction -> Direction
-func opposite = d => d
+func opposite = .
   ||> North -> South
   ||> South -> North
   ||> East  -> West
@@ -85,11 +85,9 @@ value boardW = 30
 value boardH = 20
 
 type Cell -> Bool
-func outside = c => c
+func outside = .
   ||> Cell x y -> x < 0 or x >= boardW or y < 0 or y >= boardH
 ```
-
-The function uses the **unary subject sugar**: `c => c ||> ...` could be shortened to just `.`, but here the explicit parameter makes the intent clear.
 
 ## Domains: the snake itself
 
@@ -206,9 +204,7 @@ If the head lands on food, grow the snake and spawn new food. Otherwise, move th
 Two sources drive the game — a timer and the keyboard:
 
 ```aivi
-domain Duration over Int = {
-    literal ms : Int -> Duration
-}
+use aivi.duration (Duration)
 
 @source timer.every 120ms with {
     immediate: False,
@@ -223,7 +219,7 @@ signal tick : Signal Unit
 signal keyDown : Signal Key
 ```
 
-The timer fires every 120 milliseconds. `120ms` is a **domain suffix literal** — the `ms` suffix converts the integer to a `Duration` at compile time.
+The timer fires every 120 milliseconds. `120ms` is a **domain suffix literal** — the `ms` suffix comes from the standard library's `Duration` domain, which converts the integer to a `Duration` at compile time.
 
 The keyboard source captures key presses without repeat, so holding a key does not flood the game with events.
 

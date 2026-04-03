@@ -23,7 +23,7 @@ This is not a limitation — it is a simplification. When everything is an expre
 
 ```aivi
 type Int -> Text
-func classify = score => score >= 50
+func classify = . >= 50
   T|> "pass"
   F|> "fail"
 ```
@@ -36,7 +36,7 @@ Once a value is bound, it stays that way. There is no reassignment, no mutation,
 type User = { name: Text, score: Int }
 
 value alice : User = { name: "Alice", score: 10 }
-value promoted : User = alice <| { score: alice.score + 5 }
+value promoted : User = alice <| { score: . + 5 }
 ```
 
 `alice` still has a score of 10. `promoted` is a new value with a score of 15. There is no ambiguity about what `alice` means at any point in the program.
@@ -82,7 +82,7 @@ type LoadState =
   | Failed Text
 
 type LoadState -> Text
-func describe = state => state
+func describe = .
   ||> Loading      -> "Loading..."
   ||> Ready data   -> "Got: {data}"
   ||> Failed error -> "Error: {error}"

@@ -67,6 +67,38 @@ domain Duration over Int
 
 Inside the authored body, the current domain is implemented against its carrier representation. That means `build raw = raw` is valid for `Duration over Int`, while callers still see `build : Int -> Duration`.
 
+## Block body syntax
+
+When a domain has multiple members, group them inside `= { ... }`:
+
+```aivi
+domain Duration over Int = {
+    literal ms  : Int -> Duration
+    literal sec : Int -> Duration
+    type Duration -> Duration -> Duration
+    (+)
+    type Duration -> Int
+    unwrap
+}
+```
+
+Each member follows the same rules as a standalone member line — the `= { ... }` form simply groups them together and makes the scope visual.
+
+Authored bodies work inside blocks too:
+
+```aivi
+domain Snake over List Cell = {
+    type List Cell -> Snake
+    fromCells cells = cells
+
+    type Snake -> Cell
+    head snake = getOrElse (Cell 0 0) (listHead snake)
+
+    type Snake -> Int
+    length snake = listLength snake
+}
+```
+
 ## Generic domains
 
 Domains can also be parameterised:
@@ -86,3 +118,4 @@ This is useful when you want stronger guarantees than the carrier type alone can
 | `(+) : D -> D -> D` | Add an operator |
 | `unwrap : D -> Carrier` | Add a named method |
 | `member : T` + `member x = expr` | Add an authored callable member |
+| `domain Name over Carrier = { ... }` | Group domain members in a block |

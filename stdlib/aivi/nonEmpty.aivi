@@ -66,10 +66,6 @@ type NonEmptyList A -> (NonEmptyList A) -> (NonEmptyList A)
 func appendNel = left right => left
  ||> MkNEL h t -> MkNEL h (append t (toList right))
 
-type NonEmpty A =
-  | MkNonEmpty A (List A)
-
-export NonEmpty
 export NonEmptyList
 export singleton
 export cons

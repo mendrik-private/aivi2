@@ -81,7 +81,7 @@ type Status =
   | Archived
 
 type Status -> Text
-func statusLabel = status => status
+func statusLabel = .
  ||> Draft     -> "draft"
  ||> Published -> "published"
  ||> Archived  -> "archived"
@@ -102,7 +102,7 @@ For `Bool`, the dedicated true/false pipes are shorter than a full match:
 
 ```aivi
 type Bool -> Text
-func availabilityLabel = ready => ready
+func availabilityLabel = .
  T|> "ready"
  F|> "waiting"
 
@@ -205,9 +205,9 @@ Pipes must stay on the top-level expression spine. If you need a pipe inside ano
 
 ```aivi
 type Text -> Text
-func normalizeTitle = title => title
+func normalizeTitle = .
  ||> "Inbox" -> "priority"
- ||> _       -> title
+ ||> _       -> .
 
 type Text -> Text
 func displayTitle = title =>

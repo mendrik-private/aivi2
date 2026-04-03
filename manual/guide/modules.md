@@ -54,7 +54,7 @@ type Direction =
   | Right
 
 type Direction -> Direction
-func opposite = direction => direction
+func opposite = .
  ||> Up    -> Down
  ||> Down  -> Up
  ||> Left  -> Right

@@ -10,7 +10,7 @@ Use `||>` when you want to branch on a value:
 
 ```aivi
 type Int -> Text
-func describeNumber = n => n
+func describeNumber = .
  ||> 0 -> "zero"
  ||> 1 -> "one"
  ||> _ -> "many"
@@ -37,7 +37,7 @@ type Direction =
   | Right
 
 type Direction -> Text
-func directionLabel = direction => direction
+func directionLabel = .
  ||> Up    -> "up"
  ||> Down  -> "down"
  ||> Left  -> "left"
@@ -55,7 +55,7 @@ type LoadState =
   | Failed Text
 
 type LoadState -> Text
-func describeLoadState = state => state
+func describeLoadState = .
  ||> NotAsked      -> "waiting"
  ||> Loaded name   -> "loaded {name}"
  ||> Failed reason -> "error {reason}"
@@ -74,7 +74,7 @@ type Status =
   | Stopped
 
 type Status -> Bool
-func isRunning = status => status
+func isRunning = .
  ||> Running -> True
  ||> _       -> False
 
@@ -87,7 +87,7 @@ When the choice is really a boolean condition, calculate the condition first and
 
 ```aivi
 type Int -> Text
-func classifyNumber = n => n > 0
+func classifyNumber = . > 0
  T|> "positive"
  F|> "not positive"
 
@@ -107,7 +107,7 @@ type Profile = {
 }
 
 type Profile -> Text
-func profileSummary = profile => profile
+func profileSummary = .
  ||> { name, score } -> "{name} scored {score}"
 
 value summaryText =
@@ -127,7 +127,7 @@ type Profile = {
 }
 
 type Profile -> Bool
-func isTopScore = profile => profile
+func isTopScore = .
  ||> { score } -> score >= 100
 
 value topScore =
@@ -152,7 +152,7 @@ type Direction =
   | Right
 
 type (Point, Direction) -> Point
-func step = move => move
+func step = .
  ||> (Point x y, Up)    -> Point x (y - 1)
  ||> (Point x y, Down)  -> Point x (y + 1)
  ||> (Point x y, Left)  -> Point (x - 1) y
@@ -176,7 +176,7 @@ type Outer =
   | Outer Inner
 
 type Outer -> Text
-func describeOuter = outer => outer
+func describeOuter = .
  ||> Outer A -> "outer A"
  ||> Outer B -> "outer B"
 
@@ -189,7 +189,7 @@ value outerLabel = describeOuter (Outer A)
 
 ```aivi
 type Option Text -> Text
-func displayName = maybeName => maybeName
+func displayName = .
  ||> Some name -> name
  ||> None      -> "anonymous"
 
@@ -198,7 +198,7 @@ value shownName = displayName (Some "Ada")
 
 ```aivi
 type Result Text Int -> Text
-func handleResult = result => result
+func handleResult = .
  ||> Ok value    -> "got {value}"
  ||> Err message -> "failed {message}"
 
@@ -211,7 +211,7 @@ When the subject is already `Bool`, `T|>` and `F|>` are shorter than a full matc
 
 ```aivi
 type Bool -> Text
-func statusLabel = active => active
+func statusLabel = .
  T|> "active"
  F|> "inactive"
 
