@@ -151,9 +151,14 @@ pub struct RegexLiteral {
 }
 
 /// Value-level record field preserving shorthand and explicit forms.
+///
+/// `label_path` holds additional dotted segments beyond `label`.
+/// For `{ address.city.name: value }`, `label` is `address` and
+/// `label_path` is `[city, name]`.  Plain fields leave `label_path` empty.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecordField {
     pub label: Identifier,
+    pub label_path: Vec<Identifier>,
     pub value: Option<Expr>,
     pub span: SourceSpan,
 }
@@ -575,9 +580,14 @@ pub struct PipeExpr {
 }
 
 /// Record-pattern field preserving shorthand and explicit forms.
+///
+/// `label_path` holds additional dotted segments beyond `label`.
+/// For `{ address.city.name }`, `label` is `address` and
+/// `label_path` is `[city, name]`.  Plain fields leave `label_path` empty.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecordPatternField {
     pub label: Identifier,
+    pub label_path: Vec<Identifier>,
     pub pattern: Option<Pattern>,
     pub span: SourceSpan,
 }

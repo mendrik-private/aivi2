@@ -240,7 +240,7 @@ value keepCounter : (Counter -> Counter) =
     }
 ```
 
-Current limitation: structural removal syntax (`field: -`, or equivalently `.field: -`) is parsed but still rejected later in the compiler pipeline because result-type-changing patch elaboration is not wired through the executable slice yet.
+Structural removal syntax (`field: -`) removes a field from the result type. See [Record Patterns § Patch removal](/guide/record-patterns#patch-removal) for details.
 
 ## Type annotations
 

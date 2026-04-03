@@ -48,6 +48,8 @@ const guideSections: DocGroup[] = [
       { text: 'Values & Functions', link: '/guide/values-and-functions' },
       { text: 'Types', link: '/guide/types' },
       { text: 'Pattern Matching', link: '/guide/pattern-matching' },
+      { text: 'Record Patterns', link: '/guide/record-patterns' },
+      { text: 'Predicates & Selectors', link: '/guide/predicates' },
       { text: 'Pipes & Operators', link: '/guide/pipes' },
       { text: 'Signals', link: '/guide/signals' },
       { text: 'Sources', link: '/guide/sources' },

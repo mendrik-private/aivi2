@@ -2341,11 +2341,36 @@ impl<'a> Lowerer<'a> {
                 })
             }
             syn::ExprKind::Record(record) => {
-                let record = self.lower_record_expr(record);
-                self.alloc_expr(Expr {
-                    span: expr.span,
-                    kind: ExprKind::Record(record),
-                })
+                // Detect record projection: { field: . } or { a.b.c: . }
+                // When a field value is SubjectPlaceholder, this is a projection
+                // from the ambient subject, not record construction.
+                if let Some(proj_field) = record.fields.iter().find(|f| {
+                    matches!(
+                        f.value.as_ref().map(|v| &v.kind),
+                        Some(syn::ExprKind::SubjectPlaceholder)
+                    )
+                }) {
+                    let mut names = vec![
+                        self.make_name(&proj_field.label.text, proj_field.label.span),
+                    ];
+                    for seg in &proj_field.label_path {
+                        names.push(self.make_name(&seg.text, seg.span));
+                    }
+                    let path = self.make_path(&names);
+                    self.alloc_expr(Expr {
+                        span: expr.span,
+                        kind: ExprKind::Projection {
+                            base: ProjectionBase::Ambient,
+                            path,
+                        },
+                    })
+                } else {
+                    let record = self.lower_record_expr(record);
+                    self.alloc_expr(Expr {
+                        span: expr.span,
+                        kind: ExprKind::Record(record),
+                    })
+                }
             }
             syn::ExprKind::SubjectPlaceholder => self.alloc_expr(Expr {
                 span: expr.span,
@@ -3394,30 +3419,63 @@ impl<'a> Lowerer<'a> {
                             ),
                         );
                     }
-                    let pat = field
+
+                    // Build the leaf pattern (innermost binding).
+                    let leaf_pat = field
                         .pattern
                         .as_ref()
                         .map(|pattern| self.lower_pattern(pattern))
                         .unwrap_or_else(|| {
-                            let binding_name = self.make_name(&field.label.text, field.label.span);
+                            // Shorthand: bind the leaf segment name.
+                            let leaf_ident = field
+                                .label_path
+                                .last()
+                                .unwrap_or(&field.label);
+                            let binding_name =
+                                self.make_name(&leaf_ident.text, leaf_ident.span);
                             let binding = self.alloc_binding(Binding {
-                                span: field.label.span,
+                                span: leaf_ident.span,
                                 name: binding_name.clone(),
                                 kind: BindingKind::Pattern,
                             });
                             self.alloc_pattern(Pattern {
-                                span: field.label.span,
+                                span: leaf_ident.span,
                                 kind: PatternKind::Binding(BindingPattern {
                                     binding,
                                     name: binding_name,
                                 }),
                             })
                         });
+
+                    // Wrap in nested record patterns for dotted paths:
+                    // { a.b.c } → { a: { b: { c } } }
+                    let pat = if field.label_path.is_empty() {
+                        leaf_pat
+                    } else {
+                        // Build from inside out: start with leaf_pat, wrap in
+                        // record patterns for each path segment (reversed).
+                        let mut current = leaf_pat;
+                        for seg in field.label_path.iter().rev() {
+                            let seg_name = self.make_name(&seg.text, seg.span);
+                            let inner_field = RecordPatternField {
+                                span: seg.span,
+                                label: seg_name,
+                                pattern: current,
+                                surface: RecordFieldSurface::Explicit,
+                            };
+                            current = self.alloc_pattern(Pattern {
+                                span: seg.span,
+                                kind: PatternKind::Record(vec![inner_field]),
+                            });
+                        }
+                        current
+                    };
+
                     lowered_fields.push(RecordPatternField {
                         span: field.span,
                         label: self.make_name(&field.label.text, field.label.span),
                         pattern: pat,
-                        surface: if field.pattern.is_some() {
+                        surface: if field.pattern.is_some() || !field.label_path.is_empty() {
                             RecordFieldSurface::Explicit
                         } else {
                             RecordFieldSurface::Shorthand

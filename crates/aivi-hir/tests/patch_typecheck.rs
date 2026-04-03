@@ -94,18 +94,31 @@ fn accepts_patch_constructor_focus_for_single_payload_constructors() {
 }
 
 #[test]
-fn reports_patch_remove_as_unsupported() {
+fn accepts_patch_remove_on_record_field() {
     let report = typecheck_text(
-        "patch-remove-unsupported.aivi",
-        "type User = { name: Text }\n\
-         value user:User = { name: \"Ada\" }\n\
+        "patch-remove.aivi",
+        "type User = { name: Text, age: Int }\n\
+         value user:User = { name: \"Ada\", age: 30 }\n\
          value updated = user <| { .name: - }\n",
     );
     assert!(
-        report.diagnostics().iter().any(|diagnostic| {
-            diagnostic.code == Some(aivi_hir::codes::UNSUPPORTED_PATCH_REMOVE)
-        }),
-        "expected unsupported patch removal diagnostic, got diagnostics: {:?}",
+        report.is_ok(),
+        "expected patch removal to typecheck, got diagnostics: {:?}",
+        report.diagnostics()
+    );
+}
+
+#[test]
+fn accepts_patch_remove_with_annotated_result_type() {
+    let report = typecheck_text(
+        "patch-remove-annotated.aivi",
+        "type User = { name: Text, age: Int }\n\
+         value user:User = { name: \"Ada\", age: 30 }\n\
+         value updated:{ age: Int } = user <| { .name: - }\n",
+    );
+    assert!(
+        report.is_ok(),
+        "expected annotated patch removal to typecheck, got diagnostics: {:?}",
         report.diagnostics()
     );
 }

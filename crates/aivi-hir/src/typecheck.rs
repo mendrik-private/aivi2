@@ -2382,9 +2382,19 @@ impl<'a> TypeChecker<'a> {
         expected: Option<&GateType>,
         value_stack: &mut Vec<ItemId>,
     ) -> bool {
-        let target_ty = expected
-            .cloned()
-            .or_else(|| self.inferred_expr_shape(target, env));
+        let removed = Self::collect_patch_removed_fields(patch);
+
+        // When there are removals, the result type differs from the input type.
+        // Infer the target type from the expression, not from expected.
+        let target_ty = if removed.is_empty() {
+            expected
+                .cloned()
+                .or_else(|| self.inferred_expr_shape(target, env))
+        } else {
+            self.inferred_expr_shape(target, env)
+                .or_else(|| expected.cloned())
+        };
+
         let target_ok = match target_ty.as_ref() {
             Some(subject) => self.check_expr(target, env, Some(subject), value_stack),
             None => self.check_expr(target, env, None, value_stack),
@@ -2393,13 +2403,52 @@ impl<'a> TypeChecker<'a> {
             Some(subject) => self.check_patch_block(patch, subject, env, value_stack),
             None => self.check_patch_block_children(patch, env, value_stack),
         };
-        let result_ok = match (expected, target_ty.as_ref()) {
+        // Compute the actual result type after field removal.
+        let actual_result = match target_ty.as_ref() {
+            Some(ty) if !removed.is_empty() => Some(Self::omit_fields_from_type(ty, &removed)),
+            _ => target_ty.clone(),
+        };
+        let result_ok = match (expected, actual_result.as_ref()) {
             (Some(expected), Some(actual)) => {
                 self.check_result_type(expr_id, Some(expected), actual)
             }
             _ => true,
         };
         target_ok && patch_ok && result_ok
+    }
+
+    /// Collect top-level field names targeted by Remove instructions.
+    fn collect_patch_removed_fields(patch: &crate::PatchBlock) -> Vec<String> {
+        let mut removed = Vec::new();
+        for entry in &patch.entries {
+            if !matches!(entry.instruction.kind, crate::PatchInstructionKind::Remove) {
+                continue;
+            }
+            // Only handle top-level removals: selector has exactly one Named segment.
+            if entry.selector.segments.len() == 1 {
+                if let crate::PatchSelectorSegment::Named { name, .. } =
+                    &entry.selector.segments[0]
+                {
+                    removed.push(name.text().to_string());
+                }
+            }
+        }
+        removed
+    }
+
+    /// Produce a record type with the named fields removed.  If the type is not
+    /// a record or none of the named fields match, return the type unchanged.
+    fn omit_fields_from_type(ty: &GateType, removed: &[String]) -> GateType {
+        match ty {
+            GateType::Record(fields) => GateType::Record(
+                fields
+                    .iter()
+                    .filter(|f| !removed.iter().any(|r| r == &f.name))
+                    .cloned()
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
     }
 
     fn check_patch_literal_expr(
@@ -2646,16 +2695,11 @@ impl<'a> TypeChecker<'a> {
                 self.check_expr_with_ambient(expr, env, Some(focus), focus)
             }
             crate::PatchInstructionKind::Remove => {
-                self.diagnostics.push(
-                    Diagnostic::error("structural patch removal is not implemented yet")
-                        .with_code(code("unsupported-patch-remove"))
-                        .with_primary_label(
-                            instruction.span,
-                            "remove support needs result-type elaboration through the compiler pipeline",
-                        ),
-                );
+                // Patch removal is accepted; the focus type confirms the field exists.
+                // Result-type shrinking is handled by check_patch_apply_expr which
+                // applies Omit to the target type after collecting removed fields.
                 let _ = value_stack;
-                false
+                true
             }
         }
     }

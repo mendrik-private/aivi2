@@ -2562,7 +2562,7 @@ impl<'a> Parser<'a> {
         let head_start = self.peek_nontrivia(*cursor, end)?;
         if !matches!(
             self.tokens[head_start].kind(),
-            TokenKind::Dot | TokenKind::StringLiteral
+            TokenKind::Dot | TokenKind::StringLiteral | TokenKind::LBrace
         ) {
             return None;
         }
@@ -2727,6 +2727,36 @@ impl<'a> Parser<'a> {
                 )
             }
             ExprKind::Record(record) => {
+                // Detect record projection pattern: { field: . } or { a.b.c: . }
+                // When a field value is SubjectPlaceholder, this extracts a field from
+                // the subject rather than constructing a record.
+                if !ambient_allowed {
+                    if let Some(proj_field) = record.fields.iter().find(|f| {
+                        matches!(
+                            f.value.as_ref().map(|v| &v.kind),
+                            Some(ExprKind::SubjectPlaceholder)
+                        )
+                    }) {
+                        let mut fields = vec![proj_field.label.clone()];
+                        fields.extend(proj_field.label_path.iter().cloned());
+                        let path = ProjectionPath {
+                            span: proj_field.span,
+                            fields,
+                        };
+                        return (
+                            Expr {
+                                span,
+                                kind: ExprKind::Projection {
+                                    base: Box::new(
+                                        self.implicit_function_subject_expr_at(parameter, span),
+                                    ),
+                                    path,
+                                },
+                            },
+                            true,
+                        );
+                    }
+                }
                 let (record, changed) = self.rewrite_free_function_subject_record_expr(
                     record,
                     parameter,
@@ -2976,6 +3006,7 @@ impl<'a> Parser<'a> {
                 });
                 RecordField {
                     label: field.label,
+                    label_path: field.label_path,
                     value,
                     span: field.span,
                 }
@@ -4718,6 +4749,14 @@ impl<'a> Parser<'a> {
                 break;
             };
             let field_start = label.span.span().start();
+            let mut label_path = Vec::new();
+            while self.consume_kind(cursor, end, TokenKind::Dot).is_some() {
+                if let Some(next) = self.parse_identifier(cursor, end) {
+                    label_path.push(next);
+                } else {
+                    break;
+                }
+            }
             let value = if self.consume_kind(cursor, end, TokenKind::Colon).is_some() {
                 self.parse_expr(cursor, end, ExprStop::record_context())
             } else {
@@ -4726,9 +4765,13 @@ impl<'a> Parser<'a> {
             let field_end = value
                 .as_ref()
                 .map(|expr| expr.span.span().end())
-                .unwrap_or_else(|| label.span.span().end());
+                .unwrap_or_else(|| {
+                    label_path.last().map(|p| p.span.span().end())
+                        .unwrap_or_else(|| label.span.span().end())
+                });
             fields.push(RecordField {
                 label,
+                label_path,
                 value,
                 span: SourceSpan::new(self.source.id(), Span::new(field_start, field_end)),
             });
@@ -5111,6 +5154,14 @@ impl<'a> Parser<'a> {
                 break;
             };
             let field_start = label.span.span().start();
+            let mut label_path = Vec::new();
+            while self.consume_kind(cursor, end, TokenKind::Dot).is_some() {
+                if let Some(next) = self.parse_identifier(cursor, end) {
+                    label_path.push(next);
+                } else {
+                    break;
+                }
+            }
             let pattern = if self.consume_kind(cursor, end, TokenKind::Colon).is_some() {
                 self.parse_pattern(cursor, end, PatternStop::record_context())
             } else {
@@ -5119,9 +5170,13 @@ impl<'a> Parser<'a> {
             let field_end = pattern
                 .as_ref()
                 .map(|pattern| pattern.span.span().end())
-                .unwrap_or_else(|| label.span.span().end());
+                .unwrap_or_else(|| {
+                    label_path.last().map(|p| p.span.span().end())
+                        .unwrap_or_else(|| label.span.span().end())
+                });
             fields.push(RecordPatternField {
                 label,
+                label_path,
                 pattern,
                 span: SourceSpan::new(self.source.id(), Span::new(field_start, field_end)),
             });

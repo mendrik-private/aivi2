@@ -828,6 +828,7 @@ impl Formatter {
                 });
                 RecordField {
                     label: field.label,
+                    label_path: field.label_path,
                     value,
                     span: field.span,
                 }
@@ -2543,32 +2544,43 @@ impl Formatter {
         )
     }
 
+    fn format_record_field_label(&self, field: &RecordField) -> String {
+        let mut label = field.label.text.clone();
+        for seg in &field.label_path {
+            label.push('.');
+            label.push_str(&seg.text);
+        }
+        label
+    }
+
     fn format_record_field_block(&self, field: &RecordField) -> Block {
+        let label = self.format_record_field_label(field);
         match &field.value {
             Some(value) => {
                 let block = self.format_expr_block(value, false);
                 if block.is_inline() {
                     Block::inline(format!(
                         "{}: {}",
-                        field.label.text,
+                        label,
                         block.inline_text().expect("inline block")
                     ))
                 } else {
-                    block.prefixed(&format!("{}: ", field.label.text))
+                    block.prefixed(&format!("{}: ", label))
                 }
             }
-            None => Block::inline(field.label.text.clone()),
+            None => Block::inline(label),
         }
     }
 
     fn format_record_field_inline(&self, field: &RecordField) -> String {
+        let label = self.format_record_field_label(field);
         match &field.value {
             Some(value) => format!(
                 "{}: {}",
-                field.label.text,
+                label,
                 self.format_expr_inline(value, 0)
             ),
-            None => field.label.text.clone(),
+            None => label,
         }
     }
 
@@ -2955,13 +2967,18 @@ impl Formatter {
     }
 
     fn format_pattern_field_inline(&self, field: &RecordPatternField) -> String {
+        let mut label = field.label.text.clone();
+        for seg in &field.label_path {
+            label.push('.');
+            label.push_str(&seg.text);
+        }
         match &field.pattern {
             Some(pattern) => format!(
                 "{}: {}",
-                field.label.text,
+                label,
                 self.format_pattern_inline(pattern, 0)
             ),
-            None => field.label.text.clone(),
+            None => label,
         }
     }
 
