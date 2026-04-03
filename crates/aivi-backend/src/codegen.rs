@@ -313,6 +313,7 @@ enum ItemReferencePlan {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DomainMemberCallPlan {
     RepresentationalIdentityUnary,
+    NativeIntBinary(BinaryOperator),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -840,14 +841,25 @@ impl<'a> CraneliftCompiler<'a> {
                             work.push(entry.value);
                         }
                     }
+                    KernelExprKind::SuffixedInteger(_) => {
+                        // Representational domain literals (e.g. `5sec` for
+                        // `domain Duration over Int`) compile as their
+                        // underlying integer carrier value.
+                        if !self.domain_has_int_carrier(expr.layout) {
+                            errors.push(self.unsupported_expression(
+                                kernel_id,
+                                expr_id,
+                                "suffixed integer literals require a representational domain with Int carrier for Cranelift compilation",
+                            ));
+                        }
+                    }
                     KernelExprKind::DomainMember(_)
                     | KernelExprKind::BuiltinClassMember(_)
-                    | KernelExprKind::Builtin(_)
-                    | KernelExprKind::SuffixedInteger(_) => {
+                    | KernelExprKind::Builtin(_) => {
                         errors.push(self.unsupported_expression(
                             kernel_id,
                             expr_id,
-                            "the current Cranelift slice lowers direct saturated item calls, selected direct bytes intrinsics, representational by-reference domain-member calls, niche and inline scalar Option constructors/carriers, record projection, inline-pipe gate plus straight-line transform/tap stages, scalar literals, static scalar tuple/record literals, Int/Bool arithmetic, Int/Float/Bool comparison, and native equality over scalar/Text/Bytes/record/tuple/scalar-Option/niche-Option shapes only",
+                            "the current Cranelift slice lowers direct saturated item calls, selected direct bytes intrinsics, representational by-reference domain-member calls, niche and inline scalar Option constructors/carriers, record projection, inline-pipe gate plus straight-line transform/tap stages, scalar literals, static scalar tuple/record literals, Int/Bool arithmetic, Int/Float/Bool comparison, native equality over scalar/Text/Bytes/record/tuple/scalar-Option/niche-Option shapes, and representational suffixed integer domain literals only",
                         ));
                     }
                 }
@@ -1281,6 +1293,19 @@ impl<'a> CraneliftCompiler<'a> {
                                 expr.layout,
                                 "integer literal",
                             )?;
+                            let raw = integer.raw.as_ref();
+                            let value = raw.parse::<i64>().map_err(|_| {
+                                CodegenError::InvalidIntegerLiteral {
+                                    kernel: kernel_id,
+                                    expr: expr_id,
+                                    raw: integer.raw.clone(),
+                                }
+                            })?;
+                            values.push(builder.ins().iconst(types::I64, value));
+                        }
+                        KernelExprKind::SuffixedInteger(integer) => {
+                            // Representational domain literal: emit the
+                            // integer carrier value directly.
                             let raw = integer.raw.as_ref();
                             let value = raw.parse::<i64>().map_err(|_| {
                                 CodegenError::InvalidIntegerLiteral {
@@ -3407,6 +3432,92 @@ impl<'a> CraneliftCompiler<'a> {
         );
         let (parameters, result_layout) =
             self.require_saturated_callable_call(kernel_id, expr_id, callee, arguments, &detail)?;
+
+        // ── Binary operator path ───────────────────────────────────────────
+        if let Some(operator) = domain_member_binary_operator(handle.member_name.as_ref()) {
+            let [left_layout, right_layout] = parameters.as_slice() else {
+                return Err(self.unsupported_expression(
+                    kernel_id,
+                    expr_id,
+                    &format!(
+                        "{detail} binary operator requires exactly two parameters, found {}",
+                        parameters.len()
+                    ),
+                ));
+            };
+
+            if !self.domain_has_int_carrier(*left_layout)
+                || !self.domain_has_int_carrier(*right_layout)
+            {
+                return Err(self.unsupported_expression(
+                    kernel_id,
+                    expr_id,
+                    &format!(
+                        "{detail} native binary lowering is only supported for domains over Int"
+                    ),
+                ));
+            }
+
+            match operator {
+                BinaryOperator::Add
+                | BinaryOperator::Subtract
+                | BinaryOperator::Multiply
+                | BinaryOperator::Divide
+                | BinaryOperator::Modulo => {
+                    if !self.domain_has_int_carrier(result_layout) {
+                        return Err(self.unsupported_expression(
+                            kernel_id,
+                            expr_id,
+                            &format!(
+                                "{detail} arithmetic result must be a domain over Int"
+                            ),
+                        ));
+                    }
+                }
+                BinaryOperator::GreaterThan
+                | BinaryOperator::LessThan
+                | BinaryOperator::GreaterThanOrEqual
+                | BinaryOperator::LessThanOrEqual => {
+                    if !matches!(
+                        &self.program.layouts()[result_layout].kind,
+                        LayoutKind::Primitive(PrimitiveType::Bool)
+                    ) {
+                        return Err(self.unsupported_expression(
+                            kernel_id,
+                            expr_id,
+                            &format!("{detail} comparison result must be Bool"),
+                        ));
+                    }
+                }
+                _ => {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        &format!(
+                            "{detail} operator is not supported for domain binary lowering"
+                        ),
+                    ));
+                }
+            }
+
+            return Ok(DomainMemberCallPlan::NativeIntBinary(operator));
+        }
+
+        // ── Collection operations remain unsupported ───────────────────────
+        if matches!(
+            handle.member_name.as_ref(),
+            "singleton" | "head" | "tail" | "fromList"
+        ) {
+            return Err(self.unsupported_expression(
+                kernel_id,
+                expr_id,
+                &format!(
+                    "{detail} still requires backend-owned domain/collection lowering beyond representational pointer forwarding"
+                ),
+            ));
+        }
+
+        // ── Unary representational identity path ───────────────────────────
         let [parameter_layout] = parameters.as_slice() else {
             return Err(self.unsupported_expression(
                 kernel_id,
@@ -3416,21 +3527,6 @@ impl<'a> CraneliftCompiler<'a> {
                 ),
             ));
         };
-
-        if domain_member_binary_operator(handle.member_name.as_ref()).is_some()
-            || matches!(
-                handle.member_name.as_ref(),
-                "singleton" | "head" | "tail" | "fromList"
-            )
-        {
-            return Err(self.unsupported_expression(
-                kernel_id,
-                expr_id,
-                &format!(
-                    "{detail} still requires backend-owned domain/collection lowering beyond representational pointer forwarding"
-                ),
-            ));
-        }
 
         if self.program.layouts()[*parameter_layout].abi != AbiPassMode::ByReference
             || self.program.layouts()[result_layout].abi != AbiPassMode::ByReference
@@ -3730,6 +3826,22 @@ impl<'a> CraneliftCompiler<'a> {
         )
     }
 
+    /// Returns `true` when `layout` is a named domain whose first type argument
+    /// is `Primitive(Int)` — the only carrier type currently compiled inline.
+    fn domain_has_int_carrier(&self, layout: LayoutId) -> bool {
+        match self.program.layouts().get(layout).map(|l| &l.kind) {
+            Some(LayoutKind::Domain { arguments, .. }) => {
+                arguments.first().is_some_and(|inner| {
+                    matches!(
+                        self.program.layouts().get(*inner).map(|l| &l.kind),
+                        Some(LayoutKind::Primitive(PrimitiveType::Int))
+                    )
+                })
+            }
+            _ => false,
+        }
+    }
+
     fn lower_direct_item_call(
         &mut self,
         kernel_id: KernelId,
@@ -3836,6 +3948,63 @@ impl<'a> CraneliftCompiler<'a> {
                     ));
                 };
                 Ok(*argument)
+            }
+            DirectApplyPlan::DomainMember(DomainMemberCallPlan::NativeIntBinary(operator)) => {
+                let [left, right] = arguments else {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "domain binary operator lowering expected exactly two materialized arguments",
+                    ));
+                };
+                // Domain values are ByReference pointers; load the inner i64.
+                let lhs = builder.ins().load(types::I64, MemFlags::new(), *left, 0);
+                let rhs = builder.ins().load(types::I64, MemFlags::new(), *right, 0);
+                match operator {
+                    BinaryOperator::Add
+                    | BinaryOperator::Subtract
+                    | BinaryOperator::Multiply
+                    | BinaryOperator::Divide
+                    | BinaryOperator::Modulo => {
+                        let result = match operator {
+                            BinaryOperator::Add => builder.ins().iadd(lhs, rhs),
+                            BinaryOperator::Subtract => builder.ins().isub(lhs, rhs),
+                            BinaryOperator::Multiply => builder.ins().imul(lhs, rhs),
+                            BinaryOperator::Divide => builder.ins().sdiv(lhs, rhs),
+                            BinaryOperator::Modulo => builder.ins().srem(lhs, rhs),
+                            _ => unreachable!(),
+                        };
+                        // Re-wrap: store the scalar result into a stack slot and
+                        // return a pointer (domain values are ByReference).
+                        let slot = builder.create_sized_stack_slot(
+                            cranelift_codegen::ir::StackSlotData::new(
+                                cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                                8,
+                                3,
+                            ),
+                        );
+                        let addr = builder.ins().stack_addr(self.pointer_type(), slot, 0);
+                        builder.ins().store(MemFlags::new(), result, addr, 0);
+                        Ok(addr)
+                    }
+                    BinaryOperator::GreaterThan => {
+                        Ok(builder.ins().icmp(IntCC::SignedGreaterThan, lhs, rhs))
+                    }
+                    BinaryOperator::LessThan => {
+                        Ok(builder.ins().icmp(IntCC::SignedLessThan, lhs, rhs))
+                    }
+                    BinaryOperator::GreaterThanOrEqual => {
+                        Ok(builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, lhs, rhs))
+                    }
+                    BinaryOperator::LessThanOrEqual => {
+                        Ok(builder.ins().icmp(IntCC::SignedLessThanOrEqual, lhs, rhs))
+                    }
+                    _ => Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "unsupported domain binary operator in emission",
+                    )),
+                }
             }
             DirectApplyPlan::Builtin(BuiltinCallPlan::OptionSome(contract)) => {
                 let [argument] = arguments else {
@@ -7724,3 +7893,4 @@ fn sanitize_symbol_component(name: &str) -> String {
 fn wrap_one(error: CodegenError) -> CodegenErrors {
     CodegenErrors::new(vec![error])
 }
+// TEST_MARKER_12345
