@@ -5521,7 +5521,7 @@ fn cranelift_codegen_compiles_decimal_arithmetic() {
     let backend = lower_text(
         "decimal-arith.aivi",
         r#"
-fun add_decimals:Decimal = a:Decimal => b:Decimal =>
+fun add_decimals:Decimal = a:Decimal b:Decimal =>
     a + b
 "#,
     );
@@ -5541,7 +5541,7 @@ fn cranelift_codegen_compiles_bigint_arithmetic() {
     let backend = lower_text(
         "bigint-arith.aivi",
         r#"
-fun add_bigints:BigInt = a:BigInt => b:BigInt =>
+fun add_bigints:BigInt = a:BigInt b:BigInt =>
     a + b
 "#,
     );
@@ -5562,11 +5562,11 @@ fn cranelift_codegen_compiles_decimal_all_arithmetic_ops() {
     let backend = lower_text(
         "decimal-all-arith.aivi",
         r#"
-fun dec_add:Decimal = a:Decimal => b:Decimal => a + b
-fun dec_sub:Decimal = a:Decimal => b:Decimal => a - b
-fun dec_mul:Decimal = a:Decimal => b:Decimal => a * b
-fun dec_div:Decimal = a:Decimal => b:Decimal => a / b
-fun dec_mod:Decimal = a:Decimal => b:Decimal => a % b
+fun dec_add:Decimal = a:Decimal b:Decimal => a + b
+fun dec_sub:Decimal = a:Decimal b:Decimal => a - b
+fun dec_mul:Decimal = a:Decimal b:Decimal => a * b
+fun dec_div:Decimal = a:Decimal b:Decimal => a / b
+fun dec_mod:Decimal = a:Decimal b:Decimal => a % b
 "#,
     );
 
@@ -5595,11 +5595,11 @@ fn cranelift_codegen_compiles_bigint_all_arithmetic_ops() {
     let backend = lower_text(
         "bigint-all-arith.aivi",
         r#"
-fun big_add:BigInt = a:BigInt => b:BigInt => a + b
-fun big_sub:BigInt = a:BigInt => b:BigInt => a - b
-fun big_mul:BigInt = a:BigInt => b:BigInt => a * b
-fun big_div:BigInt = a:BigInt => b:BigInt => a / b
-fun big_mod:BigInt = a:BigInt => b:BigInt => a % b
+fun big_add:BigInt = a:BigInt b:BigInt => a + b
+fun big_sub:BigInt = a:BigInt b:BigInt => a - b
+fun big_mul:BigInt = a:BigInt b:BigInt => a * b
+fun big_div:BigInt = a:BigInt b:BigInt => a / b
+fun big_mod:BigInt = a:BigInt b:BigInt => a % b
 "#,
     );
 
@@ -5628,12 +5628,12 @@ fn cranelift_codegen_compiles_decimal_comparison() {
     let backend = lower_text(
         "decimal-compare.aivi",
         r#"
-fun dec_gt:Bool = a:Decimal => b:Decimal => a > b
-fun dec_lt:Bool = a:Decimal => b:Decimal => a < b
-fun dec_gte:Bool = a:Decimal => b:Decimal => a >= b
-fun dec_lte:Bool = a:Decimal => b:Decimal => a <= b
-fun dec_eq:Bool = a:Decimal => b:Decimal => a == b
-fun dec_ne:Bool = a:Decimal => b:Decimal => a != b
+fun dec_gt:Bool = a:Decimal b:Decimal => a > b
+fun dec_lt:Bool = a:Decimal b:Decimal => a < b
+fun dec_gte:Bool = a:Decimal b:Decimal => a >= b
+fun dec_lte:Bool = a:Decimal b:Decimal => a <= b
+fun dec_eq:Bool = a:Decimal b:Decimal => a == b
+fun dec_ne:Bool = a:Decimal b:Decimal => a != b
 "#,
     );
 
@@ -5662,12 +5662,12 @@ fn cranelift_codegen_compiles_bigint_comparison() {
     let backend = lower_text(
         "bigint-compare.aivi",
         r#"
-fun big_gt:Bool = a:BigInt => b:BigInt => a > b
-fun big_lt:Bool = a:BigInt => b:BigInt => a < b
-fun big_gte:Bool = a:BigInt => b:BigInt => a >= b
-fun big_lte:Bool = a:BigInt => b:BigInt => a <= b
-fun big_eq:Bool = a:BigInt => b:BigInt => a == b
-fun big_ne:Bool = a:BigInt => b:BigInt => a != b
+fun big_gt:Bool = a:BigInt b:BigInt => a > b
+fun big_lt:Bool = a:BigInt b:BigInt => a < b
+fun big_gte:Bool = a:BigInt b:BigInt => a >= b
+fun big_lte:Bool = a:BigInt b:BigInt => a <= b
+fun big_eq:Bool = a:BigInt b:BigInt => a == b
+fun big_ne:Bool = a:BigInt b:BigInt => a != b
 "#,
     );
 
