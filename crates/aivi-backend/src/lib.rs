@@ -64,9 +64,10 @@ pub use program::{
     SourceTeardownPolicy, Stage, StageKind, TemporalStage, TruthyFalsyBranch, TruthyFalsyStage,
 };
 pub use runtime::{
-    DetachedRuntimeValue, EvaluationError, KernelEvaluator, RuntimeCallable, RuntimeConstructor,
-    RuntimeCustomCapabilityCommandPlan, RuntimeDbCommitPlan, RuntimeDbConnection,
-    RuntimeDbQueryPlan, RuntimeDbStatement, RuntimeDbTaskPlan, RuntimeMap, RuntimeMapEntry,
-    RuntimeNamedValue, RuntimeRecordField, RuntimeSumValue, RuntimeTaskPlan, RuntimeValue,
+    DetachedRuntimeValue, EvalFrame, EvaluationError, KernelEvaluator, RuntimeCallable,
+    RuntimeConstructor, RuntimeCustomCapabilityCommandPlan, RuntimeDbCommitPlan,
+    RuntimeDbConnection, RuntimeDbQueryPlan, RuntimeDbStatement, RuntimeDbTaskPlan, RuntimeMap,
+    RuntimeMapEntry, RuntimeNamedValue, RuntimeRecordField, RuntimeSumValue, RuntimeTaskPlan,
+    RuntimeValue,
 };
 pub use validate::{ValidationError, ValidationErrors, validate_program};

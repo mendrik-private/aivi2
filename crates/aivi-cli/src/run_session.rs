@@ -568,11 +568,33 @@ impl RunSessionState {
         }
         let failures = self.driver.drain_failures();
         if !failures.is_empty() {
+            let source_map = self.driver.build_source_map();
+            let graph = self.driver.signal_graph();
             let mut rendered = String::from("live runtime failed during `aivi run`:\n");
-            for failure in failures {
-                rendered.push_str("- ");
-                rendered.push_str(&failure.to_string());
-                rendered.push('\n');
+            for failure in &failures {
+                match failure {
+                    GlibLinkedRuntimeFailure::Tick(error) => {
+                        let diagnostics =
+                            render_runtime_error(error, &source_map, &graph, None);
+                        for diag in &diagnostics {
+                            rendered.push_str(&format!(
+                                "  error: {}\n",
+                                diag.message
+                            ));
+                            for note in &diag.notes {
+                                rendered.push_str(&format!("  note: {note}\n"));
+                            }
+                            for help in &diag.help {
+                                rendered.push_str(&format!("  help: {help}\n"));
+                            }
+                        }
+                    }
+                    other => {
+                        rendered.push_str("  ");
+                        rendered.push_str(&other.to_string());
+                        rendered.push('\n');
+                    }
+                }
             }
             return Err(rendered);
         }

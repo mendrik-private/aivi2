@@ -131,6 +131,29 @@ impl BackendLinkedRuntime {
         self.source_bindings.values()
     }
 
+    /// Build a [`RuntimeSourceMap`] for error rendering, enriched with
+    /// pipeline IDs from the linked runtime.
+    pub fn build_source_map(&self) -> crate::source_map::RuntimeSourceMap {
+        let mut map = crate::source_map::RuntimeSourceMap::from_assembly(&self.assembly);
+
+        // Enrich with pipeline IDs from derived signals.
+        for (handle, linked) in &self.derived_signals {
+            map.set_signal_pipeline_ids(
+                handle.as_signal(),
+                linked.pipeline_ids.clone(),
+            );
+        }
+        // Enrich with pipeline IDs from reactive signals.
+        for (_handle, linked) in &self.reactive_signals {
+            map.set_signal_pipeline_ids(
+                linked.signal,
+                linked.pipeline_ids.clone(),
+            );
+        }
+
+        map
+    }
+
     pub fn source_by_owner(&self, owner: hir::ItemId) -> Option<&LinkedSourceBinding> {
         self.source_bindings
             .values()

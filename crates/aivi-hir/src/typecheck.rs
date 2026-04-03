@@ -3027,16 +3027,31 @@ impl<'a> TypeChecker<'a> {
                 "both operands must resolve to one shared type here",
             ),
         };
-        self.diagnostics.push(
-            Diagnostic::error(format!(
+        let mut diag = Diagnostic::error(format!(
                 "operator `{}` expects {expected_operands}, found {} and {}",
                 binary_operator_text(operator),
                 describe_inferred_type(left),
                 describe_inferred_type(right),
             ))
             .with_code(code("invalid-binary-operator"))
-            .with_primary_label(span, label),
-        );
+            .with_primary_label(span, label);
+
+        // Suggest fixes for common mismatches.
+        match expectation {
+            BinaryOperatorExpectation::BoolOperands => {
+                diag = diag.with_help("logical operators `and`, `or` require both sides to be `Bool`");
+            }
+            BinaryOperatorExpectation::MatchingNumericOperands => {
+                if let (Some(l), Some(r)) = (left, right) {
+                    if l != r {
+                        diag = diag.with_help("convert one operand so both sides share the same numeric type");
+                    }
+                }
+            }
+            BinaryOperatorExpectation::CommonTypeOperands => {}
+        }
+
+        self.diagnostics.push(diag);
     }
 
     fn handle_constraints(&mut self, constraints: &[TypeConstraint]) -> ConstraintSolveReport {
@@ -3904,12 +3919,32 @@ impl<'a> TypeChecker<'a> {
         )
     }
 
-    fn emit_type_mismatch(&mut self, span: SourceSpan, expected: &GateType, actual: &GateType) {
-        self.diagnostics.push(
-            Diagnostic::error(format!("expected `{expected}` but found `{actual}`"))
-                .with_code(code("type-mismatch"))
-                .with_primary_label(span, "this expression has the wrong type"),
-        );
+        fn emit_type_mismatch(&mut self, span: SourceSpan, expected: &GateType, actual: &GateType) {
+        let mut diag = Diagnostic::error(format!("expected `{expected}` but found `{actual}`"))
+            .with_code(code("type-mismatch"))
+            .with_primary_label(span, "this expression has the wrong type");
+
+        // Suggest conversions for common primitive mismatches.
+        if let (GateType::Primitive(e), GateType::Primitive(a)) = (expected, actual) {
+            use crate::hir::BuiltinType;
+            match (e, a) {
+                (BuiltinType::Text, BuiltinType::Int | BuiltinType::Float) => {
+                    diag = diag.with_help("use `toString` to convert a number to text");
+                }
+                (BuiltinType::Int, BuiltinType::Float) => {
+                    diag = diag.with_help("use `round`, `floor`, or `ceil` to convert Float to Int");
+                }
+                (BuiltinType::Float, BuiltinType::Int) => {
+                    diag = diag.with_help("use `toFloat` to convert Int to Float");
+                }
+                (BuiltinType::Text, BuiltinType::Bool) => {
+                    diag = diag.with_help("use `toString` to convert Bool to text");
+                }
+                _ => {}
+            }
+        }
+
+        self.diagnostics.push(diag);
     }
 
     fn emit_type_mismatch_or_unresolved(

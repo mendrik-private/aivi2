@@ -90,6 +90,7 @@ pub struct Diagnostic {
     pub message: String,
     pub labels: Vec<DiagnosticLabel>,
     pub notes: Vec<String>,
+    pub help: Vec<String>,
 }
 
 impl Diagnostic {
@@ -100,6 +101,7 @@ impl Diagnostic {
             message: message.into(),
             labels: Vec::new(),
             notes: Vec::new(),
+            help: Vec::new(),
         }
     }
 
@@ -113,10 +115,6 @@ impl Diagnostic {
 
     pub fn note(message: impl Into<String>) -> Self {
         Self::new(Severity::Note, message)
-    }
-
-    pub fn help(message: impl Into<String>) -> Self {
-        Self::new(Severity::Help, message)
     }
 
     pub fn with_code(mut self, code: DiagnosticCode) -> Self {
@@ -142,6 +140,14 @@ impl Diagnostic {
         self
     }
 
+    pub fn with_help(mut self, help: impl Into<String>) -> Self {
+        self.help.push(help.into());
+        self
+    }
+
+    /// Render this diagnostic as a plain-text string (no ANSI colors).
+    ///
+    /// For colored output, use [`crate::render::DiagnosticRenderer`].
     pub fn render(&self, sources: &SourceDatabase) -> String {
         let mut rendered = String::new();
         let _ = write!(rendered, "{}", self.severity.as_str());
@@ -248,6 +254,10 @@ impl Diagnostic {
             let _ = writeln!(rendered, "note: {note}");
         }
 
+        for h in &self.help {
+            let _ = writeln!(rendered, "help: {h}");
+        }
+
         rendered.trim_end().to_owned()
     }
 }
@@ -286,5 +296,25 @@ mod tests {
             "secondary label message missing from rendered output:\n{rendered}"
         );
         assert!(rendered.contains("parser stayed in the Milestone 1 surface layer"));
+    }
+
+    #[test]
+    fn renders_help_hints() {
+        let mut sources = SourceDatabase::new();
+        let file_id = sources.add_file("sample.aivi", "value x = 42\n");
+        let file = &sources[file_id];
+
+        let rendered = Diagnostic::error("type mismatch")
+            .with_primary_label(file.source_span(10..12), "expected Text, found Int")
+            .with_help("try wrapping this in `toString`")
+            .render(&sources);
+
+        assert!(rendered.contains("help: try wrapping this in `toString`"));
+    }
+
+    #[test]
+    fn help_field_defaults_empty() {
+        let diag = Diagnostic::error("test");
+        assert!(diag.help.is_empty());
     }
 }

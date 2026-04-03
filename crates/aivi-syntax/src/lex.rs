@@ -332,7 +332,8 @@ fn lex_range(source: &SourceFile, range: std::ops::Range<usize>) -> LexedModule 
                     .with_primary_label(
                         source.source_span(start..cursor),
                         "expected a closing `\"`",
-                    ),
+                    )
+                    .with_help("regex literals must be closed with `\"` on the same line"),
                 );
             }
             for esc_offset in invalid_escapes {
@@ -350,7 +351,8 @@ fn lex_range(source: &SourceFile, range: std::ops::Range<usize>) -> LexedModule 
                     .with_primary_label(
                         source.source_span(esc_offset..esc_end),
                         "unrecognised escape sequence",
-                    ),
+                    )
+                    .with_help("valid regex escapes include: \\d, \\w, \\s, \\n, \\t, \\r, \\\\, \\0"),
                 );
             }
             at_line_start = false;
@@ -458,7 +460,8 @@ fn lex_range(source: &SourceFile, range: std::ops::Range<usize>) -> LexedModule 
                     .with_primary_label(
                         source.source_span(start..cursor),
                         "expected a closing `\"`",
-                    ),
+                    )
+                    .with_help("string literals must be closed with `\"` on the same line"),
                 );
             }
             for esc_offset in invalid_escapes {
@@ -476,7 +479,8 @@ fn lex_range(source: &SourceFile, range: std::ops::Range<usize>) -> LexedModule 
                     .with_primary_label(
                         source.source_span(esc_offset..esc_end),
                         "unrecognised escape sequence",
-                    ),
+                    )
+                    .with_help("valid string escapes are: \\n, \\t, \\r, \\\\, \\\"  and \\{, \\}"),
                 );
             }
             at_line_start = false;
@@ -519,7 +523,8 @@ fn lex_range(source: &SourceFile, range: std::ops::Range<usize>) -> LexedModule 
                     .with_primary_label(
                         source.source_span(cursor..next_cursor),
                         "this character is outside the Milestone 1 token set",
-                    ),
+                    )
+                    .with_help("check for invisible Unicode characters or unsupported symbols"),
             );
         }
         cursor = next_cursor;

@@ -421,6 +421,11 @@ impl GlibLinkedRuntimeDriver {
         self.with_state(|state| state.linked.signal_graph().clone())
     }
 
+    /// Build a [`RuntimeSourceMap`] for rendering runtime errors with source context.
+    pub fn build_source_map(&self) -> crate::source_map::RuntimeSourceMap {
+        self.with_state(|state| state.linked.build_source_map())
+    }
+
     pub fn current_signal_value(
         &self,
         signal: SignalHandle,

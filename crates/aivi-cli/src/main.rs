@@ -25,7 +25,7 @@ use aivi_backend::{
     DetachedRuntimeValue, ItemId as BackendItemId, KernelEvaluator, Program as BackendProgram,
     RuntimeValue, compile_program, lower_module as lower_backend_module, validate_program,
 };
-use aivi_base::{Diagnostic, FileId, Severity, SourceDatabase, SourceSpan};
+use aivi_base::{ColorMode, Diagnostic, DiagnosticRenderer, FileId, Severity, SourceDatabase, SourceSpan};
 use aivi_core::{
     IncludedItems, RuntimeFragmentSpec, lower_module_with_items as lower_core_module_with_items,
     lower_runtime_fragment, lower_runtime_module_with_items, runtime_fragment_included_items,
@@ -51,9 +51,10 @@ use aivi_query::{
     parsed_file as query_parsed_file, resolve_v1_entrypoint,
 };
 use aivi_runtime::{
-    BackendLinkedRuntime, GlibLinkedRuntimeDriver, HirRuntimeAssembly,
+    BackendLinkedRuntime, GlibLinkedRuntimeDriver, GlibLinkedRuntimeFailure, HirRuntimeAssembly,
     InputHandle as RuntimeInputHandle, Publication, SourceProviderContext, SourceProviderManager,
     assemble_hir_runtime_with_items, execute_runtime_value_with_context, link_backend_runtime,
+    render_runtime_error,
 };
 use aivi_syntax::{Formatter, ItemKind, TokenKind, lex_module, parse_module};
 use gtk::{glib, prelude::*};
@@ -895,6 +896,7 @@ fn test_file_with_context(
             path,
             artifact,
             context.clone(),
+            &snapshot.sources,
             "`aivi test`",
             &format!("test `{}`", test.name),
         ) {
@@ -1065,7 +1067,7 @@ fn execute_file_with_context(
             return Ok(ExitCode::FAILURE);
         }
     };
-    if let Err(message) = launch_execute(path, artifact, context, stdout, stderr) {
+    if let Err(message) = launch_execute(path, artifact, context, &snapshot.sources, stdout, stderr) {
         write_output_line(stderr, &message)?;
         return Ok(ExitCode::FAILURE);
     }
@@ -1266,11 +1268,12 @@ fn launch_execute(
     path: &Path,
     artifact: ExecuteArtifact,
     context: SourceProviderContext,
+    sources: &SourceDatabase,
     stdout: &mut impl Write,
     stderr: &mut impl Write,
 ) -> Result<(), String> {
     let value =
-        evaluate_task_owner_value(path, artifact, context.clone(), "`aivi execute`", "`main`")?;
+        evaluate_task_owner_value(path, artifact, context.clone(), sources, "`aivi execute`", "`main`")?;
     execute_main_task_value(value, &context, stdout, stderr)
 }
 
@@ -1278,6 +1281,7 @@ fn evaluate_task_owner_value(
     path: &Path,
     artifact: ExecuteArtifact,
     context: SourceProviderContext,
+    sources: &SourceDatabase,
     command_name: &str,
     entry_name: &str,
 ) -> Result<RuntimeValue, String> {
@@ -1325,7 +1329,7 @@ fn evaluate_task_owner_value(
         rendered
     })?;
     let mut providers = SourceProviderManager::with_context(context);
-    settle_execute_sources(&mut linked, &mut providers)?;
+    settle_execute_sources(&mut linked, &mut providers, sources)?;
     linked
         .evaluate_task_value_by_owner(task_owner)
         .map(|value| value.into_runtime())
@@ -1340,10 +1344,20 @@ fn evaluate_task_owner_value(
 fn settle_execute_sources(
     linked: &mut BackendLinkedRuntime,
     providers: &mut SourceProviderManager,
+    sources: &SourceDatabase,
 ) -> Result<(), String> {
+    let renderer = DiagnosticRenderer::new(ColorMode::Auto);
     loop {
         let outcome = linked.tick_with_source_lifecycle().map_err(|error| {
-            format!("failed to tick linked runtime for `aivi execute`: {error}")
+            let source_map = linked.build_source_map();
+            let graph = linked.signal_graph().clone();
+            let backend = linked.backend();
+            let diagnostics = render_runtime_error(&error, &source_map, &graph, Some(backend));
+            if diagnostics.is_empty() {
+                format!("failed to tick linked runtime for `aivi execute`: {error}")
+            } else {
+                renderer.render_all(&diagnostics, sources)
+            }
         })?;
         let had_source_actions = !outcome.source_actions().is_empty();
         providers
@@ -3748,9 +3762,10 @@ fn print_diagnostics<'a>(
     sources: &SourceDatabase,
     diagnostics: impl IntoIterator<Item = &'a Diagnostic>,
 ) -> bool {
+    let renderer = DiagnosticRenderer::new(ColorMode::Auto);
     let mut saw_error = false;
     for diagnostic in diagnostics {
-        eprintln!("{}\n", diagnostic.render(sources));
+        eprintln!("{}\n", renderer.render(diagnostic, sources));
         if diagnostic.severity == Severity::Error {
             saw_error = true;
         }
@@ -3763,6 +3778,7 @@ fn print_stage_diagnostics<'a>(
     sources: &SourceDatabase,
     diagnostics: impl IntoIterator<Item = &'a Diagnostic>,
 ) -> bool {
+    let renderer = DiagnosticRenderer::new(ColorMode::Auto);
     let mut saw_any = false;
     let mut saw_error = false;
     for diagnostic in diagnostics {
@@ -3770,7 +3786,7 @@ fn print_stage_diagnostics<'a>(
             eprintln!("{} diagnostics:\n", stage.label());
             saw_any = true;
         }
-        eprintln!("{}\n", diagnostic.render(sources));
+        eprintln!("{}\n", renderer.render(diagnostic, sources));
         if diagnostic.severity == Severity::Error {
             saw_error = true;
         }
@@ -3864,8 +3880,9 @@ fn lex_file(path: &Path) -> Result<ExitCode, String> {
     }
 
     if lexed.has_errors() {
+        let renderer = DiagnosticRenderer::new(ColorMode::Auto);
         for diagnostic in lexed.diagnostics() {
-            eprintln!("{}\n", diagnostic.render(&sources));
+            eprintln!("{}\n", renderer.render(diagnostic, &sources));
         }
         Ok(ExitCode::FAILURE)
     } else {
@@ -3879,8 +3896,9 @@ fn format_file(path: &Path) -> Result<ExitCode, String> {
     let file = &sources[file_id];
     let parsed = parse_module(file);
     if parsed.has_errors() {
+        let renderer = DiagnosticRenderer::new(ColorMode::Auto);
         for diagnostic in parsed.all_diagnostics() {
-            eprintln!("{}\n", diagnostic.render(&sources));
+            eprintln!("{}\n", renderer.render(diagnostic, &sources));
         }
         return Ok(ExitCode::FAILURE);
     }

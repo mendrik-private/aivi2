@@ -143,74 +143,164 @@ pub enum SourceDecodeError {
     UnsupportedProgram(SourceDecodeProgramSupportError),
 }
 
+/// Segment of a decode breadcrumb path (e.g. `root.users[2].email`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DecodePathSegment {
+    /// Named field in a record: `.fieldName`
+    Field(Box<str>),
+    /// Numeric index in a list/tuple: `[0]`
+    Index(usize),
+    /// Named variant in a sum: `::VariantName`
+    Variant(Box<str>),
+    /// Payload inside a variant/option/result
+    Payload,
+}
+
+impl std::fmt::Display for DecodePathSegment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Field(name) => write!(f, ".{name}"),
+            Self::Index(i) => write!(f, "[{i}]"),
+            Self::Variant(name) => write!(f, "::{name}"),
+            Self::Payload => write!(f, ".payload"),
+        }
+    }
+}
+
+/// A decode error enriched with a breadcrumb path through the nested structure.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceDecodeErrorWithPath {
+    pub path: Vec<DecodePathSegment>,
+    pub error: SourceDecodeError,
+}
+
+impl SourceDecodeErrorWithPath {
+    pub fn new(error: SourceDecodeError) -> Self {
+        Self {
+            path: Vec::new(),
+            error,
+        }
+    }
+
+    fn with_segment(mut self, segment: DecodePathSegment) -> Self {
+        self.path.insert(0, segment);
+        self
+    }
+
+    /// Format the path as a human-readable string like `root.users[2].email`.
+    pub fn path_string(&self) -> String {
+        if self.path.is_empty() {
+            return "root".to_owned();
+        }
+        let mut s = String::from("root");
+        for segment in &self.path {
+            s.push_str(&segment.to_string());
+        }
+        s
+    }
+
+    /// Render a structured multi-line error description for terminal display.
+    pub fn render_formatted(&self) -> String {
+        let mut out = String::new();
+        out.push_str("source decode error\n");
+        out.push_str(&format!("  path: {}\n", self.path_string()));
+
+        match &self.error {
+            SourceDecodeError::TypeMismatch { expected, found } => {
+                out.push_str(&format!("  expected: {expected}\n"));
+                out.push_str(&format!("     found: {found}\n"));
+            }
+            SourceDecodeError::InvalidTupleLength { expected, found } => {
+                out.push_str(&format!("  expected length: {expected}\n"));
+                out.push_str(&format!("     found length: {found}\n"));
+            }
+            SourceDecodeError::MissingField { field } => {
+                out.push_str(&format!("  missing field: `{field}`\n"));
+            }
+            SourceDecodeError::UnexpectedFields { fields } => {
+                out.push_str("  unexpected fields:\n");
+                for f in fields.iter() {
+                    out.push_str(&format!("    - `{f}`\n"));
+                }
+            }
+            SourceDecodeError::UnknownVariant { found, expected } => {
+                out.push_str(&format!("  found variant: `{found}`\n"));
+                out.push_str("  expected one of:\n");
+                for v in expected.iter() {
+                    out.push_str(&format!("    - `{v}`\n"));
+                }
+            }
+            _ => {
+                out.push_str(&format!("  error: {}\n", self.error));
+            }
+        }
+
+        out
+    }
+}
+
+impl std::fmt::Display for SourceDecodeErrorWithPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "at {}: {}", self.path_string(), self.error)
+    }
+}
+
+impl std::error::Error for SourceDecodeErrorWithPath {}
+
+impl From<SourceDecodeError> for SourceDecodeErrorWithPath {
+    fn from(error: SourceDecodeError) -> Self {
+        Self::new(error)
+    }
+}
+
 impl std::fmt::Display for SourceDecodeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidJson { detail } => write!(f, "invalid JSON source payload: {detail}"),
+            Self::InvalidJson { detail } => write!(f, "invalid JSON: {detail}"),
             Self::UnsupportedNumber { value } => {
-                write!(
-                    f,
-                    "source payload number `{value}` does not fit the current Int/Float runtime slice"
-                )
+                write!(f, "number `{value}` overflows Int/Float range")
             }
             Self::InvalidScalarLiteral { scalar, value } => {
-                write!(
-                    f,
-                    "source payload `{value}` is not a valid {scalar} literal for the current runtime decode contract"
-                )
+                write!(f, "`{value}` is not a valid {scalar} literal")
             }
             Self::InvalidBytesElementKind { index, found } => {
                 write!(
                     f,
-                    "source payload byte array element {index} must be an integer octet, found {found}"
+                    "byte array element [{index}] must be an integer, found {found}"
                 )
             }
             Self::InvalidByteValue { index, value } => {
                 write!(
                     f,
-                    "source payload byte array element {index} must be between 0 and 255, found {value}"
+                    "byte array element [{index}] must be 0–255, found {value}"
                 )
             }
             Self::TypeMismatch { expected, found } => {
-                write!(f, "source payload expected {expected}, found {found}")
+                write!(f, "expected {expected}, found {found}")
             }
             Self::InvalidTupleLength { expected, found } => {
-                write!(
-                    f,
-                    "source payload expected tuple/list length {expected}, found {found}"
-                )
+                write!(f, "expected {expected} elements, found {found}")
             }
             Self::MissingField { field } => {
-                write!(
-                    f,
-                    "source payload record is missing required field `{field}`"
-                )
+                write!(f, "missing required field `{field}`")
             }
             Self::UnexpectedFields { fields } => {
-                write!(
-                    f,
-                    "source payload record contains unexpected fields {:?}",
-                    fields
-                )
+                let names: Vec<_> = fields.iter().map(|f| format!("`{f}`")).collect();
+                write!(f, "unexpected fields: {}", names.join(", "))
             }
             Self::UnknownVariant { found, expected } => {
+                let variants: Vec<_> = expected.iter().map(|v| format!("`{v}`")).collect();
                 write!(
                     f,
-                    "source payload variant `{found}` is not one of {:?}",
-                    expected
+                    "unknown variant `{found}`, expected one of: {}",
+                    variants.join(", ")
                 )
             }
             Self::MissingVariantPayload { variant } => {
-                write!(
-                    f,
-                    "source payload variant `{variant}` is missing its payload"
-                )
+                write!(f, "variant `{variant}` requires a payload")
             }
             Self::UnexpectedVariantPayload { variant } => {
-                write!(
-                    f,
-                    "source payload variant `{variant}` must not carry a payload"
-                )
+                write!(f, "variant `{variant}` must not carry a payload")
             }
             Self::UnsupportedProgram(error) => error.fmt(f),
         }
@@ -219,13 +309,13 @@ impl std::fmt::Display for SourceDecodeError {
 
 impl std::error::Error for SourceDecodeError {}
 
-pub fn parse_json_text(text: &str) -> Result<ExternalSourceValue, SourceDecodeError> {
+pub fn parse_json_text(text: &str) -> Result<ExternalSourceValue, SourceDecodeErrorWithPath> {
     let value = serde_json::from_str::<JsonValue>(text).map_err(|error| {
-        SourceDecodeError::InvalidJson {
+        SourceDecodeErrorWithPath::new(SourceDecodeError::InvalidJson {
             detail: error.to_string().into_boxed_str(),
-        }
+        })
     })?;
-    external_from_json(value)
+    external_from_json(value).map_err(SourceDecodeErrorWithPath::new)
 }
 
 /// Maximum recursion depth for `decode_step`. JSON structures nested beyond this limit are
@@ -236,8 +326,9 @@ const MAX_DECODE_DEPTH: usize = 512;
 pub fn decode_external(
     program: &SourceDecodeProgram,
     value: &ExternalSourceValue,
-) -> Result<RuntimeValue, SourceDecodeError> {
-    validate_supported_program(program).map_err(SourceDecodeError::UnsupportedProgram)?;
+) -> Result<RuntimeValue, SourceDecodeErrorWithPath> {
+    validate_supported_program(program)
+        .map_err(|e| SourceDecodeErrorWithPath::new(SourceDecodeError::UnsupportedProgram(e)))?;
     decode_step(program, program.root_step(), value, 0)
 }
 
@@ -444,26 +535,26 @@ fn decode_step(
     step: &DecodeProgramStep,
     value: &ExternalSourceValue,
     depth: usize,
-) -> Result<RuntimeValue, SourceDecodeError> {
+) -> Result<RuntimeValue, SourceDecodeErrorWithPath> {
     if depth > MAX_DECODE_DEPTH {
-        return Err(SourceDecodeError::TypeMismatch {
+        return Err(SourceDecodeErrorWithPath::new(SourceDecodeError::TypeMismatch {
             expected: "value within nesting depth limit",
             found: "structure nested too deeply (> 512 levels)",
-        });
+        }));
     }
     match step {
         DecodeProgramStep::Scalar { scalar } => match scalar {
             aivi_typing::PrimitiveType::Unit => match value {
                 ExternalSourceValue::Unit => Ok(RuntimeValue::Unit),
-                other => Err(type_mismatch("unit", other)),
+                other => Err(wrap(type_mismatch("unit", other))),
             },
             aivi_typing::PrimitiveType::Bool => match value {
                 ExternalSourceValue::Bool(value) => Ok(RuntimeValue::Bool(*value)),
-                other => Err(type_mismatch("bool", other)),
+                other => Err(wrap(type_mismatch("bool", other))),
             },
             aivi_typing::PrimitiveType::Int => match value {
                 ExternalSourceValue::Int(value) => Ok(RuntimeValue::Int(*value)),
-                other => Err(type_mismatch("integer", other)),
+                other => Err(wrap(type_mismatch("integer", other))),
             },
             aivi_typing::PrimitiveType::Float => match value {
                 ExternalSourceValue::Int(value) => Ok(RuntimeValue::Float(
@@ -471,11 +562,11 @@ fn decode_step(
                         .expect("all i64 values should map to finite f64 values"),
                 )),
                 ExternalSourceValue::Float(value) => Ok(RuntimeValue::Float(*value)),
-                other => Err(type_mismatch("float", other)),
+                other => Err(wrap(type_mismatch("float", other))),
             },
             aivi_typing::PrimitiveType::Text => match value {
                 ExternalSourceValue::Text(value) => Ok(RuntimeValue::Text(value.clone())),
-                other => Err(type_mismatch("text", other)),
+                other => Err(wrap(type_mismatch("text", other))),
             },
             aivi_typing::PrimitiveType::Decimal => decode_literal_scalar(
                 value,
@@ -483,31 +574,35 @@ fn decode_step(
                 "decimal literal string",
                 RuntimeDecimal::parse_literal,
                 RuntimeValue::Decimal,
-            ),
+            )
+            .map_err(wrap),
             aivi_typing::PrimitiveType::BigInt => decode_literal_scalar(
                 value,
                 "BigInt",
                 "bigint literal string",
                 RuntimeBigInt::parse_literal,
                 RuntimeValue::BigInt,
-            ),
-            aivi_typing::PrimitiveType::Bytes => decode_bytes_scalar(value),
+            )
+            .map_err(wrap),
+            aivi_typing::PrimitiveType::Bytes => decode_bytes_scalar(value).map_err(wrap),
         },
         DecodeProgramStep::Tuple { elements } => {
             let ExternalSourceValue::List(values) = value else {
-                return Err(type_mismatch("list/tuple", value));
+                return Err(wrap(type_mismatch("list/tuple", value)));
             };
             if values.len() != elements.len() {
-                return Err(SourceDecodeError::InvalidTupleLength {
+                return Err(wrap(SourceDecodeError::InvalidTupleLength {
                     expected: elements.len(),
                     found: values.len(),
-                });
+                }));
             }
             let decoded = elements
                 .iter()
                 .zip(values.iter())
-                .map(|(element, value)| {
+                .enumerate()
+                .map(|(i, (element, value))| {
                     decode_step(program, program.step(*element), value, depth + 1)
+                        .map_err(|e| e.with_segment(DecodePathSegment::Index(i)))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(RuntimeValue::Tuple(decoded))
@@ -517,18 +612,21 @@ fn decode_step(
             extra_fields,
         } => {
             let ExternalSourceValue::Record(values) = value else {
-                return Err(type_mismatch("record/object", value));
+                return Err(wrap(type_mismatch("record/object", value)));
             };
             let mut decoded = Vec::with_capacity(fields.len());
             for field in fields {
                 let Some(value) = values.get(field.name.as_str()) else {
-                    return Err(SourceDecodeError::MissingField {
+                    return Err(wrap(SourceDecodeError::MissingField {
                         field: field.name.as_str().into(),
-                    });
+                    }));
                 };
                 decoded.push(RuntimeRecordField {
                     label: field.name.as_str().into(),
-                    value: decode_step(program, program.step(field.step), value, depth + 1)?,
+                    value: decode_step(program, program.step(field.step), value, depth + 1)
+                        .map_err(|e| {
+                            e.with_segment(DecodePathSegment::Field(field.name.as_str().into()))
+                        })?,
                 });
             }
             if *extra_fields == DecodeExtraFieldPolicy::Reject {
@@ -542,9 +640,9 @@ fn decode_step(
                     .cloned()
                     .collect::<Vec<_>>();
                 if !extras.is_empty() {
-                    return Err(SourceDecodeError::UnexpectedFields {
+                    return Err(wrap(SourceDecodeError::UnexpectedFields {
                         fields: extras.into_boxed_slice(),
-                    });
+                    }));
                 }
             }
             Ok(RuntimeValue::Record(decoded))
@@ -555,36 +653,39 @@ fn decode_step(
                     (name.as_ref(), payload.as_deref())
                 }
                 ExternalSourceValue::Text(name) => (name.as_ref(), None),
-                other => return Err(type_mismatch("explicit sum variant", other)),
+                other => return Err(wrap(type_mismatch("explicit sum variant", other))),
             };
             let Some(variant) = variants
                 .iter()
                 .find(|variant| variant.name.as_str() == name)
             else {
-                return Err(SourceDecodeError::UnknownVariant {
+                return Err(wrap(SourceDecodeError::UnknownVariant {
                     found: name.into(),
                     expected: variants
                         .iter()
                         .map(|variant| variant.name.as_str().into())
                         .collect::<Vec<_>>()
                         .into_boxed_slice(),
-                });
+                }));
             };
             let fields = match (variant.payload, payload) {
                 (None, None) => Vec::new(),
                 (None, Some(_)) => {
-                    return Err(SourceDecodeError::UnexpectedVariantPayload {
+                    return Err(wrap(SourceDecodeError::UnexpectedVariantPayload {
                         variant: variant.name.as_str().into(),
-                    });
+                    }));
                 }
                 (Some(_), None) => {
-                    return Err(SourceDecodeError::MissingVariantPayload {
+                    return Err(wrap(SourceDecodeError::MissingVariantPayload {
                         variant: variant.name.as_str().into(),
-                    });
+                    }));
                 }
                 (Some(payload_step), Some(payload)) => {
                     let decoded =
-                        decode_step(program, program.step(payload_step), payload, depth + 1)?;
+                        decode_step(program, program.step(payload_step), payload, depth + 1)
+                            .map_err(|e| {
+                                e.with_segment(DecodePathSegment::Variant(name.into()))
+                            })?;
                     match program.step(payload_step) {
                         DecodeProgramStep::Tuple { .. } => match decoded {
                             RuntimeValue::Tuple(fields) => fields,
@@ -605,44 +706,46 @@ fn decode_step(
                 fields,
             }))
         }
-        DecodeProgramStep::Domain { surface, .. } => Err(SourceDecodeError::UnsupportedProgram(
+        DecodeProgramStep::Domain { surface, .. } => Err(wrap(SourceDecodeError::UnsupportedProgram(
             SourceDecodeProgramSupportError::UnsupportedDomain {
                 member_name: surface.member_name.clone(),
             },
-        )),
+        ))),
         DecodeProgramStep::List { element } => {
             let ExternalSourceValue::List(values) = value else {
-                return Err(type_mismatch("list", value));
+                return Err(wrap(type_mismatch("list", value)));
             };
             let decoded = values
                 .iter()
-                .map(|value| decode_step(program, program.step(*element), value, depth + 1))
+                .enumerate()
+                .map(|(i, value)| {
+                    decode_step(program, program.step(*element), value, depth + 1)
+                        .map_err(|e| e.with_segment(DecodePathSegment::Index(i)))
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(RuntimeValue::List(decoded))
         }
         DecodeProgramStep::Option { element } => match value {
             ExternalSourceValue::Variant { name, payload } if name.as_ref() == "None" => {
                 if payload.is_some() {
-                    return Err(SourceDecodeError::UnexpectedVariantPayload {
+                    return Err(wrap(SourceDecodeError::UnexpectedVariantPayload {
                         variant: name.clone(),
-                    });
+                    }));
                 }
                 Ok(RuntimeValue::OptionNone)
             }
             ExternalSourceValue::Variant { name, payload } if name.as_ref() == "Some" => {
                 let Some(payload) = payload.as_deref() else {
-                    return Err(SourceDecodeError::MissingVariantPayload {
+                    return Err(wrap(SourceDecodeError::MissingVariantPayload {
                         variant: name.clone(),
-                    });
+                    }));
                 };
-                Ok(RuntimeValue::OptionSome(Box::new(decode_step(
-                    program,
-                    program.step(*element),
-                    payload,
-                    depth + 1,
-                )?)))
+                Ok(RuntimeValue::OptionSome(Box::new(
+                    decode_step(program, program.step(*element), payload, depth + 1)
+                        .map_err(|e| e.with_segment(DecodePathSegment::Payload))?,
+                )))
             }
-            other => Err(type_mismatch("option variant", other)),
+            other => Err(wrap(type_mismatch("option variant", other))),
         },
         DecodeProgramStep::Result {
             error,
@@ -650,31 +753,27 @@ fn decode_step(
         } => match value {
             ExternalSourceValue::Variant { name, payload } if name.as_ref() == "Ok" => {
                 let Some(payload) = payload.as_deref() else {
-                    return Err(SourceDecodeError::MissingVariantPayload {
+                    return Err(wrap(SourceDecodeError::MissingVariantPayload {
                         variant: name.clone(),
-                    });
+                    }));
                 };
-                Ok(RuntimeValue::ResultOk(Box::new(decode_step(
-                    program,
-                    program.step(*value_step),
-                    payload,
-                    depth + 1,
-                )?)))
+                Ok(RuntimeValue::ResultOk(Box::new(
+                    decode_step(program, program.step(*value_step), payload, depth + 1)
+                        .map_err(|e| e.with_segment(DecodePathSegment::Variant("Ok".into())))?,
+                )))
             }
             ExternalSourceValue::Variant { name, payload } if name.as_ref() == "Err" => {
                 let Some(payload) = payload.as_deref() else {
-                    return Err(SourceDecodeError::MissingVariantPayload {
+                    return Err(wrap(SourceDecodeError::MissingVariantPayload {
                         variant: name.clone(),
-                    });
+                    }));
                 };
-                Ok(RuntimeValue::ResultErr(Box::new(decode_step(
-                    program,
-                    program.step(*error),
-                    payload,
-                    depth + 1,
-                )?)))
+                Ok(RuntimeValue::ResultErr(Box::new(
+                    decode_step(program, program.step(*error), payload, depth + 1)
+                        .map_err(|e| e.with_segment(DecodePathSegment::Variant("Err".into())))?,
+                )))
             }
-            other => Err(type_mismatch("result variant", other)),
+            other => Err(wrap(type_mismatch("result variant", other))),
         },
         DecodeProgramStep::Validation {
             error,
@@ -682,33 +781,36 @@ fn decode_step(
         } => match value {
             ExternalSourceValue::Variant { name, payload } if name.as_ref() == "Valid" => {
                 let Some(payload) = payload.as_deref() else {
-                    return Err(SourceDecodeError::MissingVariantPayload {
+                    return Err(wrap(SourceDecodeError::MissingVariantPayload {
                         variant: name.clone(),
-                    });
+                    }));
                 };
-                Ok(RuntimeValue::ValidationValid(Box::new(decode_step(
-                    program,
-                    program.step(*value_step),
-                    payload,
-                    depth + 1,
-                )?)))
+                Ok(RuntimeValue::ValidationValid(Box::new(
+                    decode_step(program, program.step(*value_step), payload, depth + 1)
+                        .map_err(|e| e.with_segment(DecodePathSegment::Variant("Valid".into())))?,
+                )))
             }
             ExternalSourceValue::Variant { name, payload } if name.as_ref() == "Invalid" => {
                 let Some(payload) = payload.as_deref() else {
-                    return Err(SourceDecodeError::MissingVariantPayload {
+                    return Err(wrap(SourceDecodeError::MissingVariantPayload {
                         variant: name.clone(),
-                    });
+                    }));
                 };
-                Ok(RuntimeValue::ValidationInvalid(Box::new(decode_step(
-                    program,
-                    program.step(*error),
-                    payload,
-                    depth + 1,
-                )?)))
+                Ok(RuntimeValue::ValidationInvalid(Box::new(
+                    decode_step(program, program.step(*error), payload, depth + 1)
+                        .map_err(|e| {
+                            e.with_segment(DecodePathSegment::Variant("Invalid".into()))
+                        })?,
+                )))
             }
-            other => Err(type_mismatch("validation variant", other)),
+            other => Err(wrap(type_mismatch("validation variant", other))),
         },
     }
+}
+
+/// Wrap a plain `SourceDecodeError` into a `SourceDecodeErrorWithPath` with an empty path.
+fn wrap(error: SourceDecodeError) -> SourceDecodeErrorWithPath {
+    SourceDecodeErrorWithPath::new(error)
 }
 
 fn type_mismatch(expected: &'static str, value: &ExternalSourceValue) -> SourceDecodeError {
@@ -996,7 +1098,7 @@ signal price : Signal Decimal
         )
         .expect_err("missing decimal suffix should be rejected explicitly");
         assert_eq!(
-            decimal_error,
+            decimal_error.error,
             SourceDecodeError::InvalidScalarLiteral {
                 scalar: "Decimal",
                 value: "19.25".into(),
@@ -1017,7 +1119,7 @@ signal bytes : Signal Bytes
         )
         .expect_err("byte values above 255 should be rejected explicitly");
         assert_eq!(
-            bytes_error,
+            bytes_error.error,
             SourceDecodeError::InvalidByteValue {
                 index: 0,
                 value: 256,

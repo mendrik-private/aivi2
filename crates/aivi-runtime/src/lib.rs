@@ -7,8 +7,10 @@ pub mod glib_adapter;
 pub mod graph;
 pub mod hir_adapter;
 pub mod providers;
+pub mod runtime_errors;
 pub mod scheduler;
 mod source_decode;
+pub mod source_map;
 pub mod startup;
 pub mod task_executor;
 
@@ -46,9 +48,12 @@ pub use scheduler::{
     WorkerPublicationSender, WorkerSendError,
 };
 pub use source_decode::{
-    ExternalSourceValue, SourceDecodeError, SourceDecodeProgramSupportError, decode_external,
-    encode_runtime_json, parse_json_text, validate_supported_program,
+        ExternalSourceValue, SourceDecodeError, SourceDecodeErrorWithPath,
+    SourceDecodeProgramSupportError, decode_external, encode_runtime_json, parse_json_text,
+    validate_supported_program,
 };
+pub use source_map::{RuntimeSignalInfo, RuntimeSignalKind, RuntimeSourceInfo, RuntimeSourceMap};
+pub use runtime_errors::render_runtime_error;
 pub use startup::{
     BackendLinkedRuntime, BackendRuntimeError, BackendRuntimeLinkError, BackendRuntimeLinkErrors,
     EvaluatedSourceConfig, EvaluatedSourceOption, LinkedDerivedSignal, LinkedSourceArgument,

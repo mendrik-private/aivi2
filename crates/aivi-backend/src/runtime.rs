@@ -1199,7 +1199,23 @@ pub struct KernelEvaluator<'a> {
     program: &'a Program,
     item_cache: BTreeMap<ItemId, RuntimeValue>,
     item_stack: BTreeSet<ItemId>,
+    /// Ordered evaluation trace: items visited during the current evaluation,
+    /// in the order they were first entered. Used for error rendering.
+    eval_trace: Vec<EvalFrame>,
     last_kernel_call: Option<LastKernelCall>,
+}
+
+/// A lightweight frame in the evaluation trace.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EvalFrame {
+    pub item: ItemId,
+    pub kernel: KernelId,
+}
+
+impl fmt::Display for EvalFrame {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "item {} (kernel {})", self.item, self.kernel)
+    }
 }
 
 impl<'a> KernelEvaluator<'a> {
@@ -1208,12 +1224,21 @@ impl<'a> KernelEvaluator<'a> {
             program,
             item_cache: BTreeMap::new(),
             item_stack: BTreeSet::new(),
+            eval_trace: Vec::new(),
             last_kernel_call: None,
         }
     }
 
     pub fn program(&self) -> &'a Program {
         self.program
+    }
+
+    /// Return the current evaluation trace (items visited, in entry order).
+    ///
+    /// Useful for error rendering: call this after an evaluation error to
+    /// get the chain of item evaluations that led to the failure.
+    pub fn eval_trace(&self) -> &[EvalFrame] {
+        &self.eval_trace
     }
 
     pub fn evaluate_kernel(
@@ -1376,9 +1401,16 @@ impl<'a> KernelEvaluator<'a> {
         if !self.item_stack.insert(item) {
             return Err(EvaluationError::RecursiveItemEvaluation { item });
         }
+        self.eval_trace.push(EvalFrame { item, kernel });
         let result = self.evaluate_kernel_raw(kernel, None, &[], globals);
         self.item_stack.remove(&item);
-        let (raw_result, expected) = result?;
+        let (raw_result, expected) = match result {
+            Ok(v) => {
+                self.eval_trace.pop();
+                v
+            }
+            Err(e) => return Err(e),
+        };
         let result = match (&item_decl.kind, raw_result) {
             (crate::ItemKind::Signal(_), RuntimeValue::Signal(value))
                 if value_matches_layout(self.program, value.as_ref(), expected) =>

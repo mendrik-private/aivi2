@@ -1318,6 +1318,7 @@ impl Validator<'_> {
                         item.header.span,
                         "export target",
                         item.resolution.as_ref(),
+                        Some(item.target.segments().last().text()),
                         |this, resolved| {
                             if let ExportResolution::Item(item_id) = resolved {
                                 this.require_item(
@@ -1806,7 +1807,8 @@ impl Validator<'_> {
                                 .with_label(DiagnosticLabel::primary(
                                     span,
                                     "this signal is part of a circular dependency chain",
-                                )),
+                                ))
+                                .with_help("break the cycle by using a reactive update (`when`) or restructuring signal dependencies"),
                             );
                         }
                         // Skip further DFS from this branch to avoid duplicate reports.
@@ -5701,6 +5703,7 @@ impl Validator<'_> {
         diagnostic = diagnostic.with_note(
             "current resolved-HIR exhaustiveness checking covers only ordinary `Bool`, `Option`, `Result`, `Validation`, and same-module closed sums whose scrutinee type is already known here; signal-lifted case splits, imported sums, and harder unannotated scrutinee inference remain later work",
         );
+        diagnostic = diagnostic.with_help(format!("add branches for {missing_list} to make the pattern exhaustive"));
         self.diagnostics.push(diagnostic);
     }
 
@@ -8050,6 +8053,7 @@ impl Validator<'_> {
             reference.span(),
             "term reference",
             reference.resolution.as_ref(),
+            Some(reference.path.segments().last().text()),
             |this, resolution| match resolution {
                 TermResolution::Local(binding) => {
                     this.require_binding(reference.span(), "term reference", "binding", *binding);
@@ -8100,6 +8104,7 @@ impl Validator<'_> {
             literal.suffix.span(),
             "literal suffix",
             literal.resolution.as_ref(),
+            Some(literal.suffix.text()),
             |this, resolution| {
                 this.require_literal_suffix_resolution(
                     literal.suffix.span(),
@@ -8368,6 +8373,7 @@ impl Validator<'_> {
             reference.span(),
             "type reference",
             reference.resolution.as_ref(),
+            Some(reference.path.segments().last().text()),
             |this, resolution| match resolution {
                 TypeResolution::Item(item) => {
                     this.require_item(reference.span(), "type reference", "item", *item);
@@ -8395,19 +8401,25 @@ impl Validator<'_> {
         span: SourceSpan,
         subject: &'static str,
         resolution: ResolutionState<&T>,
+        name_hint: Option<&str>,
         on_resolved: impl FnOnce(&mut Self, &T),
     ) {
         match resolution {
             ResolutionState::Resolved(value) => on_resolved(self, value),
             ResolutionState::Unresolved if self.mode == ValidationMode::RequireResolvedNames => {
-                self.diagnostics.push(
+                let mut diag =
                     Diagnostic::error(format!("{subject} remains unresolved in resolved HIR mode"))
                         .with_code(code("unresolved-name"))
                         .with_label(DiagnosticLabel::primary(
                             span,
                             "Milestone 2 HIR should resolve this reference before validation",
-                        )),
-                );
+                        ));
+                if let Some(name) = name_hint {
+                    if let Some(suggestion) = suggest_similar_name(self.module, name) {
+                        diag = diag.with_help(format!("did you mean `{suggestion}`?"));
+                    }
+                }
+                self.diagnostics.push(diag);
             }
             ResolutionState::Unresolved => {}
         }
@@ -8926,6 +8938,70 @@ fn item_name(item: Option<&Item>) -> Option<String> {
         }
         Item::Instance(_) | Item::Use(_) | Item::Export(_) => None,
     }
+}
+
+/// Levenshtein edit distance between two strings.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a_len = a.len();
+    let b_len = b.len();
+    if a_len == 0 {
+        return b_len;
+    }
+    if b_len == 0 {
+        return a_len;
+    }
+
+    let mut prev: Vec<usize> = (0..=b_len).collect();
+    let mut curr = vec![0; b_len + 1];
+
+    for (i, a_char) in a.chars().enumerate() {
+        curr[0] = i + 1;
+        for (j, b_char) in b.chars().enumerate() {
+            let cost = if a_char == b_char { 0 } else { 1 };
+            curr[j + 1] = (prev[j + 1] + 1)
+                .min(curr[j] + 1)
+                .min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[b_len]
+}
+
+/// Collect all available names in a module (items + imports) and suggest
+/// the closest match to `target` within a maximum edit distance.
+fn suggest_similar_name(module: &Module, target: &str) -> Option<String> {
+    let max_distance = match target.len() {
+        0..=2 => 1,
+        3..=5 => 2,
+        _ => 3,
+    };
+
+    let mut best: Option<(usize, String)> = None;
+
+    // Check module items.
+    for (_, item) in module.items().iter() {
+        if let Some(name) = item_name(Some(item)) {
+            let d = levenshtein(target, &name);
+            if d > 0 && d <= max_distance {
+                if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+                    best = Some((d, name));
+                }
+            }
+        }
+    }
+
+    // Check imports.
+    for (_, import) in module.imports().iter() {
+        let name = import.local_name.text();
+        let d = levenshtein(target, name);
+        if d > 0 && d <= max_distance {
+            if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+                best = Some((d, name.to_owned()));
+            }
+        }
+    }
+
+    best.map(|(_, name)| name)
 }
 
 #[derive(Clone, Copy, Debug)]

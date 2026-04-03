@@ -105,7 +105,8 @@ impl<'a> Parser<'a> {
             self.diagnostics.push(
                 Diagnostic::error("expression is nested too deeply to parse")
                     .with_code(PARSE_DEPTH_EXCEEDED)
-                    .with_primary_label(span, "maximum parse depth exceeded here"),
+                    .with_primary_label(span, "maximum parse depth exceeded here")
+                    .with_help("refactor deeply nested expressions into smaller named values"),
             );
             return false;
         }
@@ -178,7 +179,8 @@ impl<'a> Parser<'a> {
                     .with_primary_label(
                         self.source_span_of_token(start),
                         "expected a following top-level declaration after this decorator block",
-                    ),
+                    )
+                    .with_help("decorators like @source must be followed by a declaration"),
             );
             return Item::Error(ErrorItem {
                 base,
@@ -251,7 +253,8 @@ impl<'a> Parser<'a> {
                         .with_primary_label(
                             self.source_span_of_token(keyword_index),
                             "expected a type expression after `type`",
-                        ),
+                        )
+                        .with_help("expected a type expression after the name"),
                 );
             }
             return NamedItem {
@@ -353,7 +356,8 @@ impl<'a> Parser<'a> {
                     .with_primary_label(
                         self.source_span_of_token(keyword_index),
                         "expected a class name such as `Eq` or `Default`",
-                    ),
+                    )
+                    .with_help("syntax: instance <Name> of <ClassName> = { ... }"),
             );
             None
         });
@@ -369,7 +373,8 @@ impl<'a> Parser<'a> {
                                 .map(|class| class.span)
                                 .unwrap_or_else(|| self.source_span_of_token(keyword_index)),
                             "expected one instance target type such as `Blob` or `Result HttpError`",
-                        ),
+                        )
+                        .with_help("syntax: instance <Name> of <ClassName> = { ... }"),
                 );
                 None
             });
@@ -416,7 +421,8 @@ impl<'a> Parser<'a> {
                     .with_primary_label(
                         self.source_span_of_token(keyword_index),
                         "expected `over` followed by the carrier type",
-                    ),
+                    )
+                    .with_help("syntax: domain <Name> over <CarrierType> = { ... }"),
             );
             None
         };
@@ -429,7 +435,8 @@ impl<'a> Parser<'a> {
                     .with_primary_label(
                         over_span.unwrap_or_else(|| self.source_span_of_token(keyword_index)),
                         "expected a carrier type such as `Int`, `Text`, or `List A`",
-                    ),
+                    )
+                    .with_help("expected a carrier type after `over`"),
             );
         }
 
@@ -538,7 +545,8 @@ impl<'a> Parser<'a> {
                     .with_primary_label(
                         anchor_span,
                         "insert `=` between the function name and its body",
-                    ),
+                    )
+                    .with_help("expected `=` followed by the function body"),
                 );
             } else {
                 self.missing_body_diagnostic(
@@ -584,7 +592,8 @@ impl<'a> Parser<'a> {
                             )
                             .with_note(
                                 "ignored unary functions are written as `func name = _ => body`",
-                            ),
+                            )
+                            .with_help("functions must have at least one parameter"),
                         );
                     }
                     body
@@ -680,7 +689,8 @@ impl<'a> Parser<'a> {
                             .with_primary_label(
                                 keyword_span,
                                 "expected a subject expression after `when`",
-                            ),
+                            )
+                            .with_help("syntax: when <source> | <guard> => <signal> <- <body>"),
                     );
                     None
                 });
@@ -729,7 +739,8 @@ impl<'a> Parser<'a> {
                         .with_primary_label(
                             keyword_span,
                             "expected a guard expression after `when`",
-                        ),
+                        )
+                        .with_help("syntax: when <source> | <guard> => <signal> <- <body>"),
                 );
                 None
             });
@@ -745,7 +756,8 @@ impl<'a> Parser<'a> {
                     .with_primary_label(
                         arrow_anchor,
                         "expected `=>` followed by the target signal name",
-                    ),
+                    )
+                    .with_help("use `=>` to separate the guard from the target signal"),
             );
         }
 
@@ -757,7 +769,8 @@ impl<'a> Parser<'a> {
                         .with_primary_label(
                             arrow_anchor,
                             "expected a target signal name after `=>`",
-                        ),
+                        )
+                        .with_help("expected a signal name after `=>`"),
                 );
                 None
             })
@@ -782,7 +795,8 @@ impl<'a> Parser<'a> {
                     .with_primary_label(
                         target_anchor,
                         "expected `<-` followed by the update expression",
-                    ),
+                    )
+                    .with_help("use `<-` before the reactive update body"),
             );
         }
 
@@ -795,7 +809,8 @@ impl<'a> Parser<'a> {
                             .with_primary_label(
                                 target_anchor,
                                 "expected an update expression after `<-`",
-                            ),
+                            )
+                            .with_help("expected an expression after `<-`"),
                     );
                     None
                 })
@@ -821,7 +836,8 @@ impl<'a> Parser<'a> {
             self.diagnostics.push(
                 Diagnostic::error("reactive update is missing its source signal name")
                     .with_code(MISSING_REACTIVE_UPDATE_SOURCE)
-                    .with_primary_label(keyword_span, "expected a source signal name after `when`"),
+                    .with_primary_label(keyword_span, "expected a source signal name after `when`")
+                    .with_help("expected a signal name after `when`"),
             );
             None
         });
@@ -843,7 +859,8 @@ impl<'a> Parser<'a> {
                         .with_primary_label(
                             source_span,
                             "expected a pattern between the source signal and `=>`",
-                        ),
+                        )
+                        .with_help("expected a binding pattern after the source signal"),
                 );
                 None
             });
@@ -863,7 +880,8 @@ impl<'a> Parser<'a> {
                     .with_primary_label(
                         arrow_anchor,
                         "expected `=>` followed by the target signal name",
-                    ),
+                    )
+                    .with_help("use `=>` to separate the guard from the target signal"),
             );
         }
 
@@ -875,7 +893,8 @@ impl<'a> Parser<'a> {
                         .with_primary_label(
                             arrow_anchor,
                             "expected a target signal name after `=>`",
-                        ),
+                        )
+                        .with_help("expected a signal name after `=>`"),
                 );
                 None
             })
@@ -900,7 +919,8 @@ impl<'a> Parser<'a> {
                     .with_primary_label(
                         target_anchor,
                         "expected `<-` followed by the update expression",
-                    ),
+                    )
+                    .with_help("use `<-` before the reactive update body"),
             );
         }
 
@@ -913,7 +933,8 @@ impl<'a> Parser<'a> {
                             .with_primary_label(
                                 target_anchor,
                                 "expected an update expression after `<-`",
-                            ),
+                            )
+                            .with_help("expected an expression after `<-`"),
                     );
                     None
                 })
@@ -1152,7 +1173,8 @@ impl<'a> Parser<'a> {
                     self.diagnostics.push(
                         Diagnostic::error("class declaration is missing `{` after `=`")
                             .with_code(MISSING_CLASS_OPEN_BRACE)
-                            .with_primary_label(head_span, "expected `{` to open the class body"),
+                            .with_primary_label(head_span, "expected `{` to open the class body")
+                            .with_help("expected `{` to open the class body"),
                     );
                     return None;
                 };
@@ -1326,7 +1348,8 @@ impl<'a> Parser<'a> {
                     self.diagnostics.push(
                         Diagnostic::error("instance declaration is missing `{` after `=`")
                             .with_code(MISSING_INSTANCE_OPEN_BRACE)
-                            .with_primary_label(head_span, "expected `{` to open the instance body"),
+                            .with_primary_label(head_span, "expected `{` to open the instance body")
+                            .with_help("expected `{` to open the instance body"),
                     );
                     return None;
                 };
@@ -1404,7 +1427,8 @@ impl<'a> Parser<'a> {
                     self.diagnostics.push(
                         Diagnostic::error("domain declaration is missing `{` after `=`")
                             .with_code(MISSING_DOMAIN_OPEN_BRACE)
-                            .with_primary_label(head_span, "expected `{` to open the domain body"),
+                            .with_primary_label(head_span, "expected `{` to open the domain body")
+                            .with_help("expected `{` to open the domain body"),
                     );
                     return None;
                 };
@@ -4913,7 +4937,8 @@ impl<'a> Parser<'a> {
                         "markup node is not closed before the end of the declaration",
                     )
                     .with_code(UNTERMINATED_MARKUP_NODE)
-                    .with_primary_label(name.span, "this markup node needs a matching closing tag"),
+                    .with_primary_label(name.span, "this markup node needs a matching closing tag")
+                    .with_help("add a closing tag or use self-closing syntax"),
                 );
                 break;
             };
@@ -4937,7 +4962,8 @@ impl<'a> Parser<'a> {
                                     .with_secondary_label(
                                         name.span,
                                         format!("`<{}>` was opened here", name.as_dotted()),
-                                    ),
+                                    )
+                                    .with_help("ensure opening and closing tags match"),
                             );
                         }
                     }
@@ -5827,7 +5853,8 @@ impl<'a> Parser<'a> {
         self.diagnostics.push(
             Diagnostic::error(message)
                 .with_code(MISSING_DECLARATION_BODY)
-                .with_primary_label(self.source_span_of_token(keyword_index), label),
+                .with_primary_label(self.source_span_of_token(keyword_index), label)
+                .with_help("expected `=` followed by the function body"),
         );
     }
 
@@ -5917,7 +5944,8 @@ impl<'a> Parser<'a> {
                             .with_primary_label(
                                 SourceSpan::new(self.source.id(), Span::from(cursor..body_end)),
                                 "expected a closing `}` for this interpolation",
-                            ),
+                            )
+                            .with_help("close the interpolation with `}`"),
                         );
                         let allow_empty = segments.is_empty();
                         self.push_text_fragment(&mut segments, cursor, body_end, allow_empty);
@@ -5935,7 +5963,8 @@ impl<'a> Parser<'a> {
                                 .with_primary_label(
                                     interpolation_span,
                                     "add an expression between `{` and `}`",
-                                ),
+                                )
+                                .with_help("text interpolation expects an expression inside `\\{...}`"),
                         );
                         self.push_text_fragment(&mut segments, cursor, interpolation_end, false);
                     } else if let Some(expr) =
@@ -6023,7 +6052,8 @@ impl<'a> Parser<'a> {
                                 lexed.tokens()[trailing_index].span(),
                             ),
                             "this token is outside the interpolation expression",
-                        ),
+                        )
+                        .with_help("text interpolation expects an expression inside `\\{...}`"),
                 );
                 None
             }
@@ -6034,7 +6064,8 @@ impl<'a> Parser<'a> {
                         .with_primary_label(
                             interpolation_span,
                             "could not parse the expression inside this interpolation",
-                        ),
+                        )
+                        .with_help("text interpolation expects an expression inside `\\{...}`"),
                 );
                 None
             }
