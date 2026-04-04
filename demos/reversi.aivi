@@ -37,8 +37,10 @@ type Status =
 
 type AnimState =
   | Idle
+  | HumanFlash Coord (List Coord) Int
   | Previewing Coord (List Coord) Int
   | Flipping Coord (List Coord) (List Coord)
+  | ComputerFlash Coord (List Coord) Int
 
 type Ray =
   | NorthWest
@@ -501,9 +503,16 @@ value initial : GameState = {
 }
 
 value noFlips : List Coord = []
-value previewBlinkCycleTicks = 6
-value previewBlinkVisibleTicks = 3
-value previewLastTick = 17
+value previewBlinkCycleTicks = 9
+value previewBlinkVisibleTicks = 5
+value previewLastTick = 25
+value placedFlashCycle = 5
+value placedFlashVisible = 3
+value placedFlashDuration = 15
+value flippedFlashCycle = 2
+value flippedFlashVisible = 1
+value flippedFlashDuration = 10
+value flashDuration = 15
 
 type Int -> Bool
 func oneFromEdge = n =>
@@ -591,8 +600,40 @@ func applyTurnMove = state turn coord => flipsForMove state.board (discForTurn t
 
 type Coord -> GameState -> GameState
 func handleTryPlace = coord state => (humanToAct state.status, coordInList coord state.legalMoves)
- ||> (True, True) -> applyTurnMove state Human coord
+ ||> (True, True) -> applyHumanMove state coord
  ||> _            -> state
+
+type GameState -> AnimState -> GameState
+func setAnimState = state animState =>
+    {
+        board: state.board,
+        status: state.status,
+        legalMoves: state.legalMoves,
+        humanCount: state.humanCount,
+        computerCount: state.computerCount,
+        moveNumber: state.moveNumber,
+        lastMove: state.lastMove,
+        lastFlips: state.lastFlips,
+        animState: animState
+    }
+
+type GameState -> Coord -> (List Coord) -> GameState
+func applyHumanMoveWithFlips = state coord flips =>
+    {
+        board: boardAfterFlips state.board (discForTurn Human) coord flips,
+        status: Active Computer,
+        legalMoves: [],
+        humanCount: state.humanCount + listLength flips + 1,
+        computerCount: state.computerCount - listLength flips,
+        moveNumber: state.moveNumber + 1,
+        lastMove: Some coord,
+        lastFlips: flips,
+        animState: HumanFlash coord flips 0
+    }
+
+type GameState -> Coord -> GameState
+func applyHumanMove = state coord => flipsForMove state.board (discForTurn Human) coord
+  |> applyHumanMoveWithFlips state coord
 
 type GameState -> (List (List Disc)) -> AnimState -> GameState
 func computerAnimState = state board animState =>
@@ -608,27 +649,13 @@ func computerAnimState = state board animState =>
         animState: animState
     }
 
-type GameState -> (List (List Disc)) -> AnimState -> GameState
-func computerFlipState = state board animState =>
-    {
-        board: board,
-        status: Active Computer,
-        legalMoves: [],
-        humanCount: countDisc Red board,
-        computerCount: countDisc Blue board,
-        moveNumber: state.moveNumber,
-        lastMove: None,
-        lastFlips: [],
-        animState: animState
-    }
-
 type GameState -> Coord -> (List Coord) -> GameState
 func beginComputerPreview = state coord flips =>
     computerAnimState state state.board (Previewing coord flips 0)
 
 type GameState -> Coord -> (List Coord) -> GameState
 func beginComputerFlips = state coord flips =>
-    computerFlipState state (put coord (discForTurn Computer) state.board) (Flipping coord flips flips)
+    computerAnimState state (put coord (discForTurn Computer) state.board) (Flipping coord flips flips)
 
 type GameState -> Coord -> (List Coord) -> Int -> GameState
 func advanceComputerPreview = state coord flips tick => tick >= previewLastTick
@@ -641,8 +668,18 @@ func finishComputerAnimation = state coord flips =>
 
 type GameState -> Coord -> (List Coord) -> (List Coord) -> GameState
 func advanceComputerFlips = state coord flips remaining => remaining
- ||> [nextFlip, ...rest] -> computerFlipState state (setDisc state.board nextFlip (discForTurn Computer)) (Flipping coord flips rest)
- ||> []                  -> finishComputerAnimation state coord flips
+ ||> [nextFlip, ...rest] -> computerAnimState state (setDisc state.board nextFlip (discForTurn Computer)) (Flipping coord flips rest)
+ ||> []                  -> setAnimState state (ComputerFlash coord flips 0)
+
+type GameState -> Coord -> (List Coord) -> Int -> GameState
+func advanceHumanFlash = state coord flips tick => tick >= flashDuration
+ T|> setAnimState state Idle
+ F|> setAnimState state (HumanFlash coord flips (tick + 1))
+
+type GameState -> Coord -> (List Coord) -> Int -> GameState
+func advanceComputerFlash = state coord flips tick => tick >= flashDuration
+ T|> finishComputerAnimation state coord flips
+ F|> setAnimState state (ComputerFlash coord flips (tick + 1))
 
 type GameState -> GameState
 func startComputerAnim = state => bestComputerMove state.board state.legalMoves
@@ -651,9 +688,11 @@ func startComputerAnim = state => bestComputerMove state.board state.legalMoves
 
 type GameState -> GameState
 func runComputerTurn = state => state.animState
- ||> Idle                           -> startComputerAnim state
- ||> Previewing coord flips tick    -> advanceComputerPreview state coord flips tick
- ||> Flipping coord flips remaining -> advanceComputerFlips state coord flips remaining
+ ||> Idle                              -> startComputerAnim state
+ ||> HumanFlash coord flips tick       -> advanceHumanFlash state coord flips tick
+ ||> Previewing coord flips tick       -> advanceComputerPreview state coord flips tick
+ ||> Flipping coord flips remaining    -> advanceComputerFlips state coord flips remaining
+ ||> ComputerFlash coord flips tick    -> advanceComputerFlash state coord flips tick
 
 type GameState -> GameState
 func handleComputerTurn = state => computerToAct state.status
@@ -680,13 +719,15 @@ func statusLabel = .
 
 type GameState -> Text
 func titlebarHintLine = state => (state.status, state.animState)
- ||> (Active Human, _)                   -> "Click a marked cell."
- ||> (Active Computer, Previewing _ _ _) -> "Blue is placing a stone."
- ||> (Active Computer, Flipping _ _ _)   -> "Blue is flipping stones."
- ||> (Active Computer, _)                -> "Blue is thinking."
- ||> (Passed Human, _)                   -> "Red passes."
- ||> (Passed Computer, _)                -> "Blue passes."
- ||> (Finished _, _)                     -> "Restart to play again."
+ ||> (Active Human, _)                      -> "Click a marked cell."
+ ||> (Active Computer, HumanFlash _ _ _)     -> "Your move."
+ ||> (Active Computer, Previewing _ _ _)     -> "Blue is placing a stone."
+ ||> (Active Computer, Flipping _ _ _)       -> "Blue is flipping stones."
+ ||> (Active Computer, ComputerFlash _ _ _)  -> "Blue has moved."
+ ||> (Active Computer, _)                    -> "Blue is thinking."
+ ||> (Passed Human, _)                       -> "Red passes."
+ ||> (Passed Computer, _)                    -> "Blue passes."
+ ||> (Finished _, _)                         -> "Restart to play again."
 
 type GameState -> Text
 func scoreLine = state =>
@@ -726,15 +767,9 @@ func previewLabelAt = animCoord coord => sameCoord animCoord coord
  T|> Some "🔵"
  F|> None
 
-type Coord -> Coord -> (Option Text)
-func flippingPlacedLabel = animCoord coord => sameCoord animCoord coord
- T|> Some "🟡"
- F|> None
-
 type AnimState -> Coord -> (Option Text)
 func previewLabel = animState coord => animState
  ||> Previewing animCoord _ _ -> previewLabelAt animCoord coord
- ||> Flipping animCoord _ _   -> flippingPlacedLabel animCoord coord
  ||> _                        -> None
 
 type Coord -> Int -> Coord -> Float
@@ -742,25 +777,51 @@ func previewOpacityForCoord = animCoord tick coord => sameCoord animCoord coord
  T|> previewOpacityAtTick tick
  F|> 1.0
 
+type Int -> Float
+func placedFlashPhase = tick => tick % placedFlashCycle < placedFlashVisible
+ T|> 1.0
+ F|> 0.0
+
+type Int -> Float
+func placedStoneOpacity = tick => tick < placedFlashDuration
+ T|> placedFlashPhase tick
+ F|> 1.0
+
+type Int -> Float
+func flippedFlashPhase = tick => tick % flippedFlashCycle < flippedFlashVisible
+ T|> 1.0
+ F|> 0.0
+
+type Int -> Float
+func flippedStoneOpacity = tick => tick < flippedFlashDuration
+ T|> flippedFlashPhase tick
+ F|> 1.0
+
+type Coord -> (List Coord) -> Int -> Coord -> Float
+func flashCellOpacity = placed flips tick coord => (sameCoord placed coord, coordInList coord flips)
+ ||> (True, _)     -> placedStoneOpacity tick
+ ||> (False, True) -> flippedStoneOpacity tick
+ ||> _             -> 1.0
+
 type AnimState -> Coord -> Float
 func cellOpacity = animState coord => animState
- ||> Previewing animCoord _ tick -> previewOpacityForCoord animCoord tick coord
- ||> _                           -> 1.0
+ ||> Previewing animCoord _ tick       -> previewOpacityForCoord animCoord tick coord
+ ||> HumanFlash placed flips tick      -> flashCellOpacity placed flips tick coord
+ ||> ComputerFlash placed flips tick   -> flashCellOpacity placed flips tick coord
+ ||> _                                 -> 1.0
 
 type AnimState -> Coord -> Bool
 func cellAnimateOpacity = animState coord => animState
- ||> Previewing animCoord _ _ -> sameCoord animCoord coord
- ||> _                        -> False
+ ||> Previewing animCoord _ _       -> sameCoord animCoord coord
+ ||> HumanFlash placed flips _      -> sameCoord placed coord or coordInList coord flips
+ ||> ComputerFlash placed flips _   -> sameCoord placed coord or coordInList coord flips
+ ||> _                              -> False
 
 type List (List Disc) -> Status -> (List Coord) -> (Option Coord) -> (List Coord) -> Coord -> Text
-func baseCellLabel = board status legalMoves lastMove lastFlips coord => (discAt board coord, isLastMove lastMove coord, coordInList coord lastFlips)
- ||> (Red, True, _)   -> "🟡"
- ||> (Red, _, True)   -> "🟠"
- ||> (Red, _, _)      -> "🔴"
- ||> (Blue, True, _)  -> "🟡"
- ||> (Blue, _, True)  -> "🟠"
- ||> (Blue, _, _)     -> "🔵"
- ||> (Empty, _, _)    -> emptyCellLabel status legalMoves coord
+func baseCellLabel = board status legalMoves lastMove lastFlips coord => discAt board coord
+ ||> Red   -> "🔴"
+ ||> Blue  -> "🔵"
+ ||> Empty -> emptyCellLabel status legalMoves coord
 
 type List (List Disc) -> Status -> (List Coord) -> (Option Coord) -> (List Coord) -> AnimState -> Coord -> Text
 func cellLabel = board status legalMoves lastMove lastFlips animState coord => previewLabel animState coord
@@ -775,7 +836,7 @@ func cellEnabled = state coord => (humanToAct state.status, coordInList coord st
 signal placeCoord : Signal Coord
 signal restartClick : Signal Unit
 
-@source timer.every 150
+@source timer.every 100
 signal computerTick : Signal Unit
 
 signal event : Signal Event

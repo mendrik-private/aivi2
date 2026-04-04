@@ -44,7 +44,7 @@ button.aivi-compact-button {
 }
 
 button.aivi-animate-opacity {
-    transition: opacity 220ms ease-in-out;
+    transition: opacity 80ms ease-in-out;
 }
 "#;
 
