@@ -995,7 +995,7 @@ impl<'a> Lowerer<'a> {
     fn lower_signal_merge_arms(
         &mut self,
         merge: &syn::SignalMergeBody,
-        keyword_span: SourceSpan,
+        _keyword_span: SourceSpan,
     ) -> (Option<ExprId>, Vec<ReactiveUpdateClause>) {
         let mut updates = Vec::new();
         let mut seed_body: Option<ExprId> = None;
@@ -1084,7 +1084,7 @@ impl<'a> Lowerer<'a> {
                     self.make_pattern_match_optional_expr(source_expr, pattern, body, arm.span);
                 updates.push(ReactiveUpdateClause {
                     span: arm.span,
-                    keyword_span,
+                    keyword_span: arm.span,
                     target_span: arm.span,
                     guard,
                     body: body_expr,

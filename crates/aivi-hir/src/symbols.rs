@@ -374,5 +374,16 @@ signal total : Signal Int = ready
         assert_eq!(total.kind, LspSymbolKind::Event);
         // Signal merge arms should appear as children
         assert!(total.children.len() >= 1);
+        // selection_span must be contained within span (LSP invariant)
+        for child in &total.children {
+            let span = child.span.span();
+            let sel = child.selection_span.span();
+            assert!(
+                sel.start() >= span.start() && sel.end() <= span.end(),
+                "selection_span {:?} must be contained in span {:?}",
+                sel,
+                span,
+            );
+        }
     }
 }
