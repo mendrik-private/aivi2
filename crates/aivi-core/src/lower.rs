@@ -3842,14 +3842,27 @@ impl<'a> RuntimeFragmentLowerer<'a> {
         if self.lowered.contains(&owner) || self.lowering.contains(&owner) {
             return;
         }
-        if matches!(
-            self.lowerer.hir.items().get(owner),
-            Some(HirItem::Signal(_))
-        ) {
-            if self.seed_hir_item(owner).is_some() {
-                self.lowered.insert(owner);
+        match self.lowerer.hir.items().get(owner) {
+            Some(HirItem::Signal(_)) => {
+                if self.seed_hir_item(owner).is_some() {
+                    self.lowered.insert(owner);
+                }
+                return;
             }
-            return;
+            // Domain/Type/Class/Use/Export/SourceProviderContract items do not produce
+            // core-level items — only their members do (handled via
+            // ensure_domain_member_lowered / ensure_instance_member_lowered). Silently
+            // skip them so transitive dependency walks don't trigger UnknownOwner.
+            Some(
+                HirItem::Domain(_)
+                | HirItem::Type(_)
+                | HirItem::Class(_)
+                | HirItem::SourceProviderContract(_)
+                | HirItem::Use(_)
+                | HirItem::Export(_),
+            )
+            | None => return,
+            _ => {}
         }
         let Some(report) = self.report_by_owner.get(&owner).cloned() else {
             let is_ambient = self.lowerer.hir.ambient_items().contains(&owner);
@@ -4076,17 +4089,13 @@ impl<'a> RuntimeFragmentLowerer<'a> {
                 format!("instance#{}", owner.as_raw()).into_boxed_str(),
                 ItemKind::Instance,
             ),
+            // These item types do not produce core-level items.
             HirItem::Type(_)
             | HirItem::Class(_)
             | HirItem::Domain(_)
             | HirItem::SourceProviderContract(_)
             | HirItem::Use(_)
-            | HirItem::Export(_) => {
-                self.lowerer
-                    .errors
-                    .push(LoweringError::UnknownOwner { owner });
-                return None;
-            }
+            | HirItem::Export(_) => return None,
         };
         let item_id = match self.lowerer.module.items_mut().alloc(Item {
             origin: owner,
