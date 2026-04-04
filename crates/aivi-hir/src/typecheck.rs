@@ -6453,4 +6453,21 @@ fun current:Int = tick:Unit => step direction
             crate::NamePath::from_vec(segments.iter().map(|segment| test_name(segment)).collect())
                 .expect("rewritten use path should stay valid");
     }
+
+    #[test]
+    fn typecheck_infers_signal_without_double_wrapping() {
+        // Derived signals without explicit annotations should not double-wrap
+        // Signal(Signal(T)). When a signal pipe body already produces Signal(T),
+        // item_value_type should detect this and avoid wrapping again.
+        let report = typecheck_text(
+            "signal-no-double-wrap.aivi",
+            "signal counter : Signal Int = 0\n\
+             signal doubled = counter |> . * 2\n",
+        );
+        assert!(
+            report.is_ok(),
+            "unannotated derived signal should typecheck without double Signal wrapping: {:?}",
+            report.diagnostics()
+        );
+    }
 }

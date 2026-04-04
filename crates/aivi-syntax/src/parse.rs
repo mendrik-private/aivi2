@@ -7645,6 +7645,30 @@ instance Eq Blob = {
     }
 
     #[test]
+    fn parser_does_not_treat_thin_arrow_as_constraint_separator() {
+        // Standalone type annotations starting with (MultiCharApply ...) ->
+        // must parse as function types, NOT as constrained types.
+        let (_, parsed) = load(concat!(
+            "type (List A) -> (Option A) -> (List A)\n",
+            "func appendPrev = items prev => items\n",
+        ));
+        assert!(
+            !parsed.has_errors(),
+            "standalone function type with (List A) -> should parse cleanly: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+
+        // The standalone `type` attaches to the `func`, so items[0] is Func
+        let Item::Fun(func_item) = &parsed.module.items[0] else {
+            panic!("expected func item with attached type annotation");
+        };
+        assert!(
+            func_item.constraints.is_empty(),
+            "expected no constraints — (List A) is a type constructor, not a class constraint"
+        );
+    }
+
+    #[test]
     fn parser_tracks_constraint_prefixes_on_functions_and_instances() {
         let (_, parsed) = load(
             r#"class Functor F = {
