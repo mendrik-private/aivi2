@@ -7,8 +7,9 @@ use crate::cst::{
     MarkupAttribute, MarkupAttributeValue, MarkupNode, Module, NamedItem, PatchBlock, PatchEntry,
     PatchInstruction, PatchInstructionKind, PatchSelector, PatchSelectorSegment, Pattern,
     PatternKind, PipeExpr, PipeStage, PipeStageKind, ProjectionPath, QualifiedName,
-    ReactiveUpdateArm, ReactiveUpdateItem, ReactiveUpdateKind, RecordExpr, RecordField,
-    RecordPatternField, ResultBinding, ResultBlockExpr, SourceDecorator,
+    RecordExpr, RecordField,
+    RecordPatternField, ResultBinding, ResultBlockExpr, SignalMergeBody, SignalReactiveArm,
+    SourceDecorator,
     SourceProviderContractItem, SourceProviderContractMember, SourceProviderContractSchemaMember,
     SuffixedIntegerLiteral, TextInterpolation, TextLiteral, TextSegment, TypeDeclBody, TypeExpr,
     TypeExprKind, TypeField, TypeVariant, UnaryOperator, UseItem,
@@ -18,7 +19,7 @@ const INDENT_WIDTH: usize = 4;
 const INLINE_LIMIT: usize = 32;
 const TYPE_VARIANT_INDENT: usize = 2;
 const PIPE_STAGE_INDENT: usize = 1;
-const REACTIVE_UPDATE_ARM_INDENT: usize = 2;
+const SIGNAL_REACTIVE_ARM_INDENT: usize = 2;
 
 const EXPR_PIPE_PREC: u8 = 0;
 const EXPR_RANGE_PREC: u8 = 1;
@@ -93,8 +94,7 @@ impl Formatter {
             Item::Type(item) => lines.extend(self.format_type_item(item)),
             Item::Fun(item) => lines.extend(self.format_fun_item(item)),
             Item::Value(item) => lines.extend(self.format_value_item("value", item)),
-            Item::Signal(item) => lines.extend(self.format_value_item("signal", item)),
-            Item::ReactiveUpdate(item) => lines.extend(self.format_reactive_update_item(item)),
+            Item::Signal(item) => lines.extend(self.format_signal_item(item)),
             Item::Class(item) => lines.extend(self.format_class_item(item)),
             Item::Instance(item) => lines.extend(self.format_instance_item(item)),
             Item::Domain(item) => lines.extend(self.format_domain_item(item)),
@@ -118,14 +118,6 @@ impl Formatter {
         right_item: &Item,
         right_lines: &[String],
     ) -> bool {
-        if matches!(
-            (left_item, right_item),
-            (Item::ReactiveUpdate(_), Item::ReactiveUpdate(_))
-        ) && left_item.decorators().is_empty()
-            && right_item.decorators().is_empty()
-        {
-            return false;
-        }
         !self.compacts_with_next_item(left_item, left_lines)
             || !self.compacts_with_next_item(right_item, right_lines)
             || left_item.kind() != right_item.kind()
@@ -136,7 +128,7 @@ impl Formatter {
             && lines.len() == 1
             && matches!(
                 item,
-                Item::Value(_) | Item::Signal(_) | Item::ReactiveUpdate(_) | Item::Export(_)
+                Item::Value(_) | Item::Signal(_) | Item::Export(_)
             )
     }
 
@@ -237,112 +229,71 @@ impl Formatter {
         }
     }
 
-    fn format_reactive_update_item(&self, item: &ReactiveUpdateItem) -> Vec<String> {
-        match &item.kind {
-            ReactiveUpdateKind::Guarded {
-                guard,
-                target,
-                body,
-            } => {
-                self.format_guarded_reactive_update(guard.as_ref(), target.as_ref(), body.as_ref())
-            }
-            ReactiveUpdateKind::SourcePattern {
-                source,
-                pattern,
-                target,
-                body,
-            } => self.format_source_pattern_reactive_update(
-                source.as_ref(),
-                pattern.as_ref(),
-                target.as_ref(),
-                body.as_ref(),
-            ),
-            ReactiveUpdateKind::Match { subject, arms } => {
-                let subject = subject
-                    .as_ref()
-                    .map(|expr| self.format_expr_inline(expr, 0))
-                    .unwrap_or_else(|| "_".to_owned());
-                let mut lines = vec![format!("when {subject}")];
-                for arm in arms {
-                    lines.extend(
-                        self.format_reactive_update_arm(arm)
-                            .into_iter()
-                            .map(|line| format!("{}{line}", spaces(REACTIVE_UPDATE_ARM_INDENT))),
-                    );
-                }
-                lines
-            }
+    /// Format a signal declaration, handling both plain expression bodies and merge bodies.
+    fn format_signal_item(&self, item: &NamedItem) -> Vec<String> {
+        if let Some(merge) = item.merge_body() {
+            return self.format_signal_merge_item(item, merge);
         }
+        self.format_value_item("signal", item)
     }
 
-    fn format_guarded_reactive_update(
+    fn format_signal_merge_item(
         &self,
-        guard: Option<&Expr>,
-        target: Option<&Identifier>,
-        body: Option<&Expr>,
+        item: &NamedItem,
+        merge: &SignalMergeBody,
     ) -> Vec<String> {
-        let guard = guard
-            .map(|expr| self.format_expr_inline(expr, 0))
-            .unwrap_or_else(|| "_".to_owned());
-        let target = target
-            .map(|target| target.text.clone())
-            .unwrap_or_else(|| "_".to_owned());
-        let header = format!("when {guard} => {target}");
-        self.format_reactive_update_body(&header, body)
+        let mut header = format!("signal {}", self.item_name(&item.name));
+        if let Some(annotation) = &item.annotation {
+            let formatted = self.format_type_inline(annotation, 0);
+            header.push_str(&format!(" : {formatted}"));
+        }
+        let sources_str = merge
+            .sources
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" | ");
+        header.push_str(&format!(" = {sources_str}"));
+        let mut lines = vec![header];
+        for arm in &merge.arms {
+            lines.extend(
+                self.format_signal_reactive_arm(arm)
+                    .into_iter()
+                    .map(|line| format!("{}{line}", spaces(SIGNAL_REACTIVE_ARM_INDENT))),
+            );
+        }
+        lines
     }
 
-    fn format_source_pattern_reactive_update(
-        &self,
-        source: Option<&Identifier>,
-        pattern: Option<&Pattern>,
-        target: Option<&Identifier>,
-        body: Option<&Expr>,
-    ) -> Vec<String> {
-        let source = source
-            .map(|source| source.text.clone())
-            .unwrap_or_else(|| "_".to_owned());
-        let pattern = pattern
-            .map(|pattern| self.format_pattern_inline(pattern, 0))
-            .unwrap_or_else(|| "_".to_owned());
-        let target = target
-            .map(|target| target.text.clone())
-            .unwrap_or_else(|| "_".to_owned());
-        let header = format!("when {source} {pattern} => {target}");
-        self.format_reactive_update_body(&header, body)
-    }
-
-    fn format_reactive_update_arm(&self, arm: &ReactiveUpdateArm) -> Vec<String> {
+    fn format_signal_reactive_arm(&self, arm: &SignalReactiveArm) -> Vec<String> {
+        let mut header = "||>".to_owned();
+        if let Some(source) = &arm.source {
+            header.push(' ');
+            header.push_str(&source.text);
+        }
         let pattern = arm
             .pattern
             .as_ref()
             .map(|pattern| self.format_pattern_inline(pattern, 0))
             .unwrap_or_else(|| "_".to_owned());
-        let target = arm
-            .target
-            .as_ref()
-            .map(|target| target.text.clone())
-            .unwrap_or_else(|| "_".to_owned());
-        let header = format!("||> {pattern} => {target}");
-        self.format_reactive_update_body(&header, arm.body.as_ref())
-    }
-
-    fn format_reactive_update_body(&self, header: &str, body: Option<&Expr>) -> Vec<String> {
-        let Some(body) = body else {
-            return vec![format!("{header} <-")];
+        header.push(' ');
+        header.push_str(&pattern);
+        header.push_str(" =>");
+        let Some(body) = &arm.body else {
+            return vec![header];
         };
-
         let force_break =
-            self.should_force_expr_break(display_width(&format!("{header} <- ")), body);
+            self.should_force_expr_break(display_width(&format!("{header} ")), body);
         let block = self.format_expr_block(body, force_break);
         if block.is_inline() {
             vec![format!(
-                "{header} <- {}",
-                block.inline_text().expect("inline reactive update body")
+                "{header} {}",
+                block.inline_text().expect("inline arm body")
             )]
         } else if block.starts_with_delimiter() {
-            block.prefixed(&format!("{header} <- ")).into_lines()
+            block.prefixed(&format!("{header} ")).into_lines()
         } else {
-            let mut lines = vec![format!("{header} <-")];
+            let mut lines = vec![header];
             lines.extend(block.indented(INDENT_WIDTH).into_lines());
             lines
         }
@@ -3812,57 +3763,32 @@ value view =
     }
 
     #[test]
-    fn formatter_normalizes_reactive_update_items() {
+    fn formatter_normalizes_single_source_signal_merge() {
         let formatted = format_text(
-            "signal total:Signal Int\nsignal ready:Signal Bool\nwhen   ready=>total<-signal1+signal2\nwhen ready.done=>total<-result{\nnext<-Ok signal1\nnext+signal2\n}\n",
+            "signal total:Signal Int=ready\n  ||>True=>left+right\n  ||>_=>0\n",
         );
         assert_eq!(
             formatted,
             concat!(
-                "signal total : Signal Int\n",
-                "signal ready : Signal Bool\n",
-                "\n",
-                "when ready => total <- signal1 + signal2\n",
-                "when ready.done => total <-\n",
-                "    result {\n",
-                "        next <- Ok signal1\n",
-                "        next + signal2\n",
-                "    }\n",
+                "signal total : Signal Int = ready\n",
+                "  ||> True => left + right\n",
+                "  ||> _ => 0\n",
             )
         );
     }
 
     #[test]
-    fn formatter_normalizes_pattern_armed_reactive_update_items() {
+    fn formatter_normalizes_multi_source_signal_merge() {
         let formatted = format_text(
-            "signal heading:Signal Direction\nsignal ticks:Signal Int\nsignal event:Signal Event\nwhen event\n  ||>Turn dir=>heading<-dir\n  ||>Tick=>ticks<-ticks+1\n",
+            "signal event:Signal Event=tick|keyDown\n  ||>tick _=>Tick\n  ||>keyDown (Key \"ArrowUp\")=>Turn North\n  ||>_=>Tick\n",
         );
         assert_eq!(
             formatted,
             concat!(
-                "signal heading : Signal Direction\n",
-                "signal ticks : Signal Int\n",
-                "signal event : Signal Event\n",
-                "\n",
-                "when event\n",
-                "  ||> Turn dir => heading <- dir\n",
-                "  ||> Tick => ticks <- ticks + 1\n",
-            )
-        );
-    }
-
-    #[test]
-    fn formatter_normalizes_source_pattern_reactive_update_items() {
-        let formatted = format_text(
-            "signal event:Signal Event\nwhen keyDown(Key \"ArrowUp\")=>event<-Turn North\nwhen tick _=>event<-Tick\n",
-        );
-        assert_eq!(
-            formatted,
-            concat!(
-                "signal event : Signal Event\n",
-                "\n",
-                "when keyDown (Key \"ArrowUp\") => event <- Turn North\n",
-                "when tick _ => event <- Tick\n",
+                "signal event : Signal Event = tick | keyDown\n",
+                "  ||> tick _ => Tick\n",
+                "  ||> keyDown (Key \"ArrowUp\") => Turn North\n",
+                "  ||> _ => Tick\n",
             )
         );
     }

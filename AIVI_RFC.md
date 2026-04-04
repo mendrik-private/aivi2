@@ -2,7 +2,7 @@
 
 ## Draft v1.0 — implementation-facing resolved pass
 
-> Status: normative working draft with implementation choices merged. Working: surface parsing, name resolution, HIR, type/kind checking, constraint resolution, closed-ADT and record lowering, `Eq`/`Functor`/`Applicative` class and instance checking, Cranelift AOT codegen, GTK/libadwaita widget bridge, signal graph scheduling, source provider catalog (HTTP, fs, timer, D-Bus, process), and CLI execute/fmt/check. Known open gaps: HKT end-to-end through Cranelift, `Monad`/`Chain` lowering, `when` runtime wiring, `&|>` typed-core lowering. Sections §26–§28 cover the CLI, LSP, and pre-stdlib implementation gaps.
+> Status: normative working draft with implementation choices merged. Working: surface parsing, name resolution, HIR, type/kind checking, constraint resolution, closed-ADT and record lowering, `Eq`/`Functor`/`Applicative` class and instance checking, Cranelift AOT codegen, GTK/libadwaita widget bridge, signal graph scheduling, source provider catalog (HTTP, fs, timer, D-Bus, process), and CLI execute/fmt/check. Known open gaps: HKT end-to-end through Cranelift, `Monad`/`Chain` lowering, signal merge runtime wiring, `&|>` typed-core lowering. Sections §26–§28 cover the CLI, LSP, and pre-stdlib implementation gaps.
 
 ---
 
@@ -307,36 +307,32 @@ signal clicked : Signal Unit
 signal query : Signal Text
 ```
 
-Top-level reactive update clauses may target an already-declared signal:
+Signal declarations may merge source signals and pattern-match their payloads using `||>` arms:
 
 ```aivi
 signal left = 20
 signal right = 22
-signal total = 0
 signal ready = True
-signal enabled = True
 
-when ready => total <- left + right
-when ready and enabled => total <-
-    result {
-        next <- Ok left
-        next + right
-    }
+signal total : Signal Int = ready
+  ||> True => left + right
+  ||> _ => 0
 ```
 
-Normative rules for `when`:
+Normative rules for signal merge:
 
-- canonical surface: `when <guard> => <target> <- <expr>`
-- source-pattern surface: `when <source-signal> <pattern> => <target> <- <expr>`
-- `<guard>` is an ordinary expression that must type-check as `Bool`
-- `<source-signal>` must resolve to a previously declared local `signal`
-- `<pattern>` is matched against that signal's payload for the tick; non-matches do not commit a value
-- `<target>` must resolve to a previously declared local `signal`
-- `<expr>` is an ordinary expression; unlike pipe stages, it has no ambient subject value
-- when the clause is triggered and the guard is `False`, the target keeps its previous committed value
-- multiple `when` clauses may target the same signal; within one scheduler tick, later firing clauses win by source order
+- merge expression: `signal name : Signal T = sig1 | sig2 ...`
+- multi-source arms: `||> <source-name> <pattern> => <body>`
+- single-source arms: `||> <pattern> => <body>`
+- default arm: `||> _ => <body>` — provides the initial value and handles unmatched cases
+- each source in the merge must resolve to a previously declared local `signal`
+- multi-source arm prefixes must match a signal in the merge list
+- `<body>` is an ordinary expression; it has no ambient subject value
+- if no arm matches, the signal keeps its previous committed value
+- if multiple sources fire in one tick, later arm in source order wins
+- self-reference: the declaring signal cannot read itself from its own arm bodies
 
-`when` is a dedicated reactive-update surface, not pipe syntax and not `result`-block binding sugar. Member-access guards such as `ready.done` are valid only when ordinary expression typing already proves them to be `Bool`; there is no extra guard-only desugaring.
+Signal merge is a dedicated reactive surface. It replaces the former `when` clause syntax.
 
 ### 5.0.4 `@source` — source-backed signal decorators
 
@@ -1559,33 +1555,39 @@ Normative rules:
 
 The shorthand accumulation forms from older drafts are not current executable surface.
 
-### 13.2.2 Reactive update clauses with `when`
+### 13.2.2 Signal merge and reactive arms
 
-Reactive update clauses attach event-driven commits to an existing signal:
+Signal declarations may merge one or more source signals and pattern-match their payloads using `||>` arms:
 
 ```aivi
 signal left = 20
 signal right = 22
-signal total = 0
 signal ready = True
-signal enabled = True
 
-when ready => total <- left + right
-when ready and enabled => total <- left + right
-when keyDown (Key "ArrowUp") => heading <- Up
+signal total : Signal Int = ready
+  ||> True => left + right
+  ||> _ => 0
+
+signal event : Signal Event = tick | keyDown
+  ||> tick _ => Tick
+  ||> keyDown (Key "ArrowUp") => Turn North
+  ||> _ => Tick
 ```
 
 Scheduler-facing rules:
 
-- the compiler records the signal dependencies referenced by each clause guard and body
-- source-pattern clauses record the referenced source signal and lower through pattern matching on that signal payload
-- a clause evaluates against the tick's stable upstream values; its body does not receive an ambient subject
-- if the clause guard evaluates to `False`, no new value is committed for that clause and the target keeps its previous committed value
-- if the source-pattern does not match, no new value is committed for that clause and the target keeps its previous committed value
-- if multiple clauses for the same target produce commits in one tick, source order breaks ties and the last firing clause wins
+- the merge expression (`sig1 | sig2`) lists the source signals; each must name a previously declared signal
+- multi-source arms require a signal-name prefix matching one of the merge sources
+- single-source arms omit the prefix and match directly on the source payload
+- the default arm (`||> _ => <body>`) provides the initial value and handles unmatched cases
+- the compiler records signal dependencies referenced by each arm body
+- source-pattern arms record the referenced source signal and lower through pattern matching on that signal payload
+- an arm evaluates against the tick's stable upstream values; its body does not receive an ambient subject
+- if no arm matches, no new value is committed and the signal keeps its previous committed value
+- if multiple sources fire in one tick, source order breaks ties and the last firing arm wins
 - recurrence and self-reference must be validated explicitly; they are not accepted by accident
 
-Current implementation status: `when` clauses now lower and execute through the linked runtime end to end. Guards and bodies are compiled as runtime fragments, source-order conflict resolution happens in the scheduler, and validation still rejects recurrence or target self-reference explicitly.
+Current implementation status: signal merge arms lower into `ReactiveUpdateClause` internally and execute through the linked runtime end to end. Guards and bodies are compiled as runtime fragments, source-order conflict resolution happens in the scheduler, and validation still rejects recurrence or target self-reference explicitly.
 
 ### 13.3 Applicative meaning of `Signal`
 

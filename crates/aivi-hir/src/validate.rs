@@ -9545,13 +9545,15 @@ mod tests {
     }
 
     #[test]
-    fn validate_reactive_update_rejects_self_references() {
+    fn validate_signal_merge_rejects_self_references() {
         let report = validate_resolved_text(
-            "reactive-update-self-reference.aivi",
-            "signal total : Signal Int\n\
-             signal ready : Signal Bool\n\
-             when total > 0 => total <- total + 1\n\
-             when ready => total <- total + 2\n",
+            "signal-merge-self-reference.aivi",
+            r#"signal ready : Signal Bool
+
+signal total : Signal Int = ready
+  ||> True => total + 1
+  ||> _ => 0
+"#,
         );
         let self_reference_count = report
             .diagnostics()
@@ -9560,28 +9562,35 @@ mod tests {
                 diagnostic.code == Some(crate::codes::REACTIVE_UPDATE_SELF_REFERENCE)
             })
             .count();
-        assert_eq!(
-            self_reference_count,
-            3,
-            "expected reactive update guard/body self-references to be diagnosed explicitly, got diagnostics: {:?}",
+        assert!(
+            self_reference_count >= 1,
+            "expected signal merge arm self-references to be diagnosed explicitly, got diagnostics: {:?}",
             report.diagnostics()
         );
     }
 
     #[test]
-    fn validate_reactive_update_cycles_participate_in_signal_cycle_detection() {
+    fn validate_signal_merge_cycles_participate_in_cycle_detection() {
+        // With signal merge, sources must be previously declared.
+        // A cycle can still happen through body dependencies.
         let report = validate_resolved_text(
-            "reactive-update-cycle.aivi",
-            "signal left : Signal Bool\n\
-             signal right : Signal Bool\n\
-             when right => left <- right\n\
-             when left => right <- left\n",
+            "signal-merge-cycle.aivi",
+            r#"signal trigger : Signal Bool
+
+signal left : Signal Bool = trigger
+  ||> True => right
+  ||> _ => False
+
+signal right : Signal Bool = trigger
+  ||> True => left
+  ||> _ => False
+"#,
         );
         assert!(
             report.diagnostics().iter().any(|diagnostic| {
                 diagnostic.code == Some(crate::codes::CIRCULAR_SIGNAL_DEPENDENCY)
             }),
-            "expected reactive update dependencies to participate in cycle detection, got diagnostics: {:?}",
+            "expected signal merge dependencies to participate in cycle detection, got diagnostics: {:?}",
             report.diagnostics()
         );
     }

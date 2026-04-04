@@ -196,14 +196,13 @@ signal tick : Signal Unit
 }
 signal keyDown : Signal Key
 
-signal event : Signal Event
-
-when tick _ => event <- Tick
-when keyDown (Key "ArrowLeft") => event <- Turn West
-when keyDown (Key "ArrowRight") => event <- Turn East
-when keyDown (Key "ArrowUp") => event <- Turn North
-when keyDown (Key "ArrowDown") => event <- Turn South
-when keyDown (Key "Space") => event <- Restart
+signal event : Signal Event = tick | keyDown
+  ||> tick _ => Tick
+  ||> keyDown (Key "ArrowLeft") => Turn West
+  ||> keyDown (Key "ArrowRight") => Turn East
+  ||> keyDown (Key "ArrowUp") => Turn North
+  ||> keyDown (Key "ArrowDown") => Turn South
+  ||> keyDown (Key "Space") => Restart
 
 signal state : Signal GameState = event
  +|> initial step

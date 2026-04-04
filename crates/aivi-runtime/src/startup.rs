@@ -4442,10 +4442,13 @@ signal enabled : Signal Bool
 
 signal left = 20
 signal right = 22
-signal total : Signal Int = 0
 
-when ready => total <- left + right
-when ready and enabled => total <- left + right + 1
+signal readyAndEnabled = ready and enabled
+
+signal total : Signal Int = ready | readyAndEnabled
+  ||> readyAndEnabled True => left + right + 1
+  ||> ready True => left + right
+  ||> _ => 0
 "#,
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
@@ -4523,12 +4526,14 @@ type Direction = Up | Down
 type Event = Turn Direction | Tick
 
 signal event = Turn Down
-signal heading : Signal Direction = Up
-signal tickSeen : Signal Bool = False
 
-when event
-  ||> Turn dir => heading <- dir
-  ||> Tick => tickSeen <- True
+signal heading : Signal Direction = event
+  ||> Turn dir => dir
+  ||> _ => Up
+
+signal tickSeen : Signal Bool = event
+  ||> Tick => True
+  ||> _ => False
 "#,
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
@@ -4576,9 +4581,9 @@ provider custom.ready
 @source custom.ready
 signal ready : Signal Bool
 
-signal total : Signal Int = 0
-
-when ready True => total <- 42
+signal total : Signal Int = ready
+  ||> True => 42
+  ||> _ => 0
 "#,
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
@@ -4648,10 +4653,10 @@ signal tick : Signal Bool
 @source custom.key
 signal key : Signal Bool
 
-signal current : Signal Int = 0
-
-when tick True => current <- 1
-when key True => current <- 2
+signal current : Signal Int = tick | key
+  ||> tick True => 1
+  ||> key True => 2
+  ||> _ => 0
 "#,
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
@@ -4729,11 +4734,9 @@ signal incoming : Signal User
 
 signal seed : Signal User = { active: True, email: "seed@example.com" }
 
-signal current : Signal User =
-    seed
-     ?|> .active
-
-when ready => current <- incoming
+signal current : Signal User = ready
+  ||> True => incoming
+  ||> _ => seed
 "#,
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
@@ -4765,7 +4768,7 @@ when ready => current <- incoming
                     value: RuntimeValue::Text("seed@example.com".into()),
                 },
             ])),
-            "the seed body should still flow through the target pipeline"
+            "the default arm body should provide the initial value"
         );
 
         ready_port
@@ -4773,21 +4776,6 @@ when ready => current <- incoming
                 RuntimeValue::Bool(true),
             ))
             .expect("ready publication should queue");
-        incoming_port
-            .publish(user_value(false, "inactive@example.com"))
-            .expect("inactive user publication should queue");
-        linked
-            .tick_with_source_lifecycle()
-            .expect("inactive reactive pipeline tick should succeed");
-        assert!(
-            linked
-                .runtime()
-                .current_value(current_signal)
-                .unwrap()
-                .is_none(),
-            "reactive bodies should still run through the target signal pipeline"
-        );
-
         incoming_port
             .publish(user_value(true, "active@example.com"))
             .expect("active user publication should queue");
@@ -4806,7 +4794,7 @@ when ready => current <- incoming
                     value: RuntimeValue::Text("active@example.com".into()),
                 },
             ])),
-            "reactive bodies should commit values that satisfy the target pipeline"
+            "reactive merge arm should commit the incoming value when guard matches"
         );
     }
 

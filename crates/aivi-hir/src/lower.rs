@@ -763,10 +763,6 @@ impl<'a> Lowerer<'a> {
             }
             return;
         }
-        if let syn::Item::ReactiveUpdate(item) = item {
-            self.attach_reactive_update_clause(item);
-            return;
-        }
 
         let lowered = match item {
             syn::Item::Type(item) => Some(Item::Type(self.lower_type_item(item))),
@@ -782,9 +778,6 @@ impl<'a> Lowerer<'a> {
             syn::Item::Use(item) => Some(Item::Use(self.lower_use_item(item))),
             syn::Item::Export(_) => {
                 unreachable!("export items are handled before single-item lowering")
-            }
-            syn::Item::ReactiveUpdate(_) => {
-                unreachable!("reactive updates are attached before ordinary item lowering")
             }
             syn::Item::Error(item) => {
                 self.emit_error(
@@ -978,292 +971,145 @@ impl<'a> Lowerer<'a> {
             .annotation
             .as_ref()
             .map(|annotation| self.lower_type_expr(annotation));
-        let body = item.expr_body().map(|expr| self.lower_expr(expr));
+
+        let (body, reactive_updates) = if let Some(merge) = item.merge_body() {
+            let (seed, updates) = self.lower_signal_merge_arms(merge, item.keyword_span);
+            (seed, updates)
+        } else {
+            let body = item.expr_body().map(|expr| self.lower_expr(expr));
+            (body, Vec::new())
+        };
 
         SignalItem {
             header,
             name,
             annotation,
             body,
-            reactive_updates: Vec::new(),
+            reactive_updates,
             signal_dependencies: Vec::new(),
             source_metadata: None,
             is_source_capability_handle: false,
         }
     }
 
-    fn attach_reactive_update_clause(&mut self, item: &syn::ReactiveUpdateItem) {
-        match &item.kind {
-            syn::ReactiveUpdateKind::Guarded {
-                guard,
-                target,
-                body,
-            } => {
-                self.attach_guarded_reactive_update_clause(
-                    item.base.span,
-                    item.keyword_span,
-                    guard.as_ref(),
-                    target.as_ref(),
-                    body.as_ref(),
+    fn lower_signal_merge_arms(
+        &mut self,
+        merge: &syn::SignalMergeBody,
+        keyword_span: SourceSpan,
+    ) -> (Option<ExprId>, Vec<ReactiveUpdateClause>) {
+        let mut updates = Vec::new();
+        let mut seed_body: Option<ExprId> = None;
+
+        // Resolve source signals.
+        let source_items: Vec<Option<ItemId>> = merge
+            .sources
+            .iter()
+            .map(|source| self.resolve_merge_source(source))
+            .collect();
+
+        for arm in &merge.arms {
+            let Some(pattern) = arm.pattern.as_ref() else {
+                self.emit_error(
+                    arm.span,
+                    "signal reactive arm is missing its pattern",
+                    code("merge-arm-missing-pattern"),
                 );
-            }
-            syn::ReactiveUpdateKind::SourcePattern {
-                source,
-                pattern,
-                target,
-                body,
-            } => {
-                self.attach_source_pattern_reactive_update_clause(
-                    item.base.span,
-                    item.keyword_span,
-                    source.as_ref(),
-                    pattern.as_ref(),
-                    target.as_ref(),
-                    body.as_ref(),
+                continue;
+            };
+            let Some(body) = arm.body.as_ref() else {
+                self.emit_error(
+                    arm.span,
+                    "signal reactive arm is missing its body expression",
+                    code("merge-arm-missing-body"),
                 );
-            }
-            syn::ReactiveUpdateKind::Match { subject, arms } => {
-                self.attach_pattern_reactive_update_clauses(
-                    item.base.span,
-                    item.keyword_span,
-                    subject.as_ref(),
-                    arms,
+                continue;
+            };
+
+            // Determine if this is a default/wildcard arm.
+            let is_default_arm = arm.source.is_none()
+                && matches!(
+                    pattern.kind,
+                    syn::PatternKind::Wildcard
                 );
+
+            // Determine trigger source from the arm's source prefix.
+            let trigger_source = if is_default_arm {
+                // Default arm (wildcard): no specific trigger source.
+                None
+            } else if let Some(source_ident) = &arm.source {
+                // Multi-source arm: find the source in the merge list.
+                let pos = merge.sources.iter().position(|s| s.text == source_ident.text);
+                match pos {
+                    Some(idx) => source_items[idx],
+                    None => {
+                        self.emit_error(
+                            source_ident.span,
+                            format!(
+                                "signal name `{}` does not appear in the merge source list",
+                                source_ident.text
+                            ),
+                            code("merge-arm-unknown-source"),
+                        );
+                        None
+                    }
+                }
+            } else if merge.sources.len() == 1 {
+                // Single-source arm: the only source is the trigger.
+                source_items[0]
+            } else {
+                None
+            };
+
+            // Build the source expression for pattern matching.
+            let source_expr_ident = if is_default_arm {
+                None
+            } else {
+                arm.source
+                    .as_ref()
+                    .or_else(|| {
+                        if merge.sources.len() == 1 {
+                            Some(&merge.sources[0])
+                        } else {
+                            None
+                        }
+                    })
+            };
+
+            if let Some(source_ident) = source_expr_ident {
+                let source_expr =
+                    self.lower_unresolved_name_expr(source_ident.text.as_str(), source_ident.span);
+                let guard =
+                    self.make_pattern_match_bool_expr(source_expr, pattern, arm.span);
+                let body_expr =
+                    self.make_pattern_match_optional_expr(source_expr, pattern, body, arm.span);
+                updates.push(ReactiveUpdateClause {
+                    span: arm.span,
+                    keyword_span,
+                    target_span: arm.span,
+                    guard,
+                    body: body_expr,
+                    body_mode: ReactiveUpdateBodyMode::OptionalPayload,
+                    trigger_source,
+                });
+            } else {
+                // Default arm: becomes the signal's seed body (initial value).
+                let body_expr = self.lower_expr(body);
+                seed_body = Some(body_expr);
             }
         }
+
+        (seed_body, updates)
     }
 
-    fn attach_guarded_reactive_update_clause(
-        &mut self,
-        span: SourceSpan,
-        keyword_span: SourceSpan,
-        guard: Option<&syn::Expr>,
-        target: Option<&syn::Identifier>,
-        body: Option<&syn::Expr>,
-    ) {
-        let Some(guard) = guard else {
-            self.emit_error(
-                span,
-                "reactive update is missing its guard expression",
-                code("reactive-update-missing-guard"),
-            );
-            return;
-        };
-        let Some(target) = target else {
-            self.emit_error(
-                span,
-                "reactive update is missing its target signal name",
-                code("reactive-update-missing-target"),
-            );
-            return;
-        };
-        let Some(body) = body else {
-            self.emit_error(
-                span,
-                "reactive update is missing its body expression",
-                code("reactive-update-missing-body"),
-            );
-            return;
-        };
-        let Some(target_item) = self.resolve_reactive_update_target(target) else {
-            return;
-        };
-        let guard = self.lower_expr(guard);
-        let body = self.lower_expr(body);
-        let Some(Item::Signal(signal)) = self.module.arenas.items.get_mut(target_item) else {
-            unreachable!("reactive update target resolution only returns signal items");
-        };
-        signal.reactive_updates.push(ReactiveUpdateClause {
-            span,
-            keyword_span,
-            target_span: target.span,
-            guard,
-            body,
-            body_mode: ReactiveUpdateBodyMode::Payload,
-            trigger_source: None,
-        });
-    }
-
-    fn attach_source_pattern_reactive_update_clause(
-        &mut self,
-        span: SourceSpan,
-        keyword_span: SourceSpan,
-        source: Option<&syn::Identifier>,
-        pattern: Option<&syn::Pattern>,
-        target: Option<&syn::Identifier>,
-        body: Option<&syn::Expr>,
-    ) {
-        let Some(source) = source else {
-            self.emit_error(
-                span,
-                "reactive update is missing its source signal name",
-                code("reactive-update-missing-source"),
-            );
-            return;
-        };
-        let Some(pattern) = pattern else {
-            self.emit_error(
-                span,
-                "reactive update is missing its source pattern",
-                code("reactive-update-missing-source-pattern"),
-            );
-            return;
-        };
-        let Some(target) = target else {
-            self.emit_error(
-                span,
-                "reactive update is missing its target signal name",
-                code("reactive-update-missing-target"),
-            );
-            return;
-        };
-        let Some(body) = body else {
-            self.emit_error(
-                span,
-                "reactive update is missing its body expression",
-                code("reactive-update-missing-body"),
-            );
-            return;
-        };
-        let Some(source_item) = self.resolve_reactive_update_source(source) else {
-            return;
-        };
-        let Some(target_item) = self.resolve_reactive_update_target(target) else {
-            return;
-        };
-
-        let source_expr = self.lower_unresolved_name_expr(source.text.as_str(), source.span);
-        let guard = self.make_pattern_match_bool_expr(source_expr, pattern, span);
-        let body = self.make_pattern_match_optional_expr(source_expr, pattern, body, span);
-        let Some(Item::Signal(signal)) = self.module.arenas.items.get_mut(target_item) else {
-            unreachable!("reactive update target resolution only returns signal items");
-        };
-        signal.reactive_updates.push(ReactiveUpdateClause {
-            span,
-            keyword_span,
-            target_span: target.span,
-            guard,
-            body,
-            body_mode: ReactiveUpdateBodyMode::OptionalPayload,
-            trigger_source: Some(source_item),
-        });
-    }
-
-    fn attach_pattern_reactive_update_clauses(
-        &mut self,
-        span: SourceSpan,
-        keyword_span: SourceSpan,
-        subject: Option<&syn::Expr>,
-        arms: &[syn::ReactiveUpdateArm],
-    ) {
-        let Some(subject) = subject else {
-            self.emit_error(
-                span,
-                "reactive update is missing its subject expression",
-                code("reactive-update-missing-subject"),
-            );
-            return;
-        };
-        if arms.is_empty() {
-            self.emit_error(
-                span,
-                "pattern-armed reactive updates require at least one `||>` arm",
-                code("reactive-update-missing-arm"),
-            );
-            return;
-        }
-
-        let subject_expr = self.lower_expr(subject);
-        for arm in arms {
-            self.attach_pattern_reactive_update_arm(keyword_span, subject_expr, arm);
-        }
-    }
-
-    fn attach_pattern_reactive_update_arm(
-        &mut self,
-        keyword_span: SourceSpan,
-        subject: ExprId,
-        arm: &syn::ReactiveUpdateArm,
-    ) {
-        let Some(pattern) = arm.pattern.as_ref() else {
-            self.emit_error(
-                arm.span,
-                "reactive update arm is missing its pattern",
-                code("reactive-update-missing-arm-pattern"),
-            );
-            return;
-        };
-        let Some(target) = arm.target.as_ref() else {
-            self.emit_error(
-                arm.span,
-                "reactive update arm is missing its target signal name",
-                code("reactive-update-missing-target"),
-            );
-            return;
-        };
-        let Some(body) = arm.body.as_ref() else {
-            self.emit_error(
-                arm.span,
-                "reactive update arm is missing its body expression",
-                code("reactive-update-missing-body"),
-            );
-            return;
-        };
-        let Some(target_item) = self.resolve_reactive_update_target(target) else {
-            return;
-        };
-
-        let guard = self.make_pattern_match_bool_expr(subject, pattern, arm.span);
-        let body = self.make_pattern_match_optional_expr(subject, pattern, body, arm.span);
-        let Some(Item::Signal(signal)) = self.module.arenas.items.get_mut(target_item) else {
-            unreachable!("reactive update target resolution only returns signal items");
-        };
-        signal.reactive_updates.push(ReactiveUpdateClause {
-            span: arm.span,
-            keyword_span,
-            target_span: target.span,
-            guard,
-            body,
-            body_mode: ReactiveUpdateBodyMode::OptionalPayload,
-            trigger_source: None,
-        });
-    }
-
-    fn resolve_reactive_update_target(&mut self, target: &syn::Identifier) -> Option<ItemId> {
-        let Some(target_item) = self.find_predeclared_named_item(target.text.as_str()) else {
-            self.emit_error(
-                target.span,
-                format!(
-                    "reactive update target `{}` must name a previously declared signal",
-                    target.text
-                ),
-                code("reactive-update-unknown-target"),
-            );
-            return None;
-        };
-        if !matches!(self.module.items()[target_item], Item::Signal(_)) {
-            self.emit_error(
-                target.span,
-                format!(
-                    "reactive update target `{}` must refer to a previously declared signal",
-                    target.text
-                ),
-                code("reactive-update-target-not-signal"),
-            );
-            return None;
-        }
-        Some(target_item)
-    }
-
-    fn resolve_reactive_update_source(&mut self, source: &syn::Identifier) -> Option<ItemId> {
+    fn resolve_merge_source(&mut self, source: &syn::Identifier) -> Option<ItemId> {
         let Some(source_item) = self.find_predeclared_named_item(source.text.as_str()) else {
             self.emit_error(
                 source.span,
                 format!(
-                    "reactive update source `{}` must name a previously declared signal",
+                    "merge source `{}` must name a previously declared signal",
                     source.text
                 ),
-                code("reactive-update-unknown-source"),
+                code("merge-unknown-source"),
             );
             return None;
         };
@@ -1271,10 +1117,10 @@ impl<'a> Lowerer<'a> {
             self.emit_error(
                 source.span,
                 format!(
-                    "reactive update source `{}` must refer to a previously declared signal",
+                    "merge source `{}` must refer to a signal, not another kind of declaration",
                     source.text
                 ),
-                code("reactive-update-source-not-signal"),
+                code("merge-source-not-signal"),
             );
             return None;
         }
@@ -9772,60 +9618,47 @@ mod tests {
     }
 
     #[test]
-    fn lowers_reactive_updates_onto_predeclared_target_signals() {
+    fn lowers_single_source_signal_merge_arms() {
         let lowered = lower_text(
-            "reactive_updates.aivi",
-            r#"signal total : Signal Int
-signal ready : Signal Bool
+            "single_source_merge.aivi",
+            r#"signal ready : Signal Bool
 signal left : Signal Int
 signal right : Signal Int
 
-when ready => total <- left + right
-when right > 0 => total <- result {
-    next <- Ok left
-    next
-}
+signal total : Signal Int = ready
+  ||> True => left + right
+  ||> _ => 0
 "#,
         );
         assert!(
             !lowered.has_errors(),
-            "expected reactive updates to lower cleanly, got diagnostics: {:?}",
+            "expected signal merge to lower cleanly, got diagnostics: {:?}",
             lowered.diagnostics()
         );
 
         let module = lowered.module();
         let total = find_signal(module, "total");
-        assert_eq!(total.reactive_updates.len(), 2);
+        // Default arm becomes the seed body, so only 1 reactive update.
+        assert_eq!(total.reactive_updates.len(), 1);
+        assert!(total.body.is_some(), "default arm should become the signal seed body");
         assert_eq!(
-            signal_dependency_names(module, total),
-            vec!["ready".to_owned(), "left".to_owned(), "right".to_owned()]
+            total.reactive_updates[0].body_mode,
+            ReactiveUpdateBodyMode::OptionalPayload
         );
-        assert!(matches!(
-            module.exprs()[total.reactive_updates[0].guard].kind,
-            ExprKind::Name(_)
-        ));
-        assert!(matches!(
-            module.exprs()[total.reactive_updates[0].body].kind,
-            ExprKind::Binary { .. }
-        ));
-        assert!(matches!(
-            module.exprs()[total.reactive_updates[1].guard].kind,
-            ExprKind::Binary { .. }
-        ));
     }
 
     #[test]
-    fn rejects_reactive_updates_that_target_later_signals() {
+    fn lowers_merge_rejects_unknown_source_signal() {
         let lowered = lower_text(
-            "reactive_updates_late_target.aivi",
-            r#"signal ready : Signal Bool
-when ready => total <- 1
-signal total : Signal Int
+            "merge_unknown_source.aivi",
+            r#"signal total : Signal Int = nonexistent
+  ||> True => 42
+  ||> _ => 0
 "#,
         );
         assert!(
             lowered.has_errors(),
-            "expected late reactive update target to fail lowering"
+            "expected unknown merge source to fail lowering"
         );
         assert!(lowered.diagnostics().iter().any(|diagnostic| {
             diagnostic.severity == Severity::Error
@@ -9833,103 +9666,77 @@ signal total : Signal Int
                     .message
                     .contains("must name a previously declared signal")
         }));
-
-        let total = find_signal(lowered.module(), "total");
-        assert!(
-            total.reactive_updates.is_empty(),
-            "invalid updates should not attach to later signals"
-        );
     }
 
     #[test]
-    fn lowers_pattern_armed_reactive_updates_onto_target_signals() {
+    fn lowers_multi_source_signal_merge_arms() {
         let lowered = lower_text(
-            "pattern_armed_reactive_updates.aivi",
+            "multi_source_merge.aivi",
             r#"type Direction = Up | Down
 type Event = Turn Direction | Tick
 
 signal event = Turn Down
-signal heading : Signal Direction
-signal tickSeen : Signal Bool
 
-when event
-  ||> Turn dir => heading <- dir
-  ||> Tick => tickSeen <- True
+signal heading : Signal Direction = event
+  ||> Turn dir => dir
+  ||> _ => Up
+
+signal tickSeen : Signal Bool = event
+  ||> Tick => True
+  ||> _ => False
 "#,
         );
         assert!(
             !lowered.has_errors(),
-            "expected pattern-armed reactive updates to lower cleanly, got diagnostics: {:?}",
+            "expected multi-source signal merge to lower cleanly, got diagnostics: {:?}",
             lowered.diagnostics()
         );
 
         let module = lowered.module();
         let heading = find_signal(module, "heading");
         let tick_seen = find_signal(module, "tickSeen");
+        // Default arm becomes seed, so only 1 reactive update each.
         assert_eq!(heading.reactive_updates.len(), 1);
         assert_eq!(tick_seen.reactive_updates.len(), 1);
-        assert_eq!(
-            signal_dependency_names(module, heading),
-            vec!["event".to_owned()]
-        );
-        assert_eq!(
-            signal_dependency_names(module, tick_seen),
-            vec!["event".to_owned()]
-        );
+        assert!(heading.body.is_some(), "default arm should become heading's seed");
+        assert!(tick_seen.body.is_some(), "default arm should become tickSeen's seed");
         assert_eq!(
             heading.reactive_updates[0].body_mode,
             ReactiveUpdateBodyMode::OptionalPayload
         );
-        assert_eq!(
-            tick_seen.reactive_updates[0].body_mode,
-            ReactiveUpdateBodyMode::OptionalPayload
-        );
-        assert!(matches!(
-            module.exprs()[heading.reactive_updates[0].guard].kind,
-            ExprKind::Pipe(_)
-        ));
-        assert!(matches!(
-            module.exprs()[heading.reactive_updates[0].body].kind,
-            ExprKind::Pipe(_)
-        ));
     }
 
     #[test]
-    fn lowers_source_pattern_reactive_updates_onto_target_signals() {
+    fn lowers_source_pattern_signal_merge_arms() {
         let lowered = lower_text(
-            "source_pattern_reactive_updates.aivi",
+            "source_pattern_merge.aivi",
             r#"type Key = Key Text
 type Event = Tick | Turn Text
 
 signal keyDown : Signal Key
-signal event : Signal Event
 
-when keyDown (Key "ArrowUp") => event <- Turn "up"
+signal event : Signal Event = keyDown
+  ||> (Key "ArrowUp") => Turn "up"
+  ||> _ => Tick
 "#,
         );
         assert!(
             !lowered.has_errors(),
-            "expected source-pattern reactive updates to lower cleanly, got diagnostics: {:?}",
+            "expected source-pattern merge to lower cleanly, got diagnostics: {:?}",
             lowered.diagnostics()
         );
 
         let module = lowered.module();
         let event = find_signal(module, "event");
+        // Default arm becomes seed, so only 1 reactive update.
         assert_eq!(event.reactive_updates.len(), 1);
-        assert_eq!(
-            signal_dependency_names(module, event),
-            vec!["keyDown".to_owned()]
-        );
+        assert!(event.body.is_some(), "default arm should become event's seed");
         assert_eq!(
             event.reactive_updates[0].body_mode,
             ReactiveUpdateBodyMode::OptionalPayload
         );
         assert!(matches!(
             module.exprs()[event.reactive_updates[0].guard].kind,
-            ExprKind::Pipe(_)
-        ));
-        assert!(matches!(
-            module.exprs()[event.reactive_updates[0].body].kind,
             ExprKind::Pipe(_)
         ));
     }

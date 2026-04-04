@@ -757,49 +757,37 @@ Rules:
 - Checked form: `signalSource +|> seed step`
 - Step function shape: `input -> state -> state`
 
-### 7.4 `when` reactive updates
+### 7.4 Signal merge and reactive arms
 
 ```aivi
-signal total = 0
+signal event : Signal Event = tick | keyDown
+  ||> tick _ => Tick
+  ||> keyDown (Key "ArrowUp") => Turn North
+  ||> keyDown (Key "ArrowDown") => Turn South
+  ||> _ => Tick
 
-when ready => total <- left + right
-
-when keyDown (Key "ArrowUp") => heading <- North
-
-when event
-  ||> Turn dir => heading <- dir
-  ||> Tick => tickSeen <- True
+signal total : Signal Int = ready
+  ||> True => left + right
+  ||> _ => 0
 ```
 
 Rules:
 
-- Guarded form: `when <guard> => <target> <- <expr>`
-- Source-pattern form: `when <source-signal> <pattern> => <target> <- <expr>`
-- Pattern-armed form:
-
-  ```aivi
-  when <subject>
-    ||> <pattern> => <target> <- <expr>
-    ||> <pattern> => <target> <- <expr>
-  ```
-
-- In the guarded form, the guard must be `Bool`.
-- In the source-pattern form, the source must name a previously declared local `signal`.
-- In the source-pattern form, the pattern is matched against that signal's current payload for the tick.
-- Pattern binders introduced by the source-pattern form are only in scope for that body.
-- In the pattern-armed form, each arm pattern is matched against the subject with ordinary pattern rules.
+- The merge expression (`sig1 | sig2`) lists the source signals that feed the declaring signal.
+- Each source must name a previously declared local `signal`.
+- Multi-source arms: `||> <source-name> <pattern> => <body>` — source name prefix required, must match a signal in the merge list.
+- Single-source arms: `||> <pattern> => <body>` — no source name prefix needed.
+- Default arm: `||> _ => <body>` — required; provides the initial value before any source fires and handles unmatched cases.
 - Pattern binders introduced by an arm are only in scope for that arm body.
-- Every target must be a previously declared local `signal`.
-- No ambient subject is available inside the body expression.
-- Pattern-armed `when` is specific to reactive updates; it does not weaken ordinary pipe exhaustiveness elsewhere.
-- Reactive update self-reference rules are unchanged: the target signal cannot read itself from its own reactive update guard or body.
-- If multiple clauses for the same target fire in one tick, later source order wins.
+- Body type must match the declaring signal's payload type.
+- No ambient subject (`.`) inside arm bodies.
+- Self-reference: the declaring signal cannot read itself from its own arm bodies.
+- If multiple sources fire in one tick, later arm in source order wins.
 
 Current implementation note:
 
-- Top-level `when` clauses execute end to end in the linked runtime.
+- Signal merge arms lower into the same reactive update clause mechanism as before.
 - Guards and bodies are ordinary expressions with direct signal references.
-- If multiple clauses write the same signal in one tick, later source order still wins.
 - The surface lowers through existing pipe/case machinery rather than a separate pattern runtime.
 - Standalone compile/startup integration remains narrower than the fully checked frontend/runtime test surface.
 
@@ -1084,7 +1072,7 @@ Safest subset for code generation today:
 
 Use extra caution with:
 
-- `when` reactive update clauses
+- signal merge reactive arms
 - `@|> ... <|@` recurrent flows
 - advanced structural patch lowering paths
 - provider-specific runtime behavior outside the common `@source` shapes

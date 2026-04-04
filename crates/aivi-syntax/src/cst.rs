@@ -796,6 +796,7 @@ pub enum NamedItemBody {
     Type(TypeDeclBody),
     Class(ClassBody),
     Instance(InstanceBody),
+    Merge(SignalMergeBody),
 }
 
 /// Shared representation for named top-level items.
@@ -840,43 +841,33 @@ impl NamedItem {
             _ => None,
         }
     }
+
+    pub fn merge_body(&self) -> Option<&SignalMergeBody> {
+        match &self.body {
+            Some(NamedItemBody::Merge(body)) => Some(body),
+            _ => None,
+        }
+    }
 }
 
-/// One pattern arm inside a pattern-armed reactive update item.
+/// One reactive arm on a signal declaration with merge sources.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReactiveUpdateArm {
+pub struct SignalReactiveArm {
+    /// Source signal identifier in multi-source arms, `None` for default/single-source.
+    pub source: Option<Identifier>,
     pub pattern: Option<Pattern>,
-    pub target: Option<Identifier>,
     pub body: Option<Expr>,
     pub span: SourceSpan,
 }
 
-/// Surface forms supported by top-level reactive update items.
+/// Signal body that merges one or more source signals and pattern-matches with `||>` arms.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ReactiveUpdateKind {
-    Guarded {
-        guard: Option<Expr>,
-        target: Option<Identifier>,
-        body: Option<Expr>,
-    },
-    SourcePattern {
-        source: Option<Identifier>,
-        pattern: Option<Pattern>,
-        target: Option<Identifier>,
-        body: Option<Expr>,
-    },
-    Match {
-        subject: Option<Expr>,
-        arms: Vec<ReactiveUpdateArm>,
-    },
-}
-
-/// Top-level reactive signal update item.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReactiveUpdateItem {
-    pub base: ItemBase,
-    pub keyword_span: SourceSpan,
-    pub kind: ReactiveUpdateKind,
+pub struct SignalMergeBody {
+    /// Source signals participating in the merge (at least 1).
+    pub sources: Vec<Identifier>,
+    /// Reactive arms that pattern-match on the merged sources.
+    pub arms: Vec<SignalReactiveArm>,
+    pub span: SourceSpan,
 }
 
 /// `instance` declaration.
@@ -981,7 +972,6 @@ pub enum Item {
     Fun(NamedItem),
     Value(NamedItem),
     Signal(NamedItem),
-    ReactiveUpdate(ReactiveUpdateItem),
     Class(NamedItem),
     Instance(InstanceItem),
     Domain(DomainItem),
@@ -998,7 +988,6 @@ pub enum ItemKind {
     Fun,
     Value,
     Signal,
-    ReactiveUpdate,
     Class,
     Instance,
     Domain,
@@ -1015,7 +1004,6 @@ impl Item {
             Item::Fun(_) => ItemKind::Fun,
             Item::Value(_) => ItemKind::Value,
             Item::Signal(_) => ItemKind::Signal,
-            Item::ReactiveUpdate(_) => ItemKind::ReactiveUpdate,
             Item::Class(_) => ItemKind::Class,
             Item::Instance(_) => ItemKind::Instance,
             Item::Domain(_) => ItemKind::Domain,
@@ -1033,7 +1021,6 @@ impl Item {
             | Item::Value(item)
             | Item::Signal(item)
             | Item::Class(item) => &item.base,
-            Item::ReactiveUpdate(item) => &item.base,
             Item::Instance(item) => &item.base,
             Item::Domain(item) => &item.base,
             Item::SourceProviderContract(item) => &item.base,

@@ -10,9 +10,9 @@ use crate::{
         MarkupAttributeValue, MarkupNode, Module, NamedItem, NamedItemBody, OperatorName,
         PatchBlock, PatchEntry, PatchInstruction, PatchInstructionKind, PatchSelector,
         PatchSelectorSegment, Pattern, PatternKind, PipeCaseArm, PipeExpr, PipeStage,
-        PipeStageKind, ProjectionPath, QualifiedName, ReactiveUpdateArm, ReactiveUpdateItem,
-        ReactiveUpdateKind, RecordExpr, RecordField, RecordPatternField, RegexLiteral,
-        ResultBinding, ResultBlockExpr, SourceDecorator, SourceProviderContractBody,
+        PipeStageKind, ProjectionPath, QualifiedName, RecordExpr, RecordField,
+        RecordPatternField, RegexLiteral, ResultBinding, ResultBlockExpr, SignalMergeBody,
+        SignalReactiveArm, SourceDecorator, SourceProviderContractBody,
         SourceProviderContractFieldValue, SourceProviderContractItem, SourceProviderContractMember,
         SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextFragment,
         TextInterpolation, TextLiteral, TextSegment, TokenRange, TypeDeclBody, TypeExpr,
@@ -125,9 +125,6 @@ impl<'a> Parser<'a> {
             let item = match self.tokens[start].kind() {
                 TokenKind::At => self.parse_decorated_item(start),
                 kind if kind.is_top_level_keyword() => self.parse_item_without_decorators(start),
-                TokenKind::Identifier if self.is_top_level_when(start) => {
-                    self.parse_item_without_decorators(start)
-                }
                 _ => self.parse_error_item(start),
             };
             let next_cursor = item.token_range().end();
@@ -211,9 +208,6 @@ impl<'a> Parser<'a> {
     ) -> Item {
         let base = self.make_base(start, end, decorators);
         match self.tokens[keyword_index].kind() {
-            TokenKind::Identifier if self.is_identifier_text(keyword_index, "when") => {
-                Item::ReactiveUpdate(self.parse_reactive_update_item(base, keyword_index, end))
-            }
             TokenKind::TypeKw => {
                 Item::Type(self.parse_type_item(base, keyword_index, end, "type declaration"))
             }
@@ -635,14 +629,7 @@ impl<'a> Parser<'a> {
             .consume_kind(&mut cursor, end, TokenKind::Equals)
             .is_some()
         {
-            self.parse_expression_body(
-                keyword_index,
-                &mut cursor,
-                end,
-                "signal declaration",
-                "signal declaration is missing its body after `=`",
-                "expected an expression after `=`",
-            )
+            self.parse_signal_body(keyword_index, &mut cursor, end)
         } else {
             None
         };
@@ -668,293 +655,155 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_reactive_update_item(
+    /// Parse a signal body after `=`. This may be:
+    /// - A merge body: `sig1 | sig2 ||> ...` or `sig1 ||> ...`
+    /// - A plain expression body: `expr |> pipe`
+    fn parse_signal_body(
         &mut self,
-        base: ItemBase,
         keyword_index: usize,
+        cursor: &mut usize,
         end: usize,
-    ) -> ReactiveUpdateItem {
-        let item_span = base.span;
-        let keyword_span = self.source_span_of_token(keyword_index);
-        let kind = if let Some(arm_start) =
-            self.find_reactive_update_arm_block_start(keyword_index + 1, end)
-        {
-            let mut cursor = keyword_index + 1;
-            let subject = self
-                .parse_expr(&mut cursor, arm_start, ExprStop::default())
-                .or_else(|| {
-                    self.diagnostics.push(
-                        Diagnostic::error("reactive update is missing its subject expression")
-                            .with_code(MISSING_REACTIVE_UPDATE_SUBJECT)
-                            .with_primary_label(
-                                keyword_span,
-                                "expected a subject expression after `when`",
-                            )
-                            .with_help("syntax: when <source> | <guard> => <signal> <- <body>"),
-                    );
-                    None
-                });
-            let mut arm_cursor = arm_start;
-            ReactiveUpdateKind::Match {
-                subject,
-                arms: self.parse_reactive_update_arms(&mut arm_cursor, end),
+    ) -> Option<NamedItemBody> {
+        // Probe: is this a merge body?
+        // A merge body starts with an identifier, optionally followed by `|` ident sequences,
+        // and eventually has `||>` arms (either inline or on next lines).
+        if let Some(merge) = self.try_parse_signal_merge_body(keyword_index, cursor, end) {
+            return Some(NamedItemBody::Merge(merge));
+        }
+        // Fall back to plain expression body.
+        self.parse_expression_body(
+            keyword_index,
+            cursor,
+            end,
+            "signal declaration",
+            "signal declaration is missing its body after `=`",
+            "expected an expression after `=`",
+        )
+    }
+
+    /// Attempt to parse a signal merge body: `sig1 | sig2 ||> arm1 ||> arm2 ...`
+    /// Returns `None` if the token stream doesn't match the merge pattern, leaving cursor unchanged.
+    fn try_parse_signal_merge_body(
+        &mut self,
+        _keyword_index: usize,
+        cursor: &mut usize,
+        end: usize,
+    ) -> Option<SignalMergeBody> {
+        let merge_span_start = *cursor;
+
+        // Probe ahead without consuming: look for identifier (| identifier)* followed by ||> arms.
+        let mut probe = *cursor;
+        let mut source_positions: Vec<usize> = Vec::new();
+
+        // First source must be an identifier.
+        let first = self.peek_nontrivia(probe, end)?;
+        if self.tokens[first].kind() != TokenKind::Identifier {
+            return None;
+        }
+        source_positions.push(first);
+        probe = first + 1;
+
+        // Collect additional `| ident` sources.
+        loop {
+            let Some(next) = self.peek_nontrivia(probe, end) else {
+                break;
+            };
+            if self.tokens[next].kind() == TokenKind::PipeTap && !self.tokens[next].line_start() {
+                let Some(ident_idx) = self.peek_nontrivia(next + 1, end) else {
+                    break;
+                };
+                if self.tokens[ident_idx].kind() == TokenKind::Identifier
+                    && !self.tokens[ident_idx].line_start()
+                {
+                    source_positions.push(ident_idx);
+                    probe = ident_idx + 1;
+                    continue;
+                }
             }
-        } else if self.is_source_pattern_reactive_update(keyword_index, end) {
-            self.parse_source_pattern_reactive_update_kind(keyword_index, end, keyword_span)
-        } else {
-            self.parse_guarded_reactive_update_kind(keyword_index, end, keyword_span)
-        };
-
-        ReactiveUpdateItem {
-            base: ItemBase {
-                span: item_span,
-                token_range: base.token_range,
-                decorators: base.decorators,
-            },
-            keyword_span,
-            kind,
+            break;
         }
+
+        // Now check: do we see `||>` arms?
+        let has_arms = self.find_signal_reactive_arm_start(probe, end).is_some();
+        if !has_arms {
+            return None;
+        }
+
+        // Commit: parse the sources.
+        let mut sources = Vec::new();
+        for &pos in &source_positions {
+            let ident = Identifier {
+                text: self.tokens[pos].text(self.source).to_owned(),
+                span: self.source_span_of_token(pos),
+            };
+            sources.push(ident);
+        }
+        *cursor = probe;
+
+        // Parse the arms.
+        let arms = self.parse_signal_reactive_arms(cursor, end);
+
+        let merge_span = self.source_span_for_range(merge_span_start, *cursor.min(&mut end.clone()));
+        Some(SignalMergeBody {
+            sources,
+            arms,
+            span: merge_span,
+        })
     }
 
-    fn parse_guarded_reactive_update_kind(
-        &mut self,
-        keyword_index: usize,
-        end: usize,
-        keyword_span: SourceSpan,
-    ) -> ReactiveUpdateKind {
-        let mut cursor = keyword_index + 1;
-        let guard = self
-            .parse_expr(
-                &mut cursor,
-                end,
-                ExprStop {
-                    arrow: true,
-                    ..ExprStop::default()
-                },
-            )
-            .or_else(|| {
-                self.diagnostics.push(
-                    Diagnostic::error("reactive update is missing its guard expression")
-                        .with_code(MISSING_REACTIVE_UPDATE_GUARD)
-                        .with_primary_label(
-                            keyword_span,
-                            "expected a guard expression after `when`",
-                        )
-                        .with_help("syntax: when <source> | <guard> => <signal> <- <body>"),
-                );
-                None
-            });
-
-        let arrow_anchor = guard.as_ref().map(|expr| expr.span).unwrap_or(keyword_span);
-        let arrow_present = self
-            .consume_kind(&mut cursor, end, TokenKind::Arrow)
-            .is_some();
-        if !arrow_present {
-            self.diagnostics.push(
-                Diagnostic::error("reactive update is missing `=>` before its target signal")
-                    .with_code(MISSING_REACTIVE_UPDATE_ARROW)
-                    .with_primary_label(
-                        arrow_anchor,
-                        "expected `=>` followed by the target signal name",
-                    )
-                    .with_help("use `=>` to separate the guard from the target signal"),
-            );
+    /// Find the start of the first `||>` reactive arm token within `[from, end)`.
+    /// Reactive arms use `=>` (fat arrow). Pipe-case arms use `->` (thin arrow) and are NOT reactive.
+    fn find_signal_reactive_arm_start(&self, from: usize, end: usize) -> Option<usize> {
+        for index in from..end {
+            let token = self.tokens[index];
+            if token.kind().is_trivia() {
+                continue;
+            }
+            if token.kind() == TokenKind::PipeCase && token.line_start() {
+                // Verify this arm uses `=>` (reactive) not `->` (case).
+                // Scan ahead on the same line for the arrow token.
+                if self.reactive_arm_uses_fat_arrow(index + 1, end) {
+                    return Some(index);
+                }
+                // `||>` with `->` is a pipe-case expression, not a reactive arm.
+                return None;
+            }
+            // If we encounter something else that's non-trivia and on a new line, stop.
+            if token.line_start() && token.kind() != TokenKind::PipeCase {
+                return None;
+            }
         }
-
-        let target = if arrow_present {
-            self.parse_identifier(&mut cursor, end).or_else(|| {
-                self.diagnostics.push(
-                    Diagnostic::error("reactive update is missing its target signal name")
-                        .with_code(MISSING_REACTIVE_UPDATE_TARGET)
-                        .with_primary_label(
-                            arrow_anchor,
-                            "expected a target signal name after `=>`",
-                        )
-                        .with_help("expected a signal name after `=>`"),
-                );
-                None
-            })
-        } else {
-            None
-        };
-
-        let target_anchor = target
-            .as_ref()
-            .map(|name| name.span)
-            .unwrap_or(arrow_anchor);
-        let left_arrow_present = if target.is_some() {
-            self.consume_kind(&mut cursor, end, TokenKind::LeftArrow)
-                .is_some()
-        } else {
-            false
-        };
-        if target.is_some() && !left_arrow_present {
-            self.diagnostics.push(
-                Diagnostic::error("reactive update is missing `<-` before its body")
-                    .with_code(MISSING_REACTIVE_UPDATE_LEFT_ARROW)
-                    .with_primary_label(
-                        target_anchor,
-                        "expected `<-` followed by the update expression",
-                    )
-                    .with_help("use `<-` before the reactive update body"),
-            );
-        }
-
-        let body = if left_arrow_present {
-            self.parse_expr(&mut cursor, end, ExprStop::default())
-                .or_else(|| {
-                    self.diagnostics.push(
-                        Diagnostic::error("reactive update is missing its body expression")
-                            .with_code(MISSING_REACTIVE_UPDATE_BODY)
-                            .with_primary_label(
-                                target_anchor,
-                                "expected an update expression after `<-`",
-                            )
-                            .with_help("expected an expression after `<-`"),
-                    );
-                    None
-                })
-        } else {
-            None
-        };
-
-        ReactiveUpdateKind::Guarded {
-            guard,
-            target,
-            body,
-        }
+        None
     }
 
-    fn parse_source_pattern_reactive_update_kind(
-        &mut self,
-        keyword_index: usize,
-        end: usize,
-        keyword_span: SourceSpan,
-    ) -> ReactiveUpdateKind {
-        let mut cursor = keyword_index + 1;
-        let source = self.parse_identifier(&mut cursor, end).or_else(|| {
-            self.diagnostics.push(
-                Diagnostic::error("reactive update is missing its source signal name")
-                    .with_code(MISSING_REACTIVE_UPDATE_SOURCE)
-                    .with_primary_label(keyword_span, "expected a source signal name after `when`")
-                    .with_help("expected a signal name after `when`"),
-            );
-            None
-        });
-
-        let pattern = self
-            .parse_pattern(
-                &mut cursor,
-                end,
-                PatternStop::reactive_update_source_context(),
-            )
-            .or_else(|| {
-                let source_span = source
-                    .as_ref()
-                    .map(|name| name.span)
-                    .unwrap_or(keyword_span);
-                self.diagnostics.push(
-                    Diagnostic::error("reactive update is missing its source pattern")
-                        .with_code(MISSING_REACTIVE_UPDATE_SOURCE_PATTERN)
-                        .with_primary_label(
-                            source_span,
-                            "expected a pattern between the source signal and `=>`",
-                        )
-                        .with_help("expected a binding pattern after the source signal"),
-                );
-                None
-            });
-
-        let arrow_anchor = pattern
-            .as_ref()
-            .map(|pattern| pattern.span)
-            .or_else(|| source.as_ref().map(|source| source.span))
-            .unwrap_or(keyword_span);
-        let arrow_present = self
-            .consume_kind(&mut cursor, end, TokenKind::Arrow)
-            .is_some();
-        if !arrow_present {
-            self.diagnostics.push(
-                Diagnostic::error("reactive update is missing `=>` before its target signal")
-                    .with_code(MISSING_REACTIVE_UPDATE_ARROW)
-                    .with_primary_label(
-                        arrow_anchor,
-                        "expected `=>` followed by the target signal name",
-                    )
-                    .with_help("use `=>` to separate the guard from the target signal"),
-            );
+    /// Check if a `||>` arm uses `=>` (fat arrow) rather than `->` (thin arrow).
+    /// Scans from the token after `||>` up to the next line-start or end.
+    fn reactive_arm_uses_fat_arrow(&self, from: usize, end: usize) -> bool {
+        for index in from..end {
+            let token = self.tokens[index];
+            if token.kind().is_trivia() {
+                continue;
+            }
+            // If we hit a new line-start token, stop scanning this arm.
+            if token.line_start() {
+                return false;
+            }
+            if token.kind() == TokenKind::Arrow {
+                return true;
+            }
+            if token.kind() == TokenKind::ThinArrow {
+                return false;
+            }
         }
-
-        let target = if arrow_present {
-            self.parse_identifier(&mut cursor, end).or_else(|| {
-                self.diagnostics.push(
-                    Diagnostic::error("reactive update is missing its target signal name")
-                        .with_code(MISSING_REACTIVE_UPDATE_TARGET)
-                        .with_primary_label(
-                            arrow_anchor,
-                            "expected a target signal name after `=>`",
-                        )
-                        .with_help("expected a signal name after `=>`"),
-                );
-                None
-            })
-        } else {
-            None
-        };
-
-        let target_anchor = target
-            .as_ref()
-            .map(|name| name.span)
-            .unwrap_or(arrow_anchor);
-        let left_arrow_present = if target.is_some() {
-            self.consume_kind(&mut cursor, end, TokenKind::LeftArrow)
-                .is_some()
-        } else {
-            false
-        };
-        if target.is_some() && !left_arrow_present {
-            self.diagnostics.push(
-                Diagnostic::error("reactive update is missing `<-` before its body")
-                    .with_code(MISSING_REACTIVE_UPDATE_LEFT_ARROW)
-                    .with_primary_label(
-                        target_anchor,
-                        "expected `<-` followed by the update expression",
-                    )
-                    .with_help("use `<-` before the reactive update body"),
-            );
-        }
-
-        let body = if left_arrow_present {
-            self.parse_expr(&mut cursor, end, ExprStop::default())
-                .or_else(|| {
-                    self.diagnostics.push(
-                        Diagnostic::error("reactive update is missing its body expression")
-                            .with_code(MISSING_REACTIVE_UPDATE_BODY)
-                            .with_primary_label(
-                                target_anchor,
-                                "expected an update expression after `<-`",
-                            )
-                            .with_help("expected an expression after `<-`"),
-                    );
-                    None
-                })
-        } else {
-            None
-        };
-
-        ReactiveUpdateKind::SourcePattern {
-            source,
-            pattern,
-            target,
-            body,
-        }
+        false
     }
 
-    fn parse_reactive_update_arms(
+    /// Parse all `||>` reactive arms at a consistent indent level.
+    fn parse_signal_reactive_arms(
         &mut self,
         cursor: &mut usize,
         end: usize,
-    ) -> Vec<ReactiveUpdateArm> {
+    ) -> Vec<SignalReactiveArm> {
         let Some(first_index) = self.peek_nontrivia(*cursor, end) else {
             return Vec::new();
         };
@@ -973,161 +822,15 @@ impl<'a> Parser<'a> {
                 break;
             }
             let arm_end = self
-                .find_next_reactive_update_arm_start(index + 1, end, arm_indent)
+                .find_next_signal_reactive_arm_start(index + 1, end, arm_indent)
                 .unwrap_or(end);
-            arms.push(self.parse_reactive_update_arm(index, arm_end));
+            arms.push(self.parse_signal_reactive_arm(index, arm_end));
             *cursor = arm_end;
         }
         arms
     }
 
-    fn parse_reactive_update_arm(&mut self, arm_start: usize, arm_end: usize) -> ReactiveUpdateArm {
-        let mut cursor = arm_start + 1;
-        let pattern = self
-            .parse_pattern(
-                &mut cursor,
-                arm_end,
-                PatternStop::reactive_update_arm_context(),
-            )
-            .or_else(|| {
-                self.diagnostics.push(
-                    Diagnostic::error("reactive update arm is missing its pattern")
-                        .with_code(MISSING_REACTIVE_UPDATE_ARM_PATTERN)
-                        .with_primary_label(
-                            self.source_span_of_token(arm_start),
-                            "expected a pattern after `||>`",
-                        ),
-                );
-                None
-            });
-        let arrow_anchor = pattern
-            .as_ref()
-            .map(|pattern| pattern.span)
-            .unwrap_or_else(|| self.source_span_of_token(arm_start));
-        let arrow_present = self
-            .consume_kind(&mut cursor, arm_end, TokenKind::Arrow)
-            .is_some();
-        if !arrow_present {
-            self.diagnostics.push(
-                Diagnostic::error("reactive update arm is missing `=>` before its target signal")
-                    .with_code(MISSING_REACTIVE_UPDATE_ARM_ARROW)
-                    .with_primary_label(
-                        arrow_anchor,
-                        "expected `=>` followed by the target signal name",
-                    ),
-            );
-        }
-        let target = if arrow_present {
-            self.parse_identifier(&mut cursor, arm_end).or_else(|| {
-                self.diagnostics.push(
-                    Diagnostic::error("reactive update arm is missing its target signal name")
-                        .with_code(MISSING_REACTIVE_UPDATE_ARM_TARGET)
-                        .with_primary_label(
-                            arrow_anchor,
-                            "expected a target signal name after `=>`",
-                        ),
-                );
-                None
-            })
-        } else {
-            None
-        };
-        let target_anchor = target
-            .as_ref()
-            .map(|target| target.span)
-            .unwrap_or(arrow_anchor);
-        let left_arrow_present = if target.is_some() {
-            self.consume_kind(&mut cursor, arm_end, TokenKind::LeftArrow)
-                .is_some()
-        } else {
-            false
-        };
-        if target.is_some() && !left_arrow_present {
-            self.diagnostics.push(
-                Diagnostic::error("reactive update arm is missing `<-` before its body")
-                    .with_code(MISSING_REACTIVE_UPDATE_ARM_LEFT_ARROW)
-                    .with_primary_label(
-                        target_anchor,
-                        "expected `<-` followed by the update expression",
-                    ),
-            );
-        }
-        let body = if left_arrow_present {
-            self.parse_expr(&mut cursor, arm_end, ExprStop::default())
-                .or_else(|| {
-                    self.diagnostics.push(
-                        Diagnostic::error("reactive update arm is missing its body expression")
-                            .with_code(MISSING_REACTIVE_UPDATE_ARM_BODY)
-                            .with_primary_label(
-                                target_anchor,
-                                "expected an update expression after `<-`",
-                            ),
-                    );
-                    None
-                })
-        } else {
-            None
-        };
-        ReactiveUpdateArm {
-            pattern,
-            target,
-            body,
-            span: self.source_span_for_range(arm_start, arm_end),
-        }
-    }
-
-    fn is_source_pattern_reactive_update(&self, keyword_index: usize, end: usize) -> bool {
-        let Some(source_index) = self.peek_nontrivia(keyword_index + 1, end) else {
-            return false;
-        };
-        let source_kind = self.tokens[source_index].kind();
-        if source_kind != TokenKind::Identifier && !source_kind.is_keyword() {
-            return false;
-        }
-
-        let Some(pattern_index) = self.peek_nontrivia(source_index + 1, end) else {
-            return false;
-        };
-        if self.tokens[pattern_index].line_start()
-            || self.tokens[pattern_index].kind() == TokenKind::Arrow
-            || self.binary_operator(pattern_index).is_some()
-        {
-            return false;
-        }
-
-        self.starts_pattern(pattern_index)
-    }
-
-    fn find_reactive_update_arm_block_start(&self, from: usize, end: usize) -> Option<usize> {
-        let mut depth = 0usize;
-        for index in from..end {
-            let token = self.tokens[index];
-            if token.kind().is_trivia() {
-                continue;
-            }
-            if depth == 0 {
-                if token.kind() == TokenKind::Arrow {
-                    return None;
-                }
-                if token.kind() == TokenKind::PipeCase
-                    && token.line_start()
-                    && !self.is_at_column_zero(index)
-                {
-                    return Some(index);
-                }
-            }
-            match token.kind() {
-                TokenKind::RParen | TokenKind::RBrace | TokenKind::RBracket => {
-                    depth = depth.saturating_sub(1)
-                }
-                TokenKind::LParen | TokenKind::LBrace | TokenKind::LBracket => depth += 1,
-                _ => {}
-            }
-        }
-        None
-    }
-
-    fn find_next_reactive_update_arm_start(
+    fn find_next_signal_reactive_arm_start(
         &self,
         from: usize,
         end: usize,
@@ -1155,6 +858,122 @@ impl<'a> Parser<'a> {
             }
         }
         None
+    }
+
+    /// Parse a single `||> [source] pattern => body` arm.
+    fn parse_signal_reactive_arm(
+        &mut self,
+        arm_start: usize,
+        arm_end: usize,
+    ) -> SignalReactiveArm {
+        let mut cursor = arm_start + 1; // skip `||>`
+
+        // Determine if this arm has a source prefix: `||> sourceName pattern => body`
+        // vs plain `||> pattern => body` or `||> _ => body`.
+        let source = self.try_parse_arm_source_prefix(&mut cursor, arm_end);
+
+        let pattern = self
+            .parse_pattern(
+                &mut cursor,
+                arm_end,
+                PatternStop::signal_reactive_arm_context(),
+            )
+            .or_else(|| {
+                self.diagnostics.push(
+                    Diagnostic::error("signal reactive arm is missing its pattern")
+                        .with_code(MISSING_REACTIVE_UPDATE_ARM_PATTERN)
+                        .with_primary_label(
+                            self.source_span_of_token(arm_start),
+                            "expected a pattern after `||>`",
+                        ),
+                );
+                None
+            });
+
+        let arrow_anchor = pattern
+            .as_ref()
+            .map(|p| p.span)
+            .or_else(|| source.as_ref().map(|s| s.span))
+            .unwrap_or_else(|| self.source_span_of_token(arm_start));
+        let arrow_present = self
+            .consume_kind(&mut cursor, arm_end, TokenKind::Arrow)
+            .is_some();
+        if !arrow_present {
+            self.diagnostics.push(
+                Diagnostic::error("signal reactive arm is missing `=>` before its body")
+                    .with_code(MISSING_REACTIVE_UPDATE_ARM_ARROW)
+                    .with_primary_label(arrow_anchor, "expected `=>` followed by the arm body"),
+            );
+        }
+
+        let body = if arrow_present {
+            self.parse_expr(&mut cursor, arm_end, ExprStop::default())
+                .or_else(|| {
+                    self.diagnostics.push(
+                        Diagnostic::error("signal reactive arm is missing its body expression")
+                            .with_code(MISSING_REACTIVE_UPDATE_ARM_BODY)
+                            .with_primary_label(
+                                arrow_anchor,
+                                "expected an expression after `=>`",
+                            ),
+                    );
+                    None
+                })
+        } else {
+            None
+        };
+
+        SignalReactiveArm {
+            source,
+            pattern,
+            body,
+            span: self.source_span_for_range(arm_start, arm_end),
+        }
+    }
+
+    /// Try to parse a source signal name prefix in a reactive arm.
+    /// In multi-source merges: `||> tick _ => ...` — `tick` is the source prefix.
+    /// We detect this by checking if there's an identifier followed by a pattern and `=>`.
+    /// If the identifier IS the pattern (e.g., `||> True => ...`), we don't consume it as source.
+    fn try_parse_arm_source_prefix(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+    ) -> Option<Identifier> {
+        let ident_idx = self.peek_nontrivia(*cursor, end)?;
+        if self.tokens[ident_idx].kind() != TokenKind::Identifier {
+            return None;
+        }
+
+        let text = self.tokens[ident_idx].text(self.source);
+        // If this is `_`, it's a wildcard pattern, not a source prefix.
+        if text == "_" {
+            return None;
+        }
+        // If it starts with uppercase, it could be a constructor pattern.
+        // Check: is there something after it before `=>`?
+        let first_char = text.chars().next().unwrap_or('a');
+        if first_char.is_uppercase() {
+            // Uppercase: likely a constructor pattern like `Tick`, `Turn dir`, etc.
+            // Only treat as source prefix if the text is lowercase.
+            return None;
+        }
+
+        // lowercase identifier. Check if it's followed by another token (pattern) before `=>`.
+        let Some(next_idx) = self.peek_nontrivia(ident_idx + 1, end) else {
+            return None;
+        };
+        // If immediately followed by `=>`, this identifier IS the pattern, not a source prefix.
+        if self.tokens[next_idx].kind() == TokenKind::Arrow {
+            return None;
+        }
+        // It's a source prefix: lowercase ident followed by pattern tokens.
+        let ident = Identifier {
+            text: text.to_owned(),
+            span: self.source_span_of_token(ident_idx),
+        };
+        *cursor = ident_idx + 1;
+        Some(ident)
     }
 
     fn parse_class_body(&mut self, cursor: &mut usize, end: usize) -> Option<ClassBody> {
@@ -6252,14 +6071,6 @@ impl<'a> Parser<'a> {
                             offending: None,
                         };
                     }
-                    TokenKind::Identifier
-                        if self.is_top_level_when(index) && self.is_at_column_zero(index) =>
-                    {
-                        return DecoratorSearch {
-                            keyword: Some(index),
-                            offending: None,
-                        };
-                    }
                     TokenKind::At => {}
                     _ if index != start => {
                         return DecoratorSearch {
@@ -6308,8 +6119,7 @@ impl<'a> Parser<'a> {
                 && token.line_start()
                 && depth == 0
                 && (token.kind() == TokenKind::At
-                    || token.kind().is_top_level_keyword()
-                    || self.is_top_level_when(index))
+                    || token.kind().is_top_level_keyword())
                 && self.is_at_column_zero(index)
             {
                 return Some(index);
@@ -6379,12 +6189,6 @@ impl<'a> Parser<'a> {
     fn is_identifier_text(&self, index: usize, expected: &str) -> bool {
         self.tokens[index].kind() == TokenKind::Identifier
             && self.tokens[index].text(self.source) == expected
-    }
-
-    fn is_top_level_when(&self, index: usize) -> bool {
-        self.is_identifier_text(index, "when")
-            && self.tokens[index].line_start()
-            && self.is_at_column_zero(index)
     }
 
     fn starts_prefixed_collection_literal(
@@ -6497,14 +6301,7 @@ impl PatternStop {
         }
     }
 
-    fn reactive_update_source_context() -> Self {
-        Self {
-            fat_arrow: true,
-            ..Self::default()
-        }
-    }
-
-    fn reactive_update_arm_context() -> Self {
+    fn signal_reactive_arm_context() -> Self {
         Self {
             fat_arrow: true,
             ..Self::default()
@@ -6990,13 +6787,11 @@ result {
     }
 
     #[test]
-    fn parser_builds_top_level_reactive_update_items() {
+    fn parser_builds_single_source_signal_merge() {
         let (_, parsed) = load(
-            r#"signal total : Signal Int
-when ready => total <- result {
-    next <- Ok left
-    next + right
-}
+            r#"signal total : Signal Int = ready
+  ||> True => 42
+  ||> _ => 0
 "#,
         );
 
@@ -7005,43 +6800,27 @@ when ready => total <- result {
             "{:?}",
             parsed.all_diagnostics().collect::<Vec<_>>()
         );
-        assert_eq!(parsed.module.items.len(), 2);
+        assert_eq!(parsed.module.items.len(), 1);
         assert_eq!(parsed.module.items[0].kind(), ItemKind::Signal);
-        assert_eq!(parsed.module.items[1].kind(), ItemKind::ReactiveUpdate);
 
-        let Item::ReactiveUpdate(item) = &parsed.module.items[1] else {
-            panic!("expected reactive update item");
+        let Item::Signal(item) = &parsed.module.items[0] else {
+            panic!("expected signal item");
         };
-        let ReactiveUpdateKind::Guarded {
-            guard,
-            target,
-            body,
-        } = &item.kind
-        else {
-            panic!("expected legacy guarded reactive update");
-        };
-        assert_eq!(
-            target.as_ref().map(|target| target.text.as_str()),
-            Some("total")
-        );
-        assert!(matches!(
-            guard.as_ref().map(|expr| &expr.kind),
-            Some(ExprKind::Name(identifier)) if identifier.text == "ready"
-        ));
-        assert!(matches!(
-            body.as_ref().map(|expr| &expr.kind),
-            Some(ExprKind::ResultBlock(_))
-        ));
+        let merge = item.merge_body().expect("expected merge body");
+        assert_eq!(merge.sources.len(), 1);
+        assert_eq!(merge.sources[0].text, "ready");
+        assert_eq!(merge.arms.len(), 2);
+        assert!(merge.arms[0].source.is_none());
+        assert!(merge.arms[1].source.is_none());
     }
 
     #[test]
-    fn parser_builds_pattern_armed_reactive_update_items() {
+    fn parser_builds_multi_source_signal_merge() {
         let (_, parsed) = load(
-            r#"signal heading : Signal Direction
-signal ticks : Signal Int
-when event
-  ||> Turn dir => heading <- dir
-  ||> Tick => ticks <- ticks + 1
+            r#"signal event : Signal Event = tick | keyDown
+  ||> tick _ => Tick
+  ||> keyDown (Key "ArrowUp") => Turn North
+  ||> _ => Tick
 "#,
         );
 
@@ -7051,81 +6830,32 @@ when event
             parsed.all_diagnostics().collect::<Vec<_>>()
         );
 
-        let Item::ReactiveUpdate(item) = &parsed.module.items[2] else {
-            panic!("expected reactive update item");
+        let Item::Signal(item) = &parsed.module.items[0] else {
+            panic!("expected signal item");
         };
-        let ReactiveUpdateKind::Match { subject, arms } = &item.kind else {
-            panic!("expected pattern-armed reactive update");
-        };
-        assert!(matches!(
-            subject.as_ref().map(|expr| &expr.kind),
-            Some(ExprKind::Name(identifier)) if identifier.text == "event"
-        ));
-        assert_eq!(arms.len(), 2);
-        assert!(matches!(
-            arms[0].pattern.as_ref().map(|pattern| &pattern.kind),
-            Some(PatternKind::Apply { .. })
-        ));
+        let merge = item.merge_body().expect("expected merge body");
+        assert_eq!(merge.sources.len(), 2);
+        assert_eq!(merge.sources[0].text, "tick");
+        assert_eq!(merge.sources[1].text, "keyDown");
+        assert_eq!(merge.arms.len(), 3);
         assert_eq!(
-            arms[0].target.as_ref().map(|target| target.text.as_str()),
-            Some("heading")
+            merge.arms[0].source.as_ref().map(|s| s.text.as_str()),
+            Some("tick")
         );
-        assert!(matches!(
-            arms[1].pattern.as_ref().map(|pattern| &pattern.kind),
-            Some(PatternKind::Name(identifier)) if identifier.text == "Tick"
-        ));
-    }
-
-    #[test]
-    fn parser_builds_source_pattern_reactive_update_items() {
-        let (_, parsed) = load(
-            r#"signal event : Signal Event
-when keyDown (Key "ArrowUp") => event <- Turn North
-"#,
-        );
-
-        assert!(
-            !parsed.has_errors(),
-            "{:?}",
-            parsed.all_diagnostics().collect::<Vec<_>>()
-        );
-
-        let Item::ReactiveUpdate(item) = &parsed.module.items[1] else {
-            panic!("expected reactive update item");
-        };
-        let ReactiveUpdateKind::SourcePattern {
-            source,
-            pattern,
-            target,
-            body,
-        } = &item.kind
-        else {
-            panic!("expected source-pattern reactive update");
-        };
         assert_eq!(
-            source.as_ref().map(|source| source.text.as_str()),
+            merge.arms[1].source.as_ref().map(|s| s.text.as_str()),
             Some("keyDown")
         );
-        assert_eq!(
-            target.as_ref().map(|target| target.text.as_str()),
-            Some("event")
-        );
-        assert!(matches!(
-            pattern.as_ref().map(|pattern| &pattern.kind),
-            Some(PatternKind::Group(inner))
-                if matches!(inner.kind, PatternKind::Apply { .. })
-        ));
-        assert!(matches!(
-            body.as_ref().map(|expr| &expr.kind),
-            Some(ExprKind::Apply { .. })
-        ));
+        // Default arm has no source prefix
+        assert!(merge.arms[2].source.is_none());
     }
 
     #[test]
-    fn parser_keeps_guarded_logical_reactive_updates_distinct_from_source_patterns() {
+    fn parser_builds_signal_merge_with_expression_body() {
         let (_, parsed) = load(
-            r#"signal total : Signal Int
-when ready and enabled => total <- 1
+            r#"signal total : Signal Int = ready
+  ||> True => left + right
+  ||> _ => 0
 "#,
         );
 
@@ -7135,16 +6865,37 @@ when ready and enabled => total <- 1
             parsed.all_diagnostics().collect::<Vec<_>>()
         );
 
-        let Item::ReactiveUpdate(item) = &parsed.module.items[1] else {
-            panic!("expected reactive update item");
+        let Item::Signal(item) = &parsed.module.items[0] else {
+            panic!("expected signal item");
         };
-        let ReactiveUpdateKind::Guarded { guard, .. } = &item.kind else {
-            panic!("expected guarded reactive update");
-        };
+        let merge = item.merge_body().expect("expected merge body");
+        assert_eq!(merge.sources.len(), 1);
+        assert_eq!(merge.arms.len(), 2);
         assert!(matches!(
-            guard.as_ref().map(|expr| &expr.kind),
+            merge.arms[0].body.as_ref().map(|e| &e.kind),
             Some(ExprKind::Binary { .. })
         ));
+    }
+
+    #[test]
+    fn parser_distinguishes_signal_merge_from_pipe_expression() {
+        let (_, parsed) = load(
+            r#"signal derived = someSignal |> transform
+"#,
+        );
+
+        assert!(
+            !parsed.has_errors(),
+            "{:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+
+        let Item::Signal(item) = &parsed.module.items[0] else {
+            panic!("expected signal item");
+        };
+        // This should be an Expr body, not a Merge body.
+        assert!(item.expr_body().is_some());
+        assert!(item.merge_body().is_none());
     }
 
     #[test]

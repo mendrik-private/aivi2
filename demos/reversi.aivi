@@ -844,11 +844,10 @@ signal restartClick : Signal Unit
 @source timer.every 100
 signal computerTick : Signal Unit
 
-signal event : Signal Event
-
-when computerTick _ => event <- ComputerTurn
-when placeCoord coord => event <- TryPlaceAt coord
-when restartClick _ => event <- Restart
+signal event : Signal Event = computerTick | placeCoord | restartClick
+  ||> computerTick _ => ComputerTurn
+  ||> placeCoord coord => TryPlaceAt coord
+  ||> restartClick _ => Restart
 
 signal state : Signal GameState = event
  +|> initial step

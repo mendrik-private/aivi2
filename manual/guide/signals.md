@@ -74,29 +74,23 @@ signal activeUsers : User = sessions
 
 For ordinary non-signal values, the same operator returns `Option A`.
 
-## Reactive update clauses with `when`
+## Signal merge and reactive arms
 
-You can also attach top-level reactive updates to an already declared signal.
+When a signal's value is driven by events from one or more source signals, use **merge + pattern arms** syntax. The signal body lists source signals separated by `|`, then `||>` arms discriminate by source name and payload pattern.
 
-The guarded form uses an ordinary boolean expression:
+### Single-source merge
 
 ```aivi
 signal left = 20
 signal right = 22
-signal total = 0
 signal ready = True
-signal enabled = True
 
-when ready => total <- left + right
-when ready and enabled => total <-
-    result {
-        next <- Ok left
-        next + right
-    }
+signal total : Signal Int = ready
+  ||> True => left + right
+  ||> _ => 0
 ```
 
-There is also a source-pattern form for routing emissions from a named signal directly into another
-signal:
+### Multi-source merge
 
 ```aivi
 type Event = Tick | Turn Text
@@ -104,54 +98,34 @@ type Event = Tick | Turn Text
 type Key =
   | Key Text
 
-signal event : Signal Event
+@source timer.every 120ms
 signal tick : Signal Unit
+
+@source window.keyDown
 signal keyDown : Signal Key
 
-when tick _ => event <- Tick
-when keyDown (Key "ArrowUp") => event <- Turn "up"
+signal event : Signal Event = tick | keyDown
+  ||> tick _ => Tick
+  ||> keyDown (Key "ArrowUp") => Turn "up"
+  ||> _ => Tick
 ```
 
-You can also match a subject value directly and route each matching arm into an existing signal:
+### Rules
 
-```aivi
-type Direction = Up | Down
+- The merge expression (`sig1 | sig2`) lists the source signals that feed the declaring signal.
+- Each source must name a previously declared local `signal`.
+- Multi-source arms: `||> <source-name> <pattern> => <body>` — source name prefix required, must match a signal in the merge list.
+- Single-source arms: `||> <pattern> => <body>` — no source name prefix needed.
+- Default arm: `||> _ => <body>` — required; provides the initial value before any source fires and handles unmatched cases.
+- Pattern binders introduced by an arm are only in scope for that arm body.
+- Body type must match the declaring signal's payload type.
+- Unlike a pipe, there is no ambient subject value inside the body.
+- If no arm matches, the signal keeps its previous committed value.
+- If multiple sources fire in one tick, later arm in source order wins.
 
-type Event =
-  | Turn Direction
-  | Tick
+Use signal merge when you want event-shaped reactive commits. Use pipes when you want to transform the current subject flowing through one expression spine.
 
-signal event = Turn Down
-signal heading = Up
-signal tickSeen = False
-
-when event
-  ||> Turn dir => heading <- dir
-  ||> Tick => tickSeen <- True
-```
-
-These forms mean:
-
-- the guarded form uses an ordinary boolean expression
-- the source-pattern form matches each emission from a previously declared signal name against one ordinary pattern
-- the pattern-armed form matches each `||>` arm against the subject expression
-- pattern binders introduced by the source-pattern form are only in scope for that body
-- any binders introduced by an arm, like `dir`, are only in scope for that arm body
-- the target must be a previously declared signal
-- the source-pattern form also requires its source name to refer to a previously declared signal
-- the right-hand side is an ordinary expression with direct signal references
-- unlike a pipe, there is no ambient subject value inside the body
-- if a guarded clause is false when it fires, the target keeps its previous committed value
-- if a source-pattern clause does not match, the target keeps its previous committed value
-- if multiple `when` clauses write the same signal in one tick, later clauses win by source order
-
-Guards like `status.done` are fine too, but only when ordinary expression typing already proves that member access is a `Bool`.
-
-Use `when` when you want event-shaped reactive commits into an existing signal. Use pipes when you want to transform the current subject flowing through one expression spine.
-
-This surface now executes end to end in the linked runtime: guards and bodies are lowered as ordinary expressions, false guards keep the previous committed value, and later matching clauses still win by source order within a tick.
-
-Reactive update self-reference rules are unchanged. A target signal still cannot read itself from its own `when` guard or body.
+Self-reference: the declaring signal cannot read itself from its own arm bodies.
 
 ## Previous and diff
 
