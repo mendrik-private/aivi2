@@ -16,6 +16,43 @@ Our snake game has:
 
 The entire game is about 230 lines of AIVI. There are no mutable variables, no loops, and no callbacks.
 
+## Imports
+
+The game imports several standard library modules:
+
+```aivi
+use aivi.nonEmpty (
+    NonEmptyList
+    singleton
+    head as nelHead
+    cons as nelCons
+    length as nelLength
+    toList as nelToList
+    init as nelInit
+    fromHeadTail as nelFromHeadTail
+)
+
+use aivi.list (
+    contains as listContains
+    any
+)
+
+use aivi.text (
+    join
+    concat
+)
+
+use aivi.duration (Duration)
+
+use aivi.matrix (
+    Matrix
+    MatrixError
+    indices as matrixIndices
+)
+```
+
+The `as` keyword renames imports to avoid ambiguity — `head` from `aivi.nonEmpty` becomes `nelHead` so it does not collide with other modules.
+
 ## Modeling the world with types
 
 The first thing to do in AIVI is define what things exist. We start with types:
@@ -29,8 +66,7 @@ type Direction =
 
 type Status = Running | GameOver
 
-type Cell =
-  | Cell Int Int
+type Cell = Cell Int Int
 ```
 
 `Direction` is a sum type with four constructors. `Status` has two. `Cell` wraps two integers — an x and y position on the grid.
@@ -46,9 +82,11 @@ type Event =
   | Tick
   | Turn Direction
   | Restart
+
+type Key = Key Text
 ```
 
-`Tick` advances the snake one step. `Turn` changes direction. `Restart` resets the game. Notice that `Turn` carries a `Direction` payload — the constructor holds data.
+`Tick` advances the snake one step. `Turn` changes direction. `Restart` resets the game. Notice that `Turn` carries a `Direction` payload — the constructor holds data. `Key` wraps a text string representing a keyboard key name.
 
 ## Pure functions for game logic
 
@@ -57,10 +95,10 @@ Every piece of game logic is a pure function. Let us start with direction:
 ```aivi
 type Direction -> Direction
 func opposite = .
-  ||> North -> South
-  ||> South -> North
-  ||> East  -> West
-  ||> West  -> East
+ ||> North -> South
+ ||> South -> North
+ ||> East  -> West
+ ||> West  -> East
 ```
 
 This function takes a direction and returns its opposite. It uses `||>` for exhaustive pattern matching — every constructor is handled.
@@ -70,10 +108,10 @@ This function takes a direction and returns its opposite. It uses `||>` for exha
 ```aivi
 type Direction -> Cell -> Cell
 func moveDir = d c => (d, c)
-  ||> (North, Cell x y) -> Cell x (y - 1)
-  ||> (South, Cell x y) -> Cell x (y + 1)
-  ||> (East, Cell x y)  -> Cell (x + 1) y
-  ||> (West, Cell x y)  -> Cell (x - 1) y
+ ||> (North, Cell x y) -> Cell x (y - 1)
+ ||> (South, Cell x y) -> Cell x (y + 1)
+ ||> (East, Cell x y)  -> Cell (x + 1) y
+ ||> (West, Cell x y)  -> Cell (x - 1) y
 ```
 
 This matches on a **tuple** of direction and cell. Each arm destructures the `Cell` to extract `x` and `y`, then constructs a new `Cell` with the adjusted position.
@@ -86,41 +124,69 @@ value boardH = 20
 
 type Cell -> Bool
 func outside = .
-  ||> Cell x y -> x < 0 or x >= boardW or y < 0 or y >= boardH
+ ||> Cell x y -> x < 0 or x >= boardW or y < 0 or y >= boardH
 ```
+
+### Pseudo-random food placement
+
+```aivi
+value seed0 = 2463534242
+
+type Int -> Int
+func nextSeed = s =>
+    (s * 1103515245 + 12345) % 2147483647
+
+type Int -> Cell
+func spawnFood = s =>
+    Cell (s % boardW) (nextSeed s % boardH)
+```
+
+The game uses a simple linear congruential generator for pseudo-random numbers. `spawnFood` converts a seed into a grid coordinate.
+
+### Cell equality
+
+```aivi
+type Cell -> Cell -> Bool
+func cellEq = a b =>
+    a == b
+```
+
+This wraps the built-in equality operator into a named function, which we pass to higher-order list functions like `listContains`.
 
 ## Domains: the snake itself
 
-The snake is a list of cells, but we want richer operations than a plain list provides. This is where **domains** come in:
+The snake is a non-empty list of cells, but we want richer operations than a plain list provides. This is where **domains** come in:
 
 ```aivi
-domain Snake over List Cell = {
-    type List Cell -> Snake
+domain Snake over NonEmptyList Cell = {
+    type NonEmptyList Cell -> Snake
     fromCells cells = cells
 
     type Cell
-    head = getOrElse (Cell 0 0) (listHead self)
+    head = nelHead self
 
     type Cell -> Bool
-    contains cell = any (cellEq cell) self
+    contains cell = listContains cellEq cell (nelToList self)
 
     type Int
-    length = listLength self
+    length = nelLength self
 
     type Cell -> Snake
-    grow cell = append [cell] self
+    grow cell = nelCons cell self
 
     type Cell -> Snake
-    move cell = takeCells (listLength self) (append [cell] self)
+    move cell = nelFromHeadTail cell (nelInit self)
 
     type Direction -> Cell
-    nextHead dir = moveDir dir (getOrElse (Cell 0 0) (listHead self))
+    nextHead dir = moveDir dir (nelHead self)
 }
 ```
 
-A domain wraps a carrier type (`List Cell`) with a semantic name (`Snake`) and domain-specific operations. Inside the body, `self` refers to the domain-typed receiver, so `listHead self` unwraps a `Snake` as the underlying `List Cell`. You call these operations with dot notation: `st.snake.head`, `st.snake.contains h`, `st.snake.grow h`.
+A domain wraps a carrier type (`NonEmptyList Cell`) with a semantic name (`Snake`) and domain-specific operations. Inside the body, `self` refers to the domain-typed receiver, so `nelHead self` unwraps a `Snake` as the underlying `NonEmptyList Cell`. You call these operations with dot notation: `st.snake.head`, `st.snake.contains h`, `st.snake.grow h`.
 
-The key insight is that outside the domain, you cannot accidentally treat a `Snake` as a raw `List Cell`. The domain boundary prevents mixing up snake-specific logic with general list operations.
+Using `NonEmptyList` rather than `List` as the carrier type guarantees the snake always has at least one cell — making `head` total (no need for a fallback value).
+
+The key insight is that outside the domain, you cannot accidentally treat a `Snake` as a raw `NonEmptyList Cell`. The domain boundary prevents mixing up snake-specific logic with general list operations.
 
 ## Game state as a record
 
@@ -141,7 +207,7 @@ And an initial state:
 
 ```aivi
 value initial : GameState = {
-    snake: fromCells [Cell 6 10, Cell 5 10, Cell 4 10],
+    snake: fromCells (nelCons (Cell 6 10) (nelCons (Cell 5 10) (singleton (Cell 4 10)))),
     dir: East,
     food: spawnFood seed0,
     score: 0,
@@ -150,6 +216,8 @@ value initial : GameState = {
 }
 ```
 
+The initial snake is built by consing cells onto a singleton non-empty list. The initial food position comes from `spawnFood seed0`.
+
 ## The step function: events → state changes
 
 The heart of the game is a single pure function that takes an event and a state, and returns the next state:
@@ -157,9 +225,9 @@ The heart of the game is a single pure function that takes an event and a state,
 ```aivi
 type Event -> GameState -> GameState
 func step = ev st => ev
-  ||> Restart -> initial
-  ||> Turn d  -> handleTurn d st
-  ||> Tick    -> handleTick st
+ ||> Restart -> initial
+ ||> Turn d  -> handleTurn d st
+ ||> Tick    -> handleTick st
 ```
 
 Each event is routed to a handler. Let us trace through `handleTick`:
@@ -167,11 +235,27 @@ Each event is routed to a handler. Let us trace through `handleTick`:
 ```aivi
 type GameState -> GameState
 func handleTick = st => st.status
-  ||> GameOver -> st
-  ||> Running  -> advance st (st.snake.nextHead st.dir)
+ ||> GameOver -> st
+ ||> Running  -> advance st (st.snake.nextHead st.dir)
 ```
 
 If the game is over, return the state unchanged. If running, compute the next head position and advance. The pattern match on `st.status` replaces what would be an `if` statement in other languages.
+
+### Handling turns
+
+```aivi
+type Direction -> GameState -> GameState
+func handleTurn = d st => st.status
+ ||> GameOver -> st
+ ||> Running  -> applyTurn d st
+
+type Direction -> GameState -> GameState
+func applyTurn = d st => d == opposite st.dir
+ T|> st
+ F|> st <| { dir: d }
+```
+
+Turns are ignored when the game is over. When running, a turn in the opposite direction is also ignored (you cannot reverse into yourself). Otherwise, the direction is updated with `<|`.
 
 ### Advancing the snake
 
@@ -255,49 +339,72 @@ signal dirLine     = state |> .dir |> dirLabel
 signal statusLine  = state |> .status |> statusLineFor
 signal scoreLine   = state |> .score |> scoreLineFor
 signal gameOver    = state |> .status |> isGameOver
+signal finalScoreLine = state |> .score |> finalScoreLineFor
 ```
 
 Each derived signal projects a piece of state and transforms it. When `state` changes, all of these recompute automatically.
 
-The `=` signs are aligned: consecutive `signal` declarations of the same kind read like a table.
+## Rendering with text and indices
 
-## Rendering with Matrix
-
-The board renders as text using `aivi.matrix`. Instead of explicit range loops, we build a `Matrix Text` from the game state and fold it into a string:
+The board renders as text. Instead of nested loops, we use `matrixIndices` to generate coordinate sequences and `map` to transform them into glyphs:
 
 ```aivi
 type GameState -> Int -> Int -> Text
-func cellGlyph = st x y =>
-    (Cell x y == st.snake.head, st.snake.contains (Cell x y), Cell x y == st.food)
-  ||> (True, _, _)          -> "@"
-  ||> (_, True, _)          -> "o"
-  ||> (_, _, True)          -> "*"
-  ||> (False, False, False) -> "·"
+func cellGlyph = st y x => (Cell x y == st.snake.head, st.snake.contains (Cell x y), Cell x y == st.food)
+ ||> (True, _, _)          -> "@"
+ ||> (_, True, _)          -> "o"
+ ||> (_, _, True)          -> "*"
+ ||> (False, False, False) -> "·"
 ```
 
 This matches on a **triple of booleans** — is this cell the head, a body segment, or food? Every combination is covered.
 
-`init` builds the matrix by calling `cellGlyph st x y` for every coordinate. `rows` exposes the result as `List (List Text)`, which we fold into a newline-separated string:
+Each row is rendered by mapping `cellGlyph st y` over the column indices, then the rows are joined with newlines:
 
 ```aivi
-type Text -> Text -> Text
-func appendCell = row cell => "{row}{cell}"
-
-type (List Text) -> Text
-func joinRow = cells => reduce appendCell "" cells
-
-type Text -> (List Text) -> Text
-func appendRow = board row => board == ""
- T|> joinRow row
- F|> "{board}\n{joinRow row}"
+type GameState -> Int -> Text
+func renderRowAt = st y => matrixIndices boardW
+  |> map (cellGlyph st y)
+  |> concat
 
 type GameState -> Text
-func renderBoard = st => init boardW boardH (cellGlyph st)
- ||> Err _ -> ""
- ||> Ok m  -> reduce appendRow "" (rows m)
+func renderBoard = st => matrixIndices boardH
+  |> map (renderRowAt st)
+  |> join "\n"
 ```
 
-`init boardW boardH (cellGlyph st)` returns `Result MatrixError (Matrix Text)`. Because both dimensions are positive constants the `Err` branch is unreachable, but the type system requires it. The `Ok` branch folds rows using `appendRow`.
+`matrixIndices boardW` produces `[0, 1, 2, ..., 29]`. The pipe maps each index through `cellGlyph st y` to produce a list of single-character strings, then `concat` joins them without a separator. The outer pipe does the same for rows, joining with newlines.
+
+### Display helper functions
+
+Several small functions format the status display using text interpolation:
+
+```aivi
+type Direction -> Text
+func dirLabel = .
+ ||> North -> "Up"
+ ||> South -> "Down"
+ ||> East  -> "Right"
+ ||> West  -> "Left"
+
+type Status -> Text
+func statusLineFor = .
+ ||> Running  -> "Running"
+ ||> GameOver -> "Game Over"
+
+type Int -> Text
+func scoreLineFor = "Score: {.}"
+
+type Int -> Text
+func finalScoreLineFor = "Final score: {.}"
+
+type Status -> Bool
+func isGameOver = .
+ ||> Running  -> False
+ ||> GameOver -> True
+```
+
+The `{.}` syntax is text interpolation — the `.` refers to the current pipe subject (the function parameter).
 
 ## The UI
 
@@ -349,15 +456,15 @@ Every arrow is a declared dependency. The runtime propagates changes through the
 | **Closed types** | `Direction`, `Status`, `Event` — every case must be handled |
 | **Pattern matching** | Every function branches with `\|\|>`, `T\|>`, `F\|>` |
 | **Pure functions** | `step`, `advance`, `resolveMove` — no mutation, no side effects |
-| **Patch** | `<|` copies a record updating only named fields |
-| **Domains** | `Snake` wraps `List Cell` with domain-specific operations |
+| **Patch** | `<\|` copies a record updating only named fields |
+| **Domains** | `Snake` wraps `NonEmptyList Cell` with domain-specific operations |
 | **Domain literals** | `120ms` — type-safe duration with suffix syntax |
 | **Signals** | `state`, `boardText`, `scoreLine` — the reactive graph |
 | **Sources** | `timer.every`, `window.keyDown` — external input boundaries |
 | **Event routing** | `when` clauses connect sources to events |
 | **Accumulation** | `+\|>` folds events into state over time |
-| **Matrix** | `aivi.matrix.init` + `rows` builds and renders the board grid |
-| **Reduce** | Folds matrix rows and cells into rendered text |
+| **Text interpolation** | `"Score: {.}"` — inline formatting with pipe subject |
+| **Imports** | `use aivi.nonEmpty (...)` — named imports with `as` renaming |
 | **Markup** | `<Window>`, `<Label>`, `<show>` — type-checked GTK UI |
 
 The game has zero mutable variables, zero loops, and zero callbacks. The entire architecture is a declared dependency graph with pure functions at every node.
