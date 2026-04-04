@@ -138,6 +138,9 @@ pub enum ClassMemberImplementation {
         instance: ItemId,
         member_index: usize,
     },
+    ImportedInstance {
+        import: ImportId,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3637,6 +3640,44 @@ impl<'a> TypeChecker<'a> {
         }
         if self.has_builtin_class_instance_binding(class_name.as_str(), subject) {
             return Some(ClassMemberImplementation::Builtin);
+        }
+        // Check imported instances from other modules.
+        if let Some(import) =
+            self.resolve_imported_instance_member(&class_name, resolution, subject)
+        {
+            return Some(ClassMemberImplementation::ImportedInstance { import });
+        }
+        None
+    }
+
+    /// Search through all import bindings for an `InstanceMember` matching the given
+    /// class, member, and subject type.
+    fn resolve_imported_instance_member(
+        &self,
+        class_name: &str,
+        resolution: ClassMemberResolution,
+        subject: &TypeBinding,
+    ) -> Option<ImportId> {
+        let Item::Class(class_item) = &self.module.items()[resolution.class] else {
+            return None;
+        };
+        let member_name = class_item.members.get(resolution.member_index)?.name.text();
+        let subject_label = self.type_binding_label(subject);
+        for (import_id, import) in self.module.imports().iter() {
+            if let ImportBindingMetadata::InstanceMember {
+                class_name: ic,
+                member_name: im,
+                subject: is,
+                ..
+            } = &import.metadata
+            {
+                if ic.as_ref() == class_name
+                    && im.as_ref() == member_name
+                    && is.as_ref() == subject_label.as_str()
+                {
+                    return Some(import_id);
+                }
+            }
         }
         None
     }

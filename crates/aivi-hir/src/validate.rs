@@ -7967,6 +7967,7 @@ impl Validator<'_> {
             | ImportBindingMetadata::BuiltinTerm(_)
             | ImportBindingMetadata::AmbientType
             | ImportBindingMetadata::Bundle(_)
+            | ImportBindingMetadata::InstanceMember { .. }
             | ImportBindingMetadata::Unknown => None,
         }
     }

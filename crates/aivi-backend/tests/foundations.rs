@@ -4396,7 +4396,7 @@ value invalid:(Option Text) =
 }
 
 #[test]
-fn cranelift_codegen_rejects_unimplemented_bytes_intrinsics() {
+fn cranelift_codegen_compiles_bytes_append_intrinsic() {
     let backend = lower_workspace_text(
         "milestone-2/valid/workspace-type-imports/main.aivi",
         r#"
@@ -4408,13 +4408,8 @@ fun combine:Bytes = left:Bytes right:Bytes=>    append left right
 "#,
     );
 
-    let errors = compile_program(&backend)
-        .expect_err("bytes.append should stay unsupported without allocation");
-    assert!(errors.errors().iter().any(|error| matches!(
-        error,
-        CodegenError::UnsupportedExpression { detail, .. }
-            if detail.contains("empty/length/get/fromText/toText Cranelift subset")
-    )));
+    compile_program(&backend)
+        .expect("bytes.append should compile with runtime function call");
 }
 
 #[test]

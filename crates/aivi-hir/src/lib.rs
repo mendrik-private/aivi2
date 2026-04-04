@@ -46,7 +46,10 @@ pub use decode_generation::{
     SourceDecodeProgramNode, SourceDecodeProgramOutcome, SourceDecodeProgramReport,
     generate_source_decode_programs,
 };
-pub use exports::{ExportedName, ExportedNameKind, ExportedNames, exports};
+pub use exports::{
+    ExportedInstanceDeclaration, ExportedInstanceMember, ExportedName, ExportedNameKind,
+    ExportedNames, exports,
+};
 pub use fanout_elaboration::{
     BlockedFanoutSegment, FanoutElaborationBlocker, FanoutElaborationReport, FanoutFilterBlocker,
     FanoutFilterPlan, FanoutJoinPlan, FanoutSegmentElaboration, FanoutSegmentOutcome,

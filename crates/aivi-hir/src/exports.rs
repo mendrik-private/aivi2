@@ -33,12 +33,43 @@ pub struct ExportedName {
 
 /// The complete set of names exported from a module.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ExportedNames(pub Vec<ExportedName>);
+pub struct ExportedNames {
+    pub names: Vec<ExportedName>,
+    pub instances: Vec<ExportedInstanceDeclaration>,
+}
 
 impl ExportedNames {
     pub fn find(&self, name: &str) -> Option<&ExportedName> {
-        self.0.iter().find(|exported| exported.name == name)
+        self.names.iter().find(|exported| exported.name == name)
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.names.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &ExportedName> {
+        self.names.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.names.len()
+    }
+}
+
+/// A class instance declaration exported from a module, carrying enough
+/// metadata for the importing module to resolve cross-module class instances.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExportedInstanceDeclaration {
+    pub class_name: Box<str>,
+    pub subject: Box<str>,
+    pub members: Vec<ExportedInstanceMember>,
+}
+
+/// One member of an exported class instance.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExportedInstanceMember {
+    pub name: Box<str>,
+    pub ty: ImportValueType,
 }
 
 /// Extract the set of names exported from a HIR module.
@@ -61,7 +92,8 @@ pub fn exports(module: &Module) -> ExportedNames {
             .cmp(&right.name)
             .then_with(|| exported_kind_rank(left.kind).cmp(&exported_kind_rank(right.kind)))
     });
-    ExportedNames(names)
+    let instances = collect_instance_declarations(module);
+    ExportedNames { names, instances }
 }
 
 fn explicit_exported_names(module: &Module) -> Vec<ExportedName> {
@@ -363,6 +395,87 @@ fn exported_value_metadata(module: &Module, annotation: Option<TypeId>) -> Impor
         .and_then(|annotation| import_value_type(module, annotation))
         .map(|ty| ImportBindingMetadata::Value { ty })
         .unwrap_or(ImportBindingMetadata::OpaqueValue)
+}
+
+/// Collect all instance declarations from a module for cross-module instance resolution.
+fn collect_instance_declarations(module: &Module) -> Vec<ExportedInstanceDeclaration> {
+    let mut declarations = Vec::new();
+    for &item_id in module.root_items() {
+        let Some(Item::Instance(instance)) = module.items().get(item_id) else {
+            continue;
+        };
+        let class_name: Box<str> = instance
+            .class
+            .path
+            .segments()
+            .last()
+            .text()
+            .into();
+        let Some(subject_type_id) = instance.arguments.iter().next().copied() else {
+            continue;
+        };
+        let Some(subject) = type_label_for_export(module, subject_type_id) else {
+            continue;
+        };
+        let members = instance
+            .members
+            .iter()
+            .filter_map(|member| {
+                let ty = member
+                    .annotation
+                    .and_then(|annotation| import_value_type(module, annotation))
+                    .or_else(|| exported_instance_member_type(module, member))?;
+                Some(ExportedInstanceMember {
+                    name: member.name.text().into(),
+                    ty,
+                })
+            })
+            .collect();
+        declarations.push(ExportedInstanceDeclaration {
+            class_name,
+            subject,
+            members,
+        });
+    }
+    declarations
+}
+
+/// Build a portable type for an instance member from its parameters and annotation,
+/// falling back to a function type inferred from parameter annotations and body annotation.
+fn exported_instance_member_type(
+    module: &Module,
+    member: &crate::InstanceMember,
+) -> Option<ImportValueType> {
+    if member.parameters.is_empty() {
+        return None;
+    }
+    let type_param_map: HashMap<TypeParameterId, usize> = HashMap::new();
+    let result = member
+        .annotation
+        .and_then(|annotation| poly_import_value_type(module, annotation, &type_param_map))?;
+    let mut ty = result;
+    for param in member.parameters.iter().rev() {
+        let param_ty = param
+            .annotation
+            .and_then(|annotation| poly_import_value_type(module, annotation, &type_param_map))?;
+        ty = ImportValueType::Arrow {
+            parameter: Box::new(param_ty),
+            result: Box::new(ty),
+        };
+    }
+    Some(ty)
+}
+
+/// Extract a string label for a type, used for cross-module instance subject matching.
+fn type_label_for_export(module: &Module, ty: TypeId) -> Option<Box<str>> {
+    let type_node = module.types().get(ty)?;
+    match &type_node.kind {
+        TypeKind::Name(reference) => {
+            Some(reference.path.segments().last().text().into())
+        }
+        TypeKind::Apply { callee, .. } => type_label_for_export(module, *callee),
+        _ => None,
+    }
 }
 
 fn exported_function_type(module: &Module, item: &crate::FunctionItem) -> Option<ImportValueType> {
@@ -714,7 +827,8 @@ fn resolve_type_constructor(
             | ImportBindingMetadata::TypeConstructor { .. }
             | ImportBindingMetadata::Domain { .. }
             | ImportBindingMetadata::BuiltinTerm(_)
-            | ImportBindingMetadata::AmbientType => None,
+            | ImportBindingMetadata::AmbientType
+            | ImportBindingMetadata::InstanceMember { .. } => None,
         },
         ResolutionState::Resolved(TypeResolution::Item(_))
         | ResolutionState::Resolved(TypeResolution::TypeParameter(_))

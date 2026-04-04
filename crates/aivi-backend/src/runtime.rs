@@ -5361,9 +5361,12 @@ fn wrap_option_in_applicative(
             ))),
             _ => Err("traverse expected the mapped value to stay in the target applicative"),
         },
-        BuiltinApplicativeCarrier::Task => {
-            Err("runtime traverse does not yet support Task applicatives")
-        }
+        BuiltinApplicativeCarrier::Task => match strip_signal(mapped) {
+            RuntimeValue::Task(plan) => Ok(RuntimeValue::Task(RuntimeTaskPlan::Pure {
+                value: Box::new(RuntimeValue::OptionSome(Box::new(RuntimeValue::Task(plan)))),
+            })),
+            _ => Err("traverse expected the mapped value to stay in the target applicative"),
+        },
     }
 }
 
@@ -5408,9 +5411,12 @@ fn wrap_result_ok_in_applicative(
             ))),
             _ => Err("traverse expected the mapped value to stay in the target applicative"),
         },
-        BuiltinApplicativeCarrier::Task => {
-            Err("runtime traverse does not yet support Task applicatives")
-        }
+        BuiltinApplicativeCarrier::Task => match strip_signal(mapped) {
+            RuntimeValue::Task(plan) => Ok(RuntimeValue::Task(RuntimeTaskPlan::Pure {
+                value: Box::new(RuntimeValue::ResultOk(Box::new(RuntimeValue::Task(plan)))),
+            })),
+            _ => Err("traverse expected the mapped value to stay in the target applicative"),
+        },
     }
 }
 
@@ -5455,9 +5461,14 @@ fn wrap_validation_valid_in_applicative(
             ))),
             _ => Err("traverse expected the mapped value to stay in the target applicative"),
         },
-        BuiltinApplicativeCarrier::Task => {
-            Err("runtime traverse does not yet support Task applicatives")
-        }
+        BuiltinApplicativeCarrier::Task => match strip_signal(mapped) {
+            RuntimeValue::Task(plan) => Ok(RuntimeValue::Task(RuntimeTaskPlan::Pure {
+                value: Box::new(RuntimeValue::ValidationValid(Box::new(RuntimeValue::Task(
+                    plan,
+                )))),
+            })),
+            _ => Err("traverse expected the mapped value to stay in the target applicative"),
+        },
     }
 }
 
@@ -5569,7 +5580,20 @@ fn sequence_traverse_results(
             ))))
         }
         BuiltinApplicativeCarrier::Task => {
-            Err("runtime traverse does not yet support Task applicatives")
+            let mut collected = Vec::with_capacity(mapped.len());
+            for value in mapped {
+                match strip_signal(value) {
+                    RuntimeValue::Task(plan) => collected.push(RuntimeValue::Task(plan)),
+                    _ => {
+                        return Err(
+                            "traverse expected the mapped value to stay in the target applicative",
+                        );
+                    }
+                }
+            }
+            Ok(RuntimeValue::Task(RuntimeTaskPlan::Pure {
+                value: Box::new(RuntimeValue::List(collected)),
+            }))
         }
     }
 }

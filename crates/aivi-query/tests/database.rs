@@ -106,7 +106,7 @@ fn parsed_and_hir_queries_reuse_cached_snapshots_until_text_changes() {
         &symbol_index(&db, file)
     ));
     assert_eq!(hir_first.symbols()[0].name, "answer");
-    assert_eq!(exported_names(&db, file).0[0].name, "answer");
+    assert_eq!(exported_names(&db, file).names[0].name, "answer");
 
     assert!(file.set_text(&db, "value total = 7".to_owned()));
 

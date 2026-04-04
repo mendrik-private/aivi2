@@ -634,6 +634,14 @@ pub enum ImportBindingMetadata {
     BuiltinTerm(BuiltinTerm),
     AmbientType,
     Bundle(ImportBundleKind),
+    /// An imported class instance member, auto-registered so cross-module instance
+    /// resolution can locate it without the user explicitly importing it by name.
+    InstanceMember {
+        class_name: Box<str>,
+        member_name: Box<str>,
+        subject: Box<str>,
+        ty: ImportValueType,
+    },
 }
 
 /// A literal-suffix member of an imported domain type, carried through the export/import

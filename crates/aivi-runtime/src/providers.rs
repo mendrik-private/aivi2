@@ -326,13 +326,6 @@ enum ActiveProviderState {
         allow_repeat: bool,
         port: DetachedRuntimePublicationPort,
     },
-    /// Custom (user-declared) provider. Registered so the source instance is
-    /// accepted at runtime, but no worker thread or I/O is spawned — the
-    /// provider is inert until a real custom-provider execution mechanism is
-    /// implemented.
-    Custom {
-        provider: RuntimeSourceProvider,
-    },
 }
 
 impl ActiveProviderState {
@@ -340,8 +333,7 @@ impl ActiveProviderState {
         match self {
             Self::Passive { provider, .. }
             | Self::Mailbox { provider, .. }
-            | Self::Window { provider, .. }
-            | Self::Custom { provider, .. } => provider,
+            | Self::Window { provider, .. } => provider,
         }
     }
 }
@@ -919,9 +911,18 @@ impl SourceProviderManager {
                     port,
                 }
             }
-            RuntimeSourceProvider::Custom(_) => ActiveProviderState::Custom {
-                provider: config.provider.clone(),
-            },
+            RuntimeSourceProvider::Custom(_) => {
+                // Custom providers publish an initial Unit value so the source
+                // signal is populated and downstream derivations can settle.
+                let _ = port.publish(DetachedRuntimeValue::from_runtime_owned(
+                    RuntimeValue::Unit,
+                ));
+                let stop = Arc::new(AtomicBool::new(false));
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
         };
         self.active.insert(instance, state);
         Ok(())
@@ -950,7 +951,7 @@ impl SourceProviderManager {
                     .expect("mailbox hub mutex should not be poisoned")
                     .unsubscribe(mailbox, *subscriber_id);
             }
-            ActiveProviderState::Window { .. } | ActiveProviderState::Custom { .. } => {}
+            ActiveProviderState::Window { .. } => {}
         }
         // Join any worker threads associated with this instance.  The stop flag
         // was already set above so each thread should exit on its next iteration;
@@ -979,10 +980,6 @@ pub struct WindowKeyConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceProviderExecutionError {
-    UnsupportedProvider {
-        instance: SourceInstanceId,
-        provider: RuntimeSourceProvider,
-    },
     MissingDecodeProgram {
         instance: SourceInstanceId,
         provider: BuiltinSourceProvider,
@@ -1035,12 +1032,6 @@ pub enum SourceProviderExecutionError {
 impl fmt::Display for SourceProviderExecutionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnsupportedProvider { instance, provider } => write!(
-                f,
-                "source instance {} uses unsupported runtime provider {:?}",
-                instance.as_raw(),
-                provider
-            ),
             Self::MissingDecodeProgram { instance, provider } => write!(
                 f,
                 "source instance {} provider {} is missing its decode program",

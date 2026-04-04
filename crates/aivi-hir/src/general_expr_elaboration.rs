@@ -1830,11 +1830,12 @@ impl<'a> GeneralExprElaborator<'a> {
         })
     }
 
-    /// Lower `target <| { f1: v1, f2: v2, ... }` for flat single-field-name Replace patches.
+    /// Lower `target <| { f1: v1, f2: v2, ... }` for record patches.
     ///
-    /// Invariant: only `PatchInstructionKind::Replace` and `PatchInstructionKind::Remove`
-    /// with a single `Named` selector segment on a closed record type are supported.
-    /// Any other patch shape falls back to `UnsupportedRuntimeExpr`.
+    /// Supports `PatchInstructionKind::Replace` and `PatchInstructionKind::Remove`
+    /// with single or multi-segment `Named` selectors on closed record types.
+    /// Multi-segment selectors (e.g., `address.street: "Main St"`) recursively
+    /// construct nested record updates.
     fn lower_patch_apply_expr(
         &mut self,
         expr_id: ExprId,
@@ -1846,17 +1847,18 @@ impl<'a> GeneralExprElaborator<'a> {
     ) -> Result<GateRuntimeExpr, Vec<GeneralExprBlocker>> {
         let span = self.module.exprs()[expr_id].span;
 
-        // Validate: all patch entries must be simple single-segment Named Replace or Remove.
+        // Validate: all patch entries must use Named selectors with Replace or Remove.
         for entry in &patch.entries {
-            let single_named = matches!(
-                entry.selector.segments.as_slice(),
-                [PatchSelectorSegment::Named { .. }]
-            );
+            let all_named = entry
+                .selector
+                .segments
+                .iter()
+                .all(|s| matches!(s, PatchSelectorSegment::Named { .. }));
             let is_replace_or_remove = matches!(
                 entry.instruction.kind,
                 PatchInstructionKind::Replace(_) | PatchInstructionKind::Remove
             );
-            if !single_named || !is_replace_or_remove {
+            if !all_named || entry.selector.segments.is_empty() || !is_replace_or_remove {
                 return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
                     span,
                     kind: GateRuntimeUnsupportedKind::PatchExpr,
@@ -1876,21 +1878,33 @@ impl<'a> GeneralExprElaborator<'a> {
             }]);
         };
 
-        // Build a map of patch entries: field_name → replacement ExprId or removal marker.
+        // Build maps for patch entries, separating single-segment and nested.
         let mut replace_map: HashMap<String, ExprId> = HashMap::new();
         let mut remove_set: HashSet<String> = HashSet::new();
+        // Nested patches: top-level field → list of (remaining segments, instruction kind)
+        let mut nested_patches: HashMap<String, Vec<(Vec<PatchSelectorSegment>, PatchInstructionKind)>> =
+            HashMap::new();
+
         for entry in &patch.entries {
-            if let [PatchSelectorSegment::Named { name, .. }] =
-                entry.selector.segments.as_slice()
-            {
-                match &entry.instruction.kind {
-                    PatchInstructionKind::Replace(value_id) => {
-                        replace_map.insert(name.text().to_owned(), *value_id);
+            let segments = &entry.selector.segments;
+            if segments.len() == 1 {
+                if let PatchSelectorSegment::Named { name, .. } = &segments[0] {
+                    match &entry.instruction.kind {
+                        PatchInstructionKind::Replace(value_id) => {
+                            replace_map.insert(name.text().to_owned(), *value_id);
+                        }
+                        PatchInstructionKind::Remove => {
+                            remove_set.insert(name.text().to_owned());
+                        }
+                        _ => {}
                     }
-                    PatchInstructionKind::Remove => {
-                        remove_set.insert(name.text().to_owned());
-                    }
-                    _ => {}
+                }
+            } else if segments.len() > 1 {
+                if let PatchSelectorSegment::Named { name, .. } = &segments[0] {
+                    nested_patches
+                        .entry(name.text().to_owned())
+                        .or_default()
+                        .push((segments[1..].to_vec(), entry.instruction.kind.clone()));
                 }
             }
         }
@@ -1907,24 +1921,114 @@ impl<'a> GeneralExprElaborator<'a> {
             let field_ty = &field.ty;
 
             if remove_set.contains(field_name) {
-                // Removed field: omit from the result record.
                 continue;
             }
 
+            let label = Name::new(field_name.to_owned(), span)
+                .expect("record field names are non-empty");
+
             if let Some(replacement_id) = replace_map.get(field_name) {
-                // Patched field: lower the replacement value.
                 match self.lower_expr(*replacement_id, env, ambient, Some(field_ty)) {
                     Ok(value) => {
-                        let label = Name::new(field_name.to_owned(), span)
-                            .expect("record field names are non-empty");
                         result_fields.push(GateRuntimeRecordField { label, value });
                     }
                     Err(mut errs) => errors.append(&mut errs),
                 }
+            } else if let Some(nested) = nested_patches.get(field_name) {
+                // Nested patch: project the field, then apply nested updates.
+                let path = NamePath::from_vec(vec![label.clone()])
+                    .expect("single-segment projection paths are always valid");
+                let base = match &lowered_target.kind {
+                    GateRuntimeExprKind::AmbientSubject => GateRuntimeProjectionBase::AmbientSubject,
+                    _ => GateRuntimeProjectionBase::Expr(Box::new(lowered_target.clone())),
+                };
+                let projected = GateRuntimeExpr {
+                    span,
+                    ty: field_ty.clone(),
+                    kind: GateRuntimeExprKind::Projection { base, path },
+                };
+
+                if let GateType::Record(nested_record_fields) = field_ty {
+                    let mut nested_replace: HashMap<String, ExprId> = HashMap::new();
+                    let mut nested_remove: HashSet<String> = HashSet::new();
+                    for (segs, kind) in nested {
+                        if segs.len() == 1 {
+                            if let PatchSelectorSegment::Named { name, .. } = &segs[0] {
+                                match kind {
+                                    PatchInstructionKind::Replace(value_id) => {
+                                        nested_replace.insert(name.text().to_owned(), *value_id);
+                                    }
+                                    PatchInstructionKind::Remove => {
+                                        nested_remove.insert(name.text().to_owned());
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+
+                    let mut nested_result_fields = Vec::with_capacity(nested_record_fields.len());
+                    for nf in nested_record_fields {
+                        let nf_name = nf.name.as_str();
+                        if nested_remove.contains(nf_name) {
+                            continue;
+                        }
+                        let nf_label = Name::new(nf_name.to_owned(), span)
+                            .expect("record field names are non-empty");
+                        if let Some(rep_id) = nested_replace.get(nf_name) {
+                            match self.lower_expr(*rep_id, env, ambient, Some(&nf.ty)) {
+                                Ok(value) => {
+                                    nested_result_fields.push(GateRuntimeRecordField {
+                                        label: nf_label,
+                                        value,
+                                    });
+                                }
+                                Err(mut errs) => errors.append(&mut errs),
+                            }
+                        } else {
+                            let nf_path = NamePath::from_vec(vec![nf_label.clone()])
+                                .expect("single-segment projection paths are always valid");
+                            let nf_projected = GateRuntimeExpr {
+                                span,
+                                ty: nf.ty.clone(),
+                                kind: GateRuntimeExprKind::Projection {
+                                    base: GateRuntimeProjectionBase::Expr(Box::new(projected.clone())),
+                                    path: nf_path,
+                                },
+                            };
+                            nested_result_fields.push(GateRuntimeRecordField {
+                                label: nf_label,
+                                value: nf_projected,
+                            });
+                        }
+                    }
+
+                    let nested_ty = if nested_remove.is_empty() {
+                        field_ty.clone()
+                    } else {
+                        let remaining: Vec<GateRecordField> = nested_record_fields
+                            .iter()
+                            .filter(|f| !nested_remove.contains(f.name.as_str()))
+                            .cloned()
+                            .collect();
+                        GateType::Record(remaining)
+                    };
+                    result_fields.push(GateRuntimeRecordField {
+                        label,
+                        value: GateRuntimeExpr {
+                            span,
+                            ty: nested_ty,
+                            kind: GateRuntimeExprKind::Record(nested_result_fields),
+                        },
+                    });
+                } else {
+                    result_fields.push(GateRuntimeRecordField {
+                        label,
+                        value: projected,
+                    });
+                }
             } else {
                 // Unpatched field: project from the lowered target.
-                let label = Name::new(field_name.to_owned(), span)
-                    .expect("record field names are non-empty");
                 let path = NamePath::from_vec(vec![label.clone()])
                     .expect("single-segment projection paths are always valid");
                 let base = match &lowered_target.kind {

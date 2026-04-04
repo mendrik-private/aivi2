@@ -2335,6 +2335,9 @@ impl<'a> GateTypeContext<'a> {
             | ImportBindingMetadata::IntrinsicValue { ty, .. } => {
                 Some(self.lower_import_value_type(ty))
             }
+            ImportBindingMetadata::InstanceMember { ty, .. } => {
+                Some(self.lower_import_value_type(ty))
+            }
             ImportBindingMetadata::TypeConstructor { .. }
             | ImportBindingMetadata::Domain { .. }
             | ImportBindingMetadata::AmbientValue { .. }

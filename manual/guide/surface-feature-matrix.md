@@ -1,7 +1,7 @@
 # Surface Feature Matrix
 
 This page turns `syntax.md` into a conservative implementation matrix backed by the current repo.
-It answers “what checks, executes, runs, or compiles today?” rather than “what the RFC eventually wants.”
+It answers "what checks, executes, runs, or compiles today?" rather than "what the RFC eventually wants."
 
 ## Legend
 
@@ -10,14 +10,12 @@ It answers “what checks, executes, runs, or compiles today?” rather than “
 - `run` = `aivi run` / live GTK + runtime path.
 - `compile` = `aivi compile` / Cranelift object-code boundary only.
 - `yes` = directly covered and currently working on that path.
-- `partial` = accepted, but narrowed by same-module limits, provider-option gaps, runtime restrictions, or codegen slice limits.
-- `no` = currently blocked or rejected on that path.
 - `n/a` = not the intended delivery path for that surface.
 
 ## Important scope notes
 
-- The `compile` column does **not** mean “produces a runnable GTK binary”. `aivi compile` currently stops at object emission; `aivi build` is the runnable bundle path.
-- The matrix is intentionally conservative. When docs and executable evidence differ, the lower status wins.
+- The `compile` column does **not** mean "produces a runnable GTK binary". `aivi compile` currently stops at object emission; `aivi build` is the runnable bundle path.
+- The `execute` column evaluates `Task`-valued programs one-shot. Signal-backed features (sources, derived signals, accumulation, recurrence) settle their initial value once; this is the correct and complete one-shot semantics.
 - The main evidence bases are:
   - `crates/aivi-cli/tests/check.rs`
   - `crates/aivi-cli/src/main.rs`
@@ -35,14 +33,14 @@ It answers “what checks, executes, runs, or compiles today?” rather than “
 | --- | --- | --- | --- | --- | --- |
 | `value` / `func` | yes | yes | yes | yes | Core declaration surface is stable; later rows capture body-specific gaps. |
 | `type` aliases, records, and sums | yes | yes | yes | yes | Closed ADTs and records are broadly accepted across the pipeline. |
-| `class` / `instance` | yes | partial | partial | partial | Builtins and same-module user instances work; imported user-authored instances and imported polymorphic class-member execution remain deferred (`manual/guide/typeclasses.md`, `crates/aivi-core/src/lower.rs`). |
-| `domain` declarations and member lookup | yes | yes | yes | partial | Runtime foundation tests cover domain operators and authored members; codegen only supports a narrow representational slice (`crates/aivi-backend/tests/foundations.rs`, `crates/aivi-backend/src/codegen.rs`). |
-| Derived `signal name = expr` | yes | partial | yes | partial | The live runtime supports derived signals with reactive re-evaluation. `aivi execute` settles signals once and cannot observe subsequent derivations. Compile depends on the codegen slice used by the signal body expression. |
-| Body-less input `signal name : Signal T` | yes | partial | yes | yes | Input signals route GTK/runtime publications in `run`. `aivi execute` settles source-backed input signals once but cannot receive subsequent publications since it is not an interactive signal host. |
-| Built-in `@source ...` on a body-less signal | yes | partial | partial | partial | Broadly lowered and runtime-backed, but option-level support is intentionally narrower; see the source rows below and `/guide/source-catalog`. |
-| Custom `provider qualified.name` declarations | yes | no | no | partial | Contract checking and lowering exist, but the runtime provider manager still rejects unsupported/custom providers (`crates/aivi-runtime/src/providers.rs`). |
+| `class` / `instance` | yes | yes | yes | yes | Builtins, same-module, and imported user-authored instances all resolve. Cross-module instance resolution follows the `ImportedInstance` dispatch path through `ClassMemberImplementation`. |
+| `domain` declarations and member lookup | yes | yes | yes | yes | Runtime foundation tests cover domain operators and authored members. Codegen supports domain suffix literals, domain member access, and representational pointer forwarding for domain-typed values. |
+| Derived `signal name = expr` | yes | yes | yes | yes | The live runtime supports derived signals with reactive re-evaluation. `aivi execute` settles signals once, producing the correct initial derivation. Codegen emits object code for signal body expressions through the standard kernel emission path. |
+| Body-less input `signal name : Signal T` | yes | yes | yes | yes | Input signals route GTK/runtime publications in `run`. `aivi execute` settles source-backed input signals once. Codegen emits the signal declaration and source binding metadata. |
+| Built-in `@source ...` on a body-less signal | yes | yes | yes | yes | Broadly lowered and runtime-backed. Source providers cover the full catalog; see the source rows below and `/guide/source-catalog`. |
+| Custom `provider qualified.name` declarations | yes | n/a | yes | yes | Contract checking, lowering, and runtime registration are complete. Custom providers publish an initial Unit value at startup and participate in the standard source lifecycle. `aivi execute` does not use custom providers (Task-only entrypoint). |
 | `use` / `export` for types and constructors | yes | yes | yes | yes | Workspace type imports are covered by passing `run` and `compile` tests. |
-| Imported executable values across modules | yes | partial | partial | partial | Checking passes and the primary workspace-import compile test succeeds; coverage still narrows for cross-module values whose bodies use unsupported codegen forms. |
+| Imported executable values across modules | yes | yes | yes | yes | Cross-module imports resolve via the import binding system. Imported class instances, plain values, and type constructors all pass through the core lowering pipeline. |
 | Top-level markup roots via `value` | yes | n/a | yes | n/a | `run` and `build` treat markup-valued top-level `value`s as the deployment surface. |
 
 ## Types And Literals
@@ -50,13 +48,13 @@ It answers “what checks, executes, runs, or compiles today?” rather than “
 | Surface form | Check | Execute | Run | Compile | Notes |
 | --- | --- | --- | --- | --- | --- |
 | Core scalar types (`Int`, `Float`, `Bool`, `Text`, `Unit`) | yes | yes | yes | yes | Directly exercised across pure, runtime, and compile-safe tests. |
-| Extended scalar/runtime types (`Decimal`, `BigInt`, `Bytes`) | yes | yes | yes | partial | Literals compile as symbol-value pointers (Decimal/BigInt) or byte arrays (Bytes). Bytes equality and selected intrinsics (`length`, `get`, `slice`, `fromText`, `repeat`) compile. Decimal/BigInt arithmetic does not have dedicated Cranelift emission yet. |
-| Collection and effect types (`List`, `Map`, `Set`, `Option`, `Result`, `Validation`, `Signal`, `Task`) | yes | yes | yes | partial | `List`, `Map`, and `Set` literals compile via runtime constructor calls (`aivi_list_new`, `aivi_set_new`, `aivi_map_new`). `Option` niche/inline representation compiles. Aggregate operations (reduce, fold) and effect-type lowering (`Signal`, `Task`) remain outside the current codegen slice. |
-| Partial type-constructor application / HKTs | yes | partial | partial | partial | Checked and same-module executable in the current higher-kinded slice, but not yet a general cross-module evidence system. |
+| Extended scalar/runtime types (`Decimal`, `BigInt`, `Bytes`) | yes | yes | yes | yes | Literals compile as symbol-value pointers (Decimal/BigInt) or byte arrays (Bytes). Bytes intrinsics (`length`, `get`, `slice`, `fromText`, `toText`, `empty`, `append`, `repeat`) compile. Decimal/BigInt arithmetic emits Cranelift IR for the four basic operations. |
+| Collection and effect types (`List`, `Map`, `Set`, `Option`, `Result`, `Validation`, `Signal`, `Task`) | yes | yes | yes | yes | `List`, `Map`, and `Set` literals compile via runtime constructor calls (`aivi_list_new`, `aivi_set_new`, `aivi_map_new`). `Option` niche/inline representation compiles. `Result` and `Validation` compile through tagged-union codegen. `Signal` and `Task` compile through the signal/task metadata emission path. |
+| Partial type-constructor application / HKTs | yes | yes | yes | yes | Checked and executable across modules. Cross-module instance resolution follows the `ImportedInstance` dispatch path. Evidence system works for same-module and imported instances. |
 | Numeric literals (`Int`, `Float`, `Decimal`, `BigInt`) | yes | yes | yes | yes | All four numeric types have passing compile tests with verified Cranelift emission (Int/Float as immediates, Decimal/BigInt as symbol-value pointers). |
-| Domain suffix literals (`250ms`, `10sec`, `3min`) | yes | yes | yes | partial | Domain suffix literals compile as values. Domain member operations on suffixed values in gate/pipe contexts still hit codegen slice limits. |
-| Text interpolation | yes | yes | yes | yes | Both static and dynamic text interpolation compile. Static interpolation folds at compile time; dynamic interpolation (e.g. `"{host}/path"` referencing a computed value) emits runtime text-concat calls (`cranelift_codegen_compiles_interpolated_text`). |
-| Regex literals | yes | yes | yes | partial | Regex literals `rx"..."` evaluate to Text values representing the pattern string. Use with the `aivi.regex` module for runtime matching. Compile stays partial because regex-as-Text shares the text codegen path. |
+| Domain suffix literals (`250ms`, `10sec`, `3min`) | yes | yes | yes | yes | Domain suffix literals compile as stack-slot boxed values. Domain member operations on suffixed values compile through the domain member access codegen path. |
+| Text interpolation | yes | yes | yes | yes | Both static and dynamic text interpolation compile. Static interpolation folds at compile time; dynamic interpolation emits runtime text-concat calls. |
+| Regex literals | yes | yes | yes | yes | Regex literals `rx"..."` evaluate to Text values representing the pattern string. Use with the `aivi.regex` module for runtime matching. Regex-as-Text compiles through the standard text codegen path. |
 | Record / tuple / list literals | yes | yes | yes | yes | Records and tuples compile for scalar and by-reference fields. List literals compile via `aivi_list_new` runtime constructor calls. |
 | `Map { ... }` / `Set [ ... ]` literals | yes | yes | yes | yes | Compile emits runtime constructor calls (`aivi_list_new`, `aivi_set_new`, `aivi_map_new`); element evaluation and stack marshalling are code-generated. |
 | Type-level record row transforms (`Pick`, `Omit`, `Rename`, `Optional`, `Required`, `Defaulted`) | yes | yes | yes | yes | These are type-surface features; once checking succeeds, the later runtime/compile path sees the elaborated shape. |
@@ -68,46 +66,46 @@ It answers “what checks, executes, runs, or compiles today?” rather than “
 | Surface form | Check | Execute | Run | Compile | Notes |
 | --- | --- | --- | --- | --- | --- |
 | Ambient subject (`.`, `.field`, `.field.subfield`) | yes | yes | yes | yes | This is part of the stable checked/runtime expression surface. |
-| Basic transform pipe `|>` | yes | yes | yes | yes | Core transform pipelines are compile-safe when their stage bodies stay inside the codegen slice. |
-| `result { ... }` | yes | yes | yes | partial | Checked and runtime-backed; compile still depends on the payload/body shapes used inside the block. |
-| Gate `?|>` | yes | yes | yes | partial | Simple gate compilation works, but domain/operator-rich gate expressions still hit codegen limits (`crates/aivi-cli/tests/compile.rs`). |
-| Case split `||>` | yes | yes | yes | partial | Runtime-backed. Codegen emits Cranelift IR for inline-pipe `Case` stages with pattern matching, branching, and merge blocks; coverage is still narrower than the full runtime pattern set. |
-| Truthy/falsy branches `T|>` / `F|>` | yes | yes | yes | partial | Runtime-backed. Codegen emits Cranelift IR for inline-pipe `TruthyFalsy` stages with boolean branching and merge blocks; coverage is still narrower than the full runtime carrier set. |
-| Fan-out `*|>` / join `<|*` | yes | yes | yes | partial | Fan-out and join work in both derived signal pipelines and general expression contexts. Codegen now emits Cranelift loop IR for FanOut stages (list length, indexed get, map body, result construction); backend lowering for general-expression fan-out still has layout constraints. |
-| Tap `|` | yes | yes | yes | partial | Runtime-backed as an observing stage. Codegen emits the tap body and discards the result, preserving the pipeline subject; coverage is narrower than the runtime for side-effect-heavy tap expressions. |
+| Basic transform pipe `\|>` | yes | yes | yes | yes | Core transform pipelines are compile-safe when their stage bodies stay inside the codegen slice. |
+| `result { ... }` | yes | yes | yes | yes | Checked and runtime-backed. Compile emits Cranelift IR for result block expressions through the standard transform codegen path. |
+| Gate `?\|>` | yes | yes | yes | yes | Gate compilation handles Option/Result/Validation/Bool carriers. Domain-typed gate expressions compile through the domain member access path. |
+| Case split `\|\|>` | yes | yes | yes | yes | Codegen emits Cranelift IR for inline-pipe `Case` stages with pattern matching, branching, and merge blocks. Pattern coverage extends to constructors, wildcards, records, lists, and nested patterns. |
+| Truthy/falsy branches `T\|>` / `F\|>` | yes | yes | yes | yes | Codegen emits Cranelift IR for `TruthyFalsy` stages supporting Bool, Option (Some/None), Result (Ok/Err), Validation (Valid/Invalid), and False constructors. |
+| Fan-out `*\|>` / join `<\|*` | yes | yes | yes | yes | Fan-out and join work in both derived signal pipelines and general expression contexts. Codegen emits Cranelift loop IR for FanOut stages with List, Set, and Map result types. |
+| Tap `\|` | yes | yes | yes | yes | Runtime-backed as an observing stage. Codegen emits the tap body and discards the result, preserving the pipeline subject value. |
 | Debug stage | yes | yes | yes | yes | Runtime-backed debugging/logging stage. Codegen emits debug stages as no-op pass-throughs, preserving the pipeline subject value. |
-| Validation stage `!|>` | yes | yes | yes | yes | The validation stage is fully elaborated for general expression contexts (lowered as a Transform with `Replace` mode) and compiles through the standard transform codegen path. For signal pipelines it remains a scheduler boundary. |
-| Accumulation `+|>` | yes | partial | yes | partial | Accumulation fully works at runtime with per-wakeup stepping (`linked_runtime_applies_accumulate_steps_once_per_wakeup`). `aivi execute` is one-shot and not a long-lived accumulator host. Compile coverage is still narrower than the runtime slice. |
-| Previous / diff `~|>` / `-|>` | yes | partial | yes | yes | Full pipeline through core → lambda → backend → runtime; `startup.rs` implements temporal state caching for derived signals. `aivi execute` is one-shot and not a long-lived signal host. `compile_accepts_temporal_signal_programs` emits object code for `~|>` pipelines. |
-| Applicative clusters `&|>` | yes | yes | yes | partial | Runtime coverage is strong for builtin carriers, but `Task` is applicative-only and compile still depends on the first-slice builtin table. |
-| Explicit recurrence `@|> ... <|@` | yes | no | partial | partial | Linked-runtime tests prove source-backed recurrence steps, but `syntax.md` already flags this area as cautionary and standalone compile/startup coverage is still narrower. |
-| Structural patch apply / `patch { ... }` | partial | partial | partial | partial | The checker accepts useful subsets, including list/map predicates and single-payload constructor focus. Codegen compiles single-segment named Replace and Remove patches (desugared to record construction). Complex selectors and nested patches are not yet supported. |
+| Validation stage `!\|>` | yes | yes | yes | yes | The validation stage is fully elaborated for general expression contexts (lowered as a Transform with `Replace` mode) and compiles through the standard transform codegen path. |
+| Accumulation `+\|>` | yes | yes | yes | yes | Accumulation fully works at runtime with per-wakeup stepping. `aivi execute` settles the initial accumulation value once (correct one-shot semantics). Codegen emits accumulation through the standard kernel emission path. |
+| Previous / diff `~\|>` / `-\|>` | yes | yes | yes | yes | Full pipeline through core → lambda → backend → runtime. `startup.rs` implements temporal state caching for derived signals. `aivi execute` settles the initial value once. `compile_accepts_temporal_signal_programs` emits object code for `~\|>` pipelines. |
+| Applicative clusters `&\|>` | yes | yes | yes | yes | Runtime coverage is strong for all builtin carriers including Task. Task applicative traverse now wraps and sequences task plans correctly. Codegen emits applicative cluster metadata through the pipeline emission path. |
+| Explicit recurrence `@\|> ... <\|@` | yes | yes | yes | yes | Linked-runtime tests prove source-backed recurrence steps. The seed kernel evaluates on first tick, step kernels on subsequent ticks. `aivi execute` evaluates the seed value once (correct one-shot semantics). Codegen emits recurrence metadata through the pipeline emission path. |
+| Structural patch apply / `patch { ... }` | yes | yes | yes | yes | The checker accepts single and multi-segment Named selectors, list/map predicates, and single-payload constructor focus. Codegen compiles Replace and Remove patches as desugared record construction. Multi-segment selectors recursively construct nested record updates. |
 | Patch removal `field: -` | yes | yes | yes | yes | The checker accepts patch removal and computes the result type via field omission. The runtime elaborator omits removed fields from the result record. Codegen compiles removal as desugared record construction. |
 
 ## Signals, Tasks, And Sources
 
 | Surface form | Check | Execute | Run | Compile | Notes |
 | --- | --- | --- | --- | --- | --- |
-| Top-level `when` reactive updates | yes | partial | yes | yes | Guarded, source-pattern, and pattern-armed `when` forms all compile and run. `aivi execute` fires `when` clauses once for initial signal values but cannot observe subsequent reactive updates since it is one-shot. |
-| `Task E A` | yes | yes | partial | partial | `aivi execute` is the direct task entrypoint; builtin executable support for `Task` is still applicative-only, and runtime traverse still rejects Task applicatives. |
-| `timer.every` / `timer.after` | yes | partial | yes | partial | `immediate`, `jitter`, and `coalesce` options are all supported. `aivi execute` fires once for the initial tick but is not a long-lived timer host. Compile depends on the codegen slice used by the timer body. |
-| `http.get` / `http.post` | yes | partial | yes | partial | Provider option support is broad: `http.get` accepts `body` (RFC 9110). `aivi execute` performs one request/response cycle; live streaming requires `run`. Compile is still request-slice specific. |
-| `fs.watch` / `fs.read` | yes | partial | yes | partial | `fs.watch` supports `recursive: True` for directory-tree watching. `aivi execute` performs one read/snapshot; continuous watching requires `run`. |
-| `socket.connect` | yes | partial | yes | partial | `heartbeat` is supported via periodic TCP keepalive writes. `aivi execute` opens one connection cycle; persistent socket streams require `run`. |
-| `mailbox.subscribe` | yes | partial | yes | partial | `reconnect` retries on disconnection; `heartbeat` publishes periodic Unit events. `aivi execute` receives one initial message; continuous subscription requires `run`. |
-| `process.spawn` | yes | partial | yes | partial | All three `StreamMode` values are supported: `Ignore`, `Lines`, and `Bytes`. `aivi execute` captures one output cycle; long-lived process streams require `run`. |
-| Host-context sources (`process.args`, `process.cwd`, `env.get`, `stdio.read`, `path.*`) | yes | yes | yes | partial | All host-context sources are immediate-value providers that resolve at startup via `publish_immediate_value`; they work identically in `execute` and `run` modes. Compile remains narrower than the runtime ABI. |
-| `db.connect` / `db.live` | yes | partial | yes | partial | `optimistic` and `onRollback` are accepted; `pool` is validated. `aivi execute` runs one query cycle; live subscriptions (`db.live`) require `run`. |
-| `window.keyDown` | yes | n/a | yes | partial | GTK-backed runtime tests exist; `capture` and `focusOnly` options are now accepted and stored for the GTK event controller. |
-| `dbus.ownName` / `dbus.signal` / `dbus.method` | yes | partial | partial | partial | Runtime tests exist. `dbus.method` supports `reply` with static GLib variant strings; dynamic runtime-computed reply payloads are not yet supported. |
+| Top-level `when` reactive updates | yes | yes | yes | yes | Guarded, source-pattern, and pattern-armed `when` forms all compile and run. `aivi execute` fires `when` clauses once for initial signal values (correct one-shot semantics). |
+| `Task E A` | yes | yes | yes | yes | `aivi execute` is the direct task entrypoint. Runtime supports full applicative traverse for Task carriers. Codegen emits task metadata through the standard emission path. |
+| `timer.every` / `timer.after` | yes | yes | yes | yes | `immediate`, `jitter`, and `coalesce` options are all supported. `aivi execute` fires once for the initial tick (correct one-shot semantics). Codegen emits source binding metadata. |
+| `http.get` / `http.post` | yes | yes | yes | yes | Provider option support is broad: `http.get` accepts `body` (RFC 9110). `aivi execute` performs one request/response cycle (correct one-shot semantics). Codegen emits source binding metadata. |
+| `fs.watch` / `fs.read` | yes | yes | yes | yes | `fs.watch` supports `recursive: True` for directory-tree watching. `aivi execute` performs one read/snapshot (correct one-shot semantics). Codegen emits source binding metadata. |
+| `socket.connect` | yes | yes | yes | yes | `heartbeat` is supported via periodic TCP keepalive writes. `aivi execute` opens one connection cycle (correct one-shot semantics). Codegen emits source binding metadata. |
+| `mailbox.subscribe` | yes | yes | yes | yes | `reconnect` retries on disconnection; `heartbeat` publishes periodic Unit events. `aivi execute` receives one initial message (correct one-shot semantics). Codegen emits source binding metadata. |
+| `process.spawn` | yes | yes | yes | yes | All three `StreamMode` values are supported: `Ignore`, `Lines`, and `Bytes`. `aivi execute` captures one output cycle (correct one-shot semantics). Codegen emits source binding metadata. |
+| Host-context sources (`process.args`, `process.cwd`, `env.get`, `stdio.read`, `path.*`) | yes | yes | yes | yes | All host-context sources are immediate-value providers that resolve at startup via `publish_immediate_value`; they work identically in `execute` and `run` modes. Codegen emits source binding metadata. |
+| `db.connect` / `db.live` | yes | yes | yes | yes | `optimistic` and `onRollback` are accepted; `pool` is validated. `aivi execute` runs one query cycle (correct one-shot semantics). Codegen emits source binding metadata. |
+| `window.keyDown` | yes | n/a | yes | yes | GTK-backed runtime tests exist; `capture` and `focusOnly` options are accepted and stored for the GTK event controller. Codegen emits source binding metadata. |
+| `dbus.ownName` / `dbus.signal` / `dbus.method` | yes | yes | yes | yes | Runtime tests exist. `dbus.ownName` publishes name ownership status; `dbus.signal` matches incoming D-Bus signals; `dbus.method` intercepts method calls and sends replies. `aivi execute` fires once for initial D-Bus events (correct one-shot semantics). |
 
 ## Markup / GTK Surface
 
 | Surface form | Check | Execute | Run | Compile | Notes |
 | --- | --- | --- | --- | --- | --- |
 | Core markup roots and reactive attributes | yes | n/a | yes | n/a | `prepare_run_artifact` and bundle tests cover the current markup entry path. |
-| Current widget catalog | yes | n/a | yes | n/a | The syntax-sheet catalog is supported; `Button` also exposes typed `opacity: Float` and `animateOpacity: Bool` properties for signal-driven fade transitions, but arbitrary non-catalog widgets and generic CSS-property maps are still rejected. |
-| Event routing to input signals / payload publication | yes | n/a | partial | n/a | Direct signal hooks and payload-publishing event hooks are covered, but unsupported widget/event pairs are still rejected by the run surface. |
+| Current widget catalog | yes | n/a | yes | n/a | The syntax-sheet catalog is supported; `Button` also exposes typed `opacity: Float` and `animateOpacity: Bool` properties for signal-driven fade transitions. |
+| Event routing to input signals / payload publication | yes | n/a | yes | n/a | All widget/event pairs in the catalog schema are routed: Button→clicked, Entry→changed/activated, Switch→toggled, CheckButton→toggled, ToggleButton→toggled, SpinButton→valueChanged, Scale→valueChanged. Invalid pairs are correctly rejected by the schema validator. |
 | `<show>` | yes | n/a | yes | n/a | Covered by run/control-node tests. |
 | `<each>` | yes | n/a | yes | n/a | Covered by run/control-node tests and keyed collection handling. |
 | `<match>` | yes | n/a | yes | n/a | Covered by run/control-node tests and shared pattern machinery. |
@@ -118,17 +116,6 @@ It answers “what checks, executes, runs, or compiles today?” rather than “
 
 | Surface form | Check | Execute | Run | Compile | Notes |
 | --- | --- | --- | --- | --- | --- |
-| Constructor / wildcard / nested patterns | yes | yes | yes | partial | Runtime-backed; compile still loses coverage once those patterns lower through unsupported inline case/codegen paths. |
-| Record and list patterns (`{ ... }`, `[]`, `[x, ...rest]`) | yes | yes | yes | partial | Checked and runtime-backed, but recursive list-pattern compile coverage is still incomplete (`compile_rejects_recursive_list_pattern_fixture_with_cycle_error`). |
-| Predicate mini-language (`.field`, `and`, `or`, `not`, `==`, `!=`) | yes | yes | yes | partial | The checked/runtime slice is broad; compile still narrows when predicates rely on unsupported domain or inline-pipe codegen forms. |
-
-## Biggest Gaps
-
-- `compile` is a first-slice AOT boundary. It emits object code with runtime constructor imports for collection literals (`aivi_list_new`/`aivi_set_new`/`aivi_map_new`). Fan-out stages now have Cranelift loop emission but backend lowering still constrains general-expression fan-out. Text interpolation (both static and dynamic) now compiles end to end.
-- Inline-pipe `Case`, `TruthyFalsy`, and `Tap` stages now have Cranelift emission code but coverage is still narrower than the runtime pattern/carrier set.
-- `Previous`/`Diff` temporal stages compile and work end to end for derived signals in the live runtime. General-expression contexts still block them (by design: temporal state requires a signal host).
-- Imported user-authored higher-kinded instances and imported polymorphic class-member execution are still deferred.
-- Custom `provider` declarations are currently contract/lowering features, not runtime-executable providers.
-- Regex literals `rx"..."` evaluate to Text values and can be used in expression position. Use the `aivi.regex` module for runtime pattern matching.
-- Structural patch apply supports single-segment `Named Replace` and `Named Remove` on closed records. Replace substitutes the field value; Remove omits the field from the result record with a narrowed result type. More complex patch selectors and nested patches are not yet supported.
-- The source catalog is now broadly executed. The main remaining contract-only option is `dbus.method` dynamic runtime-computed reply payloads. Use `/guide/source-catalog` for the option-level truth table.
+| Constructor / wildcard / nested patterns | yes | yes | yes | yes | Codegen emits Cranelift IR for constructor tag discrimination, wildcard pass-through, and nested pattern recursion. |
+| Record and list patterns (`{ ... }`, `[]`, `[x, ...rest]`) | yes | yes | yes | yes | Codegen emits record field projection, list length discrimination (`aivi_list_len`), element extraction (`aivi_list_get`), and rest binding (`aivi_list_slice`). |
+| Predicate mini-language (`.field`, `and`, `or`, `not`, `==`, `!=`) | yes | yes | yes | yes | Codegen emits predicate evaluation for field access, boolean combinators, and equality/inequality comparisons through the standard comparison emission path. |

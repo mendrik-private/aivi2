@@ -775,7 +775,9 @@ impl NavigationAnalysis {
                 );
                 targets
             }
-            ImportBindingMetadata::Unknown => Vec::new(),
+            ImportBindingMetadata::Unknown | ImportBindingMetadata::InstanceMember { .. } => {
+                Vec::new()
+            }
         }
     }
 

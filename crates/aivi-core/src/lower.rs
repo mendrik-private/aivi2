@@ -2127,7 +2127,7 @@ impl<'a> ModuleLowerer<'a> {
     }
 
     fn lower_class_member_reference(
-        &self,
+        &mut self,
         owner: HirItemId,
         span: SourceSpan,
         dispatch: &ResolvedClassMemberDispatch,
@@ -2162,6 +2162,9 @@ impl<'a> ModuleLowerer<'a> {
                         )
                     })?;
                 return Ok(Reference::Item(lowered));
+            }
+            aivi_hir::ClassMemberImplementation::ImportedInstance { import } => {
+                return self.lower_import_reference(owner, import);
             }
             aivi_hir::ClassMemberImplementation::Builtin => {}
         }
@@ -2573,7 +2576,8 @@ impl<'a> ModuleLowerer<'a> {
         };
         let ty = match &binding.metadata {
             ImportBindingMetadata::Value { ty }
-            | ImportBindingMetadata::IntrinsicValue { ty, .. } => ty,
+            | ImportBindingMetadata::IntrinsicValue { ty, .. }
+            | ImportBindingMetadata::InstanceMember { ty, .. } => ty,
             ImportBindingMetadata::AmbientValue { .. } => {
                 return Err(unsupported(
                     "ambient imports do not carry lowered value types",

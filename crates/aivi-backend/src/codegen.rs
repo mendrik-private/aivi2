@@ -327,6 +327,9 @@ enum IntrinsicCallPlan {
     BytesGet,
     BytesFromText,
     BytesToText,
+    BytesAppend,
+    BytesRepeat,
+    BytesSlice,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2275,20 +2278,23 @@ impl<'a> CraneliftCompiler<'a> {
                                     "fan-out input must be List",
                                 ));
                             };
-                            let LayoutKind::List { element: result_elem } =
-                                &self.program.layouts()[result_layout].kind.clone()
-                            else {
-                                return Err(self.unsupported_inline_pipe_stage(
-                                    kernel_id,
-                                    pipe_expr,
-                                    stage_index,
-                                    "fan-out result must be List",
-                                ));
+                            let result_elem = match &self.program.layouts()[result_layout].kind.clone() {
+                                LayoutKind::List { element } => *element,
+                                LayoutKind::Set { element } => *element,
+                                LayoutKind::Map { key, value: _ } => *key,
+                                _ => {
+                                    return Err(self.unsupported_inline_pipe_stage(
+                                        kernel_id,
+                                        pipe_expr,
+                                        stage_index,
+                                        "fan-out result must be List, Set, or Map",
+                                    ));
+                                }
                             };
                             let _input_elem_abi =
                                 self.field_abi_shape(kernel_id, *input_elem, "fanout input element")?;
                             let result_elem_abi =
-                                self.field_abi_shape(kernel_id, *result_elem, "fanout result element")?;
+                                self.field_abi_shape(kernel_id, result_elem, "fanout result element")?;
                             let result_stride = result_elem_abi.size.max(1);
 
                             // Get list length
@@ -2511,22 +2517,45 @@ impl<'a> CraneliftCompiler<'a> {
                     let next_counter = builder.ins().iadd_imm(counter, 1);
                     builder.ins().jump(loop_header, &[BlockArg::Value(next_counter)]);
 
-                    // Exit block: construct result list
+                    // Exit block: construct result collection
                     builder.switch_to_block(loop_exit);
-                    let list_new_func =
-                        self.declare_list_new_func(kernel_id, builder)?;
+                    let result_layout = stage.result_layout;
                     let stride_val =
                         builder.ins().iconst(types::I64, result_stride as i64);
-                    let new_list_call = builder.ins().call(
-                        list_new_func,
-                        &[count, result_array_ptr, stride_val],
-                    );
-                    let result_list = builder.inst_results(new_list_call)[0];
+                    let result_collection = match &self.program.layouts()[result_layout].kind {
+                        LayoutKind::Set { .. } => {
+                            let set_new_func =
+                                self.declare_set_new_func(kernel_id, builder)?;
+                            let call = builder.ins().call(
+                                set_new_func,
+                                &[count, result_array_ptr, stride_val],
+                            );
+                            builder.inst_results(call)[0]
+                        }
+                        LayoutKind::Map { .. } => {
+                            let map_new_func =
+                                self.declare_map_new_func(kernel_id, builder)?;
+                            let call = builder.ins().call(
+                                map_new_func,
+                                &[count, result_array_ptr, stride_val, stride_val],
+                            );
+                            builder.inst_results(call)[0]
+                        }
+                        _ => {
+                            let list_new_func =
+                                self.declare_list_new_func(kernel_id, builder)?;
+                            let call = builder.ins().call(
+                                list_new_func,
+                                &[count, result_array_ptr, stride_val],
+                            );
+                            builder.inst_results(call)[0]
+                        }
+                    };
 
                     if let Some(slot) = stage.result_memo {
-                        inline_subjects[slot.index()] = Some(result_list);
+                        inline_subjects[slot.index()] = Some(result_collection);
                     }
-                    values.push(result_list);
+                    values.push(result_collection);
                     if stage_index + 1 < pipe.stages.len() {
                         tasks.push(Task::BuildPipeStage {
                             pipe_expr,
@@ -3789,11 +3818,89 @@ impl<'a> CraneliftCompiler<'a> {
                 }
                 Ok(IntrinsicCallPlan::BytesToText)
             }
+            IntrinsicValue::BytesAppend => {
+                let [left, right] = arguments else {
+                    unreachable!("saturated `BytesAppend` call should keep exactly two arguments");
+                };
+                self.require_bytes_expression(
+                    kernel_id,
+                    *left,
+                    kernel.exprs()[*left].layout,
+                    "bytes.append left",
+                )?;
+                self.require_bytes_expression(
+                    kernel_id,
+                    *right,
+                    kernel.exprs()[*right].layout,
+                    "bytes.append right",
+                )?;
+                self.require_bytes_expression(
+                    kernel_id,
+                    expr_id,
+                    result_layout,
+                    "bytes.append result",
+                )?;
+                Ok(IntrinsicCallPlan::BytesAppend)
+            }
+            IntrinsicValue::BytesRepeat => {
+                let [byte_val, count] = arguments else {
+                    unreachable!("saturated `BytesRepeat` call should keep exactly two arguments");
+                };
+                self.require_int_expression(
+                    kernel_id,
+                    *byte_val,
+                    kernel.exprs()[*byte_val].layout,
+                    "bytes.repeat byte value",
+                )?;
+                self.require_int_expression(
+                    kernel_id,
+                    *count,
+                    kernel.exprs()[*count].layout,
+                    "bytes.repeat count",
+                )?;
+                self.require_bytes_expression(
+                    kernel_id,
+                    expr_id,
+                    result_layout,
+                    "bytes.repeat result",
+                )?;
+                Ok(IntrinsicCallPlan::BytesRepeat)
+            }
+            IntrinsicValue::BytesSlice => {
+                let [from, to, bytes] = arguments else {
+                    unreachable!("saturated `BytesSlice` call should keep exactly three arguments");
+                };
+                self.require_int_expression(
+                    kernel_id,
+                    *from,
+                    kernel.exprs()[*from].layout,
+                    "bytes.slice from",
+                )?;
+                self.require_int_expression(
+                    kernel_id,
+                    *to,
+                    kernel.exprs()[*to].layout,
+                    "bytes.slice to",
+                )?;
+                self.require_bytes_expression(
+                    kernel_id,
+                    *bytes,
+                    kernel.exprs()[*bytes].layout,
+                    "bytes.slice bytes",
+                )?;
+                self.require_bytes_expression(
+                    kernel_id,
+                    expr_id,
+                    result_layout,
+                    "bytes.slice result",
+                )?;
+                Ok(IntrinsicCallPlan::BytesSlice)
+            }
             _ => Err(self.unsupported_expression(
                 kernel_id,
                 expr_id,
                 &format!(
-                    "{detail} still requires backend-owned bytes/runtime lowering beyond the current empty/length/get/fromText/toText Cranelift subset"
+                    "{detail} still requires backend-owned bytes/runtime lowering beyond the current empty/length/get/fromText/toText/append/repeat/slice Cranelift subset"
                 ),
             )),
         }
@@ -4122,6 +4229,44 @@ impl<'a> CraneliftCompiler<'a> {
                     ));
                 };
                 Ok(self.lower_bytes_to_text_option(*argument, builder))
+            }
+            DirectApplyPlan::Intrinsic(IntrinsicCallPlan::BytesAppend) => {
+                let [left, right] = arguments else {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "direct bytes.append lowering expected exactly two materialized arguments",
+                    ));
+                };
+                let func_ref = self.declare_ptr_binop_func(
+                    "aivi_bytes_append", kernel_id, builder,
+                )?;
+                let call = builder.ins().call(func_ref, &[*left, *right]);
+                Ok(builder.inst_results(call)[0])
+            }
+            DirectApplyPlan::Intrinsic(IntrinsicCallPlan::BytesRepeat) => {
+                let [byte_val, count] = arguments else {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "direct bytes.repeat lowering expected exactly two materialized arguments",
+                    ));
+                };
+                let func_ref = self.declare_bytes_repeat_func(kernel_id, builder)?;
+                let call = builder.ins().call(func_ref, &[*byte_val, *count]);
+                Ok(builder.inst_results(call)[0])
+            }
+            DirectApplyPlan::Intrinsic(IntrinsicCallPlan::BytesSlice) => {
+                let [from, to, bytes] = arguments else {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "direct bytes.slice lowering expected exactly three materialized arguments",
+                    ));
+                };
+                let func_ref = self.declare_bytes_slice_func(kernel_id, builder)?;
+                let call = builder.ins().call(func_ref, &[*from, *to, *bytes]);
+                Ok(builder.inst_results(call)[0])
             }
         }
     }
@@ -4924,7 +5069,7 @@ impl<'a> CraneliftCompiler<'a> {
     }
 
     fn lower_native_equality_shape(
-        &self,
+        &mut self,
         kernel_id: KernelId,
         expr_id: KernelExprId,
         shape: &NativeEqualityShape,
@@ -4936,11 +5081,14 @@ impl<'a> CraneliftCompiler<'a> {
             NativeEqualityShape::Integer => Ok(builder.ins().icmp(IntCC::Equal, lhs, rhs)),
             NativeEqualityShape::Float => Ok(builder.ins().fcmp(FloatCC::Equal, lhs, rhs)),
             NativeEqualityShape::Decimal | NativeEqualityShape::BigInt => {
-                Err(self.unsupported_expression(
-                    kernel_id,
-                    expr_id,
-                    "Decimal/BigInt equality inside aggregate fields requires runtime dispatch; use standalone == instead",
-                ))
+                let sym = match shape {
+                    NativeEqualityShape::Decimal => "aivi_decimal_eq",
+                    NativeEqualityShape::BigInt => "aivi_bigint_eq",
+                    _ => unreachable!(),
+                };
+                let func_ref = self.declare_ptr_cmp_func(sym, kernel_id, builder)?;
+                let call = builder.ins().call(func_ref, &[lhs, rhs]);
+                Ok(builder.inst_results(call)[0])
             }
             NativeEqualityShape::InlineScalarOption(_) => {
                 Ok(builder.ins().icmp(IntCC::Equal, lhs, rhs))
@@ -5843,6 +5991,63 @@ impl<'a> CraneliftCompiler<'a> {
         Ok(self.module.declare_func_in_func(func_id, builder.func))
     }
 
+    /// `aivi_bytes_repeat(byte: i64, count: i64) -> ptr`
+    fn declare_bytes_repeat_func(
+        &mut self,
+        kernel_id: KernelId,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<cranelift_codegen::ir::FuncRef, CodegenError> {
+        let sym = "aivi_bytes_repeat";
+        let func_id = if let Some(&fid) = self.declared_external_funcs.get(sym) {
+            fid
+        } else {
+            let mut sig = self.module.make_signature();
+            sig.params.push(AbiParam::new(types::I64));
+            sig.params.push(AbiParam::new(types::I64));
+            sig.returns.push(AbiParam::new(self.pointer_type()));
+            let fid = self
+                .module
+                .declare_function(sym, Linkage::Import, &sig)
+                .map_err(|e| CodegenError::CraneliftModule {
+                    kernel: Some(kernel_id),
+                    message: e.to_string().into_boxed_str(),
+                })?;
+            self.declared_external_funcs
+                .insert(sym.to_owned().into_boxed_str(), fid);
+            fid
+        };
+        Ok(self.module.declare_func_in_func(func_id, builder.func))
+    }
+
+    /// `aivi_bytes_slice(from: i64, to: i64, bytes: ptr) -> ptr`
+    fn declare_bytes_slice_func(
+        &mut self,
+        kernel_id: KernelId,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<cranelift_codegen::ir::FuncRef, CodegenError> {
+        let sym = "aivi_bytes_slice";
+        let func_id = if let Some(&fid) = self.declared_external_funcs.get(sym) {
+            fid
+        } else {
+            let mut sig = self.module.make_signature();
+            sig.params.push(AbiParam::new(types::I64));
+            sig.params.push(AbiParam::new(types::I64));
+            sig.params.push(AbiParam::new(self.pointer_type()));
+            sig.returns.push(AbiParam::new(self.pointer_type()));
+            let fid = self
+                .module
+                .declare_function(sym, Linkage::Import, &sig)
+                .map_err(|e| CodegenError::CraneliftModule {
+                    kernel: Some(kernel_id),
+                    message: e.to_string().into_boxed_str(),
+                })?;
+            self.declared_external_funcs
+                .insert(sym.to_owned().into_boxed_str(), fid);
+            fid
+        };
+        Ok(self.module.declare_func_in_func(func_id, builder.func))
+    }
+
     /// Declare an imported runtime function with signature `(ptr, ptr) -> ptr`.
     /// Used for Decimal/BigInt binary arithmetic (add, sub, mul, div, mod).
     fn declare_ptr_binop_func(
@@ -6132,6 +6337,25 @@ impl<'a> CraneliftCompiler<'a> {
                     "TruthyFalsy Some condition requires Option contract",
                 )),
             },
+            crate::BuiltinTerm::Ok => {
+                let loaded_tag = builder.ins().load(types::I64, MemFlags::new(), current, 0);
+                Ok(builder.ins().icmp_imm(IntCC::Equal, loaded_tag, 0))
+            }
+            crate::BuiltinTerm::Err => {
+                let loaded_tag = builder.ins().load(types::I64, MemFlags::new(), current, 0);
+                Ok(builder.ins().icmp_imm(IntCC::Equal, loaded_tag, 1))
+            }
+            crate::BuiltinTerm::Valid => {
+                let loaded_tag = builder.ins().load(types::I64, MemFlags::new(), current, 0);
+                Ok(builder.ins().icmp_imm(IntCC::Equal, loaded_tag, 0))
+            }
+            crate::BuiltinTerm::Invalid => {
+                let loaded_tag = builder.ins().load(types::I64, MemFlags::new(), current, 0);
+                Ok(builder.ins().icmp_imm(IntCC::Equal, loaded_tag, 1))
+            }
+            crate::BuiltinTerm::False => {
+                Ok(builder.ins().icmp_imm(IntCC::Equal, current, 0))
+            }
             _ => Err(self.unsupported_inline_pipe_stage(
                 kernel_id,
                 pipe_expr,
@@ -6172,6 +6396,15 @@ impl<'a> CraneliftCompiler<'a> {
                 }
                 None => current,
             },
+            // Result/Validation: payload pointer is at offset 8 (past the i64 tag)
+            crate::BuiltinTerm::Ok
+            | crate::BuiltinTerm::Err
+            | crate::BuiltinTerm::Valid
+            | crate::BuiltinTerm::Invalid => {
+                builder
+                    .ins()
+                    .load(self.pointer_type(), MemFlags::new(), current, 8)
+            }
             _ => current,
         }
     }

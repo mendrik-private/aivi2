@@ -2040,6 +2040,36 @@ impl<'a> Lowerer<'a> {
                 })
             })
             .collect::<Vec<_>>();
+        // Auto-register imported instance member bindings so cross-module instance
+        // resolution can find them without the user explicitly importing by name.
+        if let ImportModuleResolution::Resolved(exports) = &module_resolution {
+            for instance_decl in &exports.instances {
+                for member in &instance_decl.members {
+                    let synthetic_name = format!(
+                        "__instance_{}_{}_{}_{}",
+                        instance_decl.class_name,
+                        member.name,
+                        instance_decl.subject,
+                        import_value_type_label(&member.ty),
+                    );
+                    let name = self.make_name(&synthetic_name, item.base.span);
+                    imports.push(self.alloc_import(ImportBinding {
+                        span: item.base.span,
+                        imported_name: self.make_name(&member.name, item.base.span),
+                        local_name: name,
+                        resolution: ImportBindingResolution::Resolved,
+                        metadata: ImportBindingMetadata::InstanceMember {
+                            class_name: instance_decl.class_name.clone(),
+                            member_name: member.name.clone(),
+                            subject: instance_decl.subject.clone(),
+                            ty: member.ty.clone(),
+                        },
+                        callable_type: None,
+                        deprecation: None,
+                    }));
+                }
+            }
+        }
         if imports.is_empty() {
             self.emit_error(
                 item.base.span,
@@ -5308,7 +5338,7 @@ impl<'a> Lowerer<'a> {
                         );
                     }
                 }
-                ImportBindingMetadata::Bundle(_) => {}
+                ImportBindingMetadata::Bundle(_) | ImportBindingMetadata::InstanceMember { .. } => {}
                 ImportBindingMetadata::Unknown => {
                     self.diagnostics.push(
                         Diagnostic::error(format!(
@@ -7744,6 +7774,76 @@ impl<'a> Lowerer<'a> {
             self.emit_arena_overflow("HIR import arena");
             std::process::exit(1);
         })
+    }
+}
+
+/// Build a string label from an `ImportValueType`, used for generating unique synthetic
+/// binding names for auto-imported instance members.
+fn import_value_type_label(ty: &ImportValueType) -> String {
+    match ty {
+        ImportValueType::Primitive(builtin) => format!("{builtin:?}"),
+        ImportValueType::Tuple(elements) => {
+            let parts: Vec<_> = elements.iter().map(import_value_type_label).collect();
+            format!("Tuple_{}", parts.join("_"))
+        }
+        ImportValueType::Record(fields) => {
+            let parts: Vec<_> = fields
+                .iter()
+                .map(|f| format!("{}_{}", f.name, import_value_type_label(&f.ty)))
+                .collect();
+            format!("Record_{}", parts.join("_"))
+        }
+        ImportValueType::Arrow { parameter, result } => {
+            format!(
+                "Arrow_{}_{}",
+                import_value_type_label(parameter),
+                import_value_type_label(result)
+            )
+        }
+        ImportValueType::List(elem) => format!("List_{}", import_value_type_label(elem)),
+        ImportValueType::Map { key, value } => {
+            format!(
+                "Map_{}_{}",
+                import_value_type_label(key),
+                import_value_type_label(value)
+            )
+        }
+        ImportValueType::Set(elem) => format!("Set_{}", import_value_type_label(elem)),
+        ImportValueType::Option(elem) => format!("Option_{}", import_value_type_label(elem)),
+        ImportValueType::Result { error, value } => {
+            format!(
+                "Result_{}_{}",
+                import_value_type_label(error),
+                import_value_type_label(value)
+            )
+        }
+        ImportValueType::Validation { error, value } => {
+            format!(
+                "Validation_{}_{}",
+                import_value_type_label(error),
+                import_value_type_label(value)
+            )
+        }
+        ImportValueType::Signal(elem) => format!("Signal_{}", import_value_type_label(elem)),
+        ImportValueType::Task { error, value } => {
+            format!(
+                "Task_{}_{}",
+                import_value_type_label(error),
+                import_value_type_label(value)
+            )
+        }
+        ImportValueType::TypeVariable { name, .. } => name.clone(),
+        ImportValueType::Named {
+            type_name,
+            arguments,
+        } => {
+            if arguments.is_empty() {
+                type_name.clone()
+            } else {
+                let args: Vec<_> = arguments.iter().map(import_value_type_label).collect();
+                format!("{}_{}", type_name, args.join("_"))
+            }
+        }
     }
 }
 
