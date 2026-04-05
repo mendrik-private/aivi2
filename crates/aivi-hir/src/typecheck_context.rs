@@ -6855,8 +6855,8 @@ impl<'a> GateTypeContext<'a> {
                         carrier: Some(carrier),
                         ..
                     } => {
-                        // Imported domain type: `.unwrap` / `.value` return the carrier type.
-                        if segment.text() == "unwrap" || segment.text() == "value" {
+                        // Imported domain type: `.unwrap` / `.value` / `.carrier` return the carrier type.
+                        if segment.text() == "unwrap" || segment.text() == "value" || segment.text() == "carrier" {
                             let carrier_ty = self.lower_import_value_type(carrier);
                             Ok(GateProjectionStep::RecordField { result: carrier_ty })
                         } else {
@@ -6920,6 +6920,32 @@ impl<'a> GateTypeContext<'a> {
                 subject: subject.to_string(),
             });
         };
+
+        // Built-in `.carrier` accessor: returns the underlying carrier type.
+        if segment.text() == "carrier" {
+            let carrier_ty = self.lower_open_annotation(domain.carrier);
+            if let Some(mut carrier_ty) = carrier_ty {
+                let substitutions: HashMap<_, _> = domain
+                    .parameters
+                    .iter()
+                    .copied()
+                    .zip(domain_arguments.iter().cloned())
+                    .collect();
+                if !substitutions.is_empty() {
+                    carrier_ty = carrier_ty.substitute_type_parameters(&substitutions);
+                }
+                let handle = DomainMemberHandle {
+                    domain: domain_item,
+                    domain_name: domain.name.text().into(),
+                    member_name: "carrier".into(),
+                    member_index: usize::MAX,
+                };
+                return Ok(GateProjectionStep::DomainMember {
+                    handle,
+                    result: carrier_ty,
+                });
+            }
+        }
 
         let substitutions = domain
             .parameters

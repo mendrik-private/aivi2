@@ -1,90 +1,17 @@
-type NonEmptyList A =
-  | MkNEL A (List A)
-
-type A -> (NonEmptyList A)
-func singleton = item =>
-    MkNEL item []
-
-type A -> (NonEmptyList A) -> (NonEmptyList A)
-func cons = item nel => nel
- ||> MkNEL h t -> MkNEL item (append [h] t)
-
-type NonEmptyList A -> A
-func head = nel => nel
- ||> MkNEL h ignored -> h
-
-type NonEmptyList A -> (List A)
-func toList = nel => nel
- ||> MkNEL h t -> append [h] t
-
-type A -> A -> A
-func lastStep = prev item =>
-    item
-
-type A -> (List A) -> A
-func lastOfTail = h t => t
-  |> reduce lastStep h
-
-type NonEmptyList A -> A
-func last = nel => nel
- ||> MkNEL h t -> lastOfTail h t
-
-type Int -> A -> Int
-func nelLengthStep = acc ignored =>
-    acc + 1
-
-type List A -> Int
-func tailLength = t => t
-  |> reduce nelLengthStep 1
-
-type NonEmptyList A -> Int
-func length = nel => nel
- ||> MkNEL ignored t -> tailLength t
-
-type (A -> B) -> (List B) -> A -> (List B)
-func mapNelStep = transform acc item =>
-    append acc [transform item]
-
-type (A -> B) -> (List A) -> (List B)
-func mappedTail = transform t => t
-  |> reduce (mapNelStep transform) []
-
-type (A -> B) -> (NonEmptyList A) -> (NonEmptyList B)
-func mapNel = transform nel => nel
- ||> MkNEL h t -> MkNEL (transform h) (mappedTail transform t)
-
-type Option (NonEmptyList A) -> A -> (Option (NonEmptyList A))
-func fromListStep = acc item => acc
- ||> None             -> Some (MkNEL item [])
- ||> Some (MkNEL h t) -> Some (MkNEL h (append t [item]))
-
-type List A -> (Option (NonEmptyList A))
-func fromList = items => items
-  |> reduce fromListStep None
-
-type NonEmptyList A -> (NonEmptyList A) -> (NonEmptyList A)
-func appendNel = left right => left
- ||> MkNEL h t -> MkNEL h (append t (toList right))
-
-type A -> (List A) -> (NonEmptyList A)
-func fromHeadTail = h t =>
-    MkNEL h t
-
-type InitState A = {
-    result: List A,
-    prev: Option A
-}
-
-type InitState A -> A -> (InitState A)
-func initStep = state item => state.prev
- ||> None   -> { result: state.result, prev: Some item }
- ||> Some p -> { result: append state.result [p], prev: Some item }
-
-type NonEmptyList A -> (List A)
-func init = nel =>
-  toList nel
-    |> reduce initStep { result: [], prev: None }
-    |> .result
+use aivi.nonEmpty (
+    NonEmptyList
+    singleton
+    cons
+    head
+    toList
+    last
+    length
+    mapNel
+    fromList
+    appendNel
+    fromHeadTail
+    init
+)
 
 export NonEmptyList
 export singleton

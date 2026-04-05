@@ -117,6 +117,29 @@ domain NonEmpty A over List A
 
 This is useful when you want stronger guarantees than the carrier type alone can express.
 
+## The `.carrier` accessor
+
+Every domain has a built-in `.carrier` accessor that returns the underlying carrier value at zero cost. You do not need to declare it — the compiler synthesizes it automatically:
+
+```aivi
+domain Score over Int = {
+    literal pts : Int -> Score
+}
+
+value raw : Int = (100pts).carrier   // 100
+```
+
+This is useful when you need to pass a domain value to a function that expects the carrier type:
+
+```aivi
+domain Snake over NonEmptyList Cell = { ... }
+
+// .carrier returns NonEmptyList Cell, then nelToList converts to List Cell
+value cells : List Cell = nelToList mySnake.carrier
+```
+
+Unlike `unwrap`, which is a user-defined member you must declare yourself, `.carrier` is always available on every domain.
+
 ## Summary
 
 | Form | Meaning |
@@ -128,3 +151,4 @@ This is useful when you want stronger guarantees than the carrier type alone can
 | `member : T` + `member x = expr` | Add an authored callable member |
 | `self` | Implicit domain-typed receiver in authored bodies |
 | `domain Name over Carrier = { ... }` | Group domain members in a block |
+| `.carrier` | Built-in accessor returning the carrier value (always available) |

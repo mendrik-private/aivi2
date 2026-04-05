@@ -57,7 +57,7 @@ fn explicit_override_bypasses_implicit_main_discovery() {
     let cwd = workspace.mkdir("nested/tool");
     let explicit_entry = workspace.write("apps/demo.aivi", "value demo = 1\n");
 
-    let resolved = resolve_v1_entrypoint(&cwd, Some(&explicit_entry))
+    let resolved = resolve_v1_entrypoint(&cwd, Some(&explicit_entry), None)
         .expect("explicit overrides should bypass implicit workspace discovery");
 
     assert_eq!(resolved.origin(), EntrypointOrigin::ExplicitPath);
@@ -75,7 +75,7 @@ fn implicit_resolution_uses_the_nearest_manifest_ancestor() {
     let nested_entry = workspace.write("apps/main.aivi", "value inner = 2\n");
     let cwd = workspace.mkdir("apps/tooling");
 
-    let resolved = resolve_v1_entrypoint(&cwd, None)
+    let resolved = resolve_v1_entrypoint(&cwd, None, None)
         .expect("implicit discovery should resolve the nearest workspace root");
 
     assert_eq!(resolved.origin(), EntrypointOrigin::ImplicitWorkspaceMain);
@@ -90,7 +90,7 @@ fn implicit_resolution_uses_the_current_directory_when_no_manifest_exists() {
     let entry = workspace.write("playground/main.aivi", "value view = 3\n");
 
     let resolved =
-        resolve_v1_entrypoint(&cwd, None).expect("current directory should be the workspace root");
+        resolve_v1_entrypoint(&cwd, None, None).expect("current directory should be the workspace root");
 
     assert_eq!(resolved.origin(), EntrypointOrigin::ImplicitWorkspaceMain);
     assert_eq!(resolved.workspace_root(), cwd.as_path());
@@ -105,7 +105,7 @@ fn missing_implicit_main_reports_the_expected_path_without_guessing() {
     let cwd = workspace.mkdir("apps/tooling");
     let expected_path = workspace.path().join("main.aivi");
 
-    let error = resolve_v1_entrypoint(&cwd, None)
+    let error = resolve_v1_entrypoint(&cwd, None, None)
         .expect_err("v1 discovery should refuse to guess when main.aivi is absent");
 
     assert_eq!(

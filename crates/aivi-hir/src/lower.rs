@@ -326,40 +326,56 @@ type Eq A => A -> A -> Bool
 func __aivi_binary_neq = left right =>
     left != right
 
-type NonEmptyList A =
-  | MkNEL A (List A)
+domain NonEmptyList A over List A = {
+    type (List A) -> (NonEmptyList A)
+    lift items = items
+}
 
 type A -> (NonEmptyList A)
 func __aivi_nel_singleton = item =>
-    MkNEL item []
+    lift [item]
 
 type A -> (NonEmptyList A) -> (NonEmptyList A)
-func __aivi_nel_cons = item nel => nel
-    ||> MkNEL h t -> MkNEL item (append [h] t)
+func __aivi_nel_cons = item nel =>
+    lift (append [item] nel.carrier)
 
 type NonEmptyList A -> A
-func __aivi_nel_head = nel => nel
-    ||> MkNEL h ignored -> h
+func __aivi_nel_head = nel =>
+    nel.carrier
+    ||> [h, ...ignored] -> h
 
 type NonEmptyList A -> (List A)
-func __aivi_nel_toList = nel => nel
-    ||> MkNEL h t -> append [h] t
+func __aivi_nel_toList = nel =>
+    nel.carrier
 
 type A -> (List A) -> (NonEmptyList A)
 func __aivi_nel_fromHeadTail = h t =>
-    MkNEL h t
-
-type Int -> A -> Int
-func __aivi_nel_lengthStep = acc ignored =>
-    acc + 1
-
-type (List A) -> Int
-func __aivi_nel_tailLength = t => t
-    |> reduce __aivi_nel_lengthStep 1
+    lift (append [h] t)
 
 type NonEmptyList A -> Int
-func __aivi_nel_length = nel => nel
-    ||> MkNEL ignored t -> __aivi_nel_tailLength t
+func __aivi_nel_length = nel =>
+    __aivi_list_length nel.carrier
+
+type A -> A -> A
+func __aivi_nel_lastStep = prev item =>
+    item
+
+type A -> (List A) -> A
+func __aivi_nel_lastOf = h t => t
+    |> reduce __aivi_nel_lastStep h
+
+type NonEmptyList A -> A
+func __aivi_nel_last = nel =>
+    nel.carrier
+    ||> [h, ...t] -> __aivi_nel_lastOf h t
+
+type (A -> B) -> (NonEmptyList A) -> (NonEmptyList B)
+func __aivi_nel_mapNel = transform nel =>
+    lift (__aivi_list_map transform nel.carrier)
+
+type (NonEmptyList A) -> (NonEmptyList A) -> (NonEmptyList A)
+func __aivi_nel_appendNel = left right =>
+    lift (append left.carrier right.carrier)
 
 type (List A) -> (Option A) -> (List A)
 func __aivi_nel_initAppendPrev = items prev => prev
@@ -379,11 +395,19 @@ func __aivi_nel_initExtract = state => state
     ||> (items, prev) -> items
 
 type NonEmptyList A -> (List A)
-func __aivi_nel_init = nel => nel
-    ||> MkNEL h t ->
-        append [h] t
-          |> reduce __aivi_nel_initStep ([], None)
-          |> __aivi_nel_initExtract
+func __aivi_nel_init = nel =>
+    nel.carrier
+    |> reduce __aivi_nel_initStep ([], None)
+    |> __aivi_nel_initExtract
+
+type (Option (NonEmptyList A)) -> A -> (Option (NonEmptyList A))
+func __aivi_nel_fromListStep = acc item => acc
+    ||> None     -> Some (lift [item])
+    ||> Some nel -> Some (lift (append nel.carrier [item]))
+
+type (List A) -> (Option (NonEmptyList A))
+func __aivi_nel_fromList = items => items
+    |> reduce __aivi_nel_fromListStep None
 
 type (A -> B) -> (Option A) -> (Option B)
 func __aivi_option_map = transform opt => opt
@@ -8081,6 +8105,12 @@ fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMeta
         ("aivi.list", "any") => Some(ImportBindingMetadata::AmbientValue {
             name: "__aivi_list_any".into(),
         }),
+        ("aivi.list", "at") => Some(ImportBindingMetadata::AmbientValue {
+            name: "__aivi_listAt".into(),
+        }),
+        ("aivi.list", "replaceAt") => Some(ImportBindingMetadata::AmbientValue {
+            name: "__aivi_listReplace".into(),
+        }),
         ("aivi.stdio", "stdoutWrite") => Some(intrinsic_import_value(
             IntrinsicValue::StdoutWrite,
             arrow_import_type(
@@ -9100,6 +9130,18 @@ fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMeta
         }),
         ("aivi.nonEmpty", "fromHeadTail") => Some(ImportBindingMetadata::AmbientValue {
             name: "__aivi_nel_fromHeadTail".into(),
+        }),
+        ("aivi.nonEmpty", "last") => Some(ImportBindingMetadata::AmbientValue {
+            name: "__aivi_nel_last".into(),
+        }),
+        ("aivi.nonEmpty", "mapNel") => Some(ImportBindingMetadata::AmbientValue {
+            name: "__aivi_nel_mapNel".into(),
+        }),
+        ("aivi.nonEmpty", "appendNel") => Some(ImportBindingMetadata::AmbientValue {
+            name: "__aivi_nel_appendNel".into(),
+        }),
+        ("aivi.nonEmpty", "fromList") => Some(ImportBindingMetadata::AmbientValue {
+            name: "__aivi_nel_fromList".into(),
         }),
         // Option ambient values
         ("aivi.option", "map") => Some(ImportBindingMetadata::AmbientValue {

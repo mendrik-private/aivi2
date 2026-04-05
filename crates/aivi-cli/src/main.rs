@@ -195,7 +195,7 @@ fn resolve_command_entrypoint(
     let cwd = env::current_dir().map_err(|error| {
         format!("failed to determine current directory for `aivi {command_name}`: {error}")
     })?;
-    resolve_v1_entrypoint(&cwd, explicit_path)
+    resolve_v1_entrypoint(&cwd, explicit_path, None)
         .map(|resolved| resolved.entry_path().to_path_buf())
         .map_err(|error| format!("failed to resolve entrypoint for `aivi {command_name}`: {error}"))
 }
@@ -272,10 +272,23 @@ fn run_build(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Strin
     let mut requested_path = None;
     let mut output = None;
     let mut requested_view = None;
+    let mut requested_app = None;
 
     while let Some(argument) = args.next() {
         if argument == "--help" || argument == "-h" {
             return print_help(Some(std::ffi::OsStr::new("build")));
+        }
+        if argument == OsString::from("--app") {
+            let name = args
+                .next()
+                .ok_or_else(|| "expected a name after `--app` for `build`".to_owned())?;
+            if requested_app
+                .replace(name.to_string_lossy().into_owned())
+                .is_some()
+            {
+                return Err("build app name was provided more than once".to_owned());
+            }
+            continue;
         }
         if argument == OsString::from("--path") {
             let path = args
@@ -318,7 +331,11 @@ fn run_build(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Strin
 
     let output =
         output.ok_or_else(|| "expected `-o`/`--output <directory>` for `build`".to_owned())?;
-    let resolved = resolve_run_entrypoint_for_build("build", requested_path.as_deref())?;
+    let resolved = resolve_run_entrypoint_for_build(
+        "build",
+        requested_path.as_deref(),
+        requested_app.as_deref(),
+    )?;
     let view = requested_view
         .as_deref()
         .or(resolved.manifest_view.as_deref())
@@ -336,11 +353,12 @@ fn run_build(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Strin
 fn resolve_run_entrypoint_for_build(
     command_name: &str,
     explicit_path: Option<&Path>,
+    app_name: Option<&str>,
 ) -> Result<ResolvedRunEntrypoint, String> {
     let cwd = env::current_dir().map_err(|error| {
         format!("failed to determine current directory for `aivi {command_name}`: {error}")
     })?;
-    let resolved = resolve_v1_entrypoint(&cwd, explicit_path)
+    let resolved = resolve_v1_entrypoint(&cwd, explicit_path, app_name)
         .map_err(|error| format!("failed to resolve entrypoint for `aivi {command_name}`: {error}"))?;
     Ok(ResolvedRunEntrypoint {
         entry_path: resolved.entry_path().to_path_buf(),
@@ -351,6 +369,7 @@ fn resolve_run_entrypoint_for_build(
 fn run_markup(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
     let mut requested_path = None;
     let mut requested_view = None;
+    let mut requested_app = None;
     let mut timings = false;
 
     while let Some(argument) = args.next() {
@@ -360,6 +379,19 @@ fn run_markup(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Stri
 
         if argument == OsString::from("--timings") {
             timings = true;
+            continue;
+        }
+
+        if argument == OsString::from("--app") {
+            let name = args
+                .next()
+                .ok_or_else(|| "expected a name after `--app` for `run`".to_owned())?;
+            if requested_app
+                .replace(name.to_string_lossy().into_owned())
+                .is_some()
+            {
+                return Err("run app name was provided more than once".to_owned());
+            }
             continue;
         }
 
@@ -402,7 +434,52 @@ fn run_markup(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Stri
     let cwd = env::current_dir().map_err(|error| {
         format!("failed to determine current directory for `aivi run`: {error}")
     })?;
-    let resolved = resolve_run_entrypoint(&cwd, requested_path.as_deref())?;
+
+    // When no explicit path or --app was given and the manifest defines multiple
+    // [[app]] entries, launch every app as a separate subprocess so each gets its
+    // own GTK main loop.
+    if requested_path.is_none() && requested_app.is_none() {
+        let workspace_root = aivi_query::discover_workspace_root_from_directory(&cwd);
+        if let Ok(manifest) = aivi_query::parse_manifest(&workspace_root) {
+            if manifest.apps.len() > 1 {
+                let exe = env::current_exe().map_err(|e| {
+                    format!("failed to locate aivi executable: {e}")
+                })?;
+                let mut children: Vec<std::process::Child> = manifest
+                    .apps
+                    .iter()
+                    .map(|app| {
+                        let mut cmd = std::process::Command::new(&exe);
+                        cmd.arg("run").arg("--app").arg(&app.name);
+                        if let Some(view) = requested_view.as_deref().or(app.view.as_deref()) {
+                            cmd.arg("--view").arg(view);
+                        }
+                        cmd.spawn().map_err(|e| {
+                            format!("failed to spawn `aivi run --app {}`: {e}", app.name)
+                        })
+                    })
+                    .collect::<Result<_, _>>()?;
+                let mut any_failed = false;
+                for child in &mut children {
+                    match child.wait() {
+                        Ok(status) if !status.success() => any_failed = true,
+                        Err(e) => {
+                            eprintln!("error waiting for child process: {e}");
+                            any_failed = true;
+                        }
+                        _ => {}
+                    }
+                }
+                return Ok(if any_failed {
+                    ExitCode::FAILURE
+                } else {
+                    ExitCode::SUCCESS
+                });
+            }
+        }
+    }
+
+    let resolved = resolve_run_entrypoint(&cwd, requested_path.as_deref(), requested_app.as_deref())?;
     let view = requested_view
         .as_deref()
         .or(resolved.manifest_view.as_deref())
@@ -424,8 +501,9 @@ struct ResolvedRunEntrypoint {
 fn resolve_run_entrypoint(
     current_dir: &Path,
     explicit_path: Option<&Path>,
+    app_name: Option<&str>,
 ) -> Result<ResolvedRunEntrypoint, String> {
-    let resolved = resolve_v1_entrypoint(current_dir, explicit_path)
+    let resolved = resolve_v1_entrypoint(current_dir, explicit_path, app_name)
         .map_err(|error| format!("failed to resolve entrypoint for `aivi run`: {error}"))?;
     Ok(ResolvedRunEntrypoint {
         entry_path: resolved.entry_path().to_path_buf(),
@@ -4727,12 +4805,16 @@ DESCRIPTION:
 aivi build — package a runnable GTK app bundle
 
 USAGE:
-    aivi build <path> -o <directory> [--view <name>]
+    aivi build <path> -o <directory> [--app <name>] [--view <name>]
 
 ARGS:
     <path>              Path to an .aivi source file or workspace entry
 
 OPTIONS:
+    --app <name>
+            Select a named app from `[[app]]` in aivi.toml.
+            Required when multiple apps are defined and no --path is given.
+
     -o, --output <directory>    (required)
             Output directory for the packaged bundle. The directory will
             contain everything needed to run the application.
@@ -4750,13 +4832,18 @@ DESCRIPTION:
 aivi run — launch a live GTK app
 
 USAGE:
-    aivi run [<path>] [--path <path>] [--view <name>]
+    aivi run [<path>] [--path <path>] [--app <name>] [--view <name>]
 
 ARGS:
     [<path>]            Path to an .aivi source file or workspace entry.
-                        When omitted, resolves to <workspace>/main.aivi.
+                        When omitted, resolves via aivi.toml [[app]] or
+                        [run] entry, then <workspace>/main.aivi.
 
 OPTIONS:
+    --app <name>
+            Select a named app from `[[app]]` in aivi.toml.
+            Required when multiple apps are defined and no --path is given.
+
     --path <path>
             Explicit path to the entry file. Alternative to the
             positional argument.

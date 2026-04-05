@@ -5961,6 +5961,47 @@ fun gt_durations:Bool = a:Duration b:Duration=>    a > b
     assert!(!compiled.object().is_empty());
 }
 
+#[test]
+fn cranelift_codegen_compiles_domain_carrier_accessor() {
+    let backend = lower_text(
+        "domain-carrier-accessor.aivi",
+        r#"
+domain Duration over Int = {
+    literal ms : Int -> Duration
+    type Duration -> Duration -> Duration
+    (+)
+}
+
+type Duration -> Int
+func unwrap_duration = d => d.carrier
+"#,
+    );
+
+    let compiled =
+        compile_program(&backend).expect("domain carrier accessor should compile");
+    let ptr = clif_pointer_ty();
+
+    let item = find_item(&backend, "unwrap_duration");
+    let body = backend.items()[item]
+        .body
+        .expect("carrier accessor function should carry a body kernel");
+    let artifact = compiled
+        .kernel(body)
+        .expect("compiled program should retain domain carrier kernel metadata");
+    assert!(artifact.code_size > 0, "unwrap_duration should produce non-empty native code");
+    assert!(
+        artifact.clif.contains(&format!("({ptr}) -> {ptr}")),
+        "unwrap_duration CLIF should have (ptr) -> ptr signature, got:\n{}",
+        artifact.clif
+    );
+    assert!(
+        !artifact.clif.contains("call"),
+        "unwrap_duration CLIF should not contain function calls (identity), got:\n{}",
+        artifact.clif
+    );
+    assert!(!compiled.object().is_empty());
+}
+
 
 #[test]
 fn cranelift_codegen_compiles_recurrence_kernels() {

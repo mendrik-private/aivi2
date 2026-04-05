@@ -341,6 +341,8 @@ enum ItemReferencePlan {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DomainMemberCallPlan {
     RepresentationalIdentityUnary,
+    /// `.carrier` where the carrier is a by-value primitive (e.g., `Duration over Int` → `Int`).
+    CarrierExtractPrimitive,
     NativeIntBinary(BinaryOperator),
 }
 
@@ -3716,6 +3718,15 @@ impl<'a> CraneliftCompiler<'a> {
             ));
         };
 
+        // `.carrier` on a domain whose carrier is a by-value primitive (e.g. Duration over Int → Int)
+        if handle.member_name.as_ref() == "carrier"
+            && self.is_named_domain_layout(*parameter_layout)
+            && self.program.layouts()[*parameter_layout].abi == AbiPassMode::ByReference
+            && self.program.layouts()[result_layout].abi == AbiPassMode::ByValue
+        {
+            return Ok(DomainMemberCallPlan::CarrierExtractPrimitive);
+        }
+
         if self.program.layouts()[*parameter_layout].abi != AbiPassMode::ByReference
             || self.program.layouts()[result_layout].abi != AbiPassMode::ByReference
         {
@@ -3731,7 +3742,7 @@ impl<'a> CraneliftCompiler<'a> {
         }
 
         match handle.member_name.as_ref() {
-            "value" | "unwrap" if self.is_named_domain_layout(*parameter_layout) => {
+            "value" | "unwrap" | "carrier" if self.is_named_domain_layout(*parameter_layout) => {
                 Ok(DomainMemberCallPlan::RepresentationalIdentityUnary)
             }
             _ if self.is_named_domain_layout(result_layout) => {
@@ -4229,6 +4240,17 @@ impl<'a> CraneliftCompiler<'a> {
                     }
                 }
                 Ok(base)
+            }
+            DirectApplyPlan::DomainMember(DomainMemberCallPlan::CarrierExtractPrimitive) => {
+                let [argument] = arguments else {
+                    return Err(self.unsupported_expression(
+                        kernel_id,
+                        expr_id,
+                        "carrier extract lowering expected exactly one materialized argument",
+                    ));
+                };
+                // Domain is by-reference (pointer to i64); load the inner value.
+                Ok(builder.ins().load(types::I64, MemFlags::new(), *argument, 0))
             }
             DirectApplyPlan::DomainMember(DomainMemberCallPlan::RepresentationalIdentityUnary)
             | DirectApplyPlan::Intrinsic(IntrinsicCallPlan::BytesFromText) => {

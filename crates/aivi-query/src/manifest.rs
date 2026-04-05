@@ -9,7 +9,20 @@ use serde::Deserialize;
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct AiviManifest {
     #[serde(default)]
+    pub workspace: WorkspaceConfig,
+    #[serde(default)]
     pub run: RunConfig,
+    /// Entries from `[[app]]` arrays, each declaring a named application.
+    #[serde(rename = "app", default)]
+    pub apps: Vec<AppConfig>,
+}
+
+/// Metadata from the `[workspace]` table.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct WorkspaceConfig {
+    pub name: Option<String>,
+    pub version: Option<String>,
+    pub description: Option<String>,
 }
 
 /// Configuration defaults for `aivi run` and `aivi build`.
@@ -21,6 +34,19 @@ pub struct RunConfig {
 
     /// Default view name for `aivi run` / `aivi build`.
     /// Overridden by `--view` on the CLI.
+    pub view: Option<String>,
+}
+
+/// One entry from a `[[app]]` array, declaring a named application target.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct AppConfig {
+    /// Unique app identifier used with `--app <name>`.
+    pub name: String,
+    /// Entry file path relative to the workspace root.
+    pub entry: String,
+    /// Human-readable description shown in disambiguation messages.
+    pub description: Option<String>,
+    /// Default view name for this app, equivalent to `[run] view`.
     pub view: Option<String>,
 }
 

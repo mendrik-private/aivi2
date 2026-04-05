@@ -180,7 +180,7 @@ A domain wraps a carrier type (`NonEmptyList Cell`) with a semantic name (`Snake
 
 Using `NonEmptyList` rather than `List` as the carrier type guarantees the snake always has at least one cell — making `head` total (no need for a fallback value).
 
-The key insight is that outside the domain, you cannot accidentally treat a `Snake` as a raw `NonEmptyList Cell`. The domain boundary prevents mixing up snake-specific logic with general list operations.
+The key insight is that outside the domain, you cannot accidentally treat a `Snake` as a raw `NonEmptyList Cell`. The domain boundary prevents mixing up snake-specific logic with general list operations. When you *do* need the underlying value — for example, to pass it to a generic list function — every domain has a built-in `.carrier` accessor that returns the carrier value at zero cost: `st.snake.carrier` yields the `NonEmptyList Cell`.
 
 ## Game state as a record
 
@@ -361,31 +361,33 @@ Each derived signal projects a piece of state and transforms it. When `state` ch
 The board renders as text. Instead of nested loops, we use `matrixIndices` to generate coordinate sequences and `map` to transform them into glyphs:
 
 ```aivi
-type GameState -> Int -> Int -> Text
-func cellGlyph = st y x => (Cell x y == st.snake.head, st.snake.contains (Cell x y), Cell x y == st.food)
+type List Cell -> GameState -> Int -> Int -> Text
+func cellGlyph = body st y x => (Cell x y == st.snake.head, listContains cellEq (Cell x y) body, Cell x y == st.food)
  ||> (True, _, _)          -> "@"
  ||> (_, True, _)          -> "o"
  ||> (_, _, True)          -> "*"
  ||> (False, False, False) -> "·"
 ```
 
-This matches on a **triple of booleans** — is this cell the head, a body segment, or food? Every combination is covered.
+This matches on a **triple of booleans** — is this cell the head, a body segment, or food? Every combination is covered. The `body` parameter is a pre-computed `List Cell` extracted from the snake via `.carrier` (see below), so the conversion from `NonEmptyList` happens once per frame rather than once per cell.
 
-Each row is rendered by mapping `cellGlyph st y` over the column indices, then the rows are joined with newlines:
+Each row is rendered by mapping `cellGlyph body st y` over the column indices, then the rows are joined with newlines:
 
 ```aivi
-type GameState -> Int -> Text
-func renderRowAt = st y => matrixIndices boardW
-  |> map (cellGlyph st y)
+type List Cell -> GameState -> Int -> Text
+func renderRowAt = body st y => matrixIndices boardW
+  |> map (cellGlyph body st y)
   |> concat
 
 type GameState -> Text
 func renderBoard = st => matrixIndices boardH
-  |> map (renderRowAt st)
+  |> map (renderRowAt (nelToList st.snake.carrier) st)
   |> join "\n"
 ```
 
-`matrixIndices boardW` produces `[0, 1, 2, ..., 29]`. The pipe maps each index through `cellGlyph st y` to produce a list of single-character strings, then `concat` joins them without a separator. The outer pipe does the same for rows, joining with newlines.
+`matrixIndices boardW` produces `[0, 1, 2, ..., 29]`. The pipe maps each index through `cellGlyph body st y` to produce a list of single-character strings, then `concat` joins them without a separator. The outer pipe does the same for rows, joining with newlines.
+
+The expression `st.snake.carrier` uses the built-in `.carrier` accessor to get the `NonEmptyList Cell` from the `Snake` domain, then `nelToList` converts it to a `List Cell`. This list is computed once in `renderBoard` and threaded through `renderRowAt` and `cellGlyph`, avoiding repeated conversions across all 600 cells.
 
 ### Display helper functions
 

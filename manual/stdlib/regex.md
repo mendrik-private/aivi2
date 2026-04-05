@@ -42,12 +42,12 @@ single backslash in the pattern is written as `\\` in source code.
 
 | Name | Type | Description |
 |------|------|-------------|
-| `isMatch` / `matches` / `hasMatch` | `Pattern -> Text -> Task RegexError Bool` | Check whether the text contains a match |
-| `find` / `firstIndex` | `Pattern -> Text -> Task RegexError (Option Int)` | Find the first match position |
-| `findText` / `firstMatch` | `Pattern -> Text -> Task RegexError (Option Text)` | Return the first matched text |
-| `findAll` / `allMatches` | `Pattern -> Text -> Task RegexError (List Text)` | Return all matched snippets |
-| `replace` / `replaceFirst` | `Pattern -> Text -> Text -> Task RegexError Text` | Replace the first match |
-| `replaceAll` / `replaceEach` | `Pattern -> Text -> Text -> Task RegexError Text` | Replace every match |
+| `isMatch / matches / hasMatch` | `Pattern -> Text -> Task RegexError Bool` | Check whether the text contains a match |
+| `find / firstIndex` | `Pattern -> Text -> Task RegexError (Option Int)` | Find the first match position |
+| `findText / firstMatch` | `Pattern -> Text -> Task RegexError (Option Text)` | Return the first matched text |
+| `findAll / allMatches` | `Pattern -> Text -> Task RegexError (List Text)` | Return all matched snippets |
+| `replace / replaceFirst` | `Pattern -> Text -> Text -> Task RegexError Text` | Replace the first match |
+| `replaceAll / replaceEach` | `Pattern -> Text -> Text -> Task RegexError Text` | Replace every match |
 
 ### Built-in patterns and validators
 
@@ -69,7 +69,11 @@ single backslash in the pattern is written as `\\` in source code.
 ### isMatch / matches / hasMatch
 
 ```aivi
-# <unparseable item>
+use aivi.regex (isMatch)
+
+type Text -> Text -> Task Text Bool
+func checkMatch = pattern input =>
+    isMatch pattern input
 ```
 
 Return `True` when the text contains at least one match. Returns `False` when the pattern is valid
@@ -78,7 +82,11 @@ but nothing matches.
 ### find / firstIndex
 
 ```aivi
-# <unparseable item>
+use aivi.regex (find)
+
+type Text -> Text -> Task Text (Option Int)
+func findPosition = pattern input =>
+    find pattern input
 ```
 
 Return the first match position as a character index. Returns `None` when there is no match.
@@ -88,7 +96,11 @@ The index counts characters, not UTF-8 bytes, so it stays useful with non-ASCII 
 ### findText / firstMatch
 
 ```aivi
-# <unparseable item>
+use aivi.regex (findText)
+
+type Text -> Text -> Task Text (Option Text)
+func findSnippet = pattern input =>
+    findText pattern input
 ```
 
 Return the first matched snippet as text. Returns `None` when there is no match.
@@ -96,7 +108,11 @@ Return the first matched snippet as text. Returns `None` when there is no match.
 ### findAll / allMatches
 
 ```aivi
-# <unparseable item>
+use aivi.regex (findAll)
+
+type Text -> Text -> Task Text (List Text)
+func findMatches = pattern input =>
+    findAll pattern input
 ```
 
 Return every full match from left to right. If nothing matches, the result is an empty list.
@@ -106,7 +122,11 @@ This wrapper returns matched text only. It does not currently expose capture gro
 ### replace / replaceFirst
 
 ```aivi
-# <unparseable item>
+use aivi.regex (replace)
+
+type Text -> Text -> Text -> Task Text Text
+func replaceOne = pattern repl input =>
+    replace pattern repl input
 ```
 
 Replace the first match and return the updated text. If nothing matches, the original text is
@@ -117,7 +137,11 @@ The argument order is `pattern -> replacement -> text`.
 ### replaceAll / replaceEach
 
 ```aivi
-# <unparseable item>
+use aivi.regex (replaceAll)
+
+type Text -> Text -> Text -> Task Text Text
+func replaceEvery = pattern repl input =>
+    replaceAll pattern repl input
 ```
 
 Replace every match and return the updated text. If nothing matches, the original text is returned
@@ -126,7 +150,11 @@ unchanged.
 ### Common patterns
 
 ```aivi
-# <unparseable item>
+use aivi.regex (isMatch)
+
+type Text -> Task Text Bool
+func checkEmail = input =>
+    isMatch "[a-zA-Z0-9._%+]+@[a-zA-Z0-9.]+" input
 ```
 
 These ready-made patterns cover a few common cases:
@@ -141,7 +169,10 @@ These ready-made patterns cover a few common cases:
 ### Convenience validators
 
 ```aivi
-# <unparseable item>
+use aivi.regex (isAlphaNum)
+
+func validateInput = input =>
+    isAlphaNum input
 ```
 
 These helpers run `isMatch` with the matching built-in pattern.
@@ -163,7 +194,6 @@ cannot be compiled.
 ```aivi
 use aivi.regex (isEmail)
 
-type Text -> Task RegexError Bool
 func emailLooksValid = email =>
     isEmail email
 ```
@@ -171,12 +201,9 @@ func emailLooksValid = email =>
 ## Example — normalise repeated whitespace
 
 ```aivi
-use aivi.regex (
-    replaceAll
-    whitespacePattern
-)
+use aivi.regex (replaceAll)
 
-type Text -> Task RegexError Text
+type Text -> Task Text Text
 func tidySentence = text =>
-    replaceAll whitespacePattern " " text
+    replaceAll "\\s+" " " text
 ```

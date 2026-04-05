@@ -622,7 +622,7 @@ fn resolve_initial_entry_path(
     current_dir: &Path,
     explicit_path: Option<&Path>,
 ) -> Result<Option<PathBuf>, String> {
-    match resolve_v1_entrypoint(current_dir, explicit_path) {
+    match resolve_v1_entrypoint(current_dir, explicit_path, None) {
         Ok(resolved) => Ok(Some(resolved.entry_path().to_path_buf())),
         Err(aivi_query::EntrypointResolutionError::MissingImplicitEntrypoint { .. })
             if explicit_path.is_none() =>
