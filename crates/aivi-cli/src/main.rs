@@ -24,7 +24,7 @@ use std::os::unix::fs::PermissionsExt;
 
 use aivi_backend::{
     DetachedRuntimeValue, ItemId as BackendItemId, KernelEvaluator, Program as BackendProgram,
-    RuntimeFloat, RuntimeValue, compile_program, lower_module as lower_backend_module,
+    RuntimeFloat, RuntimeValue, compile_program_cached, lower_module as lower_backend_module,
     validate_program,
 };
 use aivi_base::{Diagnostic, FileId, Severity, SourceDatabase, SourceSpan};
@@ -3659,7 +3659,7 @@ fn compile_file(path: &Path, output: Option<&Path>) -> Result<ExitCode, String> 
         return Ok(ExitCode::FAILURE);
     }
 
-    let compiled = match compile_program(&backend) {
+    let compiled = match compile_program_cached(&backend) {
         Ok(compiled) => compiled,
         Err(errors) => {
             print_stage_errors(CompileStage::Codegen, errors.errors());

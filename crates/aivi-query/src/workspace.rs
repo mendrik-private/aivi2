@@ -4,6 +4,8 @@ use std::{
     sync::OnceLock,
 };
 
+include!(concat!(env!("OUT_DIR"), "/stdlib_embedded.rs"));
+
 use crate::{RootDatabase, SourceFile};
 
 /// Deterministic workspace discovery rooted at the closest `aivi.toml` ancestor,
@@ -91,6 +93,20 @@ impl Workspace {
 
         if let Some(file) = db.file_at_path(&path) {
             return Some(file);
+        }
+
+        // For the bundled stdlib, check the embedded map first to avoid disk I/O.
+        if let Some(bundled_root) = &self.bundled_stdlib_root {
+            if root == bundled_root.as_path() {
+                if let Ok(relative) = path.strip_prefix(bundled_root) {
+                    let key = relative.to_str()?.replace('\\', "/");
+                    if let Some(text) =
+                        STDLIB_EMBEDDED.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
+                    {
+                        return Some(SourceFile::new(db, path, text.to_owned()));
+                    }
+                }
+            }
         }
 
         let text = fs::read_to_string(&path).ok()?;

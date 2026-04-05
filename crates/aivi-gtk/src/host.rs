@@ -13,6 +13,7 @@ use gtk::{
     glib::{self, SignalHandlerId},
     prelude::*,
 };
+use libadwaita as adw;
 
 use crate::{
     GtkBoolPropertySetter, GtkChildGroupDescriptor, GtkChildMountRoute, GtkConcreteWidgetKind,
@@ -382,6 +383,10 @@ where
             GtkConcreteWidgetKind::Separator => {
                 gtk::Separator::new(Orientation::Horizontal).upcast::<gtk::Widget>()
             }
+            GtkConcreteWidgetKind::StatusPage => adw::StatusPage::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::Clamp => adw::Clamp::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::Banner => adw::Banner::new("").upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::ToolbarView => adw::ToolbarView::new().upcast::<gtk::Widget>(),
         };
         ensure_aivi_widget_styles();
         Ok((schema, widget))
@@ -480,18 +485,17 @@ where
         widget: &gtk::Widget,
         f: impl FnOnce() -> Result<T, GtkConcreteHostError>,
     ) -> Result<T, GtkConcreteHostError> {
-        let signals = self
+        let relevant: Vec<&MountedEvent> = self
             .events
             .values()
             .filter(|mounted| mounted.widget.as_ptr() == widget.as_ptr())
-            .map(|mounted| &mounted.signal)
-            .collect::<Vec<_>>();
-        for signal in signals.iter().copied() {
-            widget.block_signal(signal);
+            .collect();
+        for mounted in &relevant {
+            mounted.signal_object.block_signal(&mounted.signal);
         }
         let result = f();
-        for signal in signals.iter().rev().copied() {
-            widget.unblock_signal(signal);
+        for mounted in relevant.iter().rev() {
+            mounted.signal_object.unblock_signal(&mounted.signal);
         }
         result
     }
@@ -643,6 +647,116 @@ where
                         expected_type: "gtk::Revealer",
                     })?
                     .set_reveal_child(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::WindowResizable) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Window>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Window",
+                    })?
+                    .set_resizable(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::WindowModal) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Window>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Window",
+                    })?
+                    .set_modal(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::LabelWrap) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Label>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Label",
+                    })?
+                    .set_wrap(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::LabelSelectable) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Label>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Label",
+                    })?
+                    .set_selectable(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::LabelUseMarkup) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Label>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Label",
+                    })?
+                    .set_use_markup(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::EntryVisibility) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Entry>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Entry",
+                    })?
+                    .set_visibility(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::ScrolledWindowPropagateNaturalWidth) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::ScrolledWindow>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::ScrolledWindow",
+                    })?
+                    .set_propagate_natural_width(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::ScrolledWindowPropagateNaturalHeight) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::ScrolledWindow>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::ScrolledWindow",
+                    })?
+                    .set_propagate_natural_height(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::ProgressBarShowText) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::ProgressBar>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::ProgressBar",
+                    })?
+                    .set_show_text(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::BoxHomogeneous) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Box>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Box",
+                    })?
+                    .set_homogeneous(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::BannerRevealed) => {
+                widget
+                    .clone()
+                    .downcast::<adw::Banner>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::Banner",
+                    })?
+                    .set_revealed(value);
             }
             _ => {
                 return Err(self.invalid_property_value(
@@ -875,6 +989,187 @@ where
                     })?
                     .set_spacing(spacing);
             }
+            GtkPropertySetter::Text(GtkTextPropertySetter::Halign) => {
+                let align = parse_align(value).ok_or_else(|| {
+                    self.invalid_property_value(schema, property, "valid Align value")
+                })?;
+                widget.set_halign(align);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::Valign) => {
+                let align = parse_align(value).ok_or_else(|| {
+                    self.invalid_property_value(schema, property, "valid Align value")
+                })?;
+                widget.set_valign(align);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::Tooltip) => {
+                if value.is_empty() {
+                    widget.set_tooltip_text(None);
+                } else {
+                    widget.set_tooltip_text(Some(value));
+                }
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::CssClasses) => {
+                let existing: Vec<String> = widget
+                    .css_classes()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .filter(|s| s.starts_with("aivi-css-"))
+                    .collect();
+                for class in &existing {
+                    widget.remove_css_class(class);
+                }
+                if !value.is_empty() {
+                    for class in value.split(',') {
+                        let class = class.trim();
+                        if !class.is_empty() {
+                            widget.add_css_class(&format!("aivi-css-{class}"));
+                        }
+                    }
+                }
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::LabelWrapMode) => {
+                let mode = parse_wrap_mode(value).ok_or_else(|| {
+                    self.invalid_property_value(schema, property, "valid WrapMode value")
+                })?;
+                widget
+                    .clone()
+                    .downcast::<gtk::Label>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Label",
+                    })?
+                    .set_wrap_mode(mode);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::LabelJustify) => {
+                let justification = parse_justification(value).ok_or_else(|| {
+                    self.invalid_property_value(schema, property, "valid Justification value")
+                })?;
+                widget
+                    .clone()
+                    .downcast::<gtk::Label>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Label",
+                    })?
+                    .set_justify(justification);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::LabelEllipsize) => {
+                let mode = parse_ellipsize(value).ok_or_else(|| {
+                    self.invalid_property_value(schema, property, "valid EllipsizeMode value")
+                })?;
+                widget
+                    .clone()
+                    .downcast::<gtk::Label>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Label",
+                    })?
+                    .set_ellipsize(mode);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::EntryInputPurpose) => {
+                let purpose = parse_input_purpose(value).ok_or_else(|| {
+                    self.invalid_property_value(schema, property, "valid InputPurpose value")
+                })?;
+                widget
+                    .clone()
+                    .downcast::<gtk::Entry>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Entry",
+                    })?
+                    .set_input_purpose(purpose);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::ScrolledWindowHPolicy) => {
+                let policy = parse_policy(value).ok_or_else(|| {
+                    self.invalid_property_value(schema, property, "valid PolicyType value")
+                })?;
+                let sw = widget
+                    .clone()
+                    .downcast::<gtk::ScrolledWindow>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::ScrolledWindow",
+                    })?;
+                sw.set_policy(policy, sw.vscrollbar_policy());
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::ScrolledWindowVPolicy) => {
+                let policy = parse_policy(value).ok_or_else(|| {
+                    self.invalid_property_value(schema, property, "valid PolicyType value")
+                })?;
+                let sw = widget
+                    .clone()
+                    .downcast::<gtk::ScrolledWindow>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::ScrolledWindow",
+                    })?;
+                sw.set_policy(sw.hscrollbar_policy(), policy);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::ImageFile) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Image>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Image",
+                    })?
+                    .set_from_file(if value.is_empty() {
+                        None::<&str>
+                    } else {
+                        Some(value)
+                    });
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::StatusPageTitle) => {
+                widget
+                    .clone()
+                    .downcast::<adw::StatusPage>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::StatusPage",
+                    })?
+                    .set_title(value);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::StatusPageDescription) => {
+                widget
+                    .clone()
+                    .downcast::<adw::StatusPage>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::StatusPage",
+                    })?
+                    .set_description(Some(value));
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::StatusPageIconName) => {
+                let icon = if value.is_empty() { None } else { Some(value) };
+                widget
+                    .clone()
+                    .downcast::<adw::StatusPage>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::StatusPage",
+                    })?
+                    .set_icon_name(icon);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::BannerTitle) => {
+                widget
+                    .clone()
+                    .downcast::<adw::Banner>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::Banner",
+                    })?
+                    .set_title(value);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::BannerButtonLabel) => {
+                widget
+                    .clone()
+                    .downcast::<adw::Banner>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::Banner",
+                    })?
+                    .set_button_label(Some(value));
+            }
             _ => {
                 return Err(self.invalid_property_value(
                     schema,
@@ -976,6 +1271,88 @@ where
                         expected_type: "gtk::Scale",
                     })?
                     .set_digits(digits);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::MarginStart) => {
+                widget.set_margin_start(value as i32);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::MarginEnd) => {
+                widget.set_margin_end(value as i32);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::MarginTop) => {
+                widget.set_margin_top(value as i32);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::MarginBottom) => {
+                widget.set_margin_bottom(value as i32);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::WindowDefaultWidth) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Window>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Window",
+                    })?
+                    .set_default_width(value as i32);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::WindowDefaultHeight) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Window>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Window",
+                    })?
+                    .set_default_height(value as i32);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::LabelMaxWidthChars) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Label>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Label",
+                    })?
+                    .set_max_width_chars(value as i32);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::EntryMaxLength) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Entry>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Entry",
+                    })?
+                    .set_max_length(value as i32);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::ClampMaximumSize) => {
+                widget
+                    .clone()
+                    .downcast::<adw::Clamp>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::Clamp",
+                    })?
+                    .set_maximum_size(value as i32);
+                Ok(())
+            }
+            GtkPropertySetter::I64(GtkI64PropertySetter::ClampTighteningThreshold) => {
+                widget
+                    .clone()
+                    .downcast::<adw::Clamp>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::Clamp",
+                    })?
+                    .set_tightening_threshold(value as i32);
                 Ok(())
             }
             _ => Err(self.invalid_property_value(
@@ -1151,6 +1528,30 @@ where
                     box_widget.append(child);
                 }
             }
+            GtkChildMountRoute::ToolbarViewTop => {
+                for child in previous {
+                    child.unparent();
+                }
+                let toolbar_view = parent_widget
+                    .clone()
+                    .downcast::<adw::ToolbarView>()
+                    .expect("toolbar view widget should downcast");
+                for child in next {
+                    toolbar_view.add_top_bar(child);
+                }
+            }
+            GtkChildMountRoute::ToolbarViewBottom => {
+                for child in previous {
+                    child.unparent();
+                }
+                let toolbar_view = parent_widget
+                    .clone()
+                    .downcast::<adw::ToolbarView>()
+                    .expect("toolbar view widget should downcast");
+                for child in next {
+                    toolbar_view.add_bottom_bar(child);
+                }
+            }
             _ => unreachable!("replace_sequence_children requires a sequence child group"),
         }
     }
@@ -1246,9 +1647,41 @@ where
                     })?
                     .set_child(child);
             }
+            GtkChildMountRoute::StatusPageContent => {
+                parent_widget
+                    .clone()
+                    .downcast::<adw::StatusPage>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "StatusPage".into(),
+                        expected_type: "adw::StatusPage",
+                    })?
+                    .set_child(child);
+            }
+            GtkChildMountRoute::ClampContent => {
+                parent_widget
+                    .clone()
+                    .downcast::<adw::Clamp>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "Clamp".into(),
+                        expected_type: "adw::Clamp",
+                    })?
+                    .set_child(child);
+            }
+            GtkChildMountRoute::ToolbarViewContent => {
+                parent_widget
+                    .clone()
+                    .downcast::<adw::ToolbarView>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "ToolbarView".into(),
+                        expected_type: "adw::ToolbarView",
+                    })?
+                    .set_content(child);
+            }
             GtkChildMountRoute::HeaderBarStart
             | GtkChildMountRoute::HeaderBarEnd
-            | GtkChildMountRoute::BoxChildren => {
+            | GtkChildMountRoute::BoxChildren
+            | GtkChildMountRoute::ToolbarViewTop
+            | GtkChildMountRoute::ToolbarViewBottom => {
                 unreachable!("sequence child groups are handled by explicit sequence APIs")
             }
         }
@@ -1396,6 +1829,7 @@ where
         let queue = self.queued_events.clone();
         let notifier = self.event_notifier.clone();
         let route_id = route.id;
+        let mut signal_object: glib::Object = widget.clone().upcast();
         let event = schema.event(route.binding.name.text()).ok_or_else(|| {
             GtkConcreteHostError::UnsupportedEvent {
                 widget: schema.markup_name.into(),
@@ -1532,11 +1966,122 @@ where
                         notifier();
                     }
                 }),
+            GtkEventSignal::RevealerChildRevealed => widget
+                .clone()
+                .downcast::<gtk::Revealer>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::Revealer",
+                })?
+                .connect_child_revealed_notify(move |r| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_bool(r.is_child_revealed()),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::FocusIn => {
+                let controller = gtk::EventControllerFocus::new();
+                let sid = controller.connect_enter(move |_| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::unit(),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                });
+                signal_object = controller.clone().upcast::<glib::Object>();
+                widget.add_controller(controller);
+                sid
+            }
+            GtkEventSignal::FocusOut => {
+                let controller = gtk::EventControllerFocus::new();
+                let sid = controller.connect_leave(move |_| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::unit(),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                });
+                signal_object = controller.clone().upcast::<glib::Object>();
+                widget.add_controller(controller);
+                sid
+            }
+            GtkEventSignal::Scroll => {
+                let controller = gtk::EventControllerScroll::new(
+                    gtk::EventControllerScrollFlags::VERTICAL,
+                );
+                let sid = controller.connect_scroll(move |_, _, dy| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_f64(dy),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                    glib::Propagation::Proceed
+                });
+                signal_object = controller.clone().upcast::<glib::Object>();
+                widget.add_controller(controller);
+                sid
+            }
+            GtkEventSignal::PointerEnter => {
+                let controller = gtk::EventControllerMotion::new();
+                let sid = controller.connect_enter(move |_, _, _| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::unit(),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                });
+                signal_object = controller.clone().upcast::<glib::Object>();
+                widget.add_controller(controller);
+                sid
+            }
+            GtkEventSignal::PointerLeave => {
+                let controller = gtk::EventControllerMotion::new();
+                let sid = controller.connect_leave(move |_| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::unit(),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                });
+                signal_object = controller.clone().upcast::<glib::Object>();
+                widget.add_controller(controller);
+                sid
+            }
+            GtkEventSignal::BannerButtonClicked => widget
+                .clone()
+                .downcast::<adw::Banner>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "adw::Banner",
+                })?
+                .connect_button_clicked(move |_| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::unit(),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                }),
         };
         self.events.insert(
             handle.0,
             MountedEvent {
                 widget: widget.clone(),
+                signal_object,
                 signal,
             },
         );
@@ -1554,7 +2099,7 @@ where
                 event: event.clone(),
             }
         })?;
-        mounted.widget.disconnect(mounted.signal);
+        mounted.signal_object.disconnect(mounted.signal);
         Ok(())
     }
 
@@ -1750,7 +2295,7 @@ where
             .collect::<Vec<_>>();
         for event_id in stale_events {
             if let Some(event) = self.events.remove(&event_id) {
-                event.widget.disconnect(event.signal);
+                event.signal_object.disconnect(event.signal);
             }
         }
         if mounted.schema.is_window_root() {
@@ -1776,6 +2321,7 @@ struct MountedWidget {
 
 struct MountedEvent {
     widget: gtk::Widget,
+    signal_object: glib::Object,
     signal: SignalHandlerId,
 }
 
@@ -1941,6 +2487,72 @@ fn text_literal(text: &TextLiteral) -> String {
             }
         })
         .collect()
+}
+
+fn parse_align(value: &str) -> Option<gtk::Align> {
+    match value {
+        "Fill" => Some(gtk::Align::Fill),
+        "Start" => Some(gtk::Align::Start),
+        "End" => Some(gtk::Align::End),
+        "Center" => Some(gtk::Align::Center),
+        "Baseline" => Some(gtk::Align::Baseline),
+        _ => None,
+    }
+}
+
+fn parse_wrap_mode(value: &str) -> Option<gtk::pango::WrapMode> {
+    match value {
+        "Word" => Some(gtk::pango::WrapMode::Word),
+        "Char" => Some(gtk::pango::WrapMode::Char),
+        "WordChar" => Some(gtk::pango::WrapMode::WordChar),
+        _ => None,
+    }
+}
+
+fn parse_justification(value: &str) -> Option<gtk::Justification> {
+    match value {
+        "Left" => Some(gtk::Justification::Left),
+        "Center" => Some(gtk::Justification::Center),
+        "Right" => Some(gtk::Justification::Right),
+        "Fill" => Some(gtk::Justification::Fill),
+        _ => None,
+    }
+}
+
+fn parse_ellipsize(value: &str) -> Option<gtk::pango::EllipsizeMode> {
+    match value {
+        "None" => Some(gtk::pango::EllipsizeMode::None),
+        "Start" => Some(gtk::pango::EllipsizeMode::Start),
+        "Middle" => Some(gtk::pango::EllipsizeMode::Middle),
+        "End" => Some(gtk::pango::EllipsizeMode::End),
+        _ => None,
+    }
+}
+
+fn parse_input_purpose(value: &str) -> Option<gtk::InputPurpose> {
+    match value {
+        "FreeForm" => Some(gtk::InputPurpose::FreeForm),
+        "Alpha" => Some(gtk::InputPurpose::Alpha),
+        "Digits" => Some(gtk::InputPurpose::Digits),
+        "Number" => Some(gtk::InputPurpose::Number),
+        "Phone" => Some(gtk::InputPurpose::Phone),
+        "Url" => Some(gtk::InputPurpose::Url),
+        "Email" => Some(gtk::InputPurpose::Email),
+        "Name" => Some(gtk::InputPurpose::Name),
+        "Password" => Some(gtk::InputPurpose::Password),
+        "Pin" => Some(gtk::InputPurpose::Pin),
+        _ => None,
+    }
+}
+
+fn parse_policy(value: &str) -> Option<gtk::PolicyType> {
+    match value {
+        "Always" => Some(gtk::PolicyType::Always),
+        "Automatic" => Some(gtk::PolicyType::Automatic),
+        "Never" => Some(gtk::PolicyType::Never),
+        "External" => Some(gtk::PolicyType::External),
+        _ => None,
+    }
 }
 
 fn parse_orientation(value: &str) -> Option<Orientation> {

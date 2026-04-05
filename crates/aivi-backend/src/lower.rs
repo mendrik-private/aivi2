@@ -3204,6 +3204,7 @@ fn map_builtin_functor_carrier(
         core::BuiltinFunctorCarrier::Result => BackendBuiltinFunctorCarrier::Result,
         core::BuiltinFunctorCarrier::Validation => BackendBuiltinFunctorCarrier::Validation,
         core::BuiltinFunctorCarrier::Signal => BackendBuiltinFunctorCarrier::Signal,
+        core::BuiltinFunctorCarrier::Task => BackendBuiltinFunctorCarrier::Task,
     }
 }
 
@@ -3236,6 +3237,7 @@ fn map_builtin_apply_carrier(carrier: core::BuiltinApplyCarrier) -> BackendBuilt
         core::BuiltinApplyCarrier::Result => BackendBuiltinApplyCarrier::Result,
         core::BuiltinApplyCarrier::Validation => BackendBuiltinApplyCarrier::Validation,
         core::BuiltinApplyCarrier::Signal => BackendBuiltinApplyCarrier::Signal,
+        core::BuiltinApplyCarrier::Task => BackendBuiltinApplyCarrier::Task,
     }
 }
 
@@ -3244,6 +3246,7 @@ fn map_builtin_monad_carrier(carrier: core::BuiltinMonadCarrier) -> BackendBuilt
         core::BuiltinMonadCarrier::List => BackendBuiltinMonadCarrier::List,
         core::BuiltinMonadCarrier::Option => BackendBuiltinMonadCarrier::Option,
         core::BuiltinMonadCarrier::Result => BackendBuiltinMonadCarrier::Result,
+        core::BuiltinMonadCarrier::Task => BackendBuiltinMonadCarrier::Task,
     }
 }
 

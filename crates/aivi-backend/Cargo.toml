@@ -18,7 +18,9 @@ cranelift-object = "0.130.0"
 indexmap = "2"
 num-bigint = "0.4.6"
 num-traits = "0.2"
+rayon = "1"
 rust_decimal = "1.40.0"
+rustc-hash.workspace = true
 
 [dev-dependencies]
 aivi-query.workspace = true

@@ -3,8 +3,11 @@ use std::{
     fmt,
 };
 
+use rayon::prelude::*;
+
 use aivi_hir::IntrinsicValue;
 use cranelift_codegen::{
+    control::ControlPlane,
     ir::{
         AbiParam, BlockArg, InstBuilder, MemFlags, Type, UserFuncName, Value,
         condcodes::{FloatCC, IntCC},
@@ -16,7 +19,9 @@ use cranelift_codegen::{
     verify_function,
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
-use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module, default_libcall_names};
+use cranelift_module::{
+    DataDescription, DataId, FuncId, Linkage, Module, ModuleReloc, default_libcall_names,
+};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 
 use crate::{
@@ -37,6 +42,17 @@ pub struct CompiledProgram {
 }
 
 impl CompiledProgram {
+    /// Construct a `CompiledProgram` from raw object bytes and kernel metadata.
+    /// Used by the artifact cache to reconstruct a cached program.
+    pub fn new(object: Vec<u8>, kernels: Vec<CompiledKernel>) -> Self {
+        let kernel_index = kernels
+            .iter()
+            .enumerate()
+            .map(|(index, k)| (k.kernel, index))
+            .collect();
+        Self { object, kernels, kernel_index }
+    }
+
     pub fn object(&self) -> &[u8] {
         &self.object
     }
@@ -59,6 +75,18 @@ pub struct CompiledKernel {
     pub symbol: Box<str>,
     pub clif: Box<str>,
     pub code_size: usize,
+}
+
+/// Intermediate result holding the built CLIF for one kernel, ready for parallel
+/// Cranelift compilation. Produced by `build_kernel_clif`; consumed by `compile()`.
+struct BuiltKernel {
+    kernel_id: KernelId,
+    func_id: FuncId,
+    /// Built CLIF function context, ready for `ctx.compile(isa, ctrl_plane)`.
+    ctx: cranelift_codegen::Context,
+    /// Human-readable CLIF text snapshot taken before compilation.
+    clif: Box<str>,
+    symbol: Box<str>,
 }
 
 pub type CodegenErrors = aivi_base::ErrorCollection<CodegenError>;
@@ -885,6 +913,15 @@ impl<'a> CraneliftCompiler<'a> {
         }
     }
 
+    /// Three-phase compilation:
+    /// 1. Sequential declaration — declares all kernel function symbols in the module.
+    /// 2. Sequential CLIF build — lowers each kernel IR to Cranelift CLIF IR.
+    /// 3. **Parallel Cranelift compile** — `ctx.compile(isa)` is data-parallel; each
+    ///    kernel produces independent machine code with no module mutations.
+    /// 4. Sequential emit — writes the compiled machine code bytes into the object module.
+    ///
+    /// Phases 1–2 and 4 remain sequential because they mutate shared module state.
+    /// Phase 3 uses Rayon's par_iter and yields a speedup proportional to kernel count.
     fn compile(mut self) -> Result<CompiledProgram, CodegenErrors> {
         let kernel_ids = self
             .program
@@ -893,6 +930,8 @@ impl<'a> CraneliftCompiler<'a> {
             .filter(|(_, kernel)| !self.is_ambient_kernel(kernel))
             .map(|(kernel_id, _)| kernel_id)
             .collect::<Vec<_>>();
+
+        // ── Phase 1: Sequential declaration ──────────────────────────────────────
         let mut declaration_errors = Vec::new();
         for &kernel_id in &kernel_ids {
             let kernel = &self.program.kernels()[kernel_id];
@@ -904,19 +943,94 @@ impl<'a> CraneliftCompiler<'a> {
             return Err(CodegenErrors::new(declaration_errors));
         }
 
-        let mut compiled_kernels = Vec::with_capacity(kernel_ids.len());
-        let mut errors = Vec::new();
-
+        // ── Phase 2: Sequential CLIF build ────────────────────────────────────────
+        let mut built_kernels: Vec<BuiltKernel> = Vec::with_capacity(kernel_ids.len());
+        let mut build_errors: Vec<CodegenError> = Vec::new();
         for &kernel_id in &kernel_ids {
             let kernel = &self.program.kernels()[kernel_id];
-            match self.compile_kernel(kernel_id, kernel) {
-                Ok(compiled) => compiled_kernels.push(compiled),
-                Err(error) => errors.push(error),
+            match self.build_kernel_clif(kernel_id, kernel) {
+                Ok(built) => built_kernels.push(built),
+                Err(error) => build_errors.push(error),
             }
         }
+        if !build_errors.is_empty() {
+            return Err(CodegenErrors::new(build_errors));
+        }
 
-        if !errors.is_empty() {
-            return Err(CodegenErrors::new(errors));
+        // ── Phase 3: Parallel Cranelift compile ───────────────────────────────────
+        // `ctx.compile(isa, ctrl_plane)` transforms CLIF → machine code purely in
+        // memory, with no writes to shared module state. Safe to parallelise.
+        let isa = self.module.isa();
+        let compile_results: Vec<Result<(BuiltKernel, usize), CodegenError>> = built_kernels
+            .into_par_iter()
+            .map(|mut built| {
+                let mut ctrl_plane = ControlPlane::default();
+                built
+                    .ctx
+                    .compile(isa, &mut ctrl_plane)
+                    .map_err(|error| CodegenError::CraneliftModule {
+                        kernel: Some(built.kernel_id),
+                        message: format!("{error:?}").into_boxed_str(),
+                    })?;
+                let code_size = built
+                    .ctx
+                    .compiled_code()
+                    .map(|c| c.code_info().total_size as usize)
+                    .unwrap_or_default();
+                Ok((built, code_size))
+            })
+            .collect();
+
+        let mut compiled_kernels: Vec<CompiledKernel> = Vec::with_capacity(compile_results.len());
+        let mut compile_errors: Vec<CodegenError> = Vec::new();
+        let mut emit_inputs: Vec<(KernelId, FuncId, cranelift_codegen::Context, Box<str>, Box<str>, usize)> =
+            Vec::with_capacity(compile_results.len());
+        for result in compile_results {
+            match result {
+                Ok((built, code_size)) => {
+                    emit_inputs.push((built.kernel_id, built.func_id, built.ctx, built.symbol, built.clif, code_size));
+                }
+                Err(error) => compile_errors.push(error),
+            }
+        }
+        if !compile_errors.is_empty() {
+            return Err(CodegenErrors::new(compile_errors));
+        }
+
+        // ── Phase 4: Sequential emit ──────────────────────────────────────────────
+        // Write machine code + relocations into the shared object module.
+        let alignment = isa.function_alignment().minimum as u64;
+        let mut emit_errors: Vec<CodegenError> = Vec::new();
+        for (kernel_id, func_id, ctx, symbol, clif, code_size) in &emit_inputs {
+            let compiled = ctx
+                .compiled_code()
+                .expect("compilation succeeded in phase 3");
+            let bytes = compiled.code_buffer();
+            let relocs: Vec<ModuleReloc> = compiled
+                .buffer
+                .relocs()
+                .iter()
+                .map(|r| ModuleReloc::from_mach_reloc(r, &ctx.func, *func_id))
+                .collect();
+            if let Err(error) = self
+                .module
+                .define_function_bytes(*func_id, alignment, bytes, &relocs)
+            {
+                emit_errors.push(CodegenError::CraneliftModule {
+                    kernel: Some(*kernel_id),
+                    message: error.to_string().into_boxed_str(),
+                });
+            } else {
+                compiled_kernels.push(CompiledKernel {
+                    kernel: *kernel_id,
+                    symbol: symbol.clone(),
+                    clif: clif.clone(),
+                    code_size: *code_size,
+                });
+            }
+        }
+        if !emit_errors.is_empty() {
+            return Err(CodegenErrors::new(emit_errors));
         }
 
         let object = self.module.finish().emit().map_err(|error| {
@@ -951,11 +1065,14 @@ impl<'a> CraneliftCompiler<'a> {
         Ok(())
     }
 
-    fn compile_kernel(
+    /// Sequential phase 2: lower kernel IR to CLIF IR and verify it.
+    /// Returns a `BuiltKernel` holding the `Context` ready for parallel compilation.
+    /// Does NOT call `define_function` — that happens in phase 4.
+    fn build_kernel_clif(
         &mut self,
         kernel_id: KernelId,
         kernel: &Kernel,
-    ) -> Result<CompiledKernel, CodegenError> {
+    ) -> Result<BuiltKernel, CodegenError> {
         match kernel.convention.kind {
             CallingConventionKind::RuntimeKernelV1 => {}
         }
@@ -965,7 +1082,7 @@ impl<'a> CraneliftCompiler<'a> {
         let func_id = *self
             .declared_functions
             .get(&kernel_id)
-            .expect("declared kernels must be available before compilation");
+            .expect("declared kernels must be available before CLIF build");
 
         let mut ctx = self.module.make_context();
         ctx.func.signature = signature;
@@ -992,23 +1109,16 @@ impl<'a> CraneliftCompiler<'a> {
             });
         }
 
+        // Take the CLIF snapshot BEFORE ctx.compile() — Cranelift optimization passes can
+        // mutate ctx.func in place, changing the output of to_string() after compilation.
         let clif = ctx.func.to_string().into_boxed_str();
-        self.module
-            .define_function(func_id, &mut ctx)
-            .map_err(|error| CodegenError::CraneliftModule {
-                kernel: Some(kernel_id),
-                message: error.to_string().into_boxed_str(),
-            })?;
-        let code_size = ctx
-            .compiled_code()
-            .map(|compiled| compiled.code_info().total_size as usize)
-            .unwrap_or_default();
 
-        Ok(CompiledKernel {
-            kernel: kernel_id,
-            symbol: symbol.into_boxed_str(),
+        Ok(BuiltKernel {
+            kernel_id,
+            func_id,
+            ctx,
             clif,
-            code_size,
+            symbol: symbol.into_boxed_str(),
         })
     }
 
