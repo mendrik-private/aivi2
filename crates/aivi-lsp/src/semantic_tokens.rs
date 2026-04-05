@@ -40,6 +40,7 @@ fn token_type_index(kind: TokenKind) -> Option<u32> {
         | TokenKind::ProviderKw
         | TokenKind::UseKw
         | TokenKind::ExportKw
+        | TokenKind::HoistKw
         | TokenKind::PatchKw => Some(IDX_KEYWORD),
 
         // Identifiers: deferred to soft_or_hard_token_type_index.

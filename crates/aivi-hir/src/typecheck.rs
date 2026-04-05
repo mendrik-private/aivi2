@@ -329,7 +329,8 @@ impl<'a> TypeChecker<'a> {
                 | Item::Class(_)
                 | Item::SourceProviderContract(_)
                 | Item::Use(_)
-                | Item::Export(_) => {}
+                | Item::Export(_)
+            | Item::Hoist(_) => {}
             }
         }
         self.solve_pending_eq_constraints();

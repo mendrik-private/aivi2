@@ -103,6 +103,7 @@ impl Formatter {
             }
             Item::Use(item) => lines.extend(self.format_use_item(item)),
             Item::Export(item) => lines.extend(self.format_export_item(item)),
+            Item::Hoist(item) => lines.extend(self.format_hoist_item(item)),
             Item::Error(_) => {
                 lines.push("# <unparseable item>".to_owned());
             }
@@ -1421,6 +1422,38 @@ impl Formatter {
                     .join(", ")
             )],
         }
+    }
+
+    fn format_hoist_item(&self, item: &crate::cst::HoistItem) -> Vec<String> {
+        let path = item
+            .path
+            .as_ref()
+            .map(|p| p.as_dotted())
+            .unwrap_or_else(|| "_".to_owned());
+
+        let mut line = format!("hoist {path}");
+
+        if !item.kind_filters.is_empty() {
+            let filters = item
+                .kind_filters
+                .iter()
+                .map(|f| f.text.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            line.push_str(&format!(" ({filters})"));
+        }
+
+        if !item.hiding.is_empty() {
+            let hidden = item
+                .hiding
+                .iter()
+                .map(|id| id.text.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            line.push_str(&format!(" hiding ({hidden})"));
+        }
+
+        vec![line]
     }
 
     fn format_domain_item(&self, item: &DomainItem) -> Vec<String> {

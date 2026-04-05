@@ -186,7 +186,8 @@ pub fn elaborate_truthy_falsy(module: &Module) -> TruthyFalsyElaborationReport {
             | Item::Domain(_)
             | Item::SourceProviderContract(_)
             | Item::Use(_)
-            | Item::Export(_) => {}
+            | Item::Export(_)
+            | Item::Hoist(_) => {}
         }
     }
 

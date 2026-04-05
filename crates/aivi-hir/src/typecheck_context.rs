@@ -2340,7 +2340,8 @@ impl<'a> GateTypeContext<'a> {
             | Item::SourceProviderContract(_)
             | Item::Instance(_)
             | Item::Use(_)
-            | Item::Export(_) => None,
+            | Item::Export(_)
+            | Item::Hoist(_) => None,
         };
         self.item_types.insert(item_id, ty.clone());
         ty
@@ -2389,7 +2390,8 @@ impl<'a> GateTypeContext<'a> {
             | Item::SourceProviderContract(_)
             | Item::Instance(_)
             | Item::Use(_)
-            | Item::Export(_) => None,
+            | Item::Export(_)
+            | Item::Hoist(_) => None,
         };
         self.item_actuals.insert(item_id, actual.clone());
         actual
@@ -3185,6 +3187,7 @@ impl<'a> GateTypeContext<'a> {
             | ResolutionState::Resolved(TermResolution::ClassMember(_))
             | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_))
             | ResolutionState::Resolved(TermResolution::IntrinsicValue(_))
+            | ResolutionState::Resolved(TermResolution::AmbiguousHoistedImports(_))
             | ResolutionState::Resolved(TermResolution::Builtin(_)) => None,
         }
     }
@@ -3257,6 +3260,7 @@ impl<'a> GateTypeContext<'a> {
             | ResolutionState::Resolved(TermResolution::DomainMember(_))
             | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_))
             | ResolutionState::Resolved(TermResolution::IntrinsicValue(_))
+            | ResolutionState::Resolved(TermResolution::AmbiguousHoistedImports(_))
             | ResolutionState::Resolved(TermResolution::Builtin(_)) => None,
         }
     }
@@ -4103,7 +4107,8 @@ impl<'a> GateTypeContext<'a> {
             | Item::SourceProviderContract(_)
             | Item::Instance(_)
             | Item::Use(_)
-            | Item::Export(_) => None,
+            | Item::Export(_)
+            | Item::Hoist(_) => None,
         };
         let popped = item_stack.pop();
         debug_assert_eq!(popped, Some(item_id));
@@ -5132,7 +5137,8 @@ impl<'a> GateTypeContext<'a> {
                 ..GateExprInfo::default()
             },
             ResolutionState::Resolved(TermResolution::ClassMember(_))
-            | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_)) => {
+            | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_))
+            | ResolutionState::Resolved(TermResolution::AmbiguousHoistedImports(_)) => {
                 GateExprInfo::default()
             }
             ResolutionState::Resolved(TermResolution::IntrinsicValue(value)) => GateExprInfo {
@@ -7126,6 +7132,7 @@ pub(crate) fn case_constructor_key(reference: &TermReference) -> Option<CaseCons
         | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_))
         | ResolutionState::Resolved(TermResolution::ClassMember(_))
         | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_))
+        | ResolutionState::Resolved(TermResolution::AmbiguousHoistedImports(_))
         | ResolutionState::Resolved(TermResolution::IntrinsicValue(_)) => None,
     }
 }
@@ -8027,7 +8034,8 @@ impl SourceOptionNamedType {
             | Item::SourceProviderContract(_)
             | Item::Instance(_)
             | Item::Use(_)
-            | Item::Export(_) => return None,
+            | Item::Export(_)
+            | Item::Hoist(_) => return None,
         };
         Some(Self {
             item,

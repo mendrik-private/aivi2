@@ -537,7 +537,8 @@ fn collect_signal_deps_internal(
                     | Item::SourceProviderContract(_)
                     | Item::Instance(_)
                     | Item::Use(_)
-                    | Item::Export(_) => {}
+                    | Item::Export(_)
+            | Item::Hoist(_) => {}
                 }
             }
         }

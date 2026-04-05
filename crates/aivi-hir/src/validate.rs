@@ -1333,6 +1333,9 @@ impl Validator<'_> {
                         },
                     );
                 }
+                Item::Hoist(item) => {
+                    self.check_name_path(&item.module);
+                }
             }
         }
     }
@@ -2011,7 +2014,8 @@ impl Validator<'_> {
                         }
                     }
                 }
-                Item::Use(_) | Item::Export(_) => {}
+                Item::Use(_) | Item::Export(_)
+            | Item::Hoist(_) => {}
             }
         }
     }
@@ -3110,7 +3114,8 @@ impl Validator<'_> {
             | ResolutionState::Resolved(TermResolution::DomainMember(_))
             | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_))
             | ResolutionState::Resolved(TermResolution::ClassMember(_))
-            | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_)) => None,
+            | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_))
+            | ResolutionState::Resolved(TermResolution::AmbiguousHoistedImports(_)) => None,
         }
     }
 
@@ -3724,7 +3729,8 @@ impl Validator<'_> {
             ResolutionState::Resolved(TermResolution::DomainMember(_))
             | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_))
             | ResolutionState::Resolved(TermResolution::ClassMember(_))
-            | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_)) => None,
+            | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_))
+            | ResolutionState::Resolved(TermResolution::AmbiguousHoistedImports(_)) => None,
             ResolutionState::Resolved(TermResolution::Builtin(builtin)) => self
                 .infer_source_option_builtin_actual_type(
                     *builtin,
@@ -4471,7 +4477,8 @@ impl Validator<'_> {
             | Item::SourceProviderContract(_)
             | Item::Instance(_)
             | Item::Use(_)
-            | Item::Export(_) => None,
+            | Item::Export(_)
+            | Item::Hoist(_) => None,
         }
     }
 
@@ -4999,7 +5006,8 @@ impl Validator<'_> {
                 | Item::Domain(_)
                 | Item::SourceProviderContract(_)
                 | Item::Use(_)
-                | Item::Export(_) => {}
+                | Item::Export(_)
+            | Item::Hoist(_) => {}
             }
         }
 
@@ -8095,6 +8103,11 @@ impl Validator<'_> {
                         );
                     }
                 }
+                TermResolution::AmbiguousHoistedImports(candidates) => {
+                    for import_id in candidates.iter().copied() {
+                        this.require_import(reference.span(), "term reference", "import", import_id);
+                    }
+                }
                 TermResolution::Builtin(_) => {}
                 TermResolution::IntrinsicValue(_) => {}
             },
@@ -8913,7 +8926,8 @@ fn item_name(item: Option<&Item>) -> Option<String> {
         Item::SourceProviderContract(item) => {
             Some(item.provider.key().unwrap_or("<provider>").to_owned())
         }
-        Item::Instance(_) | Item::Use(_) | Item::Export(_) => None,
+        Item::Instance(_) | Item::Use(_) | Item::Export(_)
+            | Item::Hoist(_) => None,
     }
 }
 

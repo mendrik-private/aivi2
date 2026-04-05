@@ -905,6 +905,34 @@ pub struct ExportItem {
     pub targets: Vec<Identifier>,
 }
 
+/// Kind filter in a `hoist` declaration (e.g. `func`, `value`, `type`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HoistKindFilter {
+    pub span: SourceSpan,
+    pub text: String,
+}
+
+/// `hoist` declaration — makes another module's exports globally available project-wide.
+///
+/// Syntax:
+/// ```aivi
+/// hoist aivi.list
+/// hoist aivi.list (func, value)
+/// hoist aivi.list hiding (length, head)
+/// hoist aivi.list (func, value) hiding (length, head)
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HoistItem {
+    pub base: ItemBase,
+    pub keyword_span: SourceSpan,
+    /// Module path, e.g. `aivi.list`.
+    pub path: Option<QualifiedName>,
+    /// Optional kind filters — if empty, all kinds are hoisted.
+    pub kind_filters: Vec<HoistKindFilter>,
+    /// Names explicitly excluded from the hoist.
+    pub hiding: Vec<Identifier>,
+}
+
 /// `domain` declaration.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DomainItem {
@@ -978,6 +1006,7 @@ pub enum Item {
     SourceProviderContract(SourceProviderContractItem),
     Use(UseItem),
     Export(ExportItem),
+    Hoist(HoistItem),
     Error(ErrorItem),
 }
 
@@ -994,6 +1023,7 @@ pub enum ItemKind {
     SourceProviderContract,
     Use,
     Export,
+    Hoist,
     Error,
 }
 
@@ -1010,6 +1040,7 @@ impl Item {
             Item::SourceProviderContract(_) => ItemKind::SourceProviderContract,
             Item::Use(_) => ItemKind::Use,
             Item::Export(_) => ItemKind::Export,
+            Item::Hoist(_) => ItemKind::Hoist,
             Item::Error(_) => ItemKind::Error,
         }
     }
@@ -1026,6 +1057,7 @@ impl Item {
             Item::SourceProviderContract(item) => &item.base,
             Item::Use(item) => &item.base,
             Item::Export(item) => &item.base,
+            Item::Hoist(item) => &item.base,
             Item::Error(item) => &item.base,
         }
     }

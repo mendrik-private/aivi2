@@ -151,7 +151,8 @@ pub fn elaborate_temporal_stages(module: &Module) -> TemporalElaborationReport {
             | Item::Domain(_)
             | Item::SourceProviderContract(_)
             | Item::Use(_)
-            | Item::Export(_) => {}
+            | Item::Export(_)
+            | Item::Hoist(_) => {}
         }
     }
 

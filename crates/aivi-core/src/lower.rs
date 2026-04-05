@@ -924,6 +924,7 @@ impl<'a> ModuleLowerer<'a> {
             Some(HirItem::Instance(_)) => "instance",
             Some(HirItem::Use(_)) => "use",
             Some(HirItem::Export(_)) => "export",
+            Some(HirItem::Hoist(_)) => "hoist",
             None => "<missing>",
         };
         match stage {
@@ -1116,7 +1117,8 @@ impl<'a> ModuleLowerer<'a> {
                 | HirItem::Domain(_)
                 | HirItem::SourceProviderContract(_)
                 | HirItem::Use(_)
-                | HirItem::Export(_) => continue,
+                | HirItem::Export(_)
+                | HirItem::Hoist(_) => continue,
             };
             let item_id = self
                 .module
@@ -2402,6 +2404,9 @@ impl<'a> ModuleLowerer<'a> {
             | aivi_hir::ResolutionState::Resolved(aivi_hir::TermResolution::ClassMember(_))
             | aivi_hir::ResolutionState::Resolved(
                 aivi_hir::TermResolution::AmbiguousClassMembers(_),
+            )
+            | aivi_hir::ResolutionState::Resolved(
+                aivi_hir::TermResolution::AmbiguousHoistedImports(_),
             )
             | aivi_hir::ResolutionState::Unresolved => unreachable!(
                 "typed-core general-expression lowering should only see resolved constructor references"
@@ -4564,7 +4569,8 @@ impl<'a> RuntimeFragmentLowerer<'a> {
             | HirItem::Domain(_)
             | HirItem::SourceProviderContract(_)
             | HirItem::Use(_)
-            | HirItem::Export(_) => return None,
+            | HirItem::Export(_)
+            | HirItem::Hoist(_) => return None,
         };
         let item_id = match self.lowerer.module.items_mut().alloc(Item {
             origin: owner,
@@ -4701,7 +4707,8 @@ impl<'a> RuntimeFragmentItemCollector<'a> {
             | HirItem::Class(_)
             | HirItem::SourceProviderContract(_)
             | HirItem::Use(_)
-            | HirItem::Export(_) => {}
+            | HirItem::Export(_)
+            | HirItem::Hoist(_) => {}
             HirItem::Domain(domain) => {
                 for (member_index, member) in domain.members.iter().enumerate() {
                     if member.body.is_none() {

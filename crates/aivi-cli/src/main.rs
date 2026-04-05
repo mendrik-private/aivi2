@@ -2887,6 +2887,7 @@ fn hir_item_kind_label(item: &Item) -> &'static str {
         Item::Instance(_) => "instance",
         Item::Use(_) => "use",
         Item::Export(_) => "export",
+        Item::Hoist(_) => "hoist",
     }
 }
 

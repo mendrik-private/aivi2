@@ -249,7 +249,7 @@ impl NavigationAnalysis {
                     },
                     &mut best,
                 ),
-                Item::SourceProviderContract(_) => {}
+                Item::SourceProviderContract(_) | Item::Hoist(_) => {}
             }
         }
 
@@ -490,6 +490,16 @@ impl NavigationAnalysis {
             ResolutionState::Resolved(TermResolution::Builtin(builtin)) => {
                 self.builtin_term_import_targets(db, name, *builtin)
             }
+            ResolutionState::Resolved(TermResolution::AmbiguousHoistedImports(candidates)) => {
+                let mut targets = Vec::new();
+                for import_id in candidates.iter().copied() {
+                    push_targets(
+                        &mut targets,
+                        self.import_definition_targets_for_import_id(db, import_id),
+                    );
+                }
+                targets
+            }
         }
     }
 
@@ -577,7 +587,8 @@ impl NavigationAnalysis {
             | ResolutionState::Resolved(TermResolution::IntrinsicValue(_))
             | ResolutionState::Resolved(TermResolution::DomainMember(_))
             | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_))
-            | ResolutionState::Resolved(TermResolution::Builtin(_)) => Vec::new(),
+            | ResolutionState::Resolved(TermResolution::Builtin(_))
+            | ResolutionState::Resolved(TermResolution::AmbiguousHoistedImports(_)) => Vec::new(),
         }
     }
 
@@ -680,6 +691,7 @@ impl NavigationAnalysis {
             Item::Instance(_)
             | Item::Use(_)
             | Item::Export(_)
+            | Item::Hoist(_)
             | Item::SourceProviderContract(_) => None,
         }
     }
@@ -824,7 +836,8 @@ impl NavigationAnalysis {
                 | Item::SourceProviderContract(_)
                 | Item::Instance(_)
                 | Item::Use(_)
-                | Item::Export(_) => {}
+                | Item::Export(_)
+                | Item::Hoist(_) => {}
             }
         }
         targets
@@ -860,6 +873,7 @@ impl NavigationAnalysis {
                 | Item::Instance(_)
                 | Item::Use(_)
                 | Item::Export(_)
+                | Item::Hoist(_)
                 | Item::Type(_)
                 | Item::Class(_)
                 | Item::Domain(_) => {}
@@ -1047,7 +1061,8 @@ impl NavigationAnalysis {
                 | Item::SourceProviderContract(_)
                 | Item::Instance(_)
                 | Item::Use(_)
-                | Item::Export(_) => {}
+                | Item::Export(_)
+                | Item::Hoist(_) => {}
             }
         }
         targets
@@ -1090,7 +1105,8 @@ impl NavigationAnalysis {
                 | Item::SourceProviderContract(_)
                 | Item::Instance(_)
                 | Item::Use(_)
-                | Item::Export(_),
+                | Item::Export(_)
+                | Item::Hoist(_),
             )
             | None => Vec::new(),
         }

@@ -289,7 +289,8 @@ fn resolve_decode_mode_name(
                 | Item::SourceProviderContract(_)
                 | Item::Instance(_)
                 | Item::Use(_)
-                | Item::Export(_) => None,
+                | Item::Export(_)
+            | Item::Hoist(_) => None,
             }
         }
         ResolutionState::Resolved(TermResolution::Local(_))
@@ -300,6 +301,7 @@ fn resolve_decode_mode_name(
         | ResolutionState::Resolved(TermResolution::Import(_))
         | ResolutionState::Resolved(TermResolution::Builtin(_))
         | ResolutionState::Resolved(TermResolution::IntrinsicValue(_))
+        | ResolutionState::Resolved(TermResolution::AmbiguousHoistedImports(_))
         | ResolutionState::Unresolved => None,
     }
 }
@@ -865,7 +867,8 @@ impl<'a> DecodeTypeLowerer<'a> {
             | Item::SourceProviderContract(_)
             | Item::Instance(_)
             | Item::Use(_)
-            | Item::Export(_) => Ok(self.external_reference(item_type_name(&item))),
+            | Item::Export(_)
+            | Item::Hoist(_) => Ok(self.external_reference(item_type_name(&item))),
         }
     }
 

@@ -822,7 +822,8 @@ impl<'a> GeneralExprElaborator<'a> {
                 | Item::Class(_)
                 | Item::SourceProviderContract(_)
                 | Item::Use(_)
-                | Item::Export(_) => {}
+                | Item::Export(_)
+            | Item::Hoist(_) => {}
             }
         }
         GeneralExprElaborationReport::new(items, domain_members, instance_members)
@@ -3322,6 +3323,9 @@ impl<'a> GeneralExprElaborator<'a> {
                         .collect(),
                 }])
             }
+            ResolutionState::Resolved(TermResolution::AmbiguousHoistedImports(_)) => {
+                Err(vec![GeneralExprBlocker::UnknownExprType { span }])
+            }
             ResolutionState::Unresolved => Err(vec![GeneralExprBlocker::UnknownExprType { span }]),
         }
     }
@@ -3598,6 +3602,7 @@ impl<'a> GeneralExprElaborator<'a> {
             | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_))
             | ResolutionState::Resolved(TermResolution::ClassMember(_))
             | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_))
+            | ResolutionState::Resolved(TermResolution::AmbiguousHoistedImports(_))
             | ResolutionState::Unresolved => None,
         }
     }

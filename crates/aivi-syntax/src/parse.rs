@@ -226,6 +226,7 @@ impl<'a> Parser<'a> {
             ),
             TokenKind::UseKw => Item::Use(self.parse_use_item(base, keyword_index, end)),
             TokenKind::ExportKw => Item::Export(self.parse_export_item(base, keyword_index, end)),
+            TokenKind::HoistKw => Item::Hoist(self.parse_hoist_item(base, keyword_index, end)),
             _ => unreachable!("finish_item only accepts top-level declaration keywords"),
         }
     }
@@ -2001,6 +2002,97 @@ impl<'a> Parser<'a> {
             .with_primary_label(span, label)
     }
 
+    fn parse_hoist_item(
+        &mut self,
+        base: ItemBase,
+        keyword_index: usize,
+        end: usize,
+    ) -> crate::cst::HoistItem {
+        let mut cursor = keyword_index + 1;
+        let path = self.parse_qualified_name(&mut cursor, end);
+        if path.is_none() {
+            self.diagnostics.push(
+                Diagnostic::error("`hoist` declaration is missing its module path")
+                    .with_code(MISSING_USE_PATH)
+                    .with_primary_label(
+                        self.source_span_of_token(keyword_index),
+                        "expected a dotted module path such as `aivi.list`",
+                    ),
+            );
+        }
+
+        // Optional kind filter list: `(func, value, signal, type, domain, class)`
+        let kind_filters = if self
+            .peek_nontrivia(cursor, end)
+            .map(|i| self.tokens[i].kind() == TokenKind::LParen)
+            .unwrap_or(false)
+        {
+            let lparen_idx = self.peek_nontrivia(cursor, end).unwrap();
+            cursor = lparen_idx + 1;
+            let mut filters = Vec::new();
+            loop {
+                if self.consume_kind(&mut cursor, end, TokenKind::RParen).is_some() {
+                    break;
+                }
+                match self.parse_identifier(&mut cursor, end) {
+                    Some(ident) => {
+                        filters.push(crate::cst::HoistKindFilter {
+                            span: ident.span,
+                            text: ident.text,
+                        });
+                    }
+                    None => break,
+                }
+                let _ = self.consume_kind(&mut cursor, end, TokenKind::Comma);
+            }
+            filters
+        } else {
+            Vec::new()
+        };
+
+        // Optional `hiding (name1, name2, ...)` clause
+        let hiding = if self
+            .peek_nontrivia(cursor, end)
+            .map(|i| self.tokens[i].kind() == TokenKind::Identifier && self.is_identifier_text(i, "hiding"))
+            .unwrap_or(false)
+        {
+            let hiding_idx = self.peek_nontrivia(cursor, end).unwrap();
+            cursor = hiding_idx + 1;
+            if self
+                .peek_nontrivia(cursor, end)
+                .map(|i| self.tokens[i].kind() == TokenKind::LParen)
+                .unwrap_or(false)
+            {
+                let lparen_idx = self.peek_nontrivia(cursor, end).unwrap();
+                cursor = lparen_idx + 1;
+                let mut names = Vec::new();
+                loop {
+                    if self.consume_kind(&mut cursor, end, TokenKind::RParen).is_some() {
+                        break;
+                    }
+                    match self.parse_identifier(&mut cursor, end) {
+                        Some(ident) => names.push(ident),
+                        None => break,
+                    }
+                    let _ = self.consume_kind(&mut cursor, end, TokenKind::Comma);
+                }
+                names
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
+        crate::cst::HoistItem {
+            base,
+            keyword_span: self.source_span_of_token(keyword_index),
+            path,
+            kind_filters,
+            hiding,
+        }
+    }
+
     fn parse_error_item(&mut self, start: usize) -> Item {
         let end = self
             .find_next_item_start(start + 1)
@@ -2011,7 +2103,7 @@ impl<'a> Parser<'a> {
                 .with_code(UNEXPECTED_TOP_LEVEL_TOKEN)
                 .with_primary_label(
                     self.source_span_of_token(start),
-                    "expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here",
+                    "expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, `hoist`, or `@decorator` here",
                 ),
         );
         Item::Error(ErrorItem {
@@ -8295,6 +8387,60 @@ fun scoreLineFor:Text = "Score: {.}"
         );
         assert!(pipe.stages[1].subject_memo.is_none());
         assert!(pipe.stages[1].result_memo.is_none());
+    }
+
+    #[test]
+    fn parser_builds_hoist_item_with_no_filters() {
+        let (_, parsed) = load("hoist aivi.list\n");
+        assert!(!parsed.has_errors(), "hoist should parse cleanly: {:?}", parsed.all_diagnostics().collect::<Vec<_>>());
+        assert_eq!(parsed.module.items.len(), 1);
+        let Item::Hoist(hoist) = &parsed.module.items[0] else {
+            panic!("expected hoist item");
+        };
+        assert_eq!(
+            hoist.path.as_ref().map(|p| p.as_dotted()).as_deref(),
+            Some("aivi.list")
+        );
+        assert!(hoist.kind_filters.is_empty());
+        assert!(hoist.hiding.is_empty());
+    }
+
+    #[test]
+    fn parser_builds_hoist_item_with_kind_filters() {
+        let (_, parsed) = load("hoist aivi.list (func, value)\n");
+        assert!(!parsed.has_errors(), "hoist with filters should parse cleanly: {:?}", parsed.all_diagnostics().collect::<Vec<_>>());
+        let Item::Hoist(hoist) = &parsed.module.items[0] else {
+            panic!("expected hoist item");
+        };
+        assert_eq!(hoist.kind_filters.len(), 2);
+        assert_eq!(hoist.kind_filters[0].text, "func");
+        assert_eq!(hoist.kind_filters[1].text, "value");
+    }
+
+    #[test]
+    fn parser_builds_hoist_item_with_hiding_clause() {
+        let (_, parsed) = load("hoist aivi.list hiding (length, head)\n");
+        assert!(!parsed.has_errors(), "hoist with hiding should parse cleanly: {:?}", parsed.all_diagnostics().collect::<Vec<_>>());
+        let Item::Hoist(hoist) = &parsed.module.items[0] else {
+            panic!("expected hoist item");
+        };
+        assert!(hoist.kind_filters.is_empty());
+        assert_eq!(hoist.hiding.len(), 2);
+        assert_eq!(hoist.hiding[0].text, "length");
+        assert_eq!(hoist.hiding[1].text, "head");
+    }
+
+    #[test]
+    fn parser_builds_hoist_item_with_filters_and_hiding() {
+        let (_, parsed) = load("hoist aivi.list (func, value) hiding (map, filter)\n");
+        assert!(!parsed.has_errors(), "hoist with filters and hiding should parse cleanly: {:?}", parsed.all_diagnostics().collect::<Vec<_>>());
+        let Item::Hoist(hoist) = &parsed.module.items[0] else {
+            panic!("expected hoist item");
+        };
+        assert_eq!(hoist.kind_filters.len(), 2);
+        assert_eq!(hoist.hiding.len(), 2);
+        assert_eq!(hoist.hiding[0].text, "map");
+        assert_eq!(hoist.hiding[1].text, "filter");
     }
 
     #[test]

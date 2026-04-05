@@ -343,7 +343,7 @@ fn explicit_item_exported_name(
                 callable_type: None,
                 deprecation,
             }),
-        Item::SourceProviderContract(_) | Item::Instance(_) | Item::Use(_) | Item::Export(_) => {
+        Item::SourceProviderContract(_) | Item::Instance(_) | Item::Use(_) | Item::Export(_) | Item::Hoist(_) => {
             None
         }
     }
@@ -429,7 +429,7 @@ fn item_to_exported_name(module: &Module, item: &Item) -> Option<ExportedName> {
             callable_type: None,
             deprecation,
         }),
-        Item::SourceProviderContract(_) | Item::Instance(_) | Item::Use(_) | Item::Export(_) => {
+        Item::SourceProviderContract(_) | Item::Instance(_) | Item::Use(_) | Item::Export(_) | Item::Hoist(_) => {
             None
         }
     }

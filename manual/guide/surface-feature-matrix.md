@@ -40,6 +40,7 @@ It answers "what checks, executes, runs, or compiles today?" rather than "what t
 | Built-in `@source ...` on a body-less signal | yes | yes | yes | yes | Broadly lowered and runtime-backed. Source providers cover the full catalog; see the source rows below and `/guide/source-catalog`. |
 | Custom `provider qualified.name` declarations | yes | n/a | yes | yes | Contract checking, lowering, and runtime registration are complete. Custom providers publish an initial Unit value at startup and participate in the standard source lifecycle. `aivi execute` does not use custom providers (Task-only entrypoint). |
 | `use` / `export` for types and constructors | yes | yes | yes | yes | Workspace type imports are covered by passing `run` and `compile` tests. |
+| `hoist module.path` (project-wide namespace) | partial | yes | yes | n/a | Syntax, HIR lowering, and name resolution infrastructure complete. Type-directed disambiguation of ambiguous hoisted names (Phase 5) is not yet implemented; ambiguous names from multiple hoisted modules produce an error suggesting `hiding`. Stdlib migration and end-to-end test fixtures pending. |
 | Imported executable values across modules | yes | yes | yes | yes | Cross-module imports resolve via the import binding system. Imported class instances, plain values, and type constructors all pass through the core lowering pipeline. |
 | Top-level markup roots via `value` | yes | n/a | yes | n/a | `run` and `build` treat markup-valued top-level `value`s as the deployment surface. |
 
