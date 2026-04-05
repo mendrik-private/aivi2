@@ -223,14 +223,52 @@ fn explicit_item_exported_name(
             };
             variants
                 .iter()
-                .any(|variant| variant.name.text() == exported_name)
-                .then(|| ExportedName {
-                    name: exported_name.to_owned(),
-                    kind: ExportedNameKind::Value,
-                    metadata: builtin_term_metadata(exported_name)
-                        .unwrap_or(ImportBindingMetadata::OpaqueValue),
-                    callable_type: None,
-                    deprecation,
+                .find(|variant| variant.name.text() == exported_name)
+                .map(|variant| {
+                    let metadata = builtin_term_metadata(exported_name)
+                        .unwrap_or_else(|| {
+                            // For non-builtin sum constructors, store the owner type name so
+                            // that `import_value_type` can return a non-None GateType for them.
+                            // Zero-arg constructors have no Arrow wrapper; constructors with
+                            // fields wrap the field types in Arrow chains.
+                            let owner_type_name: String = item.name.text().into();
+                            if variant.fields.is_empty() {
+                                ImportBindingMetadata::Value {
+                                    ty: ImportValueType::Named {
+                                        type_name: owner_type_name,
+                                        arguments: Vec::new(),
+                                    },
+                                }
+                            } else {
+                                // Multi-field constructors: build Arrow chain over field types,
+                                // returning the owner Named type.
+                                let result = ImportValueType::Named {
+                                    type_name: owner_type_name,
+                                    arguments: Vec::new(),
+                                };
+                                let ty = variant.fields.iter().rev().fold(result, |acc, field| {
+                                    let param_ty =
+                                        import_value_type(module, field.ty).unwrap_or(
+                                            ImportValueType::Named {
+                                                type_name: "Unknown".into(),
+                                                arguments: Vec::new(),
+                                            },
+                                        );
+                                    ImportValueType::Arrow {
+                                        parameter: Box::new(param_ty),
+                                        result: Box::new(acc),
+                                    }
+                                });
+                                ImportBindingMetadata::Value { ty }
+                            }
+                        });
+                    ExportedName {
+                        name: exported_name.to_owned(),
+                        kind: ExportedNameKind::Value,
+                        metadata,
+                        callable_type: None,
+                        deprecation,
+                    }
                 })
         }
         Item::Class(item) => (item.name.text() == exported_name).then(|| ExportedName {
@@ -269,6 +307,7 @@ fn explicit_item_exported_name(
                 ImportBindingMetadata::Domain {
                     kind: aivi_typing::Kind::constructor(item.parameters.len()),
                     literal_suffixes,
+                    carrier: import_value_type(module, item.carrier),
                 }
             },
             callable_type: None,
@@ -384,6 +423,7 @@ fn item_to_exported_name(module: &Module, item: &Item) -> Option<ExportedName> {
                 ImportBindingMetadata::Domain {
                     kind: aivi_typing::Kind::constructor(item.parameters.len()),
                     literal_suffixes,
+                    carrier: import_value_type(module, item.carrier),
                 }
             },
             callable_type: None,

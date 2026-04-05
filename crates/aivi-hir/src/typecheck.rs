@@ -1645,6 +1645,45 @@ impl<'a> TypeChecker<'a> {
                     }
                     Some(ok && no_new_diagnostics)
                 }
+                GateType::OpaqueImport { import, .. } => {
+                    // Imported record type: look up fields from the import binding metadata
+                    // and validate each record field against its expected type.
+                    let field_types: Option<HashMap<String, GateType>> = {
+                        let binding = &self.module.imports()[*import];
+                        if let ImportBindingMetadata::TypeConstructor {
+                            fields: Some(record_fields),
+                            ..
+                        } = &binding.metadata
+                        {
+                            Some(
+                                record_fields
+                                    .iter()
+                                    .map(|f| {
+                                        (
+                                            f.name.to_string(),
+                                            self.typing.lower_import_value_type(&f.ty),
+                                        )
+                                    })
+                                    .collect(),
+                            )
+                        } else {
+                            None
+                        }
+                    };
+                    let Some(field_types) = field_types else {
+                        return None;
+                    };
+                    let checkpoint = self.diagnostics.len();
+                    let ok = record.fields.iter().all(|field| {
+                        if let Some(expected_ty) = field_types.get(field.label.text()) {
+                            self.check_expr(field.value, env, Some(expected_ty), value_stack)
+                        } else {
+                            false
+                        }
+                    });
+                    let no_new_diagnostics = self.diagnostics.len() == checkpoint;
+                    Some(ok && no_new_diagnostics)
+                }
                 _ => None,
             },
             ExprKind::Tuple(elements) => match expected {
@@ -2620,6 +2659,31 @@ impl<'a> TypeChecker<'a> {
                         env,
                         value_stack,
                     );
+                }
+                // Handle `<|` patching of imported record types (OpaqueImport with TypeConstructor fields).
+                if let GateType::OpaqueImport { import, .. } = current {
+                    let binding = &self.module.imports()[*import];
+                    if let crate::ImportBindingMetadata::TypeConstructor {
+                        fields: Some(record_fields),
+                        ..
+                    } = &binding.metadata
+                    {
+                        if let Some(field) =
+                            record_fields.iter().find(|f| f.name.as_ref() == name.text())
+                        {
+                            let field_ty = self.typing.lower_import_value_type(&field.ty);
+                            return self.check_patch_selector_segments(
+                                segments,
+                                index + 1,
+                                &field_ty,
+                                instruction,
+                                env,
+                                value_stack,
+                            );
+                        }
+                        self.emit_unknown_patch_field(*span, name.text(), *dotted, current);
+                        return false;
+                    }
                 }
                 if *dotted {
                     self.emit_invalid_patch_selector(

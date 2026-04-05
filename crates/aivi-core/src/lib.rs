@@ -38,7 +38,8 @@ pub use ids::{DecodeProgramId, DecodeStepId, ExprId, ItemId, PipeId, SourceId, S
 pub use lower::{
     LoweredRuntimeFragment, LoweringError, LoweringErrors, RuntimeFragmentSpec, lower_module,
     lower_module_with_items, lower_runtime_fragment, lower_runtime_module,
-    lower_runtime_module_with_items, runtime_fragment_included_items,
+    lower_runtime_module_with_items, lower_runtime_module_with_workspace,
+    runtime_fragment_included_items,
 };
 pub use module::{
     DecodeField, DecodeProgram, DecodeStep, DecodeVariant, DomainDecodeSurface,

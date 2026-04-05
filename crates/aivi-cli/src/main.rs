@@ -6,7 +6,7 @@ mod run_session;
 
 use std::{
     cell::{Cell, RefCell},
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap, VecDeque},
     env,
     ffi::OsString,
     fs,
@@ -30,7 +30,8 @@ use aivi_backend::{
 use aivi_base::{Diagnostic, FileId, Severity, SourceDatabase, SourceSpan};
 use aivi_core::{
     IncludedItems, RuntimeFragmentSpec, lower_runtime_fragment,
-    lower_runtime_module_with_items, runtime_fragment_included_items,
+    lower_runtime_module_with_items, lower_runtime_module_with_workspace,
+    runtime_fragment_included_items,
     validate_module as validate_core_module,
 };
 use aivi_gtk::{
@@ -49,7 +50,7 @@ use aivi_hir::{
 };
 use aivi_lambda::{lower_module as lower_lambda_module, validate_module as validate_lambda_module};
 use aivi_query::{
-    RootDatabase, SourceFile as QuerySourceFile, hir_module as query_hir_module,
+    HirModuleResult, RootDatabase, SourceFile as QuerySourceFile, hir_module as query_hir_module,
     parsed_file as query_parsed_file, resolve_v1_entrypoint,
 };
 use aivi_runtime::{
@@ -576,6 +577,125 @@ impl WorkspaceHirSnapshot {
     }
 }
 
+/// Compute a module name from a file path relative to the workspace root.
+/// Returns e.g. "libs.types" for "<root>/libs/types.aivi".
+fn module_name_from_path(workspace_root: &Path, file_path: &Path) -> Option<String> {
+    let relative = file_path.strip_prefix(workspace_root).ok()?;
+    if relative.extension()?.to_str()? != "aivi" {
+        return None;
+    }
+    let mut segments = relative
+        .iter()
+        .map(|seg| seg.to_str().map(str::to_owned))
+        .collect::<Option<Vec<_>>>()?;
+    let file_name = segments.pop()?;
+    let stem = Path::new(&file_name).file_stem()?.to_str()?.to_owned();
+    segments.push(stem);
+    Some(segments.join("."))
+}
+
+/// Collect all non-entry workspace HIR modules in topological dependency order
+/// (dependencies before dependents) so that workspace function bodies are
+/// available when later modules reference them.
+fn collect_workspace_hirs_sorted(
+    snapshot: &WorkspaceHirSnapshot,
+) -> Vec<(String, Arc<HirModuleResult>)> {
+    let entry_path_raw = snapshot.frontend.entry.path(&snapshot.frontend.db);
+    // Canonicalize to absolute paths so strip_prefix works correctly when aivi is
+    // invoked with a relative path (e.g. `aivi run apps/ui/main.aivi`).
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let entry_path = std::fs::canonicalize(&entry_path_raw)
+        .or_else(|_| std::fs::canonicalize(cwd.join(&entry_path_raw)))
+        .unwrap_or_else(|_| cwd.join(&entry_path_raw));
+    let workspace_root_raw = discover_workspace_root(&entry_path);
+    let workspace_root = std::fs::canonicalize(&workspace_root_raw)
+        .unwrap_or(workspace_root_raw);
+
+    // Collect (module_name, file, hir) for all non-entry, non-stdlib workspace files.
+    let mut ws_modules: Vec<(String, QuerySourceFile, Arc<HirModuleResult>)> = Vec::new();
+    for &file in &snapshot.files {
+        let path_raw = file.path(&snapshot.frontend.db);
+        let path = std::fs::canonicalize(&path_raw)
+            .or_else(|_| std::fs::canonicalize(cwd.join(&path_raw)))
+            .unwrap_or_else(|_| cwd.join(&path_raw));
+        if path == entry_path {
+            continue;
+        }
+        let Some(module_name) = module_name_from_path(&workspace_root, &path) else {
+            continue;
+        };
+        // Skip bundled stdlib modules (e.g. aivi.list, aivi.option).
+        if module_name.starts_with("aivi.") {
+            continue;
+        }
+        let hir = query_hir_module(&snapshot.frontend.db, file);
+        ws_modules.push((module_name, file, hir));
+    }
+
+    // Build dependency graph: module_name → set of workspace module names it depends on.
+    let ws_names: std::collections::HashSet<&str> =
+        ws_modules.iter().map(|(n, _, _)| n.as_str()).collect();
+    let deps: Vec<(String, Vec<String>)> = ws_modules
+        .iter()
+        .map(|(name, _, hir)| {
+            let module_hir = hir.module();
+            let mut module_deps = Vec::new();
+            for (_, item) in module_hir.items().iter() {
+                let aivi_hir::Item::Use(use_item) = item else {
+                    continue;
+                };
+                let dep_name = use_item.module.to_string();
+                if ws_names.contains(dep_name.as_str()) && dep_name != *name {
+                    module_deps.push(dep_name);
+                }
+            }
+            module_deps.sort();
+            module_deps.dedup();
+            (name.clone(), module_deps)
+        })
+        .collect();
+
+    // Topological sort (Kahn's algorithm):
+    // in_degree[A] = number of A's unprocessed dependencies.
+    let mut in_degree: HashMap<String, usize> =
+        deps.iter().map(|(n, d)| (n.clone(), d.len())).collect();
+    let mut adjacency: HashMap<String, Vec<String>> = HashMap::new();
+    for (name, module_deps) in &deps {
+        for dep in module_deps {
+            adjacency.entry(dep.clone()).or_default().push(name.clone());
+        }
+    }
+    let mut queue: VecDeque<String> = in_degree
+        .iter()
+        .filter(|(_, d)| **d == 0)
+        .map(|(n, _)| n.clone())
+        .collect();
+    let mut sorted_names: Vec<String> = Vec::new();
+    while let Some(name) = queue.pop_front() {
+        sorted_names.push(name.clone());
+        for dependent in adjacency.get(&name).cloned().unwrap_or_default() {
+            let count = in_degree.entry(dependent.clone()).or_insert(0);
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                queue.push_back(dependent);
+            }
+        }
+    }
+
+    // Build final result in topological order.
+    let module_map: HashMap<String, Arc<HirModuleResult>> = ws_modules
+        .into_iter()
+        .map(|(name, _, hir)| (name, hir))
+        .collect();
+    sorted_names
+        .into_iter()
+        .filter_map(|name| {
+            let hir = module_map.get(&name)?.clone();
+            Some((name, hir))
+        })
+        .collect()
+}
+
 fn workspace_syntax_failed(
     snapshot: &WorkspaceHirSnapshot,
     mut print: impl FnMut(&SourceDatabase, &[Diagnostic]) -> bool,
@@ -1008,7 +1128,17 @@ fn run_markup_file_with_launch_config(
 
     let t0 = Instant::now();
     let lowered = snapshot.entry_hir();
-    let artifact = match prepare_run_artifact(&snapshot.sources, lowered.module(), requested_view) {
+    let workspace_hir_arcs = collect_workspace_hirs_sorted(&snapshot);
+    let workspace_hirs: Vec<(&str, &HirModule)> = workspace_hir_arcs
+        .iter()
+        .map(|(name, arc)| (name.as_str(), arc.module()))
+        .collect();
+    let artifact = match prepare_run_artifact(
+        &snapshot.sources,
+        lowered.module(),
+        &workspace_hirs,
+        requested_view,
+    ) {
         Ok(artifact) => artifact,
         Err(message) => {
             eprintln!("{message}");
@@ -1691,6 +1821,7 @@ fn write_output_line(target: &mut impl Write, text: &str) -> Result<(), String> 
 fn prepare_run_artifact(
     sources: &SourceDatabase,
     module: &HirModule,
+    workspace_hirs: &[(&str, &HirModule)],
     requested_view: Option<&str>,
 ) -> Result<RunArtifact, String> {
     let included_items = production_item_ids(module);
@@ -1720,7 +1851,16 @@ fn prepare_run_artifact(
         )
     })?;
     validate_run_plan(sources, &bridge)?;
-    let lowered = lower_runtime_backend_stack_with_items_fast(module, &included_items, "`aivi run`")?;
+    let lowered = if workspace_hirs.is_empty() {
+        lower_runtime_backend_stack_with_items_fast(module, &included_items, "`aivi run`")?
+    } else {
+        lower_runtime_backend_stack_with_workspace(
+            module,
+            workspace_hirs,
+            &included_items,
+            "`aivi run`",
+        )?
+    };
     let runtime_assembly =
         assemble_hir_runtime_with_items(module, &included_items).map_err(|errors| {
             let mut rendered = String::from("failed to assemble runtime plans for `aivi run`:\n");
@@ -2199,6 +2339,74 @@ fn lower_runtime_backend_stack_impl(
         backend: Arc::new(backend),
     })
 }
+
+fn lower_runtime_backend_stack_with_workspace(
+    module: &HirModule,
+    workspace_hirs: &[(&str, &HirModule)],
+    included_items: &IncludedItems,
+    command_name: &str,
+) -> Result<LoweredRunBackendStack, String> {
+    let core = lower_runtime_module_with_workspace(module, workspace_hirs, included_items)
+        .map_err(|errors| {
+            let mut rendered = format!("failed to lower {command_name} module into typed core:\n");
+            for error in errors.errors() {
+                rendered.push_str("- ");
+                rendered.push_str(&error.to_string());
+                rendered.push('\n');
+            }
+            rendered
+        })?;
+    validate_core_module(&core).map_err(|errors| {
+        let mut rendered = format!("typed-core validation failed for {command_name}:\n");
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
+    let lambda = lower_lambda_module(&core).map_err(|errors| {
+        let mut rendered = format!("failed to lower {command_name} module into typed lambda:\n");
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
+    validate_lambda_module(&lambda).map_err(|errors| {
+        let mut rendered = format!("typed-lambda validation failed for {command_name}:\n");
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
+    let backend = lower_backend_module(&lambda).map_err(|errors| {
+        let mut rendered = format!("failed to lower {command_name} module into backend IR:\n");
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
+    validate_program(&backend).map_err(|errors| {
+        let mut rendered = format!("backend validation failed for {command_name}:\n");
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
+    Ok(LoweredRunBackendStack {
+        core,
+        backend: Arc::new(backend),
+    })
+}
+
 
 fn lower_runtime_fragment_backend_stack(
     module: &HirModule,
@@ -3968,7 +4176,7 @@ fn build_markup_bundle(
     }
 
     let lowered = snapshot.entry_hir();
-    let artifact = match prepare_run_artifact(&snapshot.sources, lowered.module(), requested_view) {
+    let artifact = match prepare_run_artifact(&snapshot.sources, lowered.module(), &[], requested_view) {
         Ok(artifact) => artifact,
         Err(message) => {
             eprintln!("{message}");
@@ -4798,7 +5006,7 @@ mod tests {
             "test input should validate cleanly: {:?}",
             validation.diagnostics()
         );
-        prepare_run_artifact(&sources, lowered.module(), requested_view)
+        prepare_run_artifact(&sources, lowered.module(), &[], requested_view)
     }
 
     fn prepare_run_from_workspace(
@@ -4832,7 +5040,7 @@ mod tests {
             "workspace fixture should validate cleanly"
         );
         let lowered = snapshot.entry_hir();
-        prepare_run_artifact(&snapshot.sources, lowered.module(), requested_view)
+        prepare_run_artifact(&snapshot.sources, lowered.module(), &[], requested_view)
     }
 
     fn prepare_run_from_path(
@@ -4865,7 +5073,7 @@ mod tests {
             "workspace fixture should validate cleanly"
         );
         let lowered = snapshot.entry_hir();
-        prepare_run_artifact(&snapshot.sources, lowered.module(), requested_view)
+        prepare_run_artifact(&snapshot.sources, lowered.module(), &[], requested_view)
     }
 
     #[test]

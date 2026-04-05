@@ -528,6 +528,39 @@ pub fn case_pattern_field_types(
         ResolutionState::Resolved(TermResolution::Item(item_id)) => {
             same_module_constructor_fields(module, *item_id, callee, subject)
         }
+        ResolutionState::Resolved(TermResolution::Import(import_id)) => {
+            // Imported sum constructor (e.g. `SwitchView : View -> UIEvent`).
+            // Walk the Arrow chain collecting parameter types; verify the final Named result
+            // type matches the subject's OpaqueImport name.
+            let binding = module.imports().get(*import_id)?;
+            let ty_owned: ImportValueType = match &binding.metadata {
+                ImportBindingMetadata::Value { ty } => ty.clone(),
+                ImportBindingMetadata::IntrinsicValue { ty, .. } => ty.clone(),
+                _ => return None,
+            };
+            let ctx = GateTypeContext::new(module);
+            let mut params: Vec<GateType> = Vec::new();
+            let mut cur: &ImportValueType = &ty_owned;
+            loop {
+                match cur {
+                    ImportValueType::Arrow { parameter, result } => {
+                        let gate = ctx.lower_import_value_type(parameter);
+                        params.push(gate);
+                        cur = result.as_ref();
+                    }
+                    ImportValueType::Named { type_name, .. } => {
+                        let matches = match subject {
+                            GateType::OpaqueImport { name, .. } => {
+                                name.as_str() == type_name.as_str()
+                            }
+                            _ => false,
+                        };
+                        return matches.then_some(params);
+                    }
+                    _ => return None,
+                }
+            }
+        }
         ResolutionState::Resolved(_) | ResolutionState::Unresolved => None,
     }
 }
@@ -1822,14 +1855,43 @@ impl<'a> GateTypeContext<'a> {
                     }
                 }
                 PatternKind::Record(fields) => {
-                    let GateType::Record(subject_fields) = &subject_ty else {
+                    // Collect (name, type) pairs from either a local record or an imported one.
+                    let record_pairs: Option<Vec<(String, GateType)>> = match &subject_ty {
+                        GateType::Record(subject_fields) => Some(
+                            subject_fields
+                                .iter()
+                                .map(|f| (f.name.clone(), f.ty.clone()))
+                                .collect(),
+                        ),
+                        GateType::OpaqueImport { import, .. } => {
+                            match self.module.imports().get(*import).map(|b| &b.metadata) {
+                                Some(ImportBindingMetadata::TypeConstructor {
+                                    fields: Some(import_fields),
+                                    ..
+                                }) => Some(
+                                    import_fields
+                                        .iter()
+                                        .map(|f| {
+                                            (
+                                                f.name.to_string(),
+                                                self.lower_import_value_type(&f.ty),
+                                            )
+                                        })
+                                        .collect(),
+                                ),
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    };
+                    let Some(record_pairs) = record_pairs else {
                         continue;
                     };
                     for field in fields.into_iter().rev() {
-                        let Some(field_ty) = subject_fields
+                        let Some(field_ty) = record_pairs
                             .iter()
-                            .find(|candidate| candidate.name == field.label.text())
-                            .map(|field_ty| field_ty.ty.clone())
+                            .find(|(name, _)| name.as_str() == field.label.text())
+                            .map(|(_, ty)| ty.clone())
                         else {
                             continue;
                         };
@@ -1859,8 +1921,35 @@ impl<'a> GateTypeContext<'a> {
         subject: &GateType,
     ) -> Option<Vec<GateType>> {
         let key = case_constructor_key(callee)?;
+        // For imported constructors, extract field types from the Arrow chain in the import type.
+        if let CaseConstructorKey::ImportedVariant { import, .. } = &key {
+            return Some(self.import_constructor_field_types(*import));
+        }
         let subject = self.case_subject_shape(subject)?;
         subject.constructor(&key)?.field_types.clone()
+    }
+
+    fn import_constructor_field_types(&mut self, import_id: ImportId) -> Vec<GateType> {
+        let ty = {
+            let binding = &self.module.imports()[import_id];
+            match &binding.metadata {
+                crate::ImportBindingMetadata::Value { ty } => ty.clone(),
+                _ => return Vec::new(),
+            }
+        };
+        // Collect all Arrow `parameter` types from the chain; the final `result` is the sum type.
+        let mut fields = Vec::new();
+        let mut current = &ty;
+        loop {
+            match current {
+                ImportValueType::Arrow { parameter, result } => {
+                    fields.push(self.lower_import_value_type(parameter));
+                    current = result;
+                }
+                _ => break,
+            }
+        }
+        fields
     }
 
     pub(crate) fn apply_fanout_plan(&self, plan: FanoutPlan, subject: GateType) -> GateType {
@@ -4827,6 +4916,11 @@ impl<'a> GateTypeContext<'a> {
                     {
                         return self.finalize_expr_info(info);
                     }
+                    if let Some(info) = self
+                        .infer_import_function_apply_expr(reference, &arguments, env, ambient)
+                    {
+                        return self.finalize_expr_info(info);
+                    }
                 }
                 let mut info = self.infer_expr(callee, env, ambient);
                 let mut current = info.ty.clone();
@@ -5800,6 +5894,60 @@ impl<'a> GateTypeContext<'a> {
         Some(info)
     }
 
+    /// Infer the result type of applying an imported function to explicit arguments.
+    ///
+    /// When calling an imported function like `withSelectedThreadId None`, the generic
+    /// `infer_expr` path cannot determine `None`'s type without the Arrow parameter context.
+    /// This function uses the import's Arrow chain to provide expected types for each argument,
+    /// falling back to the Arrow parameter type when argument inference returns `None` (which is
+    /// safe because the HIR type-checker has already validated the call).
+    pub(crate) fn infer_import_function_apply_expr(
+        &mut self,
+        reference: &TermReference,
+        arguments: &crate::NonEmpty<ExprId>,
+        env: &GateExprEnv,
+        _ambient: Option<&GateType>,
+    ) -> Option<GateExprInfo> {
+        let ResolutionState::Resolved(TermResolution::Import(import_id)) =
+            reference.resolution.as_ref()
+        else {
+            return None;
+        };
+        let import_ty = self.import_value_type(*import_id)?;
+        // Only handle Arrow types (function applications)
+        if !matches!(import_ty, GateType::Arrow { .. }) {
+            return None;
+        }
+        let mut info = GateExprInfo::default();
+        let mut current = import_ty;
+        for argument in arguments.iter() {
+            // Extract parameter type from current Arrow for use as context
+            let (param, fallback_result) = match &current {
+                GateType::Arrow { parameter, result } => {
+                    (parameter.as_ref().clone(), result.as_ref().clone())
+                }
+                _ => return Some(info),
+            };
+            // Infer argument using the Arrow parameter as context
+            let arg_info = self.infer_expr(*argument, env, Some(&param));
+            // Use inferred type, falling back to the parameter type when unknown.
+            // This is safe because HIR type-checking has already validated the call.
+            let arg_ty = arg_info
+                .actual_gate_type()
+                .or(arg_info.ty.clone())
+                .unwrap_or_else(|| param.clone());
+            info.merge(arg_info);
+            // Advance the Arrow chain by applying this argument
+            current = self
+                .apply_function(&current, &arg_ty)
+                .unwrap_or(fallback_result);
+        }
+        if info.issues.is_empty() {
+            info.ty = Some(current);
+        }
+        Some(info)
+    }
+
     pub(crate) fn infer_class_member_apply_expr(
         &mut self,
         reference: &TermReference,
@@ -6657,31 +6805,59 @@ impl<'a> GateTypeContext<'a> {
                 item, arguments, ..
             } => self.project_domain_member_step(*item, arguments, subject, segment, path),
             GateType::OpaqueImport { import, .. } => {
-                // Look up the import binding. If it is a TypeConstructor that carried
-                // record field metadata at export time, resolve the field projection
-                // using those fields so that `value.field` works in typed-core markup.
-                let import_fields = match &self.module.imports()[*import].metadata {
+                // Guard against the sentinel value (u32::MAX) used when a named type was not
+                // found in the current module's imports — `get` returns None safely.
+                let Some(import_binding) = self.module.imports().get(*import) else {
+                    return Err(GateIssue::InvalidProjection {
+                        span: path.span(),
+                        path: name_path_text(path),
+                        subject: subject.to_string(),
+                    });
+                };
+                // Dispatch on the import metadata.
+                match &import_binding.metadata {
                     ImportBindingMetadata::TypeConstructor {
                         fields: Some(fields),
                         ..
                     } => {
-                        fields
+                        // Imported record type: resolve the named field.
+                        let import_fields = fields
                             .iter()
                             .map(|f| GateRecordField {
                                 name: f.name.to_string(),
                                 ty: self.lower_import_value_type(&f.ty),
                             })
-                            .collect::<Vec<_>>()
+                            .collect::<Vec<_>>();
+                        self.project_record_field_step(
+                            &import_fields,
+                            false,
+                            subject,
+                            segment,
+                            path,
+                        )
                     }
-                    _ => {
-                        return Err(GateIssue::InvalidProjection {
-                            span: path.span(),
-                            path: name_path_text(path),
-                            subject: subject.to_string(),
-                        });
+                    ImportBindingMetadata::Domain {
+                        carrier: Some(carrier),
+                        ..
+                    } => {
+                        // Imported domain type: `.unwrap` / `.value` return the carrier type.
+                        if segment.text() == "unwrap" || segment.text() == "value" {
+                            let carrier_ty = self.lower_import_value_type(carrier);
+                            Ok(GateProjectionStep::RecordField { result: carrier_ty })
+                        } else {
+                            Err(GateIssue::InvalidProjection {
+                                span: path.span(),
+                                path: name_path_text(path),
+                                subject: subject.to_string(),
+                            })
+                        }
                     }
-                };
-                self.project_record_field_step(&import_fields, false, subject, segment, path)
+                    _ => Err(GateIssue::InvalidProjection {
+                        span: path.span(),
+                        path: name_path_text(path),
+                        subject: subject.to_string(),
+                    }),
+                }
             }
             _ => Err(GateIssue::InvalidProjection {
                 span: path.span(),
@@ -6897,9 +7073,14 @@ pub(crate) fn case_constructor_key(reference: &TermReference) -> Option<CaseCons
                 name: reference.path.segments().iter().last()?.text().to_owned(),
             })
         }
+        ResolutionState::Resolved(TermResolution::Import(import_id)) => {
+            Some(CaseConstructorKey::ImportedVariant {
+                import: *import_id,
+                name: reference.path.segments().iter().last()?.text().to_owned(),
+            })
+        }
         ResolutionState::Unresolved
         | ResolutionState::Resolved(TermResolution::Local(_))
-        | ResolutionState::Resolved(TermResolution::Import(_))
         | ResolutionState::Resolved(TermResolution::DomainMember(_))
         | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_))
         | ResolutionState::Resolved(TermResolution::ClassMember(_))

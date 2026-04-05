@@ -9036,6 +9036,7 @@ pub struct GateRecordField {
 pub(crate) enum CaseConstructorKey {
     Builtin(BuiltinTerm),
     SameModuleVariant { item: ItemId, name: String },
+    ImportedVariant { import: ImportId, name: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -10,6 +10,7 @@ use aivi_hir::{
     GateRuntimeTextLiteral, GateRuntimeTextSegment, GateRuntimeTruthyFalsyBranch, GateStageOutcome,
     GeneralExprInstanceMemberElaboration, GeneralExprOutcome, GeneralExprParameter,
     ImportBindingMetadata, ImportId, ImportValueType, Item as HirItem, ItemId as HirItemId,
+    SumConstructorHandle,
     PatternId as HirPatternId, PipeTransformMode, RecurrenceNodeOutcome,
     ResolvedClassMemberDispatch, SourceDecodeProgram, SourceDecodeProgramOutcome,
     SourceLifecycleNodeOutcome, TemporalStageOutcome, TermResolution, TruthyFalsyStageOutcome,
@@ -375,6 +376,29 @@ pub fn lower_runtime_module_with_items(
     ModuleLowerer::new_runtime_with_items(hir, included_items).build()
 }
 
+/// Like `lower_runtime_module_with_items` but also compiles workspace module HIRs
+/// so that their functions are available as pre-compiled items (with real bodies)
+/// when entry-module imports are resolved.
+///
+/// `workspace_hirs` must be ordered so that each module appears before any module
+/// that depends on it (topological dependency order).
+pub fn lower_runtime_module_with_workspace<'a>(
+    hir: &'a aivi_hir::Module,
+    workspace_hirs: &[(&str, &'a aivi_hir::Module)],
+    included_items: &HashSet<HirItemId>,
+) -> Result<Module, LoweringErrors> {
+    let included_items = included_items
+        .iter()
+        .copied()
+        .filter(|item_id| !is_markup_value(hir, *item_id))
+        .collect::<HashSet<_>>();
+    let mut lowerer = ModuleLowerer::new_internal(hir, Some(included_items));
+    for (name, ws_hir) in workspace_hirs {
+        lowerer.compile_workspace_module(name, ws_hir)?;
+    }
+    lowerer.build()
+}
+
 fn validate_general_expr_report_completeness(
     hir: &aivi_hir::Module,
     report: &aivi_hir::GeneralExprElaborationReport,
@@ -530,6 +554,12 @@ struct ModuleLowerer<'a> {
     // independently derive the same HirItemId for the same import.
     hir_item_count: u32,
     errors: Vec<LoweringError>,
+    // Pre-compiled workspace module items: module_name → (exported_name → core ItemId).
+    // Populated by compile_workspace_module before entry module compilation in aivi run.
+    workspace_name_maps: HashMap<Box<str>, HashMap<Box<str>, ItemId>>,
+    // Maps ImportId → module name string for the currently active HIR.
+    // Rebuilt whenever self.hir changes (entry module or a workspace module).
+    import_to_module: HashMap<ImportId, Box<str>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -689,6 +719,115 @@ impl<'a> ModuleLowerer<'a> {
         Self::new_internal(hir, Some(included_items))
     }
 
+    /// Build a map of ImportId → module-name-string from a HIR's UseItems.
+    /// Used so that seed_import_item can look up pre-compiled workspace items.
+    fn make_import_to_module_map(hir: &aivi_hir::Module) -> HashMap<ImportId, Box<str>> {
+        let mut map = HashMap::new();
+        for (_, item) in hir.items().iter() {
+            let HirItem::Use(use_item) = item else {
+                continue;
+            };
+            let module_name: Box<str> = use_item.module.to_string().into();
+            for import_id in use_item.imports.iter().copied() {
+                map.insert(import_id, module_name.clone());
+            }
+        }
+        map
+    }
+
+    /// Compile a workspace module into the shared typed-core arena, then save its
+    /// name → ItemId map so that entry-module imports can resolve to the real items.
+    ///
+    /// The method saves and restores all HIR-specific state so that entry-module
+    /// compilation is unaffected.  Only `self.module` (the shared item arena) and
+    /// `self.workspace_name_maps` grow permanently.
+    fn compile_workspace_module(
+        &mut self,
+        module_name: &str,
+        ws_hir: &'a aivi_hir::Module,
+    ) -> Result<(), LoweringErrors> {
+        // ── Save all HIR-specific state ──────────────────────────────────────
+        let saved_hir = self.hir;
+        let saved_included_items = self.included_items.take();
+        let saved_item_map = std::mem::take(&mut self.item_map);
+        let saved_import_item_map = std::mem::take(&mut self.import_item_map);
+        let saved_domain_member_item_map = std::mem::take(&mut self.domain_member_item_map);
+        let saved_instance_member_item_map = std::mem::take(&mut self.instance_member_item_map);
+        let saved_pipe_builders = std::mem::take(&mut self.pipe_builders);
+        let saved_source_by_owner = std::mem::take(&mut self.source_by_owner);
+        let saved_decode_by_owner = std::mem::take(&mut self.decode_by_owner);
+        let saved_import_to_module = std::mem::take(&mut self.import_to_module);
+        let saved_debug_items = std::mem::take(&mut self.debug_items);
+        let saved_mock_overrides = std::mem::take(&mut self.mock_overrides);
+        let saved_hir_item_count = self.hir_item_count;
+        let saved_next_synthetic = self.next_synthetic_item_origin_raw;
+        let saved_next_binding = self.next_synthetic_binding_raw;
+
+        // ── Set up for workspace module ──────────────────────────────────────
+        let ws_item_count =
+            u32::try_from(ws_hir.items().iter().count()).expect("HIR item count fits u32");
+        let ws_import_count =
+            u32::try_from(ws_hir.imports().iter().count()).expect("HIR import count fits u32");
+        let ws_binding_count =
+            u32::try_from(ws_hir.bindings().iter().count()).expect("HIR binding count fits u32");
+
+        self.hir = ws_hir;
+        self.included_items = None;
+        self.item_map = HashMap::new();
+        self.import_item_map = HashMap::new();
+        self.domain_member_item_map = HashMap::new();
+        self.instance_member_item_map = HashMap::new();
+        self.pipe_builders = BTreeMap::new();
+        self.source_by_owner = HashMap::new();
+        self.decode_by_owner = HashMap::new();
+        self.debug_items = collect_debug_items(ws_hir, None);
+        self.mock_overrides = collect_mock_overrides(ws_hir, None);
+        self.hir_item_count = ws_item_count;
+        self.next_synthetic_item_origin_raw = ws_item_count + ws_import_count;
+        self.next_synthetic_binding_raw = ws_binding_count;
+        self.import_to_module = Self::make_import_to_module_map(ws_hir);
+
+        // ── Compile workspace module items ───────────────────────────────────
+        self.seed_items()?;
+        self.lower_general_exprs();
+
+        // ── Save name → ItemId map for this workspace module ─────────────────
+        let name_map: HashMap<Box<str>, ItemId> = ws_hir
+            .items()
+            .iter()
+            .filter_map(|(hir_id, item)| {
+                let name: Box<str> = match item {
+                    HirItem::Value(v) => v.name.text().into(),
+                    HirItem::Function(f) => f.name.text().into(),
+                    HirItem::Signal(s) => s.name.text().into(),
+                    _ => return None,
+                };
+                let core_id = self.item_map.get(&hir_id).copied()?;
+                Some((name, core_id))
+            })
+            .collect();
+        self.workspace_name_maps.insert(module_name.into(), name_map);
+
+        // ── Restore entry module state ───────────────────────────────────────
+        self.hir = saved_hir;
+        self.included_items = saved_included_items;
+        self.item_map = saved_item_map;
+        self.import_item_map = saved_import_item_map;
+        self.domain_member_item_map = saved_domain_member_item_map;
+        self.instance_member_item_map = saved_instance_member_item_map;
+        self.pipe_builders = saved_pipe_builders;
+        self.source_by_owner = saved_source_by_owner;
+        self.decode_by_owner = saved_decode_by_owner;
+        self.import_to_module = saved_import_to_module;
+        self.debug_items = saved_debug_items;
+        self.mock_overrides = saved_mock_overrides;
+        self.hir_item_count = saved_hir_item_count;
+        self.next_synthetic_item_origin_raw = saved_next_synthetic;
+        self.next_synthetic_binding_raw = saved_next_binding;
+
+        Ok(())
+    }
+
     fn new_internal(hir: &'a aivi_hir::Module, included_items: Option<HashSet<HirItemId>>) -> Self {
         let debug_items = collect_debug_items(hir, included_items.as_ref());
         let mock_overrides = collect_mock_overrides(hir, included_items.as_ref());
@@ -719,6 +858,8 @@ impl<'a> ModuleLowerer<'a> {
             next_synthetic_binding_raw,
             hir_item_count,
             errors: Vec::new(),
+            workspace_name_maps: HashMap::new(),
+            import_to_module: HashMap::new(),
         }
     }
 
@@ -849,6 +990,9 @@ impl<'a> ModuleLowerer<'a> {
     }
 
     fn build(mut self) -> Result<Module, LoweringErrors> {
+        // Build import-to-module map for the current entry HIR so that seed_import_item
+        // can find pre-compiled workspace items by module name.
+        self.import_to_module = Self::make_import_to_module_map(self.hir);
         self.seed_items()?;
         self.lower_general_exprs();
         // Guard: all items must have complete elaboration before any subsequent lowering
@@ -1979,7 +2123,7 @@ impl<'a> ModuleLowerer<'a> {
     }
 
     fn lower_pattern(
-        &self,
+        &mut self,
         pattern_id: HirPatternId,
         subject: Option<&aivi_hir::GateType>,
     ) -> Pattern {
@@ -2094,7 +2238,7 @@ impl<'a> ModuleLowerer<'a> {
             .map(|field_types| field_types.into_iter().map(|ty| Type::lower(&ty)).collect())
     }
 
-    fn lower_term_reference(&self, reference: &aivi_hir::TermReference) -> Reference {
+    fn lower_term_reference(&mut self, reference: &aivi_hir::TermReference) -> Reference {
         match reference.resolution.as_ref() {
             aivi_hir::ResolutionState::Resolved(aivi_hir::TermResolution::Local(binding)) => {
                 Reference::Local(*binding)
@@ -2129,8 +2273,85 @@ impl<'a> ModuleLowerer<'a> {
             aivi_hir::ResolutionState::Resolved(aivi_hir::TermResolution::IntrinsicValue(
                 value,
             )) => Reference::IntrinsicValue(value.clone()),
-            aivi_hir::ResolutionState::Resolved(aivi_hir::TermResolution::Import(_))
-            | aivi_hir::ResolutionState::Resolved(
+            aivi_hir::ResolutionState::Resolved(aivi_hir::TermResolution::Import(import)) => {
+                // An imported term used in a pattern must be a sum constructor (e.g. `LightTheme`,
+                // `ChooseProviderStep`). Seed a synthetic item for this import — consistent with
+                // the expression-context path — and build a SumConstructorHandle whose `.item` is
+                // the synthetic item's `origin` HirItemId. Because `seed_import_item` caches by
+                // ImportId, the same import always gets the same origin, so pattern matching
+                // (`handle.item == value.item`) is consistent with value construction.
+                let variant_name: Box<str> =
+                    reference.path.segments().last().text().into();
+                if let Ok(item_id) = self.seed_import_item(*import) {
+                    let origin = self.module.items()[item_id].origin;
+                    let binding = self.hir.imports().get(*import).cloned();
+                    if let Some(binding) = binding {
+                        let type_name: Box<str> = match &binding.metadata {
+                            ImportBindingMetadata::Value {
+                                ty: ImportValueType::Named { type_name, .. },
+                            }
+                            | ImportBindingMetadata::IntrinsicValue {
+                                ty: ImportValueType::Named { type_name, .. },
+                                ..
+                            } => type_name.as_str().into(),
+                            // For sum constructors with payload: `SwitchView : View -> UIEvent`.
+                            // Walk the Arrow chain to its final Named result to get the parent
+                            // type name (e.g. "UIEvent"), not the constructor name itself.
+                            ImportBindingMetadata::Value {
+                                ty: ImportValueType::Arrow { .. },
+                            }
+                            | ImportBindingMetadata::IntrinsicValue {
+                                ty: ImportValueType::Arrow { .. },
+                                ..
+                            } => {
+                                fn arrow_result_type_name(ty: &ImportValueType) -> Option<&str> {
+                                    match ty {
+                                        ImportValueType::Named { type_name, .. } => {
+                                            Some(type_name.as_str())
+                                        }
+                                        ImportValueType::Arrow { result, .. } => {
+                                            arrow_result_type_name(result)
+                                        }
+                                        _ => None,
+                                    }
+                                }
+                                let ty = match &binding.metadata {
+                                    ImportBindingMetadata::Value { ty }
+                                    | ImportBindingMetadata::IntrinsicValue { ty, .. } => ty,
+                                    _ => unreachable!(),
+                                };
+                                arrow_result_type_name(ty)
+                                    .map(Box::from)
+                                    .unwrap_or_else(|| variant_name.clone())
+                            }
+                            _ => variant_name.clone(),
+                        };
+                        let field_count = match &binding.metadata {
+                            ImportBindingMetadata::Value { ty }
+                            | ImportBindingMetadata::IntrinsicValue { ty, .. } => {
+                                fn count_arrow_params(ty: &ImportValueType) -> usize {
+                                    match ty {
+                                        ImportValueType::Arrow { result, .. } => {
+                                            1 + count_arrow_params(result)
+                                        }
+                                        _ => 0,
+                                    }
+                                }
+                                count_arrow_params(ty)
+                            }
+                            _ => 0,
+                        };
+                        return Reference::SumConstructor(SumConstructorHandle {
+                            item: origin,
+                            type_name,
+                            variant_name,
+                            field_count,
+                        });
+                    }
+                }
+                Reference::HirItem(HirItemId::from_raw(0))
+            }
+            aivi_hir::ResolutionState::Resolved(
                 aivi_hir::TermResolution::AmbiguousDomainMembers(_),
             )
             | aivi_hir::ResolutionState::Resolved(aivi_hir::TermResolution::ClassMember(_))
@@ -2664,6 +2885,18 @@ impl<'a> ModuleLowerer<'a> {
             .get(import)
             .ok_or(LoweringError::UnknownImport { import })?
             .clone();
+
+        // If this import resolves to a pre-compiled workspace module item, reuse it
+        // directly instead of creating a bodyless stub.
+        if let Some(module_name) = self.import_to_module.get(&import) {
+            if let Some(name_map) = self.workspace_name_maps.get(module_name.as_ref()) {
+                if let Some(&core_item_id) = name_map.get(binding.imported_name.text()) {
+                    self.import_item_map.insert(import, core_item_id);
+                    return Ok(core_item_id);
+                }
+            }
+        }
+
         let (kind, parameters) = self.import_item_shape(import, &binding)?;
         // Use a deterministic synthetic origin for Signal imports so that the runtime assembly
         // builder can independently derive the same HirItemId for the same import without
@@ -2734,6 +2967,110 @@ impl<'a> ModuleLowerer<'a> {
         binding: &aivi_hir::ImportBinding,
         parameters: &[ItemParameter],
     ) -> Result<Option<ExprId>, LoweringError> {
+        // For zero-argument sum constructor imports (e.g. `ChooseProviderStep`, `LightTheme`),
+        // synthesize a `SumConstructor` expression so the value can be constructed at runtime
+        // without calling a separate item body. The `item` in the handle is set to `owner` — the
+        // synthetic item's own `origin` — which is also what `lower_term_reference` uses for the
+        // pattern side, ensuring `handle.item == value.item` at match time.
+        if let (
+            ImportBindingMetadata::Value {
+                ty: ImportValueType::Named { type_name, .. },
+            },
+            true,
+        ) = (&binding.metadata, parameters.is_empty())
+        {
+            let variant_name: Box<str> = binding.local_name.text().into();
+            let handle = SumConstructorHandle {
+                item: owner,
+                type_name: type_name.as_str().into(),
+                variant_name,
+                field_count: 0,
+            };
+            let ty = self.lower_import_type(match &binding.metadata {
+                ImportBindingMetadata::Value { ty } => ty,
+                _ => unreachable!(),
+            });
+            let expr = self.alloc_expr(
+                owner,
+                binding.span,
+                Expr {
+                    span: binding.span,
+                    ty,
+                    kind: ExprKind::Reference(Reference::SumConstructor(handle)),
+                },
+            )?;
+            return Ok(Some(expr));
+        }
+
+        // For N-ary sum constructor imports (e.g. `SwitchView : ViewName -> UIEvent`),
+        // synthesize a body: `Apply { callee: SumConstructor(handle), arguments: [arg0, ...] }`.
+        // This ensures the backend compiles a kernel body so the runtime linker can find it.
+        if let ImportBindingMetadata::Value { ty } = &binding.metadata {
+            if !parameters.is_empty() {
+                // Peel Arrow layers to find the result type
+                let mut result_ty_ref = ty;
+                for _ in parameters {
+                    if let ImportValueType::Arrow { result, .. } = result_ty_ref {
+                        result_ty_ref = result;
+                    } else {
+                        break;
+                    }
+                }
+                // If the final result is a Named type, this is an N-ary sum constructor
+                if let ImportValueType::Named { type_name, .. } = result_ty_ref {
+                    let variant_name: Box<str> = binding.local_name.text().into();
+                    let field_count = parameters.len();
+                    let handle = SumConstructorHandle {
+                        item: owner,
+                        type_name: type_name.as_str().into(),
+                        variant_name,
+                        field_count,
+                    };
+                    // Callee: the SumConstructor itself has the full function type
+                    let callee_ty = self.lower_import_type(ty);
+                    let callee_id = self.alloc_expr(
+                        owner,
+                        binding.span,
+                        Expr {
+                            span: binding.span,
+                            ty: callee_ty,
+                            kind: ExprKind::Reference(Reference::SumConstructor(handle)),
+                        },
+                    )?;
+                    // Arguments: one per parameter
+                    let args: Result<Vec<_>, _> = parameters
+                        .iter()
+                        .map(|param| {
+                            self.alloc_expr(
+                                owner,
+                                binding.span,
+                                Expr {
+                                    span: binding.span,
+                                    ty: param.ty.clone(),
+                                    kind: ExprKind::Reference(Reference::Local(param.binding)),
+                                },
+                            )
+                        })
+                        .collect();
+                    let args = args?;
+                    let result_ty = self.lower_import_type(result_ty_ref);
+                    let apply_id = self.alloc_expr(
+                        owner,
+                        binding.span,
+                        Expr {
+                            span: binding.span,
+                            ty: result_ty,
+                            kind: ExprKind::Apply {
+                                callee: callee_id,
+                                arguments: args,
+                            },
+                        },
+                    )?;
+                    return Ok(Some(apply_id));
+                }
+            }
+        }
+
         let ImportBindingMetadata::IntrinsicValue { value, .. } = &binding.metadata else {
             return Ok(None);
         };
