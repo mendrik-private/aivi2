@@ -68,6 +68,6 @@ pub use runtime::{
     RuntimeConstructor, RuntimeCustomCapabilityCommandPlan, RuntimeDbCommitPlan,
     RuntimeDbConnection, RuntimeDbQueryPlan, RuntimeDbStatement, RuntimeDbTaskPlan, RuntimeMap,
     RuntimeMapEntry, RuntimeNamedValue, RuntimeRecordField, RuntimeSumValue, RuntimeTaskPlan,
-    RuntimeValue,
+    RuntimeValue, TASK_COMPOSITION_EXPR_ID, TASK_COMPOSITION_KERNEL_ID, TaskFunctionApplier,
 };
 pub use validate::{ValidationError, ValidationErrors, validate_program};

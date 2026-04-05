@@ -11,6 +11,7 @@ use aivi_backend::{
     PipelineId as BackendPipelineId, Program as BackendProgram, RuntimeCallable,
     RuntimeDbConnection, RuntimeRecordField, RuntimeSumValue, RuntimeValue,
     SourceId as BackendSourceId, StageKind as BackendStageKind,
+    TaskFunctionApplier,
     TemporalStage as BackendTemporalStage,
 };
 use aivi_core as core;
@@ -26,7 +27,8 @@ use crate::{
     providers::SourceProviderContext,
     scheduler::DependencyValues,
     task_executor::{
-        RuntimeDbCommitInvalidation, execute_runtime_value_with_context_with_stdio_effects,
+        RuntimeDbCommitInvalidation, RuntimeTaskExecutionError,
+        execute_runtime_value_with_context_effects_and_applier,
     },
 };
 
@@ -1141,13 +1143,30 @@ fn execute_task_plan(
             backend_item,
             error,
         })?;
-    let outcome = execute_runtime_value_with_context_with_stdio_effects(value, &execution_context)
-        .map_err(|error| LinkedTaskWorkerError::TaskExecution {
-            instance,
-            owner,
-            backend_item,
-            error,
-        })?;
+    // Use the applier-aware executor so that deferred Task composition plans
+    // (Map, Apply, Chain, Join) can call back into the evaluator to apply closures.
+    let mut applier = EvaluatorApplier {
+        evaluator: &mut evaluator,
+        globals: &runtime_globals,
+    };
+    let stdout = std::io::stdout();
+    let stderr = std::io::stderr();
+    let mut stdout = stdout.lock();
+    let mut stderr = stderr.lock();
+    let outcome = execute_runtime_value_with_context_effects_and_applier(
+        value,
+        &execution_context,
+        &mut stdout,
+        &mut stderr,
+        &mut applier,
+        &runtime_globals,
+    )
+    .map_err(|error| LinkedTaskWorkerError::TaskExecution {
+        instance,
+        owner,
+        backend_item,
+        error,
+    })?;
     if let Some(invalidation) = outcome.commit_invalidation
         && let Some(sink) = db_commit_invalidation_sink
     {
@@ -1164,6 +1183,27 @@ fn execute_task_plan(
                 value,
             })
         }
+    }
+}
+
+/// Bridges [`KernelEvaluator`] to the [`TaskFunctionApplier`] interface so the task executor
+/// can apply user closures while executing deferred `Map`/`Chain`/`Join` task plans.
+struct EvaluatorApplier<'a, 'b> {
+    evaluator: &'a mut KernelEvaluator<'b>,
+    globals: &'a BTreeMap<BackendItemId, RuntimeValue>,
+}
+
+impl TaskFunctionApplier for EvaluatorApplier<'_, '_> {
+    fn apply_task_function(
+        &mut self,
+        function: RuntimeValue,
+        args: Vec<RuntimeValue>,
+        _globals: &BTreeMap<aivi_backend::ItemId, RuntimeValue>,
+    ) -> Result<RuntimeValue, EvaluationError> {
+        // Delegate through KernelEvaluator's TaskFunctionApplier impl, which uses
+        // the sentinel composition context IDs for diagnostic purposes.
+        self.evaluator
+            .apply_task_function(function, args, self.globals)
     }
 }
 

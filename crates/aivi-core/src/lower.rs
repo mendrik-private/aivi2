@@ -2205,9 +2205,12 @@ impl<'a> ModuleLowerer<'a> {
                 TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Signal) => {
                     BuiltinClassMemberIntrinsic::Map(BuiltinFunctorCarrier::Signal)
                 }
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Task) => {
+                    BuiltinClassMemberIntrinsic::Map(BuiltinFunctorCarrier::Task)
+                }
                 _ => {
                     return Err(unsupported(
-                        "runtime lowering only supports map for List, Option, Result, Validation, and Signal",
+                        "runtime lowering only supports map for List, Option, Result, Validation, Signal, and Task",
                     ));
                 }
             },
@@ -2260,16 +2263,19 @@ impl<'a> ModuleLowerer<'a> {
                 TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Signal) => {
                     BuiltinClassMemberIntrinsic::Apply(BuiltinApplyCarrier::Signal)
                 }
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Task) => {
+                    BuiltinClassMemberIntrinsic::Apply(BuiltinApplyCarrier::Task)
+                }
                 _ => {
                     return Err(unsupported(
-                        "runtime lowering only supports apply for List, Option, Result, Validation, and Signal",
+                        "runtime lowering only supports apply for List, Option, Result, Validation, Signal, and Task",
                     ));
                 }
             },
             ("Chain", "chain", TypeBinding::Constructor(binding)) => {
                 let Some(carrier) = self.builtin_monad_carrier(binding.head()) else {
                     return Err(unsupported(
-                        "runtime lowering only supports chain for List, Option, and Result",
+                        "runtime lowering only supports chain for List, Option, Result, and Task",
                     ));
                 };
                 BuiltinClassMemberIntrinsic::Chain(carrier)
@@ -2277,7 +2283,7 @@ impl<'a> ModuleLowerer<'a> {
             ("Monad", "join", TypeBinding::Constructor(binding)) => {
                 let Some(carrier) = self.builtin_monad_carrier(binding.head()) else {
                     return Err(unsupported(
-                        "runtime lowering only supports join for List, Option, and Result",
+                        "runtime lowering only supports join for List, Option, Result, and Task",
                     ));
                 };
                 BuiltinClassMemberIntrinsic::Join(carrier)
@@ -2497,6 +2503,9 @@ impl<'a> ModuleLowerer<'a> {
             }
             TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Result) => {
                 Some(BuiltinMonadCarrier::Result)
+            }
+            TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Task) => {
+                Some(BuiltinMonadCarrier::Task)
             }
             _ => None,
         }

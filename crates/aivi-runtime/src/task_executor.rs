@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fmt, fs,
     io::{Read, Write},
     path::Path,
@@ -7,9 +7,9 @@ use std::{
 };
 
 use aivi_backend::{
-    RuntimeCustomCapabilityCommandPlan, RuntimeDbCommitPlan, RuntimeDbQueryPlan,
+    ItemId, RuntimeCustomCapabilityCommandPlan, RuntimeDbCommitPlan, RuntimeDbQueryPlan,
     RuntimeDbStatement, RuntimeDbTaskPlan, RuntimeFloat, RuntimeMap, RuntimeMapEntry,
-    RuntimeTaskPlan, RuntimeValue,
+    RuntimeTaskPlan, RuntimeValue, TaskFunctionApplier,
 };
 use regex::Regex;
 
@@ -21,7 +21,7 @@ pub struct RuntimeTaskExecutionError {
 }
 
 impl RuntimeTaskExecutionError {
-    fn new(message: impl Into<String>) -> Self {
+    pub(crate) fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into().into_boxed_str(),
         }
@@ -471,6 +471,18 @@ pub fn execute_runtime_task_plan_with_context(
             };
             executor.execute(context, &plan, stdout, stderr)
         }
+        // Invariant: Map/Apply/Chain/Join are deferred composition plans that require a
+        // TaskFunctionApplier (a Cranelift evaluator). They must only be executed via
+        // execute_runtime_task_plan_with_applier, never via this bare executor.
+        RuntimeTaskPlan::Map { .. }
+        | RuntimeTaskPlan::Apply { .. }
+        | RuntimeTaskPlan::Chain { .. }
+        | RuntimeTaskPlan::Join { .. } => {
+            panic!(
+                "BUG: deferred Task composition plan reached bare executor — \
+                 these variants require an applier (execute_runtime_task_plan_with_applier)"
+            )
+        }
     }
 }
 
@@ -495,6 +507,106 @@ pub fn execute_runtime_task_plan_with_context_with_stdio(
     let mut stdout = stdout.lock();
     let mut stderr = stderr.lock();
     execute_runtime_task_plan_with_context(plan, context, &mut stdout, &mut stderr)
+}
+
+/// Execute a [`RuntimeTaskPlan`] with a [`TaskFunctionApplier`] callback that can apply user
+/// closures. Required for deferred composition plans (`Map`, `Apply`, `Chain`, `Join`).
+///
+/// The `globals` map is passed to the applier so it can resolve item references inside closures.
+pub(crate) fn execute_runtime_task_plan_with_applier(
+    plan: RuntimeTaskPlan,
+    context: &SourceProviderContext,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+    applier: &mut dyn TaskFunctionApplier,
+    globals: &BTreeMap<ItemId, RuntimeValue>,
+) -> Result<RuntimeValue, RuntimeTaskExecutionError> {
+    match plan {
+        // Deferred composition variants — require the applier.
+        RuntimeTaskPlan::Map { function, inner } => {
+            let result = execute_runtime_task_plan_with_applier(
+                *inner, context, stdout, stderr, applier, globals,
+            )?;
+            applier
+                .apply_task_function(*function, vec![result], globals)
+                .map_err(|e| RuntimeTaskExecutionError::new(format!("Task.map failed: {e}")))
+        }
+        RuntimeTaskPlan::Apply {
+            function_task,
+            value_task,
+        } => {
+            let function = execute_runtime_task_plan_with_applier(
+                *function_task,
+                context,
+                stdout,
+                stderr,
+                applier,
+                globals,
+            )?;
+            let value = execute_runtime_task_plan_with_applier(
+                *value_task,
+                context,
+                stdout,
+                stderr,
+                applier,
+                globals,
+            )?;
+            applier
+                .apply_task_function(function, vec![value], globals)
+                .map_err(|e| RuntimeTaskExecutionError::new(format!("Task.apply failed: {e}")))
+        }
+        RuntimeTaskPlan::Chain { function, inner } => {
+            let result = execute_runtime_task_plan_with_applier(
+                *inner, context, stdout, stderr, applier, globals,
+            )?;
+            let next_task = applier
+                .apply_task_function(*function, vec![result], globals)
+                .map_err(|e| RuntimeTaskExecutionError::new(format!("Task.chain failed: {e}")))?;
+            match next_task {
+                RuntimeValue::Task(next_plan) => execute_runtime_task_plan_with_applier(
+                    next_plan, context, stdout, stderr, applier, globals,
+                ),
+                _ => Err(RuntimeTaskExecutionError::new(
+                    "Task.chain: the continuation must return a Task value",
+                )),
+            }
+        }
+        RuntimeTaskPlan::Join { outer } => {
+            let inner = execute_runtime_task_plan_with_applier(
+                *outer, context, stdout, stderr, applier, globals,
+            )?;
+            match inner {
+                RuntimeValue::Task(inner_plan) => execute_runtime_task_plan_with_applier(
+                    inner_plan, context, stdout, stderr, applier, globals,
+                ),
+                _ => Err(RuntimeTaskExecutionError::new(
+                    "Task.join: the outer task must produce a Task value",
+                )),
+            }
+        }
+        // All other variants delegate to the non-applier executor.
+        other => execute_runtime_task_plan_with_context(other, context, stdout, stderr),
+    }
+}
+
+/// Execute a [`RuntimeValue`] with an applier callback. If the value is a `Task` with deferred
+/// composition plans, those are resolved using `applier` and `globals`.
+pub(crate) fn execute_runtime_value_with_context_effects_and_applier(
+    value: RuntimeValue,
+    context: &SourceProviderContext,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+    applier: &mut dyn TaskFunctionApplier,
+    globals: &BTreeMap<ItemId, RuntimeValue>,
+) -> Result<RuntimeTaskExecutionOutcome, RuntimeTaskExecutionError> {
+    match value {
+        RuntimeValue::Task(plan) => {
+            execute_runtime_task_plan_with_applier(plan, context, stdout, stderr, applier, globals)
+                .map(RuntimeTaskExecutionOutcome::value)
+        }
+        RuntimeValue::DbTask(plan) => execute_runtime_db_task_plan_with_effects(plan),
+        other => Ok(RuntimeTaskExecutionOutcome::value(other)),
+    }
 }
 
 pub fn execute_runtime_value(

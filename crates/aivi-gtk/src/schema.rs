@@ -53,6 +53,10 @@ pub enum GtkConcreteWidgetKind {
     ProgressBar,
     Revealer,
     Separator,
+    StatusPage,
+    Clamp,
+    Banner,
+    ToolbarView,
 }
 
 impl GtkConcreteWidgetKind {
@@ -78,6 +82,10 @@ impl GtkConcreteWidgetKind {
             Self::ProgressBar => "ProgressBar",
             Self::Revealer => "Revealer",
             Self::Separator => "Separator",
+            Self::StatusPage => "StatusPage",
+            Self::Clamp => "Clamp",
+            Self::Banner => "Banner",
+            Self::ToolbarView => "ToolbarView",
         }
     }
 }
@@ -141,6 +149,17 @@ pub enum GtkBoolPropertySetter {
     ScaleDrawValue,
     SpinnerSpinning,
     RevealerRevealed,
+    WindowResizable,
+    WindowModal,
+    LabelWrap,
+    LabelSelectable,
+    LabelUseMarkup,
+    EntryVisibility,
+    ScrolledWindowPropagateNaturalWidth,
+    ScrolledWindowPropagateNaturalHeight,
+    ProgressBarShowText,
+    BoxHomogeneous,
+    BannerRevealed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -162,6 +181,22 @@ pub enum GtkTextPropertySetter {
     ProgressBarText,
     RevealerTransitionType,
     ScaleOrientation,
+    Halign,
+    Valign,
+    Tooltip,
+    CssClasses,
+    LabelWrapMode,
+    LabelJustify,
+    LabelEllipsize,
+    EntryInputPurpose,
+    ScrolledWindowHPolicy,
+    ScrolledWindowVPolicy,
+    ImageFile,
+    StatusPageTitle,
+    StatusPageDescription,
+    StatusPageIconName,
+    BannerTitle,
+    BannerButtonLabel,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -177,6 +212,16 @@ pub enum GtkI64PropertySetter {
     RevealerTransitionDuration,
     SpinButtonDigits,
     ScaleDigits,
+    MarginStart,
+    MarginEnd,
+    MarginTop,
+    MarginBottom,
+    WindowDefaultWidth,
+    WindowDefaultHeight,
+    LabelMaxWidthChars,
+    EntryMaxLength,
+    ClampMaximumSize,
+    ClampTighteningThreshold,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -212,6 +257,25 @@ impl GtkPropertySetter {
                 | GtkTextPropertySetter::SeparatorOrientation
                 | GtkTextPropertySetter::ScaleOrientation,
             ) => "text naming a valid Orientation value",
+            Self::Text(GtkTextPropertySetter::Halign | GtkTextPropertySetter::Valign) => {
+                "text naming a valid Align value"
+            }
+            Self::Text(GtkTextPropertySetter::LabelWrapMode) => {
+                "text naming a valid WrapMode value"
+            }
+            Self::Text(GtkTextPropertySetter::LabelJustify) => {
+                "text naming a valid Justification value"
+            }
+            Self::Text(GtkTextPropertySetter::LabelEllipsize) => {
+                "text naming a valid EllipsizeMode value"
+            }
+            Self::Text(GtkTextPropertySetter::EntryInputPurpose) => {
+                "text naming a valid InputPurpose value"
+            }
+            Self::Text(
+                GtkTextPropertySetter::ScrolledWindowHPolicy
+                | GtkTextPropertySetter::ScrolledWindowVPolicy,
+            ) => "text naming a valid PolicyType value",
             Self::Text(_) => "Text",
             Self::TextOrI64(_) => "Int or integer text",
             Self::I64(_) => "Int",
@@ -237,6 +301,13 @@ pub enum GtkEventSignal {
     ToggleButtonToggled,
     SpinButtonValueChanged,
     ScaleValueChanged,
+    RevealerChildRevealed,
+    FocusIn,
+    FocusOut,
+    Scroll,
+    PointerEnter,
+    PointerLeave,
+    BannerButtonClicked,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -275,6 +346,11 @@ pub enum GtkChildMountRoute {
     FrameChild,
     ViewportChild,
     RevealerChild,
+    StatusPageContent,
+    ClampContent,
+    ToolbarViewTop,
+    ToolbarViewBottom,
+    ToolbarViewContent,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -613,6 +689,381 @@ const VIEWPORT_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
     max_children: Some(1),
 };
 
+// ── Universal properties ─────────────────────────────────────────────────────
+
+const ALIGN_VALUE_SHAPE: GtkEnumValueShape = GtkEnumValueShape {
+    name: "Align",
+    variants: &["Fill", "Start", "End", "Center", "Baseline"],
+};
+
+const HALIGN_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "halign",
+    value_shape: GtkPropertyValueShape::Enum(ALIGN_VALUE_SHAPE),
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::Halign),
+};
+
+const VALIGN_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "valign",
+    value_shape: GtkPropertyValueShape::Enum(ALIGN_VALUE_SHAPE),
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::Valign),
+};
+
+const MARGIN_START_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "marginStart",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::MarginStart),
+};
+
+const MARGIN_END_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "marginEnd",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::MarginEnd),
+};
+
+const MARGIN_TOP_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "marginTop",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::MarginTop),
+};
+
+const MARGIN_BOTTOM_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "marginBottom",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::MarginBottom),
+};
+
+const TOOLTIP_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "tooltip",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::Tooltip),
+};
+
+const CSS_CLASSES_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "cssClasses",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::CssClasses),
+};
+
+// ── Window-specific properties ───────────────────────────────────────────────
+
+const WINDOW_DEFAULT_WIDTH_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "defaultWidth",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::WindowDefaultWidth),
+};
+
+const WINDOW_DEFAULT_HEIGHT_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "defaultHeight",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::WindowDefaultHeight),
+};
+
+const WINDOW_RESIZABLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "resizable",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::WindowResizable),
+};
+
+const WINDOW_MODAL_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "modal",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::WindowModal),
+};
+
+// ── Label-specific properties ────────────────────────────────────────────────
+
+const WRAP_MODE_VALUE_SHAPE: GtkEnumValueShape = GtkEnumValueShape {
+    name: "WrapMode",
+    variants: &["Word", "Char", "WordChar"],
+};
+
+const JUSTIFICATION_VALUE_SHAPE: GtkEnumValueShape = GtkEnumValueShape {
+    name: "Justification",
+    variants: &["Left", "Center", "Right", "Fill"],
+};
+
+const ELLIPSIZE_MODE_VALUE_SHAPE: GtkEnumValueShape = GtkEnumValueShape {
+    name: "EllipsizeMode",
+    variants: &["None", "Start", "Middle", "End"],
+};
+
+const LABEL_WRAP_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "wrap",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::LabelWrap),
+};
+
+const LABEL_WRAP_MODE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "wrapMode",
+    value_shape: GtkPropertyValueShape::Enum(WRAP_MODE_VALUE_SHAPE),
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::LabelWrapMode),
+};
+
+const LABEL_JUSTIFY_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "justify",
+    value_shape: GtkPropertyValueShape::Enum(JUSTIFICATION_VALUE_SHAPE),
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::LabelJustify),
+};
+
+const LABEL_ELLIPSIZE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "ellipsize",
+    value_shape: GtkPropertyValueShape::Enum(ELLIPSIZE_MODE_VALUE_SHAPE),
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::LabelEllipsize),
+};
+
+const LABEL_MAX_WIDTH_CHARS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "maxWidthChars",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::LabelMaxWidthChars),
+};
+
+const LABEL_SELECTABLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "selectable",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::LabelSelectable),
+};
+
+const LABEL_USE_MARKUP_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "useMarkup",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::LabelUseMarkup),
+};
+
+// ── Entry-specific properties ────────────────────────────────────────────────
+
+const INPUT_PURPOSE_VALUE_SHAPE: GtkEnumValueShape = GtkEnumValueShape {
+    name: "InputPurpose",
+    variants: &[
+        "FreeForm", "Alpha", "Digits", "Number", "Phone", "Url", "Email", "Name", "Password",
+        "Pin",
+    ],
+};
+
+const ENTRY_VISIBILITY_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "visibility",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::EntryVisibility),
+};
+
+const ENTRY_MAX_LENGTH_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "maxLength",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::EntryMaxLength),
+};
+
+const ENTRY_INPUT_PURPOSE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "inputPurpose",
+    value_shape: GtkPropertyValueShape::Enum(INPUT_PURPOSE_VALUE_SHAPE),
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::EntryInputPurpose),
+};
+
+// ── ScrolledWindow-specific properties ───────────────────────────────────────
+
+const POLICY_TYPE_VALUE_SHAPE: GtkEnumValueShape = GtkEnumValueShape {
+    name: "PolicyType",
+    variants: &["Always", "Automatic", "Never", "External"],
+};
+
+const SCROLLED_WINDOW_H_POLICY_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "hscrollbarPolicy",
+    value_shape: GtkPropertyValueShape::Enum(POLICY_TYPE_VALUE_SHAPE),
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::ScrolledWindowHPolicy),
+};
+
+const SCROLLED_WINDOW_V_POLICY_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "vscrollbarPolicy",
+    value_shape: GtkPropertyValueShape::Enum(POLICY_TYPE_VALUE_SHAPE),
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::ScrolledWindowVPolicy),
+};
+
+const SCROLLED_WINDOW_PROPAGATE_NATURAL_WIDTH_PROPERTY: GtkPropertyDescriptor =
+    GtkPropertyDescriptor {
+        name: "propagateNaturalWidth",
+        value_shape: GtkPropertyValueShape::Bool,
+        setter: GtkPropertySetter::Bool(
+            GtkBoolPropertySetter::ScrolledWindowPropagateNaturalWidth,
+        ),
+    };
+
+const SCROLLED_WINDOW_PROPAGATE_NATURAL_HEIGHT_PROPERTY: GtkPropertyDescriptor =
+    GtkPropertyDescriptor {
+        name: "propagateNaturalHeight",
+        value_shape: GtkPropertyValueShape::Bool,
+        setter: GtkPropertySetter::Bool(
+            GtkBoolPropertySetter::ScrolledWindowPropagateNaturalHeight,
+        ),
+    };
+
+// ── ProgressBar-specific properties ──────────────────────────────────────────
+
+const PROGRESS_BAR_SHOW_TEXT_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "showText",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::ProgressBarShowText),
+};
+
+// ── Image-specific properties ─────────────────────────────────────────────────
+
+const IMAGE_FILE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "file",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::ImageFile),
+};
+
+// ── Box-specific properties ───────────────────────────────────────────────────
+
+const BOX_HOMOGENEOUS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "homogeneous",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::BoxHomogeneous),
+};
+
+// ── Revealer event ────────────────────────────────────────────────────────────
+
+const REVEALER_CHILD_REVEALED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onChildRevealed",
+    payload: GtkConcreteEventPayload::Bool,
+    signal: GtkEventSignal::RevealerChildRevealed,
+};
+
+// ── Focus events ──────────────────────────────────────────────────────────────
+
+const FOCUS_IN_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onFocusIn",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::FocusIn,
+};
+
+const FOCUS_OUT_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onFocusOut",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::FocusOut,
+};
+
+// ── Scroll event ──────────────────────────────────────────────────────────────
+
+const SCROLL_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onScroll",
+    payload: GtkConcreteEventPayload::F64,
+    signal: GtkEventSignal::Scroll,
+};
+
+// ── Pointer events ────────────────────────────────────────────────────────────
+
+const POINTER_ENTER_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onPointerEnter",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::PointerEnter,
+};
+
+const POINTER_LEAVE_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onPointerLeave",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::PointerLeave,
+};
+
+// ── Adwaita: StatusPage ───────────────────────────────────────────────────────
+
+const STATUS_PAGE_TITLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "title",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::StatusPageTitle),
+};
+
+const STATUS_PAGE_DESCRIPTION_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "description",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::StatusPageDescription),
+};
+
+const STATUS_PAGE_ICON_NAME_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "iconName",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::StatusPageIconName),
+};
+
+const STATUS_PAGE_CONTENT_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "content",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::StatusPageContent,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+// ── Adwaita: Clamp ────────────────────────────────────────────────────────────
+
+const CLAMP_MAXIMUM_SIZE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "maximumSize",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::ClampMaximumSize),
+};
+
+const CLAMP_TIGHTENING_THRESHOLD_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "tighteningThreshold",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::ClampTighteningThreshold),
+};
+
+const CLAMP_CONTENT_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "content",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::ClampContent,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+// ── Adwaita: Banner ───────────────────────────────────────────────────────────
+
+const BANNER_TITLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "title",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::BannerTitle),
+};
+
+const BANNER_BUTTON_LABEL_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "buttonLabel",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::BannerButtonLabel),
+};
+
+const BANNER_REVEALED_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "revealed",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::BannerRevealed),
+};
+
+const BANNER_BUTTON_CLICKED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onButtonClicked",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::BannerButtonClicked,
+};
+
+// ── Adwaita: ToolbarView ──────────────────────────────────────────────────────
+
+const TOOLBAR_VIEW_TOP_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "topBar",
+    container: GtkChildContainerKind::Sequence,
+    mount: GtkChildMountRoute::ToolbarViewTop,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const TOOLBAR_VIEW_BOTTOM_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "bottomBar",
+    container: GtkChildContainerKind::Sequence,
+    mount: GtkChildMountRoute::ToolbarViewBottom,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const TOOLBAR_VIEW_CONTENT_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "content",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::ToolbarViewContent,
+    min_children: 0,
+    max_children: Some(1),
+};
+
 const WINDOW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     markup_name: "Window",
     kind: GtkConcreteWidgetKind::Window,
@@ -622,7 +1073,23 @@ const WINDOW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
         WINDOW_TITLE_PROPERTY,
+        WINDOW_DEFAULT_WIDTH_PROPERTY,
+        WINDOW_DEFAULT_HEIGHT_PROPERTY,
+        WINDOW_RESIZABLE_PROPERTY,
+        WINDOW_MODAL_PROPERTY,
     ],
     events: &[],
     default_child_group_override: Some(&WINDOW_CONTENT_CHILD_GROUP),
@@ -638,6 +1105,18 @@ const HEADER_BAR_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
         HEADER_BAR_SHOW_TITLE_BUTTONS_PROPERTY,
     ],
     events: &[],
@@ -658,6 +1137,18 @@ const PANED_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
         PANED_ORIENTATION_PROPERTY,
     ],
     events: &[],
@@ -674,8 +1165,21 @@ const BOX_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
         BOX_ORIENTATION_PROPERTY,
         BOX_SPACING_PROPERTY,
+        BOX_HOMOGENEOUS_PROPERTY,
     ],
     events: &[],
     default_child_group_override: None,
@@ -691,8 +1195,24 @@ const SCROLLED_WINDOW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        SCROLLED_WINDOW_H_POLICY_PROPERTY,
+        SCROLLED_WINDOW_V_POLICY_PROPERTY,
+        SCROLLED_WINDOW_PROPAGATE_NATURAL_WIDTH_PROPERTY,
+        SCROLLED_WINDOW_PROPAGATE_NATURAL_HEIGHT_PROPERTY,
     ],
-    events: &[],
+    events: &[SCROLL_EVENT],
     default_child_group_override: None,
     child_groups: &[SCROLLED_WINDOW_CONTENT_CHILD_GROUP],
 };
@@ -706,6 +1226,18 @@ const FRAME_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
         FRAME_LABEL_PROPERTY,
     ],
     events: &[],
@@ -722,6 +1254,18 @@ const VIEWPORT_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
     ],
     events: &[],
     default_child_group_override: None,
@@ -737,11 +1281,30 @@ const LABEL_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
         MONOSPACE_PROPERTY,
         LABEL_TEXT_PROPERTY,
         LABEL_LABEL_PROPERTY,
+        LABEL_WRAP_PROPERTY,
+        LABEL_WRAP_MODE_PROPERTY,
+        LABEL_JUSTIFY_PROPERTY,
+        LABEL_ELLIPSIZE_PROPERTY,
+        LABEL_MAX_WIDTH_CHARS_PROPERTY,
+        LABEL_SELECTABLE_PROPERTY,
+        LABEL_USE_MARKUP_PROPERTY,
     ],
-    events: &[],
+    events: &[FOCUS_IN_EVENT, FOCUS_OUT_EVENT, POINTER_ENTER_EVENT, POINTER_LEAVE_EVENT],
     default_child_group_override: None,
     child_groups: &[],
 };
@@ -755,15 +1318,23 @@ const BUTTON_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
         ANIMATE_OPACITY_PROPERTY,
-        BUTTON_COMPACT_PROPERTY,
-        BUTTON_HAS_FRAME_PROPERTY,
         WIDTH_REQUEST_PROPERTY,
         HEIGHT_REQUEST_PROPERTY,
-        OPACITY_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        BUTTON_COMPACT_PROPERTY,
+        BUTTON_HAS_FRAME_PROPERTY,
         BUTTON_LABEL_PROPERTY,
     ],
-    events: &[BUTTON_CLICK_EVENT],
+    events: &[BUTTON_CLICK_EVENT, FOCUS_IN_EVENT, FOCUS_OUT_EVENT, POINTER_ENTER_EVENT, POINTER_LEAVE_EVENT],
     default_child_group_override: None,
     child_groups: &[],
 };
@@ -777,11 +1348,26 @@ const ENTRY_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
         ENTRY_TEXT_PROPERTY,
         ENTRY_PLACEHOLDER_TEXT_PROPERTY,
         ENTRY_EDITABLE_PROPERTY,
+        ENTRY_VISIBILITY_PROPERTY,
+        ENTRY_MAX_LENGTH_PROPERTY,
+        ENTRY_INPUT_PURPOSE_PROPERTY,
     ],
-    events: &[ENTRY_CHANGE_EVENT, ENTRY_ACTIVATE_EVENT],
+    events: &[ENTRY_CHANGE_EVENT, ENTRY_ACTIVATE_EVENT, FOCUS_IN_EVENT, FOCUS_OUT_EVENT],
     default_child_group_override: None,
     child_groups: &[],
 };
@@ -795,9 +1381,21 @@ const SWITCH_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
         SWITCH_ACTIVE_PROPERTY,
     ],
-    events: &[SWITCH_TOGGLE_EVENT],
+    events: &[SWITCH_TOGGLE_EVENT, FOCUS_IN_EVENT, FOCUS_OUT_EVENT],
     default_child_group_override: None,
     child_groups: &[],
 };
@@ -829,10 +1427,22 @@ const CHECK_BUTTON_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
         CHECK_BUTTON_LABEL_PROPERTY,
         CHECK_BUTTON_ACTIVE_PROPERTY,
     ],
-    events: &[CHECK_BUTTON_TOGGLE_EVENT],
+    events: &[CHECK_BUTTON_TOGGLE_EVENT, FOCUS_IN_EVENT, FOCUS_OUT_EVENT],
     default_child_group_override: None,
     child_groups: &[],
 };
@@ -864,10 +1474,22 @@ const TOGGLE_BUTTON_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
         TOGGLE_BUTTON_LABEL_PROPERTY,
         TOGGLE_BUTTON_ACTIVE_PROPERTY,
     ],
-    events: &[TOGGLE_BUTTON_TOGGLE_EVENT],
+    events: &[TOGGLE_BUTTON_TOGGLE_EVENT, FOCUS_IN_EVENT, FOCUS_OUT_EVENT],
     default_child_group_override: None,
     child_groups: &[],
 };
@@ -931,6 +1553,18 @@ const SPIN_BUTTON_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
         SPIN_BUTTON_VALUE_PROPERTY,
         SPIN_BUTTON_MIN_PROPERTY,
         SPIN_BUTTON_MAX_PROPERTY,
@@ -939,7 +1573,7 @@ const SPIN_BUTTON_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SPIN_BUTTON_WRAP_PROPERTY,
         SPIN_BUTTON_NUMERIC_PROPERTY,
     ],
-    events: &[SPIN_BUTTON_VALUE_CHANGED_EVENT],
+    events: &[SPIN_BUTTON_VALUE_CHANGED_EVENT, FOCUS_IN_EVENT, FOCUS_OUT_EVENT],
     default_child_group_override: None,
     child_groups: &[],
 };
@@ -1003,6 +1637,18 @@ const SCALE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
         SCALE_VALUE_PROPERTY,
         SCALE_MIN_PROPERTY,
         SCALE_MAX_PROPERTY,
@@ -1011,7 +1657,7 @@ const SCALE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SCALE_DRAW_VALUE_PROPERTY,
         SCALE_ORIENTATION_PROPERTY,
     ],
-    events: &[SCALE_VALUE_CHANGED_EVENT],
+    events: &[SCALE_VALUE_CHANGED_EVENT, FOCUS_IN_EVENT, FOCUS_OUT_EVENT],
     default_child_group_override: None,
     child_groups: &[],
 };
@@ -1040,11 +1686,25 @@ const IMAGE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     root_kind: GtkWidgetRootKind::Embedded,
     properties: &[
         VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
         IMAGE_ICON_NAME_PROPERTY,
         IMAGE_RESOURCE_PATH_PROPERTY,
         IMAGE_PIXEL_SIZE_PROPERTY,
+        IMAGE_FILE_PROPERTY,
     ],
     events: &[],
     default_child_group_override: None,
@@ -1063,8 +1723,21 @@ const SPINNER_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     root_kind: GtkWidgetRootKind::Embedded,
     properties: &[
         VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
         SPINNER_SPINNING_PROPERTY,
     ],
     events: &[],
@@ -1090,10 +1763,24 @@ const PROGRESS_BAR_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     root_kind: GtkWidgetRootKind::Embedded,
     properties: &[
         VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
         PROGRESS_BAR_FRACTION_PROPERTY,
         PROGRESS_BAR_TEXT_PROPERTY,
+        PROGRESS_BAR_SHOW_TEXT_PROPERTY,
     ],
     events: &[],
     default_child_group_override: None,
@@ -1132,13 +1819,26 @@ const REVEALER_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     root_kind: GtkWidgetRootKind::Embedded,
     properties: &[
         VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
         REVEALER_REVEALED_PROPERTY,
         REVEALER_TRANSITION_TYPE_PROPERTY,
         REVEALER_TRANSITION_DURATION_PROPERTY,
     ],
-    events: &[],
+    events: &[REVEALER_CHILD_REVEALED_EVENT],
     default_child_group_override: None,
     child_groups: &[REVEALER_CHILD_GROUP],
 };
@@ -1158,11 +1858,143 @@ const SEPARATOR_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
         SENSITIVE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
         SEPARATOR_ORIENTATION_PROPERTY,
     ],
     events: &[],
     default_child_group_override: None,
     child_groups: &[],
+};
+
+const STATUS_PAGE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "StatusPage",
+    kind: GtkConcreteWidgetKind::StatusPage,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        STATUS_PAGE_TITLE_PROPERTY,
+        STATUS_PAGE_DESCRIPTION_PROPERTY,
+        STATUS_PAGE_ICON_NAME_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[STATUS_PAGE_CONTENT_CHILD_GROUP],
+};
+
+const CLAMP_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Clamp",
+    kind: GtkConcreteWidgetKind::Clamp,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        CLAMP_MAXIMUM_SIZE_PROPERTY,
+        CLAMP_TIGHTENING_THRESHOLD_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[CLAMP_CONTENT_CHILD_GROUP],
+};
+
+const BANNER_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Banner",
+    kind: GtkConcreteWidgetKind::Banner,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        BANNER_TITLE_PROPERTY,
+        BANNER_BUTTON_LABEL_PROPERTY,
+        BANNER_REVEALED_PROPERTY,
+    ],
+    events: &[BANNER_BUTTON_CLICKED_EVENT],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+const TOOLBAR_VIEW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "ToolbarView",
+    kind: GtkConcreteWidgetKind::ToolbarView,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: Some(&TOOLBAR_VIEW_CONTENT_CHILD_GROUP),
+    child_groups: &[
+        TOOLBAR_VIEW_TOP_CHILD_GROUP,
+        TOOLBAR_VIEW_BOTTOM_CHILD_GROUP,
+        TOOLBAR_VIEW_CONTENT_CHILD_GROUP,
+    ],
 };
 
 const GTK_WIDGET_SCHEMAS: &[GtkWidgetSchema] = &[
@@ -1186,6 +2018,10 @@ const GTK_WIDGET_SCHEMAS: &[GtkWidgetSchema] = &[
     PROGRESS_BAR_SCHEMA,
     REVEALER_SCHEMA,
     SEPARATOR_SCHEMA,
+    STATUS_PAGE_SCHEMA,
+    CLAMP_SCHEMA,
+    BANNER_SCHEMA,
+    TOOLBAR_VIEW_SCHEMA,
 ];
 
 pub fn supported_widget_schemas() -> &'static [GtkWidgetSchema] {
@@ -1287,6 +2123,10 @@ mod tests {
                 "ProgressBar",
                 "Revealer",
                 "Separator",
+                "StatusPage",
+                "Clamp",
+                "Banner",
+                "ToolbarView",
             ]
         );
     }

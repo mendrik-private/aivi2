@@ -400,6 +400,25 @@ pub enum RuntimeTaskPlan {
         body: Box<str>,
     },
     CustomCapabilityCommand(RuntimeCustomCapabilityCommandPlan),
+    /// Deferred map: execute `inner`, then apply `function` to the result and wrap in `Pure`.
+    Map {
+        function: Box<RuntimeValue>,
+        inner: Box<RuntimeTaskPlan>,
+    },
+    /// Deferred apply: execute both tasks, apply the function-result to the value-result.
+    Apply {
+        function_task: Box<RuntimeTaskPlan>,
+        value_task: Box<RuntimeTaskPlan>,
+    },
+    /// Deferred chain: execute `inner`, apply `function` (which returns a `Task`), execute that.
+    Chain {
+        function: Box<RuntimeValue>,
+        inner: Box<RuntimeTaskPlan>,
+    },
+    /// Deferred join: execute `outer` (which produces a `Task`), then execute that inner task.
+    Join {
+        outer: Box<RuntimeTaskPlan>,
+    },
 }
 
 impl fmt::Display for RuntimeTaskPlan {
@@ -471,6 +490,10 @@ impl fmt::Display for RuntimeTaskPlan {
             Self::CustomCapabilityCommand(plan) => {
                 write!(f, "{}.{}", plan.provider_key, plan.command)
             }
+            Self::Map { .. } => f.write_str("task.map(...)"),
+            Self::Apply { .. } => f.write_str("task.apply(...)"),
+            Self::Chain { .. } => f.write_str("task.chain(...)"),
+            Self::Join { .. } => f.write_str("task.join(...)"),
         }
     }
 }
@@ -1215,6 +1238,44 @@ pub struct EvalFrame {
 impl fmt::Display for EvalFrame {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "item {} (kernel {})", self.item, self.kernel)
+    }
+}
+
+/// Sentinel `KernelId` used when applying a closure during task composition (map/chain/join).
+/// Only used for error diagnostics — actual program kernels use arena-allocated IDs.
+pub const TASK_COMPOSITION_KERNEL_ID: KernelId = KernelId::from_raw(u32::MAX);
+/// Sentinel `KernelExprId` paired with [`TASK_COMPOSITION_KERNEL_ID`].
+pub const TASK_COMPOSITION_EXPR_ID: KernelExprId = KernelExprId::from_raw(u32::MAX);
+
+/// Callback interface that lets the task executor apply a user closure to a value.
+///
+/// The executor holds [`RuntimeTaskPlan::Map`] / [`RuntimeTaskPlan::Chain`] variants whose
+/// `function` field is a [`RuntimeValue::Callable`]. Executing those variants requires
+/// calling back into the Cranelift evaluator.  Callers that have a live [`KernelEvaluator`]
+/// implement this trait and supply it to [`execute_runtime_task_plan_with_applier`].
+pub trait TaskFunctionApplier {
+    fn apply_task_function(
+        &mut self,
+        function: RuntimeValue,
+        args: Vec<RuntimeValue>,
+        globals: &BTreeMap<ItemId, RuntimeValue>,
+    ) -> Result<RuntimeValue, EvaluationError>;
+}
+
+impl TaskFunctionApplier for KernelEvaluator<'_> {
+    fn apply_task_function(
+        &mut self,
+        function: RuntimeValue,
+        args: Vec<RuntimeValue>,
+        globals: &BTreeMap<ItemId, RuntimeValue>,
+    ) -> Result<RuntimeValue, EvaluationError> {
+        self.apply_callable(
+            TASK_COMPOSITION_KERNEL_ID,
+            TASK_COMPOSITION_EXPR_ID,
+            function,
+            args,
+            globals,
+        )
     }
 }
 
@@ -2911,6 +2972,29 @@ impl<'a> KernelEvaluator<'a> {
                     reason: "map received values outside the supported runtime carriers",
                 }),
             },
+            BuiltinFunctorCarrier::Task => match strip_signal(subject) {
+                RuntimeValue::Task(plan) => match plan {
+                    // Pure tasks: apply eagerly (no deferred plan needed).
+                    RuntimeTaskPlan::Pure { value } => {
+                        let mapped =
+                            self.apply_callable(kernel_id, expr, function, vec![*value], globals)?;
+                        Ok(RuntimeValue::Task(RuntimeTaskPlan::Pure {
+                            value: Box::new(mapped),
+                        }))
+                    }
+                    // Non-pure tasks: emit a deferred Map plan executed by the task worker.
+                    other => Ok(RuntimeValue::Task(RuntimeTaskPlan::Map {
+                        function: Box::new(function),
+                        inner: Box::new(other),
+                    })),
+                },
+                _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                    kernel: kernel_id,
+                    expr,
+                    intrinsic,
+                    reason: "map received a non-Task value for Task carrier",
+                }),
+            },
         }
     }
 
@@ -3090,6 +3174,44 @@ impl<'a> KernelEvaluator<'a> {
                     reason: "apply received values outside the supported runtime carriers",
                 }),
             },
+            BuiltinApplyCarrier::Task => {
+                match (strip_signal(functions), strip_signal(values)) {
+                    (
+                        RuntimeValue::Task(function_plan),
+                        RuntimeValue::Task(value_plan),
+                    ) => match (function_plan, value_plan) {
+                        // Both Pure: apply eagerly.
+                        (
+                            RuntimeTaskPlan::Pure { value: function },
+                            RuntimeTaskPlan::Pure { value },
+                        ) => {
+                            let result = self.apply_callable(
+                                kernel_id,
+                                expr,
+                                *function,
+                                vec![*value],
+                                globals,
+                            )?;
+                            Ok(RuntimeValue::Task(RuntimeTaskPlan::Pure {
+                                value: Box::new(result),
+                            }))
+                        }
+                        // Non-pure: emit a deferred Apply plan.
+                        (function_plan, value_plan) => {
+                            Ok(RuntimeValue::Task(RuntimeTaskPlan::Apply {
+                                function_task: Box::new(function_plan),
+                                value_task: Box::new(value_plan),
+                            }))
+                        }
+                    },
+                    _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                        kernel: kernel_id,
+                        expr,
+                        intrinsic,
+                        reason: "apply received non-Task values for Task carrier",
+                    }),
+                }
+            }
         }
     }
 
@@ -3185,6 +3307,39 @@ impl<'a> KernelEvaluator<'a> {
                     reason: "chain received values outside the supported runtime carriers",
                 }),
             },
+            BuiltinMonadCarrier::Task => match strip_signal(subject) {
+                RuntimeValue::Task(plan) => match plan {
+                    // Pure inner: apply eagerly and return the resulting Task.
+                    RuntimeTaskPlan::Pure { value } => {
+                        match strip_signal(self.apply_callable(
+                            kernel_id,
+                            expr,
+                            function,
+                            vec![*value],
+                            globals,
+                        )?) {
+                            RuntimeValue::Task(result_plan) => Ok(RuntimeValue::Task(result_plan)),
+                            _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                                kernel: kernel_id,
+                                expr,
+                                intrinsic,
+                                reason: "chain expected the callback to return a Task value",
+                            }),
+                        }
+                    }
+                    // Non-pure inner: emit a deferred Chain plan.
+                    other => Ok(RuntimeValue::Task(RuntimeTaskPlan::Chain {
+                        function: Box::new(function),
+                        inner: Box::new(other),
+                    })),
+                },
+                _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                    kernel: kernel_id,
+                    expr,
+                    intrinsic,
+                    reason: "chain received a non-Task value for Task carrier",
+                }),
+            },
         }
     }
 
@@ -3258,6 +3413,30 @@ impl<'a> KernelEvaluator<'a> {
                     expr,
                     intrinsic,
                     reason: "join received values outside the supported runtime carriers",
+                }),
+            },
+            BuiltinMonadCarrier::Task => match strip_signal(subject) {
+                RuntimeValue::Task(outer_plan) => match outer_plan {
+                    // Pure outer: the inner value must itself be a Task — return it directly.
+                    RuntimeTaskPlan::Pure { value } => match strip_signal(*value) {
+                        RuntimeValue::Task(inner_plan) => Ok(RuntimeValue::Task(inner_plan)),
+                        _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                            kernel: kernel_id,
+                            expr,
+                            intrinsic,
+                            reason: "join expected Task E (Task E A) — inner value was not a Task",
+                        }),
+                    },
+                    // Non-pure outer: emit a deferred Join plan.
+                    other => Ok(RuntimeValue::Task(RuntimeTaskPlan::Join {
+                        outer: Box::new(other),
+                    })),
+                },
+                _ => Err(EvaluationError::UnsupportedBuiltinClassMember {
+                    kernel: kernel_id,
+                    expr,
+                    intrinsic,
+                    reason: "join received a non-Task value for Task carrier",
                 }),
             },
         }

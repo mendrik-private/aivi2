@@ -51,6 +51,7 @@ pub enum BuiltinFunctorCarrier {
     Result,
     Validation,
     Signal,
+    Task,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -76,6 +77,7 @@ pub enum BuiltinApplyCarrier {
     Result,
     Validation,
     Signal,
+    Task,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -83,6 +85,7 @@ pub enum BuiltinMonadCarrier {
     List,
     Option,
     Result,
+    Task,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
