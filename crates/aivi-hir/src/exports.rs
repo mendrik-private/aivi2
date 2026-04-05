@@ -977,6 +977,14 @@ fn poly_name_import_value_type(
                 arguments: Vec::new(),
             })
         }
+        ResolutionState::Resolved(TypeResolution::Import(import_id)) => {
+            let binding = module.imports().get(*import_id)?;
+            let name = binding.imported_name.text().to_owned();
+            Some(ImportValueType::Named {
+                type_name: name,
+                arguments: Vec::new(),
+            })
+        }
         _ => None,
     }
 }
@@ -1092,6 +1100,15 @@ fn poly_flatten_type_application(
             {
                 let name = item_type_name(&module.items()[*item_id]);
                 return Some((PolyTypeConstructor::Named(name), Vec::new()));
+            }
+            // Imported type: use the imported name
+            if let ResolutionState::Resolved(TypeResolution::Import(import_id)) =
+                reference.resolution.as_ref()
+            {
+                if let Some(binding) = module.imports().get(*import_id) {
+                    let name = binding.imported_name.text().to_owned();
+                    return Some((PolyTypeConstructor::Named(name), Vec::new()));
+                }
             }
             None
         }
