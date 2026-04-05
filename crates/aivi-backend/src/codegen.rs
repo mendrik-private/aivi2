@@ -410,6 +410,11 @@ impl<'a> CraneliftCompiler<'a> {
             .map_err(|error| CodegenError::TargetIsaCreation {
                 message: error.to_string().into_boxed_str(),
             })?;
+        flags
+            .set("opt_level", "speed")
+            .map_err(|error| CodegenError::TargetIsaCreation {
+                message: error.to_string().into_boxed_str(),
+            })?;
         let isa = isa_builder
             .finish(settings::Flags::new(flags))
             .map_err(|error| CodegenError::TargetIsaCreation {

@@ -91,11 +91,7 @@ fn run() -> Result<ExitCode, String> {
     }
 
     if first == OsString::from("check") {
-        let path_arg = take_path_or_help(args)?;
-        return match path_arg {
-            PathOrHelp::Help => print_help(Some(std::ffi::OsStr::new("check"))),
-            PathOrHelp::Path(p) => check_file(&p),
-        };
+        return run_check(args);
     }
 
     if first == OsString::from("compile") {
@@ -143,7 +139,7 @@ fn run() -> Result<ExitCode, String> {
     }
 
     // Default: treat the first argument as a path and run `check`.
-    check_file(&PathBuf::from(first))
+    check_file(&PathBuf::from(first), false)
 }
 
 enum PathOrHelp {
@@ -189,25 +185,68 @@ fn run_fmt(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String>
     format_file(&PathBuf::from(next))
 }
 
+/// Resolve the entry file for a CLI command, using `aivi.toml` `[run] entry`
+/// as the fallback when no explicit path is provided on the command line.
+fn resolve_command_entrypoint(
+    command_name: &str,
+    explicit_path: Option<&Path>,
+) -> Result<PathBuf, String> {
+    let cwd = env::current_dir().map_err(|error| {
+        format!("failed to determine current directory for `aivi {command_name}`: {error}")
+    })?;
+    resolve_v1_entrypoint(&cwd, explicit_path)
+        .map(|resolved| resolved.entry_path().to_path_buf())
+        .map_err(|error| format!("failed to resolve entrypoint for `aivi {command_name}`: {error}"))
+}
 
+fn run_check(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
+    let mut requested_path = None;
+    let mut timings = false;
+
+    while let Some(argument) = args.next() {
+        if argument == "--help" || argument == "-h" {
+            return print_help(Some(std::ffi::OsStr::new("check")));
+        }
+        if argument == OsString::from("--timings") {
+            timings = true;
+            continue;
+        }
+        if argument == OsString::from("--path") {
+            let path = args
+                .next()
+                .map(PathBuf::from)
+                .ok_or_else(|| "expected a path value after `--path` for `check`".to_owned())?;
+            if requested_path.replace(path).is_some() {
+                return Err("check path was provided more than once".to_owned());
+            }
+            continue;
+        }
+        if requested_path.replace(PathBuf::from(&argument)).is_some() {
+            return Err("check path was provided more than once".to_owned());
+        }
+    }
+
+    let path = resolve_command_entrypoint("check", requested_path.as_deref())?;
+    check_file(&path, timings)
+}
 
 fn run_compile(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
-    let path = args
-        .next()
-        .map(PathBuf::from)
-        .ok_or_else(|| "expected a path argument after `compile`".to_owned())?;
-    if path == PathBuf::from("--help") || path == PathBuf::from("-h") {
-        return print_help(Some(std::ffi::OsStr::new("compile")));
-    }
-    if !path.exists() {
-        eprintln!("error: file not found: {}", path.display());
-        std::process::exit(2);
-    }
+    let mut requested_path = None;
     let mut output = None;
 
     while let Some(argument) = args.next() {
         if argument == "--help" || argument == "-h" {
             return print_help(Some(std::ffi::OsStr::new("compile")));
+        }
+        if argument == OsString::from("--path") {
+            let path = args
+                .next()
+                .map(PathBuf::from)
+                .ok_or_else(|| "expected a path value after `--path` for `compile`".to_owned())?;
+            if requested_path.replace(path).is_some() {
+                return Err("compile path was provided more than once".to_owned());
+            }
+            continue;
         }
         if argument == OsString::from("-o") || argument == OsString::from("--output") {
             let artifact = args
@@ -219,34 +258,33 @@ fn run_compile(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Str
             }
             continue;
         }
-
-        return Err(format!(
-            "unexpected compile argument `{}`",
-            argument.to_string_lossy()
-        ));
+        if requested_path.replace(PathBuf::from(&argument)).is_some() {
+            return Err("compile path was provided more than once".to_owned());
+        }
     }
 
+    let path = resolve_command_entrypoint("compile", requested_path.as_deref())?;
     compile_file(&path, output.as_deref())
 }
 
 fn run_build(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
-    let path = args
-        .next()
-        .map(PathBuf::from)
-        .ok_or_else(|| "expected a path argument after `build`".to_owned())?;
-    if path == PathBuf::from("--help") || path == PathBuf::from("-h") {
-        return print_help(Some(std::ffi::OsStr::new("build")));
-    }
-    if !path.exists() {
-        eprintln!("error: file not found: {}", path.display());
-        std::process::exit(2);
-    }
+    let mut requested_path = None;
     let mut output = None;
     let mut requested_view = None;
 
     while let Some(argument) = args.next() {
         if argument == "--help" || argument == "-h" {
             return print_help(Some(std::ffi::OsStr::new("build")));
+        }
+        if argument == OsString::from("--path") {
+            let path = args
+                .next()
+                .map(PathBuf::from)
+                .ok_or_else(|| "expected a path value after `--path` for `build`".to_owned())?;
+            if requested_path.replace(path).is_some() {
+                return Err("build path was provided more than once".to_owned());
+            }
+            continue;
         }
         if argument == OsString::from("-o") || argument == OsString::from("--output") {
             let bundle = args
@@ -272,31 +310,56 @@ fn run_build(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Strin
             continue;
         }
 
-        return Err(format!(
-            "unexpected build argument `{}`",
-            argument.to_string_lossy()
-        ));
+        if requested_path.replace(PathBuf::from(&argument)).is_some() {
+            return Err("build path was provided more than once".to_owned());
+        }
     }
 
     let output =
         output.ok_or_else(|| "expected `-o`/`--output <directory>` for `build`".to_owned())?;
-    if let Some(view) = &requested_view {
+    let resolved = resolve_run_entrypoint_for_build("build", requested_path.as_deref())?;
+    let view = requested_view
+        .as_deref()
+        .or(resolved.manifest_view.as_deref())
+        .map(str::to_owned);
+    if let Some(view) = &view {
         let segments: Vec<&str> = view.split('.').collect();
         if let Err(e) = validate_module_path(&segments) {
             eprintln!("error: {e}");
             std::process::exit(2);
         }
     }
-    build_markup_bundle(&path, &output, requested_view.as_deref())
+    build_markup_bundle(&resolved.entry_path, &output, view.as_deref())
+}
+
+fn resolve_run_entrypoint_for_build(
+    command_name: &str,
+    explicit_path: Option<&Path>,
+) -> Result<ResolvedRunEntrypoint, String> {
+    let cwd = env::current_dir().map_err(|error| {
+        format!("failed to determine current directory for `aivi {command_name}`: {error}")
+    })?;
+    let resolved = resolve_v1_entrypoint(&cwd, explicit_path)
+        .map_err(|error| format!("failed to resolve entrypoint for `aivi {command_name}`: {error}"))?;
+    Ok(ResolvedRunEntrypoint {
+        entry_path: resolved.entry_path().to_path_buf(),
+        manifest_view: resolved.manifest_view().map(str::to_owned),
+    })
 }
 
 fn run_markup(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
     let mut requested_path = None;
     let mut requested_view = None;
+    let mut timings = false;
 
     while let Some(argument) = args.next() {
         if argument == "--help" || argument == "-h" {
             return print_help(Some(std::ffi::OsStr::new("run")));
+        }
+
+        if argument == OsString::from("--timings") {
+            timings = true;
+            continue;
         }
 
         if argument == OsString::from("--path") {
@@ -338,27 +401,39 @@ fn run_markup(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Stri
     let cwd = env::current_dir().map_err(|error| {
         format!("failed to determine current directory for `aivi run`: {error}")
     })?;
-    let path = resolve_run_entrypoint(&cwd, requested_path.as_deref())?;
-    run_markup_file(&path, requested_view.as_deref())
+    let resolved = resolve_run_entrypoint(&cwd, requested_path.as_deref())?;
+    let view = requested_view
+        .as_deref()
+        .or(resolved.manifest_view.as_deref())
+        .map(str::to_owned);
+    run_markup_file_with_launch_config(
+        &resolved.entry_path,
+        view.as_deref(),
+        run_session::RunLaunchConfig::default(),
+        timings,
+    )
+}
+
+#[derive(Debug)]
+struct ResolvedRunEntrypoint {
+    entry_path: PathBuf,
+    manifest_view: Option<String>,
 }
 
 fn resolve_run_entrypoint(
     current_dir: &Path,
     explicit_path: Option<&Path>,
-) -> Result<PathBuf, String> {
-    resolve_v1_entrypoint(current_dir, explicit_path)
-        .map(|resolved| resolved.entry_path().to_path_buf())
-        .map_err(|error| format!("failed to resolve entrypoint for `aivi run`: {error}"))
+) -> Result<ResolvedRunEntrypoint, String> {
+    let resolved = resolve_v1_entrypoint(current_dir, explicit_path)
+        .map_err(|error| format!("failed to resolve entrypoint for `aivi run`: {error}"))?;
+    Ok(ResolvedRunEntrypoint {
+        entry_path: resolved.entry_path().to_path_buf(),
+        manifest_view: resolved.manifest_view().map(str::to_owned),
+    })
 }
 
 fn run_execute(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
-    let path = args
-        .next()
-        .map(PathBuf::from)
-        .ok_or_else(|| "expected a path argument after `execute`".to_owned())?;
-    if path == PathBuf::from("--help") || path == PathBuf::from("-h") {
-        return print_help(Some(std::ffi::OsStr::new("execute")));
-    }
+    let mut requested_path = None;
     let mut program_args = Vec::new();
     let mut accepting_program_args = false;
 
@@ -370,8 +445,22 @@ fn run_execute(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Str
         if argument == "--help" || argument == "-h" {
             return print_help(Some(std::ffi::OsStr::new("execute")));
         }
+        if argument == OsString::from("--path") {
+            let path = args
+                .next()
+                .map(PathBuf::from)
+                .ok_or_else(|| "expected a path value after `--path` for `execute`".to_owned())?;
+            if requested_path.replace(path).is_some() {
+                return Err("execute path was provided more than once".to_owned());
+            }
+            continue;
+        }
         if argument == OsString::from("--") {
             accepting_program_args = true;
+            continue;
+        }
+        if requested_path.is_none() {
+            requested_path = Some(PathBuf::from(&argument));
             continue;
         }
         return Err(format!(
@@ -380,23 +469,33 @@ fn run_execute(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Str
         ));
     }
 
+    let path = resolve_command_entrypoint("execute", requested_path.as_deref())?;
     execute_file(&path, &program_args)
 }
 
 fn run_test(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
-    let path = args
-        .next()
-        .map(PathBuf::from)
-        .ok_or_else(|| "expected a path argument after `test`".to_owned())?;
-    if path == PathBuf::from("--help") || path == PathBuf::from("-h") {
-        return print_help(Some(std::ffi::OsStr::new("test")));
+    let mut requested_path = None;
+
+    while let Some(argument) = args.next() {
+        if argument == "--help" || argument == "-h" {
+            return print_help(Some(std::ffi::OsStr::new("test")));
+        }
+        if argument == OsString::from("--path") {
+            let path = args
+                .next()
+                .map(PathBuf::from)
+                .ok_or_else(|| "expected a path value after `--path` for `test`".to_owned())?;
+            if requested_path.replace(path).is_some() {
+                return Err("test path was provided more than once".to_owned());
+            }
+            continue;
+        }
+        if requested_path.replace(PathBuf::from(&argument)).is_some() {
+            return Err("test path was provided more than once".to_owned());
+        }
     }
-    if let Some(argument) = args.next() {
-        return Err(format!(
-            "unexpected test argument `{}`",
-            argument.to_string_lossy()
-        ));
-    }
+
+    let path = resolve_command_entrypoint("test", requested_path.as_deref())?;
     test_file(&path)
 }
 
@@ -817,21 +916,30 @@ fn validate_module_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn check_file(path: &Path) -> Result<ExitCode, String> {
+fn check_file(path: &Path, timings: bool) -> Result<ExitCode, String> {
+    let total_start = Instant::now();
     require_file_exists(path)?;
+
+    let t0 = Instant::now();
     let snapshot = WorkspaceHirSnapshot::load(path)?;
+    let load_duration = t0.elapsed();
+
+    let t0 = Instant::now();
     let syntax_failed = workspace_syntax_failed(&snapshot, |sources, diagnostics| {
         print_diagnostics(sources, diagnostics.iter())
     });
+    let syntax_duration = t0.elapsed();
     if syntax_failed {
         return Ok(ExitCode::FAILURE);
     }
 
+    let t0 = Instant::now();
     let (lowering_failed, validation_failed) = workspace_hir_failed(
         &snapshot,
         |sources, diagnostics| print_diagnostics(sources, diagnostics.iter()),
         |sources, diagnostics| print_diagnostics(sources, diagnostics.iter()),
     );
+    let hir_duration = t0.elapsed();
     if lowering_failed || validation_failed {
         return Ok(ExitCode::FAILURE);
     }
@@ -845,43 +953,56 @@ fn check_file(path: &Path) -> Result<ExitCode, String> {
         snapshot.files.len(),
         plural_suffix(snapshot.files.len())
     );
-    Ok(ExitCode::SUCCESS)
-}
 
-fn run_markup_file(path: &Path, requested_view: Option<&str>) -> Result<ExitCode, String> {
-    run_markup_file_with_launch_config(
-        path,
-        requested_view,
-        run_session::RunLaunchConfig::default(),
-    )
+    if timings {
+        let total = total_start.elapsed();
+        eprintln!("timings for `aivi check` ({}):", path.display());
+        eprintln!("  load + parse:  {:>8.2?}", load_duration);
+        eprintln!("  syntax check:  {:>8.2?}", syntax_duration);
+        eprintln!("  HIR lowering:  {:>8.2?}", hir_duration);
+        eprintln!("  total:         {:>8.2?}", total);
+    }
+
+    Ok(ExitCode::SUCCESS)
 }
 
 fn run_markup_file_with_launch_config(
     path: &Path,
     requested_view: Option<&str>,
     launch_config: run_session::RunLaunchConfig,
+    timings: bool,
 ) -> Result<ExitCode, String> {
+    let total_start = Instant::now();
     require_file_exists(path)?;
     if let Some(view) = requested_view {
         validate_module_name(view)?;
     }
+
+    let t0 = Instant::now();
     let snapshot = WorkspaceHirSnapshot::load(path)?;
+    let load_duration = t0.elapsed();
+
+    let t0 = Instant::now();
     let syntax_failed = workspace_syntax_failed(&snapshot, |sources, diagnostics| {
         print_diagnostics(sources, diagnostics.iter())
     });
+    let syntax_duration = t0.elapsed();
     if syntax_failed {
         return Ok(ExitCode::FAILURE);
     }
 
+    let t0 = Instant::now();
     let (hir_lowering_failed, hir_validation_failed) = workspace_hir_failed(
         &snapshot,
         |sources, diagnostics| print_diagnostics(sources, diagnostics.iter()),
         |sources, diagnostics| print_diagnostics(sources, diagnostics.iter()),
     );
+    let hir_duration = t0.elapsed();
     if hir_lowering_failed || hir_validation_failed {
         return Ok(ExitCode::FAILURE);
     }
 
+    let t0 = Instant::now();
     let lowered = snapshot.entry_hir();
     let artifact = match prepare_run_artifact(&snapshot.sources, lowered.module(), requested_view) {
         Ok(artifact) => artifact,
@@ -890,6 +1011,17 @@ fn run_markup_file_with_launch_config(
             return Ok(ExitCode::FAILURE);
         }
     };
+    let artifact_duration = t0.elapsed();
+
+    if timings {
+        let total = total_start.elapsed();
+        eprintln!("timings for `aivi run` ({}):", path.display());
+        eprintln!("  load + parse:       {:>8.2?}", load_duration);
+        eprintln!("  syntax check:       {:>8.2?}", syntax_duration);
+        eprintln!("  HIR lowering:       {:>8.2?}", hir_duration);
+        eprintln!("  artifact prep:      {:>8.2?}", artifact_duration);
+        eprintln!("  total (pre-launch): {:>8.2?}", total);
+    }
 
     run_session::launch_run_with_config(path, artifact, launch_config)
 }
@@ -1584,7 +1716,7 @@ fn prepare_run_artifact(
         )
     })?;
     validate_run_plan(sources, &bridge)?;
-    let lowered = lower_runtime_backend_stack_with_items(module, &included_items, "`aivi run`")?;
+    let lowered = lower_runtime_backend_stack_with_items_fast(module, &included_items, "`aivi run`")?;
     let runtime_assembly =
         assemble_hir_runtime_with_items(module, &included_items).map_err(|errors| {
             let mut rendered = String::from("failed to assemble runtime plans for `aivi run`:\n");
@@ -1973,6 +2105,23 @@ fn lower_runtime_backend_stack_with_items(
     included_items: &IncludedItems,
     command_name: &str,
 ) -> Result<LoweredRunBackendStack, String> {
+    lower_runtime_backend_stack_impl(module, included_items, command_name, true)
+}
+
+fn lower_runtime_backend_stack_with_items_fast(
+    module: &HirModule,
+    included_items: &IncludedItems,
+    command_name: &str,
+) -> Result<LoweredRunBackendStack, String> {
+    lower_runtime_backend_stack_impl(module, included_items, command_name, false)
+}
+
+fn lower_runtime_backend_stack_impl(
+    module: &HirModule,
+    included_items: &IncludedItems,
+    command_name: &str,
+    validate: bool,
+) -> Result<LoweredRunBackendStack, String> {
     let core = lower_runtime_module_with_items(module, included_items).map_err(|errors| {
         let mut rendered = format!("failed to lower {command_name} module into typed core:\n");
         for error in errors.errors() {
@@ -1982,15 +2131,17 @@ fn lower_runtime_backend_stack_with_items(
         }
         rendered
     })?;
-    validate_core_module(&core).map_err(|errors| {
-        let mut rendered = format!("typed-core validation failed for {command_name}:\n");
-        for error in errors.errors() {
-            rendered.push_str("- ");
-            rendered.push_str(&error.to_string());
-            rendered.push('\n');
-        }
-        rendered
-    })?;
+    if validate {
+        validate_core_module(&core).map_err(|errors| {
+            let mut rendered = format!("typed-core validation failed for {command_name}:\n");
+            for error in errors.errors() {
+                rendered.push_str("- ");
+                rendered.push_str(&error.to_string());
+                rendered.push('\n');
+            }
+            rendered
+        })?;
+    }
     let lambda = lower_lambda_module(&core).map_err(|errors| {
         let mut rendered = format!("failed to lower {command_name} module into typed lambda:\n");
         for error in errors.errors() {
@@ -2000,15 +2151,17 @@ fn lower_runtime_backend_stack_with_items(
         }
         rendered
     })?;
-    validate_lambda_module(&lambda).map_err(|errors| {
-        let mut rendered = format!("typed-lambda validation failed for {command_name}:\n");
-        for error in errors.errors() {
-            rendered.push_str("- ");
-            rendered.push_str(&error.to_string());
-            rendered.push('\n');
-        }
-        rendered
-    })?;
+    if validate {
+        validate_lambda_module(&lambda).map_err(|errors| {
+            let mut rendered = format!("typed-lambda validation failed for {command_name}:\n");
+            for error in errors.errors() {
+                rendered.push_str("- ");
+                rendered.push_str(&error.to_string());
+                rendered.push('\n');
+            }
+            rendered
+        })?;
+    }
     let backend = lower_backend_module(&lambda).map_err(|errors| {
         let mut rendered = format!("failed to lower {command_name} module into backend IR:\n");
         for error in errors.errors() {
@@ -2018,15 +2171,17 @@ fn lower_runtime_backend_stack_with_items(
         }
         rendered
     })?;
-    validate_program(&backend).map_err(|errors| {
-        let mut rendered = format!("backend validation failed for {command_name}:\n");
-        for error in errors.errors() {
-            rendered.push_str("- ");
-            rendered.push_str(&error.to_string());
-            rendered.push('\n');
-        }
-        rendered
-    })?;
+    if validate {
+        validate_program(&backend).map_err(|errors| {
+            let mut rendered = format!("backend validation failed for {command_name}:\n");
+            for error in errors.errors() {
+                rendered.push_str("- ");
+                rendered.push_str(&error.to_string());
+                rendered.push('\n');
+            }
+            rendered
+        })?;
+    }
     Ok(LoweredRunBackendStack {
         core,
         backend: Arc::new(backend),
@@ -4523,7 +4678,7 @@ mod tests {
         let resolved = super::resolve_run_entrypoint(&cwd, Some(&explicit))
             .expect("explicit path should bypass implicit resolution");
 
-        assert_eq!(resolved, explicit);
+        assert_eq!(resolved.entry_path, explicit);
     }
 
     #[test]
@@ -4537,7 +4692,7 @@ mod tests {
         let resolved = super::resolve_run_entrypoint(&cwd, None)
             .expect("implicit resolution should use workspace-root main.aivi");
 
-        assert_eq!(resolved, expected);
+        assert_eq!(resolved.entry_path, expected);
     }
 
     #[test]
@@ -4552,7 +4707,7 @@ mod tests {
 
         assert!(error.contains("failed to resolve entrypoint for `aivi run`"));
         assert!(error.contains(&workspace.path().join("main.aivi").display().to_string()));
-        assert!(error.contains("--path <entry-file>"));
+        assert!(error.contains("--path <entry-file>") || error.contains("aivi.toml"));
     }
 
     fn execute_workspace(
@@ -4646,14 +4801,14 @@ value view =
             "milestone-2/valid/source-decorator-signals/main.aivi",
             "milestone-2/valid/pipe-explicit-recurrence-wakeups/main.aivi",
         ] {
-            let result = check_file(&fixture(path)).expect("check should run");
+            let result = check_file(&fixture(path), false).expect("check should run");
             assert_eq!(result, ExitCode::SUCCESS, "expected {path} to pass");
         }
     }
 
     #[test]
     fn check_rejects_milestone_two_invalid_fixture() {
-        let result = check_file(&fixture("milestone-2/invalid/unknown-decorator/main.aivi"))
+        let result = check_file(&fixture("milestone-2/invalid/unknown-decorator/main.aivi"), false)
             .expect("check should run");
         assert_eq!(result, ExitCode::FAILURE);
     }

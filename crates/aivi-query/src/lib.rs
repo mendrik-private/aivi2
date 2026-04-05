@@ -19,6 +19,7 @@ pub use entry::{
     EntrypointOrigin, EntrypointResolutionError, ResolvedEntrypoint, resolve_v1_entrypoint,
 };
 pub use inputs::SourceFile;
+pub use manifest::{AiviManifest, RunConfig, parse_manifest};
 pub use queries::{
     HirModuleResult, ParsedFileResult, all_diagnostics, exported_names, format_file, hir_module,
     parsed_file, resolve_module_file, symbol_index,
