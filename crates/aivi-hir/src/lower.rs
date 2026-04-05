@@ -12940,13 +12940,11 @@ fun boardTextStep:Text = acc:Text row:Int =>
                     ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Text))
                 )
         ));
-        assert_eq!(path.members.len(), 3);
+        assert_eq!(path.members.len(), 2);
         assert!(matches!(path.members[0].kind, DomainMemberKind::Literal));
         assert_eq!(path.members[0].name.text(), "root");
         assert!(matches!(path.members[1].kind, DomainMemberKind::Operator));
         assert_eq!(path.members[1].name.text(), "/");
-        assert!(matches!(path.members[2].kind, DomainMemberKind::Method));
-        assert_eq!(path.members[2].name.text(), "unwrap");
 
         let non_empty = match find_named_item(lowered.module(), "NonEmpty") {
             Item::Domain(item) => item,

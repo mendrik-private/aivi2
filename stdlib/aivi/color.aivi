@@ -2,8 +2,6 @@ domain Color over Int = {
     type Int -> Color
     argb
     type Color -> Int
-    unwrap
-    type Color -> Int
     red
     type Color -> Int
     green

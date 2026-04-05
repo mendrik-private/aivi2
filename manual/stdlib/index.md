@@ -57,7 +57,7 @@ After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first
 | [aivi.stdio](stdio.md) | Standard I/O vocabulary and `StdioSource` | `StdioSource`, `StdinLine`, `stdout` |
 | [aivi.log](log.md) | Logging vocabulary and `LogSource` | `levelToText`, `kv`, `LogSource` |
 | [aivi.process](process.md) | Process vocabulary and `ProcessSource` | `command`, `args`, `workingDir`, `env` |
-| [aivi.url](url.md) | Typed URLs with explicit parsing | `parse`, `unwrap`, `scheme`, `host`, `path` |
+| [aivi.url](url.md) | Typed URLs with explicit parsing | `parse`, `scheme`, `host`, `path` |
 | [aivi.http](http.md) | HTTP vocabulary and `HttpSource` | `HttpSource`, `Request`, `Response` |
 | [aivi.auth](auth.md) | OAuth 2.0 / PKCE sign-in records | `OAuthConfig`, `OAuthToken`, `SignInState` |
 | [aivi.db](db.md) | Database vocabulary and `DbSource` | `query`, `commit`, `DbSource` |

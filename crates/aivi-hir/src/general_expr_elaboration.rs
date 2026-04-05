@@ -4662,10 +4662,9 @@ fun length:Int = items:(List A)=>    items
             r#"
 domain Path over Text = {
     fromText : Text -> Path
-    unwrap : Path -> Text
 }
 value home : Path = fromText "/tmp/app"
-value raw : Text = home.unwrap
+value raw : Text = home.carrier
 "#,
         );
         assert!(
@@ -4689,7 +4688,7 @@ value raw : Text = home.unwrap
                         GateRuntimeExprKind::Reference(
                             GateRuntimeReference::DomainMember(handle)
                         ) if handle.domain_name.as_ref() == "Path"
-                            && handle.member_name.as_ref() == "unwrap"
+                            && handle.member_name.as_ref() == "carrier"
                     ));
                     assert!(matches!(
                         arguments[0].kind,

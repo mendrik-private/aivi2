@@ -6923,7 +6923,7 @@ impl<'a> GateTypeContext<'a> {
                         ..
                     } => {
                         // Imported domain type: `.unwrap` / `.value` / `.carrier` return the carrier type.
-                        if segment.text() == "unwrap" || segment.text() == "value" || segment.text() == "carrier" {
+                        if segment.text() == "value" || segment.text() == "carrier" {
                             let carrier_ty = self.lower_import_value_type(carrier);
                             Ok(GateProjectionStep::RecordField { result: carrier_ty })
                         } else {

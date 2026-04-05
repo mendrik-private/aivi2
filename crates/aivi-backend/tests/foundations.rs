@@ -371,8 +371,6 @@ fn lowers_source_decode_into_backend_plans() {
 domain Duration over Int
     type Int -> Result Text Duration
     parse
-    type Duration -> Int
-    unwrap
 
 @source custom.feed
 signal timeout : Signal Duration
@@ -2556,12 +2554,13 @@ fn runtime_evaluates_inline_pipe_domain_member_calls() {
         r#"
 domain Duration over Int
     literal ms : Int -> Duration
-    type Duration -> Int
-    unwrap
+
+type Duration -> Int
+func extract = d => d.carrier
 
 value raw : Int =
     10ms
-     |> unwrap
+     |> extract
 "#,
     );
     let mut evaluator = KernelEvaluator::new(&backend);
@@ -2584,9 +2583,9 @@ domain Duration over Int
     type Builder
     make raw = raw
     type Duration -> Int
-    unwrap duration = duration
+    extract duration = duration
 
-value raw : Int = unwrap (make 10)
+value raw : Int = extract (make 10)
 "#,
     );
     let mut evaluator = KernelEvaluator::new(&backend);
@@ -4742,23 +4741,21 @@ fn cranelift_codegen_compiles_direct_by_reference_domain_member_calls() {
 domain Path over Text
     type Text -> Path
     fromText
-    type Path -> Text
-    unwrap
 
 fun wrapPath:Path = raw:Text=>    fromText raw
 
-fun unwrapPath:Text = path:Path=>    unwrap path
+fun carrierPath:Text = path:Path=>    path.carrier
 "#,
     );
 
     let wrap_path = find_item(&backend, "wrapPath");
-    let unwrap_path = find_item(&backend, "unwrapPath");
+    let carrier_path = find_item(&backend, "carrierPath");
     let wrap_body = backend.items()[wrap_path]
         .body
         .expect("wrapPath should carry a body kernel");
-    let unwrap_body = backend.items()[unwrap_path]
+    let carrier_body = backend.items()[carrier_path]
         .body
-        .expect("unwrapPath should carry a body kernel");
+        .expect("carrierPath should carry a body kernel");
 
     let wrap_kernel = &backend.kernels()[wrap_body];
     match &wrap_kernel.exprs()[wrap_kernel.root].kind {
@@ -4776,19 +4773,19 @@ fun unwrapPath:Text = path:Path=>    unwrap path
         }
     }
 
-    let unwrap_kernel = &backend.kernels()[unwrap_body];
-    match &unwrap_kernel.exprs()[unwrap_kernel.root].kind {
+    let carrier_kernel = &backend.kernels()[carrier_body];
+    match &carrier_kernel.exprs()[carrier_kernel.root].kind {
         KernelExprKind::Apply { callee, arguments } => {
             assert_eq!(arguments.len(), 1);
             assert!(matches!(
-                &unwrap_kernel.exprs()[*callee].kind,
+                &carrier_kernel.exprs()[*callee].kind,
                 KernelExprKind::DomainMember(handle)
                     if handle.domain_name.as_ref() == "Path"
-                        && handle.member_name.as_ref() == "unwrap"
+                        && handle.member_name.as_ref() == "carrier"
             ));
         }
         other => {
-            panic!("expected unwrapPath body to lower into a domain-member apply, found {other:?}")
+            panic!("expected carrierPath body to lower into a domain-member apply, found {other:?}")
         }
     }
 
@@ -4796,7 +4793,7 @@ fun unwrapPath:Text = path:Path=>    unwrap path
         .expect("representational by-reference domain member calls should compile");
     let ptr = clif_pointer_ty();
 
-    for body in [wrap_body, unwrap_body] {
+    for body in [wrap_body, carrier_body] {
         let artifact = compiled
             .kernel(body)
             .expect("compiled program should retain domain-member kernel metadata");
@@ -4815,11 +4812,9 @@ fn runtime_and_codegen_accept_domain_dot_projection_over_values() {
 domain Path over Text
     type Text -> Path
     fromText
-    type Path -> Text
-    unwrap
 
 value home : Path = fromText "/tmp/app"
-value raw : Text = home.unwrap
+value raw : Text = home.carrier
 "#,
     );
 

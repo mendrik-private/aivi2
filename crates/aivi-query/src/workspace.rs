@@ -40,6 +40,21 @@ impl Workspace {
         })
     }
 
+    /// Return every `.aivi` file found under the project workspace root.
+    ///
+    /// Unlike `db.files()`, which only returns files that have already been
+    /// imported during the current compilation, this walks the workspace root
+    /// directory on disk and loads every `.aivi` file it finds.  This lets the
+    /// workspace-wide hoist scanner discover `hoist` declarations in files that
+    /// have not yet been explicitly imported by the module being compiled.
+    ///
+    /// Directories starting with `.` or named `target` are skipped.
+    pub(crate) fn all_project_files(&self, db: &RootDatabase) -> Vec<SourceFile> {
+        let mut result = Vec::new();
+        walk_aivi_files(&self.root, db, &mut result);
+        result
+    }
+
     pub(crate) fn resolve_module_file(
         &self,
         db: &RootDatabase,
@@ -195,4 +210,31 @@ fn canonical_existing_workspace_root(path: &Path) -> Option<PathBuf> {
     fs::canonicalize(path)
         .ok()
         .or_else(|| Some(path.to_path_buf()))
+}
+
+/// Recursively walk `dir` and push every `.aivi` file found into `result`.
+/// Skips hidden directories (`.*`) and the `target` directory.
+fn walk_aivi_files(dir: &Path, db: &RootDatabase, result: &mut Vec<SourceFile>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let skip = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with('.') || n == "target")
+                .unwrap_or(false);
+            if !skip {
+                walk_aivi_files(&path, db, result);
+            }
+        } else if path.extension().and_then(|e| e.to_str()) == Some("aivi") {
+            if let Some(file) = db.file_at_path(&path) {
+                result.push(file);
+            } else if let Ok(text) = fs::read_to_string(&path) {
+                result.push(SourceFile::new(db, path, text));
+            }
+        }
+    }
 }

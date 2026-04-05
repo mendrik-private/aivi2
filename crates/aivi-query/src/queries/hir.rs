@@ -221,12 +221,14 @@ pub fn format_file(db: &RootDatabase, file: SourceFile) -> Option<String> {
     Some(formatter.format(parsed.cst()))
 }
 
-/// Collect all `hoist` declarations from modules in the current workspace.
+/// Collect all `hoist` declarations from every `.aivi` file in the workspace.
 ///
-/// Scans every file currently loaded into the database that belongs to the
-/// workspace (project files + bundled stdlib), plus explicitly ensures the
-/// stdlib prelude (`aivi`) is always included even if it has not been lazily
-/// loaded yet.  Returns raw hoist items suitable for workspace-wide injection.
+/// Walks the entire workspace root directory on disk so that `hoist`
+/// declarations in files not yet imported (e.g. library modules that nothing
+/// has explicitly `use`d yet) are still found.  This lets individual modules
+/// declare their own hoists without requiring a hub file that imports them all.
+///
+/// The bundled stdlib prelude (`aivi.aivi`) is always included.
 fn collect_workspace_hoist_items(
     db: &RootDatabase,
     workspace: &Workspace,
@@ -234,21 +236,15 @@ fn collect_workspace_hoist_items(
     let mut result = Vec::new();
     let mut seen = rustc_hash::FxHashSet::default();
 
-    // Scan all files already loaded into the database that belong to this workspace.
-    for file in db.files() {
-        if seen.contains(&file.id) {
-            continue;
+    // Scan every .aivi file in the project directory tree.
+    for file in workspace.all_project_files(db) {
+        if seen.insert(file.id) {
+            let parsed = parsed_file(db, file);
+            collect_hoists_from_module(parsed.cst(), &mut result);
         }
-        if workspace.module_name_for_file(db, file).is_none() {
-            continue;
-        }
-        seen.insert(file.id);
-        let parsed = parsed_file(db, file);
-        collect_hoists_from_module(parsed.cst(), &mut result);
     }
 
-    // Always ensure the stdlib prelude (`aivi.aivi`) is included, since it may
-    // not yet be loaded into db when the first module is compiled.
+    // Always ensure the stdlib prelude (`aivi.aivi`) is included.
     let prelude_path = ["aivi"];
     if let Some(prelude_file) = workspace.resolve_module_file(db, &prelude_path) {
         if seen.insert(prelude_file.id) {

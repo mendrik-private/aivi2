@@ -7534,7 +7534,7 @@ instance Eq Blob = {
                     Some(TypeExprKind::Name(identifier)) if identifier.text == "Text"
                 ));
                 let body = item.body.as_ref().expect("domain should have a body");
-                assert_eq!(body.members.len(), 3);
+                assert_eq!(body.members.len(), 2);
                 assert!(matches!(
                     body.members[0].name,
                     DomainMemberName::Literal(ref suffix) if suffix.text == "root"
@@ -7543,11 +7543,6 @@ instance Eq Blob = {
                     body.members[1].name,
                     DomainMemberName::Signature(ClassMemberName::Operator(ref operator))
                         if operator.text == "/"
-                ));
-                assert!(matches!(
-                    body.members[2].name,
-                    DomainMemberName::Signature(ClassMemberName::Identifier(ref identifier))
-                        if identifier.text == "unwrap"
                 ));
             }
             other => panic!("expected domain item, got {other:?}"),

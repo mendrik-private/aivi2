@@ -62,8 +62,6 @@ These variants describe the common failure cases when loading a bundled resource
 domain ResourcePath over Text = {
     type Text -> Result ResourceError ResourcePath
     parse
-    type ResourcePath -> Text
-    unwrap
 }
 ```
 

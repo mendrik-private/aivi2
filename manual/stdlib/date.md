@@ -125,7 +125,6 @@ domain DateDelta over Int
 | Member | Type | Description |
 | --- | --- | --- |
 | `days` | `Int → DateDelta` | Wrap a day count |
-| `unwrap` | `DateDelta → Int` | Extract the raw Int |
 | `(+)` | `DateDelta → DateDelta → DateDelta` | Add deltas |
 | `(-)` | `DateDelta → DateDelta → DateDelta` | Subtract deltas |
 | `(*)` | `DateDelta → Int → DateDelta` | Scale a delta |

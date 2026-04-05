@@ -3,8 +3,6 @@ domain Duration over Int = {
     literal sec : Int -> Duration
     type Duration -> Duration -> Duration
     (+)
-    type Duration -> Int
-    unwrap
 }
 
 export Duration

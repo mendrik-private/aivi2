@@ -2,8 +2,6 @@ domain Duration over Int = {
     literal ms : Int -> Duration
     type Int -> Duration
     make
-    type Duration -> Int
-    unwrap
 }
 
 domain Count over Int = {
@@ -19,8 +17,8 @@ domain NonEmpty A over List A = {
 }
 
 value delay : Duration = make 250
-value delayMillis : Int = unwrap delay
-value literalMillis : Int = unwrap 250ms
+value delayMillis : Int = delay.carrier
+value literalMillis : Int = (250ms).carrier
 value first : Int = head (singleton 1)
 
 export first

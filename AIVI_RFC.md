@@ -2433,7 +2433,7 @@ A domain introduces a nominal type over a carrier type while preserving explicit
 
 - literal suffixes
 - smart construction
-- explicit unwrapping
+- carrier access
 - domain-local operators
 - optional decode/parse surfaces
 
@@ -2631,7 +2631,7 @@ domain NonEmpty A over List A
 
 The implemented v1 domain slice:
 
-- declarations, callable members, explicit construction/unwrapping, explicit decode surfaces, and domain-local operators are in scope
+- declarations, callable members, explicit construction and carrier access, explicit decode surfaces, and domain-local operators are in scope
 - literal suffixes are current-module integer-family surfaces only
 - no implicit casts
 - no projection syntax
