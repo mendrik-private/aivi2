@@ -1431,13 +1431,7 @@ impl Formatter {
     }
 
     fn format_hoist_item(&self, item: &crate::cst::HoistItem) -> Vec<String> {
-        let path = item
-            .path
-            .as_ref()
-            .map(|p| p.as_dotted())
-            .unwrap_or_else(|| "_".to_owned());
-
-        let mut line = format!("hoist {path}");
+        let mut line = "hoist".to_owned();
 
         if !item.kind_filters.is_empty() {
             let filters = item

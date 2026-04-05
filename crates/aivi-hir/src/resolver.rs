@@ -60,6 +60,13 @@ pub trait ImportResolver {
     fn workspace_hoist_items(&self) -> Vec<RawHoistItem> {
         vec![]
     }
+
+    /// Return the dotted module path of the module currently being compiled
+    /// (e.g. `"libs.time_util"`).  Used to skip self-hoists so a module
+    /// declaring `hoist libs.time_util` inside itself doesn't create a cycle.
+    fn current_module_path(&self) -> Option<String> {
+        None
+    }
 }
 
 /// A no-op resolver that never resolves any import. Used when cross-file

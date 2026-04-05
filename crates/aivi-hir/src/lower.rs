@@ -2075,18 +2075,6 @@ impl<'a> Lowerer<'a> {
     fn lower_hoist_item(&mut self, item: &syn::HoistItem) -> HoistItem {
         let header =
             self.lower_item_header(&item.base.decorators, ItemKind::Hoist, item.base.span);
-        let module = item
-            .path
-            .as_ref()
-            .map(|path| self.lower_qualified_name(path))
-            .unwrap_or_else(|| {
-                self.emit_error(
-                    item.base.span,
-                    "hoist declaration is missing a module path",
-                    code("missing-use-path"),
-                );
-                self.make_path(&[self.make_name("invalid", item.base.span)])
-            });
 
         let kind_filters = item
             .kind_filters
@@ -2117,7 +2105,6 @@ impl<'a> Lowerer<'a> {
 
         HoistItem {
             header,
-            module,
             kind_filters,
             hiding,
         }
@@ -5361,36 +5348,9 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    fn register_hoist_item(&mut self, item: &HoistItem, namespaces: &mut Namespaces) {
-        let module_name = path_text(&item.module);
-        namespaces.hoisted_module_paths.insert(module_name.clone());
-
-        let module_segments = item.module.segments().iter().map(Name::text).collect::<Vec<_>>();
-        let module_resolution = self.resolver.resolve(&module_segments);
-
-        let ImportModuleResolution::Resolved(ref exports) = module_resolution else {
-            if matches!(module_resolution, ImportModuleResolution::Missing) {
-                self.diagnostics.push(
-                    Diagnostic::error(format!("unknown hoist module `{module_name}`"))
-                        .with_code(code("unknown-hoist-module"))
-                        .with_primary_label(
-                            item.header.span,
-                            "this workspace does not contain the hoisted module",
-                        ),
-                );
-            }
-            return;
-        };
-
-        let hiding: Vec<String> = item.hiding.iter().map(|h| h.text().to_owned()).collect();
-        self.register_hoist_exports(
-            &module_name,
-            exports,
-            &item.kind_filters,
-            &hiding,
-            item.header.span,
-            namespaces,
-        );
+    fn register_hoist_item(&mut self, _item: &HoistItem, _namespaces: &mut Namespaces) {
+        // Self-hoist declarations are propagated by the workspace scanner in aivi-query.
+        // Nothing to do here — the current module's own names are already in scope.
     }
 
     /// Register all workspace-level hoist items from other modules.
@@ -5408,10 +5368,20 @@ impl<'a> Lowerer<'a> {
             return;
         }
 
+        // Skip hoists that would resolve to the current module — a module
+        // declaring `hoist libs.foo` inside `libs/foo.aivi` itself is a
+        // self-hoist used as a "publish myself" pattern. Injecting the module's
+        // own names into its own namespace would create a compilation cycle, and
+        // is unnecessary since the names are already in scope.
+        let self_path = self.resolver.current_module_path();
+
         let synthetic_span = SourceSpan::new(FileId::new(0), Span::from(0..0));
 
         for raw in workspace_hoists {
             let module_key = raw.module_path.join(".");
+            if Some(&module_key) == self_path.as_ref() {
+                continue; // self-hoist: skip for this module, still propagates to others
+            }
             if namespaces.hoisted_module_paths.contains(&module_key) {
                 continue;
             }
@@ -13737,13 +13707,11 @@ domain Duration over Int = {
     }
 
     #[test]
-    fn hoist_item_lowers_to_hir_with_module_path() {
+    fn hoist_item_lowers_to_hir() {
         let lowered = lower_text(
             "hoist-basic.aivi",
-            "hoist aivi.list\n",
+            "hoist\n",
         );
-        // The module path can't be resolved without a real resolver, which is expected.
-        // What we verify is that the hoist item itself was lowered into the HIR correctly.
         let hoist_item = lowered
             .module()
             .items()
@@ -13753,10 +13721,6 @@ domain Duration over Int = {
                 _ => None,
             })
             .expect("lowered module should contain a hoist item");
-        let segs = hoist_item.module.segments();
-        assert_eq!(segs.len(), 2);
-        assert_eq!(segs.first().text(), "aivi");
-        assert_eq!(segs.last().text(), "list");
         assert!(hoist_item.kind_filters.is_empty());
         assert!(hoist_item.hiding.is_empty());
     }
@@ -13765,7 +13729,7 @@ domain Duration over Int = {
     fn hoist_item_lowers_kind_filters_correctly() {
         let lowered = lower_text(
             "hoist-filters.aivi",
-            "hoist aivi.list (func, value)\n",
+            "hoist (func, value)\n",
         );
         let hoist_item = lowered
             .module()
@@ -13785,7 +13749,7 @@ domain Duration over Int = {
     fn hoist_item_lowers_hiding_list_correctly() {
         let lowered = lower_text(
             "hoist-hiding.aivi",
-            "hoist aivi.list hiding (length, head)\n",
+            "hoist hiding (length, head)\n",
         );
         let hoist_item = lowered
             .module()
@@ -13806,7 +13770,7 @@ domain Duration over Int = {
     fn hoist_item_emits_diagnostic_for_unknown_kind_filter() {
         let lowered = lower_text(
             "hoist-bad-filter.aivi",
-            "hoist aivi.list (funky)\n",
+            "hoist (funky)\n",
         );
         assert!(
             lowered.has_errors(),

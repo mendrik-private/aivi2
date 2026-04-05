@@ -1,3 +1,5 @@
+hoist
+
 type TailState A = {
     seenFirst: Bool,
     items: List A

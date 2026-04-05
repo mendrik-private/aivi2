@@ -1,3 +1,5 @@
+hoist
+
 type Bool -> Bool
 func not = b => b
  T|> False

@@ -1237,17 +1237,13 @@ pub enum HoistKindFilter {
     Class,
 }
 
-/// One `hoist` declaration — makes another module's exports globally available
-/// project-wide (above `use` imports in the resolution priority chain but below
-/// local definitions and explicit `use` imports in the current module).
+/// One `hoist` declaration — lifts this module's own exports into project scope.
 ///
 /// Kind filters narrow which exported names are hoisted. An empty filter list
 /// means "hoist everything". Hidden names are explicitly excluded.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HoistItem {
     pub header: ItemHeader,
-    /// Resolved module path (e.g. `aivi.list`).
-    pub module: NamePath,
     /// Optional kind filters — empty means all kinds.
     pub kind_filters: Vec<HoistKindFilter>,
     /// Names explicitly excluded from the hoist.

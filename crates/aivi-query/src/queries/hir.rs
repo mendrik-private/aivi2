@@ -136,6 +136,10 @@ impl ImportResolver for WorkspaceImportResolver<'_> {
     fn workspace_hoist_items(&self) -> Vec<aivi_hir::resolver::RawHoistItem> {
         collect_workspace_hoist_items(self.db, self.workspace)
     }
+
+    fn current_module_path(&self) -> Option<String> {
+        self.stack.last().map(|entry| entry.module_name.clone())
+    }
 }
 
 /// Lower the given source file to HIR and memoise the result by file revision.
@@ -239,17 +243,21 @@ fn collect_workspace_hoist_items(
     // Scan every .aivi file in the project directory tree.
     for file in workspace.all_project_files(db) {
         if seen.insert(file.id) {
-            let parsed = parsed_file(db, file);
-            collect_hoists_from_module(parsed.cst(), &mut result);
+            if let Some(module_name) = workspace.module_name_for_file(db, file) {
+                let parsed = parsed_file(db, file);
+                collect_hoists_from_module(parsed.cst(), &module_name, &mut result);
+            }
         }
     }
 
-    // Always ensure the stdlib prelude (`aivi.aivi`) is included.
-    let prelude_path = ["aivi"];
-    if let Some(prelude_file) = workspace.resolve_module_file(db, &prelude_path) {
-        if seen.insert(prelude_file.id) {
-            let parsed = parsed_file(db, prelude_file);
-            collect_hoists_from_module(parsed.cst(), &mut result);
+    // Scan every bundled stdlib file so individual stdlib modules can declare
+    // `hoist` themselves (e.g. `aivi/list.aivi` declaring `hoist`).
+    for file in workspace.all_bundled_stdlib_files(db) {
+        if seen.insert(file.id) {
+            if let Some(module_name) = workspace.module_name_for_file(db, file) {
+                let parsed = parsed_file(db, file);
+                collect_hoists_from_module(parsed.cst(), &module_name, &mut result);
+            }
         }
     }
 
@@ -257,22 +265,24 @@ fn collect_workspace_hoist_items(
 }
 
 /// Walk a module's CST and collect `hoist` declarations as `RawHoistItem`s.
+///
+/// `declaring_module` is the dotted module path of the file being scanned
+/// (e.g. `"libs.time_util"`). Each `hoist` item in the file publishes the
+/// declaring module's own exports, so `declaring_module` becomes the
+/// `module_path` in every emitted `RawHoistItem`.
 fn collect_hoists_from_module(
     module: &aivi_syntax::cst::Module,
+    declaring_module: &str,
     result: &mut Vec<aivi_hir::resolver::RawHoistItem>,
 ) {
+    let module_path: Vec<String> = declaring_module.split('.').map(str::to_owned).collect();
+    if module_path.is_empty() {
+        return;
+    }
     for item in &module.items {
         let aivi_syntax::cst::Item::Hoist(hoist) = item else {
             continue;
         };
-        let Some(ref path) = hoist.path else {
-            continue;
-        };
-        let module_path: Vec<String> =
-            path.segments.iter().map(|s: &aivi_syntax::cst::Identifier| s.text.clone()).collect();
-        if module_path.is_empty() {
-            continue;
-        }
         let kind_filters: Vec<HoistKindFilter> = hoist
             .kind_filters
             .iter()
@@ -292,7 +302,7 @@ fn collect_hoists_from_module(
             .map(|h: &aivi_syntax::cst::Identifier| h.text.clone())
             .collect();
         result.push(aivi_hir::resolver::RawHoistItem {
-            module_path,
+            module_path: module_path.clone(),
             kind_filters,
             hiding,
         });

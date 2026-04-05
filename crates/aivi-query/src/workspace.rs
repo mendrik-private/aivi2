@@ -55,6 +55,19 @@ impl Workspace {
         result
     }
 
+    /// Return every `.aivi` file found in the bundled stdlib root, if any.
+    ///
+    /// Used by the hoist workspace scanner to discover self-hoist declarations
+    /// in bundled stdlib modules (e.g. `aivi/list.aivi` declaring `hoist`).
+    pub(crate) fn all_bundled_stdlib_files(&self, db: &RootDatabase) -> Vec<SourceFile> {
+        let Some(ref root) = self.bundled_stdlib_root else {
+            return Vec::new();
+        };
+        let mut result = Vec::new();
+        walk_aivi_files_from_embedded(root, db, &mut result);
+        result
+    }
+
     pub(crate) fn resolve_module_file(
         &self,
         db: &RootDatabase,
@@ -236,5 +249,17 @@ fn walk_aivi_files(dir: &Path, db: &RootDatabase, result: &mut Vec<SourceFile>) 
                 result.push(SourceFile::new(db, path, text));
             }
         }
+    }
+}
+
+/// Load every `.aivi` file from the embedded stdlib map, using `root` as the
+/// base path.  Falls back to disk if the embedded map doesn't cover a file.
+fn walk_aivi_files_from_embedded(root: &Path, db: &RootDatabase, result: &mut Vec<SourceFile>) {
+    for (relative_key, text) in STDLIB_EMBEDDED {
+        let path = root.join(relative_key.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let file = db
+            .file_at_path(&path)
+            .unwrap_or_else(|| SourceFile::new(db, path, text.to_string()));
+        result.push(file);
     }
 }

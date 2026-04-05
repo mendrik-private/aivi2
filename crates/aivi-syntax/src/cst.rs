@@ -914,21 +914,20 @@ pub struct HoistKindFilter {
     pub text: String,
 }
 
-/// `hoist` declaration — makes another module's exports globally available project-wide.
+/// `hoist` declaration — lifts this module's own exports into the project-wide global scope.
 ///
 /// Syntax:
 /// ```aivi
-/// hoist aivi.list
-/// hoist aivi.list (func, value)
-/// hoist aivi.list hiding (length, head)
-/// hoist aivi.list (func, value) hiding (length, head)
+/// hoist
+/// hoist (func)
+/// hoist (func, value)
+/// hoist hiding (foo)
+/// hoist (func) hiding (foo)
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HoistItem {
     pub base: ItemBase,
     pub keyword_span: SourceSpan,
-    /// Module path, e.g. `aivi.list`.
-    pub path: Option<QualifiedName>,
     /// Optional kind filters — if empty, all kinds are hoisted.
     pub kind_filters: Vec<HoistKindFilter>,
     /// Names explicitly excluded from the hoist.

@@ -1,3 +1,5 @@
+hoist
+
 type (A, B) -> A
 func fst = pair => pair
  ||> (a, _) -> a

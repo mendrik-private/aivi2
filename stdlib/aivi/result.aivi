@@ -1,3 +1,5 @@
+hoist
+
 type A -> (Result E A)
 func keepOk = item =>
     Ok item

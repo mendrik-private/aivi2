@@ -2024,17 +2024,6 @@ impl<'a> Parser<'a> {
         end: usize,
     ) -> crate::cst::HoistItem {
         let mut cursor = keyword_index + 1;
-        let path = self.parse_qualified_name(&mut cursor, end);
-        if path.is_none() {
-            self.diagnostics.push(
-                Diagnostic::error("`hoist` declaration is missing its module path")
-                    .with_code(MISSING_USE_PATH)
-                    .with_primary_label(
-                        self.source_span_of_token(keyword_index),
-                        "expected a dotted module path such as `aivi.list`",
-                    ),
-            );
-        }
 
         // Optional kind filter list: `(func, value, signal, type, domain, class)`
         let kind_filters = if self
@@ -2102,7 +2091,6 @@ impl<'a> Parser<'a> {
         crate::cst::HoistItem {
             base,
             keyword_span: self.source_span_of_token(keyword_index),
-            path,
             kind_filters,
             hiding,
         }
@@ -8441,23 +8429,19 @@ fun scoreLineFor:Text = "Score: {.}"
 
     #[test]
     fn parser_builds_hoist_item_with_no_filters() {
-        let (_, parsed) = load("hoist aivi.list\n");
+        let (_, parsed) = load("hoist\n");
         assert!(!parsed.has_errors(), "hoist should parse cleanly: {:?}", parsed.all_diagnostics().collect::<Vec<_>>());
         assert_eq!(parsed.module.items.len(), 1);
         let Item::Hoist(hoist) = &parsed.module.items[0] else {
             panic!("expected hoist item");
         };
-        assert_eq!(
-            hoist.path.as_ref().map(|p| p.as_dotted()).as_deref(),
-            Some("aivi.list")
-        );
         assert!(hoist.kind_filters.is_empty());
         assert!(hoist.hiding.is_empty());
     }
 
     #[test]
     fn parser_builds_hoist_item_with_kind_filters() {
-        let (_, parsed) = load("hoist aivi.list (func, value)\n");
+        let (_, parsed) = load("hoist (func, value)\n");
         assert!(!parsed.has_errors(), "hoist with filters should parse cleanly: {:?}", parsed.all_diagnostics().collect::<Vec<_>>());
         let Item::Hoist(hoist) = &parsed.module.items[0] else {
             panic!("expected hoist item");
@@ -8469,7 +8453,7 @@ fun scoreLineFor:Text = "Score: {.}"
 
     #[test]
     fn parser_builds_hoist_item_with_hiding_clause() {
-        let (_, parsed) = load("hoist aivi.list hiding (length, head)\n");
+        let (_, parsed) = load("hoist hiding (length, head)\n");
         assert!(!parsed.has_errors(), "hoist with hiding should parse cleanly: {:?}", parsed.all_diagnostics().collect::<Vec<_>>());
         let Item::Hoist(hoist) = &parsed.module.items[0] else {
             panic!("expected hoist item");
@@ -8482,7 +8466,7 @@ fun scoreLineFor:Text = "Score: {.}"
 
     #[test]
     fn parser_builds_hoist_item_with_filters_and_hiding() {
-        let (_, parsed) = load("hoist aivi.list (func, value) hiding (map, filter)\n");
+        let (_, parsed) = load("hoist (func, value) hiding (map, filter)\n");
         assert!(!parsed.has_errors(), "hoist with filters and hiding should parse cleanly: {:?}", parsed.all_diagnostics().collect::<Vec<_>>());
         let Item::Hoist(hoist) = &parsed.module.items[0] else {
             panic!("expected hoist item");

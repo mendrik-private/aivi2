@@ -1333,8 +1333,8 @@ impl Validator<'_> {
                         },
                     );
                 }
-                Item::Hoist(item) => {
-                    self.check_name_path(&item.module);
+                Item::Hoist(_item) => {
+                    // No module path to validate — hoist is a self-declaration.
                 }
             }
         }
