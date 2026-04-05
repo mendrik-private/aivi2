@@ -111,7 +111,7 @@ pub use recurrence_elaboration::{
     RecurrenceNonSourceWakeupBinding, RecurrenceRuntimeExpr, RecurrenceRuntimeStageBlocker,
     RecurrenceStagePlan, elaborate_recurrences,
 };
-pub use resolver::{ImportCycle, ImportModuleResolution, ImportResolver, NullImportResolver};
+pub use resolver::{ImportCycle, ImportModuleResolution, ImportResolver, NullImportResolver, RawHoistItem};
 pub use sequence::{AtLeastTwo, NonEmpty, SequenceError};
 pub use signal_metadata_elaboration::{
     collect_signal_dependencies_for_expr, collect_signal_dependencies_for_exprs,

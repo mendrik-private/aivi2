@@ -2,7 +2,8 @@ use std::{cell::RefCell, sync::Arc};
 
 use aivi_base::Diagnostic;
 use aivi_hir::{
-    ExportedNames, ImportCycle, ImportModuleResolution, ImportResolver, LoweringResult, LspSymbol,
+    ExportedNames, HoistKindFilter, ImportCycle, ImportModuleResolution, ImportResolver,
+    LoweringResult, LspSymbol,
     exports, extract_symbols, lower_module_with_resolver,
 };
 use aivi_syntax::Formatter;
@@ -131,6 +132,10 @@ impl ImportResolver for WorkspaceImportResolver<'_> {
         let lowered = hir_module_with_stack(self.db, file, self.stack);
         ImportModuleResolution::Resolved(lowered.exported_names().clone())
     }
+
+    fn workspace_hoist_items(&self) -> Vec<aivi_hir::resolver::RawHoistItem> {
+        collect_workspace_hoist_items(self.db, self.workspace)
+    }
 }
 
 /// Lower the given source file to HIR and memoise the result by file revision.
@@ -214,4 +219,86 @@ pub fn format_file(db: &RootDatabase, file: SourceFile) -> Option<String> {
     let parsed = parsed_file(db, file);
     let formatter = Formatter;
     Some(formatter.format(parsed.cst()))
+}
+
+/// Collect all `hoist` declarations from modules in the current workspace.
+///
+/// Scans every file currently loaded into the database that belongs to the
+/// workspace (project files + bundled stdlib), plus explicitly ensures the
+/// stdlib prelude (`aivi`) is always included even if it has not been lazily
+/// loaded yet.  Returns raw hoist items suitable for workspace-wide injection.
+fn collect_workspace_hoist_items(
+    db: &RootDatabase,
+    workspace: &Workspace,
+) -> Vec<aivi_hir::resolver::RawHoistItem> {
+    let mut result = Vec::new();
+    let mut seen = rustc_hash::FxHashSet::default();
+
+    // Scan all files already loaded into the database that belong to this workspace.
+    for file in db.files() {
+        if seen.contains(&file.id) {
+            continue;
+        }
+        if workspace.module_name_for_file(db, file).is_none() {
+            continue;
+        }
+        seen.insert(file.id);
+        let parsed = parsed_file(db, file);
+        collect_hoists_from_module(parsed.cst(), &mut result);
+    }
+
+    // Always ensure the stdlib prelude (`aivi.aivi`) is included, since it may
+    // not yet be loaded into db when the first module is compiled.
+    let prelude_path = ["aivi"];
+    if let Some(prelude_file) = workspace.resolve_module_file(db, &prelude_path) {
+        if seen.insert(prelude_file.id) {
+            let parsed = parsed_file(db, prelude_file);
+            collect_hoists_from_module(parsed.cst(), &mut result);
+        }
+    }
+
+    result
+}
+
+/// Walk a module's CST and collect `hoist` declarations as `RawHoistItem`s.
+fn collect_hoists_from_module(
+    module: &aivi_syntax::cst::Module,
+    result: &mut Vec<aivi_hir::resolver::RawHoistItem>,
+) {
+    for item in &module.items {
+        let aivi_syntax::cst::Item::Hoist(hoist) = item else {
+            continue;
+        };
+        let Some(ref path) = hoist.path else {
+            continue;
+        };
+        let module_path: Vec<String> =
+            path.segments.iter().map(|s: &aivi_syntax::cst::Identifier| s.text.clone()).collect();
+        if module_path.is_empty() {
+            continue;
+        }
+        let kind_filters: Vec<HoistKindFilter> = hoist
+            .kind_filters
+            .iter()
+            .filter_map(|kf| match kf.text.as_str() {
+                "func" => Some(HoistKindFilter::Func),
+                "value" => Some(HoistKindFilter::Value),
+                "signal" => Some(HoistKindFilter::Signal),
+                "type" => Some(HoistKindFilter::Type),
+                "domain" => Some(HoistKindFilter::Domain),
+                "class" => Some(HoistKindFilter::Class),
+                _ => None,
+            })
+            .collect();
+        let hiding: Vec<String> = hoist
+            .hiding
+            .iter()
+            .map(|h: &aivi_syntax::cst::Identifier| h.text.clone())
+            .collect();
+        result.push(aivi_hir::resolver::RawHoistItem {
+            module_path,
+            kind_filters,
+            hiding,
+        });
+    }
 }
