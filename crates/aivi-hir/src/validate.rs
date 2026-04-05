@@ -10066,7 +10066,7 @@ value resultLabel =
                 imported_name: name(text),
                 local_name: name(text),
                 resolution: ImportBindingResolution::Resolved,
-                metadata: ImportBindingMetadata::TypeConstructor { kind },
+                metadata: ImportBindingMetadata::TypeConstructor { kind, fields: None },
                 callable_type: None,
                 deprecation: None,
             })

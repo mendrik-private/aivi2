@@ -381,16 +381,34 @@ fn accumulate_stage(pipe: &PipeExpr) -> Option<AccumulateStage> {
     })
 }
 
+/// Returns the `ItemId` of a signal referenced by the given expression, or `None`
+/// if the expression does not reference a signal. For imported signals, a synthetic
+/// `ItemId` is produced using the same formula as `hir_adapter.rs`:
+/// `synthetic_id = item_count + import_id.as_raw()`.
 fn signal_item_reference(module: &Module, expr_id: ExprId) -> Option<ItemId> {
     let ExprKind::Name(reference) = &module.exprs()[expr_id].kind else {
         return None;
     };
-    let crate::ResolutionState::Resolved(crate::TermResolution::Item(item_id)) =
-        reference.resolution.as_ref()
-    else {
-        return None;
-    };
-    matches!(module.items().get(*item_id), Some(Item::Signal(_))).then_some(*item_id)
+    match reference.resolution.as_ref() {
+        crate::ResolutionState::Resolved(crate::TermResolution::Item(item_id)) => {
+            matches!(module.items().get(*item_id), Some(Item::Signal(_))).then_some(*item_id)
+        }
+        crate::ResolutionState::Resolved(crate::TermResolution::Import(import_id)) => {
+            let binding = module.imports().get(*import_id)?;
+            matches!(
+                &binding.metadata,
+                crate::ImportBindingMetadata::Value {
+                    ty: crate::ImportValueType::Signal(_),
+                }
+            )
+            .then(|| {
+                let hir_item_count =
+                    u32::try_from(module.items().iter().count()).expect("HIR item count fits u32");
+                ItemId::from_raw(hir_item_count + import_id.as_raw())
+            })
+        }
+        _ => None,
+    }
 }
 
 fn elaborate_accumulate_pipe(

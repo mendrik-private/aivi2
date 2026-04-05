@@ -4873,7 +4873,12 @@ impl<'a> Parser<'a> {
         let start = *cursor;
         let pattern = self.parse_pattern(cursor, end, PatternStop::arrow_context())?;
         let _ = self.consume_kind(cursor, end, TokenKind::ThinArrow)?;
-        let body = self.parse_expr(cursor, end, outer_stop.with_pipe_stage())?;
+        // The arm body may contain inline pipe expressions (e.g. `first ||> { email } -> email`).
+        // Only line-start pipe operators terminate the body — those belong to sibling arms.
+        let mut body_stop = outer_stop;
+        body_stop.pipe_stage = false;
+        body_stop.pipe_stage_line_start_only = true;
+        let body = self.parse_expr(cursor, end, body_stop)?;
         Some(PipeCaseArm {
             pattern,
             body,
@@ -5560,7 +5565,10 @@ impl<'a> Parser<'a> {
             TokenKind::RBracket => stop.rbracket,
             TokenKind::Arrow => stop.arrow,
             TokenKind::Hash => stop.hash,
-            kind if kind.is_pipe_operator() => stop.pipe_stage,
+            kind if kind.is_pipe_operator() => {
+                stop.pipe_stage
+                    || (stop.pipe_stage_line_start_only && self.tokens[index].line_start())
+            }
             _ => false,
         }
     }
@@ -6219,6 +6227,10 @@ struct ExprStop {
     rbracket: bool,
     arrow: bool,
     pipe_stage: bool,
+    /// Like `pipe_stage`, but only stops at pipe operators that begin a new line.
+    /// Used for pipe-case arm bodies so inline `||>` continuations are allowed
+    /// (e.g. `||> [first, ...rest] -> first ||> { email } -> email`).
+    pipe_stage_line_start_only: bool,
     hash: bool,
     patch_entry: bool,
 }

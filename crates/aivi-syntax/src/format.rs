@@ -3562,7 +3562,7 @@ value view =
     #[test]
     fn formatter_aligns_match_arms_and_top_level_spacing() {
         let formatted = format_text(
-            "type Status=Idle|Failed Text\nfun label:Text = status:Status =>\nstatus||>Idle->\"idle\"||>Failed reason->\"failed {reason}\"\n",
+            "type Status=Idle|Failed Text\nfun label:Text = status:Status =>\nstatus\n||>Idle->\"idle\"\n||>Failed reason->\"failed {reason}\"\n",
         );
         assert_eq!(
             formatted,

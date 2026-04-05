@@ -1890,7 +1890,10 @@ impl<'a> GeneralExprElaborator<'a> {
 
         // Infer the target type — must be a closed record or an imported record type.
         let target_ty = self.typing.infer_expr(target, env, ambient);
-        let Some(target_gate_ty) = target_ty.actual_gate_type() else {
+        let Some(target_gate_ty) = target_ty
+            .actual_gate_type()
+            .or_else(|| target_ty.ty.clone())
+        else {
             return Err(vec![GeneralExprBlocker::UnknownExprType { span }]);
         };
         // Extract the record fields — either from a local Record or from an imported TypeConstructor.

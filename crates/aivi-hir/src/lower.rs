@@ -12159,7 +12159,7 @@ fun boardTextStep:Text = acc:Text row:Int =>
 
         let request_import = lowered.module().imports().iter().find_map(|(_, import)| {
             match (&*import.local_name.text(), &import.metadata) {
-                ("Request", ImportBindingMetadata::TypeConstructor { kind }) => Some(kind),
+                ("Request", ImportBindingMetadata::TypeConstructor { kind, .. }) => Some(kind),
                 _ => None,
             }
         });
@@ -12171,7 +12171,7 @@ fun boardTextStep:Text = acc:Text row:Int =>
 
         let channel_import = lowered.module().imports().iter().find_map(|(_, import)| {
             match (&*import.local_name.text(), &import.metadata) {
-                ("Channel", ImportBindingMetadata::TypeConstructor { kind }) => Some(kind),
+                ("Channel", ImportBindingMetadata::TypeConstructor { kind, .. }) => Some(kind),
                 _ => None,
             }
         });
@@ -12247,7 +12247,7 @@ fun boardTextStep:Text = acc:Text row:Int =>
         assert!(
             matches!(
                 aliased_request.map(|(_, import)| &import.metadata),
-                Some(ImportBindingMetadata::TypeConstructor { kind })
+                Some(ImportBindingMetadata::TypeConstructor { kind, .. })
                     if kind == &Kind::constructor(1)
             ),
             "expected aliased Request import to preserve constructor kind metadata"
