@@ -279,6 +279,55 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
             });
         }
 
+        // Add stub Input signal entries for all workspace Signal import bindings.
+        // These use the same deterministic synthetic HirItemId formula as lower.rs:
+        //   synthetic_id = hir_item_count + import_id.as_raw()
+        // This ensures signal_items_by_handle can map signal handles → backend items.
+        let hir_item_count =
+            u32::try_from(self.module.items().iter().count()).expect("HIR item count fits u32");
+        for (import_id, binding) in self.module.imports().iter() {
+            let hir::ImportBindingMetadata::Value {
+                ty: hir::ImportValueType::Signal(_),
+            } = &binding.metadata
+            else {
+                continue;
+            };
+            let signal_name = binding.local_name.text();
+            let synthetic_item_id =
+                hir::ItemId::from_raw(hir_item_count + import_id.as_raw());
+            let owner = match graph_builder.add_owner(signal_name, None) {
+                Ok(owner) => owner,
+                Err(err) => {
+                    errors.push(HirRuntimeAdapterError::GraphBuild(err));
+                    continue;
+                }
+            };
+            let input = match graph_builder.add_input(signal_name, Some(owner)) {
+                Ok(input) => input,
+                Err(err) => {
+                    errors.push(HirRuntimeAdapterError::GraphBuild(err));
+                    continue;
+                }
+            };
+            public_signals.insert(synthetic_item_id, input.as_signal());
+            public_signal_names.insert(signal_name.to_owned(), input.as_signal());
+            source_inputs.insert(synthetic_item_id, input);
+            owners.push(HirOwnerBinding {
+                item: synthetic_item_id,
+                span: binding.span,
+                name: signal_name.into(),
+                handle: owner,
+            });
+            signals.push(HirSignalBinding {
+                item: synthetic_item_id,
+                span: binding.span,
+                name: signal_name.into(),
+                owner,
+                kind: HirSignalBindingKind::Input { signal: input },
+                source_input: Some(input),
+            });
+        }
+
         let mut next_reactive_clause_raw = 0u32;
         for binding in &mut signals {
             let Some(hir::Item::Signal(signal)) = self.module.items().get(binding.item) else {

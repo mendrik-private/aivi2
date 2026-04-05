@@ -622,13 +622,20 @@ pub enum ImportBindingMetadata {
     },
     TypeConstructor {
         kind: Kind,
+        /// Record fields when the exported type is a record alias, enabling
+        /// cross-module field projection (`thread.subject`) in typed-core.
+        fields: Option<Vec<ImportRecordField>>,
     },
-    /// An imported domain type. Carries the kind for type-checking and the set of literal-suffix
+    /// An imported domain type. Carries the kind for type-checking, the set of literal-suffix
     /// members so importing modules can resolve suffixed integer literals (e.g. `120ms`) without
-    /// re-parsing the source module.
+    /// re-parsing the source module, and the carrier type so `.unwrap`/`.value` projections on
+    /// domain-typed fields can be type-checked in importing modules.
     Domain {
         kind: Kind,
         literal_suffixes: Vec<ImportedDomainLiteralSuffix>,
+        /// The carrier type (e.g. `Text` for `domain Foo over Text`). `None` when the carrier
+        /// type could not be serialised to an `ImportValueType`.
+        carrier: Option<ImportValueType>,
     },
     BuiltinType(BuiltinType),
     BuiltinTerm(BuiltinTerm),

@@ -203,8 +203,10 @@ fn explicit_item_exported_name(
                 let metadata = if ambient {
                     ImportBindingMetadata::AmbientType
                 } else {
+                    let fields = extract_type_record_fields(module, item);
                     ImportBindingMetadata::TypeConstructor {
                         kind: aivi_typing::Kind::constructor(item.parameters.len()),
+                        fields,
                     }
                 };
                 return Some(ExportedName {
@@ -221,14 +223,52 @@ fn explicit_item_exported_name(
             };
             variants
                 .iter()
-                .any(|variant| variant.name.text() == exported_name)
-                .then(|| ExportedName {
-                    name: exported_name.to_owned(),
-                    kind: ExportedNameKind::Value,
-                    metadata: builtin_term_metadata(exported_name)
-                        .unwrap_or(ImportBindingMetadata::OpaqueValue),
-                    callable_type: None,
-                    deprecation,
+                .find(|variant| variant.name.text() == exported_name)
+                .map(|variant| {
+                    let metadata = builtin_term_metadata(exported_name)
+                        .unwrap_or_else(|| {
+                            // For non-builtin sum constructors, store the owner type name so
+                            // that `import_value_type` can return a non-None GateType for them.
+                            // Zero-arg constructors have no Arrow wrapper; constructors with
+                            // fields wrap the field types in Arrow chains.
+                            let owner_type_name: String = item.name.text().into();
+                            if variant.fields.is_empty() {
+                                ImportBindingMetadata::Value {
+                                    ty: ImportValueType::Named {
+                                        type_name: owner_type_name,
+                                        arguments: Vec::new(),
+                                    },
+                                }
+                            } else {
+                                // Multi-field constructors: build Arrow chain over field types,
+                                // returning the owner Named type.
+                                let result = ImportValueType::Named {
+                                    type_name: owner_type_name,
+                                    arguments: Vec::new(),
+                                };
+                                let ty = variant.fields.iter().rev().fold(result, |acc, field| {
+                                    let param_ty =
+                                        import_value_type(module, field.ty).unwrap_or(
+                                            ImportValueType::Named {
+                                                type_name: "Unknown".into(),
+                                                arguments: Vec::new(),
+                                            },
+                                        );
+                                    ImportValueType::Arrow {
+                                        parameter: Box::new(param_ty),
+                                        result: Box::new(acc),
+                                    }
+                                });
+                                ImportBindingMetadata::Value { ty }
+                            }
+                        });
+                    ExportedName {
+                        name: exported_name.to_owned(),
+                        kind: ExportedNameKind::Value,
+                        metadata,
+                        callable_type: None,
+                        deprecation,
+                    }
                 })
         }
         Item::Class(item) => (item.name.text() == exported_name).then(|| ExportedName {
@@ -239,6 +279,7 @@ fn explicit_item_exported_name(
             } else {
                 ImportBindingMetadata::TypeConstructor {
                     kind: aivi_typing::Kind::constructor(item.parameters.len()),
+                    fields: None,
                 }
             },
             callable_type: None,
@@ -266,6 +307,7 @@ fn explicit_item_exported_name(
                 ImportBindingMetadata::Domain {
                     kind: aivi_typing::Kind::constructor(item.parameters.len()),
                     literal_suffixes,
+                    carrier: import_value_type(module, item.carrier),
                 }
             },
             callable_type: None,
@@ -318,6 +360,7 @@ fn item_to_exported_name(module: &Module, item: &Item) -> Option<ExportedName> {
             kind: ExportedNameKind::Type,
             metadata: ImportBindingMetadata::TypeConstructor {
                 kind: aivi_typing::Kind::constructor(item.parameters.len()),
+                fields: extract_type_record_fields(module, item),
             },
             callable_type: None,
             deprecation,
@@ -355,6 +398,7 @@ fn item_to_exported_name(module: &Module, item: &Item) -> Option<ExportedName> {
             kind: ExportedNameKind::Class,
             metadata: ImportBindingMetadata::TypeConstructor {
                 kind: aivi_typing::Kind::constructor(item.parameters.len()),
+                fields: None,
             },
             callable_type: None,
             deprecation,
@@ -379,6 +423,7 @@ fn item_to_exported_name(module: &Module, item: &Item) -> Option<ExportedName> {
                 ImportBindingMetadata::Domain {
                     kind: aivi_typing::Kind::constructor(item.parameters.len()),
                     literal_suffixes,
+                    carrier: import_value_type(module, item.carrier),
                 }
             },
             callable_type: None,
@@ -550,7 +595,33 @@ fn deprecation_notice(module: &Module, deprecated: &DeprecatedDecorator) -> Depr
 pub(crate) fn import_value_type(module: &Module, ty: TypeId) -> Option<ImportValueType> {
     let type_node = module.types().get(ty)?;
     match &type_node.kind {
-        TypeKind::Name(reference) => primitive_import_value_type(reference),
+        TypeKind::Name(reference) => {
+            // First try builtins.
+            if let Some(prim) = primitive_import_value_type(reference) {
+                return Some(prim);
+            }
+            // For user-defined types, emit a Named entry so field projection
+            // can be resolved in importing modules via lower_import_value_type.
+            match reference.resolution.as_ref() {
+                ResolutionState::Resolved(TypeResolution::Item(item_id)) => {
+                    let item = module.items().get(*item_id)?;
+                    let name = item_type_name(item);
+                    Some(ImportValueType::Named {
+                        type_name: name,
+                        arguments: Vec::new(),
+                    })
+                }
+                ResolutionState::Resolved(TypeResolution::Import(import_id)) => {
+                    let binding = module.imports().get(*import_id)?;
+                    let name = binding.imported_name.text().to_owned();
+                    Some(ImportValueType::Named {
+                        type_name: name,
+                        arguments: Vec::new(),
+                    })
+                }
+                _ => None,
+            }
+        }
         TypeKind::Tuple(elements) => Some(ImportValueType::Tuple(
             elements
                 .iter()
@@ -1054,6 +1125,26 @@ fn builtin_term_metadata(name: &str) -> Option<ImportBindingMetadata> {
         "Err" => Some(ImportBindingMetadata::BuiltinTerm(BuiltinTerm::Err)),
         "Valid" => Some(ImportBindingMetadata::BuiltinTerm(BuiltinTerm::Valid)),
         "Invalid" => Some(ImportBindingMetadata::BuiltinTerm(BuiltinTerm::Invalid)),
+        _ => None,
+    }
+}
+
+/// Extract record fields from a type alias that resolves directly to a record.
+/// Returns `Some(fields)` only for zero-parameter aliases of the form
+/// `type Foo = { field: Type, ... }`. Parameterised types and sum types return `None`.
+fn extract_type_record_fields(
+    module: &Module,
+    item: &crate::TypeItem,
+) -> Option<Vec<ImportRecordField>> {
+    // Only monomorphic record aliases carry stable field lists.
+    if !item.parameters.is_empty() {
+        return None;
+    }
+    let TypeItemBody::Alias(alias) = &item.body else {
+        return None;
+    };
+    match import_value_type(module, *alias)? {
+        ImportValueType::Record(fields) => Some(fields),
         _ => None,
     }
 }

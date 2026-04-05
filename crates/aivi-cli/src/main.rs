@@ -6,7 +6,7 @@ mod run_session;
 
 use std::{
     cell::{Cell, RefCell},
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap, VecDeque},
     env,
     ffi::OsString,
     fs,
@@ -24,13 +24,14 @@ use std::os::unix::fs::PermissionsExt;
 
 use aivi_backend::{
     DetachedRuntimeValue, ItemId as BackendItemId, KernelEvaluator, Program as BackendProgram,
-    RuntimeFloat, RuntimeValue, compile_program_cached, lower_module as lower_backend_module,
-    validate_program,
+    RuntimeFloat, RuntimeRecordField, RuntimeValue, compile_program_cached,
+    lower_module as lower_backend_module, validate_program,
 };
 use aivi_base::{Diagnostic, FileId, Severity, SourceDatabase, SourceSpan};
 use aivi_core::{
     IncludedItems, RuntimeFragmentSpec, lower_runtime_fragment,
-    lower_runtime_module_with_items, runtime_fragment_included_items,
+    lower_runtime_module_with_items, lower_runtime_module_with_workspace,
+    runtime_fragment_included_items,
     validate_module as validate_core_module,
 };
 use aivi_gtk::{
@@ -41,15 +42,15 @@ use aivi_gtk::{
     lower_widget_bridge,
 };
 use aivi_hir::{
-    BuiltinTerm, BuiltinType, DecoratorPayload, ExprId as HirExprId, ExprKind, GeneralExprOutcome,
-    GeneralExprParameter, Item, ItemId as HirItemId, MarkupRuntimeExprSites, Module as HirModule,
-    PatternId as HirPatternId, PatternKind, TermResolution, TypeKind, TypeResolution,
-    ValidationMode, ValueItem, collect_markup_runtime_expr_sites, elaborate_runtime_expr_with_env,
+    BuiltinTerm, BuiltinType, DecoratorPayload, ExprId as HirExprId, ExprKind, GateRecordField,
+    GateType, GeneralExprOutcome, GeneralExprParameter, ImportBindingMetadata, ImportId,
+    ImportValueType, Item, ItemId as HirItemId, MarkupRuntimeExprSites, Module as HirModule,
+    PatternId as HirPatternId, PatternKind, TermResolution, ValidationMode, ValueItem, collect_markup_runtime_expr_sites, elaborate_runtime_expr_with_env,
     signal_payload_type,
 };
 use aivi_lambda::{lower_module as lower_lambda_module, validate_module as validate_lambda_module};
 use aivi_query::{
-    RootDatabase, SourceFile as QuerySourceFile, hir_module as query_hir_module,
+    HirModuleResult, RootDatabase, SourceFile as QuerySourceFile, hir_module as query_hir_module,
     parsed_file as query_parsed_file, resolve_v1_entrypoint,
 };
 use aivi_runtime::{
@@ -576,6 +577,125 @@ impl WorkspaceHirSnapshot {
     }
 }
 
+/// Compute a module name from a file path relative to the workspace root.
+/// Returns e.g. "libs.types" for "<root>/libs/types.aivi".
+fn module_name_from_path(workspace_root: &Path, file_path: &Path) -> Option<String> {
+    let relative = file_path.strip_prefix(workspace_root).ok()?;
+    if relative.extension()?.to_str()? != "aivi" {
+        return None;
+    }
+    let mut segments = relative
+        .iter()
+        .map(|seg| seg.to_str().map(str::to_owned))
+        .collect::<Option<Vec<_>>>()?;
+    let file_name = segments.pop()?;
+    let stem = Path::new(&file_name).file_stem()?.to_str()?.to_owned();
+    segments.push(stem);
+    Some(segments.join("."))
+}
+
+/// Collect all non-entry workspace HIR modules in topological dependency order
+/// (dependencies before dependents) so that workspace function bodies are
+/// available when later modules reference them.
+fn collect_workspace_hirs_sorted(
+    snapshot: &WorkspaceHirSnapshot,
+) -> Vec<(String, Arc<HirModuleResult>)> {
+    let entry_path_raw = snapshot.frontend.entry.path(&snapshot.frontend.db);
+    // Canonicalize to absolute paths so strip_prefix works correctly when aivi is
+    // invoked with a relative path (e.g. `aivi run apps/ui/main.aivi`).
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let entry_path = std::fs::canonicalize(&entry_path_raw)
+        .or_else(|_| std::fs::canonicalize(cwd.join(&entry_path_raw)))
+        .unwrap_or_else(|_| cwd.join(&entry_path_raw));
+    let workspace_root_raw = discover_workspace_root(&entry_path);
+    let workspace_root = std::fs::canonicalize(&workspace_root_raw)
+        .unwrap_or(workspace_root_raw);
+
+    // Collect (module_name, file, hir) for all non-entry, non-stdlib workspace files.
+    let mut ws_modules: Vec<(String, QuerySourceFile, Arc<HirModuleResult>)> = Vec::new();
+    for &file in &snapshot.files {
+        let path_raw = file.path(&snapshot.frontend.db);
+        let path = std::fs::canonicalize(&path_raw)
+            .or_else(|_| std::fs::canonicalize(cwd.join(&path_raw)))
+            .unwrap_or_else(|_| cwd.join(&path_raw));
+        if path == entry_path {
+            continue;
+        }
+        let Some(module_name) = module_name_from_path(&workspace_root, &path) else {
+            continue;
+        };
+        // Skip bundled stdlib modules (e.g. aivi.list, aivi.option).
+        if module_name.starts_with("aivi.") {
+            continue;
+        }
+        let hir = query_hir_module(&snapshot.frontend.db, file);
+        ws_modules.push((module_name, file, hir));
+    }
+
+    // Build dependency graph: module_name → set of workspace module names it depends on.
+    let ws_names: std::collections::HashSet<&str> =
+        ws_modules.iter().map(|(n, _, _)| n.as_str()).collect();
+    let deps: Vec<(String, Vec<String>)> = ws_modules
+        .iter()
+        .map(|(name, _, hir)| {
+            let module_hir = hir.module();
+            let mut module_deps = Vec::new();
+            for (_, item) in module_hir.items().iter() {
+                let aivi_hir::Item::Use(use_item) = item else {
+                    continue;
+                };
+                let dep_name = use_item.module.to_string();
+                if ws_names.contains(dep_name.as_str()) && dep_name != *name {
+                    module_deps.push(dep_name);
+                }
+            }
+            module_deps.sort();
+            module_deps.dedup();
+            (name.clone(), module_deps)
+        })
+        .collect();
+
+    // Topological sort (Kahn's algorithm):
+    // in_degree[A] = number of A's unprocessed dependencies.
+    let mut in_degree: HashMap<String, usize> =
+        deps.iter().map(|(n, d)| (n.clone(), d.len())).collect();
+    let mut adjacency: HashMap<String, Vec<String>> = HashMap::new();
+    for (name, module_deps) in &deps {
+        for dep in module_deps {
+            adjacency.entry(dep.clone()).or_default().push(name.clone());
+        }
+    }
+    let mut queue: VecDeque<String> = in_degree
+        .iter()
+        .filter(|(_, d)| **d == 0)
+        .map(|(n, _)| n.clone())
+        .collect();
+    let mut sorted_names: Vec<String> = Vec::new();
+    while let Some(name) = queue.pop_front() {
+        sorted_names.push(name.clone());
+        for dependent in adjacency.get(&name).cloned().unwrap_or_default() {
+            let count = in_degree.entry(dependent.clone()).or_insert(0);
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                queue.push_back(dependent);
+            }
+        }
+    }
+
+    // Build final result in topological order.
+    let module_map: HashMap<String, Arc<HirModuleResult>> = ws_modules
+        .into_iter()
+        .map(|(name, _, hir)| (name, hir))
+        .collect();
+    sorted_names
+        .into_iter()
+        .filter_map(|name| {
+            let hir = module_map.get(&name)?.clone();
+            Some((name, hir))
+        })
+        .collect()
+}
+
 fn workspace_syntax_failed(
     snapshot: &WorkspaceHirSnapshot,
     mut print: impl FnMut(&SourceDatabase, &[Diagnostic]) -> bool,
@@ -677,6 +797,10 @@ struct RunArtifact {
     core: aivi_core::Module,
     backend: Arc<BackendProgram>,
     event_handlers: BTreeMap<HirExprId, ResolvedRunEventHandler>,
+    /// Default values to publish into stub Input signal handles for cross-module
+    /// workspace imports before the first hydration cycle. Keyed by the input handle
+    /// that was synthesised in the runtime assembly for each import signal.
+    stub_signal_defaults: Vec<(RuntimeInputHandle, DetachedRuntimeValue)>,
 }
 
 #[derive(Clone, Debug)]
@@ -1004,7 +1128,17 @@ fn run_markup_file_with_launch_config(
 
     let t0 = Instant::now();
     let lowered = snapshot.entry_hir();
-    let artifact = match prepare_run_artifact(&snapshot.sources, lowered.module(), requested_view) {
+    let workspace_hir_arcs = collect_workspace_hirs_sorted(&snapshot);
+    let workspace_hirs: Vec<(&str, &HirModule)> = workspace_hir_arcs
+        .iter()
+        .map(|(name, arc)| (name.as_str(), arc.module()))
+        .collect();
+    let artifact = match prepare_run_artifact(
+        &snapshot.sources,
+        lowered.module(),
+        &workspace_hirs,
+        requested_view,
+    ) {
         Ok(artifact) => artifact,
         Err(message) => {
             eprintln!("{message}");
@@ -1687,6 +1821,7 @@ fn write_output_line(target: &mut impl Write, text: &str) -> Result<(), String> 
 fn prepare_run_artifact(
     sources: &SourceDatabase,
     module: &HirModule,
+    workspace_hirs: &[(&str, &HirModule)],
     requested_view: Option<&str>,
 ) -> Result<RunArtifact, String> {
     let included_items = production_item_ids(module);
@@ -1716,7 +1851,16 @@ fn prepare_run_artifact(
         )
     })?;
     validate_run_plan(sources, &bridge)?;
-    let lowered = lower_runtime_backend_stack_with_items_fast(module, &included_items, "`aivi run`")?;
+    let lowered = if workspace_hirs.is_empty() {
+        lower_runtime_backend_stack_with_items_fast(module, &included_items, "`aivi run`")?
+    } else {
+        lower_runtime_backend_stack_with_workspace(
+            module,
+            workspace_hirs,
+            &included_items,
+            "`aivi run`",
+        )?
+    };
     let runtime_assembly =
         assemble_hir_runtime_with_items(module, &included_items).map_err(|errors| {
             let mut rendered = String::from("failed to assemble runtime plans for `aivi run`:\n");
@@ -1729,8 +1873,14 @@ fn prepare_run_artifact(
         })?;
     let runtime_backend_by_hir = backend_items_by_hir(&lowered.core, lowered.backend.as_ref());
     let sites = collect_markup_runtime_expr_sites(module, view.body).map_err(|error| {
+        let span_info = match &error {
+            aivi_hir::MarkupRuntimeExprSiteError::UnknownExprType { span, .. } => {
+                format!(" (failing expr at {})", source_location(sources, *span))
+            }
+            _ => String::new(),
+        };
         format!(
-            "failed to collect runtime expression environments for run view at {}: {error}",
+            "failed to collect runtime expression environments for run view at {}: {error}{span_info}",
             source_location(sources, module.exprs()[view.body].span)
         )
     })?;
@@ -1746,6 +1896,7 @@ fn prepare_run_artifact(
     let required_signal_globals = collect_run_required_signal_globals(&hydration_inputs);
     let event_handlers =
         resolve_run_event_handlers(module, &sites, &bridge, &runtime_assembly, sources)?;
+    let stub_signal_defaults = collect_stub_signal_defaults(module, &runtime_assembly);
     Ok(RunArtifact {
         view_name: view.name.text().into(),
         module: module.clone(),
@@ -1756,6 +1907,7 @@ fn prepare_run_artifact(
         core: lowered.core,
         backend: lowered.backend,
         event_handlers,
+        stub_signal_defaults,
     })
 }
 
@@ -2188,6 +2340,74 @@ fn lower_runtime_backend_stack_impl(
     })
 }
 
+fn lower_runtime_backend_stack_with_workspace(
+    module: &HirModule,
+    workspace_hirs: &[(&str, &HirModule)],
+    included_items: &IncludedItems,
+    command_name: &str,
+) -> Result<LoweredRunBackendStack, String> {
+    let core = lower_runtime_module_with_workspace(module, workspace_hirs, included_items)
+        .map_err(|errors| {
+            let mut rendered = format!("failed to lower {command_name} module into typed core:\n");
+            for error in errors.errors() {
+                rendered.push_str("- ");
+                rendered.push_str(&error.to_string());
+                rendered.push('\n');
+            }
+            rendered
+        })?;
+    validate_core_module(&core).map_err(|errors| {
+        let mut rendered = format!("typed-core validation failed for {command_name}:\n");
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
+    let lambda = lower_lambda_module(&core).map_err(|errors| {
+        let mut rendered = format!("failed to lower {command_name} module into typed lambda:\n");
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
+    validate_lambda_module(&lambda).map_err(|errors| {
+        let mut rendered = format!("typed-lambda validation failed for {command_name}:\n");
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
+    let backend = lower_backend_module(&lambda).map_err(|errors| {
+        let mut rendered = format!("failed to lower {command_name} module into backend IR:\n");
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
+    validate_program(&backend).map_err(|errors| {
+        let mut rendered = format!("backend validation failed for {command_name}:\n");
+        for error in errors.errors() {
+            rendered.push_str("- ");
+            rendered.push_str(&error.to_string());
+            rendered.push('\n');
+        }
+        rendered
+    })?;
+    Ok(LoweredRunBackendStack {
+        core,
+        backend: Arc::new(backend),
+    })
+}
+
+
 fn lower_runtime_fragment_backend_stack(
     module: &HirModule,
     fragment: &RuntimeFragmentSpec,
@@ -2300,14 +2520,14 @@ fn resolve_run_event_handler(
     };
     match &module.exprs()[expr].kind {
         ExprKind::Name(reference) => {
-            let (item_id, signal, signal_input) =
+            let resolved =
                 resolve_run_event_signal_target(module, runtime_assembly, reference, &location)?;
             let payload = event.payload;
-            if !signal_accepts_event_payload(module, signal, payload) {
+            if !event_signal_accepts_payload(resolved.inner_payload_type.as_ref(), payload) {
                 return Err(format!(
                     "event handler `{}` at {location} points at signal `{}`, but `{}` on `{}` publishes `{}` and requires `{}`",
                     name_path_text(&reference.path),
-                    signal.name.text(),
+                    resolved.signal_name,
                     event_name,
                     run_widget_name(widget),
                     payload.label(),
@@ -2315,9 +2535,9 @@ fn resolve_run_event_handler(
                 ));
             }
             Ok(ResolvedRunEventHandler {
-                signal_item: item_id,
-                signal_name: signal.name.text().into(),
-                signal_input,
+                signal_item: resolved.item_id,
+                signal_name: resolved.signal_name,
+                signal_input: resolved.signal_input,
                 payload: ResolvedRunEventPayload::GtkPayload,
             })
         }
@@ -2336,13 +2556,13 @@ fn resolve_run_event_handler(
                 arguments.iter().next().copied().expect(
                     "single-argument handler applications should expose a payload expression",
                 );
-            let (item_id, signal, signal_input) =
+            let resolved =
                 resolve_run_event_signal_target(module, runtime_assembly, reference, &location)?;
-            let required_payload = signal_payload_type(module, signal).ok_or_else(|| {
+            let required_payload = resolved.inner_payload_type.clone().ok_or_else(|| {
                 format!(
                     "event handler `{}` at {location} points at signal `{}`, but explicit payload hooks require a known `Signal A` payload type",
                     name_path_text(&reference.path),
-                    signal.name.text()
+                    resolved.signal_name,
                 )
             })?;
             let site = sites.get(payload_expr).ok_or_else(|| {
@@ -2356,15 +2576,15 @@ fn resolve_run_event_handler(
                 return Err(format!(
                     "event handler `{}` at {location} points at signal `{}`, but the explicit payload has type `{}` and the signal requires `{}`",
                     name_path_text(&reference.path),
-                    signal.name.text(),
+                    resolved.signal_name,
                     site.ty,
                     required_payload
                 ));
             }
             Ok(ResolvedRunEventHandler {
-                signal_item: item_id,
-                signal_name: signal.name.text().into(),
-                signal_input,
+                signal_item: resolved.item_id,
+                signal_name: resolved.signal_name,
+                signal_input: resolved.signal_input,
                 payload: ResolvedRunEventPayload::ScopedInput,
             })
         }
@@ -2374,100 +2594,192 @@ fn resolve_run_event_handler(
     }
 }
 
-fn resolve_run_event_signal_target<'a>(
-    module: &'a HirModule,
+/// Result of resolving an event signal target, covering both same-module and cross-module cases.
+struct EventSignalResolution {
+    item_id: aivi_hir::ItemId,
+    signal_name: Box<str>,
+    signal_input: RuntimeInputHandle,
+    /// Inner payload type of `Signal A` (e.g. `Unit`, `Text`), used for payload validation.
+    inner_payload_type: Option<GateType>,
+}
+
+fn resolve_run_event_signal_target(
+    module: &HirModule,
     runtime_assembly: &HirRuntimeAssembly,
     reference: &aivi_hir::TermReference,
     location: &str,
-) -> Result<
-    (
-        aivi_hir::ItemId,
-        &'a aivi_hir::SignalItem,
-        RuntimeInputHandle,
-    ),
-    String,
-> {
-    let aivi_hir::ResolutionState::Resolved(TermResolution::Item(item_id)) =
-        reference.resolution.as_ref()
-    else {
-        return Err(format!(
-            "event handler `{}` at {location} must resolve directly to a same-module signal item",
+) -> Result<EventSignalResolution, String> {
+    let hir_item_count =
+        u32::try_from(module.items().iter().count()).expect("HIR item count fits u32");
+    match reference.resolution.as_ref() {
+        aivi_hir::ResolutionState::Resolved(TermResolution::Item(item_id)) => {
+            let Item::Signal(signal) = &module.items()[*item_id] else {
+                return Err(format!(
+                    "event handler `{}` at {location} resolves to a {}, but event hooks require an input-backed signal",
+                    name_path_text(&reference.path),
+                    hir_item_kind_label(&module.items()[*item_id])
+                ));
+            };
+            let binding = runtime_assembly.signal(*item_id).ok_or_else(|| {
+                format!(
+                    "event handler `{}` at {location} points at signal `{}` without a runtime binding",
+                    name_path_text(&reference.path),
+                    signal.name.text()
+                )
+            })?;
+            let Some(signal_input) = binding.input() else {
+                return Err(format!(
+                    "event handler `{}` at {location} points at signal `{}`, but only direct input signals are publishable from GTK events",
+                    name_path_text(&reference.path),
+                    signal.name.text()
+                ));
+            };
+            let inner_payload_type = signal_payload_type(module, signal);
+            Ok(EventSignalResolution {
+                item_id: *item_id,
+                signal_name: signal.name.text().into(),
+                signal_input,
+                inner_payload_type,
+            })
+        }
+        aivi_hir::ResolutionState::Resolved(TermResolution::Import(import_id)) => {
+            let Some(import_binding) = module.imports().get(*import_id) else {
+                return Err(format!(
+                    "event handler `{}` at {location}: import binding not found",
+                    name_path_text(&reference.path)
+                ));
+            };
+            let ImportBindingMetadata::Value {
+                ty: ImportValueType::Signal(inner_ty),
+            } = &import_binding.metadata
+            else {
+                return Err(format!(
+                    "event handler `{}` at {location} resolves to a cross-module import that is not a Signal",
+                    name_path_text(&reference.path)
+                ));
+            };
+            let synthetic_id =
+                aivi_hir::ItemId::from_raw(hir_item_count + import_id.as_raw());
+            let binding = runtime_assembly.signal(synthetic_id).ok_or_else(|| {
+                format!(
+                    "event handler `{}` at {location}: no runtime stub found for cross-module signal `{}`",
+                    name_path_text(&reference.path),
+                    import_binding.local_name.text()
+                )
+            })?;
+            let Some(signal_input) = binding.input() else {
+                return Err(format!(
+                    "event handler `{}` at {location}: cross-module signal `{}` is not a publishable input signal",
+                    name_path_text(&reference.path),
+                    import_binding.local_name.text()
+                ));
+            };
+            let inner_payload_type = import_value_type_to_gate_type(inner_ty);
+            Ok(EventSignalResolution {
+                item_id: synthetic_id,
+                signal_name: import_binding.local_name.text().into(),
+                signal_input,
+                inner_payload_type,
+            })
+        }
+        _ => Err(format!(
+            "event handler `{}` at {location} must resolve directly to a signal item",
             name_path_text(&reference.path)
-        ));
-    };
-    let Item::Signal(signal) = &module.items()[*item_id] else {
-        return Err(format!(
-            "event handler `{}` at {location} resolves to a {}, but event hooks require an input-backed signal",
-            name_path_text(&reference.path),
-            hir_item_kind_label(&module.items()[*item_id])
-        ));
-    };
-    let binding = runtime_assembly.signal(*item_id).ok_or_else(|| {
-        format!(
-            "event handler `{}` at {location} points at signal `{}` without a runtime binding",
-            name_path_text(&reference.path),
-            signal.name.text()
-        )
-    })?;
-    let Some(signal_input) = binding.input() else {
-        return Err(format!(
-            "event handler `{}` at {location} points at signal `{}`, but only direct input signals are publishable from GTK events",
-            name_path_text(&reference.path),
-            signal.name.text()
-        ));
-    };
-    Ok((*item_id, signal, signal_input))
+        )),
+    }
 }
 
-fn signal_accepts_event_payload(
-    module: &HirModule,
-    signal: &aivi_hir::SignalItem,
+/// Checks whether a resolved signal inner type accepts the given GTK event payload.
+fn event_signal_accepts_payload(
+    inner_ty: Option<&GateType>,
     payload: GtkConcreteEventPayload,
 ) -> bool {
-    let Some(annotation) = signal.annotation else {
-        return false;
-    };
-    let TypeKind::Apply { callee, arguments } = &module.types()[annotation].kind else {
-        return false;
-    };
-    if arguments.len() != 1 {
-        return false;
-    }
-    let TypeKind::Name(reference) = &module.types()[*callee].kind else {
-        return false;
-    };
-    if !matches!(
-        &reference.resolution,
-        aivi_hir::ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Signal))
-    ) {
-        return false;
-    }
-    let Some(payload_ty) = arguments.iter().next().copied() else {
+    let Some(inner_ty) = inner_ty else {
         return false;
     };
     match payload {
-        GtkConcreteEventPayload::Unit => type_is_builtin(module, payload_ty, BuiltinType::Unit),
-        GtkConcreteEventPayload::Bool => type_is_builtin(module, payload_ty, BuiltinType::Bool),
-        GtkConcreteEventPayload::Text => type_is_builtin(module, payload_ty, BuiltinType::Text),
-        GtkConcreteEventPayload::F64 => type_is_builtin(module, payload_ty, BuiltinType::Float),
-        GtkConcreteEventPayload::I64 => type_is_builtin(module, payload_ty, BuiltinType::Int),
+        GtkConcreteEventPayload::Unit => {
+            matches!(inner_ty, GateType::Primitive(BuiltinType::Unit))
+        }
+        GtkConcreteEventPayload::Bool => {
+            matches!(inner_ty, GateType::Primitive(BuiltinType::Bool))
+        }
+        GtkConcreteEventPayload::Text => {
+            matches!(inner_ty, GateType::Primitive(BuiltinType::Text))
+        }
+        GtkConcreteEventPayload::F64 => {
+            matches!(inner_ty, GateType::Primitive(BuiltinType::Float))
+        }
+        GtkConcreteEventPayload::I64 => {
+            matches!(inner_ty, GateType::Primitive(BuiltinType::Int))
+        }
     }
 }
 
-fn type_is_builtin(module: &HirModule, ty: aivi_hir::TypeId, builtin: BuiltinType) -> bool {
-    match &module.types()[ty].kind {
-        TypeKind::Name(reference) => matches!(
-            &reference.resolution,
-            aivi_hir::ResolutionState::Resolved(TypeResolution::Builtin(resolved))
-                if *resolved == builtin
+/// Converts an `ImportValueType` to a `GateType` without needing module context.
+/// Returns `None` for `Named` types (user-defined type constructors) which require module lookup.
+fn import_value_type_to_gate_type(ty: &ImportValueType) -> Option<GateType> {
+    Some(match ty {
+        ImportValueType::Primitive(builtin) => GateType::Primitive(*builtin),
+        ImportValueType::Tuple(elements) => GateType::Tuple(
+            elements
+                .iter()
+                .filter_map(import_value_type_to_gate_type)
+                .collect(),
         ),
-        TypeKind::Tuple(_)
-        | TypeKind::Record(_)
-        | TypeKind::RecordTransform { .. }
-        | TypeKind::Arrow { .. }
-        | TypeKind::Apply { .. } => false,
-    }
+        ImportValueType::Record(fields) => GateType::Record(
+            fields
+                .iter()
+                .filter_map(|field| {
+                    import_value_type_to_gate_type(&field.ty).map(|ty| GateRecordField {
+                        name: field.name.to_string(),
+                        ty,
+                    })
+                })
+                .collect(),
+        ),
+        ImportValueType::Arrow { parameter, result } => GateType::Arrow {
+            parameter: Box::new(import_value_type_to_gate_type(parameter)?),
+            result: Box::new(import_value_type_to_gate_type(result)?),
+        },
+        ImportValueType::List(element) => {
+            GateType::List(Box::new(import_value_type_to_gate_type(element)?))
+        }
+        ImportValueType::Map { key, value } => GateType::Map {
+            key: Box::new(import_value_type_to_gate_type(key)?),
+            value: Box::new(import_value_type_to_gate_type(value)?),
+        },
+        ImportValueType::Set(element) => {
+            GateType::Set(Box::new(import_value_type_to_gate_type(element)?))
+        }
+        ImportValueType::Option(element) => {
+            GateType::Option(Box::new(import_value_type_to_gate_type(element)?))
+        }
+        ImportValueType::Result { error, value } => GateType::Result {
+            error: Box::new(import_value_type_to_gate_type(error)?),
+            value: Box::new(import_value_type_to_gate_type(value)?),
+        },
+        ImportValueType::Validation { error, value } => GateType::Validation {
+            error: Box::new(import_value_type_to_gate_type(error)?),
+            value: Box::new(import_value_type_to_gate_type(value)?),
+        },
+        ImportValueType::Signal(element) => {
+            GateType::Signal(Box::new(import_value_type_to_gate_type(element)?))
+        }
+        ImportValueType::Task { error, value } => GateType::Task {
+            error: Box::new(import_value_type_to_gate_type(error)?),
+            value: Box::new(import_value_type_to_gate_type(value)?),
+        },
+        ImportValueType::TypeVariable { index, name } => GateType::TypeParameter {
+            parameter: aivi_hir::TypeParameterId::from_raw(u32::MAX - *index as u32),
+            name: name.clone(),
+        },
+        ImportValueType::Named { .. } => return None,
+    })
 }
+
+
+
 
 fn name_path_text(path: &aivi_hir::NamePath) -> String {
     path.segments()
@@ -2666,6 +2978,88 @@ fn run_hydration_globals_ready(
     required.keys().all(|item| globals.contains_key(item))
 }
 
+/// For each workspace Signal import in the assembly's stub Input signals, compute
+/// a type-based default runtime value to pre-seed the signal before the first
+/// hydration cycle. This prevents hydration from blocking on cross-module signals
+/// that have no daemon publisher.
+fn collect_stub_signal_defaults(
+    module: &HirModule,
+    assembly: &HirRuntimeAssembly,
+) -> Vec<(RuntimeInputHandle, DetachedRuntimeValue)> {
+    let hir_item_count =
+        u32::try_from(module.items().iter().count()).expect("HIR item count fits u32");
+    let mut defaults = Vec::new();
+    for signal_binding in assembly.signals() {
+        let raw = signal_binding.item.as_raw();
+        if raw < hir_item_count {
+            continue; // Real HIR item, not a stub.
+        }
+        let import_id = ImportId::from_raw(raw - hir_item_count);
+        let Some(import_binding) = module.imports().get(import_id) else {
+            continue;
+        };
+        let ImportBindingMetadata::Value {
+            ty: ImportValueType::Signal(inner_ty),
+        } = &import_binding.metadata
+        else {
+            continue;
+        };
+        let Some(input) = signal_binding.input() else {
+            continue;
+        };
+        let default_value =
+            DetachedRuntimeValue::from_runtime_owned(default_runtime_value_for_import_type(inner_ty));
+        defaults.push((input, default_value));
+    }
+    defaults
+}
+
+fn default_runtime_value_for_import_type(ty: &ImportValueType) -> RuntimeValue {
+    match ty {
+        ImportValueType::Primitive(builtin) => match builtin {
+            BuiltinType::Text => RuntimeValue::Text("".into()),
+            BuiltinType::Int => RuntimeValue::Int(0),
+            BuiltinType::Bool => RuntimeValue::Bool(false),
+            BuiltinType::Float => RuntimeValue::Float(RuntimeFloat::new(0.0_f64).expect("0.0 is a valid float")),
+            BuiltinType::Unit => RuntimeValue::Unit,
+            _ => RuntimeValue::Unit,
+        },
+        ImportValueType::List(_) => RuntimeValue::List(vec![]),
+        ImportValueType::Set(_) => RuntimeValue::Set(vec![]),
+        ImportValueType::Map { .. } => RuntimeValue::Map(Default::default()),
+        ImportValueType::Option(_) => RuntimeValue::OptionNone,
+        ImportValueType::Result { error, .. } => RuntimeValue::ResultErr(Box::new(
+            default_runtime_value_for_import_type(error),
+        )),
+        ImportValueType::Validation { error, .. } => RuntimeValue::ValidationInvalid(Box::new(
+            default_runtime_value_for_import_type(error),
+        )),
+        ImportValueType::Tuple(elements) => RuntimeValue::Tuple(
+            elements
+                .iter()
+                .map(default_runtime_value_for_import_type)
+                .collect(),
+        ),
+        ImportValueType::Record(fields) => RuntimeValue::Record(
+            fields
+                .iter()
+                .map(|f| RuntimeRecordField {
+                    label: f.name.clone(),
+                    value: default_runtime_value_for_import_type(&f.ty),
+                })
+                .collect(),
+        ),
+        ImportValueType::Signal(inner) => RuntimeValue::Signal(Box::new(
+            default_runtime_value_for_import_type(inner),
+        )),
+        // Functions, tasks, and named/variable types cannot be trivially defaulted.
+        ImportValueType::Arrow { .. }
+        | ImportValueType::Task { .. }
+        | ImportValueType::TypeVariable { .. }
+        | ImportValueType::Named { .. } => RuntimeValue::Unit,
+    }
+}
+
 fn compile_run_expr_fragment(
     sources: &SourceDatabase,
     module: &HirModule,
@@ -2751,11 +3145,10 @@ fn compile_run_expr_fragment(
                     fragment_item
                 )
             })?;
-            let hir_item = core
+            let core_item = core
                 .module
                 .items()
                 .get(fragment_decl.origin)
-                .map(|item| item.origin)
                 .ok_or_else(|| {
                     format!(
                         "compiled runtime fragment {} lost core→HIR origin for backend item {}",
@@ -2763,40 +3156,56 @@ fn compile_run_expr_fragment(
                         fragment_item
                     )
                 })?;
-            let Item::Signal(signal) = module.items().get(hir_item).ok_or_else(|| {
-                format!(
-                    "compiled runtime fragment {} references unknown HIR item {}",
-                    expr.as_raw(),
-                    hir_item.as_raw()
-                )
-            })? else {
-                return Ok(None);
+            let hir_item = core_item.origin;
+            // eprintln!("DEBUG: fragment {} backend item {} core item {} hir_item {} name={}", expr.as_raw(), fragment_item, fragment_decl.origin, hir_item.as_raw(), core_item.name);
+            // Look up the HIR item. For cross-module signals, the origin is a synthetic ID
+            // that doesn't correspond to a real HIR item — in that case fall back to the
+            // core item's own name (which is the import's local name).
+            let hir_lookup = module.items().get(hir_item);
+            // eprintln!("DEBUG:   hir_lookup = {:?}", hir_lookup.map(|i| i.label()));
+            let signal_name: Box<str> = match hir_lookup {
+                Some(Item::Signal(signal)) => signal.name.text().into(),
+                Some(_) => return Ok(None),
+                None => core_item.name.clone(),
             };
-            let runtime_item = runtime_backend_by_hir.get(&hir_item).copied().ok_or_else(|| {
-                format!(
-                    "runtime fragment {} needs signal `{}` but the live run backend has no matching item",
-                    expr.as_raw(),
-                    signal.name.text()
-                )
-            })?;
+            let runtime_item = if hir_lookup.is_some() {
+                runtime_backend_by_hir.get(&hir_item).copied().ok_or_else(|| {
+                    format!(
+                        "runtime fragment {} needs signal `{signal_name}` but the live run backend has no matching item",
+                        expr.as_raw(),
+                    )
+                })?
+            } else {
+                // Synthetic origin: find the backend item by signal name instead.
+                runtime_backend.items().iter()
+                    .find_map(|(bid, bitem)| {
+                        (bitem.name.as_ref() == signal_name.as_ref()
+                            && matches!(bitem.kind, aivi_backend::ItemKind::Signal(_)))
+                        .then_some(bid)
+                    })
+                    .ok_or_else(|| {
+                        format!(
+                            "runtime fragment {} needs signal `{signal_name}` (synthetic origin) but no matching signal found",
+                            expr.as_raw(),
+                        )
+                    })?
+            };
             let runtime_decl = runtime_backend.items().get(runtime_item).ok_or_else(|| {
                 format!(
-                    "live run backend is missing runtime item {} for signal `{}`",
+                    "live run backend is missing runtime item {} for signal `{signal_name}`",
                     runtime_item,
-                    signal.name.text()
                 )
             })?;
             if !matches!(runtime_decl.kind, aivi_backend::ItemKind::Signal(_)) {
                 return Err(format!(
-                    "live run backend item {} for signal `{}` is not a signal",
+                    "live run backend item {} for signal `{signal_name}` is not a signal",
                     runtime_item,
-                    signal.name.text()
                 ));
             }
             Ok(Some(CompiledRunSignalGlobal {
                 fragment_item,
                 runtime_item,
-                name: signal.name.text().into(),
+                name: signal_name,
             }))
         })
         .collect::<Result<Vec<_>, _>>()?
@@ -3767,7 +4176,7 @@ fn build_markup_bundle(
     }
 
     let lowered = snapshot.entry_hir();
-    let artifact = match prepare_run_artifact(&snapshot.sources, lowered.module(), requested_view) {
+    let artifact = match prepare_run_artifact(&snapshot.sources, lowered.module(), &[], requested_view) {
         Ok(artifact) => artifact,
         Err(message) => {
             eprintln!("{message}");
@@ -4597,7 +5006,7 @@ mod tests {
             "test input should validate cleanly: {:?}",
             validation.diagnostics()
         );
-        prepare_run_artifact(&sources, lowered.module(), requested_view)
+        prepare_run_artifact(&sources, lowered.module(), &[], requested_view)
     }
 
     fn prepare_run_from_workspace(
@@ -4631,7 +5040,7 @@ mod tests {
             "workspace fixture should validate cleanly"
         );
         let lowered = snapshot.entry_hir();
-        prepare_run_artifact(&snapshot.sources, lowered.module(), requested_view)
+        prepare_run_artifact(&snapshot.sources, lowered.module(), &[], requested_view)
     }
 
     fn prepare_run_from_path(
@@ -4664,7 +5073,7 @@ mod tests {
             "workspace fixture should validate cleanly"
         );
         let lowered = snapshot.entry_hir();
-        prepare_run_artifact(&snapshot.sources, lowered.module(), requested_view)
+        prepare_run_artifact(&snapshot.sources, lowered.module(), &[], requested_view)
     }
 
     #[test]

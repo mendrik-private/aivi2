@@ -7957,7 +7957,7 @@ impl Validator<'_> {
     fn import_type_kind(&self, import_id: ImportId) -> Option<Kind> {
         let import = &self.module.imports()[import_id];
         match &import.metadata {
-            ImportBindingMetadata::TypeConstructor { kind } => Some(kind.clone()),
+            ImportBindingMetadata::TypeConstructor { kind, .. } => Some(kind.clone()),
             ImportBindingMetadata::Domain { kind, .. } => Some(kind.clone()),
             ImportBindingMetadata::BuiltinType(builtin) => Some(builtin_kind(*builtin)),
             ImportBindingMetadata::Value { .. }
@@ -9036,6 +9036,7 @@ pub struct GateRecordField {
 pub(crate) enum CaseConstructorKey {
     Builtin(BuiltinTerm),
     SameModuleVariant { item: ItemId, name: String },
+    ImportedVariant { import: ImportId, name: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

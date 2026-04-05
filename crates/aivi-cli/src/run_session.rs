@@ -732,7 +732,7 @@ pub(super) fn start_run_session_with_launch_config(
         core,
         backend,
         event_handlers,
-        ..
+        stub_signal_defaults,
     } = artifact;
     let linked = link_backend_runtime(runtime_assembly, &core, backend).map_err(|errors| {
         let mut rendered = String::from("failed to link backend runtime for `aivi run`:\n");
@@ -758,6 +758,16 @@ pub(super) fn start_run_session_with_launch_config(
         launch_config.providers,
         Some(session_notifier.clone()),
     );
+
+    // Pre-seed default values for stub cross-module signal imports so that hydration
+    // can fire immediately on first tick instead of waiting indefinitely for signals
+    // that are only computed by a companion daemon process.
+    for (input_handle, default_value) in stub_signal_defaults {
+        if let Ok(stamp) = driver.current_stamp(input_handle) {
+            let _ = driver.queue_publication_now(Publication::new(stamp, default_value));
+        }
+    }
+
     let main_loop = glib::MainLoop::new(Some(&context), false);
     let executor =
         GtkRuntimeExecutor::new(bridge.clone(), GtkConcreteHost::<RunHostValue>::default())

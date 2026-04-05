@@ -1629,13 +1629,35 @@ impl<'a> GeneralExprElaborator<'a> {
                 )
             }
             ExprKind::Record(record) => {
-                let expected_fields = match expected {
+                let expected_fields: Option<HashMap<String, GateType>> = match expected {
                     Some(GateType::Record(fields)) => Some(
                         fields
                             .iter()
-                            .map(|field| (field.name.as_str(), field.ty.clone()))
-                            .collect::<HashMap<_, _>>(),
+                            .map(|field| (field.name.clone(), field.ty.clone()))
+                            .collect(),
                     ),
+                    Some(GateType::OpaqueImport { import, .. }) => {
+                        let binding = &self.module.imports()[*import];
+                        if let crate::ImportBindingMetadata::TypeConstructor {
+                            fields: Some(record_fields),
+                            ..
+                        } = &binding.metadata
+                        {
+                            Some(
+                                record_fields
+                                    .iter()
+                                    .map(|f| {
+                                        (
+                                            f.name.to_string(),
+                                            self.typing.lower_import_value_type(&f.ty),
+                                        )
+                                    })
+                                    .collect(),
+                            )
+                        } else {
+                            None
+                        }
+                    }
                     _ => None,
                 };
                 GateRuntimeExprKind::Record(
@@ -1866,16 +1888,40 @@ impl<'a> GeneralExprElaborator<'a> {
             }
         }
 
-        // Infer the target type — must be a closed record.
+        // Infer the target type — must be a closed record or an imported record type.
         let target_ty = self.typing.infer_expr(target, env, ambient);
         let Some(target_gate_ty) = target_ty.actual_gate_type() else {
             return Err(vec![GeneralExprBlocker::UnknownExprType { span }]);
         };
-        let GateType::Record(record_fields) = &target_gate_ty else {
-            return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
-                span,
-                kind: GateRuntimeUnsupportedKind::PatchExpr,
-            }]);
+        // Extract the record fields — either from a local Record or from an imported TypeConstructor.
+        let record_fields: Vec<GateRecordField> = match &target_gate_ty {
+            GateType::Record(fields) => fields.clone(),
+            GateType::OpaqueImport { import, .. } => {
+                match self.module.imports().get(*import).map(|b| &b.metadata) {
+                    Some(crate::ImportBindingMetadata::TypeConstructor {
+                        fields: Some(import_fields),
+                        ..
+                    }) => import_fields
+                        .iter()
+                        .map(|f| GateRecordField {
+                            name: f.name.to_string(),
+                            ty: self.typing.lower_import_value_type(&f.ty),
+                        })
+                        .collect(),
+                    _ => {
+                        return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
+                            span,
+                            kind: GateRuntimeUnsupportedKind::PatchExpr,
+                        }]);
+                    }
+                }
+            }
+            _ => {
+                return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
+                    span,
+                    kind: GateRuntimeUnsupportedKind::PatchExpr,
+                }]);
+            }
         };
 
         // Build maps for patch entries, separating single-segment and nested.
@@ -1912,7 +1958,6 @@ impl<'a> GeneralExprElaborator<'a> {
         // Lower the target expression once so we can project from it.
         let lowered_target = self.lower_expr(target, env, ambient, Some(&target_gate_ty))?;
 
-        let record_fields = record_fields.clone();
         let mut result_fields = Vec::with_capacity(record_fields.len());
         let mut errors: Vec<GeneralExprBlocker> = Vec::new();
 
@@ -3414,14 +3459,43 @@ impl<'a> GeneralExprElaborator<'a> {
                     }
                 }
                 crate::PatternKind::Record(fields) => {
-                    let GateType::Record(subject_fields) = &subject_ty else {
+                    // Collect (name, type) pairs from either a local record or an imported one.
+                    let record_pairs: Option<Vec<(String, GateType)>> = match &subject_ty {
+                        GateType::Record(subject_fields) => Some(
+                            subject_fields
+                                .iter()
+                                .map(|f| (f.name.clone(), f.ty.clone()))
+                                .collect(),
+                        ),
+                        GateType::OpaqueImport { import, .. } => {
+                            match self.module.imports().get(*import).map(|b| &b.metadata) {
+                                Some(crate::ImportBindingMetadata::TypeConstructor {
+                                    fields: Some(import_fields),
+                                    ..
+                                }) => Some(
+                                    import_fields
+                                        .iter()
+                                        .map(|f| {
+                                            (
+                                                f.name.to_string(),
+                                                self.typing.lower_import_value_type(&f.ty),
+                                            )
+                                        })
+                                        .collect(),
+                                ),
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    };
+                    let Some(record_pairs) = record_pairs else {
                         continue;
                     };
                     for field in fields.into_iter().rev() {
-                        let Some(field_ty) = subject_fields
+                        let Some(field_ty) = record_pairs
                             .iter()
-                            .find(|candidate| candidate.name == field.label.text())
-                            .map(|field_ty| field_ty.ty.clone())
+                            .find(|(name, _)| name.as_str() == field.label.text())
+                            .map(|(_, ty)| ty.clone())
                         else {
                             continue;
                         };
@@ -3486,8 +3560,30 @@ impl<'a> GeneralExprElaborator<'a> {
             ResolutionState::Resolved(TermResolution::Item(item_id)) => {
                 self.same_module_constructor_fields(*item_id, callee, subject)
             }
+            ResolutionState::Resolved(TermResolution::Import(import_id)) => {
+                // For imported sum-type constructors, extract field types from the Arrow chain
+                // in the import binding's Value type. The final type in the chain is the sum type.
+                let ty_clone = {
+                    let binding = &self.module.imports()[*import_id];
+                    match &binding.metadata {
+                        crate::ImportBindingMetadata::Value { ty } => ty.clone(),
+                        _ => return None,
+                    }
+                };
+                let mut fields = Vec::new();
+                let mut current = &ty_clone;
+                loop {
+                    match current {
+                        crate::ImportValueType::Arrow { parameter, result } => {
+                            fields.push(self.typing.lower_import_value_type(parameter));
+                            current = result;
+                        }
+                        _ => break,
+                    }
+                }
+                Some(fields)
+            }
             ResolutionState::Resolved(TermResolution::Local(_))
-            | ResolutionState::Resolved(TermResolution::Import(_))
             | ResolutionState::Resolved(TermResolution::IntrinsicValue(_))
             | ResolutionState::Resolved(TermResolution::DomainMember(_))
             | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_))

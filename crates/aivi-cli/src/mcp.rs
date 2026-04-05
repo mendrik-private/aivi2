@@ -598,9 +598,15 @@ fn prepare_launch_request(
         return Err(diagnostics);
     }
     let lowered = snapshot.entry_hir();
+    let workspace_hir_arcs = collect_workspace_hirs_sorted(&snapshot);
+    let workspace_hirs: Vec<(&str, &aivi_hir::Module)> = workspace_hir_arcs
+        .iter()
+        .map(|(name, arc)| (name.as_str(), arc.module()))
+        .collect();
     let artifact = prepare_run_artifact(
         &snapshot.sources,
         lowered.module(),
+        &workspace_hirs,
         requested_view.as_deref(),
     )?;
     Ok(PreparedLaunch {
