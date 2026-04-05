@@ -391,3 +391,7 @@ That keeps pipe flow explicit and matches the compiler's current nesting rule.
 | `+\|>` | Stateful accumulation |
 | `@\|>` | Explicit recurrence start |
 | `<\|@` | Explicit recurrence step |
+
+---
+
+**See also:** [Pattern Matching](pattern-matching.md) — the `\|\|>` case-split pipe in depth

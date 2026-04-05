@@ -162,3 +162,7 @@ value view =
 | `<case pattern={...}>` | One match branch |
 | `<each of={...} as={...} key={...}>` | Iterate a list |
 | `<empty>` | Empty-list fallback inside `<each>` |
+
+---
+
+**See also:** [Building Snake](building-snake.md) — a complete application that uses every markup feature together

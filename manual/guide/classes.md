@@ -150,3 +150,7 @@ Classes let generic code talk about capability instead of one hard-coded type. T
 | `instance Eq Blob` | Implement a class for one concrete type |
 | `type Eq K => K -> K -> Bool` | Require `K` to have `Eq` in a function annotation |
 | `class Name A = { ... }` | Group class members in a block |
+
+---
+
+**See also:** [Typeclasses & Higher-Kinded Support](typeclasses.md) — HKT hierarchy, built-in support matrix, and user-authored instance limits
