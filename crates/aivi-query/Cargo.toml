@@ -11,6 +11,8 @@ aivi-hir = { workspace = true }
 aivi-typing = { workspace = true }
 parking_lot = "0.12"
 rustc-hash = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 tracing = "0.1"
 
 [lints]
