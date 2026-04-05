@@ -14,6 +14,7 @@ use gtk::{
     prelude::*,
 };
 use libadwaita as adw;
+use adw::prelude::*;
 
 use crate::{
     GtkBoolPropertySetter, GtkChildGroupDescriptor, GtkChildMountRoute, GtkConcreteWidgetKind,
@@ -387,6 +388,35 @@ where
             GtkConcreteWidgetKind::Clamp => adw::Clamp::new().upcast::<gtk::Widget>(),
             GtkConcreteWidgetKind::Banner => adw::Banner::new("").upcast::<gtk::Widget>(),
             GtkConcreteWidgetKind::ToolbarView => adw::ToolbarView::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::ActionRow => adw::ActionRow::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::ExpanderRow => adw::ExpanderRow::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::SwitchRow => adw::SwitchRow::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::SpinRow => {
+                adw::SpinRow::with_range(0.0, 100.0, 1.0).upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::EntryRow => adw::EntryRow::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::ListBox => gtk::ListBox::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::ListBoxRow => gtk::ListBoxRow::new().upcast::<gtk::Widget>(),
+            GtkConcreteWidgetKind::DropDown => {
+                gtk::DropDown::new(None::<gtk::StringList>, None::<gtk::Expression>)
+                    .upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::SearchEntry => {
+                gtk::SearchEntry::new().upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::Expander => {
+                gtk::Expander::new(None).upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::NavigationView => {
+                adw::NavigationView::new().upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::NavigationPage => {
+                let placeholder = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                adw::NavigationPage::new(&placeholder, "").upcast::<gtk::Widget>()
+            }
+            GtkConcreteWidgetKind::ToastOverlay => {
+                adw::ToastOverlay::new().upcast::<gtk::Widget>()
+            }
         };
         ensure_aivi_widget_styles();
         Ok((schema, widget))
@@ -757,6 +787,46 @@ where
                         expected_type: "adw::Banner",
                     })?
                     .set_revealed(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::ExpanderRowExpanded) => {
+                widget
+                    .clone()
+                    .downcast::<adw::ExpanderRow>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::ExpanderRow",
+                    })?
+                    .set_expanded(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::SwitchRowActive) => {
+                widget
+                    .clone()
+                    .downcast::<adw::SwitchRow>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::SwitchRow",
+                    })?
+                    .set_active(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::ListBoxRowActivatable) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::ListBoxRow>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::ListBoxRow",
+                    })?
+                    .set_activatable(value);
+            }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::ExpanderExpanded) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Expander>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Expander",
+                    })?
+                    .set_expanded(value);
             }
             _ => {
                 return Err(self.invalid_property_value(
@@ -1170,6 +1240,136 @@ where
                     })?
                     .set_button_label(Some(value));
             }
+            GtkPropertySetter::Text(GtkTextPropertySetter::AdwPreferencesRowTitle) => {
+                widget
+                    .clone()
+                    .downcast::<adw::PreferencesRow>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::PreferencesRow",
+                    })?
+                    .set_title(value);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::AdwActionRowSubtitle) => {
+                widget
+                    .clone()
+                    .downcast::<adw::ActionRow>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::ActionRow",
+                    })?
+                    .set_subtitle(value);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::AdwExpanderRowSubtitle) => {
+                widget
+                    .clone()
+                    .downcast::<adw::ExpanderRow>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::ExpanderRow",
+                    })?
+                    .set_subtitle(value);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::EntryRowText) => {
+                widget
+                    .clone()
+                    .downcast::<adw::EntryRow>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::EntryRow",
+                    })?
+                    .set_text(value);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::ListBoxSelectionMode) => {
+                use gtk::SelectionMode;
+                let mode = match value {
+                    "None" => SelectionMode::None,
+                    "Single" => SelectionMode::Single,
+                    "Browse" => SelectionMode::Browse,
+                    "Multiple" => SelectionMode::Multiple,
+                    _ => {
+                        return Err(self.invalid_property_value(
+                            schema,
+                            property,
+                            "valid SelectionMode value (None, Single, Browse, Multiple)",
+                        ));
+                    }
+                };
+                widget
+                    .clone()
+                    .downcast::<gtk::ListBox>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::ListBox",
+                    })?
+                    .set_selection_mode(mode);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::DropDownItems) => {
+                let items: Vec<&str> = if value.is_empty() {
+                    vec![]
+                } else {
+                    value.split(',').map(str::trim).collect()
+                };
+                let model = gtk::StringList::new(&items);
+                widget
+                    .clone()
+                    .downcast::<gtk::DropDown>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::DropDown",
+                    })?
+                    .set_model(Some(&model));
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::SearchEntryText) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::SearchEntry>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::SearchEntry",
+                    })?
+                    .set_text(value);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::SearchEntryPlaceholder) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::SearchEntry>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::SearchEntry",
+                    })?
+                    .set_placeholder_text(if value.is_empty() { None } else { Some(value) });
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::ExpanderLabel) => {
+                widget
+                    .clone()
+                    .downcast::<gtk::Expander>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::Expander",
+                    })?
+                    .set_label(if value.is_empty() { None } else { Some(value) });
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::NavigationPageTitle) => {
+                widget
+                    .clone()
+                    .downcast::<adw::NavigationPage>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::NavigationPage",
+                    })?
+                    .set_title(value);
+            }
+            GtkPropertySetter::Text(GtkTextPropertySetter::NavigationPageTag) => {
+                widget
+                    .clone()
+                    .downcast::<adw::NavigationPage>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::NavigationPage",
+                    })?
+                    .set_tag(if value.is_empty() { None } else { Some(value) });
+            }
             _ => {
                 return Err(self.invalid_property_value(
                     schema,
@@ -1355,6 +1555,20 @@ where
                     .set_tightening_threshold(value as i32);
                 Ok(())
             }
+            GtkPropertySetter::I64(GtkI64PropertySetter::DropDownSelected) => {
+                let position = u32::try_from(value).map_err(|_| {
+                    self.invalid_property_value(schema, property, "non-negative 32-bit integer")
+                })?;
+                widget
+                    .clone()
+                    .downcast::<gtk::DropDown>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "gtk::DropDown",
+                    })?
+                    .set_selected(position);
+                Ok(())
+            }
             _ => Err(self.invalid_property_value(
                 schema,
                 property,
@@ -1474,6 +1688,50 @@ where
                 scale.adjustment().set_step_increment(value);
                 Ok(())
             }
+            GtkPropertySetter::F64(GtkF64PropertySetter::SpinRowValue) => {
+                widget
+                    .clone()
+                    .downcast::<adw::SpinRow>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::SpinRow",
+                    })?
+                    .set_value(value);
+                Ok(())
+            }
+            GtkPropertySetter::F64(GtkF64PropertySetter::SpinRowMin) => {
+                let spin = widget
+                    .clone()
+                    .downcast::<adw::SpinRow>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::SpinRow",
+                    })?;
+                spin.adjustment().set_lower(value);
+                Ok(())
+            }
+            GtkPropertySetter::F64(GtkF64PropertySetter::SpinRowMax) => {
+                let spin = widget
+                    .clone()
+                    .downcast::<adw::SpinRow>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::SpinRow",
+                    })?;
+                spin.adjustment().set_upper(value);
+                Ok(())
+            }
+            GtkPropertySetter::F64(GtkF64PropertySetter::SpinRowStep) => {
+                let spin = widget
+                    .clone()
+                    .downcast::<adw::SpinRow>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: schema.markup_name.into(),
+                        expected_type: "adw::SpinRow",
+                    })?;
+                spin.adjustment().set_step_increment(value);
+                Ok(())
+            }
             _ => Err(self.invalid_property_value(
                 schema,
                 property,
@@ -1550,6 +1808,56 @@ where
                     .expect("toolbar view widget should downcast");
                 for child in next {
                     toolbar_view.add_bottom_bar(child);
+                }
+            }
+            GtkChildMountRoute::ActionRowSuffix => {
+                for child in previous {
+                    child.unparent();
+                }
+                let row = parent_widget
+                    .clone()
+                    .downcast::<adw::ActionRow>()
+                    .expect("action row widget should downcast");
+                for child in next {
+                    row.add_suffix(child);
+                }
+            }
+            GtkChildMountRoute::ExpanderRowRows => {
+                for child in previous {
+                    child.unparent();
+                }
+                let expander = parent_widget
+                    .clone()
+                    .downcast::<adw::ExpanderRow>()
+                    .expect("expander row widget should downcast");
+                for child in next {
+                    expander.add_row(child);
+                }
+            }
+            GtkChildMountRoute::ListBoxChildren => {
+                let list_box = parent_widget
+                    .clone()
+                    .downcast::<gtk::ListBox>()
+                    .expect("list box widget should downcast");
+                for child in previous {
+                    list_box.remove(child);
+                }
+                for child in next {
+                    list_box.append(child);
+                }
+            }
+            GtkChildMountRoute::NavigationViewPages => {
+                for child in previous {
+                    child.unparent();
+                }
+                let nav_view = parent_widget
+                    .clone()
+                    .downcast::<adw::NavigationView>()
+                    .expect("navigation view widget should downcast");
+                for child in next {
+                    if let Ok(page) = child.clone().downcast::<adw::NavigationPage>() {
+                        nav_view.add(&page);
+                    }
                 }
             }
             _ => unreachable!("replace_sequence_children requires a sequence child group"),
@@ -1677,11 +1985,55 @@ where
                     })?
                     .set_content(child);
             }
+            GtkChildMountRoute::ListBoxRowChild => {
+                parent_widget
+                    .clone()
+                    .downcast::<gtk::ListBoxRow>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "ListBoxRow".into(),
+                        expected_type: "gtk::ListBoxRow",
+                    })?
+                    .set_child(child);
+            }
+            GtkChildMountRoute::ExpanderChild => {
+                parent_widget
+                    .clone()
+                    .downcast::<gtk::Expander>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "Expander".into(),
+                        expected_type: "gtk::Expander",
+                    })?
+                    .set_child(child);
+            }
+            GtkChildMountRoute::NavigationPageContent => {
+                parent_widget
+                    .clone()
+                    .downcast::<adw::NavigationPage>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "NavigationPage".into(),
+                        expected_type: "adw::NavigationPage",
+                    })?
+                    .set_child(child);
+            }
+            GtkChildMountRoute::ToastOverlayContent => {
+                parent_widget
+                    .clone()
+                    .downcast::<adw::ToastOverlay>()
+                    .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                        widget: "ToastOverlay".into(),
+                        expected_type: "adw::ToastOverlay",
+                    })?
+                    .set_child(child);
+            }
             GtkChildMountRoute::HeaderBarStart
             | GtkChildMountRoute::HeaderBarEnd
             | GtkChildMountRoute::BoxChildren
             | GtkChildMountRoute::ToolbarViewTop
-            | GtkChildMountRoute::ToolbarViewBottom => {
+            | GtkChildMountRoute::ToolbarViewBottom
+            | GtkChildMountRoute::ActionRowSuffix
+            | GtkChildMountRoute::ExpanderRowRows
+            | GtkChildMountRoute::ListBoxChildren
+            | GtkChildMountRoute::NavigationViewPages => {
                 unreachable!("sequence child groups are handled by explicit sequence APIs")
             }
         }
@@ -2071,6 +2423,187 @@ where
                     queue.push(GtkQueuedEvent {
                         route: route_id,
                         value: V::unit(),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::ActionRowActivated => widget
+                .clone()
+                .downcast::<adw::ActionRow>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "adw::ActionRow",
+                })?
+                .connect_activated(move |_| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::unit(),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::SwitchRowToggled => widget
+                .clone()
+                .downcast::<adw::SwitchRow>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "adw::SwitchRow",
+                })?
+                .connect_active_notify(move |row| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_bool(row.is_active()),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::SpinRowValueChanged => widget
+                .clone()
+                .downcast::<adw::SpinRow>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "adw::SpinRow",
+                })?
+                .connect_value_notify(move |row| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_f64(row.value()),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::EntryRowChanged => widget
+                .clone()
+                .downcast::<adw::EntryRow>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "adw::EntryRow",
+                })?
+                .connect_changed(move |entry| {
+                    let text = entry.text();
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_text(text.as_str()),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::EntryRowActivated => widget
+                .clone()
+                .downcast::<adw::EntryRow>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "adw::EntryRow",
+                })?
+                .connect_entry_activated(move |_| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::unit(),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::ListBoxActivated => widget
+                .clone()
+                .downcast::<gtk::ListBox>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::ListBox",
+                })?
+                .connect_row_activated(move |_, row| {
+                    let index = row.index() as i64;
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_i64(index),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::ListBoxRowActivated => widget
+                .clone()
+                .downcast::<gtk::ListBoxRow>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::ListBoxRow",
+                })?
+                .connect_activate(move |_| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::unit(),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::DropDownSelectionChanged => widget
+                .clone()
+                .downcast::<gtk::DropDown>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::DropDown",
+                })?
+                .connect_selected_notify(move |dd| {
+                    let selected = dd.selected() as i64;
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_i64(selected),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::SearchEntryChanged => widget
+                .clone()
+                .downcast::<gtk::SearchEntry>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::SearchEntry",
+                })?
+                .connect_changed(move |entry| {
+                    let text = entry.text();
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_text(text.as_str()),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::SearchEntryActivated => widget
+                .clone()
+                .downcast::<gtk::SearchEntry>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::SearchEntry",
+                })?
+                .connect_activate(move |_| {
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::unit(),
+                    });
+                    if let Some(notifier) = &notifier {
+                        notifier();
+                    }
+                }),
+            GtkEventSignal::SearchEntrySearchChanged => widget
+                .clone()
+                .downcast::<gtk::SearchEntry>()
+                .map_err(|_| GtkConcreteHostError::WidgetDowncastFailed {
+                    widget: schema.markup_name.into(),
+                    expected_type: "gtk::SearchEntry",
+                })?
+                .connect_search_changed(move |entry| {
+                    let text = entry.text();
+                    queue.push(GtkQueuedEvent {
+                        route: route_id,
+                        value: V::from_text(text.as_str()),
                     });
                     if let Some(notifier) = &notifier {
                         notifier();

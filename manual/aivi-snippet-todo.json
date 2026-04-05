@@ -1,9 +1,9 @@
 {
   "root": "manual",
   "scanned_files": 75,
-  "scanned_blocks": 844,
-  "rewritten_blocks": 2,
-  "unresolved_fragments": 318,
+  "scanned_blocks": 881,
+  "rewritten_blocks": 39,
+  "unresolved_fragments": 355,
   "entries": [
     {
       "markdown_path": "manual/guide/building-snake.md",
@@ -76,13 +76,13 @@
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `West`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `West`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/building-snake/block_4.aivi:5:15\n  |\n 5 |  ||> East  -> West\n  |               ^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `West`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/building-snake/block_4.aivi:5:15\n  |\n 5 |  ||> East  -> West\n  |               ^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `Less`?"
         },
         {
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `West`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `West`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/building-snake/block_4.aivi:6:6\n  |\n 6 |  ||> West  -> East\n  |      ^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `West`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/building-snake/block_4.aivi:6:6\n  |\n 6 |  ||> West  -> East\n  |      ^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `Less`?"
         }
       ],
       "suggested_snippet": "type Direction -> Direction\nfunc opposite = .\n ||> North -> South\n ||> South -> North\n ||> East  -> West\n ||> West  -> East\n"
@@ -168,7 +168,7 @@
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `West`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `West`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/building-snake/block_5.aivi:6:7\n  |\n 6 |  ||> (West, Cell x y)  -> Cell (x - 1) y\n  |       ^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `West`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/building-snake/block_5.aivi:6:7\n  |\n 6 |  ||> (West, Cell x y)  -> Cell (x - 1) y\n  |       ^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `Less`?"
         }
       ],
       "suggested_snippet": "type Direction -> Cell -> Cell\nfunc moveDir = d c => (d, c)\n ||> (North, Cell x y) -> Cell x (y - 1)\n ||> (South, Cell x y) -> Cell x (y + 1)\n ||> (East, Cell x y)  -> Cell (x + 1) y\n ||> (West, Cell x y)  -> Cell (x - 1) y\n"
@@ -260,7 +260,7 @@
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `cellEq`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `cellEq`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/building-snake/block_9.aivi:7:34\n  |\n 7 |     contains cell = listContains cellEq cell (nelToList self)\n  |                                  ^^^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `cellEq`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/building-snake/block_9.aivi:7:34\n  |\n 7 |     contains cell = listContains cellEq cell (nelToList self)\n  |                                  ^^^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `cell`?"
         },
         {
           "severity": "error",
@@ -812,7 +812,7 @@
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `West`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `West`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/building-snake/block_18.aivi:3:41\n  |\n 3 |   ||> keyDown (Key \"ArrowLeft\") => Turn West\n  |                                         ^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `West`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/building-snake/block_18.aivi:3:41\n  |\n 3 |   ||> keyDown (Key \"ArrowLeft\") => Turn West\n  |                                         ^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `Less`?"
         },
         {
           "severity": "error",
@@ -1104,13 +1104,13 @@
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `GameOver`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `GameOver`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/building-snake/block_23.aivi:11:6\n  |\n11 |  ||> GameOver -> \"Game Over\"\n  |      ^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `GameOver`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/building-snake/block_23.aivi:11:6\n  |\n11 |  ||> GameOver -> \"Game Over\"\n  |      ^^^^^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `isGameOver`?"
         },
         {
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `GameOver`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `GameOver`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/building-snake/block_23.aivi:22:6\n  |\n22 |  ||> GameOver -> True\n  |      ^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `GameOver`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/building-snake/block_23.aivi:22:6\n  |\n22 |  ||> GameOver -> True\n  |      ^^^^^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `isGameOver`?"
         },
         {
           "severity": "error",
@@ -1140,7 +1140,7 @@
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `West`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `West`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/building-snake/block_23.aivi:6:6\n  |\n 6 |  ||> West  -> \"Left\"\n  |      ^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `West`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/building-snake/block_23.aivi:6:6\n  |\n 6 |  ||> West  -> \"Left\"\n  |      ^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `Less`?"
         }
       ],
       "suggested_snippet": "type Direction -> Text\nfunc dirLabel = .\n ||> North -> \"Up\"\n ||> South -> \"Down\"\n ||> East  -> \"Right\"\n ||> West  -> \"Left\"\n\ntype Status -> Text\nfunc statusLineFor = .\n ||> Running  -> \"Running\"\n ||> GameOver -> \"Game Over\"\n\ntype Int -> Text\nfunc scoreLineFor = \"Score: {.}\"\n\ntype Int -> Text\nfunc finalScoreLineFor = \"Final score: {.}\"\n\ntype Status -> Bool\nfunc isGameOver = .\n ||> Running  -> False\n ||> GameOver -> True\n"
@@ -1368,19 +1368,19 @@
           "severity": "error",
           "code": "hir::type-mismatch",
           "message": "expected `PlayerId` but found `Int`",
-          "rendered": "error[hir::type-mismatch]: expected `PlayerId` but found `Int`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/domains/block_1.aivi:8:34\n  |\n 8 | value currentPlayer : PlayerId = 7\n  |                                  ^\n  = this expression has the wrong type"
+          "rendered": "error[hir::type-mismatch]: expected `PlayerId` but found `Int`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/domains/block_1.aivi:8:34\n  |\n 8 | value currentPlayer : PlayerId = 7\n  |                                  ^\n  = found `Int` here, expected `PlayerId`"
         },
         {
           "severity": "error",
           "code": "hir::type-mismatch",
           "message": "expected `Score` but found `Int`",
-          "rendered": "error[hir::type-mismatch]: expected `Score` but found `Int`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/domains/block_1.aivi:7:27\n  |\n 7 | value highScore : Score = 9000\n  |                           ^^^^\n  = this expression has the wrong type"
+          "rendered": "error[hir::type-mismatch]: expected `Score` but found `Int`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/domains/block_1.aivi:7:27\n  |\n 7 | value highScore : Score = 9000\n  |                           ^^^^\n  = found `Int` here, expected `Score`"
         },
         {
           "severity": "error",
           "code": "hir::type-mismatch",
           "message": "expected `Tag` but found `Text`",
-          "rendered": "error[hir::type-mismatch]: expected `Tag` but found `Text`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/domains/block_1.aivi:9:21\n  |\n 9 | value label : Tag = \"featured\"\n  |                     ^^^^^^^^^^\n  = this expression has the wrong type"
+          "rendered": "error[hir::type-mismatch]: expected `Tag` but found `Text`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/domains/block_1.aivi:9:21\n  |\n 9 | value label : Tag = \"featured\"\n  |                     ^^^^^^^^^^\n  = found `Text` here, expected `Tag`"
         }
       ],
       "suggested_snippet": "domain Score over Int\n\ndomain PlayerId over Int\n\ndomain Tag over Text\n\nvalue highScore : Score = 9000\nvalue currentPlayer : PlayerId = 7\nvalue label : Tag = \"featured\"\n"
@@ -1438,7 +1438,7 @@
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `Cell`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/domains/block_8.aivi:5:23\n  |\n 5 |     head = getOrElse (Cell 0 0) (listHead self)\n  |                       ^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/domains/block_8.aivi:5:23\n  |\n 5 |     head = getOrElse (Cell 0 0) (listHead self)\n  |                       ^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `self`?"
         },
         {
           "severity": "error",
@@ -1516,6 +1516,968 @@
         }
       ],
       "suggested_snippet": "domain Snake over NonEmptyList Cell\n\nvalue cells : List Cell = nelToList mySnake.carrier\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 7,
+      "fence_info": "aivi",
+      "start_line": 179,
+      "end_line": 182,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_7.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_7.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 8,
+      "fence_info": "aivi",
+      "start_line": 192,
+      "end_line": 195,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_8.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_8.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 9,
+      "fence_info": "aivi",
+      "start_line": 203,
+      "end_line": 206,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_9.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_9.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 10,
+      "fence_info": "aivi",
+      "start_line": 216,
+      "end_line": 218,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_10.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_10.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 11,
+      "fence_info": "aivi",
+      "start_line": 226,
+      "end_line": 229,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_11.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_11.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 12,
+      "fence_info": "aivi",
+      "start_line": 237,
+      "end_line": 240,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_12.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_12.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 13,
+      "fence_info": "aivi",
+      "start_line": 248,
+      "end_line": 248,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_13.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_13.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 14,
+      "fence_info": "aivi",
+      "start_line": 256,
+      "end_line": 256,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_14.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_14.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 15,
+      "fence_info": "aivi",
+      "start_line": 264,
+      "end_line": 264,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_15.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_15.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 16,
+      "fence_info": "aivi",
+      "start_line": 272,
+      "end_line": 272,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_16.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_16.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 17,
+      "fence_info": "aivi",
+      "start_line": 280,
+      "end_line": 280,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_17.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_17.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 18,
+      "fence_info": "aivi",
+      "start_line": 288,
+      "end_line": 288,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_18.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_18.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 19,
+      "fence_info": "aivi",
+      "start_line": 296,
+      "end_line": 296,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_19.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_19.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 20,
+      "fence_info": "aivi",
+      "start_line": 304,
+      "end_line": 304,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_20.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_20.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 21,
+      "fence_info": "aivi",
+      "start_line": 312,
+      "end_line": 312,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_21.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_21.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 22,
+      "fence_info": "aivi",
+      "start_line": 320,
+      "end_line": 320,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_22.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_22.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 23,
+      "fence_info": "aivi",
+      "start_line": 328,
+      "end_line": 328,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_23.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_23.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 24,
+      "fence_info": "aivi",
+      "start_line": 336,
+      "end_line": 338,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_24.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_24.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 25,
+      "fence_info": "aivi",
+      "start_line": 346,
+      "end_line": 346,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_25.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_25.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 26,
+      "fence_info": "aivi",
+      "start_line": 354,
+      "end_line": 356,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_26.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_26.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 27,
+      "fence_info": "aivi",
+      "start_line": 364,
+      "end_line": 366,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_27.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_27.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 28,
+      "fence_info": "aivi",
+      "start_line": 374,
+      "end_line": 374,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_28.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_28.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 29,
+      "fence_info": "aivi",
+      "start_line": 382,
+      "end_line": 384,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_29.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_29.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 30,
+      "fence_info": "aivi",
+      "start_line": 392,
+      "end_line": 394,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_30.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_30.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 31,
+      "fence_info": "aivi",
+      "start_line": 408,
+      "end_line": 412,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_31.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_31.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 32,
+      "fence_info": "aivi",
+      "start_line": 424,
+      "end_line": 427,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_32.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_32.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 33,
+      "fence_info": "aivi",
+      "start_line": 438,
+      "end_line": 438,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_33.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_33.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 34,
+      "fence_info": "aivi",
+      "start_line": 449,
+      "end_line": 449,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_34.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_34.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 35,
+      "fence_info": "aivi",
+      "start_line": 460,
+      "end_line": 460,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_35.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_35.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 36,
+      "fence_info": "aivi",
+      "start_line": 475,
+      "end_line": 478,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_36.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_36.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 37,
+      "fence_info": "aivi",
+      "start_line": 490,
+      "end_line": 492,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_37.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_37.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 38,
+      "fence_info": "aivi",
+      "start_line": 504,
+      "end_line": 504,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_38.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_38.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 39,
+      "fence_info": "aivi",
+      "start_line": 519,
+      "end_line": 519,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_39.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_39.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 40,
+      "fence_info": "aivi",
+      "start_line": 530,
+      "end_line": 532,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_40.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_40.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 41,
+      "fence_info": "aivi",
+      "start_line": 547,
+      "end_line": 551,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_41.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_41.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 42,
+      "fence_info": "aivi",
+      "start_line": 561,
+      "end_line": 563,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_42.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_42.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
+    },
+    {
+      "markdown_path": "manual/guide/markup.md",
+      "block_index": 43,
+      "fence_info": "aivi",
+      "start_line": 574,
+      "end_line": 576,
+      "formatting_changed": true,
+      "syntax_problem_count": 1,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::error-item",
+          "message": "error recovery item cannot enter Milestone 2 HIR",
+          "rendered": "error[hir::error-item]: error recovery item cannot enter Milestone 2 HIR\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_43.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^^^^^^^^^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        },
+        {
+          "severity": "error",
+          "code": "syntax::unexpected-top-level-token",
+          "message": "expected a top-level declaration",
+          "rendered": "error[syntax::unexpected-top-level-token]: expected a top-level declaration\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/markup/block_43.aivi:1:1\n  |\n 1 | # <unparseable item>\n  | ^\n  = expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here"
+        }
+      ],
+      "suggested_snippet": "# <unparseable item>\n"
     },
     {
       "markdown_path": "manual/guide/pipes.md",
@@ -2006,7 +2968,7 @@
           "severity": "error",
           "code": "hir::type-mismatch",
           "message": "expected `{ name: Text, email: Text }` but found `{ name: Text, email: Text, debug: Bool }`",
-          "rendered": "error[hir::type-mismatch]: expected `{ name: Text, email: Text }` but found `{ name: Text, email: Text, debug: Bool }`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/record-patterns/block_13.aivi:8:19\n  |\n 8 | func stripDebug = .\n  |                   ^\n  = this expression has the wrong type"
+          "rendered": "error[hir::type-mismatch]: expected `{ name: Text, email: Text }` but found `{ name: Text, email: Text, debug: Bool }`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/record-patterns/block_13.aivi:8:19\n  |\n 8 | func stripDebug = .\n  |                   ^\n  = found `{ name: Text, email: Text, debug: Bool }` here, expected `{ name: Text, email: Text }`"
         }
       ],
       "suggested_snippet": "type Full = {\n    name: Text,\n    email: Text,\n    debug: Bool\n}\n\ntype Full -> { name: Text, email: Text }\nfunc stripDebug = .\n"
@@ -2078,7 +3040,7 @@
           "severity": "error",
           "code": "hir::type-mismatch",
           "message": "expected `Option Int` but found `Signal Option Signal Int`",
-          "rendered": "error[hir::type-mismatch]: expected `Option Int` but found `Signal Option Signal Int`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/signals/block_5.aivi:6:3\n  |\n 6 |   ||> True => left + right\n  |   ^^^^^^^^^^^^^^^^^^^^^^^^\n  = this expression has the wrong type"
+          "rendered": "error[hir::type-mismatch]: expected `Option Int` but found `Signal Option Signal Int`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/signals/block_5.aivi:6:3\n  |\n 6 |   ||> True => left + right\n  |   ^^^^^^^^^^^^^^^^^^^^^^^^\n  = found `Signal Option Signal Int` here, expected `Option Int`"
         }
       ],
       "suggested_snippet": "signal left = 20\nsignal right = 22\nsignal ready = True\n\nsignal total : Signal Int = ready\n  ||> True => left + right\n  ||> _ => 0\n"
@@ -2428,7 +3390,7 @@
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `Cell`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/types/block_9.aivi:1:15\n  |\n 1 | value mkRow = Cell 5\n  |               ^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/types/block_9.aivi:1:15\n  |\n 1 | value mkRow = Cell 5\n  |               ^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `cell`?"
         }
       ],
       "suggested_snippet": "value mkRow = Cell 5\nvalue cell = mkRow 3\n"
@@ -2448,13 +3410,13 @@
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `Cell`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/types/block_10.aivi:11:6\n  |\n11 |  ||> Cell _ y -> y\n  |      ^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/types/block_10.aivi:11:6\n  |\n11 |  ||> Cell _ y -> y\n  |      ^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `cellY`?"
         },
         {
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `Cell`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/types/block_10.aivi:7:6\n  |\n 7 |  ||> Cell x _ -> x\n  |      ^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/guide/types/block_10.aivi:7:6\n  |\n 7 |  ||> Cell x _ -> x\n  |      ^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `cellY`?"
         },
         {
           "severity": "error",
@@ -2776,7 +3738,7 @@
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `Running`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `Running`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/stdlib/app/block_13.aivi:7:6\n  |\n 7 |  ||> Running -> True\n  |      ^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `Running`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/stdlib/app/block_13.aivi:7:6\n  |\n 7 |  ||> Running -> True\n  |      ^^^^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `isRunning`?"
         },
         {
           "severity": "error",
@@ -4080,7 +5042,7 @@
           "severity": "error",
           "code": "hir::type-mismatch",
           "message": "expected `TableRef { id: Int, email: Text }` but found `{ name: Text, conn: Connection, changed: Signal Unit }`",
-          "rendered": "error[hir::type-mismatch]: expected `TableRef { id: Int, email: Text }` but found `{ name: Text, conn: Connection, changed: Signal Unit }`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/stdlib/db/block_5.aivi:13:5\n  |\n13 |     {\n  |     ^\n  = this expression has the wrong type"
+          "rendered": "error[hir::type-mismatch]: expected `TableRef { id: Int, email: Text }` but found `{ name: Text, conn: Connection, changed: Signal Unit }`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/stdlib/db/block_5.aivi:13:5\n  |\n13 |     {\n  |     ^\n  = found `{ name: Text, conn: Connection, changed: Signal Unit }` here, expected `TableRef { id: Int, email: Text }`"
         }
       ],
       "suggested_snippet": "use aivi.db (\n    Connection\n    TableRef\n)\n\ntype User = {\n    id: Int,\n    email: Text\n}\n\ntype Connection -> Signal Unit -> TableRef User\nfunc usersTable = conn changed =>\n    {\n        name: \"users\",\n        conn: conn,\n        changed: changed\n    }\n"
@@ -4100,7 +5062,7 @@
           "severity": "error",
           "code": "hir::type-mismatch",
           "message": "expected `DbRow` but found `{ entries: List { key: Text, value: Text } }`",
-          "rendered": "error[hir::type-mismatch]: expected `DbRow` but found `{ entries: List { key: Text, value: Text } }`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/stdlib/db/block_7.aivi:3:27\n  |\n 3 | value sampleRow : DbRow = {\n  |                           ^\n  = this expression has the wrong type"
+          "rendered": "error[hir::type-mismatch]: expected `DbRow` but found `{ entries: List { key: Text, value: Text } }`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/stdlib/db/block_7.aivi:3:27\n  |\n 3 | value sampleRow : DbRow = {\n  |                           ^\n  = found `{ entries: List { key: Text, value: Text } }` here, expected `DbRow`"
         }
       ],
       "suggested_snippet": "use aivi.db (DbRow)\n\nvalue sampleRow : DbRow = {\n    entries: [\n        { key: \"id\", value: \"7\" },\n        {\n            key: \"email\",\n            value: \"ada@example.com\"\n        }\n    ]\n}\n"
@@ -4140,7 +5102,7 @@
           "severity": "error",
           "code": "hir::type-mismatch",
           "message": "expected `Task Text List DbRow` but found `Task Text List Map Text Text`",
-          "rendered": "error[hir::type-mismatch]: expected `Task Text List DbRow` but found `Task Text List Map Text Text`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/stdlib/db/block_17.aivi:20:44\n  |\n20 | value loadUsers : Task Text (List DbRow) = database.query loadUsersQuery\n  |                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  = this expression has the wrong type"
+          "rendered": "error[hir::type-mismatch]: expected `Task Text List DbRow` but found `Task Text List Map Text Text`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/stdlib/db/block_17.aivi:20:44\n  |\n20 | value loadUsers : Task Text (List DbRow) = database.query loadUsersQuery\n  |                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  = found `Task Text List Map Text Text` here, expected `Task Text List DbRow`"
         }
       ],
       "suggested_snippet": "use aivi.db (\n    DbSource\n    Connection\n    DbRow\n    DbStatement\n)\n\nvalue connection : Connection = {\n    database: \"data/app.db\"\n}\n\n@source db connection\nsignal database : DbSource\n\nvalue loadUsersQuery : DbStatement = {\n    sql: \"select * from users\",\n    arguments: []\n}\n\nvalue loadUsers : Task Text (List DbRow) = database.query loadUsersQuery\n"
@@ -7854,7 +8816,7 @@
           "severity": "error",
           "code": "hir::type-mismatch",
           "message": "expected `GoaAccountId` but found `Text`",
-          "rendered": "error[hir::type-mismatch]: expected `GoaAccountId` but found `Text`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/stdlib/onlineAccounts/block_6.aivi:4:9\n  |\n 4 |     id: \"personal-mail\"\n  |         ^^^^^^^^^^^^^^^\n  = this expression has the wrong type"
+          "rendered": "error[hir::type-mismatch]: expected `GoaAccountId` but found `Text`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/stdlib/onlineAccounts/block_6.aivi:4:9\n  |\n 4 |     id: \"personal-mail\"\n  |         ^^^^^^^^^^^^^^^\n  = found `Text` here, expected `GoaAccountId`"
         }
       ],
       "suggested_snippet": "use aivi.gnome.onlineAccounts (GoaAccount)\n\nvalue account : GoaAccount = {\n    id: \"personal-mail\"\n}\n"
@@ -8140,7 +9102,7 @@
           "severity": "error",
           "code": "hir::type-mismatch",
           "message": "expected `Signal Result FsError Text` but found `Task Text Text`",
-          "rendered": "error[hir::type-mismatch]: expected `Signal Result FsError Text` but found `Task Text Text`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/stdlib/path/block_12.aivi:18:51\n  |\n18 | value readConfig : Signal (Result FsError Text) = files.read \"app.conf\"\n  |                                                   ^^^^^^^^^^^^^^^^^^^^^\n  = this expression has the wrong type"
+          "rendered": "error[hir::type-mismatch]: expected `Signal Result FsError Text` but found `Task Text Text`\n --> /home/mendrik/desk/mendrik/aivi3/aivi3-production-polish/stdlib/manual_snippets/stdlib/path/block_12.aivi:18:51\n  |\n18 | value readConfig : Signal (Result FsError Text) = files.read \"app.conf\"\n  |                                                   ^^^^^^^^^^^^^^^^^^^^^\n  = found `Task Text Text` here, expected `Signal Result FsError Text`"
         }
       ],
       "suggested_snippet": "use aivi.path (\n    join\n    normalize\n)\n\nuse aivi.fs (\n    FsSource\n    FsError\n)\n\nvalue configDir : Text = \"/etc/demo\"\n\n@source fs configDir\nsignal files : FsSource\n\nvalue configPath : Text = join configDir \"app.conf\"\nvalue backupPath : Text = normalize (join configDir \"../demo/app.conf.bak\")\nvalue readConfig : Signal (Result FsError Text) = files.read \"app.conf\"\nvalue writeBackup : Task Text Unit = files.writeText \"app.conf.bak\" \"...\"\n"
