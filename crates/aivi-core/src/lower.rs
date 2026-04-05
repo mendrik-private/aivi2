@@ -829,7 +829,7 @@ impl<'a> ModuleLowerer<'a> {
         self.ws_origin_base = self.next_synthetic_item_origin_raw;
 
         // ── Save name → ItemId map for this workspace module ─────────────────
-        let name_map: HashMap<Box<str>, ItemId> = ws_hir
+        let mut name_map: HashMap<Box<str>, ItemId> = ws_hir
             .items()
             .iter()
             .filter_map(|(hir_id, item)| {
@@ -843,6 +843,49 @@ impl<'a> ModuleLowerer<'a> {
                 Some((name, core_id))
             })
             .collect();
+        // Also include all non-signal imports so that downstream modules that import through
+        // a re-export shim resolve to the original implementation item (with body) rather than
+        // a bodyless stub. Two passes: first from import_item_map (already-resolved imports from
+        // body lowering), then a direct workspace lookup for imports that body lowering never
+        // touched (e.g., shim modules with no function bodies where all items are just imports).
+        // Signal imports are excluded: they use deterministic synthetic origins that must not
+        // be remapped.
+        for (import_id, &core_id) in &self.import_item_map {
+            if let Some(binding) = ws_hir.imports().get(*import_id) {
+                if !matches!(self.module.items()[core_id].kind, ItemKind::Signal(_)) {
+                    let local_name: Box<str> = binding.local_name.text().into();
+                    name_map.entry(local_name).or_insert(core_id);
+                }
+            }
+        }
+        // Second pass: directly resolve imports not yet in import_item_map by looking up the
+        // workspace name maps of their source modules. This handles pure re-export shims where
+        // lower_general_exprs never calls seed_import_item because there are no function bodies.
+        for (import_id, binding) in ws_hir.imports().iter() {
+            let local_name: Box<str> = binding.local_name.text().into();
+            if name_map.contains_key(&local_name) {
+                continue;
+            }
+            // Skip signal imports — they must use deterministic synthetic origin arithmetic and
+            // must not be remapped to the workspace item's origin.
+            let is_signal = matches!(
+                &binding.metadata,
+                ImportBindingMetadata::Value {
+                    ty: ImportValueType::Signal(_)
+                }
+            );
+            if is_signal {
+                continue;
+            }
+            if let Some(source_module) = self.import_to_module.get(&import_id) {
+                if let Some(source_name_map) = self.workspace_name_maps.get(source_module.as_ref())
+                {
+                    if let Some(&core_id) = source_name_map.get(binding.imported_name.text()) {
+                        name_map.insert(local_name, core_id);
+                    }
+                }
+            }
+        }
         self.workspace_name_maps.insert(module_name.into(), name_map);
 
         // ── Restore entry module state ───────────────────────────────────────
@@ -1332,11 +1375,24 @@ impl<'a> ModuleLowerer<'a> {
                     .push(LoweringError::UnknownOwner { owner: hir_id });
                 continue;
             };
-            let dependencies = signal
+            let mut dependencies = signal
                 .signal_dependencies
                 .iter()
                 .filter_map(|dependency| self.map_dependency(hir_id, *dependency))
                 .collect::<Vec<_>>();
+            // Also include imported workspace signal dependencies.
+            // These are tracked in import_item_map by ImportId, not in item_map.
+            for &import_id in &signal.import_signal_dependencies {
+                match self.import_item_map.get(&import_id).copied() {
+                    Some(core_id) => dependencies.push(core_id),
+                    None => self.errors.push(LoweringError::DependencyOutsideCore {
+                        owner: hir_id,
+                        dependency: HirItemId::from_raw(
+                            self.hir_item_count + import_id.as_raw(),
+                        ),
+                    }),
+                }
+            }
             let Some(item) = self.module.items_mut().get_mut(item_id) else {
                 self.errors
                     .push(LoweringError::UnknownOwner { owner: hir_id });
@@ -1345,7 +1401,6 @@ impl<'a> ModuleLowerer<'a> {
             let ItemKind::Signal(info) = &mut item.kind else {
                 continue;
             };
-            let mut dependencies = dependencies;
             dependencies.sort();
             dependencies.dedup();
             info.dependencies = dependencies;

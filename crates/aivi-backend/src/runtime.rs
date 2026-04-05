@@ -1414,6 +1414,11 @@ impl<'a> KernelEvaluator<'a> {
             }
         }
         let inline_subjects = vec![None; kernel.inline_subjects.len()];
+        if kernel_id.as_raw() == 1456 {
+            let root = kernel.root;
+            let root_expr_kind = kernel.exprs().get(root).map(|e| crate::kernel::describe_expr_kind(&e.kind));
+            eprintln!("[DBG-k1456] root={root} kind={root_expr_kind:?}");
+        }
         let result = self.evaluate_expr(
             kernel_id,
             kernel.root,
@@ -1463,12 +1468,16 @@ impl<'a> KernelEvaluator<'a> {
             return Err(EvaluationError::RecursiveItemEvaluation { item });
         }
         self.eval_trace.push(EvalFrame { item, kernel });
+        if let Some(k) = self.program.kernels().get(kernel) {
+            eprintln!("[DBG-item] evaluate_item item={item} kernel={kernel} name={} kernel_origin={} result_layout={}", item_decl.name, k.origin.kind, k.result_layout);
+        }
         let result = self.evaluate_kernel_raw(kernel, None, &[], globals);
         self.item_stack.remove(&item);
         let (raw_result, expected) = match result {
-            Ok(v) => {
+            Ok((v, layout)) => {
+                eprintln!("[DBG-item-ok] item={item} kernel={kernel} name={} result={v:?}", item_decl.name);
                 self.eval_trace.pop();
-                v
+                (v, layout)
             }
             Err(e) => return Err(e),
         };

@@ -346,6 +346,20 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                         &public_signals,
                         &mut errors,
                     );
+                    // Resolve imported signal dependencies (workspace module signals
+                    // referenced via TermResolution::Import). These use the same
+                    // synthetic ItemId formula as the import stub block above.
+                    for &import_id in &signal.import_signal_dependencies {
+                        let synthetic_id =
+                            hir::ItemId::from_raw(hir_item_count + import_id.as_raw());
+                        match public_signals.get(&synthetic_id).copied() {
+                            Some(handle) => push_unique_signal(&mut resolved, handle),
+                            None => errors.push(HirRuntimeAdapterError::UnknownSignalDependency {
+                                owner: binding.item,
+                                dependency: synthetic_id,
+                            }),
+                        }
+                    }
                     if let Some(source_input) = binding.source_input {
                         push_unique_signal(&mut resolved, source_input.as_signal());
                     }

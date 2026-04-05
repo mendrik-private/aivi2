@@ -2373,6 +2373,12 @@ impl LinkedDerivedEvaluator<'_> {
 
         if previous.is_none() {
             // First tick: evaluate the seed kernel (no input subject).
+            {
+                let k = binding.seed_kernel;
+                if let Some(kernel) = self.backend.kernels().get(k) {
+                    eprintln!("[DBG-seed] kernel{k} origin={} result_layout={}", kernel.origin.kind, kernel.result_layout);
+                }
+            }
             let seed_value = evaluate_kernel_coercing_zero_arity(
                 &mut evaluator,
                 binding.seed_kernel,
@@ -3091,7 +3097,6 @@ impl<'a> LinkBuilder<'a> {
                 let item = &self.backend.items()[*item_id];
                 match item.kind {
                     BackendItemKind::Signal(_) => {
-                        eprintln!("[DEBUG req-sig] owner={owner:?} item={item_id:?} name={}", item.name);
                         required.insert(*item_id);
                     }
                     _ => {

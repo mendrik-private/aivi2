@@ -145,7 +145,7 @@ impl<'a> ModuleLowerer<'a> {
         for (item_id, item) in self.core.items().iter() {
             let lambda_params = core_to_lambda_parameters(&item.parameters);
             let body = item.body.and_then(|root| {
-                match self.lower_closure(
+                self.lower_closure(
                     item_id,
                     item.span,
                     ClosureKind::ItemBody,
@@ -154,10 +154,7 @@ impl<'a> ModuleLowerer<'a> {
                     root,
                     false,
                     &parameter_name_map(&item.parameters),
-                ) {
-                    Some(closure) => Some(closure),
-                    None => None,
-                }
+                )
             });
 
             let lowered_id = alloc_or_diag!(

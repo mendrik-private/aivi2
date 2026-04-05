@@ -2090,14 +2090,33 @@ impl<'a> Lowerer<'a> {
                             return (ImportBindingResolution::Resolved, metadata, None, None);
                         }
                     }
-                    // For non-ambient exports, fall back to known_import_metadata when
-                    // the export is opaque (e.g. stdlib modules that can't resolve their
-                    // own self-imports).
+                    // For non-ambient exports, fall back to known_import_metadata when the
+                    // export is opaque (e.g. stdlib modules that can't resolve their own
+                    // self-imports), OR when the compiler explicitly marks the function as an
+                    // IntrinsicValue but the stdlib exports it as a regular Value (e.g.
+                    // aivi.text.lower is a thin wrapper around the toLower intrinsic and exports
+                    // as Value, but the compiler can lower it as a direct intrinsic call).
+                    let export_is_plain_value =
+                        matches!(exported.metadata, ImportBindingMetadata::Value { .. });
                     if matches!(exported.metadata, ImportBindingMetadata::OpaqueValue) {
                         if let Some(metadata) =
                             known_import_metadata(module_name, imported_name.text())
                         {
                             return (ImportBindingResolution::Resolved, metadata, None, None);
+                        }
+                    }
+                    if export_is_plain_value {
+                        if let Some(metadata) =
+                            known_import_metadata(module_name, imported_name.text())
+                        {
+                            if matches!(metadata, ImportBindingMetadata::IntrinsicValue { .. }) {
+                                return (
+                                    ImportBindingResolution::Resolved,
+                                    metadata,
+                                    None,
+                                    None,
+                                );
+                            }
                         }
                     }
                     (
