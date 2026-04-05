@@ -250,8 +250,21 @@ impl DiagnosticRenderer {
                 // If the span crosses lines, also add the end line.
                 let end_loc = file.line_column(label.span.span().end());
                 if end_loc.line != loc.line {
-                    // For multi-line spans, we show start and end lines.
-                    line_labels.entry(end_loc.line).or_default();
+                    let span_lines = end_loc.line.saturating_sub(loc.line) + 1;
+                    if span_lines <= 6 {
+                        // Show all lines of the span.
+                        for l in (loc.line + 1)..=end_loc.line {
+                            line_labels.entry(l).or_default();
+                        }
+                    } else {
+                        // Show first 3 context lines (start+1, start+2) then the end line;
+                        // the existing gap-ellipsis logic renders `…` for the skipped middle.
+                        let context_end = (loc.line + 2).min(end_loc.line.saturating_sub(1));
+                        for l in (loc.line + 1)..=context_end {
+                            line_labels.entry(l).or_default();
+                        }
+                        line_labels.entry(end_loc.line).or_default();
+                    }
                 }
             }
 
@@ -599,5 +612,41 @@ mod tests {
         // Explicit modes override everything.
         assert!(should_colorize(ColorMode::Always, false));
         assert!(!should_colorize(ColorMode::Never, true));
+    }
+
+    #[test]
+    fn renders_long_multiline_span_truncated() {
+        // Build a source with 10 lines; label spans the entire thing.
+        let src = "line one\nline two\nline three\nline four\nline five\nline six\nline seven\nline eight\nline nine\nline ten\n";
+        let mut sources = SourceDatabase::new();
+        let fid = sources.add_file("multi.aivi", src);
+        let file = &sources[fid];
+
+        // Span from byte 0 to just before the final newline (stays on line 10).
+        let span_end = src.trim_end_matches('\n').len();
+        let span = file.source_span(0..span_end);
+        let diag =
+            Diagnostic::error("very long span").with_primary_label(span, "spans many lines");
+
+        let renderer = DiagnosticRenderer::plain();
+        let rendered = renderer.render(&diag, &sources);
+
+        // First 3 lines must appear.
+        assert!(rendered.contains("line one"), "first line missing: {rendered}");
+        assert!(rendered.contains("line two"), "second line missing: {rendered}");
+        assert!(rendered.contains("line three"), "third line missing: {rendered}");
+        // Last line must appear.
+        assert!(rendered.contains("line ten"), "last line missing: {rendered}");
+        // Intermediate lines should be truncated with the ellipsis gutter marker.
+        assert!(rendered.contains("·"), "expected ellipsis gap marker: {rendered}");
+        // Lines 4-9 should NOT all appear (truncation must have happened).
+        let middle_lines_shown = ["line four", "line five", "line six", "line seven", "line eight", "line nine"]
+            .iter()
+            .filter(|&&l| rendered.contains(l))
+            .count();
+        assert!(
+            middle_lines_shown < 6,
+            "expected middle lines to be truncated, but all appeared: {rendered}"
+        );
     }
 }
