@@ -911,6 +911,25 @@ impl SourceProviderManager {
                     port,
                 }
             }
+            RuntimeSourceProvider::Builtin(
+                BuiltinSourceProvider::ImapConnect
+                | BuiltinSourceProvider::ImapIdle
+                | BuiltinSourceProvider::ImapFetchBody
+                | BuiltinSourceProvider::SmtpSend
+                | BuiltinSourceProvider::DbExec
+                | BuiltinSourceProvider::TimeNowMs,
+            ) => {
+                // Stub: runtime implementations are pending. Publish Unit so
+                // downstream signals settle at startup without panicking.
+                let _ = port.publish(DetachedRuntimeValue::from_runtime_owned(
+                    RuntimeValue::Unit,
+                ));
+                let stop = Arc::new(AtomicBool::new(false));
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
             RuntimeSourceProvider::Custom(_) => {
                 // Custom providers publish an initial Unit value so the source
                 // signal is populated and downstream derivations can settle.

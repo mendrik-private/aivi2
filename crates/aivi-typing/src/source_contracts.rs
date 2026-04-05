@@ -37,10 +37,16 @@ pub enum BuiltinSourceProvider {
     DbusSignal,
     DbusMethod,
     WindowKeyDown,
+    ImapConnect,
+    ImapIdle,
+    ImapFetchBody,
+    SmtpSend,
+    DbExec,
+    TimeNowMs,
 }
 
 impl BuiltinSourceProvider {
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 30] = [
         Self::HttpGet,
         Self::HttpPost,
         Self::TimerEvery,
@@ -65,6 +71,12 @@ impl BuiltinSourceProvider {
         Self::DbusSignal,
         Self::DbusMethod,
         Self::WindowKeyDown,
+        Self::ImapConnect,
+        Self::ImapIdle,
+        Self::ImapFetchBody,
+        Self::SmtpSend,
+        Self::DbExec,
+        Self::TimeNowMs,
     ];
 
     pub fn parse(key: &str) -> Option<Self> {
@@ -93,6 +105,12 @@ impl BuiltinSourceProvider {
             "dbus.signal" => Some(Self::DbusSignal),
             "dbus.method" => Some(Self::DbusMethod),
             "window.keyDown" => Some(Self::WindowKeyDown),
+            "imap.connect" => Some(Self::ImapConnect),
+            "imap.idle" => Some(Self::ImapIdle),
+            "imap.fetchBody" => Some(Self::ImapFetchBody),
+            "smtp.send" => Some(Self::SmtpSend),
+            "db.exec" => Some(Self::DbExec),
+            "time.nowMs" => Some(Self::TimeNowMs),
             _ => None,
         }
     }
@@ -123,6 +141,12 @@ impl BuiltinSourceProvider {
             Self::DbusSignal => "dbus.signal",
             Self::DbusMethod => "dbus.method",
             Self::WindowKeyDown => "window.keyDown",
+            Self::ImapConnect => "imap.connect",
+            Self::ImapIdle => "imap.idle",
+            Self::ImapFetchBody => "imap.fetchBody",
+            Self::SmtpSend => "smtp.send",
+            Self::DbExec => "db.exec",
+            Self::TimeNowMs => "time.nowMs",
         }
     }
 
@@ -198,6 +222,24 @@ impl BuiltinSourceProvider {
             ),
             Self::WindowKeyDown => {
                 SourceContract::new(self, &WINDOW_OPTIONS, WINDOW_RECURRENCE, STREAM_LIFECYCLE)
+            }
+            Self::ImapConnect => {
+                SourceContract::new(self, &NO_OPTIONS, STATIC_RECURRENCE, STREAM_LIFECYCLE)
+            }
+            Self::ImapIdle => {
+                SourceContract::new(self, &NO_OPTIONS, FS_WATCH_RECURRENCE, STREAM_LIFECYCLE)
+            }
+            Self::ImapFetchBody => {
+                SourceContract::new(self, &NO_OPTIONS, HTTP_RECURRENCE, HTTP_LIFECYCLE)
+            }
+            Self::SmtpSend => {
+                SourceContract::new(self, &NO_OPTIONS, HTTP_RECURRENCE, HTTP_LIFECYCLE)
+            }
+            Self::DbExec => {
+                SourceContract::new(self, &NO_OPTIONS, HTTP_RECURRENCE, HTTP_LIFECYCLE)
+            }
+            Self::TimeNowMs => {
+                SourceContract::new(self, &NO_OPTIONS, STATIC_RECURRENCE, STATIC_LIFECYCLE)
             }
         }
     }

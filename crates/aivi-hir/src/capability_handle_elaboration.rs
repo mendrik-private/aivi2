@@ -21,6 +21,7 @@ pub(crate) fn is_builtin_source_capability_family_path(path: &NamePath) -> bool 
     matches!(
         path.segments().first().text(),
         "fs" | "http" | "db" | "env" | "log" | "stdio" | "random" | "process" | "path" | "dbus"
+            | "imap" | "smtp" | "time"
     )
 }
 
@@ -55,6 +56,9 @@ enum BuiltinCapabilityFamily {
     Process,
     Path,
     Dbus,
+    Imap,
+    Smtp,
+    Time,
 }
 
 #[derive(Clone, Debug)]
@@ -858,7 +862,31 @@ fn lower_builtin_signal_member(
                 options: handle.options,
             })
         }
-        BuiltinCapabilityFamily::Log | BuiltinCapabilityFamily::Random => None,
+        BuiltinCapabilityFamily::Log | BuiltinCapabilityFamily::Random | BuiltinCapabilityFamily::Smtp => None,
+        BuiltinCapabilityFamily::Imap => {
+            let provider = match invocation.member.as_str() {
+                "connect" => BuiltinSourceProvider::ImapConnect,
+                "idle" => BuiltinSourceProvider::ImapIdle,
+                "fetchBody" => BuiltinSourceProvider::ImapFetchBody,
+                _ => return None,
+            };
+            Some(SourceDecorator {
+                provider: Some(provider_name_path(invocation.span, provider)),
+                arguments: inherited_arguments(handle, &invocation.arguments),
+                options: handle.options,
+            })
+        }
+        BuiltinCapabilityFamily::Time => match invocation.member.as_str() {
+            "nowMs" => Some(SourceDecorator {
+                provider: Some(provider_name_path(
+                    invocation.span,
+                    BuiltinSourceProvider::TimeNowMs,
+                )),
+                arguments: inherited_arguments(handle, &invocation.arguments),
+                options: handle.options,
+            }),
+            _ => None,
+        },
     }
 }
 
@@ -902,7 +930,7 @@ fn lower_builtin_value_member(
         BuiltinCapabilityFamily::Db => {
             let intrinsic = match invocation.member.as_str() {
                 "query" => IntrinsicValue::DbQuery,
-                "commit" => IntrinsicValue::DbCommit,
+                "commit" | "exec" => IntrinsicValue::DbCommit,
                 _ => return None,
             };
             Some(build_intrinsic_call(
@@ -983,7 +1011,11 @@ fn lower_builtin_value_member(
                 inherited_arguments(handle, &invocation.arguments),
             ))
         }
-        BuiltinCapabilityFamily::Process | BuiltinCapabilityFamily::Dbus => None,
+        BuiltinCapabilityFamily::Process
+        | BuiltinCapabilityFamily::Dbus
+        | BuiltinCapabilityFamily::Imap
+        | BuiltinCapabilityFamily::Time => None,
+        BuiltinCapabilityFamily::Smtp => None,
     }
 }
 
@@ -1423,6 +1455,9 @@ fn builtin_capability_family(path: &NamePath) -> Option<BuiltinCapabilityFamily>
         "process" => Some(BuiltinCapabilityFamily::Process),
         "path" => Some(BuiltinCapabilityFamily::Path),
         "dbus" => Some(BuiltinCapabilityFamily::Dbus),
+        "imap" => Some(BuiltinCapabilityFamily::Imap),
+        "smtp" => Some(BuiltinCapabilityFamily::Smtp),
+        "time" => Some(BuiltinCapabilityFamily::Time),
         _ => None,
     }
 }
@@ -1440,7 +1475,9 @@ fn supports_builtin_signal_member(family: BuiltinCapabilityFamily, member: &str)
             "home" | "configHome" | "dataHome" | "cacheHome" | "tempDir"
         ),
         BuiltinCapabilityFamily::Dbus => matches!(member, "ownName" | "signal" | "method"),
-        BuiltinCapabilityFamily::Log | BuiltinCapabilityFamily::Random => false,
+        BuiltinCapabilityFamily::Imap => matches!(member, "connect" | "idle" | "fetchBody"),
+        BuiltinCapabilityFamily::Time => matches!(member, "nowMs"),
+        BuiltinCapabilityFamily::Log | BuiltinCapabilityFamily::Random | BuiltinCapabilityFamily::Smtp => false,
     }
 }
 
@@ -1468,7 +1505,7 @@ fn supports_builtin_value_member(family: BuiltinCapabilityFamily, member: &str) 
             member,
             "get" | "getBytes" | "getStatus" | "post" | "put" | "delete" | "head" | "postJson"
         ),
-        BuiltinCapabilityFamily::Db => matches!(member, "query" | "commit"),
+        BuiltinCapabilityFamily::Db => matches!(member, "query" | "commit" | "exec"),
         BuiltinCapabilityFamily::Env => matches!(member, "get" | "list"),
         BuiltinCapabilityFamily::Log => matches!(member, "emit" | "emitContext"),
         BuiltinCapabilityFamily::Stdio => {
@@ -1491,7 +1528,11 @@ fn supports_builtin_value_member(family: BuiltinCapabilityFamily, member: &str) 
                 | "dataDirs"
                 | "configDirs"
         ),
-        BuiltinCapabilityFamily::Process | BuiltinCapabilityFamily::Dbus => false,
+        BuiltinCapabilityFamily::Process
+        | BuiltinCapabilityFamily::Dbus
+        | BuiltinCapabilityFamily::Imap
+        | BuiltinCapabilityFamily::Time => false,
+        BuiltinCapabilityFamily::Smtp => matches!(member, "send"),
     }
 }
 

@@ -6225,7 +6225,11 @@ impl Validator<'_> {
                             | BuiltinSourceProvider::DbusOwnName
                             | BuiltinSourceProvider::DbusSignal
                             | BuiltinSourceProvider::DbusMethod
-                            | BuiltinSourceProvider::WindowKeyDown => {
+                            | BuiltinSourceProvider::WindowKeyDown
+                            | BuiltinSourceProvider::ImapIdle
+                            | BuiltinSourceProvider::ImapFetchBody
+                            | BuiltinSourceProvider::SmtpSend
+                            | BuiltinSourceProvider::DbExec => {
                                 "this built-in source should already have planned a wakeup; if you hit this diagnostic, keep the failing fixture because the recurrence wakeup adapter is inconsistent"
                             }
                             BuiltinSourceProvider::ProcessArgs
@@ -6236,10 +6240,12 @@ impl Validator<'_> {
                             | BuiltinSourceProvider::PathConfigHome
                             | BuiltinSourceProvider::PathDataHome
                             | BuiltinSourceProvider::PathCacheHome
-                            | BuiltinSourceProvider::PathTempDir => {
+                            | BuiltinSourceProvider::PathTempDir
+                            | BuiltinSourceProvider::TimeNowMs => {
                                 "this built-in source publishes one host-context snapshot when subscribed; add an explicit recurrence wakeup or switch to a non-recurrent signal"
                             }
-                            BuiltinSourceProvider::DbConnect => {
+                            BuiltinSourceProvider::DbConnect
+                            | BuiltinSourceProvider::ImapConnect => {
                                 "this connection source publishes one connection snapshot when subscribed; add an explicit recurrence wakeup or switch to a non-recurrent signal"
                             }
                             BuiltinSourceProvider::HttpGet
