@@ -779,6 +779,10 @@ struct Namespaces {
     /// after explicit `use` imports but before class/builtin fallbacks.
     hoisted_term_imports: HashMap<String, Vec<NamedSite<ImportId>>>,
     hoisted_type_imports: HashMap<String, Vec<NamedSite<ImportId>>>,
+    /// Module paths (dot-joined) that have already been registered via a local
+    /// `hoist` declaration.  Prevents double-registration when the workspace
+    /// scan returns the same module path.
+    hoisted_module_paths: std::collections::HashSet<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -5360,6 +5364,8 @@ impl<'a> Lowerer<'a> {
         use crate::exports::ExportedNameKind;
 
         let module_name = path_text(&item.module);
+        let module_key = module_name.clone();
+        namespaces.hoisted_module_paths.insert(module_key);
         let module_segments = item.module.segments().iter().map(Name::text).collect::<Vec<_>>();
         let module_resolution = self.resolver.resolve(&module_segments);
 
@@ -5481,6 +5487,175 @@ impl<'a> Lowerer<'a> {
                 });
             }
         }
+    }
+
+    /// Register all workspace-level hoist items from other modules.
+    ///
+    /// Called after `build_namespaces()` processes local `Item::Hoist`
+    /// declarations.  Module paths already registered locally are skipped to
+    /// prevent double-registration.  Missing modules are silently ignored (no
+    /// diagnostic) since they may belong to a different workspace scope.
+    fn register_workspace_hoists(&mut self, namespaces: &mut Namespaces) {
+        use aivi_base::{FileId, Span};
+        use crate::resolver::RawHoistItem;
+
+        let workspace_hoists: Vec<RawHoistItem> = self.resolver.workspace_hoist_items();
+        if workspace_hoists.is_empty() {
+            return;
+        }
+
+        let synthetic_span = SourceSpan::new(FileId::ZERO, Span::from(0..0));
+
+        for raw in workspace_hoists {
+            let module_key = raw.module_path.join(".");
+            if namespaces.hoisted_module_paths.contains(&module_key) {
+                continue;
+            }
+            namespaces.hoisted_module_paths.insert(module_key.clone());
+
+            let module_segments: Vec<&str> = raw.module_path.iter().map(String::as_str).collect();
+            let module_resolution = self.resolver.resolve(&module_segments);
+            let crate::resolver::ImportModuleResolution::Resolved(ref exports) = module_resolution
+            else {
+                continue; // silent — workspace hoists may reference optional modules
+            };
+
+            self.register_hoist_exports(
+                &module_key,
+                exports,
+                &raw.kind_filters,
+                &raw.hiding,
+                synthetic_span,
+                namespaces,
+            );
+        }
+    }
+
+    /// Core of hoist registration: given a resolved module's `ExportedNames`,
+    /// apply kind filters and hiding, then insert synthetic imports into the
+    /// hoisted namespace maps.  Shared by both local `Item::Hoist` and
+    /// workspace hoist propagation.
+    fn register_hoist_exports(
+        &mut self,
+        module_name: &str,
+        exports: &crate::exports::ExportedNames,
+        kind_filters: &[HoistKindFilter],
+        hiding: &[impl AsRef<str>],
+        span: SourceSpan,
+        namespaces: &mut Namespaces,
+    ) {
+        use crate::exports::ExportedNameKind;
+        use crate::resolver::ImportModuleResolution;
+
+        let module_resolution = self.resolver.resolve(
+            &module_name.split('.').collect::<Vec<_>>(),
+        );
+        // Re-use the already-resolved exports passed in; build a local
+        // ImportModuleResolution::Resolved so resolve_import_binding works.
+        let wrapped = ImportModuleResolution::Resolved(exports.clone());
+
+        for exported in exports.names.iter() {
+            if !kind_filters.is_empty() {
+                let kind_matches = kind_filters.iter().any(|f| match (f, &exported.kind) {
+                    (HoistKindFilter::Func, ExportedNameKind::Function) => true,
+                    (HoistKindFilter::Value, ExportedNameKind::Value) => true,
+                    (HoistKindFilter::Signal, ExportedNameKind::Signal) => true,
+                    (HoistKindFilter::Type, ExportedNameKind::Type) => true,
+                    (HoistKindFilter::Domain, ExportedNameKind::Domain) => true,
+                    (HoistKindFilter::Class, ExportedNameKind::Class) => true,
+                    _ => false,
+                });
+                if !kind_matches {
+                    continue;
+                }
+            }
+
+            if hiding.iter().any(|h| h.as_ref() == exported.name) {
+                continue;
+            }
+
+            let imported_name = self.make_name(&exported.name, span);
+            let (resolution, metadata, callable_type, deprecation) =
+                self.resolve_import_binding(module_name, &imported_name, &wrapped);
+
+            if !matches!(resolution, ImportBindingResolution::Resolved) {
+                continue;
+            }
+
+            let import_id = self.alloc_import(ImportBinding {
+                span,
+                imported_name: imported_name.clone(),
+                local_name: imported_name.clone(),
+                resolution,
+                metadata: metadata.clone(),
+                callable_type,
+                deprecation,
+            });
+
+            match &metadata {
+                ImportBindingMetadata::TypeConstructor { .. }
+                | ImportBindingMetadata::BuiltinType(_)
+                | ImportBindingMetadata::AmbientType => insert_site(
+                    &mut namespaces.hoisted_type_imports,
+                    imported_name.text(),
+                    import_id,
+                    span,
+                ),
+                ImportBindingMetadata::Domain { literal_suffixes, .. } => {
+                    let suffixes = literal_suffixes.clone();
+                    insert_site(
+                        &mut namespaces.hoisted_type_imports,
+                        imported_name.text(),
+                        import_id,
+                        span,
+                    );
+                    if !suffixes.is_empty() {
+                        self.register_imported_domain_literal_suffixes(
+                            &imported_name,
+                            span,
+                            &suffixes,
+                            &mut namespaces.literal_suffixes,
+                        );
+                    }
+                }
+                ImportBindingMetadata::Bundle(_) | ImportBindingMetadata::InstanceMember { .. } => {}
+                _ => insert_site(
+                    &mut namespaces.hoisted_term_imports,
+                    imported_name.text(),
+                    import_id,
+                    span,
+                ),
+            }
+        }
+
+        // Auto-register instance members for class dispatch.
+        for instance_decl in &exports.instances {
+            for member in &instance_decl.members {
+                let synthetic_name = format!(
+                    "__instance_{}_{}_{}_{}",
+                    instance_decl.class_name,
+                    member.name,
+                    instance_decl.subject,
+                    import_value_type_label(&member.ty),
+                );
+                let name = self.make_name(&synthetic_name, span);
+                self.alloc_import(ImportBinding {
+                    span,
+                    imported_name: self.make_name(&member.name, span),
+                    local_name: name,
+                    resolution: ImportBindingResolution::Resolved,
+                    metadata: ImportBindingMetadata::InstanceMember {
+                        class_name: instance_decl.class_name.clone(),
+                        member_name: member.name.clone(),
+                        subject: instance_decl.subject.clone(),
+                        ty: member.ty.clone(),
+                    },
+                    callable_type: None,
+                    deprecation: None,
+                });
+            }
+        }
+        let _ = module_resolution; // used only for resolve_import_binding
     }
 
     /// Synthesise a minimal `Item::Domain` stub in the current module so that

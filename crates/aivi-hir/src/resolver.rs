@@ -1,4 +1,5 @@
 use crate::exports::ExportedNames;
+use crate::hir::HoistKindFilter;
 
 /// One explicit import cycle discovered during module resolution.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,6 +31,16 @@ pub enum ImportModuleResolution {
     Cycle(ImportCycle),
 }
 
+/// A hoist declaration extracted from a module's syntax tree, used to
+/// propagate workspace-wide hoists without full HIR lowering of the source
+/// module.
+#[derive(Clone, Debug)]
+pub struct RawHoistItem {
+    pub module_path: Vec<String>,
+    pub kind_filters: Vec<HoistKindFilter>,
+    pub hiding: Vec<String>,
+}
+
 /// Resolves an import path to the exported names of the referenced module.
 ///
 /// Implementors inject cross-file resolution into the HIR lowering pipeline
@@ -38,6 +49,17 @@ pub trait ImportResolver {
     /// Resolve a dotted module path (e.g. `["aivi", "network"]`) to the set of
     /// names exported by that module.
     fn resolve(&self, path: &[&str]) -> ImportModuleResolution;
+
+    /// Return all hoist declarations from other modules in the same workspace.
+    ///
+    /// These are injected into every module's namespace after its own local
+    /// `hoist` items are processed, making the hoisted names globally available
+    /// across the entire project without per-file `use` imports.
+    ///
+    /// The default implementation returns an empty list (no workspace hoists).
+    fn workspace_hoist_items(&self) -> Vec<RawHoistItem> {
+        vec![]
+    }
 }
 
 /// A no-op resolver that never resolves any import. Used when cross-file
