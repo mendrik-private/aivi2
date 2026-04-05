@@ -253,3 +253,7 @@ keyboard     ──→  keyDown signal
 
 Every arrow is a declared dependency. There are no hidden subscriptions, no manual wiring, and
 no callbacks.
+
+---
+
+**See also:** [Sources](sources.md) — how external data enters the reactive graph · [Source Catalog](source-catalog.md) — built-in `@source` providers and configuration

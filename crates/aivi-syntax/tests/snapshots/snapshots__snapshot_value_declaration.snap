@@ -28,6 +28,7 @@ Module {
                         end: 7,
                     },
                     decorators: [],
+                    leading_comments: [],
                 },
                 keyword_span: SourceSpan {
                     file: FileId(

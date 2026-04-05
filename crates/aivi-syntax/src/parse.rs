@@ -121,7 +121,11 @@ impl<'a> Parser<'a> {
     fn parse(mut self) -> (Module, Vec<Diagnostic>) {
         let mut items = Vec::new();
         let mut pending_type_annotation = None;
+        // Comments collected for a pending standalone `type` annotation are
+        // carried forward and prepended to the following declaration.
+        let mut carried_comments: Vec<String> = Vec::new();
         while let Some(start) = self.next_significant_from(self.cursor) {
+            let leading_comments = self.collect_leading_comments(self.cursor, start);
             let item = match self.tokens[start].kind() {
                 TokenKind::At => self.parse_decorated_item(start),
                 kind if kind.is_top_level_keyword() => self.parse_item_without_decorators(start),
@@ -138,12 +142,23 @@ impl<'a> Parser<'a> {
                 if let Some(previous) = pending_type_annotation.replace(pending) {
                     self.emit_orphan_standalone_type_annotation(&previous, None);
                 }
+                // Carry the comments so they prefix the following declaration.
+                if !leading_comments.is_empty() {
+                    carried_comments = leading_comments;
+                }
                 continue;
             }
 
             let mut item = item;
             if let Some(pending) = pending_type_annotation.take() {
                 self.apply_pending_type_annotation(&mut item, pending);
+            }
+            // Merge carried comments (from a preceding type annotation) with
+            // any comments directly before this item, preferring carried first.
+            let mut all_comments = std::mem::take(&mut carried_comments);
+            all_comments.extend(leading_comments);
+            if !all_comments.is_empty() {
+                item.base_mut().leading_comments = all_comments;
             }
             items.push(item);
         }
@@ -6134,6 +6149,7 @@ impl<'a> Parser<'a> {
             span: self.source_span_for_range(start, end),
             token_range: TokenRange::new(start, end),
             decorators,
+            leading_comments: Vec::new(),
         }
     }
 
@@ -6238,6 +6254,45 @@ impl<'a> Parser<'a> {
 
     fn next_significant_from(&self, start: usize) -> Option<usize> {
         self.next_significant_in_range(start, self.tokens.len())
+    }
+
+    /// Collect line comments from tokens in `[from, to)` that appear at the
+    /// start of a line. Only the contiguous block of comments immediately
+    /// before the item (index `to`) is kept; any blank line (span gap larger
+    /// than a single newline) between comment groups resets the accumulator so
+    /// we don't attach comments that belong to the previous item.
+    fn collect_leading_comments(&self, from: usize, to: usize) -> Vec<String> {
+        // Walk forward over [from, to), collecting LineComment tokens.
+        // When we encounter a blank line we reset so only the final group
+        // adjacent to the item is kept.
+        let mut candidates: Vec<String> = Vec::new();
+        let mut last_end: Option<u32> = None;
+        for index in from..to {
+            let token = self.tokens[index];
+            if token.kind() == TokenKind::LineComment {
+                // Check for blank line gap: if the byte distance from the
+                // previous token's end to this token's start is more than one
+                // newline, consider this a fresh block.
+                if let Some(prev_end) = last_end {
+                    let gap = token.span().start().as_u32().saturating_sub(prev_end);
+                    if gap > 1 {
+                        // There is at least one blank line — reset.
+                        candidates.clear();
+                    }
+                }
+                candidates.push(token.text(self.source).to_owned());
+                last_end = Some(token.span().end().as_u32());
+            } else if !token.kind().is_trivia() {
+                // Unexpected non-trivia in this range — clear and stop.
+                candidates.clear();
+            } else {
+                // Whitespace / block comment trivia: track position for gap detection.
+                if last_end.is_none() {
+                    last_end = Some(token.span().end().as_u32());
+                }
+            }
+        }
+        candidates
     }
 
     fn next_significant_in_range(&self, start: usize, end: usize) -> Option<usize> {

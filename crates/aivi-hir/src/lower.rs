@@ -7372,11 +7372,27 @@ impl<'a> Lowerer<'a> {
             reference.resolution = ResolutionState::Resolved(TermResolution::Builtin(builtin));
             return;
         }
-        self.emit_error(
-            reference.span(),
-            format!("unknown term `{name}`"),
-            code("unresolved-term-name"),
-        );
+        {
+            let mut candidates: Vec<&str> = Vec::new();
+            candidates.extend(
+                env.term_scopes
+                    .iter()
+                    .flat_map(|scope| scope.keys().map(|k| k.as_str())),
+            );
+            candidates.extend(namespaces.term_items.keys().map(|k| k.as_str()));
+            candidates.extend(namespaces.ambient_term_items.keys().map(|k| k.as_str()));
+            candidates.extend(namespaces.term_imports.keys().map(|k| k.as_str()));
+            let mut diag = Diagnostic::error(format!("unknown term `{name}`"))
+                .with_code(code("unresolved-term-name"))
+                .with_primary_label(
+                    reference.span(),
+                    "reported during Milestone 2 HIR lowering",
+                );
+            if let Some(suggestion) = closest_name(name, &candidates) {
+                diag = diag.with_help(format!("did you mean `{suggestion}`?"));
+            }
+            self.diagnostics.push(diag);
+        }
         reference.resolution = ResolutionState::Unresolved;
     }
 
@@ -9758,6 +9774,43 @@ fn code(name: &'static str) -> DiagnosticCode {
     DiagnosticCode::new("hir", name)
 }
 
+/// Iterative Levenshtein distance between two strings (character-level).
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let m = a.len();
+    let n = b.len();
+    let mut dp = vec![vec![0usize; n + 1]; m + 1];
+    for i in 0..=m {
+        dp[i][0] = i;
+    }
+    for j in 0..=n {
+        dp[0][j] = j;
+    }
+    for i in 1..=m {
+        for j in 1..=n {
+            dp[i][j] = if a[i - 1] == b[j - 1] {
+                dp[i - 1][j - 1]
+            } else {
+                1 + dp[i - 1][j].min(dp[i][j - 1]).min(dp[i - 1][j - 1])
+            };
+        }
+    }
+    dp[m][n]
+}
+
+/// Return the closest candidate within Levenshtein distance 2 of `target`, or `None`.
+fn closest_name<'a>(target: &str, candidates: &[&'a str]) -> Option<&'a str> {
+    candidates
+        .iter()
+        .filter_map(|&c| {
+            let d = levenshtein(target, c);
+            if d <= 2 { Some((d, c)) } else { None }
+        })
+        .min_by_key(|(d, _)| *d)
+        .map(|(_, name)| name)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{fs, path::PathBuf};
@@ -9801,6 +9854,43 @@ mod tests {
         let text =
             fs::read_to_string(fixture_root().join(path)).expect("fixture should be readable");
         lower_text(path, &text)
+    }
+
+    #[test]
+    fn did_you_mean_suggestion_for_misspelled_binding() {
+        // "couner" is 2 edits from "counter" — should trigger a "did you mean" hint.
+        let result = lower_text(
+            "did-you-mean.aivi",
+            "value counter = 42\nvalue result = couner\n",
+        );
+        assert!(result.has_errors(), "expected an error for unknown term");
+        let has_help = result.diagnostics().iter().any(|d| {
+            d.help.iter().any(|h| h.contains("counter"))
+        });
+        assert!(
+            has_help,
+            "expected a 'did you mean `counter`?' hint, got diagnostics: {:?}",
+            result.diagnostics()
+        );
+    }
+
+    #[test]
+    fn no_did_you_mean_for_very_different_binding() {
+        // "xyz" has no close match to "counter" — no suggestion should appear.
+        let result = lower_text(
+            "no-suggestion.aivi",
+            "value counter = 42\nvalue result = xyz\n",
+        );
+        assert!(result.has_errors(), "expected an error for unknown term");
+        let has_help = result
+            .diagnostics()
+            .iter()
+            .any(|d| !d.help.is_empty());
+        assert!(
+            !has_help,
+            "expected no 'did you mean' hint for very different name, got: {:?}",
+            result.diagnostics()
+        );
     }
 
     fn find_ambient_named_item<'a>(module: &'a crate::Module, name: &str) -> &'a Item {

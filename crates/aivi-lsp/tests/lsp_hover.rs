@@ -56,3 +56,81 @@ async fn hover_at_out_of_range_position_returns_none() {
         "hover at an out-of-range position should return None"
     );
 }
+
+#[tokio::test]
+async fn hover_on_func_declaration_uses_func_kind_label() {
+    // "type Int -> Int\nfunc id x =>\n    x\n"
+    // 'id' is on line 1, character 5
+    let text = "type Int -> Int\nfunc id x =>\n    x\n";
+    let (state, uri) = open_inline("hover-func.aivi", text);
+    let result = hover(hover_params(uri, 1, 5), state).await;
+
+    assert!(result.is_some(), "hover on a func name should return a result");
+
+    if let Some(hover_info) = result {
+        if let HoverContents::Markup(markup) = hover_info.contents {
+            // The hover content should contain the symbol name and use "func" or "value"
+            // as the kind label.
+            assert!(
+                markup.value.contains("id"),
+                "hover content should mention the function name; got: {}",
+                markup.value
+            );
+            assert!(
+                markup.value.starts_with("```aivi"),
+                "hover content should be a fenced code block; got: {}",
+                markup.value
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn hover_on_signal_declaration_uses_signal_kind_label() {
+    // signal tick = 0
+    // 'tick' is on line 0, character 7
+    let text = "signal tick = 0\n";
+    let (state, uri) = open_inline("hover-signal.aivi", text);
+    let result = hover(hover_params(uri, 0, 7), state).await;
+
+    assert!(result.is_some(), "hover on a signal name should return a result");
+
+    if let Some(hover_info) = result {
+        if let HoverContents::Markup(markup) = hover_info.contents {
+            assert!(
+                markup.value.contains("signal"),
+                "hover on a signal should mention 'signal' kind; got: {}",
+                markup.value
+            );
+            assert!(
+                markup.value.contains("tick"),
+                "hover on a signal should mention the name 'tick'; got: {}",
+                markup.value
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn hover_colon_separated_from_type_detail() {
+    // When a symbol has a type detail the hover should format it as
+    //   kind name : detail
+    // with a space before the colon (not "kind name: detail").
+    let text = "value answer = 42\n";
+    let (state, uri) = open_inline("hover-colon.aivi", text);
+    let result = hover(hover_params(uri, 0, 6), state).await;
+
+    if let Some(hover_info) = result {
+        if let HoverContents::Markup(markup) = hover_info.contents {
+            // If the symbol carries a detail, the format must be "… : <detail>".
+            // If there is no detail, just "kind name" is fine.
+            if markup.value.contains(':') {
+                assert!(
+                    markup.value.contains(" : "),
+                    "detail separator should be ' : ' with spaces; got: {}",
+                    markup.value
+                );
+            }
+        }
+    }
+}

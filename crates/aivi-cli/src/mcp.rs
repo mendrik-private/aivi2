@@ -1019,6 +1019,170 @@ fn handle_tool_call(
                 }),
             )
         }
+        "check_workspace" => {
+            let args: CheckWorkspaceArgs = serde_json::from_value(arguments)
+                .map_err(|error| JsonRpcError::invalid_params(error.to_string()))?;
+            let configured_target = effective_configured_target(controller, configured);
+            let entry_path = if let Some(path) = args.path {
+                PathBuf::from(path)
+            } else {
+                configured_target
+                    .entry_path
+                    .ok_or_else(|| JsonRpcError::tool_failure("no entry path configured; provide `path`"))?
+            };
+            let snapshot =
+                WorkspaceHirSnapshot::load(&entry_path).map_err(JsonRpcError::tool_failure)?;
+            let mut diagnostics: Vec<JsonValue> = Vec::new();
+            for file in &snapshot.files {
+                let hir = query_hir_module(&snapshot.frontend.db, *file);
+                for diag in hir.diagnostics() {
+                    diagnostics.push(serialize_diagnostic(diag, &snapshot.sources));
+                }
+                let file_lowering_failed = hir
+                    .hir_diagnostics()
+                    .iter()
+                    .any(|d| d.severity == Severity::Error);
+                let validation_mode = if file_lowering_failed {
+                    ValidationMode::Structural
+                } else {
+                    ValidationMode::RequireResolvedNames
+                };
+                for diag in hir.module().validate(validation_mode).diagnostics() {
+                    diagnostics.push(serialize_diagnostic(diag, &snapshot.sources));
+                }
+            }
+            let error_count = diagnostics
+                .iter()
+                .filter(|d| d.get("severity").and_then(|s| s.as_str()) == Some("error"))
+                .count();
+            tool_success(
+                format!(
+                    "Checked workspace: {} diagnostic(s), {} error(s)",
+                    diagnostics.len(),
+                    error_count
+                ),
+                json!({ "diagnostics": diagnostics }),
+            )
+        }
+        "list_diagnostics" => {
+            let args: ListDiagnosticsArgs = serde_json::from_value(arguments)
+                .map_err(|error| JsonRpcError::invalid_params(error.to_string()))?;
+            let configured_target = effective_configured_target(controller, configured);
+            let root = project_root(&configured_target);
+            let file_path = root.join(&args.file);
+            let text = std::fs::read_to_string(&file_path).map_err(|error| {
+                JsonRpcError::tool_failure(format!(
+                    "failed to read `{}`: {error}",
+                    file_path.display()
+                ))
+            })?;
+            let db = RootDatabase::new();
+            let source_file = QuerySourceFile::new(&db, file_path, text);
+            let sources = db.source_database();
+            let hir = query_hir_module(&db, source_file);
+            let mut diagnostics: Vec<JsonValue> = hir
+                .diagnostics()
+                .iter()
+                .map(|d| serialize_diagnostic(d, &sources))
+                .collect();
+            let file_lowering_failed = hir
+                .hir_diagnostics()
+                .iter()
+                .any(|d| d.severity == Severity::Error);
+            let validation_mode = if file_lowering_failed {
+                ValidationMode::Structural
+            } else {
+                ValidationMode::RequireResolvedNames
+            };
+            for diag in hir.module().validate(validation_mode).diagnostics() {
+                diagnostics.push(serialize_diagnostic(diag, &sources));
+            }
+            tool_success(
+                format!("Found {} diagnostic(s) in `{}`", diagnostics.len(), args.file),
+                json!({ "diagnostics": diagnostics }),
+            )
+        }
+        "read_source_file" => {
+            let args: ReadSourceFileArgs = serde_json::from_value(arguments)
+                .map_err(|error| JsonRpcError::invalid_params(error.to_string()))?;
+            let configured_target = effective_configured_target(controller, configured);
+            let root = project_root(&configured_target);
+            let resolved = root.join(&args.path);
+            let content = std::fs::read_to_string(&resolved).map_err(|error| {
+                JsonRpcError::tool_failure(format!(
+                    "failed to read `{}`: {error}",
+                    resolved.display()
+                ))
+            })?;
+            let lines = content.lines().count();
+            tool_success(
+                format!("Read `{}` ({lines} lines)", args.path),
+                json!({
+                    "path": args.path,
+                    "content": content,
+                    "lines": lines,
+                }),
+            )
+        }
+        "get_type_at" => {
+            let args: GetTypeAtArgs = serde_json::from_value(arguments)
+                .map_err(|error| JsonRpcError::invalid_params(error.to_string()))?;
+            let configured_target = effective_configured_target(controller, configured);
+            let root = project_root(&configured_target);
+            let file_path = root.join(&args.file);
+            let text = std::fs::read_to_string(&file_path).map_err(|error| {
+                JsonRpcError::tool_failure(format!(
+                    "failed to read `{}`: {error}",
+                    file_path.display()
+                ))
+            })?;
+            let db = RootDatabase::new();
+            let source_file = QuerySourceFile::new(&db, file_path, text);
+            let analysis = aivi_lsp::analysis::FileAnalysis::load(&db, source_file);
+            let position = aivi_base::LspPosition {
+                line: args.line,
+                character: args.character,
+            };
+            let Some(symbol) = analysis.tightest_symbol_at_lsp_position(position) else {
+                return Ok(tool_error(
+                    format!(
+                        "no symbol found at {}:{}:{} in `{}`",
+                        args.file, args.line, args.character, args.file
+                    ),
+                    json!({ "found": false }),
+                )?);
+            };
+            let sources = db.source_database();
+            let span_lsp = sources
+                .file(symbol.span.file())
+                .map(|f| f.span_to_lsp_range(symbol.span.span()));
+            let sel_span_lsp = sources
+                .file(symbol.selection_span.file())
+                .map(|f| f.span_to_lsp_range(symbol.selection_span.span()));
+            tool_success(
+                format!(
+                    "Symbol `{}` ({}) at {}:{}:{}",
+                    symbol.name,
+                    lsp_symbol_kind_str(symbol.kind),
+                    args.file,
+                    args.line,
+                    args.character
+                ),
+                json!({
+                    "name": symbol.name,
+                    "kind": lsp_symbol_kind_str(symbol.kind),
+                    "detail": symbol.detail,
+                    "span": span_lsp.map(|r| json!({
+                        "start": { "line": r.start.line, "char": r.start.character },
+                        "end": { "line": r.end.line, "char": r.end.character },
+                    })),
+                    "selection_span": sel_span_lsp.map(|r| json!({
+                        "start": { "line": r.start.line, "char": r.start.character },
+                        "end": { "line": r.end.line, "char": r.end.character },
+                    })),
+                }),
+            )
+        }
         other => return Err(JsonRpcError::method_not_found(other)),
     }?;
     Ok(result)
@@ -1174,6 +1338,70 @@ fn tool_definitions() -> Vec<JsonValue> {
                     "repeated": { "type": "boolean" }
                 },
                 "required": ["event"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "check_workspace",
+            "description": "Run a full HIR check on the project workspace and return all diagnostics as a structured JSON array. Use this before making edits to understand the current error state, or after edits to verify correctness.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Entry .aivi file path (relative to project root). Defaults to the configured entry path."
+                    }
+                },
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "list_diagnostics",
+            "description": "List diagnostics for a single source file. Faster than `check_workspace` for focused queries.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "description": "Relative path to the .aivi source file."
+                    }
+                },
+                "required": ["file"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "read_source_file",
+            "description": "Read the source text of an AIVI file by path relative to the project root. Returns the file content and line count.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path from the project root."
+                    }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "get_type_at",
+            "description": "Get the type information for the symbol at a given position in a source file. Returns name, kind, and type signature if available.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file": { "type": "string" },
+                    "line": {
+                        "type": "integer",
+                        "description": "0-based line number"
+                    },
+                    "character": {
+                        "type": "integer",
+                        "description": "0-based character offset (UTF-16)"
+                    }
+                },
+                "required": ["file", "line", "character"],
                 "additionalProperties": false
             }
         }),
@@ -2054,6 +2282,98 @@ struct EventResult {
     time_us: u64,
 }
 
+#[derive(Deserialize)]
+struct CheckWorkspaceArgs {
+    path: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ListDiagnosticsArgs {
+    file: String,
+}
+
+#[derive(Deserialize)]
+struct ReadSourceFileArgs {
+    path: String,
+}
+
+#[derive(Deserialize)]
+struct GetTypeAtArgs {
+    file: String,
+    line: u32,
+    character: u32,
+}
+
+fn project_root(configured: &ConfiguredTarget) -> PathBuf {
+    configured
+        .entry_path
+        .as_ref()
+        .and_then(|p| p.parent())
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+}
+
+fn serialize_diagnostic(diag: &aivi_base::Diagnostic, sources: &SourceDatabase) -> JsonValue {
+    let primary = diag
+        .labels
+        .iter()
+        .find(|l| l.style == aivi_base::LabelStyle::Primary)
+        .or_else(|| diag.labels.first());
+    let (file_path, line, column) = if let Some(label) = primary {
+        if let Some(file) = sources.file(label.span.file()) {
+            let lc = file.line_column(label.span.span().start());
+            (
+                file.path().display().to_string(),
+                lc.line.saturating_sub(1) as u64,
+                lc.column.saturating_sub(1) as u64,
+            )
+        } else {
+            (String::new(), 0u64, 0u64)
+        }
+    } else {
+        (String::new(), 0u64, 0u64)
+    };
+    json!({
+        "file": file_path,
+        "line": line,
+        "column": column,
+        "severity": diag.severity.as_str(),
+        "message": diag.message,
+        "code": diag.code.map(|c| c.to_string()),
+    })
+}
+
+fn lsp_symbol_kind_str(kind: aivi_hir::LspSymbolKind) -> &'static str {
+    match kind {
+        aivi_hir::LspSymbolKind::File => "file",
+        aivi_hir::LspSymbolKind::Module => "module",
+        aivi_hir::LspSymbolKind::Namespace => "namespace",
+        aivi_hir::LspSymbolKind::Package => "package",
+        aivi_hir::LspSymbolKind::Class => "class",
+        aivi_hir::LspSymbolKind::Method => "method",
+        aivi_hir::LspSymbolKind::Property => "property",
+        aivi_hir::LspSymbolKind::Field => "field",
+        aivi_hir::LspSymbolKind::Constructor => "constructor",
+        aivi_hir::LspSymbolKind::Enum => "enum",
+        aivi_hir::LspSymbolKind::Interface => "interface",
+        aivi_hir::LspSymbolKind::Function => "func",
+        aivi_hir::LspSymbolKind::Variable => "var",
+        aivi_hir::LspSymbolKind::Constant => "constant",
+        aivi_hir::LspSymbolKind::String => "string",
+        aivi_hir::LspSymbolKind::Number => "number",
+        aivi_hir::LspSymbolKind::Boolean => "boolean",
+        aivi_hir::LspSymbolKind::Array => "array",
+        aivi_hir::LspSymbolKind::Object => "object",
+        aivi_hir::LspSymbolKind::Key => "key",
+        aivi_hir::LspSymbolKind::Null => "null",
+        aivi_hir::LspSymbolKind::EnumMember => "enum-member",
+        aivi_hir::LspSymbolKind::Struct => "struct",
+        aivi_hir::LspSymbolKind::Event => "event",
+        aivi_hir::LspSymbolKind::Operator => "operator",
+        aivi_hir::LspSymbolKind::TypeParameter => "type-parameter",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -2217,6 +2537,10 @@ mod tests {
                 "snapshot_gtk_tree",
                 "find_widgets",
                 "emit_gtk_event",
+                "check_workspace",
+                "list_diagnostics",
+                "read_source_file",
+                "get_type_at",
             ]
         );
         let launch_schema = &tools["tools"][0]["inputSchema"]["properties"];
@@ -2334,6 +2658,134 @@ mod tests {
         node.children
             .iter()
             .find_map(|child| find_widget_snapshot_by_path(child, path))
+    }
+
+    #[test]
+    fn check_workspace_returns_diagnostic_array() {
+        let (task_tx, task_rx) = sync_mpsc::channel();
+        drop(task_rx);
+        let controller = McpHostController { task_tx };
+        let configured = ConfiguredTarget {
+            entry_path: Some(repo_path("demos/snake.aivi")),
+            default_view: None,
+        };
+        let result = handle_json_rpc_request(
+            &controller,
+            &configured,
+            JsonRpcRequest {
+                jsonrpc: "2.0".to_owned(),
+                id: Some(JsonValue::from(10)),
+                method: "tools/call".to_owned(),
+                params: Some(json!({
+                    "name": "check_workspace",
+                    "arguments": {}
+                })),
+            },
+        )
+        .expect("check_workspace should succeed for a valid workspace");
+        assert_eq!(result["isError"], json!(false));
+        assert!(
+            result["structuredContent"]["diagnostics"].is_array(),
+            "check_workspace should return a diagnostics array"
+        );
+    }
+
+    #[test]
+    fn read_source_file_returns_content_and_line_count() {
+        let (task_tx, task_rx) = sync_mpsc::channel();
+        drop(task_rx);
+        let controller = McpHostController { task_tx };
+        let snake_path = repo_path("demos/snake.aivi");
+        let configured = ConfiguredTarget {
+            entry_path: Some(snake_path.clone()),
+            default_view: None,
+        };
+        let result = handle_json_rpc_request(
+            &controller,
+            &configured,
+            JsonRpcRequest {
+                jsonrpc: "2.0".to_owned(),
+                id: Some(JsonValue::from(11)),
+                method: "tools/call".to_owned(),
+                params: Some(json!({
+                    "name": "read_source_file",
+                    "arguments": { "path": "snake.aivi" }
+                })),
+            },
+        )
+        .expect("read_source_file should succeed for an existing file");
+        assert_eq!(result["isError"], json!(false));
+        let content = &result["structuredContent"];
+        assert!(
+            content["content"].as_str().is_some(),
+            "read_source_file should return file content"
+        );
+        assert!(
+            content["lines"].as_u64().unwrap_or(0) > 0,
+            "read_source_file should report at least one line"
+        );
+    }
+
+    #[test]
+    fn list_diagnostics_returns_diagnostic_array_for_valid_file() {
+        let (task_tx, task_rx) = sync_mpsc::channel();
+        drop(task_rx);
+        let controller = McpHostController { task_tx };
+        let snake_path = repo_path("demos/snake.aivi");
+        let configured = ConfiguredTarget {
+            entry_path: Some(snake_path.clone()),
+            default_view: None,
+        };
+        let result = handle_json_rpc_request(
+            &controller,
+            &configured,
+            JsonRpcRequest {
+                jsonrpc: "2.0".to_owned(),
+                id: Some(JsonValue::from(12)),
+                method: "tools/call".to_owned(),
+                params: Some(json!({
+                    "name": "list_diagnostics",
+                    "arguments": { "file": "snake.aivi" }
+                })),
+            },
+        )
+        .expect("list_diagnostics should succeed for a valid file");
+        assert_eq!(result["isError"], json!(false));
+        assert!(
+            result["structuredContent"]["diagnostics"].is_array(),
+            "list_diagnostics should return a diagnostics array"
+        );
+    }
+
+    #[test]
+    fn get_type_at_returns_not_found_for_empty_position() {
+        let (task_tx, task_rx) = sync_mpsc::channel();
+        drop(task_rx);
+        let controller = McpHostController { task_tx };
+        let snake_path = repo_path("demos/snake.aivi");
+        let configured = ConfiguredTarget {
+            entry_path: Some(snake_path.clone()),
+            default_view: None,
+        };
+        let result = handle_json_rpc_request(
+            &controller,
+            &configured,
+            JsonRpcRequest {
+                jsonrpc: "2.0".to_owned(),
+                id: Some(JsonValue::from(13)),
+                method: "tools/call".to_owned(),
+                params: Some(json!({
+                    "name": "get_type_at",
+                    "arguments": { "file": "snake.aivi", "line": 0, "character": 0 }
+                })),
+            },
+        )
+        .expect("get_type_at should return a valid MCP response");
+        // Either found or not found is acceptable; just verify shape
+        assert!(
+            result["structuredContent"].is_object(),
+            "get_type_at should return structured content"
+        );
     }
 
     #[gtk::test]

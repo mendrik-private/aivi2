@@ -3,6 +3,7 @@
 //! AIVI Language Server Protocol server.
 
 pub mod analysis;
+pub mod code_actions;
 pub mod code_lens;
 pub mod completion;
 pub mod definition;
@@ -11,7 +12,10 @@ pub mod documents;
 pub mod formatting;
 pub mod hover;
 pub mod implementation;
+pub mod inlay_hints;
 mod navigation;
+pub mod references;
+pub mod rename;
 pub mod semantic_tokens;
 pub mod server;
 pub mod state;

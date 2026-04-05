@@ -74,6 +74,9 @@ impl Formatter {
             if fun.annotation.is_some() {
                 let rendered = self.format_fun_item(fun);
                 let mut lines = Vec::new();
+                for comment in &item.base().leading_comments {
+                    lines.push(comment.clone());
+                }
                 if let Some((type_line, rest)) = rendered.split_first() {
                     lines.push(type_line.clone());
                     for decorator in item.decorators() {
@@ -86,6 +89,9 @@ impl Formatter {
         }
 
         let mut lines = Vec::new();
+        for comment in &item.base().leading_comments {
+            lines.push(comment.clone());
+        }
         for decorator in item.decorators() {
             lines.extend(self.format_decorator(decorator).into_lines());
         }

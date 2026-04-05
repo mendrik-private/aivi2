@@ -100,3 +100,7 @@ Choose your path:
 - **I want to build something immediately** → [Your First App](/guide/your-first-app)
 - **I want to see a real program** → [Building Snake](/guide/building-snake)
 - **I want the language reference** → [Values & Functions](/guide/values-and-functions)
+
+---
+
+**See also:** [Your First App](your-first-app.md) — step-by-step counter app with signals, sources, and markup

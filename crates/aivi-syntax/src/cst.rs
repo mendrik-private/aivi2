@@ -770,6 +770,8 @@ pub struct ItemBase {
     pub span: SourceSpan,
     pub token_range: TokenRange,
     pub decorators: Vec<Decorator>,
+    /// Line comments (including `//` prefix) that appear immediately before this item.
+    pub leading_comments: Vec<String>,
 }
 
 /// Function parameter preserved by the syntax layer.
@@ -1068,6 +1070,22 @@ impl Item {
 
     pub fn token_range(&self) -> TokenRange {
         self.base().token_range
+    }
+
+    pub fn base_mut(&mut self) -> &mut ItemBase {
+        match self {
+            Item::Type(item)
+            | Item::Fun(item)
+            | Item::Value(item)
+            | Item::Signal(item)
+            | Item::Class(item) => &mut item.base,
+            Item::Instance(item) => &mut item.base,
+            Item::Domain(item) => &mut item.base,
+            Item::SourceProviderContract(item) => &mut item.base,
+            Item::Use(item) => &mut item.base,
+            Item::Export(item) => &mut item.base,
+            Item::Error(item) => &mut item.base,
+        }
     }
 
     pub fn decorators(&self) -> &[Decorator] {

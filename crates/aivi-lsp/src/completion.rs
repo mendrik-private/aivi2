@@ -6,7 +6,7 @@ use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse,
 };
 
-use crate::state::ServerState;
+use crate::{analysis::FileAnalysis, state::ServerState};
 
 pub async fn completion(
     params: CompletionParams,
@@ -16,47 +16,50 @@ pub async fn completion(
     let lsp_pos = params.text_document_position.position;
 
     let file = *state.files.get(uri)?;
-    let analysis = crate::analysis::FileAnalysis::load(&state.db, file);
+    let current_analysis = FileAnalysis::load(&state.db, file);
 
-    let sym = analysis.tightest_symbol_at_lsp_position(LspPosition {
+    // Reject out-of-range cursor positions before returning any items.
+    current_analysis.source.lsp_position_to_offset(LspPosition {
         line: lsp_pos.line,
         character: lsp_pos.character,
     })?;
 
-    // If the tightest symbol is a record/struct/namespace, offer its children
-    // as field or member completions.
-    let child_completions = match sym.kind {
-        LspSymbolKind::Struct | LspSymbolKind::Namespace | LspSymbolKind::Class => sym
-            .children
-            .iter()
-            .map(|child| {
-                let kind = lsp_symbol_kind_to_completion_kind(child.kind);
-                CompletionItem {
-                    label: child.name.clone(),
-                    kind: Some(kind),
-                    detail: child.detail.clone(),
-                    ..Default::default()
-                }
-            })
-            .collect::<Vec<_>>(),
-        // For any other symbol, offer the symbol's children (e.g. function parameters,
-        // enum members) as candidates.
-        _ => sym
-            .children
-            .iter()
-            .map(|child| {
-                let kind = lsp_symbol_kind_to_completion_kind(child.kind);
-                CompletionItem {
-                    label: child.name.clone(),
-                    kind: Some(kind),
-                    detail: child.detail.clone(),
-                    ..Default::default()
-                }
-            })
-            .collect::<Vec<_>>(),
-    };
+    let mut items: Vec<CompletionItem> = Vec::new();
 
-    Some(CompletionResponse::Array(child_completions))
+    // 1. Top-level symbols from the current file.
+    collect_top_level(&current_analysis, &mut items);
+
+    // 2. Exported symbols from all other tracked files.
+    for entry in state.files.iter() {
+        let other_uri = entry.key();
+        if other_uri == uri {
+            continue;
+        }
+        let &other_file = entry.value();
+        let other_analysis = FileAnalysis::load(&state.db, other_file);
+        collect_top_level(&other_analysis, &mut items);
+    }
+
+    // Deduplicate by label (keep first occurrence).
+    let mut seen = std::collections::HashSet::new();
+    items.retain(|item| seen.insert(item.label.clone()));
+
+    if items.is_empty() {
+        None
+    } else {
+        Some(CompletionResponse::Array(items))
+    }
+}
+
+fn collect_top_level(analysis: &FileAnalysis, out: &mut Vec<CompletionItem>) {
+    for sym in analysis.symbols.iter() {
+        out.push(CompletionItem {
+            label: sym.name.clone(),
+            kind: Some(lsp_symbol_kind_to_completion_kind(sym.kind)),
+            detail: sym.detail.clone(),
+            ..Default::default()
+        });
+    }
 }
 
 fn lsp_symbol_kind_to_completion_kind(kind: LspSymbolKind) -> CompletionItemKind {

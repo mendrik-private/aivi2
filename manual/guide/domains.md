@@ -126,15 +126,14 @@ domain Score over Int = {
     literal pts : Int -> Score
 }
 
-value raw : Int = (100pts).carrier   // 100
+value raw : Int = (100pts).carrier
 ```
 
 This is useful when you need to pass a domain value to a function that expects the carrier type:
 
 ```aivi
-domain Snake over NonEmptyList Cell = { ... }
+domain Snake over NonEmptyList Cell
 
-// .carrier returns NonEmptyList Cell, then nelToList converts to List Cell
 value cells : List Cell = nelToList mySnake.carrier
 ```
 

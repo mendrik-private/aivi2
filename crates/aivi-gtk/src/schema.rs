@@ -57,6 +57,23 @@ pub enum GtkConcreteWidgetKind {
     Clamp,
     Banner,
     ToolbarView,
+    // Group A: Adwaita preference rows
+    ActionRow,
+    ExpanderRow,
+    SwitchRow,
+    SpinRow,
+    EntryRow,
+    // Group B: List and selection
+    ListBox,
+    ListBoxRow,
+    DropDown,
+    // Group C: Utility
+    SearchEntry,
+    Expander,
+    // Group D: Navigation and overlay
+    NavigationView,
+    NavigationPage,
+    ToastOverlay,
 }
 
 impl GtkConcreteWidgetKind {
@@ -86,6 +103,19 @@ impl GtkConcreteWidgetKind {
             Self::Clamp => "Clamp",
             Self::Banner => "Banner",
             Self::ToolbarView => "ToolbarView",
+            Self::ActionRow => "ActionRow",
+            Self::ExpanderRow => "ExpanderRow",
+            Self::SwitchRow => "SwitchRow",
+            Self::SpinRow => "SpinRow",
+            Self::EntryRow => "EntryRow",
+            Self::ListBox => "ListBox",
+            Self::ListBoxRow => "ListBoxRow",
+            Self::DropDown => "DropDown",
+            Self::SearchEntry => "SearchEntry",
+            Self::Expander => "Expander",
+            Self::NavigationView => "NavigationView",
+            Self::NavigationPage => "NavigationPage",
+            Self::ToastOverlay => "ToastOverlay",
         }
     }
 }
@@ -160,6 +190,13 @@ pub enum GtkBoolPropertySetter {
     ProgressBarShowText,
     BoxHomogeneous,
     BannerRevealed,
+    // Group A: Adwaita preference rows
+    ExpanderRowExpanded,
+    SwitchRowActive,
+    // Shared for ActionRow and ListBoxRow (both are ListBoxRow subtypes)
+    ListBoxRowActivatable,
+    // Group C: Utility
+    ExpanderExpanded,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -197,6 +234,24 @@ pub enum GtkTextPropertySetter {
     StatusPageIconName,
     BannerTitle,
     BannerButtonLabel,
+    // Group A: Adwaita preference rows — shared title via PreferencesRowExt
+    AdwPreferencesRowTitle,
+    // Subtitle: ActionRow, SwitchRow, SpinRow share ActionRowExt::set_subtitle
+    AdwActionRowSubtitle,
+    // Subtitle: ExpanderRow uses ExpanderRowExt::set_subtitle
+    AdwExpanderRowSubtitle,
+    // EntryRow text content via EditableExt
+    EntryRowText,
+    // Group B: List and selection
+    ListBoxSelectionMode,
+    DropDownItems,
+    // Group C: Utility
+    SearchEntryText,
+    SearchEntryPlaceholder,
+    ExpanderLabel,
+    // Group D: Navigation
+    NavigationPageTitle,
+    NavigationPageTag,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -222,6 +277,8 @@ pub enum GtkI64PropertySetter {
     EntryMaxLength,
     ClampMaximumSize,
     ClampTighteningThreshold,
+    // Group B: List and selection
+    DropDownSelected,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -236,6 +293,11 @@ pub enum GtkF64PropertySetter {
     ScaleMin,
     ScaleMax,
     ScaleStep,
+    // Group A: Adwaita preference rows
+    SpinRowValue,
+    SpinRowMin,
+    SpinRowMax,
+    SpinRowStep,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -276,6 +338,9 @@ impl GtkPropertySetter {
                 GtkTextPropertySetter::ScrolledWindowHPolicy
                 | GtkTextPropertySetter::ScrolledWindowVPolicy,
             ) => "text naming a valid PolicyType value",
+            Self::Text(GtkTextPropertySetter::ListBoxSelectionMode) => {
+                "text naming a valid SelectionMode value"
+            }
             Self::Text(_) => "Text",
             Self::TextOrI64(_) => "Int or integer text",
             Self::I64(_) => "Int",
@@ -308,6 +373,20 @@ pub enum GtkEventSignal {
     PointerEnter,
     PointerLeave,
     BannerButtonClicked,
+    // Group A: Adwaita preference rows
+    ActionRowActivated,
+    SwitchRowToggled,
+    SpinRowValueChanged,
+    EntryRowChanged,
+    EntryRowActivated,
+    // Group B: List and selection
+    ListBoxActivated,
+    ListBoxRowActivated,
+    DropDownSelectionChanged,
+    // Group C: Utility
+    SearchEntryChanged,
+    SearchEntryActivated,
+    SearchEntrySearchChanged,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -351,6 +430,18 @@ pub enum GtkChildMountRoute {
     ToolbarViewTop,
     ToolbarViewBottom,
     ToolbarViewContent,
+    // Group A: Adwaita preference rows
+    ActionRowSuffix,
+    ExpanderRowRows,
+    // Group B: List and selection
+    ListBoxChildren,
+    ListBoxRowChild,
+    // Group C: Utility
+    ExpanderChild,
+    // Group D: Navigation and overlay
+    NavigationViewPages,
+    NavigationPageContent,
+    ToastOverlayContent,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1997,6 +2088,673 @@ const TOOLBAR_VIEW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     ],
 };
 
+// ── Adwaita preference row shared properties ──────────────────────────────────
+
+const ADW_PREFERENCES_ROW_TITLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "title",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::AdwPreferencesRowTitle),
+};
+
+const ADW_ACTION_ROW_SUBTITLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "subtitle",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::AdwActionRowSubtitle),
+};
+
+const ADW_EXPANDER_ROW_SUBTITLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "subtitle",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::AdwExpanderRowSubtitle),
+};
+
+const LIST_BOX_ROW_ACTIVATABLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "activatable",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::ListBoxRowActivatable),
+};
+
+// ── Adwaita: ActionRow ────────────────────────────────────────────────────────
+
+const ACTION_ROW_ACTIVATED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onActivated",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::ActionRowActivated,
+};
+
+const ACTION_ROW_SUFFIX_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "suffix",
+    container: GtkChildContainerKind::Sequence,
+    mount: GtkChildMountRoute::ActionRowSuffix,
+    min_children: 0,
+    max_children: None,
+};
+
+const ACTION_ROW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "ActionRow",
+    kind: GtkConcreteWidgetKind::ActionRow,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        ADW_PREFERENCES_ROW_TITLE_PROPERTY,
+        ADW_ACTION_ROW_SUBTITLE_PROPERTY,
+        LIST_BOX_ROW_ACTIVATABLE_PROPERTY,
+    ],
+    events: &[ACTION_ROW_ACTIVATED_EVENT],
+    default_child_group_override: None,
+    child_groups: &[ACTION_ROW_SUFFIX_CHILD_GROUP],
+};
+
+// ── Adwaita: ExpanderRow ──────────────────────────────────────────────────────
+
+const EXPANDER_ROW_EXPANDED_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "expanded",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::ExpanderRowExpanded),
+};
+
+const EXPANDER_ROW_ROWS_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "rows",
+    container: GtkChildContainerKind::Sequence,
+    mount: GtkChildMountRoute::ExpanderRowRows,
+    min_children: 0,
+    max_children: None,
+};
+
+const EXPANDER_ROW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "ExpanderRow",
+    kind: GtkConcreteWidgetKind::ExpanderRow,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        ADW_PREFERENCES_ROW_TITLE_PROPERTY,
+        ADW_EXPANDER_ROW_SUBTITLE_PROPERTY,
+        EXPANDER_ROW_EXPANDED_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[EXPANDER_ROW_ROWS_CHILD_GROUP],
+};
+
+// ── Adwaita: SwitchRow ────────────────────────────────────────────────────────
+
+const SWITCH_ROW_ACTIVE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "active",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::SwitchRowActive),
+};
+
+const SWITCH_ROW_TOGGLED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onToggled",
+    payload: GtkConcreteEventPayload::Bool,
+    signal: GtkEventSignal::SwitchRowToggled,
+};
+
+const SWITCH_ROW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "SwitchRow",
+    kind: GtkConcreteWidgetKind::SwitchRow,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        ADW_PREFERENCES_ROW_TITLE_PROPERTY,
+        ADW_ACTION_ROW_SUBTITLE_PROPERTY,
+        SWITCH_ROW_ACTIVE_PROPERTY,
+    ],
+    events: &[SWITCH_ROW_TOGGLED_EVENT],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+// ── Adwaita: SpinRow ──────────────────────────────────────────────────────────
+
+const SPIN_ROW_VALUE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "value",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::SpinRowValue),
+};
+
+const SPIN_ROW_MIN_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "min",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::SpinRowMin),
+};
+
+const SPIN_ROW_MAX_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "max",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::SpinRowMax),
+};
+
+const SPIN_ROW_STEP_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "step",
+    value_shape: GtkPropertyValueShape::F64,
+    setter: GtkPropertySetter::F64(GtkF64PropertySetter::SpinRowStep),
+};
+
+const SPIN_ROW_VALUE_CHANGED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onValueChanged",
+    payload: GtkConcreteEventPayload::F64,
+    signal: GtkEventSignal::SpinRowValueChanged,
+};
+
+const SPIN_ROW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "SpinRow",
+    kind: GtkConcreteWidgetKind::SpinRow,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        ADW_PREFERENCES_ROW_TITLE_PROPERTY,
+        ADW_ACTION_ROW_SUBTITLE_PROPERTY,
+        SPIN_ROW_VALUE_PROPERTY,
+        SPIN_ROW_MIN_PROPERTY,
+        SPIN_ROW_MAX_PROPERTY,
+        SPIN_ROW_STEP_PROPERTY,
+    ],
+    events: &[SPIN_ROW_VALUE_CHANGED_EVENT],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+// ── Adwaita: EntryRow ─────────────────────────────────────────────────────────
+
+const ENTRY_ROW_TEXT_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "text",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::EntryRowText),
+};
+
+const ENTRY_ROW_CHANGED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onChange",
+    payload: GtkConcreteEventPayload::Text,
+    signal: GtkEventSignal::EntryRowChanged,
+};
+
+const ENTRY_ROW_ACTIVATED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onActivated",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::EntryRowActivated,
+};
+
+const ENTRY_ROW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "EntryRow",
+    kind: GtkConcreteWidgetKind::EntryRow,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        ADW_PREFERENCES_ROW_TITLE_PROPERTY,
+        ENTRY_ROW_TEXT_PROPERTY,
+    ],
+    events: &[ENTRY_ROW_CHANGED_EVENT, ENTRY_ROW_ACTIVATED_EVENT],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+// ── ListBox ───────────────────────────────────────────────────────────────────
+
+const SELECTION_MODE_VALUE_SHAPE: GtkEnumValueShape = GtkEnumValueShape {
+    name: "SelectionMode",
+    variants: &["None", "Single", "Browse", "Multiple"],
+};
+
+const LIST_BOX_SELECTION_MODE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "selectionMode",
+    value_shape: GtkPropertyValueShape::Enum(SELECTION_MODE_VALUE_SHAPE),
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::ListBoxSelectionMode),
+};
+
+const LIST_BOX_ACTIVATED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onRowActivated",
+    payload: GtkConcreteEventPayload::I64,
+    signal: GtkEventSignal::ListBoxActivated,
+};
+
+const LIST_BOX_CHILDREN_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "children",
+    container: GtkChildContainerKind::Sequence,
+    mount: GtkChildMountRoute::ListBoxChildren,
+    min_children: 0,
+    max_children: None,
+};
+
+const LIST_BOX_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "ListBox",
+    kind: GtkConcreteWidgetKind::ListBox,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        LIST_BOX_SELECTION_MODE_PROPERTY,
+    ],
+    events: &[LIST_BOX_ACTIVATED_EVENT],
+    default_child_group_override: None,
+    child_groups: &[LIST_BOX_CHILDREN_CHILD_GROUP],
+};
+
+// ── ListBoxRow ────────────────────────────────────────────────────────────────
+
+const LIST_BOX_ROW_ACTIVATED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onActivated",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::ListBoxRowActivated,
+};
+
+const LIST_BOX_ROW_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "child",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::ListBoxRowChild,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const LIST_BOX_ROW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "ListBoxRow",
+    kind: GtkConcreteWidgetKind::ListBoxRow,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        LIST_BOX_ROW_ACTIVATABLE_PROPERTY,
+    ],
+    events: &[LIST_BOX_ROW_ACTIVATED_EVENT],
+    default_child_group_override: None,
+    child_groups: &[LIST_BOX_ROW_CHILD_GROUP],
+};
+
+// ── DropDown ──────────────────────────────────────────────────────────────────
+
+const DROP_DOWN_ITEMS_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "items",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::DropDownItems),
+};
+
+const DROP_DOWN_SELECTED_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "selected",
+    value_shape: GtkPropertyValueShape::I64,
+    setter: GtkPropertySetter::I64(GtkI64PropertySetter::DropDownSelected),
+};
+
+const DROP_DOWN_SELECTION_CHANGED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onSelectionChanged",
+    payload: GtkConcreteEventPayload::I64,
+    signal: GtkEventSignal::DropDownSelectionChanged,
+};
+
+const DROP_DOWN_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "DropDown",
+    kind: GtkConcreteWidgetKind::DropDown,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        DROP_DOWN_ITEMS_PROPERTY,
+        DROP_DOWN_SELECTED_PROPERTY,
+    ],
+    events: &[DROP_DOWN_SELECTION_CHANGED_EVENT],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+// ── SearchEntry ───────────────────────────────────────────────────────────────
+
+const SEARCH_ENTRY_TEXT_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "text",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::SearchEntryText),
+};
+
+const SEARCH_ENTRY_PLACEHOLDER_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "placeholder",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::SearchEntryPlaceholder),
+};
+
+const SEARCH_ENTRY_CHANGED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onChange",
+    payload: GtkConcreteEventPayload::Text,
+    signal: GtkEventSignal::SearchEntryChanged,
+};
+
+const SEARCH_ENTRY_ACTIVATED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onActivated",
+    payload: GtkConcreteEventPayload::Unit,
+    signal: GtkEventSignal::SearchEntryActivated,
+};
+
+const SEARCH_ENTRY_SEARCH_CHANGED_EVENT: GtkEventDescriptor = GtkEventDescriptor {
+    name: "onSearchChanged",
+    payload: GtkConcreteEventPayload::Text,
+    signal: GtkEventSignal::SearchEntrySearchChanged,
+};
+
+const SEARCH_ENTRY_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "SearchEntry",
+    kind: GtkConcreteWidgetKind::SearchEntry,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        SEARCH_ENTRY_TEXT_PROPERTY,
+        SEARCH_ENTRY_PLACEHOLDER_PROPERTY,
+    ],
+    events: &[
+        SEARCH_ENTRY_CHANGED_EVENT,
+        SEARCH_ENTRY_ACTIVATED_EVENT,
+        SEARCH_ENTRY_SEARCH_CHANGED_EVENT,
+        FOCUS_IN_EVENT,
+        FOCUS_OUT_EVENT,
+    ],
+    default_child_group_override: None,
+    child_groups: &[],
+};
+
+// ── Expander ──────────────────────────────────────────────────────────────────
+
+const EXPANDER_LABEL_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "label",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::ExpanderLabel),
+};
+
+const EXPANDER_EXPANDED_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "expanded",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::ExpanderExpanded),
+};
+
+const EXPANDER_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "child",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::ExpanderChild,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const EXPANDER_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "Expander",
+    kind: GtkConcreteWidgetKind::Expander,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        EXPANDER_LABEL_PROPERTY,
+        EXPANDER_EXPANDED_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[EXPANDER_CHILD_GROUP],
+};
+
+// ── Adwaita: NavigationView ───────────────────────────────────────────────────
+
+const NAVIGATION_VIEW_PAGES_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "pages",
+    container: GtkChildContainerKind::Sequence,
+    mount: GtkChildMountRoute::NavigationViewPages,
+    min_children: 0,
+    max_children: None,
+};
+
+const NAVIGATION_VIEW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "NavigationView",
+    kind: GtkConcreteWidgetKind::NavigationView,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[NAVIGATION_VIEW_PAGES_CHILD_GROUP],
+};
+
+// ── Adwaita: NavigationPage ───────────────────────────────────────────────────
+
+const NAVIGATION_PAGE_TITLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "title",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::NavigationPageTitle),
+};
+
+const NAVIGATION_PAGE_TAG_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "tag",
+    value_shape: GtkPropertyValueShape::Text,
+    setter: GtkPropertySetter::Text(GtkTextPropertySetter::NavigationPageTag),
+};
+
+const NAVIGATION_PAGE_CONTENT_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "content",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::NavigationPageContent,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const NAVIGATION_PAGE_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "NavigationPage",
+    kind: GtkConcreteWidgetKind::NavigationPage,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+        NAVIGATION_PAGE_TITLE_PROPERTY,
+        NAVIGATION_PAGE_TAG_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[NAVIGATION_PAGE_CONTENT_CHILD_GROUP],
+};
+
+// ── Adwaita: ToastOverlay ─────────────────────────────────────────────────────
+
+const TOAST_OVERLAY_CONTENT_CHILD_GROUP: GtkChildGroupDescriptor = GtkChildGroupDescriptor {
+    name: "content",
+    container: GtkChildContainerKind::Single,
+    mount: GtkChildMountRoute::ToastOverlayContent,
+    min_children: 0,
+    max_children: Some(1),
+};
+
+const TOAST_OVERLAY_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
+    markup_name: "ToastOverlay",
+    kind: GtkConcreteWidgetKind::ToastOverlay,
+    root_kind: GtkWidgetRootKind::Embedded,
+    properties: &[
+        VISIBLE_PROPERTY,
+        SENSITIVE_PROPERTY,
+        HEXPAND_PROPERTY,
+        VEXPAND_PROPERTY,
+        OPACITY_PROPERTY,
+        ANIMATE_OPACITY_PROPERTY,
+        WIDTH_REQUEST_PROPERTY,
+        HEIGHT_REQUEST_PROPERTY,
+        HALIGN_PROPERTY,
+        VALIGN_PROPERTY,
+        MARGIN_START_PROPERTY,
+        MARGIN_END_PROPERTY,
+        MARGIN_TOP_PROPERTY,
+        MARGIN_BOTTOM_PROPERTY,
+        TOOLTIP_PROPERTY,
+        CSS_CLASSES_PROPERTY,
+    ],
+    events: &[],
+    default_child_group_override: None,
+    child_groups: &[TOAST_OVERLAY_CONTENT_CHILD_GROUP],
+};
+
 const GTK_WIDGET_SCHEMAS: &[GtkWidgetSchema] = &[
     WINDOW_SCHEMA,
     HEADER_BAR_SCHEMA,
@@ -2022,6 +2780,19 @@ const GTK_WIDGET_SCHEMAS: &[GtkWidgetSchema] = &[
     CLAMP_SCHEMA,
     BANNER_SCHEMA,
     TOOLBAR_VIEW_SCHEMA,
+    ACTION_ROW_SCHEMA,
+    EXPANDER_ROW_SCHEMA,
+    SWITCH_ROW_SCHEMA,
+    SPIN_ROW_SCHEMA,
+    ENTRY_ROW_SCHEMA,
+    LIST_BOX_SCHEMA,
+    LIST_BOX_ROW_SCHEMA,
+    DROP_DOWN_SCHEMA,
+    SEARCH_ENTRY_SCHEMA,
+    EXPANDER_SCHEMA,
+    NAVIGATION_VIEW_SCHEMA,
+    NAVIGATION_PAGE_SCHEMA,
+    TOAST_OVERLAY_SCHEMA,
 ];
 
 pub fn supported_widget_schemas() -> &'static [GtkWidgetSchema] {
@@ -2127,6 +2898,19 @@ mod tests {
                 "Clamp",
                 "Banner",
                 "ToolbarView",
+                "ActionRow",
+                "ExpanderRow",
+                "SwitchRow",
+                "SpinRow",
+                "EntryRow",
+                "ListBox",
+                "ListBoxRow",
+                "DropDown",
+                "SearchEntry",
+                "Expander",
+                "NavigationView",
+                "NavigationPage",
+                "ToastOverlay",
             ]
         );
     }

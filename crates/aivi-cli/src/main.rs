@@ -5172,7 +5172,7 @@ mod tests {
         fs::create_dir_all(&cwd).expect("tooling directory should exist");
         let explicit = workspace.write("apps/demo.aivi", "value demo = 1\n");
 
-        let resolved = super::resolve_run_entrypoint(&cwd, Some(&explicit))
+        let resolved = super::resolve_run_entrypoint(&cwd, Some(&explicit), None)
             .expect("explicit path should bypass implicit resolution");
 
         assert_eq!(resolved.entry_path, explicit);
@@ -5186,7 +5186,7 @@ mod tests {
         let cwd = workspace.path().join("tooling/nested");
         fs::create_dir_all(&cwd).expect("nested tooling directory should exist");
 
-        let resolved = super::resolve_run_entrypoint(&cwd, None)
+        let resolved = super::resolve_run_entrypoint(&cwd, None, None)
             .expect("implicit resolution should use workspace-root main.aivi");
 
         assert_eq!(resolved.entry_path, expected);
@@ -5199,7 +5199,7 @@ mod tests {
         let cwd = workspace.path().join("tooling");
         fs::create_dir_all(&cwd).expect("tooling directory should exist");
 
-        let error = super::resolve_run_entrypoint(&cwd, None)
+        let error = super::resolve_run_entrypoint(&cwd, None, None)
             .expect_err("missing main.aivi should fail without guessing");
 
         assert!(error.contains("failed to resolve entrypoint for `aivi run`"));
