@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import DefaultTheme from 'vitepress/theme'
-import { useData, useRoute } from 'vitepress'
+import { useData, useRoute, onContentUpdated } from 'vitepress'
 import aiviLogo from '../../../assets/aivi-logo.png'
 import { watch, onMounted, nextTick } from 'vue'
 
@@ -21,12 +21,35 @@ function labelTableCells() {
   })
 }
 
+// VitePress's serializeHeader strips all HTML and keeps only textContent,
+// so headings with inline code (e.g. `### \`Button\``) lose their <code>
+// formatting in the "On This Page" outline. Fix this by replacing each
+// outline link's text with the actual heading innerHTML (minus the anchor).
+function fixOutlineCodeLabels() {
+  const links = document.querySelectorAll<HTMLAnchorElement>(
+    '.VPDocOutlineItem .outline-link'
+  )
+  for (const link of links) {
+    const hash = link.getAttribute('href')
+    if (!hash?.startsWith('#')) continue
+    const id = decodeURIComponent(hash.slice(1))
+    const heading = document.getElementById(id)
+    if (!heading) continue
+    const clone = heading.cloneNode(true) as HTMLElement
+    clone.querySelector('.header-anchor')?.remove()
+    const html = clone.innerHTML.trim()
+    if (html) link.innerHTML = html
+  }
+}
+
 const route = useRoute()
 watch(
   () => route.path,
   () => nextTick(labelTableCells)
 )
 onMounted(labelTableCells)
+onContentUpdated(() => nextTick(fixOutlineCodeLabels))
+onMounted(() => nextTick(fixOutlineCodeLabels))
 </script>
 
 <template>

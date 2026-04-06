@@ -1453,9 +1453,10 @@ impl<'a> KernelEvaluator<'a> {
             .items()
             .get(item)
             .ok_or(EvaluationError::UnknownItem { item })?;
-        let kernel = item_decl
-            .body
-            .ok_or(EvaluationError::MissingItemBody { item })?;
+        let kernel = item_decl.body.ok_or_else(|| {
+            eprintln!("[DBG-missing-body] item={item} name={}", item_decl.name);
+            EvaluationError::MissingItemBody { item }
+        })?;
         if !item_decl.parameters.is_empty() {
             return Ok(RuntimeValue::Callable(RuntimeCallable::ItemBody {
                 item,
