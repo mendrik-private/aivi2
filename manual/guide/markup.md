@@ -176,7 +176,7 @@ value view =
 Top-level application window.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 **Properties:** `title`, `defaultWidth`, `defaultHeight`, `resizable`, `modal`, `visible`, `sensitive`, `opacity`, `hexpand`, `vexpand`, `halign`, `valign`, `widthRequest`, `heightRequest`, `marginStart`, `marginEnd`, `marginTop`, `marginBottom`, `tooltip`, `cssClasses`, `animateOpacity`
@@ -186,7 +186,7 @@ Top-level application window.
 Title bar with optional start/end widget slots.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `Box`
@@ -194,7 +194,7 @@ Title bar with optional start/end widget slots.
 Linear layout container.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 **Properties:** `orientation` (`Horizontal`|`Vertical`), `spacing`, `homogeneous`
@@ -204,7 +204,7 @@ Linear layout container.
 Adds scrollbars to an inner widget.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `Paned`
@@ -212,7 +212,7 @@ Adds scrollbars to an inner widget.
 Two-pane resizable splitter.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `ToolbarView`
@@ -220,7 +220,7 @@ Two-pane resizable splitter.
 Adwaita toolbar container with top/bottom bars and content.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `Label`
@@ -228,7 +228,7 @@ Adwaita toolbar container with top/bottom bars and content.
 Text display widget.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `Button`
@@ -236,7 +236,7 @@ Text display widget.
 Clickable button.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `Entry`
@@ -244,7 +244,7 @@ Clickable button.
 Single-line text input.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `Switch`
@@ -252,7 +252,7 @@ Single-line text input.
 Toggle switch.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `CheckButton`
@@ -260,7 +260,7 @@ Toggle switch.
 Checkbox with label.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `ToggleButton`
@@ -268,7 +268,7 @@ Checkbox with label.
 Button that stays pressed.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `SpinButton`
@@ -276,7 +276,7 @@ Button that stays pressed.
 Numeric spinner input.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `Scale`
@@ -284,7 +284,7 @@ Numeric spinner input.
 Slider for numeric values.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `Image`
@@ -292,7 +292,7 @@ Slider for numeric values.
 Image display.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `Spinner`
@@ -300,7 +300,7 @@ Image display.
 Activity indicator.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `ProgressBar`
@@ -308,7 +308,7 @@ Activity indicator.
 Progress display.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `Revealer`
@@ -316,7 +316,7 @@ Progress display.
 Animated visibility toggle.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `Separator`
@@ -324,7 +324,7 @@ Animated visibility toggle.
 Visual divider line.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `StatusPage`
@@ -332,7 +332,7 @@ Visual divider line.
 Placeholder page with icon and description.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `Clamp`
@@ -340,7 +340,7 @@ Placeholder page with icon and description.
 Width-constraining container.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `Banner`
@@ -348,7 +348,7 @@ Width-constraining container.
 Informational banner strip.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `Frame`
@@ -356,7 +356,7 @@ Informational banner strip.
 Container with an optional label border.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ### `Viewport`
@@ -364,7 +364,7 @@ Container with an optional label border.
 Low-level scrollable viewport.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ---
@@ -378,7 +378,7 @@ These widgets are designed for settings/preferences UIs. They extend `gtk::ListB
 A row with title, optional subtitle, and suffix widgets.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 **Properties:** `title`, `subtitle`, `activatable`  
@@ -390,7 +390,7 @@ A row with title, optional subtitle, and suffix widgets.
 An expandable row that reveals child rows.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 **Properties:** `title`, `subtitle`, `expanded`  
@@ -401,7 +401,7 @@ An expandable row that reveals child rows.
 A preference row with an embedded switch.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 **Properties:** `title`, `subtitle`, `active`  
@@ -412,7 +412,7 @@ A preference row with an embedded switch.
 A preference row with an embedded spin button.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 **Properties:** `title`, `subtitle`, `value`, `min`, `max`, `step`  
@@ -423,7 +423,7 @@ A preference row with an embedded spin button.
 A preference row with an embedded text entry.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 **Properties:** `title`, `text`  
@@ -438,7 +438,7 @@ A preference row with an embedded text entry.
 A vertical list container for rows.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 **Properties:** `selectionMode` (`None`|`Single`|`Browse`|`Multiple`)  
@@ -450,7 +450,7 @@ A vertical list container for rows.
 A single row in a `ListBox`.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 **Properties:** `activatable`  
@@ -462,7 +462,7 @@ A single row in a `ListBox`.
 A dropdown selector from a comma-separated list of strings.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 **Properties:** `items` (comma-separated text), `selected` (Int)  
@@ -477,7 +477,7 @@ A dropdown selector from a comma-separated list of strings.
 A text entry styled for search input with debounced `onSearchChanged`.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 **Properties:** `text`, `placeholder`  
@@ -488,7 +488,7 @@ A text entry styled for search input with debounced `onSearchChanged`.
 A collapsible container with a label toggle.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 **Properties:** `label`, `expanded`  
@@ -503,7 +503,7 @@ A collapsible container with a label toggle.
 Adwaita push-based navigation stack. Children must be `NavigationPage` widgets.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 **Children:** `pages` (sequence of `NavigationPage`)
@@ -513,7 +513,7 @@ Adwaita push-based navigation stack. Children must be `NavigationPage` widgets.
 A page within a `NavigationView`.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 **Properties:** `title`, `tag`  
@@ -524,7 +524,7 @@ A page within a `NavigationView`.
 An overlay that can display transient toast notifications (toasts are shown at runtime via the signal engine, not via markup children).
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 **Children:** `content` (single)

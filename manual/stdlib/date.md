@@ -154,7 +154,7 @@ domain DateDelta over Int
 | `daysInMonth` | `Month → Year → Day` | Number of days in a given month |
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ## Formatting
@@ -167,7 +167,7 @@ domain DateDelta over Int
 | `zonedToIso` | `ZonedDateTime → Text` | `"2024-06-15T14:30:00+00:00"` |
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ## Comparison

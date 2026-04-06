@@ -29,27 +29,27 @@ func fromInteger = n =>
 
 // Arithmetic
 type BigInt -> BigInt -> BigInt
-func plus = a => b =>
+func plus = a b =>
     add a b
 
 type BigInt -> BigInt -> BigInt
-func minus = a => b =>
+func minus = a b =>
     sub a b
 
 type BigInt -> BigInt -> BigInt
-func times = a => b =>
+func times = a b =>
     mul a b
 
 type BigInt -> BigInt -> Option BigInt
-func dividedBy = a => b =>
+func dividedBy = a b =>
     div a b
 
 type BigInt -> BigInt -> Option BigInt
-func remainder = a => b =>
+func remainder = a b =>
     bigMod a b
 
 type BigInt -> Int -> BigInt
-func raiseTo = base => exp =>
+func raiseTo = base exp =>
     pow base exp
 
 type BigInt -> BigInt
@@ -62,25 +62,25 @@ func absolute = n =>
 
 // Comparison
 type BigInt -> BigInt -> Bool
-func equals = a => b =>
+func equals = a b =>
     bigEq a b
 
 type BigInt -> BigInt -> Bool
-func greaterThan = a => b =>
+func greaterThan = a b =>
     gt a b
 
 type BigInt -> BigInt -> Bool
-func lessThan = a => b =>
+func lessThan = a b =>
     lt a b
 
 type BigInt -> BigInt -> Bool
-func greaterOrEqual = a => b =>
+func greaterOrEqual = a b =>
     gt a b
     T|> True
     F|> bigEq a b
 
 type BigInt -> BigInt -> Bool
-func lessOrEqual = a => b =>
+func lessOrEqual = a b =>
     lt a b
     T|> True
     F|> bigEq a b

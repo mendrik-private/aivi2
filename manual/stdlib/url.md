@@ -43,7 +43,7 @@ use aivi.url (
 ## `parse`
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 Use this when URL text comes from config, user input, or another external source.
@@ -61,7 +61,7 @@ value apiBase : Result UrlError Url = parse "https://api.example.com/v1/users?pa
 ## `.carrier`
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 Access the raw URL text.
@@ -103,7 +103,7 @@ key/value pairs for you.
 ### `withPath`
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 Return a new `Url` with a different path.
@@ -111,7 +111,7 @@ Return a new `Url` with a different path.
 ### `withQuery`
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 Return a new `Url` with a different query string.

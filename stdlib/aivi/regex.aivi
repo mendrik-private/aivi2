@@ -13,34 +13,34 @@ type RegexError = Text
 
 // Test if text matches pattern
 type Pattern -> Text -> Task RegexError Bool
-func matches = pattern => text => isMatch pattern text
+func matches = pattern text => isMatch pattern text
 
 // Find first match position (char index)
 type Pattern -> Text -> Task RegexError (Option Int)
-func firstIndex = pattern => text => find pattern text
+func firstIndex = pattern text => find pattern text
 
 // Find first match text
 type Pattern -> Text -> Task RegexError (Option Text)
-func firstMatch = pattern => text => findText pattern text
+func firstMatch = pattern text => findText pattern text
 
 // Find all matches
 type Pattern -> Text -> Task RegexError (List Text)
-func allMatches = pattern => text => findAll pattern text
+func allMatches = pattern text => findAll pattern text
 
 // Replace first match
 type Pattern -> Text -> Text -> Task RegexError Text
-func replaceFirst = pattern => replacement => text => replace pattern replacement text
+func replaceFirst = pattern replacement text => replace pattern replacement text
 
 // Replace all matches
 type Pattern -> Text -> Text -> Task RegexError Text
-func replaceEach = pattern => replacement => text => replaceAll pattern replacement text
+func replaceEach = pattern replacement text => replaceAll pattern replacement text
 
 // Check if text has any match
 type Pattern -> Text -> Task RegexError Bool
-func hasMatch = pattern => text => isMatch pattern text
+func hasMatch = pattern text => isMatch pattern text
 
 // Common patterns
-value emailPattern : Pattern = "^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$"
+value emailPattern : Pattern = "^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]\{2,\}$"
 value urlPattern : Pattern = "https?://[^\\s]+"
 value intPattern : Pattern = "^-?[0-9]+$"
 value floatPattern : Pattern = "^-?[0-9]+(\\.[0-9]+)?$"

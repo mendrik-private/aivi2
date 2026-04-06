@@ -63,7 +63,7 @@ type Theme = {
 ### argb
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 Construct a `Color` from one packed ARGB integer. This is the low-level constructor exposed
@@ -72,7 +72,7 @@ by the module today.
 ### red / green / blue / alpha
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 Read one channel from a color.
@@ -80,7 +80,7 @@ Read one channel from a color.
 ### withAlpha / withRed / withGreen / withBlue
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 Return a new color with one channel replaced.
@@ -98,7 +98,7 @@ func dimAccent = theme =>
 ### blend
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 Blend two colors together. The `Float` controls how far the result moves from the first

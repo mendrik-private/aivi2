@@ -113,10 +113,60 @@ fn explicit_exported_names(module: &Module) -> Vec<ExportedName> {
 fn implicit_exported_names(module: &Module) -> Vec<ExportedName> {
     let mut names = Vec::new();
     for &id in module.root_items() {
-        if let Some(item) = module.items().get(id)
-            && let Some(exported) = item_to_exported_name(module, item)
-        {
+        let Some(item) = module.items().get(id) else {
+            continue;
+        };
+        if let Some(exported) = item_to_exported_name(module, item) {
             push_unique_exported_name(&mut names, exported);
+        }
+        // For sum types, also export each constructor individually so that
+        // `use module (ConstructorName)` works for modules using implicit exports.
+        if let Item::Type(type_item) = item {
+            if let TypeItemBody::Sum(variants) = &type_item.body {
+                let deprecation = item_deprecation_notice(module, item);
+                for variant in variants.iter() {
+                    let name = variant.name.text().to_owned();
+                    let metadata = builtin_term_metadata(&name).unwrap_or_else(|| {
+                        let owner_type_name: String = type_item.name.text().into();
+                        if variant.fields.is_empty() {
+                            ImportBindingMetadata::Value {
+                                ty: ImportValueType::Named {
+                                    type_name: owner_type_name,
+                                    arguments: Vec::new(),
+                                },
+                            }
+                        } else {
+                            let result = ImportValueType::Named {
+                                type_name: owner_type_name,
+                                arguments: Vec::new(),
+                            };
+                            let ty = variant.fields.iter().rev().fold(result, |acc, field| {
+                                let param_ty = import_value_type(module, field.ty).unwrap_or(
+                                    ImportValueType::Named {
+                                        type_name: "Unknown".into(),
+                                        arguments: Vec::new(),
+                                    },
+                                );
+                                ImportValueType::Arrow {
+                                    parameter: Box::new(param_ty),
+                                    result: Box::new(acc),
+                                }
+                            });
+                            ImportBindingMetadata::Value { ty }
+                        }
+                    });
+                    push_unique_exported_name(
+                        &mut names,
+                        ExportedName {
+                            name,
+                            kind: ExportedNameKind::Value,
+                            metadata,
+                            callable_type: None,
+                            deprecation: deprecation.clone(),
+                        },
+                    );
+                }
+            }
         }
     }
     names
