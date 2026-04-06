@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use aivi_base::{Diagnostic, DiagnosticCode};
 use aivi_hir::{
     ExprKind, Item, ItemId, Module, ResolutionState, TermResolution, TypeKind, TypeResolution,
 };
@@ -43,6 +44,38 @@ pub fn collect_unused_diagnostics(
             tags: Some(vec![DiagnosticTag::UNNECESSARY]),
             data: None,
         });
+    }
+
+    diagnostics
+}
+
+/// Collect unused-symbol warnings as native [`aivi_base::Diagnostic`] items so
+/// that CLI tools can render them without depending on LSP types.
+///
+/// Only called when the module has no HIR errors, matching the LSP behaviour.
+pub fn collect_unused_native_diagnostics(
+    module: &Module,
+    source: &aivi_base::SourceFile,
+) -> Vec<Diagnostic> {
+    let referenced = collect_referenced_items(module);
+    let exported = collect_exported_items(module);
+
+    let mut diagnostics = Vec::new();
+
+    for item_id in module.root_items() {
+        if referenced.contains(item_id) || exported.contains(item_id) {
+            continue;
+        }
+
+        let Some((name_text, name_span)) = item_name_and_span(module, *item_id) else {
+            continue;
+        };
+        let _ = source; // span is already file-scoped; kept for API symmetry
+        diagnostics.push(
+            Diagnostic::warning(format!("`{name_text}` is defined but never used"))
+                .with_code(DiagnosticCode::new("aivi", "unused-symbol"))
+                .with_primary_label(name_span, "defined here"),
+        );
     }
 
     diagnostics

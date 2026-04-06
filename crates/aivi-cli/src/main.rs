@@ -51,7 +51,8 @@ use aivi_hir::{
 use aivi_lambda::{lower_module as lower_lambda_module, validate_module as validate_lambda_module};
 use aivi_query::{
     HirModuleResult, RootDatabase, SourceFile as QuerySourceFile, hir_module as query_hir_module,
-    parsed_file as query_parsed_file, resolve_v1_entrypoint,
+    parsed_file as query_parsed_file, parse_manifest, resolve_v1_entrypoint,
+    discover_workspace_root_from_directory,
 };
 use aivi_runtime::{
     BackendLinkedRuntime, GlibLinkedRuntimeDriver, GlibLinkedRuntimeFailure, HirRuntimeAssembly,
@@ -224,6 +225,26 @@ fn run_check(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Strin
         }
         if requested_path.replace(PathBuf::from(&argument)).is_some() {
             return Err("check path was provided more than once".to_owned());
+        }
+    }
+
+    // Directory: check every .aivi file found recursively inside it.
+    if let Some(ref dir) = requested_path {
+        if dir.is_dir() {
+            return check_directory(dir, timings);
+        }
+    }
+
+    // No path given and the manifest declares multiple apps: check them all.
+    if requested_path.is_none() {
+        let cwd = env::current_dir().map_err(|error| {
+            format!("failed to determine current directory for `aivi check`: {error}")
+        })?;
+        let workspace_root = discover_workspace_root_from_directory(&cwd);
+        let manifest = parse_manifest(&workspace_root)
+            .map_err(|message| format!("failed to parse aivi.toml: {message}"))?;
+        if manifest.apps.len() > 1 {
+            return check_all_apps(&manifest.apps, &workspace_root, timings);
         }
     }
 
@@ -1118,6 +1139,72 @@ fn validate_module_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Recursively collect all `.aivi` files under `dir`, sorted for deterministic output.
+fn collect_aivi_files(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut files = Vec::new();
+    let mut dirs = vec![dir.to_path_buf()];
+    while let Some(current) = dirs.pop() {
+        let entries = fs::read_dir(&current).map_err(|error| {
+            format!("failed to read directory `{}`: {error}", current.display())
+        })?;
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                format!("failed to read directory entry in `{}`: {error}", current.display())
+            })?;
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if path.extension().is_some_and(|ext| ext == "aivi") {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+/// Check every `.aivi` file found recursively under `dir`.
+fn check_directory(dir: &Path, timings: bool) -> Result<ExitCode, String> {
+    let files = collect_aivi_files(dir)?;
+    if files.is_empty() {
+        println!("no .aivi files found in `{}`", dir.display());
+        return Ok(ExitCode::SUCCESS);
+    }
+    let mut any_failed = false;
+    for path in &files {
+        match check_file(path, timings)? {
+            ExitCode::SUCCESS => {}
+            _ => any_failed = true,
+        }
+    }
+    if any_failed {
+        Ok(ExitCode::FAILURE)
+    } else {
+        Ok(ExitCode::SUCCESS)
+    }
+}
+
+/// Check every `[[app]]` entry defined in `aivi.toml`.
+fn check_all_apps(
+    apps: &[aivi_query::AppConfig],
+    workspace_root: &Path,
+    timings: bool,
+) -> Result<ExitCode, String> {
+    let mut any_failed = false;
+    for app in apps {
+        let entry_path = workspace_root.join(&app.entry);
+        match check_file(&entry_path, timings)? {
+            ExitCode::SUCCESS => {}
+            _ => any_failed = true,
+        }
+    }
+    if any_failed {
+        Ok(ExitCode::FAILURE)
+    } else {
+        Ok(ExitCode::SUCCESS)
+    }
+}
+
 fn check_file(path: &Path, timings: bool) -> Result<ExitCode, String> {
     let total_start = Instant::now();
     require_file_exists(path)?;
@@ -1146,14 +1233,37 @@ fn check_file(path: &Path, timings: bool) -> Result<ExitCode, String> {
         return Ok(ExitCode::FAILURE);
     }
 
+    // After HIR passes, collect LSP-level unused-symbol warnings for each file.
+    let t0 = Instant::now();
+    let mut unused_count = 0usize;
+    for file in &snapshot.files {
+        let hir = query_hir_module(&snapshot.frontend.db, *file);
+        let has_errors = hir
+            .diagnostics()
+            .iter()
+            .any(|d| d.severity == Severity::Error);
+        if !has_errors {
+            let warnings =
+                aivi_lsp::collect_unused_native_diagnostics(hir.module(), &hir.source());
+            unused_count += warnings.len();
+            print_diagnostics(&snapshot.sources, warnings.iter());
+        }
+    }
+    let unused_duration = t0.elapsed();
+
     let parsed = snapshot.entry_parsed();
     println!(
-        "syntax + HIR passed: {} ({} surface item{}, {} workspace file{})",
+        "syntax + HIR passed: {} ({} surface item{}, {} workspace file{}{})",
         path.display(),
         parsed.cst().items.len(),
         plural_suffix(parsed.cst().items.len()),
         snapshot.files.len(),
-        plural_suffix(snapshot.files.len())
+        plural_suffix(snapshot.files.len()),
+        if unused_count > 0 {
+            format!(", {} unused-symbol warning{}", unused_count, plural_suffix(unused_count))
+        } else {
+            String::new()
+        }
     );
 
     if timings {
@@ -1162,6 +1272,7 @@ fn check_file(path: &Path, timings: bool) -> Result<ExitCode, String> {
         eprintln!("  load + parse:  {:>8.2?}", load_duration);
         eprintln!("  syntax check:  {:>8.2?}", syntax_duration);
         eprintln!("  HIR lowering:  {:>8.2?}", hir_duration);
+        eprintln!("  unused check:  {:>8.2?}", unused_duration);
         eprintln!("  total:         {:>8.2?}", total);
     }
 
@@ -4743,7 +4854,7 @@ USAGE:
     aivi <path>                     Shorthand for `aivi check <path>`
 
 COMMANDS:
-    check <path>                    Type-check a module through HIR
+    check [path]                    Type-check a module, directory, or all apps
     compile <path> [-o <object>]    Compile a module to native object code
     build <path> -o <dir> [opts]    Package a runnable GTK app bundle
     run [path] [opts]               Launch a live GTK app
@@ -4772,16 +4883,19 @@ fn format_subcommand_help(name: &str) -> Option<String> {
 aivi check — type-check a module through HIR
 
 USAGE:
-    aivi check <path>
+    aivi check [<path>]
 
 ARGS:
-    <path>              Path to an .aivi source file or workspace entry
+    <path>              Path to an .aivi source file, or a directory to check
+                        recursively. When omitted, all [[app]] entries in
+                        aivi.toml are checked; if only one app (or a [run]
+                        entry) is defined, that single entry is checked.
 
 DESCRIPTION:
-    Lexes, parses, lowers, and validates a module through the full HIR
-    pipeline. Reports any syntax errors, name resolution failures, or
-    type errors as diagnostics. Exits with code 0 on success, 1 on
-    diagnostic errors.
+    Lexes, parses, lowers, and validates one or more modules through the full
+    HIR pipeline. Reports any syntax errors, name resolution failures, or type
+    errors as diagnostics. Exits with code 0 when all files pass, 1 on any
+    diagnostic error.
 ",
         "compile" => "\
 aivi compile — compile a module to native object code

@@ -22,6 +22,10 @@ pub mod state;
 pub mod symbols;
 pub mod unused;
 
+/// Collect unused-symbol warnings as native [`aivi_base::Diagnostic`] items.
+/// Only meaningful when the module has no HIR errors.
+pub use unused::collect_unused_native_diagnostics;
+
 /// Start the LSP server, listening on stdio.
 pub async fn run() -> anyhow::Result<()> {
     use tracing_subscriber::{EnvFilter, fmt};

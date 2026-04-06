@@ -355,13 +355,6 @@ impl RootDatabase {
         Some(computed)
     }
 
-    /// Remove only the cached HIR for `file`, forcing re-lowering on the next
-    /// access while keeping the source text and parse tree intact.
-    pub(crate) fn invalidate_hir(&self, file: SourceFile) {
-        let mut state = self.state.write();
-        state.hir.remove(&file.id);
-    }
-
     /// Remove a file from the database, clearing all its cached state and
     /// dependency edges.  Callers must ensure no other live `SourceFile`
     /// handles refer to the removed id after this call.
