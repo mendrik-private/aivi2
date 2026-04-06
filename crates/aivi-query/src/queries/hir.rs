@@ -240,8 +240,15 @@ pub fn resolve_module_file(
 }
 
 /// Format the source file using the memoised CST.
+///
+/// Returns `None` when the file has parse errors so the editor does not
+/// receive a format edit that might corrupt the file (e.g. by substituting
+/// unparseable regions with placeholder text).
 pub fn format_file(db: &RootDatabase, file: SourceFile) -> Option<String> {
     let parsed = parsed_file(db, file);
+    if !parsed.diagnostics().is_empty() {
+        return None;
+    }
     let formatter = Formatter;
     Some(formatter.format(parsed.cst()))
 }

@@ -111,7 +111,7 @@ impl Formatter {
             Item::Export(item) => lines.extend(self.format_export_item(item)),
             Item::Hoist(item) => lines.extend(self.format_hoist_item(item)),
             Item::Error(_) => {
-                lines.push("# <unparseable item>".to_owned());
+                lines.push("// <unparseable item>".to_owned());
             }
         }
 
