@@ -79,6 +79,21 @@
     "body": ["use ${1:module} (${2:name})"],
     "description": "Import from a module"
   },
+  "Hoist module": {
+    "prefix": "hoist",
+    "body": ["hoist ${1:module}"],
+    "description": "Hoist a module's exports into the project-wide namespace"
+  },
+  "Hoist module with filters": {
+    "prefix": "hoistf",
+    "body": ["hoist ${1:module} (${2:func, value})"],
+    "description": "Hoist specific kinds from a module (func, value, signal, type, domain, class)"
+  },
+  "Hoist module with hiding": {
+    "prefix": "hoisth",
+    "body": ["hoist ${1:module} hiding (${2:name})"],
+    "description": "Hoist a module while hiding specific names"
+  },
   "Match markup": {
     "prefix": "match",
     "body": [

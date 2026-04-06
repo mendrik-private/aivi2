@@ -25,8 +25,6 @@ type PendingProfiles = (Task HttpError (Map Text Profile))
 domain ResourceId A over A = {
     type A -> ResourceId A
     wrap
-    type ResourceId A -> A
-    unwrap
 }
 
 domain HeaderBag over Map Text Text = {

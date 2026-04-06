@@ -3,9 +3,7 @@ domain Amount A over A = {
     wrap
     type Amount A -> Amount A -> Amount A
     (+)
-    type Amount A -> A
-    unwrap
 }
 
 value total : Amount Int = wrap 1 + wrap 2
-value raw : Int = unwrap total
+value raw : Int = total.carrier

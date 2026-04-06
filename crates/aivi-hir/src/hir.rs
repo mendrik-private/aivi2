@@ -729,6 +729,10 @@ pub enum TermResolution {
     AmbiguousDomainMembers(NonEmpty<DomainMemberResolution>),
     ClassMember(ClassMemberResolution),
     AmbiguousClassMembers(NonEmpty<ClassMemberResolution>),
+    /// Multiple hoisted modules export the same name; resolved by type-directed
+    /// disambiguation at the type-checking layer, or reported as an error with a
+    /// suggestion to use `hiding` if the context cannot disambiguate.
+    AmbiguousHoistedImports(NonEmpty<ImportId>),
     Builtin(BuiltinTerm),
 }
 
@@ -822,6 +826,7 @@ pub enum ItemKind {
     Instance,
     Use,
     Export,
+    Hoist,
 }
 
 /// One module-level declaration.
@@ -837,6 +842,7 @@ pub enum Item {
     Instance(InstanceItem),
     Use(UseItem),
     Export(ExportItem),
+    Hoist(HoistItem),
 }
 
 impl Item {
@@ -852,6 +858,7 @@ impl Item {
             Self::Instance(_) => ItemKind::Instance,
             Self::Use(_) => ItemKind::Use,
             Self::Export(_) => ItemKind::Export,
+            Self::Hoist(_) => ItemKind::Hoist,
         }
     }
 
@@ -867,6 +874,7 @@ impl Item {
             Self::Instance(item) => item.header.span,
             Self::Use(item) => item.header.span,
             Self::Export(item) => item.header.span,
+            Self::Hoist(item) => item.header.span,
         }
     }
 
@@ -882,6 +890,7 @@ impl Item {
             Self::Instance(item) => &item.header.decorators,
             Self::Use(item) => &item.header.decorators,
             Self::Export(item) => &item.header.decorators,
+            Self::Hoist(item) => &item.header.decorators,
         }
     }
 }
@@ -1215,6 +1224,30 @@ pub enum ExportResolution {
     /// Re-export of an imported binding (e.g. an intrinsic or a name from
     /// another module forwarded through this one).
     Import(ImportId),
+}
+
+/// Kind filter used in a `hoist` declaration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum HoistKindFilter {
+    Func,
+    Value,
+    Signal,
+    Type,
+    Domain,
+    Class,
+}
+
+/// One `hoist` declaration — lifts this module's own exports into project scope.
+///
+/// Kind filters narrow which exported names are hoisted. An empty filter list
+/// means "hoist everything". Hidden names are explicitly excluded.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HoistItem {
+    pub header: ItemHeader,
+    /// Optional kind filters — empty means all kinds.
+    pub kind_filters: Vec<HoistKindFilter>,
+    /// Names explicitly excluded from the hoist.
+    pub hiding: Vec<Name>,
 }
 
 /// One integer literal preserved in raw form.

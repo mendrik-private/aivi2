@@ -1,3 +1,5 @@
+hoist
+
 type DurationError = Text
 
 domain Duration over Int = {
@@ -10,8 +12,6 @@ domain Duration over Int = {
     millis
     type Int -> Result DurationError Duration
     trySeconds
-    type Duration -> Int
-    unwrap
     type Duration -> Duration -> Duration
     (+)
     type Duration -> Duration -> Duration

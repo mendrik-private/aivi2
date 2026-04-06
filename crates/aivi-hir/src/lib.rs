@@ -80,9 +80,9 @@ pub use hir::{
     DecoratorPayload, DeprecatedDecorator, DeprecationNotice, DomainItem, DomainMember,
     DomainMemberHandle, DomainMemberKind, DomainMemberResolution, EachControl, EmptyControl,
     ExportItem, ExportResolution, Expr, ExprKind, FloatLiteral, FragmentControl, FunctionItem,
-    FunctionParameter, ImportBinding, ImportBindingMetadata, ImportBindingResolution,
-    ImportBundleKind, ImportRecordField, ImportValueType, ImportedDomainLiteralSuffix,
-    InstanceItem, InstanceMember,
+    FunctionParameter, HoistItem, HoistKindFilter, ImportBinding, ImportBindingMetadata,
+    ImportBindingResolution, ImportBundleKind, ImportRecordField, ImportValueType,
+    ImportedDomainLiteralSuffix, InstanceItem, InstanceMember,
     IntegerLiteral, IntrinsicValue, Item, ItemHeader, ItemKind, LiteralSuffixResolution, MapExpr,
     MapExprEntry, MarkupAttribute, MarkupAttributeValue, MarkupElement, MarkupNode, MarkupNodeKind,
     MatchControl, MockDecorator, Module, ModuleArenas, Name, NameError, NamePath, NamePathError,
@@ -111,7 +111,7 @@ pub use recurrence_elaboration::{
     RecurrenceNonSourceWakeupBinding, RecurrenceRuntimeExpr, RecurrenceRuntimeStageBlocker,
     RecurrenceStagePlan, elaborate_recurrences,
 };
-pub use resolver::{ImportCycle, ImportModuleResolution, ImportResolver, NullImportResolver};
+pub use resolver::{ImportCycle, ImportModuleResolution, ImportResolver, NullImportResolver, RawHoistItem};
 pub use sequence::{AtLeastTwo, NonEmpty, SequenceError};
 pub use signal_metadata_elaboration::{
     collect_signal_dependencies_for_expr, collect_signal_dependencies_for_exprs,

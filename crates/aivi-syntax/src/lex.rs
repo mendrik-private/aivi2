@@ -61,6 +61,7 @@ pub enum TokenKind {
     ProviderKw,
     UseKw,
     ExportKw,
+    HoistKw,
     Star,
     PatchApply,
     PipeTransform,
@@ -107,6 +108,7 @@ impl TokenKind {
                 | TokenKind::ProviderKw
                 | TokenKind::UseKw
                 | TokenKind::ExportKw
+                | TokenKind::HoistKw
         )
     }
 
@@ -145,6 +147,7 @@ impl TokenKind {
                 | TokenKind::ProviderKw
                 | TokenKind::UseKw
                 | TokenKind::ExportKw
+                | TokenKind::HoistKw
         )
     }
 }
@@ -591,6 +594,7 @@ fn keyword_kind(text: &str) -> Option<TokenKind> {
         "provider" => Some(TokenKind::ProviderKw),
         "use" => Some(TokenKind::UseKw),
         "export" => Some(TokenKind::ExportKw),
+        "hoist" => Some(TokenKind::HoistKw),
         _ => None,
     }
 }

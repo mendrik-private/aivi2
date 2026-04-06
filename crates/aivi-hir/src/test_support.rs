@@ -95,7 +95,7 @@ pub fn item_name(module: &Module, item_id: ItemId) -> &str {
         Item::Signal(item) => item.name.text(),
         Item::Class(item) => item.name.text(),
         Item::Domain(item) => item.name.text(),
-        Item::SourceProviderContract(_) | Item::Instance(_) | Item::Use(_) | Item::Export(_) => {
+        Item::SourceProviderContract(_) | Item::Instance(_) | Item::Use(_) | Item::Export(_) | Item::Hoist(_) => {
             "<anonymous>"
         }
     }

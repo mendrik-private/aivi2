@@ -55,7 +55,7 @@ func cityName = .
 `{ address.city.name }` is sugar for nested patterns:
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 The leaf segment (`name`) becomes the bound variable. This works at any depth:
@@ -155,7 +155,7 @@ func stripDebug = .
 Removal can target nested fields using selectors:
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 See [Values & Functions § Structural patches](/guide/values-and-functions#structural-patches) for more on the `<|` operator and patch selectors.

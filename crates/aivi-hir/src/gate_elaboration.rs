@@ -435,7 +435,8 @@ pub fn elaborate_gates(module: &Module) -> GateElaborationReport {
             | Item::Domain(_)
             | Item::SourceProviderContract(_)
             | Item::Use(_)
-            | Item::Export(_) => {}
+            | Item::Export(_)
+            | Item::Hoist(_) => {}
         }
     }
 
@@ -1957,6 +1958,7 @@ fn runtime_reference_for_name(
         crate::ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_))
         | crate::ResolutionState::Resolved(TermResolution::ClassMember(_))
         | crate::ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_))
+        | crate::ResolutionState::Resolved(TermResolution::AmbiguousHoistedImports(_))
         | crate::ResolutionState::Unresolved => {
             Err(GateElaborationBlocker::UnknownRuntimeExprType { span })
         }

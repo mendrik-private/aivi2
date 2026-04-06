@@ -3,8 +3,6 @@ type UrlError = Text
 domain Url over Text = {
     type Text -> Result UrlError Url
     parse
-    type Url -> Text
-    unwrap
     type Url -> Option Text
     scheme
     type Url -> Option Text

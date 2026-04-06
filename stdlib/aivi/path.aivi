@@ -17,8 +17,6 @@ type PathError =
 domain Path over Text = {
     type Text -> Result PathError Path
     parse
-    type Path -> Text
-    unwrap
     type Path -> Text -> Path
     (/)
     type Path -> Option Path

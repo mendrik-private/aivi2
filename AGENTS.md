@@ -29,6 +29,11 @@ You are implementing **AIVI** in **Rust**: a purely functional, reactive, GTK/li
 - runtime scheduler, signal engine, GC, source watchers, and GTK bridge,
 - GTK main thread must never block on background work.
 
+## AIVI comment syntax
+
+AIVI uses `//` for line comments, `/* */` for block comments, and `/** **/` for doc comments.
+**Never use `--` or `#` as comment syntax** — both are parse errors in AIVI.
+
 ## Before coding
 
 Identify:

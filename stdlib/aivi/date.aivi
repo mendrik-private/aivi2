@@ -34,8 +34,6 @@ domain DateDelta over Int = {
     literal wk : Int -> DateDelta
     type Int -> DateDelta
     days
-    type DateDelta -> Int
-    unwrap
     type DateDelta -> DateDelta -> DateDelta
     (+)
     type DateDelta -> DateDelta -> DateDelta

@@ -1,29 +1,13 @@
+// Aliases needed only inside the Snake domain body where domain operations
+// share names with hoisted stdlib functions.
 use aivi.nonEmpty (
-    NonEmptyList
-    singleton
     head as nelHead
-    cons as nelCons
     length as nelLength
     init as nelInit
-    fromHeadTail as nelFromHeadTail
 )
 
 use aivi.list (
     contains as listContains
-    any
-)
-
-use aivi.text (
-    join
-    concat
-)
-
-use aivi.duration (Duration)
-
-use aivi.matrix (
-    Matrix
-    MatrixError
-    indices as matrixIndices
 )
 
 type Direction =
@@ -79,13 +63,13 @@ domain Snake over NonEmptyList Cell = {
     type Cell
     head = nelHead self
     type Cell -> Bool
-    contains cell = listContains cellEq cell self.carrier
+    contains cell = listContains cellEq cell (toList self)
     type Int
     length = nelLength self
     type Cell -> Snake
-    grow cell = nelCons cell self
+    grow cell = cons cell self
     type Cell -> Snake
-    move cell = nelFromHeadTail cell (nelInit self)
+    move cell = fromHeadTail cell (nelInit self)
     type Direction -> Cell
     nextHead dir = moveDir dir (nelHead self)
 }
@@ -110,7 +94,7 @@ func dirLabel = .
  ||> East  -> "Right"
  ||> West  -> "Left"
 
-value initialSnake = fromCells (nelCons (Cell 6 10) (nelCons (Cell 5 10) (singleton (Cell 4 10))))
+value initialSnake = fromCells (cons (Cell 6 10) (cons (Cell 5 10) (singleton (Cell 4 10))))
 
 value initial : GameState = {
     snake: initialSnake,
@@ -168,13 +152,13 @@ func cellGlyph = body st y x => (Cell x y == st.snake.head, listContains cellEq 
  ||> (False, False, False) -> "·"
 
 type List Cell -> GameState -> Int -> Text
-func renderRowAt = body st y => matrixIndices boardW
+func renderRowAt = body st y => indices boardW
   |> map (cellGlyph body st y)
   |> concat
 
 type GameState -> Text
-func renderBoard = st => matrixIndices boardH
-  |> map (renderRowAt st.snake.carrier.carrier st)
+func renderBoard = st => indices boardH
+  |> map (renderRowAt (toList st.snake.carrier) st)
   |> join "\n"
 
 type Status -> Bool

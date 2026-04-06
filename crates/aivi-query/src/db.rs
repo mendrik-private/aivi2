@@ -203,22 +203,22 @@ impl RootDatabase {
         files
     }
 
-    /// Snapshot all currently known sources into an `aivi_base::SourceDatabase`
-    /// using stable file-id order so cached diagnostics keep pointing at the
-    /// correct source file.
+    /// Snapshot all currently known sources into an `aivi_base::SourceDatabase`.
+    ///
+    /// Each file is inserted with its own stable query-layer id as the
+    /// `aivi_base::FileId`, so cached diagnostic spans remain valid even when
+    /// file ids are non-contiguous (e.g. after a file has been removed via
+    /// [`remove_file`]).
     pub fn source_database(&self) -> aivi_base::SourceDatabase {
         let state = self.state.read();
-        let mut ids = state.files.keys().copied().collect::<Vec<_>>();
-        ids.sort_unstable();
-
         let mut sources = aivi_base::SourceDatabase::new();
-        for id in ids {
-            let input = state
-                .files
-                .get(&id)
-                .expect("sorted file id must refer to a stored input");
-            let new_id = sources.add_file(input.path.as_ref().clone(), Arc::clone(&input.text));
-            debug_assert_eq!(new_id.as_u32(), id);
+        for (&id, input) in &state.files {
+            let file_id = aivi_base::FileId::new(id);
+            sources.insert(aivi_base::SourceFile::new(
+                file_id,
+                input.path.as_ref().clone(),
+                Arc::clone(&input.text),
+            ));
         }
         sources
     }
@@ -260,17 +260,21 @@ impl RootDatabase {
             .expect("source file handle must refer to a stored input")
     }
 
-    /// Build an `aivi_base::SourceFile` for the given file handle with the
-    /// correct `FileId` by using `source_database()`.  The returned `Arc` is
-    /// suitable for passing to the parser and storing in cached results.
+    /// Build an `aivi_base::SourceFile` for the given file handle.
+    ///
+    /// The `aivi_base::FileId` is set to `file.id` so it matches the id used
+    /// in all diagnostic spans produced during HIR lowering of this file.
     pub(crate) fn make_source_file(&self, file: SourceFile) -> Arc<aivi_base::SourceFile> {
-        let sources = self.source_database();
-        Arc::new(
-            sources
-                .file_at(file.id)
-                .expect("source file handle must refer to a registered file")
-                .clone(),
-        )
+        let state = self.state.read();
+        let input = state
+            .files
+            .get(&file.id)
+            .expect("source file handle must refer to a stored input");
+        Arc::new(aivi_base::SourceFile::new(
+            aivi_base::FileId::new(file.id),
+            input.path.as_ref().clone(),
+            Arc::clone(&input.text),
+        ))
     }
 
     pub(crate) fn cached_parsed(

@@ -209,7 +209,8 @@ pub fn elaborate_fanouts(module: &Module) -> FanoutElaborationReport {
             | Item::Domain(_)
             | Item::SourceProviderContract(_)
             | Item::Use(_)
-            | Item::Export(_) => {}
+            | Item::Export(_)
+            | Item::Hoist(_) => {}
         }
     }
 

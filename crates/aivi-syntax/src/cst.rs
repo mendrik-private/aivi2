@@ -770,6 +770,8 @@ pub struct ItemBase {
     pub span: SourceSpan,
     pub token_range: TokenRange,
     pub decorators: Vec<Decorator>,
+    /// Line comments (including `//` prefix) that appear immediately before this item.
+    pub leading_comments: Vec<String>,
 }
 
 /// Function parameter preserved by the syntax layer.
@@ -905,6 +907,33 @@ pub struct ExportItem {
     pub targets: Vec<Identifier>,
 }
 
+/// Kind filter in a `hoist` declaration (e.g. `func`, `value`, `type`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HoistKindFilter {
+    pub span: SourceSpan,
+    pub text: String,
+}
+
+/// `hoist` declaration — lifts this module's own exports into the project-wide global scope.
+///
+/// Syntax:
+/// ```aivi
+/// hoist
+/// hoist (func)
+/// hoist (func, value)
+/// hoist hiding (foo)
+/// hoist (func) hiding (foo)
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HoistItem {
+    pub base: ItemBase,
+    pub keyword_span: SourceSpan,
+    /// Optional kind filters — if empty, all kinds are hoisted.
+    pub kind_filters: Vec<HoistKindFilter>,
+    /// Names explicitly excluded from the hoist.
+    pub hiding: Vec<Identifier>,
+}
+
 /// `domain` declaration.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DomainItem {
@@ -978,6 +1007,7 @@ pub enum Item {
     SourceProviderContract(SourceProviderContractItem),
     Use(UseItem),
     Export(ExportItem),
+    Hoist(HoistItem),
     Error(ErrorItem),
 }
 
@@ -994,6 +1024,7 @@ pub enum ItemKind {
     SourceProviderContract,
     Use,
     Export,
+    Hoist,
     Error,
 }
 
@@ -1010,6 +1041,7 @@ impl Item {
             Item::SourceProviderContract(_) => ItemKind::SourceProviderContract,
             Item::Use(_) => ItemKind::Use,
             Item::Export(_) => ItemKind::Export,
+            Item::Hoist(_) => ItemKind::Hoist,
             Item::Error(_) => ItemKind::Error,
         }
     }
@@ -1026,6 +1058,7 @@ impl Item {
             Item::SourceProviderContract(item) => &item.base,
             Item::Use(item) => &item.base,
             Item::Export(item) => &item.base,
+            Item::Hoist(item) => &item.base,
             Item::Error(item) => &item.base,
         }
     }
@@ -1036,6 +1069,23 @@ impl Item {
 
     pub fn token_range(&self) -> TokenRange {
         self.base().token_range
+    }
+
+    pub fn base_mut(&mut self) -> &mut ItemBase {
+        match self {
+            Item::Type(item)
+            | Item::Fun(item)
+            | Item::Value(item)
+            | Item::Signal(item)
+            | Item::Class(item) => &mut item.base,
+            Item::Instance(item) => &mut item.base,
+            Item::Domain(item) => &mut item.base,
+            Item::SourceProviderContract(item) => &mut item.base,
+            Item::Use(item) => &mut item.base,
+            Item::Export(item) => &mut item.base,
+            Item::Hoist(item) => &mut item.base,
+            Item::Error(item) => &mut item.base,
+        }
     }
 
     pub fn decorators(&self) -> &[Decorator] {

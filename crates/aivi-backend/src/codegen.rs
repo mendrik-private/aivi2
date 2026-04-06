@@ -3742,7 +3742,7 @@ impl<'a> CraneliftCompiler<'a> {
         }
 
         match handle.member_name.as_ref() {
-            "value" | "unwrap" | "carrier" if self.is_named_domain_layout(*parameter_layout) => {
+            "value" | "carrier" if self.is_named_domain_layout(*parameter_layout) => {
                 Ok(DomainMemberCallPlan::RepresentationalIdentityUnary)
             }
             _ if self.is_named_domain_layout(result_layout) => {

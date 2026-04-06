@@ -227,3 +227,47 @@ async fn implementation_resolves_class_member_use_site() {
     assert_eq!(locations[0].uri, uri);
     assert_eq!(locations[0].range.start, position_of_nth(&text, "(==)", 1));
 }
+
+#[tokio::test]
+async fn definition_resolves_class_member_declaration_site() {
+    // Hover on the `display` member name in the class body should navigate to its declaration.
+    let relative = "fixtures/frontend/milestone-2/valid/class-declarations/main.aivi";
+    let (state, uri, text) = open_fixture_document(relative);
+
+    let response = definition(
+        definition_params(uri.clone(), position_of_nth(&text, "display", 0)),
+        state,
+    )
+    .await
+    .expect("definition on a class member declaration should return a result");
+
+    let locations = response_locations(response);
+    assert!(
+        !locations.is_empty(),
+        "definition on a class member declaration should produce at least one location"
+    );
+    assert_eq!(
+        locations[0].uri, uri,
+        "definition should point to the same file"
+    );
+}
+
+#[tokio::test]
+async fn implementation_resolves_class_to_its_instances() {
+    // When the cursor is on the class name `Eq`, go-to-impl should jump to its instance(s).
+    let relative = "fixtures/frontend/milestone-2/valid/instance-declarations/main.aivi";
+    let (state, uri, text) = open_fixture_document(relative);
+
+    let response = implementation(
+        implementation_params(uri.clone(), position_of_nth(&text, "Eq", 0)),
+        state,
+    )
+    .await
+    .expect("implementation on a class name should resolve to its instances");
+
+    let locations = implementation_locations(response);
+    assert!(
+        !locations.is_empty(),
+        "there should be at least one instance implementation for class Eq"
+    );
+}

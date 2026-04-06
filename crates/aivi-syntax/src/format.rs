@@ -74,6 +74,9 @@ impl Formatter {
             if fun.annotation.is_some() {
                 let rendered = self.format_fun_item(fun);
                 let mut lines = Vec::new();
+                for comment in &item.base().leading_comments {
+                    lines.push(comment.clone());
+                }
                 if let Some((type_line, rest)) = rendered.split_first() {
                     lines.push(type_line.clone());
                     for decorator in item.decorators() {
@@ -86,6 +89,9 @@ impl Formatter {
         }
 
         let mut lines = Vec::new();
+        for comment in &item.base().leading_comments {
+            lines.push(comment.clone());
+        }
         for decorator in item.decorators() {
             lines.extend(self.format_decorator(decorator).into_lines());
         }
@@ -103,8 +109,9 @@ impl Formatter {
             }
             Item::Use(item) => lines.extend(self.format_use_item(item)),
             Item::Export(item) => lines.extend(self.format_export_item(item)),
+            Item::Hoist(item) => lines.extend(self.format_hoist_item(item)),
             Item::Error(_) => {
-                lines.push("# <unparseable item>".to_owned());
+                lines.push("// <unparseable item>".to_owned());
             }
         }
 
@@ -1421,6 +1428,32 @@ impl Formatter {
                     .join(", ")
             )],
         }
+    }
+
+    fn format_hoist_item(&self, item: &crate::cst::HoistItem) -> Vec<String> {
+        let mut line = "hoist".to_owned();
+
+        if !item.kind_filters.is_empty() {
+            let filters = item
+                .kind_filters
+                .iter()
+                .map(|f| f.text.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            line.push_str(&format!(" ({filters})"));
+        }
+
+        if !item.hiding.is_empty() {
+            let hidden = item
+                .hiding
+                .iter()
+                .map(|id| id.text.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            line.push_str(&format!(" hiding ({hidden})"));
+        }
+
+        vec![line]
     }
 
     fn format_domain_item(&self, item: &DomainItem) -> Vec<String> {
@@ -3392,16 +3425,12 @@ value view =
                 "    literal ms : Int -> Duration\n",
                 "    type Duration -> Int -> Duration\n",
                 "    (*)\n",
-                "    type Duration -> Int\n",
-                "    unwrap\n",
                 "}\n",
                 "\n",
                 "domain Path over Text = {\n",
                 "    literal root : Text -> Path\n",
                 "    type Path -> Text -> Path\n",
                 "    (/)\n",
-                "    type Path -> Text\n",
-                "    unwrap\n",
                 "}\n",
             )
         );

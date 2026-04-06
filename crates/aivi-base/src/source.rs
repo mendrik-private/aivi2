@@ -328,8 +328,14 @@ impl SourceFile {
 
 /// Collection of immutable source files used for span rendering.
 #[derive(Clone, Debug, Default)]
+/// A collection of source files indexed by their [`FileId`].
+///
+/// Files may be added with sequentially assigned ids via [`add_file`] or
+/// inserted with a pre-assigned id via [`insert`].  The latter supports
+/// query-layer databases where file ids may be non-contiguous (e.g. after a
+/// file is removed and the id slot is not recycled).
 pub struct SourceDatabase {
-    files: Vec<SourceFile>,
+    files: std::collections::BTreeMap<u32, SourceFile>,
 }
 
 impl SourceDatabase {
@@ -337,27 +343,33 @@ impl SourceDatabase {
         Self::default()
     }
 
+    /// Add a new source file, assigning the next available sequential id.
     pub fn add_file(&mut self, path: impl Into<PathBuf>, text: impl Into<Arc<str>>) -> FileId {
         let raw = u32::try_from(self.files.len()).expect("source file table exceeded u32::MAX");
         let id = FileId::new(raw);
-        self.files.push(SourceFile::new(id, path, text));
+        self.files.insert(raw, SourceFile::new(id, path, text));
         id
     }
 
-    pub fn file(&self, id: FileId) -> Option<&SourceFile> {
-        self.files.get(id.as_u32() as usize)
+    /// Insert a pre-built [`SourceFile`] using its own [`FileId`] as the key.
+    ///
+    /// Use this when the caller already manages file ids (e.g. the query-layer
+    /// `RootDatabase`) so that ids remain stable even after other files are
+    /// removed.
+    pub fn insert(&mut self, file: SourceFile) {
+        self.files.insert(file.id().as_u32(), file);
     }
 
-    /// Look up a source file by its raw insertion index.
+    pub fn file(&self, id: FileId) -> Option<&SourceFile> {
+        self.files.get(&id.as_u32())
+    }
+
+    /// Look up a source file by its [`FileId`] raw value.
     ///
-    /// This is the safe counterpart of indexing with [`FileId`] for callers
-    /// (such as query layers) that manage their own file-id tables in parallel
-    /// and need to retrieve the base-layer source file by position without
-    /// constructing a [`FileId`] directly.
-    ///
-    /// Returns `None` when `index` is out of range.
-    pub fn file_at(&self, index: u32) -> Option<&SourceFile> {
-        self.files.get(index as usize)
+    /// Unlike the sequential-index assumption of an internal `Vec`, this works
+    /// correctly when ids are non-contiguous (e.g. after file removal).
+    pub fn file_at(&self, id: u32) -> Option<&SourceFile> {
+        self.files.get(&id)
     }
 
     pub fn len(&self) -> usize {
@@ -369,7 +381,7 @@ impl SourceDatabase {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &SourceFile> {
-        self.files.iter()
+        self.files.values()
     }
 }
 

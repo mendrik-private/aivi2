@@ -121,7 +121,11 @@ impl<'a> Parser<'a> {
     fn parse(mut self) -> (Module, Vec<Diagnostic>) {
         let mut items = Vec::new();
         let mut pending_type_annotation = None;
+        // Comments collected for a pending standalone `type` annotation are
+        // carried forward and prepended to the following declaration.
+        let mut carried_comments: Vec<String> = Vec::new();
         while let Some(start) = self.next_significant_from(self.cursor) {
+            let leading_comments = self.collect_leading_comments(self.cursor, start);
             let item = match self.tokens[start].kind() {
                 TokenKind::At => self.parse_decorated_item(start),
                 kind if kind.is_top_level_keyword() => self.parse_item_without_decorators(start),
@@ -138,12 +142,23 @@ impl<'a> Parser<'a> {
                 if let Some(previous) = pending_type_annotation.replace(pending) {
                     self.emit_orphan_standalone_type_annotation(&previous, None);
                 }
+                // Carry the comments so they prefix the following declaration.
+                if !leading_comments.is_empty() {
+                    carried_comments = leading_comments;
+                }
                 continue;
             }
 
             let mut item = item;
             if let Some(pending) = pending_type_annotation.take() {
                 self.apply_pending_type_annotation(&mut item, pending);
+            }
+            // Merge carried comments (from a preceding type annotation) with
+            // any comments directly before this item, preferring carried first.
+            let mut all_comments = std::mem::take(&mut carried_comments);
+            all_comments.extend(leading_comments);
+            if !all_comments.is_empty() {
+                item.base_mut().leading_comments = all_comments;
             }
             items.push(item);
         }
@@ -226,6 +241,7 @@ impl<'a> Parser<'a> {
             ),
             TokenKind::UseKw => Item::Use(self.parse_use_item(base, keyword_index, end)),
             TokenKind::ExportKw => Item::Export(self.parse_export_item(base, keyword_index, end)),
+            TokenKind::HoistKw => Item::Hoist(self.parse_hoist_item(base, keyword_index, end)),
             _ => unreachable!("finish_item only accepts top-level declaration keywords"),
         }
     }
@@ -2001,6 +2017,85 @@ impl<'a> Parser<'a> {
             .with_primary_label(span, label)
     }
 
+    fn parse_hoist_item(
+        &mut self,
+        base: ItemBase,
+        keyword_index: usize,
+        end: usize,
+    ) -> crate::cst::HoistItem {
+        let mut cursor = keyword_index + 1;
+
+        // Optional kind filter list: `(func, value, signal, type, domain, class)`
+        let kind_filters = if self
+            .peek_nontrivia(cursor, end)
+            .map(|i| self.tokens[i].kind() == TokenKind::LParen)
+            .unwrap_or(false)
+        {
+            let lparen_idx = self.peek_nontrivia(cursor, end).unwrap();
+            cursor = lparen_idx + 1;
+            let mut filters = Vec::new();
+            loop {
+                if self.consume_kind(&mut cursor, end, TokenKind::RParen).is_some() {
+                    break;
+                }
+                match self.parse_identifier(&mut cursor, end) {
+                    Some(ident) => {
+                        filters.push(crate::cst::HoistKindFilter {
+                            span: ident.span,
+                            text: ident.text,
+                        });
+                    }
+                    None => break,
+                }
+                let _ = self.consume_kind(&mut cursor, end, TokenKind::Comma);
+            }
+            filters
+        } else {
+            Vec::new()
+        };
+
+        // Optional `hiding (name1, name2, ...)` clause
+        let hiding = if self
+            .peek_nontrivia(cursor, end)
+            .map(|i| self.tokens[i].kind() == TokenKind::Identifier && self.is_identifier_text(i, "hiding"))
+            .unwrap_or(false)
+        {
+            let hiding_idx = self.peek_nontrivia(cursor, end).unwrap();
+            cursor = hiding_idx + 1;
+            if self
+                .peek_nontrivia(cursor, end)
+                .map(|i| self.tokens[i].kind() == TokenKind::LParen)
+                .unwrap_or(false)
+            {
+                let lparen_idx = self.peek_nontrivia(cursor, end).unwrap();
+                cursor = lparen_idx + 1;
+                let mut names = Vec::new();
+                loop {
+                    if self.consume_kind(&mut cursor, end, TokenKind::RParen).is_some() {
+                        break;
+                    }
+                    match self.parse_identifier(&mut cursor, end) {
+                        Some(ident) => names.push(ident),
+                        None => break,
+                    }
+                    let _ = self.consume_kind(&mut cursor, end, TokenKind::Comma);
+                }
+                names
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
+        crate::cst::HoistItem {
+            base,
+            keyword_span: self.source_span_of_token(keyword_index),
+            kind_filters,
+            hiding,
+        }
+    }
+
     fn parse_error_item(&mut self, start: usize) -> Item {
         let end = self
             .find_next_item_start(start + 1)
@@ -2011,7 +2106,7 @@ impl<'a> Parser<'a> {
                 .with_code(UNEXPECTED_TOP_LEVEL_TOKEN)
                 .with_primary_label(
                     self.source_span_of_token(start),
-                    "expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, or `@decorator` here",
+                    "expected `type`, `value`, `func`, `signal`, `class`, `use`, `export`, `hoist`, or `@decorator` here",
                 ),
         );
         Item::Error(ErrorItem {
@@ -6042,6 +6137,7 @@ impl<'a> Parser<'a> {
             span: self.source_span_for_range(start, end),
             token_range: TokenRange::new(start, end),
             decorators,
+            leading_comments: Vec::new(),
         }
     }
 
@@ -6146,6 +6242,45 @@ impl<'a> Parser<'a> {
 
     fn next_significant_from(&self, start: usize) -> Option<usize> {
         self.next_significant_in_range(start, self.tokens.len())
+    }
+
+    /// Collect line comments from tokens in `[from, to)` that appear at the
+    /// start of a line. Only the contiguous block of comments immediately
+    /// before the item (index `to`) is kept; any blank line (span gap larger
+    /// than a single newline) between comment groups resets the accumulator so
+    /// we don't attach comments that belong to the previous item.
+    fn collect_leading_comments(&self, from: usize, to: usize) -> Vec<String> {
+        // Walk forward over [from, to), collecting LineComment tokens.
+        // When we encounter a blank line we reset so only the final group
+        // adjacent to the item is kept.
+        let mut candidates: Vec<String> = Vec::new();
+        let mut last_end: Option<u32> = None;
+        for index in from..to {
+            let token = self.tokens[index];
+            if token.kind() == TokenKind::LineComment {
+                // Check for blank line gap: if the byte distance from the
+                // previous token's end to this token's start is more than one
+                // newline, consider this a fresh block.
+                if let Some(prev_end) = last_end {
+                    let gap = token.span().start().as_u32().saturating_sub(prev_end);
+                    if gap > 1 {
+                        // There is at least one blank line — reset.
+                        candidates.clear();
+                    }
+                }
+                candidates.push(token.text(self.source).to_owned());
+                last_end = Some(token.span().end().as_u32());
+            } else if !token.kind().is_trivia() {
+                // Unexpected non-trivia in this range — clear and stop.
+                candidates.clear();
+            } else {
+                // Whitespace / block comment trivia: track position for gap detection.
+                if last_end.is_none() {
+                    last_end = Some(token.span().end().as_u32());
+                }
+            }
+        }
+        candidates
     }
 
     fn next_significant_in_range(&self, start: usize, end: usize) -> Option<usize> {
@@ -7387,7 +7522,7 @@ instance Eq Blob = {
                     Some(TypeExprKind::Name(identifier)) if identifier.text == "Text"
                 ));
                 let body = item.body.as_ref().expect("domain should have a body");
-                assert_eq!(body.members.len(), 3);
+                assert_eq!(body.members.len(), 2);
                 assert!(matches!(
                     body.members[0].name,
                     DomainMemberName::Literal(ref suffix) if suffix.text == "root"
@@ -7396,11 +7531,6 @@ instance Eq Blob = {
                     body.members[1].name,
                     DomainMemberName::Signature(ClassMemberName::Operator(ref operator))
                         if operator.text == "/"
-                ));
-                assert!(matches!(
-                    body.members[2].name,
-                    DomainMemberName::Signature(ClassMemberName::Identifier(ref identifier))
-                        if identifier.text == "unwrap"
                 ));
             }
             other => panic!("expected domain item, got {other:?}"),
@@ -8295,6 +8425,56 @@ fun scoreLineFor:Text = "Score: {.}"
         );
         assert!(pipe.stages[1].subject_memo.is_none());
         assert!(pipe.stages[1].result_memo.is_none());
+    }
+
+    #[test]
+    fn parser_builds_hoist_item_with_no_filters() {
+        let (_, parsed) = load("hoist\n");
+        assert!(!parsed.has_errors(), "hoist should parse cleanly: {:?}", parsed.all_diagnostics().collect::<Vec<_>>());
+        assert_eq!(parsed.module.items.len(), 1);
+        let Item::Hoist(hoist) = &parsed.module.items[0] else {
+            panic!("expected hoist item");
+        };
+        assert!(hoist.kind_filters.is_empty());
+        assert!(hoist.hiding.is_empty());
+    }
+
+    #[test]
+    fn parser_builds_hoist_item_with_kind_filters() {
+        let (_, parsed) = load("hoist (func, value)\n");
+        assert!(!parsed.has_errors(), "hoist with filters should parse cleanly: {:?}", parsed.all_diagnostics().collect::<Vec<_>>());
+        let Item::Hoist(hoist) = &parsed.module.items[0] else {
+            panic!("expected hoist item");
+        };
+        assert_eq!(hoist.kind_filters.len(), 2);
+        assert_eq!(hoist.kind_filters[0].text, "func");
+        assert_eq!(hoist.kind_filters[1].text, "value");
+    }
+
+    #[test]
+    fn parser_builds_hoist_item_with_hiding_clause() {
+        let (_, parsed) = load("hoist hiding (length, head)\n");
+        assert!(!parsed.has_errors(), "hoist with hiding should parse cleanly: {:?}", parsed.all_diagnostics().collect::<Vec<_>>());
+        let Item::Hoist(hoist) = &parsed.module.items[0] else {
+            panic!("expected hoist item");
+        };
+        assert!(hoist.kind_filters.is_empty());
+        assert_eq!(hoist.hiding.len(), 2);
+        assert_eq!(hoist.hiding[0].text, "length");
+        assert_eq!(hoist.hiding[1].text, "head");
+    }
+
+    #[test]
+    fn parser_builds_hoist_item_with_filters_and_hiding() {
+        let (_, parsed) = load("hoist (func, value) hiding (map, filter)\n");
+        assert!(!parsed.has_errors(), "hoist with filters and hiding should parse cleanly: {:?}", parsed.all_diagnostics().collect::<Vec<_>>());
+        let Item::Hoist(hoist) = &parsed.module.items[0] else {
+            panic!("expected hoist item");
+        };
+        assert_eq!(hoist.kind_filters.len(), 2);
+        assert_eq!(hoist.hiding.len(), 2);
+        assert_eq!(hoist.hiding[0].text, "map");
+        assert_eq!(hoist.hiding[1].text, "filter");
     }
 
     #[test]

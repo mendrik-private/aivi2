@@ -31,7 +31,7 @@ Functions that query the structure or contents of a list without changing it.
 Returns `True` if the list has no elements.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -58,7 +58,7 @@ value result2 : Text =
 Returns `True` if the list has at least one element.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -82,7 +82,7 @@ value result : Text =
 Returns the number of elements in a list.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -103,7 +103,7 @@ value n : Int =
 Returns the first element wrapped in `Some`, or `None` if the list is empty.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -131,7 +131,7 @@ value fallback : Int = firstOrZero []
 Returns the element at the given zero-based index wrapped in `Some`, or `None` if the index is negative or out of range.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -154,7 +154,7 @@ value missing : Option Text = at 9 items
 Returns all elements after the first, wrapped in `Some (List A)`, or `None` if the list is empty.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -180,7 +180,7 @@ value result : List Int =
 Returns all elements after the first, or `[]` if the list is empty. A convenient alternative to `tail` when `None` handling is not needed.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -203,7 +203,7 @@ value none : List Int = tailOrEmpty []
 Returns the last element wrapped in `Some`, or `None` if the list is empty.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -233,7 +233,7 @@ Functions that produce a new list from an existing one.
 Applies a function to every element, returning a new list of the results.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -254,7 +254,7 @@ value result : List Int = [1, 2, 3]
 Returns only the elements that satisfy a predicate.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -274,7 +274,7 @@ value result
 Collapses a list of lists into a single flat list.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -297,7 +297,7 @@ value flat : List Int = flatten nested
 Applies a function returning a list to each element, then flattens the result. Equivalent to `map` followed by `flatten`.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -318,7 +318,7 @@ value result : List Int = [1, 2, 3]
 Returns the list with its elements in reversed order.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -342,7 +342,7 @@ value reversed : List Int = reverse original
 Returns the first `n` elements. If the list is shorter than `n`, the entire list is returned.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -366,7 +366,7 @@ value first3 : List Int = take 3 items
 Skips the first `n` elements and returns the rest.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -390,7 +390,7 @@ value after2 : List Int = drop 2 items
 Returns a new list with the element at the given zero-based index replaced. Negative or out-of-range indices leave the original list unchanged.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -413,7 +413,7 @@ value unchanged : List Int = replaceAt 9 42 items
 Returns the longest prefix of elements that all satisfy the predicate. Stops at the first element that does not match.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -434,7 +434,7 @@ value result : List Int = [2, 5, 8, 11, 3]
 Drops elements from the front as long as they satisfy the predicate, then returns the rest.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -455,7 +455,7 @@ value result : List Int = [2, 5, 8, 11, 3]
 Inserts a separator element between every pair of adjacent elements.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -481,7 +481,7 @@ Functions that locate elements or test properties of a list.
 Returns `True` if at least one element satisfies the predicate.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -501,7 +501,7 @@ value result
 Returns `True` if every element satisfies the predicate.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -528,7 +528,7 @@ value someNeg
 Returns the number of elements that satisfy the predicate.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -548,7 +548,7 @@ value n
 Returns the first element that satisfies the predicate, or `None`.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -575,7 +575,7 @@ func findUser = id users =>
 Applies a function to each element in order and returns the first `Some` result, or `None` if all calls return `None`. Useful for combined search-and-transform.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -596,7 +596,7 @@ value result
 Returns `True` if any element equals the target, using the provided equality function.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -630,7 +630,7 @@ value missing : Bool =
 Returns the index of the first element satisfying the predicate, or `None`.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -660,7 +660,7 @@ Functions that reduce a list to a single value.
 Sums all integers in a list. Returns `0` for an empty list.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -683,7 +683,7 @@ value total : Int =
 Multiplies all integers in a list together. Returns `1` for an empty list.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -706,7 +706,7 @@ value result : Int =
 Returns the largest element wrapped in `Some`, or `None` for an empty list. Requires a comparison function `cmp` where `cmp a b = True` means `a` is less than `b`.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -736,7 +736,7 @@ value highest : Option Int =
 Returns the smallest element wrapped in `Some`, or `None` for an empty list. Accepts the same kind of comparison function as `maximum`.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -770,7 +770,7 @@ Functions that treat lists as ordered collections with identity constraints.
 Removes duplicate elements, keeping only the first occurrence of each. Requires an equality function.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -798,7 +798,7 @@ value deduped : List Int =
 Sorts a list using an ordering function. The function `cmp a b` should return `True` when `a` should appear before `b` in the result.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -846,7 +846,7 @@ value descending : List Int =
 Splits a list into two sub-lists: `matched` (elements satisfying the predicate) and `unmatched` (those that do not). Preserves the original order in both sub-lists.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 `Partition A` is a record `{ matched: List A, unmatched: List A }`.
@@ -877,7 +877,7 @@ Functions that combine multiple lists element-by-element.
 Pairs up elements from two lists into a list of tuples. The result length equals the shorter of the two inputs.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -905,7 +905,7 @@ value pairs : List (Text, Int) = zip names scores
 Like `zip`, but instead of producing tuples it applies a combining function to each pair of elements.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -930,7 +930,7 @@ value sums : List Int =
 Separates a list of pairs into two separate lists. The inverse of `zip`.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 `UnzipState A B` is a record `{ lefts: List A, rights: List B }`.

@@ -5,17 +5,19 @@ use tower_lsp::{
     jsonrpc::Result,
     lsp_types::request::{GotoImplementationParams, GotoImplementationResponse},
     lsp_types::{
+        CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
         CodeLens, CodeLensOptions, CodeLensParams, CompletionOptions, CompletionParams,
         CompletionResponse, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
         DidOpenTextDocumentParams, DocumentFormattingParams, DocumentSymbolParams,
         DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
-        HoverProviderCapability, ImplementationProviderCapability, InitializeParams,
-        InitializeResult, InitializedParams, Location, MessageType, OneOf,
-        SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
+        HoverProviderCapability, ImplementationProviderCapability, InlayHint, InlayHintParams,
+        InitializeParams, InitializeResult, InitializedParams,
+        Location, MessageType, OneOf, PrepareRenameResponse, ReferenceParams, RenameOptions,
+        RenameParams, SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
         SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
-        ServerCapabilities, SymbolInformation, SymbolKind, TextDocumentSyncCapability,
-        TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit, WorkDoneProgressOptions,
-        WorkspaceSymbolParams,
+        ServerCapabilities, SymbolInformation, SymbolKind, TextDocumentPositionParams,
+        TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit,
+        WorkDoneProgressOptions, WorkspaceEdit, WorkspaceSymbolParams,
     },
 };
 
@@ -74,6 +76,15 @@ impl LanguageServer for Backend {
                 }),
                 definition_provider: Some(OneOf::Left(true)),
                 implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
+                references_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                })),
+                inlay_hint_provider: Some(OneOf::Left(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Options(
+                    CodeActionOptions::default(),
+                )),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 code_lens_provider: Some(CodeLensOptions {
                     resolve_provider: Some(false),
@@ -204,6 +215,32 @@ impl LanguageServer for Backend {
         params: GotoImplementationParams,
     ) -> Result<Option<GotoImplementationResponse>> {
         Ok(crate::implementation::implementation(params, Arc::clone(&self.state)).await)
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        Ok(crate::references::references(params, Arc::clone(&self.state)).await)
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        Ok(crate::rename::prepare_rename(params, Arc::clone(&self.state)).await)
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        Ok(crate::rename::rename(params, Arc::clone(&self.state)).await)
+    }
+
+    async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        Ok(crate::inlay_hints::inlay_hints(params, Arc::clone(&self.state)))
+    }
+
+    async fn code_action(
+        &self,
+        params: CodeActionParams,
+    ) -> Result<Option<tower_lsp::lsp_types::CodeActionResponse>> {
+        Ok(crate::code_actions::code_actions(params, Arc::clone(&self.state)))
     }
 
     async fn symbol(

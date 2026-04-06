@@ -8,16 +8,12 @@ type SettingsError =
 domain SettingsSchema over Text = {
     type Text -> Result SettingsError SettingsSchema
     parse
-    type SettingsSchema -> Text
-    unwrap
 }
 
 // Domain type for settings key paths
 domain SettingsKey over Text = {
     type Text -> SettingsKey
     make
-    type SettingsKey -> Text
-    unwrap
 }
 
 // Typed setting values

@@ -2,16 +2,12 @@ domain Duration over Int = {
     literal ms : Int -> Duration
     type Duration -> Duration -> Duration
     (+)
-    type Duration -> Int
-    unwrap
 }
 
 domain Path over Text = {
     literal root : Text -> Path
     type Path -> Text -> Path
     (/)
-    type Path -> Text
-    unwrap
 }
 
 domain NonEmpty A over List A = {

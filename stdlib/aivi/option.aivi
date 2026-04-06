@@ -1,3 +1,5 @@
+hoist
+
 type A -> Bool -> (Option A)
 func filterHelp = item keep => keep
  T|> Some item

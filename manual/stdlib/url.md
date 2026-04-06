@@ -5,7 +5,7 @@ Typed URLs with explicit parsing.
 `aivi.url` gives you a `Url` domain over `Text`. That means you can keep validated URLs as
 their own type instead of passing around raw strings everywhere.
 
-Construction is explicit: you parse text into `Url`, and you unwrap a `Url` back to `Text`
+Construction is explicit: you parse text into `Url`, and you access `.carrier` on a `Url`
 when you need the raw value again.
 
 ## Import
@@ -15,7 +15,6 @@ use aivi.url (
     Url
     UrlError
     parse
-    unwrap
     scheme
     host
     port
@@ -32,7 +31,6 @@ use aivi.url (
 | Member | Type | Description |
 | --- | --- | --- |
 | `parse` | `Text -> Result UrlError Url` | Parse text into a typed URL |
-| `unwrap` | `Url -> Text` | Get the raw URL text back |
 | `scheme` | `Url -> Option Text` | Read the scheme if present |
 | `host` | `Url -> Option Text` | Read the host if present |
 | `port` | `Url -> Option Int` | Read the port if present |
@@ -45,7 +43,7 @@ use aivi.url (
 ## `parse`
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 Use this when URL text comes from config, user input, or another external source.
@@ -60,23 +58,20 @@ use aivi.url (
 value apiBase : Result UrlError Url = parse "https://api.example.com/v1/users?page=1"
 ```
 
-## `unwrap`
+## `.carrier`
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
-Convert a typed URL back to raw text.
+Access the raw URL text.
 
 ```aivi
-use aivi.url (
-    Url
-    unwrap
-)
+use aivi.url (Url)
 
 type Url -> Text
 func rawAddress = url =>
-    unwrap url
+    url.carrier
 ```
 
 ## Accessors
@@ -108,7 +103,7 @@ key/value pairs for you.
 ### `withPath`
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 Return a new `Url` with a different path.
@@ -116,7 +111,7 @@ Return a new `Url` with a different path.
 ### `withQuery`
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 Return a new `Url` with a different query string.
@@ -150,13 +145,12 @@ Failed parses report a plain text error message.
 ```aivi
 use aivi.url (
     Url
-    unwrap
     withPath
 )
 
 type Url -> Text
 func avatarEndpoint = base =>
-    unwrap (withPath base "/api/avatar")
+    (withPath base "/api/avatar").carrier
 ```
 
 ## Current limits

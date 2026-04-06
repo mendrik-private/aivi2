@@ -23,7 +23,7 @@ use aivi.core.fn (
 Returns its argument unchanged. Useful as a no-op transformer in pipelines.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -41,7 +41,7 @@ func keepAsIs = n =>
 Returns a function that always returns its first argument, ignoring the second. Useful for discarding an input in a pipeline step.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -59,7 +59,7 @@ func alwaysForty = ignored =>
 Reverses the order of the first two arguments of a two-argument function.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -79,7 +79,7 @@ func clampFlipped = high low n =>
 Composes two functions, applying `g` first and then `f`. `compose f g x` is equivalent to `f (g x)`.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -102,7 +102,7 @@ func negAbs = n =>
 Applies `f` first and then `g`. The reverse of `compose`. `andThen f g x` is equivalent to `g (f x)`. Often called "left-to-right composition" or `>>>`.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -125,7 +125,7 @@ func absNeg = n =>
 Returns a function that ignores its argument and always returns the given value. Equivalent to `const` with argument order swapped.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -143,7 +143,7 @@ func constantZero = ignored =>
 Applies a transformation `f` to both arguments before combining them with `combine`. Useful for comparing or combining values after mapping.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -167,7 +167,7 @@ func absCompare = x y =>
 Applies a function to a value. `applyTo x f` is equivalent to `f x`. Useful for making value-first pipelines.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -187,7 +187,7 @@ func applyAbs = n =>
 Applies a function to itself twice: `applyTwice f x` is equivalent to `f (f x)`.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi

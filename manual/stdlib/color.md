@@ -17,7 +17,6 @@ use aivi.color (Color)
 |------|------|-------------|
 | `Color` | domain over `Int` | A packed color value |
 | `argb` | `Int -> Color` | Build a color from one packed ARGB integer |
-| `unwrap` | `Color -> Int` | Get the packed integer back |
 | `red` / `green` / `blue` / `alpha` | `Color -> Int` | Read one color channel |
 | `withAlpha` / `withRed` / `withGreen` / `withBlue` | `Color -> Int -> Color` | Replace one channel |
 | `blend` | `Color -> Color -> Float -> Color` | Mix two colors |
@@ -28,8 +27,6 @@ use aivi.color (Color)
 domain Color over Int = {
     type Int -> Color
     argb
-    type Color -> Int
-    unwrap
     type Color -> Int
     red
     type Color -> Int
@@ -66,24 +63,16 @@ type Theme = {
 ### argb
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 Construct a `Color` from one packed ARGB integer. This is the low-level constructor exposed
 by the module today.
 
-### unwrap
-
-```aivi
-# <unparseable item>
-```
-
-Extract the packed integer again.
-
 ### red / green / blue / alpha
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 Read one channel from a color.
@@ -91,7 +80,7 @@ Read one channel from a color.
 ### withAlpha / withRed / withGreen / withBlue
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 Return a new color with one channel replaced.
@@ -109,7 +98,7 @@ func dimAccent = theme =>
 ### blend
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 Blend two colors together. The `Float` controls how far the result moves from the first

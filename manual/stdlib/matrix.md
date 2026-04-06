@@ -55,7 +55,7 @@ type MatrixError =
 ## `init`
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 `init width height build` calls `build x y` for every zero-based coordinate in the rectangle.
@@ -83,7 +83,7 @@ value middleSeat : Result MatrixError (Option Int) = seats
 ## `fromRows`
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 Use `fromRows` when you already have nested lists and want to verify that every row has the same
@@ -106,7 +106,7 @@ value board : Result MatrixError (Matrix Text) =
 ## Dimensions and access
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 `width` and `height` report the current rectangular shape. `row` and `at` return `None` when the
@@ -149,7 +149,7 @@ value corner : Result MatrixError (Option Int) = board
 ## `replaceAt`
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 `replaceAt` returns `Some updatedMatrix` when both coordinates are in bounds, otherwise `None`.

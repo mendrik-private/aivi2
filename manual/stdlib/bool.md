@@ -21,7 +21,7 @@ use aivi.bool (
 Negates a boolean value.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -39,7 +39,7 @@ func isInactive = active =>
 Returns `True` if exactly one of the two arguments is `True` (exclusive or).
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -57,7 +57,7 @@ func toggleChanged = previous current =>
 Logical implication: `implies a b` is `False` only when `a` is `True` and `b` is `False`.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -75,7 +75,7 @@ func checkRule = hasPermission canAccess =>
 Returns `True` if both arguments are `True`. Equivalent to `a and b`.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -93,7 +93,7 @@ func isAdminAndActive = isAdmin isActive =>
 Returns `True` if at least one argument is `True`. Equivalent to `a or b`.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -111,7 +111,7 @@ func canProceed = hasTokenA hasTokenB =>
 Returns `True` only if both arguments are `False`.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi
@@ -129,7 +129,7 @@ func isSilent = isPlaying isPaused =>
 Converts an integer to a boolean: `0` becomes `False`, any other value becomes `True`.
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ```aivi

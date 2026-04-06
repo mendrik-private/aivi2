@@ -51,8 +51,6 @@ domain Score over Int = {
     literal pts : Int -> Score
     type Score -> Score -> Score
     (+)
-    type Score -> Int
-    unwrap
 }
 ```
 
@@ -60,7 +58,7 @@ That lets you write domain-aware expressions such as:
 
 ```aivi
 value total : Score = 10pts + 5pts
-value raw : Int = unwrap total
+value raw : Int = total.carrier
 ```
 
 Callable members can also carry authored bodies. Declare the type first, then add a binding line with the implementation:
@@ -81,12 +79,8 @@ When a domain has multiple members, group them inside `= { ... }`:
 ```aivi
 domain Score over Int = {
     literal pts : Int -> Score
-    type Score -> Score -> Score
-    (+)
     type Score -> Score -> Bool
     (<)
-    type Score -> Int
-    unwrap
 }
 ```
 
@@ -126,19 +120,18 @@ domain Score over Int = {
     literal pts : Int -> Score
 }
 
-value raw : Int = (100pts).carrier   // 100
+value raw : Int = (100pts).carrier
 ```
 
 This is useful when you need to pass a domain value to a function that expects the carrier type:
 
 ```aivi
-domain Snake over NonEmptyList Cell = { ... }
+domain Snake over NonEmptyList Cell
 
-// .carrier returns NonEmptyList Cell, then nelToList converts to List Cell
 value cells : List Cell = nelToList mySnake.carrier
 ```
 
-Unlike `unwrap`, which is a user-defined member you must declare yourself, `.carrier` is always available on every domain.
+Unlike user-defined domain members, `.carrier` is always available on every domain without any declaration.
 
 ## Summary
 
@@ -147,7 +140,6 @@ Unlike `unwrap`, which is a user-defined member you must declare yourself, `.car
 | `domain Name over Carrier` | Declare a domain |
 | `literal pts : Int -> Score` | Add a literal suffix |
 | `(+) : D -> D -> D` | Add an operator |
-| `unwrap : D -> Carrier` | Add a named method |
 | `member : T` + `member x = expr` | Add an authored callable member |
 | `self` | Implicit domain-typed receiver in authored bodies |
 | `domain Name over Carrier = { ... }` | Group domain members in a block |

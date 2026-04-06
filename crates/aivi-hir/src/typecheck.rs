@@ -28,7 +28,10 @@ pub enum ConstraintClass {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ConstraintOrigin {
     Expression,
-    RecordOmittedField { field_name: String },
+    RecordOmittedField {
+        field_name: String,
+        available_fields: Vec<String>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,6 +97,7 @@ impl TypeConstraint {
         span: SourceSpan,
         field_name: impl Into<String>,
         subject: GateType,
+        available_fields: Vec<String>,
     ) -> Self {
         Self {
             span,
@@ -101,6 +105,7 @@ impl TypeConstraint {
             subject,
             origin: ConstraintOrigin::RecordOmittedField {
                 field_name: field_name.into(),
+                available_fields,
             },
         }
     }
@@ -120,7 +125,16 @@ impl TypeConstraint {
     fn omitted_field_name(&self) -> Option<&str> {
         match &self.origin {
             ConstraintOrigin::Expression => None,
-            ConstraintOrigin::RecordOmittedField { field_name } => Some(field_name),
+            ConstraintOrigin::RecordOmittedField { field_name, .. } => Some(field_name),
+        }
+    }
+
+    fn available_field_names(&self) -> Option<&[String]> {
+        match &self.origin {
+            ConstraintOrigin::Expression => None,
+            ConstraintOrigin::RecordOmittedField {
+                available_fields, ..
+            } => Some(available_fields),
         }
     }
 }
@@ -329,7 +343,8 @@ impl<'a> TypeChecker<'a> {
                 | Item::Class(_)
                 | Item::SourceProviderContract(_)
                 | Item::Use(_)
-                | Item::Export(_) => {}
+                | Item::Export(_)
+            | Item::Hoist(_) => {}
             }
         }
         self.solve_pending_eq_constraints();
@@ -2256,22 +2271,31 @@ impl<'a> TypeChecker<'a> {
             .iter()
             .map(|field| (field.name.as_str(), &field.ty))
             .collect::<HashMap<_, _>>();
+        let available_field_names: Vec<String> = expected_fields
+            .iter()
+            .map(|f| f.name.clone())
+            .collect();
         let mut seen = HashMap::<String, SourceSpan>::new();
         let mut ok = true;
 
         for field in &record.fields {
             let label = field.label.text();
             let Some(expected_ty) = expected.get(label) else {
-                self.diagnostics.push(
-                    Diagnostic::error(format!(
-                        "record literal provides unexpected field `{label}`"
-                    ))
-                    .with_code(code("unexpected-record-field"))
-                    .with_primary_label(
-                        field.span,
-                        "this field is not part of the expected closed record type",
-                    ),
+                let mut diag = Diagnostic::error(format!(
+                    "record literal provides unexpected field `{label}`"
+                ))
+                .with_code(code("unexpected-record-field"))
+                .with_primary_label(
+                    field.span,
+                    "this field is not part of the expected closed record type",
                 );
+                if !available_field_names.is_empty() {
+                    diag = diag.with_note(format!(
+                        "available fields: {}",
+                        available_field_names.join(", ")
+                    ));
+                }
+                self.diagnostics.push(diag);
                 ok = false;
                 continue;
             };
@@ -2301,6 +2325,7 @@ impl<'a> TypeChecker<'a> {
                 expr_span,
                 field.name.clone(),
                 field.ty.clone(),
+                available_field_names.clone(),
             ));
         }
 
@@ -3186,18 +3211,25 @@ impl<'a> TypeChecker<'a> {
                     }
                     Err(reason) => {
                         let field_name = constraint.omitted_field_name().unwrap_or("this field");
-                        self.diagnostics.push(
-                                Diagnostic::error(format!(
-                                    "record literal omits field `{field_name}` but no `Default` instance is in scope for `{}`",
-                                    constraint.subject()
-                                ))
-                                .with_code(code("missing-default-instance"))
-                                .with_primary_label(
-                                    constraint.span(),
-                                    format!("field `{field_name}` must be provided or defaultable here"),
-                                )
-                                .with_note(reason),
-                            );
+                        let mut diag = Diagnostic::error(format!(
+                                "record literal omits field `{field_name}` but no `Default` instance is in scope for `{}`",
+                                constraint.subject()
+                            ))
+                            .with_code(code("missing-default-instance"))
+                            .with_primary_label(
+                                constraint.span(),
+                                format!("field `{field_name}` must be provided or defaultable here"),
+                            )
+                            .with_note(reason);
+                        if let Some(available) = constraint.available_field_names()
+                            && !available.is_empty()
+                        {
+                            diag = diag.with_note(format!(
+                                "available fields: {}",
+                                available.join(", ")
+                            ));
+                        }
+                        self.diagnostics.push(diag);
                     }
                 },
             }
@@ -4080,7 +4112,10 @@ impl<'a> TypeChecker<'a> {
         fn emit_type_mismatch(&mut self, span: SourceSpan, expected: &GateType, actual: &GateType) {
         let mut diag = Diagnostic::error(format!("expected `{expected}` but found `{actual}`"))
             .with_code(code("type-mismatch"))
-            .with_primary_label(span, "this expression has the wrong type");
+            .with_primary_label(
+                span,
+                format!("found `{actual}` here, expected `{expected}`"),
+            );
 
         // Suggest conversions for common primitive mismatches.
         if let (GateType::Primitive(e), GateType::Primitive(a)) = (expected, actual) {
@@ -4119,7 +4154,10 @@ impl<'a> TypeChecker<'a> {
                     describe_inferred_type(None)
                 ))
                 .with_code(code("type-mismatch"))
-                .with_primary_label(span, "this expression has the wrong type"),
+                .with_primary_label(
+                    span,
+                    format!("expected `{expected}` but the type could not be inferred"),
+                ),
             ),
         }
     }

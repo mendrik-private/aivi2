@@ -2076,4 +2076,90 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn runtime_high_fanout_signal_graph_no_glitch() {
+        const N: usize = 20;
+        let mut builder = SignalGraphBuilder::new();
+        let source = builder.add_input("source", None).unwrap();
+        let mut derived_handles = Vec::with_capacity(N);
+        for index in 0..N {
+            let node = builder
+                .add_derived(format!("derived-{index}"), None)
+                .unwrap();
+            builder.define_derived(node, [source.as_signal()]).unwrap();
+            derived_handles.push(node);
+        }
+
+        let graph = builder.build().unwrap();
+        let mut scheduler = Scheduler::new(graph);
+        let stamp = scheduler.current_stamp(source).unwrap();
+        scheduler
+            .queue_publication(Publication::new(stamp, 100_i32))
+            .unwrap();
+
+        let mut eval_counts = vec![0usize; N];
+        let outcome = scheduler.tick(&mut |signal, inputs: DependencyValues<'_, i32>| {
+            let idx = derived_handles
+                .iter()
+                .position(|&h| h == signal)
+                .expect("evaluator receives only declared derived signals");
+            eval_counts[idx] += 1;
+            Some(inputs.value(0).copied()? + idx as i32)
+        });
+
+        // Source + all N derived must be committed in one tick.
+        assert_eq!(outcome.committed().len(), N + 1);
+
+        // Each derived is evaluated exactly once (no glitch).
+        for (idx, count) in eval_counts.iter().enumerate() {
+            assert_eq!(*count, 1, "derived-{idx} evaluated more than once");
+        }
+
+        // All N derived signals have the expected values.
+        for (idx, handle) in derived_handles.iter().enumerate() {
+            assert_eq!(
+                scheduler
+                    .current_value(handle.as_signal())
+                    .unwrap()
+                    .copied(),
+                Some(100 + idx as i32),
+                "derived-{idx} has wrong value"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_initial_signal_settle_is_correct() {
+        const DEPTH: usize = 10;
+        let mut builder = SignalGraphBuilder::new();
+        let root = builder.add_input("root", None).unwrap();
+        let mut previous = root.as_signal();
+        let mut chain = Vec::with_capacity(DEPTH);
+        for index in 0..DEPTH {
+            let node = builder
+                .add_derived(format!("chain-{index}"), None)
+                .unwrap();
+            builder.define_derived(node, [previous]).unwrap();
+            previous = node.as_signal();
+            chain.push(node);
+        }
+
+        let graph = builder.build().unwrap();
+        let mut scheduler = Scheduler::new(graph);
+        let stamp = scheduler.current_stamp(root).unwrap();
+        scheduler
+            .queue_publication(Publication::new(stamp, 0_i32))
+            .unwrap();
+
+        scheduler.tick(&mut |_, inputs: DependencyValues<'_, i32>| {
+            Some(inputs.value(0).copied()? + 1)
+        });
+
+        // The last node in the chain should equal DEPTH (each step adds 1).
+        assert_eq!(
+            scheduler.current_value(previous).unwrap().copied(),
+            Some(DEPTH as i32)
+        );
+    }
 }

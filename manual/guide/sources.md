@@ -26,12 +26,6 @@ vocabularies, but they no longer expose parallel effectful entry points.
 Current shape:
 
 ```aivi
-use aivi.fs (
-    FsSource
-    FsError
-    FsEvent
-)
-
 @source fs projectRoot
 signal files : FsSource
 
@@ -57,11 +51,6 @@ The compiler lowers those forms onto the existing built-in source providers, tas
 pure host-context intrinsics:
 
 ```aivi
-use aivi.fs (
-    FsSource
-    FsError
-)
-
 signal projectRoot : Text = "/tmp/demo"
 
 @source fs projectRoot
@@ -144,10 +133,6 @@ type DecodeMode =
 type Map K V =
   | EmptyMap
 
-use aivi.duration (Duration)
-
-use aivi.http (Retry)
-
 value authHeaders : Map Text Text = EmptyMap
 
 signal apiHost = "https://api.example.com"
@@ -215,8 +200,6 @@ You can also declare a provider contract. Argument and option declarations still
 surface in HIR so later custom-provider handle lowering can target one provider-owned API:
 
 ```aivi
-use aivi.duration (Duration)
-
 type Mode =
   | Stream
 

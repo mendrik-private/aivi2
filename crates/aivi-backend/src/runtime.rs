@@ -2492,7 +2492,7 @@ impl<'a> KernelEvaluator<'a> {
         }
 
         match (handle.member_name.as_ref(), arguments.as_slice()) {
-            ("value" | "unwrap" | "carrier", [argument])
+            ("value" | "carrier", [argument])
                 if parameters.len() == 1 && is_named_domain_layout(self.program, parameters[0]) =>
             {
                 return Ok(domain_member_carrier_value(argument.clone()));

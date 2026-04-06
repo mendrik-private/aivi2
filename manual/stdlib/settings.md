@@ -56,8 +56,6 @@ These variants describe the usual GSettings failure cases.
 domain SettingsSchema over Text = {
     type Text -> Result SettingsError SettingsSchema
     parse
-    type SettingsSchema -> Text
-    unwrap
 }
 ```
 
@@ -75,8 +73,6 @@ value interfaceSchema : Result SettingsError SettingsSchema = parse "org.gnome.d
 domain SettingsKey over Text = {
     type Text -> SettingsKey
     make
-    type SettingsKey -> Text
-    unwrap
 }
 ```
 

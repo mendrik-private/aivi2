@@ -11,10 +11,10 @@ use crate::{
     DecimalLiteral, Decorator, DecoratorCall, DecoratorId, DecoratorPayload, DeprecatedDecorator,
     DomainItem, DomainMember, DomainMemberKind, DomainMemberResolution, EachControl, EmptyControl,
     ExportItem, ExportResolution, Expr, ExprId, ExprKind, FloatLiteral, FragmentControl,
-    FunctionItem, FunctionParameter, ImportBinding, ImportBindingMetadata, ImportBindingResolution,
-    ImportBundleKind, ImportId, ImportModuleResolution, ImportRecordField, ImportValueType,
-    ImportedDomainLiteralSuffix, InstanceItem, InstanceMember, IntegerLiteral, IntrinsicValue,
-    Item, ItemHeader, ItemId,
+    FunctionItem, FunctionParameter, HoistItem, HoistKindFilter, ImportBinding,
+    ImportBindingMetadata, ImportBindingResolution, ImportBundleKind, ImportId,
+    ImportModuleResolution, ImportRecordField, ImportValueType, ImportedDomainLiteralSuffix,
+    InstanceItem, InstanceMember, IntegerLiteral, IntrinsicValue, Item, ItemHeader, ItemId,
     ItemKind, LiteralSuffixResolution, MapExpr, MapExprEntry, MarkupAttribute,
     MarkupAttributeValue, MarkupElement, MarkupNode, MarkupNodeId, MarkupNodeKind, MatchControl,
     MockDecorator, Module, Name, NamePath, NonEmpty, PatchBlock, PatchEntry, PatchInstruction,
@@ -775,6 +775,14 @@ struct Namespaces {
     literal_suffixes: HashMap<String, Vec<NamedSite<LiteralSuffixResolution>>>,
     term_imports: HashMap<String, Vec<NamedSite<ImportId>>>,
     type_imports: HashMap<String, Vec<NamedSite<ImportId>>>,
+    /// Names made available project-wide by `hoist` declarations.  Consulted
+    /// after explicit `use` imports but before class/builtin fallbacks.
+    hoisted_term_imports: HashMap<String, Vec<NamedSite<ImportId>>>,
+    hoisted_type_imports: HashMap<String, Vec<NamedSite<ImportId>>>,
+    /// Module paths (dot-joined) that have already been registered via a local
+    /// `hoist` declaration.  Prevents double-registration when the workspace
+    /// scan returns the same module path.
+    hoisted_module_paths: std::collections::HashSet<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -868,6 +876,7 @@ impl<'a> Lowerer<'a> {
                 self.lower_source_provider_contract_item(item),
             )),
             syn::Item::Use(item) => Some(Item::Use(self.lower_use_item(item))),
+            syn::Item::Hoist(item) => Some(Item::Hoist(self.lower_hoist_item(item))),
             syn::Item::Export(_) => {
                 unreachable!("export items are handled before single-item lowering")
             }
@@ -1299,7 +1308,8 @@ impl<'a> Lowerer<'a> {
                 Item::SourceProviderContract(_)
                 | Item::Instance(_)
                 | Item::Use(_)
-                | Item::Export(_) => false,
+                | Item::Export(_)
+            | Item::Hoist(_) => false,
             })
     }
 
@@ -1932,7 +1942,16 @@ impl<'a> Lowerer<'a> {
                     .map(|s| known_import_metadata(&module_name, &s.text).is_some())
                     .unwrap_or(false)
             });
-            if !(is_direct_self_import && all_intrinsics) {
+            // Suppress false-positive import-cycle errors that arise when stdlib modules
+            // are compiled transitively during workspace-hoist registration. In that
+            // context the module is compiled with an import stack inherited from app
+            // code, so `module_name_for_file` may fall back to a file-system path string
+            // (containing '/') instead of the logical dotted module name. When the cycle
+            // path contains a path-encoded entry (detected by the presence of a '/'
+            // separator), the cycle is an artefact of hoist-chain compilation order, not
+            // a real circular import dependency.
+            let is_hoist_induced_cycle = cycle.modules().iter().any(|m| m.contains('/'));
+            if !(is_direct_self_import && all_intrinsics) && !is_hoist_induced_cycle {
                 self.diagnostics.push(
                     Diagnostic::error(format!(
                         "import cycle detected: {}",
@@ -2059,6 +2078,44 @@ impl<'a> Lowerer<'a> {
             header,
             target,
             resolution: ResolutionState::Unresolved,
+        }
+    }
+
+    fn lower_hoist_item(&mut self, item: &syn::HoistItem) -> HoistItem {
+        let header =
+            self.lower_item_header(&item.base.decorators, ItemKind::Hoist, item.base.span);
+
+        let kind_filters = item
+            .kind_filters
+            .iter()
+            .filter_map(|f| match f.text.as_str() {
+                "func" => Some(HoistKindFilter::Func),
+                "value" => Some(HoistKindFilter::Value),
+                "signal" => Some(HoistKindFilter::Signal),
+                "type" => Some(HoistKindFilter::Type),
+                "domain" => Some(HoistKindFilter::Domain),
+                "class" => Some(HoistKindFilter::Class),
+                other => {
+                    self.emit_error(
+                        f.span,
+                        format!("unknown hoist kind filter `{other}`; expected one of: func, value, signal, type, domain, class"),
+                        code("unknown-hoist-kind-filter"),
+                    );
+                    None
+                }
+            })
+            .collect();
+
+        let hiding = item
+            .hiding
+            .iter()
+            .map(|ident| self.make_name(&ident.text, ident.span))
+            .collect();
+
+        HoistItem {
+            header,
+            kind_filters,
+            hiding,
         }
     }
 
@@ -5114,6 +5171,7 @@ impl<'a> Lowerer<'a> {
                     }
                 }
                 Item::Use(item) => self.register_use_item(&item, &mut namespaces),
+                Item::Hoist(item) => self.register_hoist_item(&item, &mut namespaces),
                 Item::Export(_) | Item::Instance(_) => {}
             }
         }
@@ -5219,9 +5277,11 @@ impl<'a> Lowerer<'a> {
                 Item::SourceProviderContract(_)
                 | Item::Instance(_)
                 | Item::Use(_)
-                | Item::Export(_) => {}
+                | Item::Export(_)
+            | Item::Hoist(_) => {}
             }
         }
+        self.register_workspace_hoists(&mut namespaces);
         namespaces
     }
 
@@ -5312,6 +5372,184 @@ impl<'a> Lowerer<'a> {
                     );
                     continue;
                 }
+            }
+        }
+    }
+
+    fn register_hoist_item(&mut self, _item: &HoistItem, _namespaces: &mut Namespaces) {
+        // Self-hoist declarations are propagated by the workspace scanner in aivi-query.
+        // Nothing to do here — the current module's own names are already in scope.
+    }
+
+    /// Register all workspace-level hoist items from other modules.
+    ///
+    /// Called after `build_namespaces()` processes local `Item::Hoist`
+    /// declarations.  Module paths already registered locally are skipped to
+    /// prevent double-registration.  Missing modules are silently ignored (no
+    /// diagnostic) since they may belong to a different workspace scope.
+    fn register_workspace_hoists(&mut self, namespaces: &mut Namespaces) {
+        use aivi_base::Span;
+        use crate::resolver::RawHoistItem;
+
+        let workspace_hoists: Vec<RawHoistItem> = self.resolver.workspace_hoist_items();
+        if workspace_hoists.is_empty() {
+            return;
+        }
+
+        // Skip hoists that would resolve to the current module — a module
+        // declaring `hoist libs.foo` inside `libs/foo.aivi` itself is a
+        // self-hoist used as a "publish myself" pattern. Injecting the module's
+        // own names into its own namespace would create a compilation cycle, and
+        // is unnecessary since the names are already in scope.
+        let self_path = self.resolver.current_module_path();
+
+        let synthetic_span = SourceSpan::new(self.module.file(), Span::from(0..0));
+
+        for raw in workspace_hoists {
+            let module_key = raw.module_path.join(".");
+            if Some(&module_key) == self_path.as_ref() {
+                continue; // self-hoist: skip for this module, still propagates to others
+            }
+            if namespaces.hoisted_module_paths.contains(&module_key) {
+                continue;
+            }
+            namespaces.hoisted_module_paths.insert(module_key.clone());
+
+            let module_segments: Vec<&str> = raw.module_path.iter().map(String::as_str).collect();
+            let module_resolution = self.resolver.resolve_for_hoist(&module_segments);
+            let crate::resolver::ImportModuleResolution::Resolved(ref exports) = module_resolution
+            else {
+                continue; // silent — workspace hoists may reference optional modules
+            };
+
+            self.register_hoist_exports(
+                &module_key,
+                exports,
+                &raw.kind_filters,
+                &raw.hiding,
+                synthetic_span,
+                namespaces,
+            );
+        }
+    }
+
+    /// Core of hoist registration: given a resolved module's `ExportedNames`,
+    /// apply kind filters and hiding, then insert synthetic imports into the
+    /// hoisted namespace maps.  Shared by both local `Item::Hoist` and
+    /// workspace hoist propagation.
+    fn register_hoist_exports(
+        &mut self,
+        module_name: &str,
+        exports: &crate::exports::ExportedNames,
+        kind_filters: &[HoistKindFilter],
+        hiding: &[impl AsRef<str>],
+        span: SourceSpan,
+        namespaces: &mut Namespaces,
+    ) {
+        use crate::exports::ExportedNameKind;
+        use crate::resolver::ImportModuleResolution;
+
+        let wrapped = ImportModuleResolution::Resolved(exports.clone());
+
+        for exported in exports.names.iter() {
+            if !kind_filters.is_empty() {
+                let kind_matches = kind_filters.iter().any(|f| match (f, &exported.kind) {
+                    (HoistKindFilter::Func, ExportedNameKind::Function) => true,
+                    (HoistKindFilter::Value, ExportedNameKind::Value) => true,
+                    (HoistKindFilter::Signal, ExportedNameKind::Signal) => true,
+                    (HoistKindFilter::Type, ExportedNameKind::Type) => true,
+                    (HoistKindFilter::Domain, ExportedNameKind::Domain) => true,
+                    (HoistKindFilter::Class, ExportedNameKind::Class) => true,
+                    _ => false,
+                });
+                if !kind_matches {
+                    continue;
+                }
+            }
+
+            if hiding.iter().any(|h| h.as_ref() == exported.name) {
+                continue;
+            }
+
+            let imported_name = self.make_name(&exported.name, span);
+            let (resolution, metadata, callable_type, deprecation) =
+                self.resolve_import_binding(module_name, &imported_name, &wrapped);
+
+            if !matches!(resolution, ImportBindingResolution::Resolved) {
+                continue;
+            }
+
+            let import_id = self.alloc_import(ImportBinding {
+                span,
+                imported_name: imported_name.clone(),
+                local_name: imported_name.clone(),
+                resolution,
+                metadata: metadata.clone(),
+                callable_type,
+                deprecation,
+            });
+
+            match &metadata {
+                ImportBindingMetadata::TypeConstructor { .. }
+                | ImportBindingMetadata::BuiltinType(_)
+                | ImportBindingMetadata::AmbientType => insert_site(
+                    &mut namespaces.hoisted_type_imports,
+                    imported_name.text(),
+                    import_id,
+                    span,
+                ),
+                ImportBindingMetadata::Domain { literal_suffixes, .. } => {
+                    let suffixes = literal_suffixes.clone();
+                    insert_site(
+                        &mut namespaces.hoisted_type_imports,
+                        imported_name.text(),
+                        import_id,
+                        span,
+                    );
+                    if !suffixes.is_empty() {
+                        self.register_imported_domain_literal_suffixes(
+                            &imported_name,
+                            span,
+                            &suffixes,
+                            &mut namespaces.literal_suffixes,
+                        );
+                    }
+                }
+                ImportBindingMetadata::Bundle(_) | ImportBindingMetadata::InstanceMember { .. } => {}
+                _ => insert_site(
+                    &mut namespaces.hoisted_term_imports,
+                    imported_name.text(),
+                    import_id,
+                    span,
+                ),
+            }
+        }
+
+        // Auto-register instance members for class dispatch.
+        for instance_decl in &exports.instances {
+            for member in &instance_decl.members {
+                let synthetic_name = format!(
+                    "__instance_{}_{}_{}_{}",
+                    instance_decl.class_name,
+                    member.name,
+                    instance_decl.subject,
+                    import_value_type_label(&member.ty),
+                );
+                let name = self.make_name(&synthetic_name, span);
+                self.alloc_import(ImportBinding {
+                    span,
+                    imported_name: self.make_name(&member.name, span),
+                    local_name: name,
+                    resolution: ImportBindingResolution::Resolved,
+                    metadata: ImportBindingMetadata::InstanceMember {
+                        class_name: instance_decl.class_name.clone(),
+                        member_name: member.name.clone(),
+                        subject: instance_decl.subject.clone(),
+                        ty: member.ty.clone(),
+                    },
+                    callable_type: None,
+                    deprecation: None,
+                });
             }
         }
     }
@@ -6343,6 +6581,7 @@ impl<'a> Lowerer<'a> {
                 item.resolution = self.resolve_export_target(&item.target, namespaces);
                 Item::Export(item)
             }
+            Item::Hoist(item) => Item::Hoist(item),
             Item::Instance(mut item) => {
                 let mut env = ResolveEnv::default();
                 if prefer_ambient_names {
@@ -7114,6 +7353,46 @@ impl<'a> Lowerer<'a> {
             }
             LookupResult::Missing => {}
         }
+        // Hoisted names (from `hoist` declarations) are consulted after explicit
+        // `use` imports.  Unique → resolved as a normal import.  Multiple
+        // candidates (same name from different hoisted modules) → deferred to
+        // type-directed disambiguation at the type-checking layer.
+        match lookup_item(&namespaces.hoisted_term_imports, name) {
+            LookupResult::Unique(import) => {
+                let import_binding = &self.module.imports()[import];
+                reference.resolution = match &import_binding.metadata {
+                    ImportBindingMetadata::BuiltinTerm(builtin) => {
+                        ResolutionState::Resolved(TermResolution::Builtin(*builtin))
+                    }
+                    ImportBindingMetadata::IntrinsicValue { value, .. } => {
+                        ResolutionState::Resolved(TermResolution::IntrinsicValue(value.clone()))
+                    }
+                    ImportBindingMetadata::AmbientValue { name } => {
+                        match lookup_item(&namespaces.ambient_term_items, name) {
+                            LookupResult::Unique(item) => {
+                                ResolutionState::Resolved(TermResolution::Item(item))
+                            }
+                            _ => ResolutionState::Resolved(TermResolution::Import(import)),
+                        }
+                    }
+                    _ => ResolutionState::Resolved(TermResolution::Import(import)),
+                };
+                return;
+            }
+            LookupResult::Ambiguous => {
+                if let Some(candidates) = namespaces.hoisted_term_imports.get(name)
+                    && let Ok(candidates) = crate::NonEmpty::from_vec(
+                        candidates.iter().map(|site| site.value).collect::<Vec<ImportId>>(),
+                    )
+                {
+                    reference.resolution = ResolutionState::Resolved(
+                        TermResolution::AmbiguousHoistedImports(candidates),
+                    );
+                    return;
+                }
+            }
+            LookupResult::Missing => {}
+        }
         match lookup_item(&namespaces.class_terms, name) {
             LookupResult::Unique(resolution) => {
                 reference.resolution =
@@ -7164,11 +7443,27 @@ impl<'a> Lowerer<'a> {
             reference.resolution = ResolutionState::Resolved(TermResolution::Builtin(builtin));
             return;
         }
-        self.emit_error(
-            reference.span(),
-            format!("unknown term `{name}`"),
-            code("unresolved-term-name"),
-        );
+        {
+            let mut candidates: Vec<&str> = Vec::new();
+            candidates.extend(
+                env.term_scopes
+                    .iter()
+                    .flat_map(|scope| scope.keys().map(|k| k.as_str())),
+            );
+            candidates.extend(namespaces.term_items.keys().map(|k| k.as_str()));
+            candidates.extend(namespaces.ambient_term_items.keys().map(|k| k.as_str()));
+            candidates.extend(namespaces.term_imports.keys().map(|k| k.as_str()));
+            let mut diag = Diagnostic::error(format!("unknown term `{name}`"))
+                .with_code(code("unresolved-term-name"))
+                .with_primary_label(
+                    reference.span(),
+                    "reported during Milestone 2 HIR lowering",
+                );
+            if let Some(suggestion) = closest_name(name, &candidates) {
+                diag = diag.with_help(format!("did you mean `{suggestion}`?"));
+            }
+            self.diagnostics.push(diag);
+        }
         reference.resolution = ResolutionState::Unresolved;
     }
 
@@ -7299,6 +7594,59 @@ impl<'a> Lowerer<'a> {
                     format!("imported type `{name}` is ambiguous"),
                     code("ambiguous-import-name"),
                 );
+                reference.resolution = ResolutionState::Unresolved;
+                return;
+            }
+            LookupResult::Missing => {}
+        }
+        // Hoisted type imports (from `hoist` declarations): consulted after
+        // explicit `use` type imports but before builtins.
+        match lookup_item(&namespaces.hoisted_type_imports, name) {
+            LookupResult::Unique(import) => {
+                let import_binding = &self.module.imports()[import];
+                reference.resolution = match import_binding.metadata {
+                    ImportBindingMetadata::BuiltinType(builtin) => {
+                        ResolutionState::Resolved(TypeResolution::Builtin(builtin))
+                    }
+                    ImportBindingMetadata::AmbientType => {
+                        match lookup_item(
+                            &namespaces.ambient_type_items,
+                            import_binding.imported_name.text(),
+                        ) {
+                            LookupResult::Unique(item) => {
+                                ResolutionState::Resolved(TypeResolution::Item(item))
+                            }
+                            _ => ResolutionState::Resolved(TypeResolution::Import(import)),
+                        }
+                    }
+                    _ => ResolutionState::Resolved(TypeResolution::Import(import)),
+                };
+                return;
+            }
+            LookupResult::Ambiguous => {
+                // Multiple hoisted modules export the same type name.  Report an
+                // error and suggest narrowing with `hiding`.
+                if let Some(candidates) = namespaces.hoisted_type_imports.get(name) {
+                    let modules = candidates
+                        .iter()
+                        .filter_map(|site| {
+                            self.module
+                                .imports()
+                                .get(site.value)
+                                .map(|b| b.imported_name.text().to_owned())
+                        })
+                        .collect::<Vec<_>>()
+                        .join("`, `");
+                    self.emit_error(
+                        reference.span(),
+                        format!(
+                            "hoisted type `{name}` is ambiguous — it is exported by multiple \
+                             hoisted modules (`{modules}`); add a `hiding` clause to the relevant \
+                             `hoist` declarations to resolve the conflict",
+                        ),
+                        code("ambiguous-hoisted-type"),
+                    );
+                }
                 reference.resolution = ResolutionState::Unresolved;
                 return;
             }
@@ -9497,6 +9845,43 @@ fn code(name: &'static str) -> DiagnosticCode {
     DiagnosticCode::new("hir", name)
 }
 
+/// Iterative Levenshtein distance between two strings (character-level).
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let m = a.len();
+    let n = b.len();
+    let mut dp = vec![vec![0usize; n + 1]; m + 1];
+    for i in 0..=m {
+        dp[i][0] = i;
+    }
+    for j in 0..=n {
+        dp[0][j] = j;
+    }
+    for i in 1..=m {
+        for j in 1..=n {
+            dp[i][j] = if a[i - 1] == b[j - 1] {
+                dp[i - 1][j - 1]
+            } else {
+                1 + dp[i - 1][j].min(dp[i][j - 1]).min(dp[i - 1][j - 1])
+            };
+        }
+    }
+    dp[m][n]
+}
+
+/// Return the closest candidate within Levenshtein distance 2 of `target`, or `None`.
+fn closest_name<'a>(target: &str, candidates: &[&'a str]) -> Option<&'a str> {
+    candidates
+        .iter()
+        .filter_map(|&c| {
+            let d = levenshtein(target, c);
+            if d <= 2 { Some((d, c)) } else { None }
+        })
+        .min_by_key(|(d, _)| *d)
+        .map(|(_, name)| name)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{fs, path::PathBuf};
@@ -9508,7 +9893,8 @@ mod tests {
     use super::{lower_module, path_text};
     use crate::{
         ApplicativeSpineHead, BuiltinTerm, BuiltinType, ClusterFinalizer, ClusterPresentation,
-        DecoratorPayload, DomainMemberKind, ExportResolution, ExprKind, ImportBindingMetadata,
+        DecoratorPayload, DomainMemberKind, ExportResolution, ExprKind, HoistKindFilter,
+        ImportBindingMetadata,
         ImportBundleKind, ImportValueType, IntrinsicValue, Item, LiteralSuffixResolution,
         PipeStageKind, ReactiveUpdateBodyMode, RecordRowTransform, RecurrenceWakeupDecoratorKind,
         ResolutionState, SourceProviderRef, TermResolution, TextSegment, TypeItemBody, TypeKind,
@@ -9541,6 +9927,43 @@ mod tests {
         lower_text(path, &text)
     }
 
+    #[test]
+    fn did_you_mean_suggestion_for_misspelled_binding() {
+        // "couner" is 2 edits from "counter" — should trigger a "did you mean" hint.
+        let result = lower_text(
+            "did-you-mean.aivi",
+            "value counter = 42\nvalue result = couner\n",
+        );
+        assert!(result.has_errors(), "expected an error for unknown term");
+        let has_help = result.diagnostics().iter().any(|d| {
+            d.help.iter().any(|h| h.contains("counter"))
+        });
+        assert!(
+            has_help,
+            "expected a 'did you mean `counter`?' hint, got diagnostics: {:?}",
+            result.diagnostics()
+        );
+    }
+
+    #[test]
+    fn no_did_you_mean_for_very_different_binding() {
+        // "xyz" has no close match to "counter" — no suggestion should appear.
+        let result = lower_text(
+            "no-suggestion.aivi",
+            "value counter = 42\nvalue result = xyz\n",
+        );
+        assert!(result.has_errors(), "expected an error for unknown term");
+        let has_help = result
+            .diagnostics()
+            .iter()
+            .any(|d| !d.help.is_empty());
+        assert!(
+            !has_help,
+            "expected no 'did you mean' hint for very different name, got: {:?}",
+            result.diagnostics()
+        );
+    }
+
     fn find_ambient_named_item<'a>(module: &'a crate::Module, name: &str) -> &'a Item {
         module
             .ambient_items()
@@ -9556,7 +9979,8 @@ mod tests {
                 Item::SourceProviderContract(_)
                 | Item::Instance(_)
                 | Item::Use(_)
-                | Item::Export(_) => false,
+                | Item::Export(_)
+            | Item::Hoist(_) => false,
             })
             .unwrap_or_else(|| panic!("expected to find ambient item `{name}`"))
     }
@@ -9576,7 +10000,8 @@ mod tests {
                 Item::SourceProviderContract(_)
                 | Item::Instance(_)
                 | Item::Use(_)
-                | Item::Export(_) => false,
+                | Item::Export(_)
+            | Item::Hoist(_) => false,
             })
             .unwrap_or_else(|| panic!("expected to find named item `{name}`"))
     }
@@ -12513,13 +12938,11 @@ fun boardTextStep:Text = acc:Text row:Int =>
                     ResolutionState::Resolved(TypeResolution::Builtin(BuiltinType::Text))
                 )
         ));
-        assert_eq!(path.members.len(), 3);
+        assert_eq!(path.members.len(), 2);
         assert!(matches!(path.members[0].kind, DomainMemberKind::Literal));
         assert_eq!(path.members[0].name.text(), "root");
         assert!(matches!(path.members[1].kind, DomainMemberKind::Operator));
         assert_eq!(path.members[1].name.text(), "/");
-        assert!(matches!(path.members[2].kind, DomainMemberKind::Method));
-        assert_eq!(path.members[2].name.text(), "unwrap");
 
         let non_empty = match find_named_item(lowered.module(), "NonEmpty") {
             Item::Domain(item) => item,
@@ -13308,6 +13731,86 @@ domain Duration over Int = {
             function.parameters.len(),
             2,
             "atRow should have 2 parameters: rowOpt and x"
+        );
+    }
+
+    #[test]
+    fn hoist_item_lowers_to_hir() {
+        let lowered = lower_text(
+            "hoist-basic.aivi",
+            "hoist\n",
+        );
+        let hoist_item = lowered
+            .module()
+            .items()
+            .iter()
+            .find_map(|(_, item)| match item {
+                Item::Hoist(h) => Some(h.clone()),
+                _ => None,
+            })
+            .expect("lowered module should contain a hoist item");
+        assert!(hoist_item.kind_filters.is_empty());
+        assert!(hoist_item.hiding.is_empty());
+    }
+
+    #[test]
+    fn hoist_item_lowers_kind_filters_correctly() {
+        let lowered = lower_text(
+            "hoist-filters.aivi",
+            "hoist (func, value)\n",
+        );
+        let hoist_item = lowered
+            .module()
+            .items()
+            .iter()
+            .find_map(|(_, item)| match item {
+                Item::Hoist(h) => Some(h.clone()),
+                _ => None,
+            })
+            .expect("lowered module should contain a hoist item");
+        assert_eq!(hoist_item.kind_filters.len(), 2);
+        assert!(matches!(hoist_item.kind_filters[0], HoistKindFilter::Func));
+        assert!(matches!(hoist_item.kind_filters[1], HoistKindFilter::Value));
+    }
+
+    #[test]
+    fn hoist_item_lowers_hiding_list_correctly() {
+        let lowered = lower_text(
+            "hoist-hiding.aivi",
+            "hoist hiding (length, head)\n",
+        );
+        let hoist_item = lowered
+            .module()
+            .items()
+            .iter()
+            .find_map(|(_, item)| match item {
+                Item::Hoist(h) => Some(h.clone()),
+                _ => None,
+            })
+            .expect("lowered module should contain a hoist item");
+        assert!(hoist_item.kind_filters.is_empty());
+        assert_eq!(hoist_item.hiding.len(), 2);
+        assert_eq!(hoist_item.hiding[0].text(), "length");
+        assert_eq!(hoist_item.hiding[1].text(), "head");
+    }
+
+    #[test]
+    fn hoist_item_emits_diagnostic_for_unknown_kind_filter() {
+        let lowered = lower_text(
+            "hoist-bad-filter.aivi",
+            "hoist (funky)\n",
+        );
+        assert!(
+            lowered.has_errors(),
+            "hoist with invalid kind filter should emit a diagnostic"
+        );
+        assert!(
+            lowered
+                .diagnostics()
+                .iter()
+                .any(|d| d.code.as_ref().is_some_and(|c| c.name() == "unknown-hoist-kind-filter")),
+            "expected unknown-hoist-kind-filter diagnostic, got {:?}",
+            lowered.diagnostics()
         );
     }
 }

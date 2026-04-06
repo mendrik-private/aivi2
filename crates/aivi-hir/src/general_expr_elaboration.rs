@@ -822,7 +822,8 @@ impl<'a> GeneralExprElaborator<'a> {
                 | Item::Class(_)
                 | Item::SourceProviderContract(_)
                 | Item::Use(_)
-                | Item::Export(_) => {}
+                | Item::Export(_)
+            | Item::Hoist(_) => {}
             }
         }
         GeneralExprElaborationReport::new(items, domain_members, instance_members)
@@ -3277,7 +3278,7 @@ impl<'a> GeneralExprElaborator<'a> {
     }
 
     fn runtime_reference_for_name(
-        &self,
+        &mut self,
         span: SourceSpan,
         reference: &TermReference,
         expected: &GateType,
@@ -3321,6 +3322,13 @@ impl<'a> GeneralExprElaborator<'a> {
                         .map(|handle| format!("{}.{}", handle.domain_name, handle.member_name))
                         .collect(),
                 }])
+            }
+            ResolutionState::Resolved(TermResolution::AmbiguousHoistedImports(_)) => {
+                if let Some(import_id) = self.typing.select_hoisted_import(reference, Some(expected)) {
+                    Ok(GateRuntimeReference::Import(import_id))
+                } else {
+                    Err(vec![GeneralExprBlocker::UnknownExprType { span }])
+                }
             }
             ResolutionState::Unresolved => Err(vec![GeneralExprBlocker::UnknownExprType { span }]),
         }
@@ -3598,6 +3606,7 @@ impl<'a> GeneralExprElaborator<'a> {
             | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_))
             | ResolutionState::Resolved(TermResolution::ClassMember(_))
             | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_))
+            | ResolutionState::Resolved(TermResolution::AmbiguousHoistedImports(_))
             | ResolutionState::Unresolved => None,
         }
     }
@@ -4653,10 +4662,9 @@ fun length:Int = items:(List A)=>    items
             r#"
 domain Path over Text = {
     fromText : Text -> Path
-    unwrap : Path -> Text
 }
 value home : Path = fromText "/tmp/app"
-value raw : Text = home.unwrap
+value raw : Text = home.carrier
 "#,
         );
         assert!(
@@ -4680,7 +4688,7 @@ value raw : Text = home.unwrap
                         GateRuntimeExprKind::Reference(
                             GateRuntimeReference::DomainMember(handle)
                         ) if handle.domain_name.as_ref() == "Path"
-                            && handle.member_name.as_ref() == "unwrap"
+                            && handle.member_name.as_ref() == "carrier"
                     ));
                     assert!(matches!(
                         arguments[0].kind,

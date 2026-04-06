@@ -21,6 +21,62 @@ After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first
 [`aivi.option`](/stdlib/option), [`aivi.result`](/stdlib/result), [`aivi.list`](/stdlib/list),
 [`aivi.text`](/stdlib/text), and [`aivi.math`](/stdlib/math).
 
+## At a glance
+
+| Module | Description | Key exports |
+| --- | --- | --- |
+| [aivi.prelude](prelude.md) | Convenience re-exports and built-in types | `Option`, `Result`, `Signal`, `Eq`, `Ord`, `Functor` |
+| [aivi.option](option.md) | Values that may be missing | `map`, `withDefault`, `andThen`, `fromResult` |
+| [aivi.result](result.md) | Success-or-error values | `map`, `mapErr`, `andThen`, `onOk`, `onErr` |
+| [aivi.validation](validation.md) | Accumulating validation for independent inputs | `zipValidation`, `andThen`, `onValid`, `onInvalid` |
+| [aivi.core.either](either.md) | Disjoint union holding one of two alternatives | `Left`, `Right`, `mapLeft`, `mapRight` |
+| [aivi.list](list.md) | Purely functional list operations | `map`, `filter`, `fold`, `append`, `flatten` |
+| [aivi.nonEmpty](nonEmpty.md) | Non-empty list guaranteed at the type level | `head`, `last`, `singleton`, `cons`, `fromList` |
+| [aivi.pair](pair.md) | Two-element tuples | `first`, `second`, `mapFirst`, `mapSecond` |
+| [aivi.matrix](matrix.md) | Rectangular 2D collections | `init`, `fromRows`, `width`, `height`, `rows` |
+| [aivi.core.dict](dict.md) | Association map keyed by any `Eq` type | `entries`, `merge`, `combine` |
+| [aivi.core.set](set.md) | Unordered set for any `Eq` type | `singleton`, `member`, `insert`, `union` |
+| [aivi.core.range](range.md) | Inclusive integer range `[start, end]` | `start`, `end`, `toList`, `contains` |
+| [aivi.core.fn](fn.md) | Higher-order function combinators | `compose`, `const`, `flip`, `combine` |
+| [aivi.order](order.md) | Comparison utilities parameterised by a comparator | `compare`, `minOf`, `maxOf`, `descending` |
+| [aivi.bool](bool.md) | Boolean helpers | `and`, `or`, `not`, `all`, `any` |
+| [aivi.defaults](defaults.md) | Default values for common types | `defaultText`, `defaultInt`, `defaultBool` |
+| [aivi.math](math.md) | Integer arithmetic utilities | `abs`, `clamp`, `min`, `max`, `gcd` |
+| [aivi.core.float](float.md) | IEEE 754 double-precision helpers | `floor`, `ceil`, `round`, `sqrt`, `pi` |
+| [aivi.bigint](bigint.md) | Arbitrary-size integers | `parse`, `plus`, `times`, `dividedBy` |
+| [aivi.text](text.md) | Text manipulation | `length`, `contains`, `trim`, `split`, `toUpper` |
+| [aivi.regex](regex.md) | Regular-expression matching and replacement | `matches`, `hasMatch`, `replaceFirst`, `allMatches` |
+| [aivi.core.bytes](bytes.md) | Byte sequence operations | `fromText`, `toText`, `slice`, `append` |
+| [aivi.duration](duration.md) | Typed time spans | `ms`, `sec`, `min`, `hr`, `millis` |
+| [aivi.time](time.md) | Clock, timestamp, and formatting helpers | `nowMs`, `monotonicMs`, `format`, `parse` |
+| [aivi.timer](timer.md) | Marker types for timer-backed signals | `immediate` |
+| [aivi.random](random.md) | Randomness vocabulary and `RandomSource` | `randomInt`, `randomFloat`, `randomBytes` |
+| [aivi.fs](fs.md) | Filesystem vocabulary and `FsSource` | `readText`, `writeText`, `deleteFile` |
+| [aivi.path](path.md) | Lexical path manipulation | `join`, `basename`, `dirname`, `extension` |
+| [aivi.env](env.md) | Environment vocabulary and `EnvSource` | `get`, `getAll`, `EnvSource` |
+| [aivi.stdio](stdio.md) | Standard I/O vocabulary and `StdioSource` | `StdioSource`, `StdinLine`, `stdout` |
+| [aivi.log](log.md) | Logging vocabulary and `LogSource` | `levelToText`, `kv`, `LogSource` |
+| [aivi.process](process.md) | Process vocabulary and `ProcessSource` | `command`, `args`, `workingDir`, `env` |
+| [aivi.url](url.md) | Typed URLs with explicit parsing | `parse`, `scheme`, `host`, `path` |
+| [aivi.http](http.md) | HTTP vocabulary and `HttpSource` | `HttpSource`, `Request`, `Response` |
+| [aivi.auth](auth.md) | OAuth 2.0 / PKCE sign-in records | `OAuthConfig`, `OAuthToken`, `SignInState` |
+| [aivi.db](db.md) | Database vocabulary and `DbSource` | `query`, `commit`, `DbSource` |
+| [aivi.imap](imap.md) | Mailbox and folder types for IMAP integrations | `FolderSummary`, `MailEvent`, `lastSyncedAt` |
+| [aivi.smtp](smtp.md) | Outgoing mail configuration and messages | `from`, `to`, `subject`, `bodyText`, `SmtpConfig` |
+| [aivi.app](app.md) | Application framework types | `AppLifecycle`, `AppActionResult`, `AppCommand` |
+| [aivi.app.lifecycle](lifecycle.md) | Lifecycle state, commands, undo, notifications | `label`, `shortcut`, `canUndo`, `NotificationLevel` |
+| [aivi.desktop.xdg](xdg.md) | XDG error vocabulary | `dataHome`, `configHome`, `cacheHome` |
+| [aivi.portal](portal.md) | Desktop portal results | `openFile`, `openUri`, `screenshot` |
+| [aivi.dbus](dbus.md) | D-Bus vocabulary and `DbusSource` | `destination`, `path`, `interface`, `member` |
+| [aivi.gnome.settings](settings.md) | GSettings schema, key, and value types | `make`, `parse`, `GSettingsSource` |
+| [aivi.gnome.onlineAccounts](onlineAccounts.md) | Desktop account and token records | `id`, `token`, `tokenType`, `expiresAt` |
+| [aivi.gnome.notifications](notifications.md) | Desktop notification payloads | `summary`, `body`, `icon`, `actions` |
+| [aivi.clipboard](clipboard.md) | Clipboard content types and watcher shapes | `ClipboardContent`, `ClipboardSource` |
+| [aivi.color](color.md) | Packed UI color domain | `argb`, `red`, `green`, `blue`, `withAlpha` |
+| [aivi.image](image.md) | Image data, metadata, and load errors | `format`, `size`, `bytes`, `hasAlpha` |
+| [aivi.gresource](gresource.md) | Bundled GResource paths and load errors | `readText`, `readBytes` |
+| [aivi.i18n](i18n.md) | Internationalisation marker helpers | `tr`, `trn` |
+
 ## Built-in types you will see often
 
 | Type | Meaning | More |

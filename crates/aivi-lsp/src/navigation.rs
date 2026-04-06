@@ -14,12 +14,36 @@ use tower_lsp::lsp_types::{GotoDefinitionResponse, Location, Url};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NavigationTarget {
     file: SourceFile,
-    span: SourceSpan,
+    pub(crate) span: SourceSpan,
 }
 
 impl NavigationTarget {
     fn new(file: SourceFile, span: SourceSpan) -> Self {
         Self { file, span }
+    }
+
+    /// Try to find the `LspSymbol` declared at this target's span.  Used by
+    /// hover to retrieve the declaration's type detail when the cursor is on a
+    /// reference site rather than the declaration itself.
+    pub fn find_symbol_at_target(&self, db: &RootDatabase) -> Option<aivi_hir::LspSymbol> {
+        let hir = aivi_query::hir_module(db, self.file);
+        let symbols = hir.symbols_arc();
+        let target_span = self.span;
+        let mut stack: Vec<aivi_hir::LspSymbol> = symbols.iter().cloned().collect();
+        let mut best: Option<aivi_hir::LspSymbol> = None;
+        while let Some(sym) = stack.pop() {
+            if sym.span.file() == target_span.file()
+                && sym.span.span().contains(target_span.span().start())
+            {
+                if best.as_ref().is_none_or(|b: &aivi_hir::LspSymbol| {
+                    sym.span.span().len() < b.span.span().len()
+                }) {
+                    best = Some(sym.clone());
+                }
+                stack.extend(sym.children.iter().cloned());
+            }
+        }
+        best
     }
 }
 
@@ -79,6 +103,244 @@ impl NavigationAnalysis {
             return NavigationLookup::NoSite;
         };
         NavigationLookup::from_targets(self.implementation_targets_for_site(db, &site))
+    }
+
+    /// Return all `Location`s in this file that refer to any of the given
+    /// definition `targets`.  This powers find-all-references and rename.
+    pub fn all_reference_locations_for_targets(
+        &self,
+        db: &RootDatabase,
+        targets: &[NavigationTarget],
+    ) -> Vec<Location> {
+        let mut locations = Vec::new();
+        for (span, site) in self.collect_all_sites() {
+            let site_targets = self.definition_targets_for_site(db, &site);
+            if site_targets.iter().any(|t| targets.contains(t)) {
+                if let Some(loc) =
+                    location_for_target(db, NavigationTarget::new(self.file, span))
+                {
+                    if !locations.contains(&loc) {
+                        locations.push(loc);
+                    }
+                }
+            }
+        }
+        locations
+    }
+
+    /// Collect every navigable (span, site) pair in this module without
+    /// cursor filtering.  Mirrors the traversal in `semantic_site_at_offset`
+    /// but accumulates all entries instead of selecting the tightest one.
+    fn collect_all_sites(&self) -> Vec<(SourceSpan, NavigationSite)> {
+        let module = self.module();
+        let source_id = self.source.id();
+        let mut sites: Vec<(SourceSpan, NavigationSite)> = Vec::new();
+
+        macro_rules! push {
+            ($span:expr, $site:expr) => {
+                if $span.file() == source_id {
+                    sites.push(($span, $site));
+                }
+            };
+        }
+
+        for (binding_id, binding) in module.bindings().iter() {
+            push!(binding.name.span(), NavigationSite::BindingDecl { binding: binding_id });
+        }
+
+        for (parameter_id, parameter) in module.type_parameters().iter() {
+            push!(
+                parameter.name.span(),
+                NavigationSite::TypeParameterDecl { parameter: parameter_id }
+            );
+        }
+
+        for item_id in module.root_items().iter().copied() {
+            let item = &module.items()[item_id];
+            match item {
+                Item::Type(item) => {
+                    push!(item.name.span(), NavigationSite::ItemDecl { item: item_id });
+                    if let TypeItemBody::Sum(variants) = &item.body {
+                        for variant in variants.iter() {
+                            push!(
+                                variant.name.span(),
+                                NavigationSite::ConstructorDecl {
+                                    item: item_id,
+                                    variant_name: variant.name.text().into(),
+                                }
+                            );
+                        }
+                    }
+                }
+                Item::Value(item) => {
+                    push!(item.name.span(), NavigationSite::ItemDecl { item: item_id });
+                }
+                Item::Function(item) => {
+                    push!(item.name.span(), NavigationSite::ItemDecl { item: item_id });
+                }
+                Item::Signal(item) => {
+                    push!(item.name.span(), NavigationSite::ItemDecl { item: item_id });
+                }
+                Item::Class(item) => {
+                    push!(item.name.span(), NavigationSite::ItemDecl { item: item_id });
+                    for (member_index, member) in item.members.iter().enumerate() {
+                        push!(
+                            member.name.span(),
+                            NavigationSite::ClassMemberDecl {
+                                resolution: ClassMemberResolution {
+                                    class: item_id,
+                                    member_index,
+                                },
+                            }
+                        );
+                    }
+                }
+                Item::Domain(item) => {
+                    push!(item.name.span(), NavigationSite::ItemDecl { item: item_id });
+                    for (member_index, member) in item.members.iter().enumerate() {
+                        push!(
+                            member.name.span(),
+                            NavigationSite::DomainMemberDecl {
+                                resolution: DomainMemberResolution {
+                                    domain: item_id,
+                                    member_index,
+                                },
+                            }
+                        );
+                    }
+                }
+                Item::Instance(item) => {
+                    push!(
+                        item.class.span(),
+                        NavigationSite::TypeReference {
+                            name: first_segment_text(&item.class.path),
+                            resolution: item.class.resolution.clone(),
+                        }
+                    );
+                    for (member_index, member) in item.members.iter().enumerate() {
+                        push!(
+                            member.name.span(),
+                            NavigationSite::InstanceMemberDecl {
+                                instance: item_id,
+                                member_index,
+                            }
+                        );
+                    }
+                }
+                Item::Use(item) => {
+                    for import_id in item.imports.iter().copied() {
+                        let import = &module.imports()[import_id];
+                        push!(
+                            import.imported_name.span(),
+                            NavigationSite::ImportName {
+                                module: item.module.clone(),
+                                import: import_id,
+                            }
+                        );
+                        push!(
+                            import.local_name.span(),
+                            NavigationSite::ImportName {
+                                module: item.module.clone(),
+                                import: import_id,
+                            }
+                        );
+                    }
+                }
+                Item::Export(item) => {
+                    push!(
+                        item.target.span(),
+                        NavigationSite::ExportTarget {
+                            name: first_segment_text(&item.target),
+                            resolution: item.resolution.clone(),
+                        }
+                    );
+                }
+                Item::SourceProviderContract(_) | Item::Hoist(_) => {}
+            }
+        }
+
+        for (_, ty) in module.types().iter() {
+            if let TypeKind::Name(reference) = &ty.kind {
+                push!(
+                    reference.span(),
+                    NavigationSite::TypeReference {
+                        name: first_segment_text(&reference.path),
+                        resolution: reference.resolution.clone(),
+                    }
+                );
+            }
+        }
+
+        for (_, pattern) in module.patterns().iter() {
+            match &pattern.kind {
+                PatternKind::Constructor { callee, .. }
+                | PatternKind::UnresolvedName(callee) => {
+                    push!(
+                        callee.span(),
+                        NavigationSite::TermReference {
+                            name: first_segment_text(&callee.path),
+                            resolution: callee.resolution.clone(),
+                        }
+                    );
+                }
+                PatternKind::Wildcard
+                | PatternKind::Binding(_)
+                | PatternKind::Integer(_)
+                | PatternKind::Text(_)
+                | PatternKind::Tuple(_)
+                | PatternKind::List { .. }
+                | PatternKind::Record(_) => {}
+            }
+        }
+
+        for (_, expr) in module.exprs().iter() {
+            match &expr.kind {
+                ExprKind::Name(reference) => {
+                    push!(
+                        reference.span(),
+                        NavigationSite::TermReference {
+                            name: first_segment_text(&reference.path),
+                            resolution: reference.resolution.clone(),
+                        }
+                    );
+                }
+                ExprKind::SuffixedInteger(literal) => {
+                    push!(
+                        literal.suffix.span(),
+                        NavigationSite::LiteralSuffix {
+                            resolution: literal.resolution.clone(),
+                        }
+                    );
+                }
+                ExprKind::Binary { left, operator, right } => {
+                    if let Some(span) = self.binary_operator_span(*left, *right) {
+                        push!(span, NavigationSite::BinaryOperator { operator: *operator });
+                    }
+                }
+                ExprKind::Integer(_)
+                | ExprKind::Float(_)
+                | ExprKind::Decimal(_)
+                | ExprKind::BigInt(_)
+                | ExprKind::Text(_)
+                | ExprKind::Regex(_)
+                | ExprKind::Tuple(_)
+                | ExprKind::List(_)
+                | ExprKind::Map(_)
+                | ExprKind::Set(_)
+                | ExprKind::Record(_)
+                | ExprKind::AmbientSubject
+                | ExprKind::Projection { .. }
+                | ExprKind::Apply { .. }
+                | ExprKind::Unary { .. }
+                | ExprKind::PatchApply { .. }
+                | ExprKind::PatchLiteral(_)
+                | ExprKind::Pipe(_)
+                | ExprKind::Cluster(_)
+                | ExprKind::Markup(_) => {}
+            }
+        }
+
+        sites
     }
 
     fn module(&self) -> &Module {
@@ -249,7 +511,7 @@ impl NavigationAnalysis {
                     },
                     &mut best,
                 ),
-                Item::SourceProviderContract(_) => {}
+                Item::SourceProviderContract(_) | Item::Hoist(_) => {}
             }
         }
 
@@ -490,6 +752,16 @@ impl NavigationAnalysis {
             ResolutionState::Resolved(TermResolution::Builtin(builtin)) => {
                 self.builtin_term_import_targets(db, name, *builtin)
             }
+            ResolutionState::Resolved(TermResolution::AmbiguousHoistedImports(candidates)) => {
+                let mut targets = Vec::new();
+                for import_id in candidates.iter().copied() {
+                    push_targets(
+                        &mut targets,
+                        self.import_definition_targets_for_import_id(db, import_id),
+                    );
+                }
+                targets
+            }
         }
     }
 
@@ -577,7 +849,8 @@ impl NavigationAnalysis {
             | ResolutionState::Resolved(TermResolution::IntrinsicValue(_))
             | ResolutionState::Resolved(TermResolution::DomainMember(_))
             | ResolutionState::Resolved(TermResolution::AmbiguousDomainMembers(_))
-            | ResolutionState::Resolved(TermResolution::Builtin(_)) => Vec::new(),
+            | ResolutionState::Resolved(TermResolution::Builtin(_))
+            | ResolutionState::Resolved(TermResolution::AmbiguousHoistedImports(_)) => Vec::new(),
         }
     }
 
@@ -680,6 +953,7 @@ impl NavigationAnalysis {
             Item::Instance(_)
             | Item::Use(_)
             | Item::Export(_)
+            | Item::Hoist(_)
             | Item::SourceProviderContract(_) => None,
         }
     }
@@ -824,7 +1098,8 @@ impl NavigationAnalysis {
                 | Item::SourceProviderContract(_)
                 | Item::Instance(_)
                 | Item::Use(_)
-                | Item::Export(_) => {}
+                | Item::Export(_)
+                | Item::Hoist(_) => {}
             }
         }
         targets
@@ -860,6 +1135,7 @@ impl NavigationAnalysis {
                 | Item::Instance(_)
                 | Item::Use(_)
                 | Item::Export(_)
+                | Item::Hoist(_)
                 | Item::Type(_)
                 | Item::Class(_)
                 | Item::Domain(_) => {}
@@ -1047,7 +1323,8 @@ impl NavigationAnalysis {
                 | Item::SourceProviderContract(_)
                 | Item::Instance(_)
                 | Item::Use(_)
-                | Item::Export(_) => {}
+                | Item::Export(_)
+                | Item::Hoist(_) => {}
             }
         }
         targets
@@ -1090,7 +1367,8 @@ impl NavigationAnalysis {
                 | Item::SourceProviderContract(_)
                 | Item::Instance(_)
                 | Item::Use(_)
-                | Item::Export(_),
+                | Item::Export(_)
+                | Item::Hoist(_),
             )
             | None => Vec::new(),
         }

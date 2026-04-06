@@ -22,7 +22,7 @@ pub use cst::{
     SourceProviderContractFieldValue, SourceProviderContractItem, SourceProviderContractMember,
     SourceProviderContractSchemaMember, SuffixedIntegerLiteral, TextFragment, TextInterpolation,
     TextLiteral, TextSegment, TokenRange, TypeDeclBody, TypeExpr, TypeExprKind, TypeField,
-    TypeVariant, UnaryOperator, UseImport, UseItem,
+    TypeVariant, UnaryOperator, UseImport, UseItem, HoistItem, HoistKindFilter,
 };
 pub use format::Formatter;
 pub use lex::{LexedModule, Token, TokenKind, lex_module};

@@ -162,7 +162,8 @@ impl<'a> SourceContractTypeResolver<'a> {
                 | Item::SourceProviderContract(_)
                 | Item::Instance(_)
                 | Item::Use(_)
-                | Item::Export(_) => None,
+                | Item::Export(_)
+            | Item::Hoist(_) => None,
             });
 
         let lookup = match (matches.next(), matches.next()) {

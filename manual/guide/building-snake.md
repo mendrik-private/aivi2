@@ -16,42 +16,31 @@ Our snake game has:
 
 The entire game is about 230 lines of AIVI. There are no mutable variables, no loops, and no callbacks.
 
-## Imports
+## Standard library
 
-The game imports several standard library modules:
+All standard library functions are available in every AIVI file without any
+`use` statement — the stdlib modules self-hoist their exports project-wide.
+`map`, `filter`, `join`, `concat`, `indices`, `Duration`, and the rest are
+ready to use directly.
+
+The only case where a small `use` block with `as` is still useful is when
+a domain defines an operation that shares a name with a hoisted function. For
+example, the `Snake` domain defines its own `head`, `length`, and `contains`
+operations; inside the domain body the `as` aliases give the compiler
+unambiguous references to the underlying `NonEmptyList` and `List` helpers:
 
 ```aivi
 use aivi.nonEmpty (
-    NonEmptyList
-    singleton
     head as nelHead
-    cons as nelCons
     length as nelLength
-    toList as nelToList
     init as nelInit
-    fromHeadTail as nelFromHeadTail
 )
 
-use aivi.list (
-    contains as listContains
-    any
-)
-
-use aivi.text (
-    join
-    concat
-)
-
-use aivi.duration (Duration)
-
-use aivi.matrix (
-    Matrix
-    MatrixError
-    indices as matrixIndices
-)
+use aivi.list (contains as listContains)
 ```
 
-The `as` keyword renames imports to avoid ambiguity — `head` from `aivi.nonEmpty` becomes `nelHead` so it does not collide with other modules.
+Outside the domain body — in plain functions and signal expressions — you use
+all names directly without any import.
 
 ## Modeling the world with types
 
@@ -164,13 +153,13 @@ domain Snake over NonEmptyList Cell = {
     type Cell
     head = nelHead self
     type Cell -> Bool
-    contains cell = listContains cellEq cell (nelToList self)
+    contains cell = listContains cellEq cell (toList self)
     type Int
     length = nelLength self
     type Cell -> Snake
-    grow cell = nelCons cell self
+    grow cell = cons cell self
     type Cell -> Snake
-    move cell = nelFromHeadTail cell (nelInit self)
+    move cell = fromHeadTail cell (nelInit self)
     type Direction -> Cell
     nextHead dir = moveDir dir (nelHead self)
 }
@@ -201,7 +190,7 @@ And an initial state:
 
 ```aivi
 value initial : GameState = {
-    snake: fromCells (nelCons (Cell 6 10) (nelCons (Cell 5 10) (singleton (Cell 4 10)))),
+    snake: fromCells (cons (Cell 6 10) (cons (Cell 5 10) (singleton (Cell 4 10)))),
     dir: East,
     food: spawnFood seed0,
     score: 0,
@@ -280,8 +269,6 @@ If the head lands on food, grow the snake, spawn new food, and increment the sco
 Two sources drive the game — a timer and the keyboard:
 
 ```aivi
-use aivi.duration (Duration)
-
 @source timer.every 120ms with {
     immediate: False,
     coalesce: True
@@ -375,19 +362,19 @@ Each row is rendered by mapping `cellGlyph body st y` over the column indices, t
 
 ```aivi
 type List Cell -> GameState -> Int -> Text
-func renderRowAt = body st y => matrixIndices boardW
+func renderRowAt = body st y => indices boardW
   |> map (cellGlyph body st y)
   |> concat
 
 type GameState -> Text
-func renderBoard = st => matrixIndices boardH
-  |> map (renderRowAt (nelToList st.snake.carrier) st)
+func renderBoard = st => indices boardH
+  |> map (renderRowAt (toList st.snake.carrier) st)
   |> join "\n"
 ```
 
 `matrixIndices boardW` produces `[0, 1, 2, ..., 29]`. The pipe maps each index through `cellGlyph body st y` to produce a list of single-character strings, then `concat` joins them without a separator. The outer pipe does the same for rows, joining with newlines.
 
-The expression `st.snake.carrier` uses the built-in `.carrier` accessor to get the `NonEmptyList Cell` from the `Snake` domain, then `nelToList` converts it to a `List Cell`. This list is computed once in `renderBoard` and threaded through `renderRowAt` and `cellGlyph`, avoiding repeated conversions across all 600 cells.
+The expression `st.snake.carrier` uses the built-in `.carrier` accessor to get the `NonEmptyList Cell` from the `Snake` domain, then `toList` converts it to a `List Cell`. This list is computed once in `renderBoard` and threaded through `renderRowAt` and `cellGlyph`, avoiding repeated conversions across all 600 cells.
 
 ### Display helper functions
 
@@ -478,7 +465,7 @@ Every arrow is a declared dependency. The runtime propagates changes through the
 | **Event routing** | Signal merge connects sources to events |
 | **Accumulation** | `+\|>` folds events into state over time |
 | **Text interpolation** | `"Score: {.}"` — inline formatting with pipe subject |
-| **Imports** | `use aivi.nonEmpty (...)` — named imports with `as` renaming |
+| **Standard library** | All stdlib functions available project-wide — no `use` needed; `as` aliases resolve domain body name conflicts |
 | **Markup** | `<Window>`, `<Label>`, `<show>` — type-checked GTK UI |
 
 The game has zero mutable variables, zero loops, and zero callbacks. The entire architecture is a declared dependency graph with pure functions at every node.

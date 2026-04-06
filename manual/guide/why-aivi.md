@@ -102,8 +102,6 @@ If you add a new constructor to `LoadState`, the compiler tells you every place 
 A duration is not just an integer. A URL is not just text. AIVI lets you create **domains** that wrap a carrier type with semantic meaning:
 
 ```aivi
-use aivi.duration (Duration)
-
 value timeout : Duration = 5sec
 value delay : Duration = 250ms
 ```

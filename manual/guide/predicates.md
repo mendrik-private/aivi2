@@ -7,7 +7,7 @@ Predicates are inline filter expressions used inside patch selectors and collect
 A predicate appears inside square brackets and uses dot-prefixed field access:
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 The dot (`.`) refers to the current element being tested. The expression must evaluate to `Bool`.
@@ -71,7 +71,7 @@ Selectors are the path expressions inside patch braces that determine what to up
 Examples of chaining:
 
 ```aivi
-# <unparseable item>
+// <unparseable item>
 ```
 
 ## Constructor focus

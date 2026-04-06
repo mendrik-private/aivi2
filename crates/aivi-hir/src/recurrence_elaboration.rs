@@ -285,7 +285,8 @@ pub fn elaborate_recurrences(module: &Module) -> RecurrenceElaborationReport {
             | Item::Domain(_)
             | Item::SourceProviderContract(_)
             | Item::Use(_)
-            | Item::Export(_) => {}
+            | Item::Export(_)
+            | Item::Hoist(_) => {}
         }
     }
 

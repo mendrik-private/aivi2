@@ -467,6 +467,32 @@
             "1": { "name": "keyword.control.export.aivi" },
             "2": { "name": "entity.name.variable.aivi" }
           }
+        },
+        {
+          "comment": "hoist module.path with optional kind filters and hiding clause",
+          "begin": "\\b(hoist)\\s+",
+          "beginCaptures": { "1": { "name": "keyword.control.import.aivi" } },
+          "end": "(?=\\n(?![ \\t]))",
+          "patterns": [
+            {
+              "match": "([a-z][a-zA-Z0-9_]*)(?:\\.[a-z][a-zA-Z0-9_]*)+",
+              "name": "entity.name.namespace.aivi"
+            },
+            {
+              "match": "\\b(hiding)\\b",
+              "name": "keyword.control.import.aivi"
+            },
+            {
+              "match": "\\b(func|value|signal|type|domain|class)\\b",
+              "name": "storage.type.aivi"
+            },
+            {
+              "match": "\\b([a-z_][a-zA-Z0-9_]*)\\b",
+              "name": "variable.other.import.aivi"
+            },
+            { "include": "#line-comment" },
+            { "include": "#block-comment" }
+          ]
         }
       ]
     },
@@ -475,7 +501,7 @@
       "patterns": [
         {
           "comment": "lowercase call heads followed by arguments",
-          "match": "(?<![@.])\\b(?!(?:func|fun|value|signal|source|result|type|class|instance|domain|provider|use|export|with|require|when|as|pattern|of|on|key)\\b)([a-z_][a-zA-Z0-9_]*)\\b(?=\\s+(?:[#a-z_][a-zA-Z0-9_]*|\\(|\\[|\\{|\\\"|-?\\d|<))",
+          "match": "(?<![@.])\\b(?!(?:func|fun|value|signal|source|result|type|class|instance|domain|provider|use|export|hoist|with|require|when|as|pattern|of|on|key)\\b)([a-z_][a-zA-Z0-9_]*)\\b(?=\\s+(?:[#a-z_][a-zA-Z0-9_]*|\\(|\\[|\\{|\\\"|-?\\d|<))",
           "captures": {
             "1": { "name": "entity.name.function.call.aivi" }
           }
