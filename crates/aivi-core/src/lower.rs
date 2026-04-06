@@ -3141,8 +3141,15 @@ impl<'a> ModuleLowerer<'a> {
         // For N-ary sum constructor imports (e.g. `SwitchView : ViewName -> UIEvent`),
         // synthesize a body: `Apply { callee: SumConstructor(handle), arguments: [arg0, ...] }`.
         // This ensures the backend compiles a kernel body so the runtime linker can find it.
+        //
+        // Guard: only fire this heuristic when `callable_type` is None — constructors are
+        // exported without a callable_type, while regular functions always set callable_type.
+        // Without this guard a regular stdlib function like
+        //   `filled : Int -> Int -> (Int -> Int -> A) -> Matrix A`
+        // (result type Named("Matrix")) would be misidentified as a constructor,
+        // producing a fake Sum value at runtime instead of calling the real function body.
         if let ImportBindingMetadata::Value { ty } = &binding.metadata {
-            if !parameters.is_empty() {
+            if !parameters.is_empty() && binding.callable_type.is_none() {
                 // Peel Arrow layers to find the result type
                 let mut result_ty_ref = ty;
                 for _ in parameters {

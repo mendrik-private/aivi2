@@ -661,6 +661,23 @@ func __aivi_matrix_fromRows = inputRows => inputRows
     |> reduce __aivi_matrix_fromRowsStep (0, 0, None)
     |> __aivi_matrix_fromRowsFinish inputRows
 
+type (Int -> Int -> A) -> Int -> Int -> A
+func __aivi_matrix_initCellAt = build y x =>
+    build x y
+
+type Int -> (Int -> Int -> A) -> Int -> (List A)
+func __aivi_matrix_buildRow = width build y =>
+    __aivi_list_map (__aivi_matrix_initCellAt build y) (__aivi_list_range width)
+
+type Int -> Int -> (Int -> Int -> A) -> (List (List A))
+func __aivi_matrix_buildRows = width height build =>
+    __aivi_list_map (__aivi_matrix_buildRow width build) (__aivi_list_range height)
+
+type Int -> Int -> (Int -> Int -> A) -> Matrix A
+func __aivi_matrix_filled = w h build => w < 0 or h < 0
+    T|> MkMatrix 0 0 []
+    F|> MkMatrix w h (__aivi_matrix_buildRows w h build)
+
 type (A -> Bool) -> A -> (Option A)
 func __aivi_list_findTry = predicate item => predicate item
     T|> Some item
@@ -9596,6 +9613,9 @@ fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMeta
         }),
         ("aivi.matrix", "height") => Some(ImportBindingMetadata::AmbientValue {
             name: "__aivi_matrix_height".into(),
+        }),
+        ("aivi.matrix", "filled") => Some(ImportBindingMetadata::AmbientValue {
+            name: "__aivi_matrix_filled".into(),
         }),
         _ => None,
     }
