@@ -1,5 +1,5 @@
 use aivi.matrix (
-    fromRows as matrixFromRows
+    filled as matrixFilled
     at as matrixAt
     replaceAt as matrixReplaceAt
     rows as matrixRows
@@ -18,7 +18,6 @@ use aivi.list (
 
 use aivi.option (
     getOrElse as optGetOrElse
-    map as optMap
 )
 
 type Disc = Empty | Red | Blue
@@ -61,7 +60,7 @@ type TurnResolution = {
 }
 
 type GameState = {
-    board: (List (List Disc)),
+    board: Matrix Disc,
     status: Status,
     legalMoves: List Coord,
     humanCount: Int,
@@ -85,8 +84,6 @@ type Event =
 
 value boardSize = 8
 value lastIndex = 7
-value centerLow = 3
-value centerHigh = 4
 value boardIndices = [0..7]
 
 value rays = [
@@ -106,10 +103,6 @@ value corners = [
     Coord 0 7,
     Coord 7 7
 ]
-
-type Int -> Int -> Bool
-func smallerInt = left right =>
-    left < right
 
 type Coord -> Int
 func coordX = .
@@ -162,11 +155,6 @@ func otherDisc = .
  ||> Blue  -> Red
  ||> Empty -> Empty
 
-type Turn -> Text
-func turnLabel = .
- ||> Human    -> "Red (you)"
- ||> Computer -> "Blue (computer)"
-
 type Outcome -> Text
 func outcomeText = .
  ||> HumanWins    -> "You won"
@@ -190,25 +178,23 @@ func finished = .
  ||> Finished _ -> True
  ||> _          -> False
 
-type List (List Disc) -> Coord -> Disc
-func discAt = board coord => (matrixFromRows board, coordX coord, coordY coord)
- ||> (Err _, _, _) -> Empty
- ||> (Ok m, x, y) -> optGetOrElse Empty (matrixAt m x y)
+type Matrix Disc -> Coord -> Disc
+func discAt = board coord =>
+    optGetOrElse Empty (matrixAt board (coordX coord) (coordY coord))
 
-type List (List Disc) -> Coord -> Disc -> (List (List Disc))
-func setDisc = board coord disc => (matrixFromRows board, coordX coord, coordY coord)
- ||> (Err _, _, _) -> board
- ||> (Ok m, x, y) -> optGetOrElse board (optMap matrixRows (matrixReplaceAt m (x, y) disc))
+type Matrix Disc -> Coord -> Disc -> Matrix Disc
+func setDisc = board coord disc =>
+    optGetOrElse board (matrixReplaceAt board (coordX coord, coordY coord) disc)
 
-type Disc -> (List (List Disc)) -> Coord -> (List (List Disc))
+type Disc -> Matrix Disc -> Coord -> Matrix Disc
 func setManyStep = disc board coord =>
     setDisc board coord disc
 
-type List (List Disc) -> Disc -> (List Coord) -> (List (List Disc))
+type Matrix Disc -> Disc -> (List Coord) -> Matrix Disc
 func setMany = board disc coords => coords
   |> reduce (setManyStep disc) board
 
-type Coord -> Disc -> (List (List Disc)) -> (List (List Disc))
+type Coord -> Disc -> Matrix Disc -> Matrix Disc
 func put = coord disc board =>
     setDisc board coord disc
 
@@ -230,28 +216,28 @@ type RayLegalState = {
     found: Bool
 }
 
-type List (List Disc) -> Disc -> Ray -> RayScanState -> Disc -> RayScanState
+type Matrix Disc -> Disc -> Ray -> RayScanState -> Disc -> RayScanState
 func resolveRayDisc = board disc ray state current => (current == otherDisc disc, current == disc, listLength state.captured > 0)
  ||> (True, _, _)        -> { current: stepRay ray state.current, captured: append state.captured [state.current], resolved: False, flips: [] }
  ||> (False, True, True) -> { current: state.current, captured: state.captured, resolved: True, flips: state.captured }
  ||> _                   -> { current: state.current, captured: state.captured, resolved: True, flips: [] }
 
-type List (List Disc) -> Disc -> Ray -> RayScanState -> RayScanState
+type Matrix Disc -> Disc -> Ray -> RayScanState -> RayScanState
 func scanRayOnBoard = board disc ray state => discAt board state.current
  ||> Empty   -> { current: state.current, captured: state.captured, resolved: True, flips: [] }
  ||> current -> resolveRayDisc board disc ray state current
 
-type List (List Disc) -> Disc -> Ray -> RayScanState -> RayScanState
+type Matrix Disc -> Disc -> Ray -> RayScanState -> RayScanState
 func scanUnresolvedRayStep = board disc ray state => onBoard state.current
  T|> scanRayOnBoard board disc ray state
  F|> { current: state.current, captured: state.captured, resolved: True, flips: [] }
 
-type List (List Disc) -> Disc -> Ray -> RayScanState -> Int -> RayScanState
+type Matrix Disc -> Disc -> Ray -> RayScanState -> Int -> RayScanState
 func scanRayStep = board disc ray state ignored => state.resolved
  T|> state
  F|> scanUnresolvedRayStep board disc ray state
 
-type List (List Disc) -> Disc -> Coord -> Ray -> (List Coord)
+type Matrix Disc -> Disc -> Coord -> Ray -> (List Coord)
 func flipsInRay = board disc coord ray => boardIndices
   |> reduce (scanRayStep board disc ray) { current: stepRay ray coord, captured: [], resolved: False, flips: [] }
   |> .flips
@@ -262,35 +248,35 @@ func resolveLegalRayDisc = disc ray state current => (current == otherDisc disc,
  ||> (False, True, True) -> { current: state.current, captured: state.captured, resolved: True, found: True }
  ||> _                   -> { current: state.current, captured: state.captured, resolved: True, found: False }
 
-type List (List Disc) -> Disc -> Ray -> RayLegalState -> RayLegalState
+type Matrix Disc -> Disc -> Ray -> RayLegalState -> RayLegalState
 func scanLegalRayOnBoard = board disc ray state => discAt board state.current
  ||> Empty   -> { current: state.current, captured: state.captured, resolved: True, found: False }
  ||> current -> resolveLegalRayDisc disc ray state current
 
-type List (List Disc) -> Disc -> Ray -> RayLegalState -> RayLegalState
+type Matrix Disc -> Disc -> Ray -> RayLegalState -> RayLegalState
 func scanUnresolvedLegalRayStep = board disc ray state => onBoard state.current
  T|> scanLegalRayOnBoard board disc ray state
  F|> { current: state.current, captured: state.captured, resolved: True, found: False }
 
-type List (List Disc) -> Disc -> Ray -> RayLegalState -> Int -> RayLegalState
+type Matrix Disc -> Disc -> Ray -> RayLegalState -> Int -> RayLegalState
 func scanLegalRayStep = board disc ray state ignored => state.resolved
  T|> state
  F|> scanUnresolvedLegalRayStep board disc ray state
 
-type List (List Disc) -> Disc -> Coord -> Ray -> Bool
+type Matrix Disc -> Disc -> Coord -> Ray -> Bool
 func rayHasFlip = board disc coord ray => boardIndices
   |> reduce (scanLegalRayStep board disc ray) { current: stepRay ray coord, captured: 0, resolved: False, found: False }
   |> .found
 
-type List (List Disc) -> Disc -> Coord -> Bool
+type Matrix Disc -> Disc -> Coord -> Bool
 func anyRayHasFlip = board disc coord =>
     listAny (rayHasFlip board disc coord) rays
 
-type List (List Disc) -> Disc -> Coord -> (List Coord)
+type Matrix Disc -> Disc -> Coord -> (List Coord)
 func flipsForMove = board disc coord =>
     listFlatMap (flipsInRay board disc coord) rays
 
-type List (List Disc) -> Disc -> Coord -> Bool
+type Matrix Disc -> Disc -> Coord -> Bool
 func legalMove = board disc coord =>
     discAt board coord == Empty and anyRayHasFlip board disc coord
 
@@ -303,47 +289,47 @@ type List Coord -> (List Coord) -> (List Coord)
 func appendCoordsUnique = coords more => more
   |> reduce appendCoordUnique coords
 
-type List (List Disc) -> (List Coord) -> Coord -> (List Coord)
+type Matrix Disc -> (List Coord) -> Coord -> (List Coord)
 func addEmptyNeighbor = board coords next => discAt board next == Empty
  T|> appendCoordUnique coords next
  F|> coords
 
-type List (List Disc) -> Coord -> (List Coord) -> Ray -> (List Coord)
+type Matrix Disc -> Coord -> (List Coord) -> Ray -> (List Coord)
 func emptyNeighborStep = board coord coords ray => onBoard (stepRay ray coord)
  T|> addEmptyNeighbor board coords (stepRay ray coord)
  F|> coords
 
-type List (List Disc) -> Coord -> (List Coord)
+type Matrix Disc -> Coord -> (List Coord)
 func emptyNeighbors = board coord => rays
   |> reduce (emptyNeighborStep board coord) []
 
-type List (List Disc) -> Disc -> Int -> (List Coord) -> Int -> (List Coord)
+type Matrix Disc -> Disc -> Int -> (List Coord) -> Int -> (List Coord)
 func rowCandidateStep = board disc y candidates x => discAt board (coordFromRow y x) == otherDisc disc
  T|> appendCoordsUnique candidates (emptyNeighbors board (coordFromRow y x))
  F|> candidates
 
-type List (List Disc) -> Disc -> Int -> (List Coord)
+type Matrix Disc -> Disc -> Int -> (List Coord)
 func rowCandidateCoords = board disc y => boardIndices
   |> reduce (rowCandidateStep board disc y) []
 
-type List (List Disc) -> Disc -> (List Coord) -> Int -> (List Coord)
+type Matrix Disc -> Disc -> (List Coord) -> Int -> (List Coord)
 func candidateCoordsStep = board disc candidates y =>
     appendCoordsUnique candidates (rowCandidateCoords board disc y)
 
-type List (List Disc) -> Disc -> (List Coord)
+type Matrix Disc -> Disc -> (List Coord)
 func candidateCoords = board disc => boardIndices
   |> reduce (candidateCoordsStep board disc) []
 
-type List (List Disc) -> Disc -> (List Coord)
+type Matrix Disc -> Disc -> (List Coord)
 func legalMoves = board disc => candidateCoords board disc
   |> listFilter (legalMove board disc)
 
-type List (List Disc) -> Disc -> Coord -> (List Coord) -> (List (List Disc))
+type Matrix Disc -> Disc -> Coord -> (List Coord) -> Matrix Disc
 func boardAfterFlips = board disc coord flips => flips
   |> setMany board disc
   |> put coord disc
 
-type List (List Disc) -> Disc -> Coord -> (List (List Disc))
+type Matrix Disc -> Disc -> Coord -> Matrix Disc
 func boardAfterMove = board disc coord => flipsForMove board disc coord
   |> boardAfterFlips board disc coord
 
@@ -355,8 +341,8 @@ type Disc -> (List Disc) -> Int
 func countInRow = target row =>
     listCount (sameDisc target) row
 
-type Disc -> (List (List Disc)) -> Int
-func countDisc = target board => board
+type Disc -> Matrix Disc -> Int
+func countDisc = target board => matrixRows board
   |> listMap (countInRow target)
   |> listSum
 
@@ -366,29 +352,29 @@ func outcomeFromCounts = humanCount computerCount => (humanCount > computerCount
  ||> (False, True) -> ComputerWins
  ||> _             -> Draw
 
-type List (List Disc) -> Outcome
+type Matrix Disc -> Outcome
 func outcomeForBoard = board =>
     outcomeFromCounts (countDisc Red board) (countDisc Blue board)
 
-type List (List Disc) -> Turn -> (List Coord) -> TurnResolution
+type Matrix Disc -> Turn -> (List Coord) -> TurnResolution
 func resolveFallbackTurn = board preferred fallbackMoves => listLength fallbackMoves > 0
  T|> { status: Passed preferred, legalMoves: fallbackMoves }
  F|> { status: Finished (outcomeForBoard board), legalMoves: [] }
 
-type List (List Disc) -> Turn -> TurnResolution
+type Matrix Disc -> Turn -> TurnResolution
 func advanceFallbackTurn = board preferred =>
     resolveFallbackTurn board preferred (legalMoves board (discForTurn (otherTurn preferred)))
 
-type List (List Disc) -> Turn -> (List Coord) -> TurnResolution
+type Matrix Disc -> Turn -> (List Coord) -> TurnResolution
 func resolvePreferredTurn = board preferred preferredMoves => listLength preferredMoves > 0
  T|> { status: Active preferred, legalMoves: preferredMoves }
  F|> advanceFallbackTurn board preferred
 
-type List (List Disc) -> Turn -> TurnResolution
+type Matrix Disc -> Turn -> TurnResolution
 func advanceTurn = board preferred =>
     resolvePreferredTurn board preferred (legalMoves board (discForTurn preferred))
 
-type List (List Disc) -> Int -> (Option Coord) -> (List Coord) -> Int -> Int -> TurnResolution -> GameState
+type Matrix Disc -> Int -> (Option Coord) -> (List Coord) -> Int -> Int -> TurnResolution -> GameState
 func makeState = board moveNumber lastMove lastFlips humanCount computerCount resolution =>
     {
         board: board,
@@ -402,88 +388,15 @@ func makeState = board moveNumber lastMove lastFlips humanCount computerCount re
         animState: Idle
     }
 
-value initialBoard : (List (List Disc)) = [
-    [
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty
-    ],
-    [
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty
-    ],
-    [
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty
-    ],
-    [
-        Empty,
-        Empty,
-        Empty,
-        Blue,
-        Red,
-        Empty,
-        Empty,
-        Empty
-    ],
-    [
-        Empty,
-        Empty,
-        Empty,
-        Red,
-        Blue,
-        Empty,
-        Empty,
-        Empty
-    ],
-    [
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty
-    ],
-    [
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty
-    ],
-    [
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty,
-        Empty
-    ]
-]
+type Int -> Int -> Disc
+func initialDiscAt = x y => (x, y)
+ ||> (3, 3) -> Blue
+ ||> (4, 4) -> Blue
+ ||> (3, 4) -> Red
+ ||> (4, 3) -> Red
+ ||> _      -> Empty
+
+value initialBoard : Matrix Disc = matrixFilled 8 8 initialDiscAt
 
 value initial : GameState = {
     board: initialBoard,
@@ -513,6 +426,8 @@ value flippedFlashCycle = 2
 value flippedFlashVisible = 1
 value flippedFlashDuration = 10
 value flashDuration = 15
+value computerFlashDuration = 6
+value computerFlippedFlashDuration = 6
 
 type Int -> Bool
 func oneFromEdge = n =>
@@ -563,7 +478,7 @@ func buildCandidateWithFlips = coord flipCount =>
         score: finalCandidateScore coord
     }
 
-type List (List Disc) -> Coord -> Candidate
+type Matrix Disc -> Coord -> Candidate
 func candidateForCoord = board coord =>
     buildCandidateWithFlips coord (listLength (flipsForMove board (discForTurn Computer) coord))
 
@@ -571,7 +486,7 @@ type Candidate -> Candidate -> Bool
 func candidateLessThan = left right =>
     left.score < right.score or (left.score == right.score and left.flips < right.flips) or (left.score == right.score and left.flips == right.flips and coordId left.coord > coordId right.coord)
 
-type List (List Disc) -> (List Coord) -> (Option Candidate)
+type Matrix Disc -> (List Coord) -> (Option Candidate)
 func bestComputerMove = board moves => moves
   |> listMap (candidateForCoord board)
   |> listMaximum candidateLessThan
@@ -586,7 +501,7 @@ func nextComputerCount = turn state flipCount => turn
  ||> Human    -> state.computerCount - flipCount
  ||> Computer -> state.computerCount + flipCount + 1
 
-type GameState -> Turn -> Coord -> Int -> (List Coord) -> (List (List Disc)) -> GameState
+type GameState -> Turn -> Coord -> Int -> (List Coord) -> Matrix Disc -> GameState
 func applyResolvedBoard = state turn coord flipCount flips afterBoard =>
     makeState afterBoard (state.moveNumber + 1) (Some coord) flips (nextHumanCount turn state flipCount) (nextComputerCount turn state flipCount) (advanceTurn afterBoard (otherTurn turn))
 
@@ -625,7 +540,7 @@ type GameState -> Coord -> GameState
 func applyHumanMove = state coord => flipsForMove state.board (discForTurn Human) coord
   |> applyHumanMoveWithFlips state coord
 
-type GameState -> (List (List Disc)) -> AnimState -> GameState
+type GameState -> Matrix Disc -> AnimState -> GameState
 func computerAnimState = state board animState =>
     state <| {
         board: board,
@@ -664,7 +579,7 @@ func advanceHumanFlash = state coord flips tick => tick >= flashDuration
  F|> setAnimState state (HumanFlash coord flips (tick + 1))
 
 type GameState -> Coord -> (List Coord) -> Int -> GameState
-func advanceComputerFlash = state coord flips tick => tick >= flashDuration
+func advanceComputerFlash = state coord flips tick => tick >= computerFlashDuration
  T|> finishComputerAnimation state coord flips
  F|> setAnimState state (ComputerFlash coord flips (tick + 1))
 
@@ -691,10 +606,6 @@ func step = event state => event
  ||> Restart          -> initial
  ||> TryPlaceAt coord -> handleTryPlace coord state
  ||> ComputerTurn     -> handleComputerTurn state
-
-type Coord -> Text
-func coordLabel = .
- ||> Coord x y -> "({x + 1}, {y + 1})"
 
 type Status -> Text
 func statusLabel = .
@@ -734,16 +645,6 @@ func emptyCellLabel = status legalMoves coord => (coordInList coord legalMoves, 
  ||> (True, True, _)     -> "◌"
  ||> (True, False, True) -> "◍"
  ||> _                   -> "·"
-
-type Option Coord -> Coord -> Bool
-func isLastMove = lastMove coord => lastMove
- ||> Some lc -> sameCoord lc coord
- ||> None    -> False
-
-type Option Coord -> Coord -> Status -> (Option Text)
-func lastMovePlacedLabel = lastMove coord status => (computerToAct status, isLastMove lastMove coord)
- ||> (True, True) -> Some "🎯"
- ||> _            -> None
 
 type Int -> Bool
 func animStoneVisible = tick =>
@@ -789,6 +690,11 @@ func flippedStoneOpacity = tick => tick < flippedFlashDuration
  T|> flippedFlashPhase tick
  F|> 1.0
 
+type Int -> Float
+func computerFlippedStoneOpacity = tick => tick < computerFlippedFlashDuration
+ T|> flippedFlashPhase tick
+ F|> 1.0
+
 type Coord -> (List Coord) -> Int -> Coord -> Float
 func flashCellOpacity = placed flips tick coord => (sameCoord placed coord, coordInList coord flips)
  ||> (True, _)     -> placedStoneOpacity tick
@@ -797,7 +703,7 @@ func flashCellOpacity = placed flips tick coord => (sameCoord placed coord, coor
 
 type (List Coord) -> Int -> Coord -> Float
 func computerFlashOpacity = flips tick coord => coordInList coord flips
- T|> flippedStoneOpacity tick
+ T|> computerFlippedStoneOpacity tick
  F|> 1.0
 
 type AnimState -> Coord -> Float
@@ -814,21 +720,20 @@ func cellAnimateOpacity = animState coord => animState
  ||> ComputerFlash _ flips _        -> coordInList coord flips
  ||> _                              -> False
 
-type List (List Disc) -> Status -> (List Coord) -> (Option Coord) -> (List Coord) -> Coord -> Text
-func baseCellLabel = board status legalMoves lastMove lastFlips coord => discAt board coord
+type Matrix Disc -> Status -> (List Coord) -> Coord -> Text
+func baseCellLabel = board status legalMoves coord => discAt board coord
  ||> Red   -> "🔴"
  ||> Blue  -> "🔵"
  ||> Empty -> emptyCellLabel status legalMoves coord
 
-type AnimState -> (Option Coord) -> Status -> Coord -> (Option Text)
-func overlayLabel = animState lastMove status coord => previewLabel animState coord
- ||> Some label -> Some label
- ||> None       -> lastMovePlacedLabel lastMove coord status
+type AnimState -> Coord -> (Option Text)
+func overlayLabel = animState coord =>
+    previewLabel animState coord
 
-type List (List Disc) -> Status -> (List Coord) -> (Option Coord) -> (List Coord) -> AnimState -> Coord -> Text
-func cellLabel = board status legalMoves lastMove lastFlips animState coord => overlayLabel animState lastMove status coord
+type Matrix Disc -> Status -> (List Coord) -> AnimState -> Coord -> Text
+func cellLabel = board status legalMoves animState coord => overlayLabel animState coord
  ||> Some label -> label
- ||> None       -> baseCellLabel board status legalMoves lastMove lastFlips coord
+ ||> None       -> baseCellLabel board status legalMoves coord
 
 type GameState -> Coord -> Bool
 func cellEnabled = state coord => (humanToAct state.status, coordInList coord state.legalMoves)
@@ -882,7 +787,7 @@ value main =
                     <Box orientation="horizontal" spacing={0}>
                         <each of={boardIndices} as={x} key={x}>
                             <with value={Coord x y} as={coord}>
-                                <Button label={cellLabel currentState.board currentState.status currentState.legalMoves currentState.lastMove currentState.lastFlips currentState.animState coord} onClick={placeCoord coord} sensitive={cellEnabled currentState coord} animateOpacity={cellAnimateOpacity currentState.animState coord} opacity={cellOpacity currentState.animState coord} compact hasFrame={False} widthRequest={52} heightRequest={52} />
+                                <Button label={cellLabel currentState.board currentState.status currentState.legalMoves currentState.animState coord} onClick={placeCoord coord} sensitive={cellEnabled currentState coord} animateOpacity={cellAnimateOpacity currentState.animState coord} opacity={cellOpacity currentState.animState coord} compact hasFrame={False} widthRequest={52} heightRequest={52} />
                             </with>
                         </each>
                     </Box>

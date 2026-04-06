@@ -142,6 +142,11 @@ type Matrix A -> (Int, Int) -> A -> (Option (Matrix A))
 func replaceAt = matrix coord value => coord
  ||> (x, y) -> replaceAtCoords matrix x y value
 
+type Int -> Int -> (Int -> Int -> A) -> Matrix A
+func filled = w h build => w < 0 or h < 0
+ T|> MkMatrix 0 0 []
+ F|> MkMatrix w h (buildRows w h build)
+
 export (MatrixError, NegativeWidth, NegativeHeight, RaggedRows,
-        Matrix, init, fromRows, width, height, rows, row, at, replaceAt,
+        Matrix, init, fromRows, filled, width, height, rows, row, at, replaceAt,
         indices)
