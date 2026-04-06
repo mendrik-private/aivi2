@@ -140,6 +140,10 @@ fn run() -> Result<ExitCode, String> {
         return run_fmt(args);
     }
 
+    if first == OsString::from("openapi-gen") {
+        return run_openapi_gen(args);
+    }
+
     // Default: treat the first argument as a path and run `check`.
     check_file(&PathBuf::from(first), false)
 }
@@ -185,6 +189,60 @@ fn run_fmt(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String>
 
     // Treat as a file path — format to stdout (legacy behaviour).
     format_file(&PathBuf::from(next))
+}
+
+fn run_openapi_gen(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String> {
+    let Some(next) = args.next() else {
+        return Err(
+            "expected a spec path argument after `openapi-gen`\n\
+             Usage: aivi openapi-gen <spec.yaml> [-o output.aivi]"
+                .to_owned(),
+        );
+    };
+
+    if next == "--help" || next == "-h" {
+        return print_help(Some(std::ffi::OsStr::new("openapi-gen")));
+    }
+
+    let spec_path = PathBuf::from(&next);
+    if !spec_path.exists() {
+        return Err(format!("spec file not found: {}", spec_path.display()));
+    }
+
+    let mut output_path: Option<PathBuf> = None;
+    while let Some(arg) = args.next() {
+        if arg == OsString::from("-o") {
+            let out = args
+                .next()
+                .ok_or_else(|| "expected a path after `-o`".to_owned())?;
+            output_path = Some(PathBuf::from(out));
+        }
+    }
+
+    let spec = aivi_openapi::parse_spec(&spec_path)
+        .map_err(|e| format!("error: {e}"))?;
+    let resolved = aivi_openapi::resolve_spec(spec, &spec_path)
+        .map_err(|errs| {
+            errs.iter()
+                .map(|e| format!("error: {e}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })?;
+    let generated = aivi_openapi::generate_aivi_types(&resolved);
+
+    match output_path {
+        Some(path) => {
+            fs::write(&path, &generated.aivi_source).map_err(|e| {
+                format!("failed to write output to `{}`: {e}", path.display())
+            })?;
+            eprintln!("wrote {}", path.display());
+        }
+        None => {
+            print!("{}", generated.aivi_source);
+        }
+    }
+
+    Ok(ExitCode::SUCCESS)
 }
 
 /// Resolve the entry file for a CLI command, using `aivi.toml` `[run] entry`
@@ -4862,6 +4920,7 @@ COMMANDS:
     test <path>                     Run @test declarations in a workspace
     lex <path>                      Dump the lossless token stream
     fmt <path|--stdin|--check>      Format AIVI source code
+    openapi-gen <spec> [-o file]    Generate AIVI types from an OpenAPI spec
     lsp                             Start the language server (stdio)
     mcp [opts]                      Start the MCP introspection server (stdio)
     manual-snippets [opts]          Validate and format manual code blocks
@@ -5044,6 +5103,28 @@ DESCRIPTION:
     Canonically formats AIVI source code. The formatter preserves
     semantics while normalizing whitespace, indentation, and layout.
     Files with parse errors are left unchanged.
+",
+        "openapi-gen" => "\
+aivi openapi-gen — generate AIVI type declarations from an OpenAPI spec
+
+USAGE:
+    aivi openapi-gen <spec.yaml|spec.json> [-o output.aivi]
+
+ARGS:
+    <spec>              Path to an OpenAPI 3.x YAML or JSON spec file.
+
+OPTIONS:
+    -o <output>         Write the generated AIVI source to a file.
+                        When omitted, output is written to stdout.
+
+DESCRIPTION:
+    Parses an OpenAPI 3.x specification and emits AIVI type declarations
+    for all component schemas, a sum type for auth schemes, and a
+    standard ApiError type. The generated file can be used alongside
+    an @source api handle to give user-defined types to API responses.
+
+    Example:
+        aivi openapi-gen ./petstore.yaml -o types/petstore.aivi
 ",
         "lsp" => "\
 aivi lsp — start the language server

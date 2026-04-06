@@ -67,6 +67,7 @@ dependencies = [
  "aivi-hir",
  "aivi-lambda",
  "aivi-lsp",
+ "aivi-openapi",
  "aivi-query",
  "aivi-runtime",
  "aivi-syntax",

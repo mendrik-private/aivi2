@@ -18,8 +18,9 @@ A persistent, LLM-maintained knowledge base for the AIVI compiler project.
 | [gtk-bridge.md](gtk-bridge.md) | GTK4/libadwaita widget bridge, markup lowering, event routing |
 | [query-layer.md](query-layer.md) | Incremental Salsa-style query layer, workspace, memoisation |
 | [lsp-server.md](lsp-server.md) | Language Server: diagnostics, completion, hover, navigation |
-| [cli.md](cli.md) | CLI commands: check, run, compile, fmt, lsp, mcp |
+| [cli.md](cli.md) | CLI commands: check, run, compile, fmt, lsp, mcp, openapi-gen |
 | [stdlib.md](stdlib.md) | Standard library modules overview |
+| [openapi-source.md](openapi-source.md) | OpenAPI capability handle: `@source api`, codegen, auth |
 
 | [demo-audit.md](demo-audit.md) | Snake & Reversi audit — issues found and fixed |
 

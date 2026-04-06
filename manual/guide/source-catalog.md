@@ -38,6 +38,7 @@ These families now have a preferred public handle surface:
 | --- | --- | --- |
 | File system | `@source fs ...` + `FsSource` | `fs.read`, `fs.watch`, plus handle-member tasks such as `files.delete` |
 | HTTP | `@source http ...` + `HttpSource` | `http.get`, `http.post`, plus handle-member request tasks such as `api.get` |
+| OpenAPI | `@source api "spec.yaml" with { baseUrl: url, ... }` + `ApiSource` | `api.get`, `api.post`, `api.put`, `api.patch`, `api.delete` |
 | Database | `@source db ...` + `DbSource` | `db.connect`, `db.live`, plus handle-member `database.query` / `database.commit` tasks |
 | Environment | `@source env` + `EnvSource` | `env.get` plus handle-member environment snapshots/listing |
 | Logging / stdio | `@source log`, `@source stdio` | log/stdio handle members plus `stdio.read` |
@@ -103,6 +104,57 @@ Uses the same option surface as `http.get`, plus:
 | Option | Type | Current support |
 | --- | --- | --- |
 | `body` | `A` | Supported for `http.post` only. |
+
+## OpenAPI
+
+The `api` family provides a typed capability handle backed by an OpenAPI 3.x spec file. Member
+access on the handle is validated against the spec at compile time when the spec path is a static
+literal.
+
+Read operations (`listPets`, `showPetById`, etc.) lower to `api.get` signal providers. Write
+operations (`createPet`, `deletePet`, etc.) lower to `api.post` / `api.put` / `api.patch` /
+`api.delete` intrinsic value calls.
+
+Generate AIVI type declarations from the spec with:
+
+```
+aivi openapi-gen ./spec.yaml -o types/api.aivi
+```
+
+### `api.get` / `api.post` / `api.put` / `api.patch` / `api.delete`
+
+**Handle form:**
+
+```aivi
+@source api "./spec.yaml" with {
+    baseUrl: serverUrl,
+    auth: BearerToken apiToken,
+    timeout: 30sec
+}
+signal petstore : ApiSource
+```
+
+**Option surface** (same as `http.get` / `http.post`, plus):
+
+| Option | Type | Current support |
+| --- | --- | --- |
+| `baseUrl` | `Text` | Required. Base URL prepended to every operation path. |
+| `auth` | `ApiAuth` | Supported. Injects `Authorization` or `X-API-Key` headers from the value. |
+| `headers` | `Map Text Text` | Supported. Additional HTTP headers. |
+| `body` | `A` | Supported for mutation operations. |
+| `timeout` | `Duration` | Supported. |
+| `retry` | `Retry` | Supported. |
+| `refreshEvery` | `Duration` | Supported. |
+| `decode` | `DecodeMode` | Supported through the decode pipeline. |
+| `refreshOn` | `Signal A` | Supported as an explicit trigger signal. |
+| `activeWhen` | `Signal Bool` | Supported as a lifecycle gate. |
+
+**Notes**
+
+- The spec path (first argument) is only used at compile time for operationId validation. It is not used at runtime.
+- The final request URL is `baseUrl` + the operation's path from the spec.
+- Auth variants: `BearerToken Text`, `BasicAuth Text Text`, `ApiKey Text`, `ApiKeyQuery Text`, `OAuth2 Text`.
+- `ApiKeyQuery` injects the key as a query parameter rather than a header (not yet applied at runtime).
 
 ## File system
 

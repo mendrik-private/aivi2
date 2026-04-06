@@ -42,3 +42,20 @@ Key insight: the old guide was a feature inventory; the new structure tells a le
 - `done` preserves last successful value on subsequent errors (stale-while-revalidate)
 - `do once` documented as accumulation idiom; dedicated `@effect`/`doOnce` noted as planned
 - No compiler changes needed — pure stdlib + documentation
+
+## [2026-04-06] ingest | OpenAPI source feature implementation
+
+Added full `@source api` capability handle feature:
+
+- `crates/aivi-openapi/`: new crate with model, parser, resolver, operations, auth, typegen, diagnostics modules
+- `crates/aivi-typing/src/source_contracts.rs`: 5 new BuiltinSourceProvider variants (ApiGet, ApiPost, ApiPut, ApiPatch, ApiDelete) + api_options()
+- `crates/aivi-hir/src/capability_handle_elaboration.rs`: Api capability family, lower_api_signal_member, lower_api_value_member, supports_* functions updated
+- `crates/aivi-hir/src/validate.rs`: exhaustive match updated for new providers
+- `crates/aivi-runtime/src/providers.rs`: ApiPlan, spawn_api_worker, extract_auth_header, base64_encode; run_http_request updated for Api variants
+- `stdlib/aivi/api.aivi`: ApiError, ApiAuth, ApiSource, ApiResponse stdlib types
+- `crates/aivi-cli/src/main.rs`: `aivi openapi-gen` command
+- `manual/guide/source-catalog.md`: OpenAPI section + unified capability families table updated
+- `manual/guide/openapi-source.md`: new guide page
+- `manual/guide/surface-feature-matrix.md`: `@source api` row added
+- `fixtures/frontend/milestone-1/valid/sources/petstore.yaml`: Petstore OpenAPI spec fixture
+- `fixtures/frontend/milestone-1/valid/sources/openapi_source.aivi`: API handle fixture

@@ -540,6 +540,27 @@ impl SourceProviderManager {
                     stop,
                 }
             }
+            RuntimeSourceProvider::Builtin(
+                provider @ (BuiltinSourceProvider::ApiGet
+                | BuiltinSourceProvider::ApiPost
+                | BuiltinSourceProvider::ApiPut
+                | BuiltinSourceProvider::ApiPatch
+                | BuiltinSourceProvider::ApiDelete),
+            ) => {
+                let plan = ApiPlan::parse(instance, *provider, config)?;
+                let stop = Arc::new(AtomicBool::new(false));
+                let handle = spawn_api_worker(port, plan, stop.clone());
+                self.thread_handles
+                    .lock()
+                    .unwrap()
+                    .entry(instance)
+                    .or_default()
+                    .push(handle);
+                ActiveProviderState::Passive {
+                    provider: config.provider.clone(),
+                    stop,
+                }
+            }
             RuntimeSourceProvider::Builtin(BuiltinSourceProvider::FsRead) => {
                 let plan = FsReadPlan::parse(instance, config)?;
                 let stop = Arc::new(AtomicBool::new(false));
@@ -1713,6 +1734,226 @@ impl HttpPlan {
             result: RequestResultPlan::parse(instance, provider, config)?,
         })
     }
+}
+
+/// Runtime plan for OpenAPI capability handle operations.
+///
+/// Combines a `baseUrl` option with the `operationPath` argument at runtime
+/// and delegates to the same HTTP worker infrastructure as `HttpPlan`.
+struct ApiPlan {
+    /// HTTP provider variant (ApiGet / ApiPost / etc.) driving the curl method.
+    provider: BuiltinSourceProvider,
+    /// Fully composed request URL: baseUrl + operation_path.
+    url: Box<str>,
+    headers: Box<[(Box<str>, Box<str>)]>,
+    body: Option<Box<str>>,
+    timeout: Option<Duration>,
+    refresh_every: Option<Duration>,
+    retry_attempts: u32,
+    result: RequestResultPlan,
+}
+
+impl ApiPlan {
+    fn parse(
+        instance: SourceInstanceId,
+        provider: BuiltinSourceProvider,
+        config: &EvaluatedSourceConfig,
+    ) -> Result<Self, SourceProviderExecutionError> {
+        // Arguments: [spec_path (ignored at runtime), operation_path]
+        if config.arguments.len() < 2 {
+            return Err(SourceProviderExecutionError::InvalidArgumentCount {
+                instance,
+                provider,
+                expected: 2,
+                found: config.arguments.len(),
+            });
+        }
+        let operation_path = parse_text_argument(instance, provider, 1, &config.arguments[1])?;
+        let mut base_url = String::new();
+        let mut headers = Vec::new();
+        let mut body = None;
+        let mut timeout = None;
+        let mut refresh_every = None;
+        let mut retry_attempts = 0;
+        for option in &config.options {
+            match option.option_name.as_ref() {
+                "baseUrl" => {
+                    base_url = parse_text_option(instance, provider, &option.option_name, &option.value)?
+                        .into();
+                }
+                "headers" => {
+                    headers =
+                        parse_text_map(instance, provider, &option.option_name, &option.value)?;
+                }
+                "query" => {
+                    // Query params are appended to the URL after combination; skip for now.
+                }
+                "body" => {
+                    body = Some(encode_runtime_body(instance, provider, &option.value)?);
+                }
+                "timeout" => {
+                    timeout = Some(parse_option_duration(
+                        instance,
+                        provider,
+                        &option.option_name,
+                        &option.value,
+                    )?);
+                }
+                "retry" => {
+                    retry_attempts =
+                        parse_retry(instance, provider, &option.option_name, &option.value)?;
+                }
+                "refreshEvery" => {
+                    refresh_every = Some(parse_option_duration(
+                        instance,
+                        provider,
+                        &option.option_name,
+                        &option.value,
+                    )?);
+                }
+                "auth" => {
+                    // Inject auth header from the runtime value.
+                    if let Some((name, value)) =
+                        extract_auth_header(instance, provider, &option.value)?
+                    {
+                        headers.push((name, value));
+                    }
+                }
+                "decode" | "refreshOn" | "activeWhen" => {}
+                _ => {
+                    return Err(SourceProviderExecutionError::UnsupportedOption {
+                        instance,
+                        provider,
+                        option_name: option.option_name.clone(),
+                    });
+                }
+            }
+        }
+        let full_url = format!("{}{}", base_url.trim_end_matches('/'), operation_path.as_ref());
+        let url = Url::parse(&full_url).map_err(|error| {
+            SourceProviderExecutionError::StartFailed {
+                instance,
+                provider,
+                detail: format!("invalid API URL `{full_url}`: {error}").into_boxed_str(),
+            }
+        })?;
+        // Convert to HttpPlan by reusing the underlying HTTP worker.
+        // We represent the plan as a zero-cost HttpPlan alias via a helper.
+        Ok(Self {
+            provider,
+            url: url.to_string().into_boxed_str(),
+            headers: headers.into_boxed_slice(),
+            body,
+            timeout,
+            refresh_every,
+            retry_attempts,
+            result: RequestResultPlan::parse(instance, provider, config)?,
+        })
+    }
+
+    fn into_http_plan(self) -> HttpPlan {
+        HttpPlan {
+            provider: self.provider,
+            url: self.url,
+            headers: self.headers,
+            body: self.body,
+            timeout: self.timeout,
+            refresh_every: self.refresh_every,
+            retry_attempts: self.retry_attempts,
+            result: self.result,
+        }
+    }
+}
+
+fn extract_auth_header(
+    instance: SourceInstanceId,
+    provider: BuiltinSourceProvider,
+    value: &DetachedRuntimeValue,
+) -> Result<Option<(Box<str>, Box<str>)>, SourceProviderExecutionError> {
+    match strip_detached_signal(value) {
+        RuntimeValue::Sum(sum) => {
+            match sum.variant_name.as_ref() {
+                "BearerToken" => {
+                    if let Some(RuntimeValue::Text(token)) = sum.fields.first() {
+                        return Ok(Some((
+                            "Authorization".into(),
+                            format!("Bearer {token}").into_boxed_str(),
+                        )));
+                    }
+                }
+                "BasicAuth" => {
+                    if sum.fields.len() >= 2 {
+                        if let (RuntimeValue::Text(user), RuntimeValue::Text(pass)) =
+                            (&sum.fields[0], &sum.fields[1])
+                        {
+                            let credentials = format!("{user}:{pass}");
+                            let encoded = base64_encode(credentials.as_bytes());
+                            return Ok(Some((
+                                "Authorization".into(),
+                                format!("Basic {encoded}").into_boxed_str(),
+                            )));
+                        }
+                    }
+                }
+                "ApiKey" => {
+                    if let Some(RuntimeValue::Text(key)) = sum.fields.first() {
+                        return Ok(Some(("X-API-Key".into(), key.clone())));
+                    }
+                }
+                "ApiKeyQuery" => {
+                    // Query-based API key; not injected as a header.
+                }
+                "OAuth2" => {
+                    if let Some(RuntimeValue::Text(token)) = sum.fields.first() {
+                        return Ok(Some((
+                            "Authorization".into(),
+                            format!("Bearer {token}").into_boxed_str(),
+                        )));
+                    }
+                }
+                _ => {}
+            }
+            Ok(None)
+        }
+        RuntimeValue::Unit => Ok(None),
+        _ => Err(SourceProviderExecutionError::StartFailed {
+            instance,
+            provider,
+            detail: "api `auth` option must be an ApiAuth sum value".into(),
+        }),
+    }
+}
+
+fn base64_encode(input: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as usize;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as usize;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as usize;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[(n >> 18) & 0x3F] as char);
+        out.push(TABLE[(n >> 12) & 0x3F] as char);
+        if chunk.len() > 1 {
+            out.push(TABLE[(n >> 6) & 0x3F] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(TABLE[n & 0x3F] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
+}
+
+fn spawn_api_worker(
+    port: DetachedRuntimePublicationPort,
+    plan: ApiPlan,
+    stop: Arc<AtomicBool>,
+) -> thread::JoinHandle<()> {
+    spawn_http_worker(port, plan.into_http_plan(), stop)
 }
 
 #[derive(Clone)]
@@ -4264,6 +4505,11 @@ fn run_http_request(
     command.arg(match plan.provider {
         BuiltinSourceProvider::HttpGet => "GET",
         BuiltinSourceProvider::HttpPost => "POST",
+        BuiltinSourceProvider::ApiGet => "GET",
+        BuiltinSourceProvider::ApiPost => "POST",
+        BuiltinSourceProvider::ApiPut => "PUT",
+        BuiltinSourceProvider::ApiPatch => "PATCH",
+        BuiltinSourceProvider::ApiDelete => "DELETE",
         _ => unreachable!("http plan should only be built for http providers"),
     });
     if let Some(timeout) = plan.timeout {

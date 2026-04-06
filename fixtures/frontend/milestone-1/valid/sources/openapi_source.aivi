@@ -1,0 +1,24 @@
+use aivi.api (ApiSource, ApiError)
+use aivi.http (DecodeMode)
+
+domain Duration over Int = { literal sec : Int -> Duration }
+domain Retry over Int = { literal times : Int -> Retry }
+
+type Pet = { id: Int, name: Text, status: Option Text }
+type NewPet = { name: Text, status: Option Text }
+
+value serverUrl : Text = "https://api.petstore.io/v2"
+value apiToken : Text = "my-token"
+
+@source api "./petstore.yaml" with {
+    baseUrl: serverUrl,
+    auth: BearerToken apiToken,
+    timeout: 30sec
+}
+signal petstore : ApiSource
+
+@source api "./petstore.yaml" with {
+    baseUrl: serverUrl,
+    timeout: 30sec
+}
+signal publicApi : ApiSource

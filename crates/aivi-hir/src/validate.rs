@@ -6259,7 +6259,12 @@ impl Validator<'_> {
                             BuiltinSourceProvider::HttpGet
                             | BuiltinSourceProvider::HttpPost
                             | BuiltinSourceProvider::DbLive
-                            | BuiltinSourceProvider::FsRead => {
+                            | BuiltinSourceProvider::FsRead
+                            | BuiltinSourceProvider::ApiGet
+                            | BuiltinSourceProvider::ApiPost
+                            | BuiltinSourceProvider::ApiPut
+                            | BuiltinSourceProvider::ApiPatch
+                            | BuiltinSourceProvider::ApiDelete => {
                                 unreachable!("request-like providers are handled above")
                             }
                         },

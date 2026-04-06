@@ -873,7 +873,8 @@ mod tests {
             Item::SourceProviderContract(_)
             | Item::Instance(_)
             | Item::Use(_)
-            | Item::Export(_) => "<anonymous>",
+            | Item::Export(_)
+            | Item::Hoist(_) => "<anonymous>",
         }
     }
 

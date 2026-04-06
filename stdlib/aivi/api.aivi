@@ -1,0 +1,27 @@
+hoist
+
+type ApiError =
+  | ApiTimeout
+  | ApiDecodeFailure Text
+  | ApiRequestFailure Text
+  | ApiUnauthorized
+  | ApiNotFound
+  | ApiServerError Text
+
+type ApiAuth =
+  | BearerToken Text
+  | BasicAuth Text Text
+  | ApiKey Text
+  | ApiKeyQuery Text
+  | OAuth2 Text
+
+type ApiSource = Unit
+
+type ApiResponse A = (Result ApiError A)
+
+export (
+    ApiError, ApiTimeout, ApiDecodeFailure, ApiRequestFailure, ApiUnauthorized, ApiNotFound, ApiServerError,
+    ApiAuth, BearerToken, BasicAuth, ApiKey, ApiKeyQuery, OAuth2,
+    ApiSource,
+    ApiResponse
+)

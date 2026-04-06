@@ -1227,6 +1227,169 @@ fn inherited_arguments(
     arguments
 }
 
+fn try_get_plain_text_literal<'a>(module: &'a Module, expr_id: ExprId) -> Option<&'a str> {
+    let expr = module.arenas.exprs.get(expr_id)?;
+    match &expr.kind {
+        ExprKind::Text(lit) if !lit.has_interpolation() => match lit.segments.as_slice() {
+            [] => Some(""),
+            [crate::TextSegment::Text(frag)] => Some(&frag.raw),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn synthesize_text_literal(module: &mut Module, text: &str, span: SourceSpan) -> ExprId {
+    module
+        .alloc_expr(Expr {
+            span,
+            kind: ExprKind::Text(crate::TextLiteral {
+                segments: vec![crate::TextSegment::Text(crate::TextFragment {
+                    raw: text.into(),
+                    span,
+                })],
+            }),
+        })
+        .expect("api capability lowering should fit inside the expression arena")
+}
+
+fn lower_api_signal_member(
+    module: &mut Module,
+    handle: &CapabilityHandleBinding,
+    invocation: &CapabilityInvocation,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<SourceDecorator> {
+    let operation_id = invocation.member.clone();
+    let spec_path_expr = handle.arguments.first().copied();
+    let spec_path_str = spec_path_expr
+        .and_then(|id| try_get_plain_text_literal(module, id))
+        .map(|s| s.to_owned());
+
+    if let Some(ref spec_path) = spec_path_str {
+        let path = std::path::Path::new(spec_path.as_str());
+        match aivi_openapi::parse_spec_and_find_operation(path, &operation_id) {
+            Some(info) => {
+                if !info.method.is_read_only() {
+                    diagnostics.push(
+                        Diagnostic::error(format!(
+                            "operation `{operation_id}` is a {} mutation; use `value` instead of `signal` for write operations",
+                            info.method.as_str()
+                        ))
+                        .with_code(code("api-mutation-used-as-signal"))
+                        .with_label(DiagnosticLabel::primary(
+                            invocation.span,
+                            "bind this as a `value` so it is executed as a one-shot command",
+                        )),
+                    );
+                    return None;
+                }
+                let op_path_expr = synthesize_text_literal(module, &info.path, invocation.span);
+                Some(SourceDecorator {
+                    provider: Some(provider_name_path(
+                        invocation.span,
+                        BuiltinSourceProvider::ApiGet,
+                    )),
+                    arguments: vec![
+                        spec_path_expr.unwrap_or(op_path_expr),
+                        op_path_expr,
+                    ],
+                    options: handle.options,
+                })
+            }
+            None => {
+                diagnostics.push(
+                    Diagnostic::error(format!(
+                        "operation `{operation_id}` not found in OpenAPI spec `{spec_path}`"
+                    ))
+                    .with_code(code("unknown-api-operation"))
+                    .with_label(DiagnosticLabel::primary(
+                        invocation.span,
+                        "check the operationId in the spec file",
+                    )),
+                );
+                None
+            }
+        }
+    } else {
+        let op_id_expr = synthesize_text_literal(module, &operation_id, invocation.span);
+        let spec_arg = spec_path_expr.unwrap_or(op_id_expr);
+        Some(SourceDecorator {
+            provider: Some(provider_name_path(
+                invocation.span,
+                BuiltinSourceProvider::ApiGet,
+            )),
+            arguments: vec![spec_arg, op_id_expr],
+            options: handle.options,
+        })
+    }
+}
+
+fn lower_api_value_member(
+    module: &mut Module,
+    handle: &CapabilityHandleBinding,
+    invocation: &CapabilityInvocation,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<ExprId> {
+    let operation_id = invocation.member.clone();
+    let spec_path_expr = handle.arguments.first().copied();
+    let spec_path_str = spec_path_expr
+        .and_then(|id| try_get_plain_text_literal(module, id))
+        .map(|s| s.to_owned());
+
+    if let Some(ref spec_path) = spec_path_str {
+        let path = std::path::Path::new(spec_path.as_str());
+        match aivi_openapi::parse_spec_and_find_operation(path, &operation_id) {
+            Some(info) => {
+                if info.method.is_read_only() {
+                    return None;
+                }
+                let intrinsic = match info.method {
+                    aivi_openapi::OperationMethod::Post => IntrinsicValue::HttpPost,
+                    aivi_openapi::OperationMethod::Put => IntrinsicValue::HttpPut,
+                    aivi_openapi::OperationMethod::Delete => IntrinsicValue::HttpDelete,
+                    aivi_openapi::OperationMethod::Patch => IntrinsicValue::HttpPut,
+                    _ => return None,
+                };
+                let arguments = combine_http_value_arguments(
+                    module,
+                    handle,
+                    &invocation.arguments,
+                    invocation.span,
+                    diagnostics,
+                );
+                Some(build_intrinsic_call(module, intrinsic, invocation.span, arguments))
+            }
+            None => {
+                diagnostics.push(
+                    Diagnostic::error(format!(
+                        "operation `{operation_id}` not found in OpenAPI spec `{spec_path}`"
+                    ))
+                    .with_code(code("unknown-api-operation"))
+                    .with_label(DiagnosticLabel::primary(
+                        invocation.span,
+                        "check the operationId in the spec file",
+                    )),
+                );
+                None
+            }
+        }
+    } else {
+        let arguments = combine_http_value_arguments(
+            module,
+            handle,
+            &invocation.arguments,
+            invocation.span,
+            diagnostics,
+        );
+        Some(build_intrinsic_call(
+            module,
+            IntrinsicValue::HttpPost,
+            invocation.span,
+            arguments,
+        ))
+    }
+}
+
 fn combine_http_value_arguments(
     module: &mut Module,
     handle: &CapabilityHandleBinding,
@@ -1465,6 +1628,7 @@ fn builtin_capability_family(path: &NamePath) -> Option<BuiltinCapabilityFamily>
         "imap" => Some(BuiltinCapabilityFamily::Imap),
         "smtp" => Some(BuiltinCapabilityFamily::Smtp),
         "time" => Some(BuiltinCapabilityFamily::Time),
+        "api" => Some(BuiltinCapabilityFamily::Api),
         _ => None,
     }
 }
@@ -1485,6 +1649,8 @@ fn supports_builtin_signal_member(family: BuiltinCapabilityFamily, member: &str)
         BuiltinCapabilityFamily::Imap => matches!(member, "connect" | "idle" | "fetchBody"),
         BuiltinCapabilityFamily::Time => matches!(member, "nowMs"),
         BuiltinCapabilityFamily::Log | BuiltinCapabilityFamily::Random | BuiltinCapabilityFamily::Smtp => false,
+        // Api members are dynamic (spec-based); validation happens in lower_api_signal_member.
+        BuiltinCapabilityFamily::Api => true,
     }
 }
 
@@ -1540,6 +1706,8 @@ fn supports_builtin_value_member(family: BuiltinCapabilityFamily, member: &str) 
         | BuiltinCapabilityFamily::Imap
         | BuiltinCapabilityFamily::Time => false,
         BuiltinCapabilityFamily::Smtp => matches!(member, "send"),
+        // Api members are dynamic (spec-based); validation happens in lower_api_value_member.
+        BuiltinCapabilityFamily::Api => true,
     }
 }
 
