@@ -64,7 +64,23 @@ impl Workspace {
             return Vec::new();
         };
         let mut result = Vec::new();
-        walk_aivi_files_from_embedded(root, db, &mut result);
+        for (relative_key, text) in STDLIB_EMBEDDED {
+            // Derive the dotted module path from the relative path (strip .aivi, / → .).
+            let module_name = relative_key.trim_end_matches(".aivi").replace('/', ".");
+            let segments: Vec<&str> = module_name.split('.').collect();
+
+            // If the workspace has its own version of this module, do not load
+            // the bundled copy at all — not even into the database.
+            if self.resolve_module_file_in_root(db, &self.root, &segments).is_some() {
+                continue;
+            }
+
+            let path = root.join(relative_key.replace('/', std::path::MAIN_SEPARATOR_STR));
+            let file = db
+                .file_at_path(&path)
+                .unwrap_or_else(|| SourceFile::new(db, path, text.to_string()));
+            result.push(file);
+        }
         result
     }
 
@@ -249,17 +265,5 @@ fn walk_aivi_files(dir: &Path, db: &RootDatabase, result: &mut Vec<SourceFile>) 
                 result.push(SourceFile::new(db, path, text));
             }
         }
-    }
-}
-
-/// Load every `.aivi` file from the embedded stdlib map, using `root` as the
-/// base path.  Falls back to disk if the embedded map doesn't cover a file.
-fn walk_aivi_files_from_embedded(root: &Path, db: &RootDatabase, result: &mut Vec<SourceFile>) {
-    for (relative_key, text) in STDLIB_EMBEDDED {
-        let path = root.join(relative_key.replace('/', std::path::MAIN_SEPARATOR_STR));
-        let file = db
-            .file_at_path(&path)
-            .unwrap_or_else(|| SourceFile::new(db, path, text.to_string()));
-        result.push(file);
     }
 }

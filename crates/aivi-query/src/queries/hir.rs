@@ -129,7 +129,14 @@ impl ImportResolver for WorkspaceImportResolver<'_> {
             return ImportModuleResolution::Cycle(cycle);
         }
 
-        let lowered = hir_module_with_stack(self.db, file, self.stack);
+        // Propagate the current workspace to sub-module lowering so that
+        // transitive imports (e.g. bundled stdlib files) use the user project
+        // workspace for both module resolution and hoist collection.  Without
+        // this, a bundled stdlib sub-module would rediscover the stdlib dir as
+        // its own workspace root and walk all stdlib files as "project files",
+        // incorrectly loading files that should remain absent from the db (such
+        // as bundledsmoketest.aivi when a workspace override exists).
+        let lowered = hir_module_with_stack(self.db, file, self.stack, Some(self.workspace));
         ImportModuleResolution::Resolved(lowered.exported_names().clone())
     }
 
@@ -144,15 +151,29 @@ impl ImportResolver for WorkspaceImportResolver<'_> {
 
 /// Lower the given source file to HIR and memoise the result by file revision.
 pub fn hir_module(db: &RootDatabase, file: SourceFile) -> Arc<HirModuleResult> {
-    hir_module_with_stack(db, file, &[])
+    hir_module_with_stack(db, file, &[], None)
 }
 
+/// `parent_workspace` propagates the calling compilation's workspace to
+/// transitive imports.  When `Some`, module resolution and hoist collection
+/// use the caller's workspace rather than re-discovering one from `file`.
+/// This is essential for bundled stdlib sub-modules, which would otherwise
+/// discover the stdlib directory as their own workspace and walk it as a
+/// project root, loading unrelated files into the database.
 fn hir_module_with_stack(
     db: &RootDatabase,
     file: SourceFile,
     parent_stack: &[ImportStackEntry],
+    parent_workspace: Option<&Workspace>,
 ) -> Arc<HirModuleResult> {
-    let workspace = Workspace::discover(db, file);
+    let owned_workspace;
+    let workspace = match parent_workspace {
+        Some(w) => w,
+        None => {
+            owned_workspace = Workspace::discover(db, file);
+            &owned_workspace
+        }
+    };
     let module_name = workspace
         .module_name_for_file(db, file)
         .unwrap_or_else(|| file.path(db).display().to_string());
@@ -165,7 +186,7 @@ fn hir_module_with_stack(
             return cached;
         }
 
-        let resolver = WorkspaceImportResolver::new(db, &workspace, &stack);
+        let resolver = WorkspaceImportResolver::new(db, workspace, &stack);
         let lowered: LoweringResult = lower_module_with_resolver(parsed.cst(), Some(&resolver));
         let hir_diagnostics = Arc::<[Diagnostic]>::from(lowered.diagnostics().to_vec());
         let mut diagnostics = parsed.diagnostics().to_vec();
@@ -252,6 +273,7 @@ fn collect_workspace_hoist_items(
 
     // Scan every bundled stdlib file so individual stdlib modules can declare
     // `hoist` themselves (e.g. `aivi/list.aivi` declaring `hoist`).
+    // all_bundled_stdlib_files() already filters out workspace-overridden files.
     for file in workspace.all_bundled_stdlib_files(db) {
         if seen.insert(file.id) {
             if let Some(module_name) = workspace.module_name_for_file(db, file) {
