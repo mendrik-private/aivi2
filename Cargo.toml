@@ -4,6 +4,7 @@ members = [
     "crates/aivi-core",
     "crates/aivi-lambda",
     "crates/aivi-hir",
+    "crates/aivi-openapi",
     "crates/aivi-runtime",
     "crates/aivi-gtk",
     "crates/aivi-backend",
@@ -24,6 +25,7 @@ rust-version = "1.94.1"
 aivi-base = { path = "crates/aivi-base" }
 aivi-hir = { path = "crates/aivi-hir" }
 aivi-lambda = { path = "crates/aivi-lambda" }
+aivi-openapi = { path = "crates/aivi-openapi" }
 aivi-syntax = { path = "crates/aivi-syntax" }
 aivi-typing = { path = "crates/aivi-typing" }
 aivi-query = { path = "crates/aivi-query" }

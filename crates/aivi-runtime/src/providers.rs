@@ -3463,15 +3463,7 @@ fn spawn_dbus_method_worker(
                 }
                 let reply = message.new_method_reply();
                 if let Some(body) = &reply_variant {
-                    eprintln!("[dbus-method-debug] setting reply body: type={} print={}", body.type_(), body.print(true));
                     reply.set_body(body);
-                    if let Some(actual) = reply.body() {
-                        eprintln!("[dbus-method-debug] reply body after set: type={} print={}", actual.type_(), actual.print(true));
-                    } else {
-                        eprintln!("[dbus-method-debug] reply body after set is None!");
-                    }
-                } else {
-                    eprintln!("[dbus-method-debug] no reply_variant configured");
                 }
                 let _ = connection.send_message(&reply, DBusSendMessageFlags::NONE);
                 if let (Some(path), Some(interface), Some(member)) =

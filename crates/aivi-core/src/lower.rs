@@ -1294,7 +1294,7 @@ impl<'a> ModuleLowerer<'a> {
         // by the backend).  Errors from blocked ambient items are suppressed — see
         // `lower_general_expr_body`.
         let ambient_report = elaborate_ambient_items(self.hir);
-        let (ambient_items, _, _) = ambient_report.into_parts();
+        let (ambient_items, ambient_domain_members, _) = ambient_report.into_parts();
         for item in ambient_items {
             if !self.includes_item(item.owner) {
                 continue;
@@ -1308,6 +1308,25 @@ impl<'a> ModuleLowerer<'a> {
                 item.body_expr,
                 item.parameters,
                 item.outcome,
+            );
+        }
+        for member in ambient_domain_members {
+            if !self.includes_item(member.domain_owner) {
+                continue;
+            }
+            let key = DomainMemberKey {
+                domain: member.domain_owner,
+                member_index: member.member_index,
+            };
+            let Some(owner) = self.domain_member_item_map.get(&key).copied() else {
+                continue;
+            };
+            self.lower_general_expr_body(
+                member.domain_owner,
+                owner,
+                member.body_expr,
+                member.parameters,
+                member.outcome,
             );
         }
     }
@@ -4240,11 +4259,11 @@ impl<'a> RuntimeFragmentLowerer<'a> {
         // Ambient prelude items are elaborated separately; merge their results so
         // runtime fragments that reference ambient functions can lower them.
         let ambient_report = elaborate_ambient_items(hir);
-        let (ambient_items, _, _) = ambient_report.into_parts();
+        let (ambient_items, ambient_domain_members, _) = ambient_report.into_parts();
         for item in ambient_items {
             report_by_owner.entry(item.owner).or_insert(item);
         }
-        let domain_member_reports = domain_members
+        let mut domain_member_reports: HashMap<_, _> = domain_members
             .into_iter()
             .map(|item| {
                 (
@@ -4256,6 +4275,14 @@ impl<'a> RuntimeFragmentLowerer<'a> {
                 )
             })
             .collect();
+        for member in ambient_domain_members {
+            domain_member_reports
+                .entry(DomainMemberKey {
+                    domain: member.domain_owner,
+                    member_index: member.member_index,
+                })
+                .or_insert(member);
+        }
         let instance_member_reports = instance_members
             .into_iter()
             .map(|item| {
@@ -4660,11 +4687,11 @@ impl<'a> RuntimeFragmentItemCollector<'a> {
         let mut report_by_owner: HashMap<HirItemId, _> = items.into_iter().map(|item| (item.owner, item)).collect();
         // Include ambient prelude items so fragment dependency collection can
         // transitively walk through ambient function bodies.
-        let (ambient_items, _, _) = elaborate_ambient_items(hir).into_parts();
+        let (ambient_items, ambient_domain_members, _) = elaborate_ambient_items(hir).into_parts();
         for item in ambient_items {
             report_by_owner.entry(item.owner).or_insert(item);
         }
-        let domain_member_reports = domain_members
+        let mut domain_member_reports: HashMap<_, _> = domain_members
             .into_iter()
             .map(|item| {
                 (
@@ -4676,6 +4703,14 @@ impl<'a> RuntimeFragmentItemCollector<'a> {
                 )
             })
             .collect();
+        for member in ambient_domain_members {
+            domain_member_reports
+                .entry(DomainMemberKey {
+                    domain: member.domain_owner,
+                    member_index: member.member_index,
+                })
+                .or_insert(member);
+        }
         let instance_member_reports = instance_members
             .into_iter()
             .map(|item| {

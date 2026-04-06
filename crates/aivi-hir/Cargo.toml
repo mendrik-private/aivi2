@@ -6,6 +6,7 @@ rust-version.workspace = true
 
 [dependencies]
 aivi-base.workspace = true
+aivi-openapi.workspace = true
 aivi-syntax.workspace = true
 aivi-typing.workspace = true
 regex-syntax.workspace = true

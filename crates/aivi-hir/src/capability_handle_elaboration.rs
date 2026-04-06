@@ -21,7 +21,7 @@ pub(crate) fn is_builtin_source_capability_family_path(path: &NamePath) -> bool 
     matches!(
         path.segments().first().text(),
         "fs" | "http" | "db" | "env" | "log" | "stdio" | "random" | "process" | "path" | "dbus"
-            | "imap" | "smtp" | "time"
+            | "imap" | "smtp" | "time" | "api"
     )
 }
 
@@ -59,6 +59,7 @@ enum BuiltinCapabilityFamily {
     Imap,
     Smtp,
     Time,
+    Api,
 }
 
 #[derive(Clone, Debug)]
@@ -887,6 +888,9 @@ fn lower_builtin_signal_member(
             }),
             _ => None,
         },
+        BuiltinCapabilityFamily::Api => {
+            lower_api_signal_member(module, handle, invocation, diagnostics)
+        }
     }
 }
 
@@ -1016,6 +1020,9 @@ fn lower_builtin_value_member(
         | BuiltinCapabilityFamily::Imap
         | BuiltinCapabilityFamily::Time => None,
         BuiltinCapabilityFamily::Smtp => None,
+        BuiltinCapabilityFamily::Api => {
+            lower_api_value_member(module, handle, invocation, diagnostics)
+        }
     }
 }
 

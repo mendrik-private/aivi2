@@ -43,10 +43,15 @@ pub enum BuiltinSourceProvider {
     SmtpSend,
     DbExec,
     TimeNowMs,
+    ApiGet,
+    ApiPost,
+    ApiPut,
+    ApiPatch,
+    ApiDelete,
 }
 
 impl BuiltinSourceProvider {
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 35] = [
         Self::HttpGet,
         Self::HttpPost,
         Self::TimerEvery,
@@ -77,6 +82,11 @@ impl BuiltinSourceProvider {
         Self::SmtpSend,
         Self::DbExec,
         Self::TimeNowMs,
+        Self::ApiGet,
+        Self::ApiPost,
+        Self::ApiPut,
+        Self::ApiPatch,
+        Self::ApiDelete,
     ];
 
     pub fn parse(key: &str) -> Option<Self> {
@@ -111,6 +121,11 @@ impl BuiltinSourceProvider {
             "smtp.send" => Some(Self::SmtpSend),
             "db.exec" => Some(Self::DbExec),
             "time.nowMs" => Some(Self::TimeNowMs),
+            "api.get" => Some(Self::ApiGet),
+            "api.post" => Some(Self::ApiPost),
+            "api.put" => Some(Self::ApiPut),
+            "api.patch" => Some(Self::ApiPatch),
+            "api.delete" => Some(Self::ApiDelete),
             _ => None,
         }
     }
@@ -147,6 +162,11 @@ impl BuiltinSourceProvider {
             Self::SmtpSend => "smtp.send",
             Self::DbExec => "db.exec",
             Self::TimeNowMs => "time.nowMs",
+            Self::ApiGet => "api.get",
+            Self::ApiPost => "api.post",
+            Self::ApiPut => "api.put",
+            Self::ApiPatch => "api.patch",
+            Self::ApiDelete => "api.delete",
         }
     }
 
@@ -240,6 +260,13 @@ impl BuiltinSourceProvider {
             }
             Self::TimeNowMs => {
                 SourceContract::new(self, &NO_OPTIONS, STATIC_RECURRENCE, STATIC_LIFECYCLE)
+            }
+            Self::ApiGet
+            | Self::ApiPost
+            | Self::ApiPut
+            | Self::ApiPatch
+            | Self::ApiDelete => {
+                SourceContract::new(self, api_options(), HTTP_RECURRENCE, HTTP_LIFECYCLE)
             }
         }
     }
@@ -709,6 +736,24 @@ const HTTP_WAKEUP_OPTIONS: [SourceOptionWakeupContract; 3] = [
     SourceOptionWakeupContract::new("refreshOn", SourceOptionWakeupCause::TriggerSignal),
     SourceOptionWakeupContract::new("refreshEvery", SourceOptionWakeupCause::PollingPolicy),
 ];
+
+// API_OPTIONS extends HTTP_OPTIONS with `baseUrl` and `auth` for OpenAPI capability handles.
+static API_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
+
+fn api_options() -> &'static [SourceOptionContract] {
+    API_OPTIONS_STORAGE.get_or_init(|| {
+        let mut opts = http_options().to_vec();
+        opts.push(SourceOptionContract::new(
+            "baseUrl",
+            SourceContractType::Atom(SourceTypeAtom::primitive(PrimitiveType::Text)),
+        ));
+        opts.push(SourceOptionContract::new(
+            "auth",
+            SourceContractType::parameter(SourceTypeParameter::A),
+        ));
+        opts
+    })
+}
 
 static TIMER_OPTIONS_STORAGE: OnceLock<Vec<SourceOptionContract>> = OnceLock::new();
 

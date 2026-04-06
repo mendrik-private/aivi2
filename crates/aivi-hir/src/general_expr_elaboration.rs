@@ -846,6 +846,7 @@ impl<'a> GeneralExprElaborator<'a> {
 
     fn build_ambient(mut self) -> GeneralExprElaborationReport {
         let mut items = Vec::new();
+        let mut domain_members = Vec::new();
         for (item_id, item) in self.module.items().iter() {
             if !self.module.ambient_items().contains(&item_id) {
                 continue;
@@ -853,10 +854,13 @@ impl<'a> GeneralExprElaborator<'a> {
             match item {
                 Item::Value(value) => items.push(self.elaborate_value(item_id, value)),
                 Item::Function(function) => items.push(self.elaborate_function(item_id, function)),
+                Item::Domain(domain) => {
+                    domain_members.extend(self.elaborate_domain_members(item_id, domain));
+                }
                 _ => {}
             }
         }
-        GeneralExprElaborationReport::new(items, Vec::new(), Vec::new())
+        GeneralExprElaborationReport::new(items, domain_members, Vec::new())
     }
 
     fn collect_markup_runtime_expr_sites(
