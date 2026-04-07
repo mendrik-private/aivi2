@@ -72,7 +72,8 @@ where
     ) -> Result<(), GlibSchedulerError> {
         self.with_state_mut(|state| state.scheduler.queue_publication(publication))
             .map_err(GlibSchedulerError::SchedulerAccess)?;
-        self.shared.drive_pending_ticks();
+        self.shared
+            .drive_pending_ticks(GlibTickDrainMode::UntilIdle);
         Ok(())
     }
 
@@ -201,6 +202,20 @@ fn assert_non_reentrant_driver_access() {
     });
 }
 
+const GLIB_ASYNC_WAKE_TICK_BUDGET: usize = 32;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GlibTickDrainMode {
+    UntilIdle,
+    AsyncWakeBudgeted,
+}
+
+impl GlibTickDrainMode {
+    fn should_yield_after_tick(self, drained_ticks: usize) -> bool {
+        matches!(self, Self::AsyncWakeBudgeted) && drained_ticks >= GLIB_ASYNC_WAKE_TICK_BUDGET
+    }
+}
+
 #[derive(Clone)]
 pub struct GlibWorkerPublicationSender<V, E>
 where
@@ -260,14 +275,20 @@ where
             return;
         }
 
+        self.spawn_async_tick_drive();
+    }
+
+    fn spawn_async_tick_drive(self: &Arc<Self>) {
         let shared = self.clone();
         self.context.spawn(async move {
-            shared.drive_pending_ticks();
+            shared.drive_pending_ticks(GlibTickDrainMode::AsyncWakeBudgeted);
         });
     }
 
-    fn drive_pending_ticks(&self) {
-        let _guard = TickExecutionGuard::enter();
+    fn drive_pending_ticks(self: &Arc<Self>, mode: GlibTickDrainMode) {
+        let guard = TickExecutionGuard::enter();
+        let mut drained_ticks = 0usize;
+        let mut reschedule = false;
         loop {
             self.tick_enqueued.store(false, Ordering::Release);
 
@@ -299,9 +320,19 @@ where
                 self.tick_enqueued.load(Ordering::Acquire) || queued_count > 0
             };
 
+            drained_ticks = drained_ticks.saturating_add(1);
+
             if !should_continue {
                 break;
             }
+            if mode.should_yield_after_tick(drained_ticks) {
+                reschedule = true;
+                break;
+            }
+        }
+        drop(guard);
+        if reschedule {
+            self.request_tick();
         }
     }
 }
@@ -581,7 +612,8 @@ impl GlibLinkedRuntimeDriver {
     }
 
     pub fn tick_now(&self) {
-        self.shared.drive_pending_ticks();
+        self.shared
+            .drive_pending_ticks(GlibTickDrainMode::UntilIdle);
     }
 
     pub fn request_tick(&self) {
@@ -728,9 +760,13 @@ impl GlibLinkedRuntimeShared {
             return;
         }
 
+        self.spawn_async_tick_drive();
+    }
+
+    fn spawn_async_tick_drive(self: &Arc<Self>) {
         let shared = self.clone();
         self.context.spawn(async move {
-            shared.drive_pending_ticks();
+            shared.drive_pending_ticks(GlibTickDrainMode::AsyncWakeBudgeted);
         });
     }
 
@@ -754,12 +790,14 @@ impl GlibLinkedRuntimeShared {
         state.linked.invalidate_db_commit(invalidation)
     }
 
-    fn drive_pending_ticks(&self) {
+    fn drive_pending_ticks(self: &Arc<Self>, mode: GlibTickDrainMode) {
         if self.stopped.load(Ordering::Acquire) {
             return;
         }
-        let _guard = TickExecutionGuard::enter();
+        let guard = TickExecutionGuard::enter();
         let mut notify = false;
+        let mut drained_ticks = 0usize;
+        let mut reschedule = false;
         loop {
             self.tick_enqueued.store(false, Ordering::Release);
             let mut state = self
@@ -802,6 +840,7 @@ impl GlibLinkedRuntimeShared {
                     false
                 }
             };
+            drained_ticks = drained_ticks.saturating_add(1);
             *self
                 .state
                 .lock()
@@ -810,9 +849,17 @@ impl GlibLinkedRuntimeShared {
             if !should_continue {
                 break;
             }
+            if mode.should_yield_after_tick(drained_ticks) {
+                reschedule = true;
+                break;
+            }
         }
+        drop(guard);
         if notify {
             self.notify_tick_ready();
+        }
+        if reschedule {
+            self.request_tick();
         }
     }
 }
@@ -852,7 +899,10 @@ mod tests {
         scheduler::{DependencyValues, Publication, Scheduler},
     };
 
-    use super::{GlibLinkedRuntimeDriver, GlibSchedulerDriver, TickExecutionGuard};
+    use super::{
+        GLIB_ASYNC_WAKE_TICK_BUDGET, GlibLinkedRuntimeDriver, GlibSchedulerDriver,
+        TickExecutionGuard,
+    };
 
     struct LoweredStack {
         hir: hir::LoweringResult,
@@ -947,22 +997,49 @@ mod tests {
         )))
     }
 
-    fn pump_until(context: &MainContext, mut condition: impl FnMut() -> bool) {
-        let deadline = Instant::now() + Duration::from_secs(5);
+    fn expected_runtime_int(value: i64) -> DetachedRuntimeValue {
+        DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Int(value))
+    }
+
+    fn pump_context(context: &MainContext, duration: Duration) {
+        let deadline = Instant::now() + duration;
         while Instant::now() < deadline {
             while context.pending() {
                 context.iteration(false);
-            }
-            if condition() {
-                return;
             }
             thread::sleep(Duration::from_millis(10));
         }
         while context.pending() {
             context.iteration(false);
         }
+    }
+
+    fn pump_until(context: &MainContext, mut condition: impl FnMut() -> bool) {
+        let _ = pump_until_with_iterations(context, &mut condition);
+    }
+
+    fn pump_until_with_iterations(
+        context: &MainContext,
+        mut condition: impl FnMut() -> bool,
+    ) -> usize {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut iterations = 0usize;
+        while Instant::now() < deadline {
+            while context.pending() {
+                context.iteration(false);
+                iterations = iterations.saturating_add(1);
+            }
+            if condition() {
+                return iterations;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        while context.pending() {
+            context.iteration(false);
+            iterations = iterations.saturating_add(1);
+        }
         if condition() {
-            return;
+            return iterations;
         }
         panic!("GLib main context did not reach the expected scheduler state");
     }
@@ -1073,6 +1150,71 @@ mod tests {
     }
 
     #[test]
+    fn glib_driver_yields_long_worker_publication_chains_across_multiple_wakes() {
+        let context = MainContext::new();
+        context
+            .with_thread_default(|| {
+                let mut builder = SignalGraphBuilder::new();
+                let input = builder.add_input("input", None).unwrap();
+                let mirror = builder.add_derived("mirror", None).unwrap();
+                builder.define_derived(mirror, [input.as_signal()]).unwrap();
+
+                let publish_next: Arc<Mutex<Option<Box<dyn Fn(i32) + Send + 'static>>>> =
+                    Arc::new(Mutex::new(None));
+                let publish_next_in_evaluator = publish_next.clone();
+                let driver = GlibSchedulerDriver::new(
+                    context.clone(),
+                    Scheduler::new(builder.build().unwrap()),
+                    move |_signal, inputs: DependencyValues<'_, i32>| {
+                        let current = inputs.value(0).copied();
+                        if let Some(current) = current {
+                            if let Some(callback) = publish_next_in_evaluator
+                                .lock()
+                                .expect("publish-next hook mutex should not be poisoned")
+                                .as_ref()
+                            {
+                                callback(current);
+                            }
+                        }
+                        current
+                    },
+                );
+
+                let sender = driver.worker_sender();
+                let stamp = driver.current_stamp(input).unwrap();
+                let target = GLIB_ASYNC_WAKE_TICK_BUDGET as i32 + 8;
+                *publish_next
+                    .lock()
+                    .expect("publish-next hook mutex should not be poisoned") =
+                    Some(Box::new(move |current| {
+                        if current < target {
+                            sender
+                                .publish(Publication::new(stamp, current + 1))
+                                .expect("worker publication chain should stay live");
+                        }
+                    }));
+
+                driver
+                    .queue_publication(Publication::new(stamp, 0_i32))
+                    .unwrap();
+
+                let iterations = pump_until_with_iterations(&context, || {
+                    driver.current_value(mirror.as_signal()).unwrap() == Some(target)
+                });
+
+                assert!(
+                    iterations > 1,
+                    "long worker-publication chains should yield across multiple GLib wakes"
+                );
+                assert_eq!(
+                    driver.current_value(mirror.as_signal()).unwrap(),
+                    Some(target)
+                );
+            })
+            .unwrap();
+    }
+
+    #[test]
     fn glib_linked_runtime_processes_window_key_source_events_via_context_wakeups() {
         let context = MainContext::new();
         context
@@ -1129,6 +1271,104 @@ signal keyDown : Signal Text
                         Some(&expected_signal_text(name))
                     );
                 }
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn glib_linked_runtime_stop_keeps_queued_follow_up_callbacks_inert() {
+        let context = MainContext::new();
+        context
+            .with_thread_default(|| {
+                let lowered = lower_text(
+                    "glib-runtime-stop-after-queued-follow-up.aivi",
+                    r#"
+signal count : Signal Int
+signal mirror : Signal Int = count
+"#,
+                );
+                let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+                    .expect("runtime assembly should build");
+                let count_input = assembly
+                    .signal(item_id(lowered.hir.module(), "count"))
+                    .expect("count signal binding should exist")
+                    .input()
+                    .expect("count should lower as a runtime input");
+                let mirror_signal = assembly
+                    .signal(item_id(lowered.hir.module(), "mirror"))
+                    .expect("mirror signal binding should exist")
+                    .signal();
+                let driver_slot: Arc<Mutex<Option<GlibLinkedRuntimeDriver>>> =
+                    Arc::new(Mutex::new(None));
+                let first_wake = Arc::new(Mutex::new(true));
+                let notifier: Arc<dyn Fn() + Send + Sync + 'static> = {
+                    let driver_slot = driver_slot.clone();
+                    let first_wake = first_wake.clone();
+                    Arc::new(move || {
+                        let mut first = first_wake
+                            .lock()
+                            .expect("first-wake mutex should not be poisoned");
+                        if !*first {
+                            return;
+                        }
+                        *first = false;
+                        drop(first);
+
+                        let driver = driver_slot
+                            .lock()
+                            .expect("driver slot mutex should not be poisoned")
+                            .as_ref()
+                            .expect("driver should be installed before notifier runs")
+                            .clone();
+                        let stamp = driver.current_stamp(count_input).unwrap();
+                        driver
+                            .queue_publication(Publication::new(
+                                stamp,
+                                DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Int(2)),
+                            ))
+                            .expect("follow-up publication should queue before stop");
+                        driver.stop();
+                    })
+                };
+                let linked = crate::link_backend_runtime(
+                    assembly,
+                    &lowered.core,
+                    Arc::new(lowered.backend.clone()),
+                )
+                .expect("startup link should succeed");
+                let driver = GlibLinkedRuntimeDriver::new(
+                    context.clone(),
+                    linked,
+                    SourceProviderManager::new(),
+                    Some(notifier),
+                );
+                *driver_slot
+                    .lock()
+                    .expect("driver slot mutex should not be poisoned") = Some(driver.clone());
+
+                let stamp = driver.current_stamp(count_input).unwrap();
+                driver
+                    .queue_publication(Publication::new(
+                        stamp,
+                        DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Int(1)),
+                    ))
+                    .expect("initial publication should queue");
+
+                pump_until(&context, || {
+                    driver.failure_count() > 0 || driver.outcome_count() > 0
+                });
+                pump_context(&context, Duration::from_millis(50));
+
+                assert_eq!(driver.failure_count(), 0);
+                assert_eq!(
+                    driver.current_signal_value(mirror_signal).unwrap(),
+                    Some(expected_runtime_int(1))
+                );
+                assert_eq!(
+                    driver.drain_outcomes().len(),
+                    1,
+                    "stop should suppress the queued follow-up callback before it can commit"
+                );
             })
             .unwrap();
     }

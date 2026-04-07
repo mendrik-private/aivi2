@@ -3722,8 +3722,12 @@ fn plan_run_node(
             })
         }
         GtkBridgeNodeKind::Match(match_node) => {
-            let value =
-                evaluate_run_input(&shared.inputs, globals, match_node.scrutinee.input, env)?;
+            let value = evaluate_run_input(
+                &shared.inputs,
+                globals,
+                match_node.scrutinee.input,
+                env,
+            )?;
             let mut matched = None;
             for (index, branch) in match_node.cases.iter().enumerate() {
                 let mut bindings = RuntimeBindingEnv::new();
@@ -3772,7 +3776,12 @@ fn plan_run_node(
             )?,
         }),
         GtkBridgeNodeKind::With(with_node) => {
-            let value = evaluate_run_input(&shared.inputs, globals, with_node.value.input, env)?;
+            let value = evaluate_run_input(
+                &shared.inputs,
+                globals,
+                with_node.value.input,
+                env,
+            )?;
             let mut child_env = env.clone();
             child_env.insert(with_node.binding, strip_signal_runtime_value(value));
             Ok(HydratedRunNode::With {

@@ -78,3 +78,11 @@ Implemented brace-bodied closed-sum companions and updated the spec/docs to stop
 - `crates/aivi-hir/`: companion members now lower to ordinary synthetic function items that retain owner type parameters
 - `crates/aivi-cli/tests/check.rs`: CLI checks for same-module and imported companion usage
 - `manual/guide/types.md`, `syntax.md`, `manual/guide/surface-feature-matrix.md`, `AIVI_RFC.md`: user-facing docs and spec updated to describe the implemented surface
+
+## [2026-04-07] ingest | GLib driver fairness budget
+
+Hardened the GLib runtime adapter so async wake-driven draining can no longer run an unbounded number of ticks on one GTK main-loop wake.
+
+- `crates/aivi-runtime/src/glib_adapter.rs`: both `GlibSchedulerShared` and `GlibLinkedRuntimeShared` now apply a fixed 32-tick async wake budget, yield between ticks, and reschedule another GLib callback when work remains
+- Explicit synchronous drains (`queue_publication_now`, `tick_now`) still run until idle
+- Added stress coverage for long worker-publication chains and linked-runtime stop safety after a queued follow-up callback

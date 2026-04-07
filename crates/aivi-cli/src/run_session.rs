@@ -769,11 +769,24 @@ pub(super) fn start_run_session_with_launch_config(
     })?;
 
     let context = glib::MainContext::default();
-    let (update_tx, update_rx) = sync_mpsc::channel::<()>();
+    let scheduled_session = Arc::new(std::sync::Mutex::new(
+        None::<Arc<glib::thread_guard::ThreadGuard<Box<dyn Fn() + 'static>>>>,
+    ));
     let session_notifier: Arc<dyn Fn() + Send + Sync + 'static> = {
-        let update_tx = update_tx.clone();
+        let context = context.clone();
+        let scheduled_session = scheduled_session.clone();
         Arc::new(move || {
-            let _ = update_tx.send(());
+            let callback = scheduled_session
+                .lock()
+                .expect("run-session notifier state mutex should not be poisoned")
+                .clone();
+            let Some(callback) = callback else {
+                return;
+            };
+            let callback = callback.clone();
+            context.spawn(async move {
+                (callback.get_ref())();
+            });
         })
     };
     let driver = GlibLinkedRuntimeDriver::new(
@@ -846,20 +859,15 @@ pub(super) fn start_run_session_with_launch_config(
     {
         let weak_session = Rc::downgrade(&session);
         let schedule_state = schedule_state.clone();
-        glib::timeout_add_local(std::time::Duration::from_millis(1), move || {
-            let Some(session) = weak_session.upgrade() else {
-                return glib::ControlFlow::Break;
-            };
-            loop {
-                match update_rx.try_recv() {
-                    Ok(()) => schedule_run_session(&session, &schedule_state),
-                    Err(sync_mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
-                    Err(sync_mpsc::TryRecvError::Disconnected) => {
-                        return glib::ControlFlow::Break;
-                    }
+        let callback: Arc<glib::thread_guard::ThreadGuard<Box<dyn Fn() + 'static>>> =
+            Arc::new(glib::thread_guard::ThreadGuard::new(Box::new(move || {
+                if let Some(session) = weak_session.upgrade() {
+                    schedule_run_session(&session, &schedule_state);
                 }
-            }
-        });
+            })));
+        *scheduled_session
+            .lock()
+            .expect("run-session notifier state mutex should not be poisoned") = Some(callback);
     }
 
     session.borrow().driver.tick_now();
@@ -1405,7 +1413,7 @@ mod tests {
             "shifted snake demo should start with runway"
         );
 
-        pump_context(&context, Duration::from_millis(650));
+        pump_context(&context, Duration::from_millis(250));
         assert_eq!(
             board_text_for(&harness, board_item),
             initial_board,
@@ -1592,6 +1600,7 @@ export main
             RunLaunchConfig::default(),
         )
         .expect("payload event handler fixture should start a run session");
+        let context = harness.control().context();
         let beta = harness
             .root_windows()
             .iter()
@@ -1602,14 +1611,10 @@ export main
         assert_eq!(text_signal_for(&harness, selected_item), "None");
 
         beta.emit_clicked();
-        harness.with_access(|access| {
-            access
-                .process_pending_work()
-                .expect("clicked payload event should process in one work cycle");
-        });
-        assert_eq!(
-            text_signal_for(&harness, selected_item),
-            "Beta",
+        assert!(
+            pump_until(&context, Duration::from_millis(100), || {
+                text_signal_for(&harness, selected_item) == "Beta"
+            }),
             "payload event hooks should publish the clicked row binding into the selected signal"
         );
 
@@ -1630,7 +1635,7 @@ export main
             .expect("presenting the reversi window should release startup-held timers");
         assert_eq!(
             text_signal_for(&harness, status_item),
-            "You are red",
+            "You are 🔴",
             "reversi should start on the human turn"
         );
 
@@ -1674,14 +1679,10 @@ export main
             .find_map(|window| find_button_by_label(&window.clone().upcast::<gtk::Widget>(), "◌"))
             .expect("reversi board should still expose a legal opening move after idling");
         opening_move.emit_clicked();
-        harness.with_access(|access| {
-            access
-                .process_pending_work()
-                .expect("idle opening move should still process in one work cycle");
-        });
-        assert_ne!(
-            text_signal_for(&harness, last_move_item),
-            "Opening position",
+        assert!(
+            pump_until(&context, Duration::from_millis(100), || {
+                text_signal_for(&harness, last_move_item) != "Opening position"
+            }),
             "an idle reversi session should still accept the first human move"
         );
 
@@ -1710,26 +1711,19 @@ export main
             .find_map(|window| find_button_by_label(&window.clone().upcast::<gtk::Widget>(), "◌"))
             .expect("reversi board should expose a legal opening move");
         opening_move.emit_clicked();
-        harness.with_access(|access| {
-            access
-                .process_pending_work()
-                .expect("the first human move should process in one work cycle");
-        });
-        assert_eq!(
-            text_signal_for(&harness, status_item),
-            "Computer is choosing...",
-            "the first move should hand control to the AI"
+        assert!(
+            pump_until(&context, Duration::from_millis(100), || {
+                text_signal_for(&harness, status_item) == "Computer is choosing..."
+                    && text_signal_for(&harness, preview_item).starts_with("Computer is eyeing")
+            }),
+            "the first move should promptly hand control to the AI and expose its planned target"
         );
         assert!(
-            text_signal_for(&harness, preview_item).starts_with("Computer is eyeing"),
-            "once the human move lands the AI should already expose its planned target"
-        );
-        assert!(
-            pump_until(&context, Duration::from_secs(3), || {
+            pump_until(&context, Duration::from_millis(500), || {
                 text_signal_for(&harness, status_item) == "Your turn"
                     && text_signal_for(&harness, last_move_item).starts_with("Computer plays")
             }),
-            "after the AI reply the game should return to a playable human turn (status: {}, preview: {}, last move: {}, action: {}, session: {}, history: {})",
+            "after the AI reply the game should quickly return to a playable human turn (status: {}, preview: {}, last move: {}, action: {}, session: {}, history: {})",
             text_signal_for(&harness, status_item),
             text_signal_for(&harness, preview_item),
             text_signal_for(&harness, last_move_item),
@@ -1756,13 +1750,10 @@ export main
             })
             .expect("reversi should expose another clickable human move after the AI reply");
         second_move.emit_clicked();
-        harness.with_access(|access| {
-            access
-                .process_pending_work()
-                .expect("the second human move should still process cleanly");
-        });
         assert!(
-            text_signal_for(&harness, last_move_item).starts_with("You plays"),
+            pump_until(&context, Duration::from_millis(100), || {
+                text_signal_for(&harness, last_move_item).starts_with("You plays")
+            }),
             "the second human move should update the move summary instead of crashing (status: {}, preview: {}, last move: {}, action: {}, session: {}, history: {})",
             text_signal_for(&harness, status_item),
             text_signal_for(&harness, preview_item),

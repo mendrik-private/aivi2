@@ -319,8 +319,8 @@ impl McpHostState {
     ) -> Result<SourcePublishResult, String> {
         let source_id = parse_source_id(&args.source_id)?;
         let before = self.list_signals(ListSignalsArgs::default())?;
-        let started_at = Instant::now();
         let session = self.require_session()?;
+        let started_at = Instant::now();
         session.harness.with_access(|access| {
             let driver = access.driver();
             if args.suspend_live.unwrap_or(true) {
@@ -2818,7 +2818,7 @@ mod tests {
             .session_status()
             .expect("reversi MCP session should report status after launch")
             .latest_applied_hydration;
-        let idle_deadline = std::time::Instant::now() + std::time::Duration::from_millis(650);
+        let idle_deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
         while std::time::Instant::now() < idle_deadline {
             host.process_context_work();
             host.session
@@ -2839,6 +2839,7 @@ mod tests {
         let opening_move = host
             .find_widgets(FindWidgetsArgs {
                 text_contains: Some("◌".to_owned()),
+                role: Some("button".to_owned()),
                 actionable: Some(true),
                 ..Default::default()
             })

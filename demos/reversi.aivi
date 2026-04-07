@@ -55,6 +55,12 @@ type Score = {
     computer: Int
 }
 
+type CellView = {
+    label: Text,
+    enabled: Bool,
+    opacity: Float
+}
+
 type Snapshot = {
     board: Matrix Disc,
     turn: Player,
@@ -81,6 +87,7 @@ value boardIndices : List Int = matrixIndices boardSize
 value raySteps : List Int = listTailOrEmpty boardIndices
 value emptyCoords : List Coord = []
 value emptyHistory : List Move = []
+value defaultCellView : CellView = { label: "·", enabled: False, opacity: 1.0 }
 
 value directions : List Vector = [
     Delta neg1 neg1,
@@ -459,15 +466,15 @@ func statusLine = snapshot score => snapshotGameOver snapshot
 type List Move -> Text
 func statusFromHistory = history => listNonEmpty history
  T|> statusLine (snapshotFromHistory history) (countScore (boardFromHistory history))
- F|> "You are red"
+ F|> "You are 🔴"
 
 type Score -> Text
 func scoreLine = score =>
-    "You (X): {score.human}   Computer (O): {score.computer}"
+    "You 🔴: {score.human}   Computer ⚪: {score.computer}"
 
 type Option Coord -> Text
 func previewLine = opt => opt
- ||> None       -> "Click a + square to place X."
+ ||> None       -> "Click a ◌ square to place 🔴."
  ||> Some coord -> "Computer is eyeing {coordLabel coord}."
 
 type Option Coord -> Int -> Int -> Bool
@@ -478,7 +485,7 @@ func previewAt = opt x y => opt
 type Bool -> Text
 func legalMoveLabel = legal => legal
  T|> "◌"
- F|> "."
+ F|> "·"
 
 type Bool -> Bool -> Text
 func emptyCellLabel = legal preview => preview
@@ -490,21 +497,49 @@ func cellKey = y x =>
     y * boardSize + x
 
 type Snapshot -> Option Coord -> Int -> Int -> Text
-func cellLabelAt = snapshot preview y x =>
+func cellLabelAt = snapshot preview x y =>
     matrixAt snapshot.board x y
  ||> Some Black -> "🔴"
  ||> Some White -> "⚪"
  ||> Some Empty -> emptyCellLabel (listContains coordEq (Coord x y) (snapshotCurrentMoves snapshot)) (previewAt preview x y)
- ||> None       -> "."
+ ||> None       -> "·"
 
 type Snapshot -> Int -> Int -> Bool
-func cellEnabledAt = snapshot y x =>
+func cellEnabledAt = snapshot x y =>
     snapshot.turn == Human and listContains coordEq (Coord x y) (snapshotCurrentMoves snapshot)
 
 type Option Coord -> Int -> Int -> Float
 func cellOpacityAt = preview x y => previewAt preview x y
  T|> 0.55
  F|> 1.0
+
+type Int -> Int -> CellView
+func fillCellView = x y =>
+    defaultCellView
+
+value emptyCellViews : Matrix CellView =
+    matrixFilled boardSize boardSize fillCellView
+
+type Snapshot -> Option Coord -> Int -> Int -> CellView
+func buildCellView = snapshot preview x y =>
+    {
+        label: cellLabelAt snapshot preview x y,
+        enabled: cellEnabledAt snapshot x y,
+        opacity: cellOpacityAt preview x y
+    }
+
+type Snapshot -> Option Coord -> Matrix CellView
+func boardCellViews = snapshot preview =>
+    resultWithDefault emptyCellViews (matrixInit boardSize boardSize (buildCellView snapshot preview))
+
+type Snapshot -> Matrix CellView
+func cellViewsFromSnapshot = snapshot =>
+    boardCellViews snapshot (snapshotAiTarget snapshot)
+
+type Matrix CellView -> Int -> Int -> CellView
+func cellViewAt = cells x y => matrixAt cells x y
+ ||> Some cell -> cell
+ ||> None      -> defaultCellView
 
 signal placeCoord : Signal Coord
 
@@ -518,7 +553,7 @@ signal timerControl : Signal TimerControl = placeCoord | restartClick
 signal timerEnabled : Signal Bool = timerControl
  +|> False stepTimerEnabled
 
-@source timer.after 640ms with {
+@source timer.after 180ms with {
     immediate: False,
     activeWhen: timerEnabled,
     restartOn: aiTrigger
@@ -546,6 +581,9 @@ signal gameOver : Signal Bool = snapshot
 
 signal aiPreview : Signal (Option Coord) = snapshot
   |> snapshotAiTarget
+
+signal cellViews : Signal (Matrix CellView) = snapshot
+  |> cellViewsFromSnapshot
 
 signal score : Signal Score = snapshot
   |> .board
@@ -578,30 +616,30 @@ value main =
             <show when={gameOver}>
                 <Label text={finalText} />
             </show>
-            <Label text="X = you, O = computer, + = legal move." wrap />
+            <Label text="🔴 = you, ⚪ = computer, ◌ = legal move, ○ = AI preview." wrap />
             <Button label="Restart" onClick={restartClick} compact hasFrame={False} />
-            <with value={snapshot} as={state}>
-                <with value={aiPreview} as={preview}>
-                    <Box orientation="vertical" spacing={2}>
-                        <each of={boardIndices} as={y} key={y}>
-                            <Box orientation="horizontal" spacing={2}>
-                                <each of={boardIndices} as={x} key={cellKey y x}>
+            <with value={cellViews} as={cells}>
+                <Box orientation="vertical" spacing={2}>
+                    <each of={boardIndices} as={y} key={y}>
+                        <Box orientation="horizontal" spacing={2}>
+                            <each of={boardIndices} as={x} key={cellKey y x}>
+                                <with value={cellViewAt cells x y} as={cell}>
                                     <Button
-                                        label={cellLabelAt state preview y x}
+                                        label={cell.label}
                                         onClick={placeCoord (Coord x y)}
-                                        sensitive={cellEnabledAt state y x}
+                                        sensitive={cell.enabled}
                                         compact
                                         hasFrame={False}
                                         animateOpacity={True}
-                                        opacity={cellOpacityAt preview x y}
+                                        opacity={cell.opacity}
                                         widthRequest={56}
                                         heightRequest={56}
                                     />
-                                </each>
-                            </Box>
-                        </each>
-                    </Box>
-                </with>
+                                </with>
+                            </each>
+                        </Box>
+                    </each>
+                </Box>
             </with>
         </Box>
     </Window>

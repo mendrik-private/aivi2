@@ -132,6 +132,12 @@ External source values (JSON, D-Bus replies, HTTP responses) are decoded into ty
 - `GlibWorkerPublicationSender` is the `Send` channel from workers to the scheduler
 - `GlibSchedulerDriver` drives tick scheduling within the GLib main loop
 
+Fairness boundary:
+- Async GLib wakeups are now **budgeted** in `glib_adapter.rs`: one wake drains at most 32 ticks before yielding back to the main loop.
+- If queued work remains after the budget is exhausted, the driver re-arms another GLib callback and continues on the next wake instead of monopolising the GTK thread.
+- Explicit synchronous drains (`queue_publication_now()`, `tick_now()`) still run until idle; the budget only applies to async `request_tick()` / worker-triggered wakes.
+- `GlibLinkedRuntimeDriver::stop()` remains authoritative over queued follow-up callbacks: rescheduled async wakes check the stop flag and become inert under teardown.
+
 `GlibLinkedRuntimeFailure` represents fatal runtime errors that cause application teardown.
 
 ## Runtime Errors
