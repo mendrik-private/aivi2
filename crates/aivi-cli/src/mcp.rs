@@ -2816,15 +2816,9 @@ mod tests {
             })
             .expect("reversi should expose legal opening moves through MCP")
             .into_iter()
-            .find(|widget| {
-                widget.path
-                    == vec![
-                        "window[0]".to_owned(),
-                        "box[2]".to_owned(),
-                        "box[3]".to_owned(),
-                    ]
-            })
-            .expect("the opening move at row 3 column 4 should be discoverable");
+            .next()
+            .expect("reversi should expose at least one clickable opening move");
+        let clicked_path = opening_move.path.clone();
 
         let result = host
             .emit_gtk_event(EmitGtkEventArgs {
@@ -2855,12 +2849,13 @@ mod tests {
             "the click should update the reversi move summary"
         );
 
-        let clicked_cell = widget_snapshot_by_path(&result.gtk, &["window[0]", "box[2]", "box[3]"])
+        let clicked_path_refs: Vec<&str> = clicked_path.iter().map(|segment| segment.as_str()).collect();
+        let clicked_cell = widget_snapshot_by_path(&result.gtk, &clicked_path_refs)
             .expect("the clicked board cell should still exist in the GTK snapshot");
         assert_eq!(
             clicked_cell.text.as_deref(),
-            Some("🎯"),
-            "the clicked cell should show the last-placed animation while the computer is thinking"
+            Some("🔴"),
+            "the clicked cell should redraw as the newly placed human disc"
         );
         assert!(
             !clicked_cell.sensitive,

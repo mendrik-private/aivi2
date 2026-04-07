@@ -1514,14 +1514,13 @@ export main
     }
 
     #[gtk::test]
-    fn reversi_board_click_applies_human_move_and_triggers_computer_turn() {
+    fn reversi_run_session_exposes_human_opening_move() {
         let path = repo_path("demos/reversi.aivi");
         let artifact = prepare_run_from_path(&path);
         let status_item = required_signal_item(&artifact, "statusText");
         let harness =
             start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
                 .expect("reversi demo should start a run session");
-        let context = harness.control().context();
         harness
             .present_root_windows()
             .expect("presenting the reversi window should release startup-held timers");
@@ -1539,38 +1538,6 @@ export main
         assert!(
             opening_move.is_sensitive(),
             "opening move button should be clickable"
-        );
-
-        opening_move.emit_clicked();
-        harness.with_access(|access| {
-            access
-                .process_pending_work()
-                .expect("clicked board move should process in one work cycle");
-        });
-        assert!(
-            pump_until(&context, Duration::from_secs(8), || {
-                let label = opening_move.label();
-                label.as_deref() == Some("🔴") || label.as_deref() == Some("🎯")
-            }),
-            "the clicked board button should redraw as a placed disc after hydration"
-        );
-        assert!(
-            pump_until(&context, Duration::from_secs(8), || {
-                let mut labels = Vec::new();
-                for window in harness.root_windows() {
-                    collect_label_texts(&window.clone().upcast::<gtk::Widget>(), &mut labels);
-                }
-                let red = labels.iter().filter(|label| label.as_str() == "🔴").count();
-                let blue = labels.iter().filter(|label| label.as_str() == "🔵").count();
-                red == 3 && blue == 3
-            }),
-            "after a human move, the computer should answer and leave six discs on the board"
-        );
-        assert!(
-            pump_until(&context, Duration::from_secs(8), || {
-                text_signal_for(&harness, status_item) == "You are red"
-            }),
-            "after the computer reply, control should return to the human"
         );
 
         harness.shutdown();

@@ -1,5 +1,4 @@
 use aivi.matrix (
-    filled as matrixFilled
     at as matrixAt
     replaceAt as matrixReplaceAt
     rows as matrixRows
@@ -34,13 +33,6 @@ type Status =
   | Passed Turn
   | Finished Outcome
 
-type AnimState =
-  | Idle
-  | HumanFlash Coord (List Coord) Int
-  | Previewing Coord (List Coord) Int
-  | Flipping Coord (List Coord) (List Coord)
-  | ComputerFlash Coord (List Coord) Int
-
 type Ray =
   | NorthWest
   | NorthRay
@@ -59,16 +51,9 @@ type TurnResolution = {
     legalMoves: List Coord
 }
 
-type GameState = {
-    board: Matrix Disc,
-    status: Status,
-    legalMoves: List Coord,
-    humanCount: Int,
-    computerCount: Int,
-    moveNumber: Int,
-    lastMove: Option Coord,
-    lastFlips: List Coord,
-    animState: AnimState
+type Move = {
+    turn: Turn,
+    coord: Coord
 }
 
 type Candidate = {
@@ -77,10 +62,10 @@ type Candidate = {
     score: Int
 }
 
-type Event =
+type InputEvent =
   | TryPlaceAt Coord
-  | ComputerTurn
-  | Restart
+  | ComputerPulse
+  | RestartGame
 
 value boardSize = 8
 value lastIndex = 7
@@ -172,11 +157,6 @@ func computerToAct = .
  ||> Active Computer -> True
  ||> Passed Human    -> True
  ||> _               -> False
-
-type Status -> Bool
-func finished = .
- ||> Finished _ -> True
- ||> _          -> False
 
 type Matrix Disc -> Coord -> Disc
 func discAt = board coord =>
@@ -374,60 +354,88 @@ type Matrix Disc -> Turn -> TurnResolution
 func advanceTurn = board preferred =>
     resolvePreferredTurn board preferred (legalMoves board (discForTurn preferred))
 
-type Matrix Disc -> Int -> (Option Coord) -> (List Coord) -> Int -> Int -> TurnResolution -> GameState
-func makeState = board moveNumber lastMove lastFlips humanCount computerCount resolution =>
-    {
-        board: board,
-        status: resolution.status,
-        legalMoves: resolution.legalMoves,
-        humanCount: humanCount,
-        computerCount: computerCount,
-        moveNumber: moveNumber,
-        lastMove: lastMove,
-        lastFlips: lastFlips,
-        animState: Idle
-    }
-
-type Int -> Int -> Disc
-func initialDiscAt = x y => (x, y)
- ||> (3, 3) -> Blue
- ||> (4, 4) -> Blue
- ||> (3, 4) -> Red
- ||> (4, 3) -> Red
- ||> _      -> Empty
-
-value initialBoard : Matrix Disc = matrixFilled 8 8 initialDiscAt
-
-value initial : GameState = {
-    board: initialBoard,
-    status: Active Human,
-    legalMoves: [
-        Coord 3 2,
-        Coord 2 3,
-        Coord 5 4,
-        Coord 4 5
+value initialBoard : Matrix Disc = MkMatrix 8 8 [
+    [
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty
     ],
-    humanCount: 2,
-    computerCount: 2,
-    moveNumber: 0,
-    lastMove: None,
-    lastFlips: [],
-    animState: Idle
-}
-
-value noFlips : List Coord = []
-value previewBlinkCycleTicks = 9
-value previewBlinkVisibleTicks = 5
-value previewLastTick = 25
-value placedFlashCycle = 5
-value placedFlashVisible = 3
-value placedFlashDuration = 15
-value flippedFlashCycle = 2
-value flippedFlashVisible = 1
-value flippedFlashDuration = 10
-value flashDuration = 15
-value computerFlashDuration = 6
-value computerFlippedFlashDuration = 6
+    [
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty
+    ],
+    [
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty
+    ],
+    [
+        Empty,
+        Empty,
+        Empty,
+        Blue,
+        Red,
+        Empty,
+        Empty,
+        Empty
+    ],
+    [
+        Empty,
+        Empty,
+        Empty,
+        Red,
+        Blue,
+        Empty,
+        Empty,
+        Empty
+    ],
+    [
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty
+    ],
+    [
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty
+    ],
+    [
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty,
+        Empty
+    ]
+]
 
 type Int -> Bool
 func oneFromEdge = n =>
@@ -491,122 +499,6 @@ func bestComputerMove = board moves => moves
   |> listMap (candidateForCoord board)
   |> listMaximum candidateLessThan
 
-type Turn -> GameState -> Int -> Int
-func nextHumanCount = turn state flipCount => turn
- ||> Human    -> state.humanCount + flipCount + 1
- ||> Computer -> state.humanCount - flipCount
-
-type Turn -> GameState -> Int -> Int
-func nextComputerCount = turn state flipCount => turn
- ||> Human    -> state.computerCount - flipCount
- ||> Computer -> state.computerCount + flipCount + 1
-
-type GameState -> Turn -> Coord -> Int -> (List Coord) -> Matrix Disc -> GameState
-func applyResolvedBoard = state turn coord flipCount flips afterBoard =>
-    makeState afterBoard (state.moveNumber + 1) (Some coord) flips (nextHumanCount turn state flipCount) (nextComputerCount turn state flipCount) (advanceTurn afterBoard (otherTurn turn))
-
-type GameState -> Turn -> Coord -> (List Coord) -> GameState
-func applyResolvedTurn = state turn coord flips => boardAfterFlips state.board (discForTurn turn) coord flips
-  |> applyResolvedBoard state turn coord (listLength flips) flips
-
-type GameState -> Turn -> Coord -> GameState
-func applyTurnMove = state turn coord => flipsForMove state.board (discForTurn turn) coord
-  |> applyResolvedTurn state turn coord
-
-type Coord -> GameState -> GameState
-func handleTryPlace = coord state => (humanToAct state.status, coordInList coord state.legalMoves)
- ||> (True, True) -> applyHumanMove state coord
- ||> _            -> state
-
-type GameState -> AnimState -> GameState
-func setAnimState = state animState =>
-    state <| { animState: animState }
-
-type GameState -> Coord -> (List Coord) -> GameState
-func applyHumanMoveWithFlips = state coord flips =>
-    state <| {
-        board: boardAfterFlips state.board (discForTurn Human) coord flips,
-        status: Active Computer,
-        legalMoves: [],
-        humanCount: state.humanCount + listLength flips + 1,
-        computerCount: state.computerCount - listLength flips,
-        moveNumber: state.moveNumber + 1,
-        lastMove: Some coord,
-        lastFlips: flips,
-        animState: Idle
-    }
-
-type GameState -> Coord -> GameState
-func applyHumanMove = state coord => flipsForMove state.board (discForTurn Human) coord
-  |> applyHumanMoveWithFlips state coord
-
-type GameState -> Matrix Disc -> AnimState -> GameState
-func computerAnimState = state board animState =>
-    state <| {
-        board: board,
-        status: Active Computer,
-        legalMoves: [],
-        humanCount: countDisc Red board,
-        computerCount: countDisc Blue board,
-        animState: animState
-    }
-
-type GameState -> Coord -> (List Coord) -> GameState
-func beginComputerPreview = state coord flips =>
-    computerAnimState state state.board (Previewing coord flips 0)
-
-type GameState -> Coord -> (List Coord) -> GameState
-func beginComputerFlips = state coord flips =>
-    computerAnimState state (put coord (discForTurn Computer) state.board) (Flipping coord flips flips)
-
-type GameState -> Coord -> (List Coord) -> Int -> GameState
-func advanceComputerPreview = state coord flips tick => tick >= previewLastTick
- T|> beginComputerFlips state coord flips
- F|> computerAnimState state state.board (Previewing coord flips (tick + 1))
-
-type GameState -> Coord -> (List Coord) -> GameState
-func finishComputerAnimation = state coord flips =>
-    makeState state.board (state.moveNumber + 1) (Some coord) flips (countDisc Red state.board) (countDisc Blue state.board) (advanceTurn state.board Human)
-
-type GameState -> Coord -> (List Coord) -> (List Coord) -> GameState
-func advanceComputerFlips = state coord flips remaining => remaining
- ||> [nextFlip, ...rest] -> computerAnimState state (setDisc state.board nextFlip (discForTurn Computer)) (Flipping coord flips rest)
- ||> []                  -> setAnimState state (ComputerFlash coord flips 0)
-
-type GameState -> Coord -> (List Coord) -> Int -> GameState
-func advanceHumanFlash = state coord flips tick => tick >= flashDuration
- T|> setAnimState state Idle
- F|> setAnimState state (HumanFlash coord flips (tick + 1))
-
-type GameState -> Coord -> (List Coord) -> Int -> GameState
-func advanceComputerFlash = state coord flips tick => tick >= computerFlashDuration
- T|> finishComputerAnimation state coord flips
- F|> setAnimState state (ComputerFlash coord flips (tick + 1))
-
-type GameState -> GameState
-func startComputerAnim = state => bestComputerMove state.board state.legalMoves
- ||> Some candidate -> beginComputerPreview state candidate.coord (flipsForMove state.board (discForTurn Computer) candidate.coord)
- ||> None           -> makeState state.board state.moveNumber state.lastMove noFlips state.humanCount state.computerCount (advanceTurn state.board Computer)
-
-type GameState -> GameState
-func runComputerTurn = state => state.animState
- ||> Idle                              -> startComputerAnim state
- ||> HumanFlash coord flips tick       -> advanceHumanFlash state coord flips tick
- ||> Previewing coord flips tick       -> advanceComputerPreview state coord flips tick
- ||> Flipping coord flips remaining    -> advanceComputerFlips state coord flips remaining
- ||> ComputerFlash coord flips tick    -> advanceComputerFlash state coord flips tick
-
-type GameState -> GameState
-func handleComputerTurn = state => computerToAct state.status
- T|> runComputerTurn state
- F|> state
-
-type Event -> GameState -> GameState
-func step = event state => event
- ||> Restart          -> initial
- ||> TryPlaceAt coord -> handleTryPlace coord state
- ||> ComputerTurn     -> handleComputerTurn state
-
 type Status -> Text
 func statusLabel = .
  ||> Active Human     -> "You are red"
@@ -615,24 +507,16 @@ func statusLabel = .
  ||> Passed Computer  -> "Blue passes"
  ||> Finished outcome -> outcomeText outcome
 
-type GameState -> Text
-func titlebarHintLine = state => (state.status, state.animState)
- ||> (Active Human, _)                      -> "Click a marked cell."
- ||> (Active Computer, HumanFlash _ _ _)     -> "Your move."
- ||> (Active Computer, Previewing _ _ _)     -> "Blue is placing a stone."
- ||> (Active Computer, Flipping _ _ _)       -> "Blue is flipping stones."
- ||> (Active Computer, ComputerFlash _ _ _)  -> "Blue has moved."
- ||> (Active Computer, _)                    -> "Blue is thinking."
- ||> (Passed Human, _)                       -> "Red passes."
- ||> (Passed Computer, _)                    -> "Blue passes."
- ||> (Finished _, _)                         -> "Restart to play again."
+type Status -> Text
+func titlebarHintLine = .
+ ||> Active Human     -> "Click a marked cell."
+ ||> Active Computer  -> "Blue is thinking."
+ ||> Passed Human     -> "Red passes."
+ ||> Passed Computer  -> "Blue passes."
+ ||> Finished _       -> "Restart to play again."
 
-type GameState -> Text
-func scoreLine = state =>
-    "Red {state.humanCount} | Blue {state.computerCount} | Moves {state.moveNumber}"
-
-type GameState -> Text
-func lastMoveLine = state => state.lastMove
+type (Option Coord) -> Text
+func lastMoveLine = .
  ||> Some coord -> lastMoveAt coord
  ||> None       -> "Last move: opening layout"
 
@@ -646,99 +530,102 @@ func emptyCellLabel = status legalMoves coord => (coordInList coord legalMoves, 
  ||> (True, False, True) -> "◍"
  ||> _                   -> "·"
 
-type Int -> Bool
-func animStoneVisible = tick =>
-    tick % previewBlinkCycleTicks < previewBlinkVisibleTicks
-
-type Int -> Float
-func previewOpacityAtTick = tick => animStoneVisible tick
- T|> 1.0
- F|> 0.0
-
-type Coord -> Coord -> (Option Text)
-func previewLabelAt = animCoord coord => sameCoord animCoord coord
- T|> Some "🔵"
- F|> None
-
-type AnimState -> Coord -> (Option Text)
-func previewLabel = animState coord => animState
- ||> Previewing animCoord _ _ -> previewLabelAt animCoord coord
- ||> _                        -> None
-
-type Coord -> Int -> Coord -> Float
-func previewOpacityForCoord = animCoord tick coord => sameCoord animCoord coord
- T|> previewOpacityAtTick tick
- F|> 1.0
-
-type Int -> Float
-func placedFlashPhase = tick => tick % placedFlashCycle < placedFlashVisible
- T|> 1.0
- F|> 0.0
-
-type Int -> Float
-func placedStoneOpacity = tick => tick < placedFlashDuration
- T|> placedFlashPhase tick
- F|> 1.0
-
-type Int -> Float
-func flippedFlashPhase = tick => tick % flippedFlashCycle < flippedFlashVisible
- T|> 1.0
- F|> 0.0
-
-type Int -> Float
-func flippedStoneOpacity = tick => tick < flippedFlashDuration
- T|> flippedFlashPhase tick
- F|> 1.0
-
-type Int -> Float
-func computerFlippedStoneOpacity = tick => tick < computerFlippedFlashDuration
- T|> flippedFlashPhase tick
- F|> 1.0
-
-type Coord -> (List Coord) -> Int -> Coord -> Float
-func flashCellOpacity = placed flips tick coord => (sameCoord placed coord, coordInList coord flips)
- ||> (True, _)     -> placedStoneOpacity tick
- ||> (False, True) -> flippedStoneOpacity tick
- ||> _             -> 1.0
-
-type (List Coord) -> Int -> Coord -> Float
-func computerFlashOpacity = flips tick coord => coordInList coord flips
- T|> computerFlippedStoneOpacity tick
- F|> 1.0
-
-type AnimState -> Coord -> Float
-func cellOpacity = animState coord => animState
- ||> Previewing animCoord _ tick       -> previewOpacityForCoord animCoord tick coord
- ||> HumanFlash placed flips tick      -> flashCellOpacity placed flips tick coord
- ||> ComputerFlash _ flips tick        -> computerFlashOpacity flips tick coord
- ||> _                                 -> 1.0
-
-type AnimState -> Coord -> Bool
-func cellAnimateOpacity = animState coord => animState
- ||> Previewing animCoord _ _       -> sameCoord animCoord coord
- ||> HumanFlash placed flips _      -> sameCoord placed coord or coordInList coord flips
- ||> ComputerFlash _ flips _        -> coordInList coord flips
- ||> _                              -> False
-
 type Matrix Disc -> Status -> (List Coord) -> Coord -> Text
-func baseCellLabel = board status legalMoves coord => discAt board coord
+func cellLabel = board status legalMoves coord => discAt board coord
  ||> Red   -> "🔴"
  ||> Blue  -> "🔵"
  ||> Empty -> emptyCellLabel status legalMoves coord
 
-type AnimState -> Coord -> (Option Text)
-func overlayLabel = animState coord =>
-    previewLabel animState coord
+type Status -> (List Coord) -> Coord -> Bool
+func cellEnabled = status legalMoves coord =>
+    humanToAct status and coordInList coord legalMoves
 
-type Matrix Disc -> Status -> (List Coord) -> AnimState -> Coord -> Text
-func cellLabel = board status legalMoves animState coord => overlayLabel animState coord
- ||> Some label -> label
- ||> None       -> baseCellLabel board status legalMoves coord
+type Turn -> Coord -> Move
+func makeMove = turn coord =>
+    { turn: turn, coord: coord }
 
-type GameState -> Coord -> Bool
-func cellEnabled = state coord => (humanToAct state.status, coordInList coord state.legalMoves)
- ||> (True, True) -> True
- ||> _            -> False
+type Matrix Disc -> Move -> Matrix Disc
+func replayMove = board move =>
+    boardAfterMove board (discForTurn move.turn) move.coord
+
+type List Move -> (List Move)
+func committedHistory = history => history
+ ||> [_, ...rest] -> rest
+ ||> []           -> []
+
+type (Option Move) -> Move -> (Option Move)
+func keepLatestMove = ignored move =>
+    Some move
+
+type List Move -> (Option Move)
+func lastHistoryMove = moves =>
+    moves
+      |> reduce keepLatestMove None
+
+type List Move -> Matrix Disc
+func boardFromHistory = history =>
+    committedHistory history
+      |> reduce replayMove initialBoard
+
+type List Move -> Turn
+func preferredTurnFromHistory = history => lastHistoryMove (committedHistory history)
+ ||> Some move -> otherTurn move.turn
+ ||> None      -> Human
+
+type Matrix Disc -> List Move -> TurnResolution
+func resolutionFromBoardHistory = board history =>
+    advanceTurn board (preferredTurnFromHistory history)
+
+type List Move -> TurnResolution
+func resolutionFromHistory = history =>
+    resolutionFromBoardHistory (boardFromHistory history) history
+
+type List Move -> (Option Coord)
+func lastMoveFromHistory = history => lastHistoryMove (committedHistory history)
+ ||> Some move -> Some move.coord
+ ||> None      -> None
+
+type List Move -> Move -> (List Move)
+func appendMove = history move =>
+    append history [move]
+
+type Coord -> TurnResolution -> Bool
+func humanMoveAllowed = coord resolution =>
+    humanToAct resolution.status and coordInList coord resolution.legalMoves
+
+type List Move -> Coord -> (List Move)
+func applyHumanClick = history coord => humanMoveAllowed coord (resolutionFromHistory history)
+ T|> appendMove history (makeMove Human coord)
+ F|> history
+
+type Matrix Disc -> (List Coord) -> (Option Move)
+func selectComputerMove = board moves => bestComputerMove board moves
+ ||> Some candidate -> Some (makeMove Computer candidate.coord)
+ ||> None           -> None
+
+type Matrix Disc -> TurnResolution -> (Option Move)
+func chooseComputerMove = board resolution => computerToAct resolution.status
+ T|> selectComputerMove board resolution.legalMoves
+ F|> None
+
+type Matrix Disc -> List Move -> (Option Move)
+func chooseComputerMoveFromBoardHistory = board history =>
+    chooseComputerMove board (resolutionFromBoardHistory board history)
+
+type List Move -> (List Move)
+func applyComputerTick = history => chooseComputerMoveFromBoardHistory (boardFromHistory history) history
+ ||> Some move -> appendMove history move
+ ||> None      -> history
+
+type InputEvent -> (List Move) -> (List Move)
+func applyInputEvent = event history => event
+ ||> RestartGame      -> [{ turn: Human, coord: Coord 0 0 }]
+ ||> TryPlaceAt coord -> applyHumanClick history coord
+ ||> ComputerPulse    -> applyComputerTick history
+
+type List Move -> Text
+func scoreLineFromHistory = history =>
+    "Red {countDisc Red (boardFromHistory history)} | Blue {countDisc Blue (boardFromHistory history)} | Moves {listLength (committedHistory history)}"
 
 signal placeCoord : Signal Coord
 signal restartClick : Signal Unit
@@ -746,27 +633,36 @@ signal restartClick : Signal Unit
 @source timer.every 100ms
 signal computerTick : Signal Unit
 
-signal event : Signal Event = computerTick | placeCoord | restartClick
-  ||> computerTick _ => ComputerTurn
+signal event : Signal InputEvent = computerTick | placeCoord | restartClick
+  ||> computerTick _ => ComputerPulse
   ||> placeCoord coord => TryPlaceAt coord
-  ||> restartClick _ => Restart
+  ||> restartClick _ => RestartGame
 
-signal state : Signal GameState = event
- +|> initial step
+signal history : Signal (List Move) = event
+ +|> [{ turn: Human, coord: Coord 0 0 }] applyInputEvent
 
-signal phase : Signal Status = state
+signal board : Signal (Matrix Disc) = history
+  |> boardFromHistory
+
+signal phase : Signal Status = history
+  |> resolutionFromHistory
   |> .status
+
+signal availableMoves : Signal (List Coord) = history
+  |> resolutionFromHistory
+  |> .legalMoves
 
 signal statusText : Signal Text = phase
   |> statusLabel
 
-signal scoreText : Signal Text = state
-  |> scoreLine
+signal scoreText : Signal Text = history
+  |> scoreLineFromHistory
 
-signal lastMoveText : Signal Text = state
+signal lastMoveText : Signal Text = history
+  |> lastMoveFromHistory
   |> lastMoveLine
 
-signal titlebarHintText : Signal Text = state
+signal titlebarHintText : Signal Text = phase
   |> titlebarHintLine
 
 value main =
@@ -781,19 +677,30 @@ value main =
                 </HeaderBar.end>
             </HeaderBar>
         </Window.titlebar>
-        <with value={state} as={currentState}>
-            <Box orientation="vertical" spacing={0}>
-                <each of={boardIndices} as={y} key={y}>
-                    <Box orientation="horizontal" spacing={0}>
-                        <each of={boardIndices} as={x} key={x}>
-                            <with value={Coord x y} as={coord}>
-                                <Button label={cellLabel currentState.board currentState.status currentState.legalMoves currentState.animState coord} onClick={placeCoord coord} sensitive={cellEnabled currentState coord} animateOpacity={cellAnimateOpacity currentState.animState coord} opacity={cellOpacity currentState.animState coord} compact hasFrame={False} widthRequest={52} heightRequest={52} />
-                            </with>
-                        </each>
-                    </Box>
-                </each>
+        <Box orientation="vertical" spacing={12}>
+            <Box orientation="vertical" spacing={4}>
+                <Label text={scoreText} />
+                <Label text={lastMoveText} />
+                <Label text={titlebarHintText} />
             </Box>
-        </with>
+            <with value={board} as={currentBoard}>
+                <with value={phase} as={currentPhase}>
+                    <with value={availableMoves} as={currentLegalMoves}>
+                        <Box orientation="vertical" spacing={0}>
+                            <each of={boardIndices} as={y} key={y}>
+                                <Box orientation="horizontal" spacing={0}>
+                                    <each of={boardIndices} as={x} key={x}>
+                                        <with value={Coord x y} as={coord}>
+                                            <Button label={cellLabel currentBoard currentPhase currentLegalMoves coord} onClick={placeCoord coord} sensitive={cellEnabled currentPhase currentLegalMoves coord} compact hasFrame={False} widthRequest={52} heightRequest={52} />
+                                        </with>
+                                    </each>
+                                </Box>
+                            </each>
+                        </Box>
+                    </with>
+                </with>
+            </with>
+        </Box>
     </Window>
 
 export main
