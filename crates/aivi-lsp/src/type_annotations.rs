@@ -40,6 +40,7 @@ pub struct TypedDeclarationSummary {
     pub inferred_type: Option<String>,
     pub annotation_matches_inferred: Option<bool>,
     pub has_explicit_constraints: bool,
+    pub annotation_is_independently_inferable: bool,
     pub annotation: Option<TypeAnnotationSite>,
 }
 
@@ -50,18 +51,24 @@ pub fn collect_typed_declaration_summaries(
 ) -> Vec<TypedDeclarationSummary> {
     aivi_hir::collect_typed_declarations(module)
         .into_iter()
-        .map(|info| TypedDeclarationSummary {
-            item_id: info.item_id,
-            kind: info.kind,
-            name: info.name,
-            header_span: info.header_span,
-            name_span: info.name_span,
-            declared_type: info.declared_type,
-            inferred_type: info.inferred_type,
-            annotation_matches_inferred: info.annotation_matches_inferred,
-            has_explicit_constraints: info.has_explicit_constraints,
-            annotation: matching_named_item(parsed, info.kind, info.header_span)
-                .and_then(|item| annotation_site(item, source)),
+        .map(|info| {
+            let parsed_item = matching_named_item(parsed, info.kind, info.header_span);
+            TypedDeclarationSummary {
+                item_id: info.item_id,
+                kind: info.kind,
+                name: info.name,
+                header_span: info.header_span,
+                name_span: info.name_span,
+                declared_type: info.declared_type,
+                inferred_type: info.inferred_type,
+                annotation_matches_inferred: info.annotation_matches_inferred,
+                has_explicit_constraints: info.has_explicit_constraints,
+                annotation_is_independently_inferable: annotation_is_independently_inferable(
+                    info.kind,
+                    parsed_item,
+                ),
+                annotation: parsed_item.and_then(|item| annotation_site(item, source)),
+            }
         })
         .collect()
 }
@@ -72,10 +79,11 @@ pub fn diagnostic_kind(summary: &TypedDeclarationSummary) -> Option<TypeAnnotati
         summary.inferred_type.as_ref(),
         summary.annotation_matches_inferred,
         summary.has_explicit_constraints,
+        summary.annotation_is_independently_inferable,
     ) {
-        (Some(_), Some(_), Some(true), false) => Some(TypeAnnotationDiagnosticKind::Unnecessary),
-        (Some(_), Some(_), Some(false), _) => Some(TypeAnnotationDiagnosticKind::Mismatched),
-        (None, None, _, _) => Some(TypeAnnotationDiagnosticKind::Missing),
+        (Some(_), Some(_), Some(true), false, true) => Some(TypeAnnotationDiagnosticKind::Unnecessary),
+        (Some(_), Some(_), Some(false), _, _) => Some(TypeAnnotationDiagnosticKind::Mismatched),
+        (None, None, _, _, _) => Some(TypeAnnotationDiagnosticKind::Missing),
         _ => None,
     }
 }
@@ -269,6 +277,17 @@ fn matching_named_item<'a>(
         }
         _ => None,
     })
+}
+
+fn annotation_is_independently_inferable(
+    kind: aivi_hir::TypedDeclarationKind,
+    item: Option<&aivi_syntax::NamedItem>,
+) -> bool {
+    match kind {
+        aivi_hir::TypedDeclarationKind::Value | aivi_hir::TypedDeclarationKind::Signal => true,
+        aivi_hir::TypedDeclarationKind::Function => item
+            .is_some_and(|item| item.parameters.iter().all(|parameter| parameter.annotation.is_some())),
+    }
 }
 
 fn annotation_site(
@@ -478,6 +497,17 @@ mod tests {
             .as_ref()
             .expect("expected annotation site");
         assert_eq!(annotation.style, TypeAnnotationStyle::Standalone);
+    }
+
+    #[test]
+    fn parameterized_function_signatures_do_not_become_unnecessary_hints() {
+        let (_, _, _, summaries) = parse(
+            "type Int -> Int\n\
+             func id = value => value\n",
+        );
+
+        assert_eq!(diagnostic_kind(&summaries[0]), None);
+        assert!(!summaries[0].annotation_is_independently_inferable);
     }
 
     #[test]
