@@ -769,6 +769,9 @@ fn collect_workspace_hirs_sorted(
         .unwrap_or(workspace_root_raw);
 
     // Collect (module_name, file, hir) for all non-entry, non-stdlib workspace files.
+    // Stdlib modules (aivi.*) are excluded because their intrinsic functions can't be
+    // synthesized through the workspace compilation path; they are handled via
+    // hoisted item bodies or synthesize_import_body in the entry module's core lowering.
     let mut ws_modules: Vec<(String, QuerySourceFile, Arc<HirModuleResult>)> = Vec::new();
     for &file in &snapshot.files {
         let path_raw = file.path(&snapshot.frontend.db);
@@ -781,7 +784,8 @@ fn collect_workspace_hirs_sorted(
         let Some(module_name) = module_name_from_path(&workspace_root, &path) else {
             continue;
         };
-        // Skip bundled stdlib modules (e.g. aivi.list, aivi.option).
+        // Skip bundled stdlib modules (e.g. aivi.list, aivi.option, aivi.matrix).
+        // Their intrinsic/native functions cannot be compiled via workspace_name_maps.
         if module_name.starts_with("aivi.") {
             continue;
         }
