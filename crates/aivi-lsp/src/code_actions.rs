@@ -26,6 +26,13 @@ pub fn code_actions(
     let request_range = params.range;
     let mut actions: Vec<CodeActionOrCommand> = Vec::new();
 
+    actions.extend(crate::type_annotations::build_type_annotation_code_actions(
+        uri,
+        analysis.typed_declarations.as_ref(),
+        analysis.source.as_ref(),
+        request_range,
+    ));
+
     for diag in &unused_diags {
         if diag.code != Some(NumberOrString::String("aivi/unused-symbol".to_owned())) {
             continue;

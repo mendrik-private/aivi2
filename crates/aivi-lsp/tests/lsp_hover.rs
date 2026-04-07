@@ -2,7 +2,8 @@ use std::{path::PathBuf, sync::Arc};
 
 use aivi_lsp::{documents::open_document, hover::hover, state::ServerState};
 use tower_lsp::lsp_types::{
-    HoverContents, HoverParams, Position, TextDocumentIdentifier, TextDocumentPositionParams, Url,
+    Hover, HoverContents, HoverParams, Position, TextDocumentIdentifier, TextDocumentPositionParams,
+    Url,
 };
 
 fn test_uri(name: &str) -> Url {
@@ -27,26 +28,25 @@ fn hover_params(uri: Url, line: u32, character: u32) -> HoverParams {
     }
 }
 
+fn hover_markup(result: Option<Hover>) -> String {
+    let hover = result.expect("expected hover result");
+    match hover.contents {
+        HoverContents::Markup(markup) => markup.value,
+        other => panic!("expected markdown hover contents, found {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn hover_at_value_name_returns_kind_label() {
     // "value answer = 42" — 'answer' starts at character 6 on line 0
     let (state, uri) = open_inline("hover-value.aivi", "value answer = 42\n");
-    let result = hover(hover_params(uri, 0, 6), state).await;
+    let markup = hover_markup(hover(hover_params(uri, 0, 6), state).await);
 
     assert!(
-        result.is_some(),
-        "hover at a value name should return a result"
+        markup.contains("value answer : Int"),
+        "hover should show the inferred value type; got: {}",
+        markup
     );
-
-    if let Some(hover_info) = result {
-        if let HoverContents::Markup(markup) = hover_info.contents {
-            assert!(
-                markup.value.contains("value") || markup.value.contains("answer"),
-                "hover content should mention the kind or name; got: {}",
-                markup.value
-            );
-        }
-    }
 }
 
 #[tokio::test]
@@ -62,33 +62,17 @@ async fn hover_at_out_of_range_position_returns_none() {
 
 #[tokio::test]
 async fn hover_on_func_declaration_uses_func_kind_label() {
-    // "type Int -> Int\nfunc id x =>\n    x\n"
+    // "type Int -> Int\nfunc id = x =>\n    x\n"
     // 'id' is on line 1, character 5
-    let text = "type Int -> Int\nfunc id x =>\n    x\n";
+    let text = "type Int -> Int\nfunc id = x =>\n    x\n";
     let (state, uri) = open_inline("hover-func.aivi", text);
-    let result = hover(hover_params(uri, 1, 5), state).await;
+    let markup = hover_markup(hover(hover_params(uri, 1, 5), state).await);
 
     assert!(
-        result.is_some(),
-        "hover on a func name should return a result"
+        markup.contains("func id : Int -> Int"),
+        "hover should show the inferred function signature; got: {}",
+        markup
     );
-
-    if let Some(hover_info) = result {
-        if let HoverContents::Markup(markup) = hover_info.contents {
-            // The hover content should contain the symbol name and use "func" or "value"
-            // as the kind label.
-            assert!(
-                markup.value.contains("id"),
-                "hover content should mention the function name; got: {}",
-                markup.value
-            );
-            assert!(
-                markup.value.starts_with("```aivi"),
-                "hover content should be a fenced code block; got: {}",
-                markup.value
-            );
-        }
-    }
 }
 
 #[tokio::test]
@@ -97,27 +81,13 @@ async fn hover_on_signal_declaration_uses_signal_kind_label() {
     // 'tick' is on line 0, character 7
     let text = "signal tick = 0\n";
     let (state, uri) = open_inline("hover-signal.aivi", text);
-    let result = hover(hover_params(uri, 0, 7), state).await;
+    let markup = hover_markup(hover(hover_params(uri, 0, 7), state).await);
 
     assert!(
-        result.is_some(),
-        "hover on a signal name should return a result"
+        markup.contains("signal tick : Signal Int"),
+        "hover should show the inferred signal type; got: {}",
+        markup
     );
-
-    if let Some(hover_info) = result {
-        if let HoverContents::Markup(markup) = hover_info.contents {
-            assert!(
-                markup.value.contains("signal"),
-                "hover on a signal should mention 'signal' kind; got: {}",
-                markup.value
-            );
-            assert!(
-                markup.value.contains("tick"),
-                "hover on a signal should mention the name 'tick'; got: {}",
-                markup.value
-            );
-        }
-    }
 }
 
 #[tokio::test]
@@ -127,19 +97,41 @@ async fn hover_colon_separated_from_type_detail() {
     // with a space before the colon (not "kind name: detail").
     let text = "value answer = 42\n";
     let (state, uri) = open_inline("hover-colon.aivi", text);
-    let result = hover(hover_params(uri, 0, 6), state).await;
+    let markup = hover_markup(hover(hover_params(uri, 0, 6), state).await);
+    assert!(
+        markup.contains(" : "),
+        "detail separator should be ' : ' with spaces; got: {}",
+        markup
+    );
+}
 
-    if let Some(hover_info) = result {
-        if let HoverContents::Markup(markup) = hover_info.contents {
-            // If the symbol carries a detail, the format must be "… : <detail>".
-            // If there is no detail, just "kind name" is fine.
-            if markup.value.contains(':') {
-                assert!(
-                    markup.value.contains(" : "),
-                    "detail separator should be ' : ' with spaces; got: {}",
-                    markup.value
-                );
-            }
-        }
-    }
+#[tokio::test]
+async fn hover_on_reference_site_uses_inferred_declaration_type() {
+    let text = "value answer = 42\nvalue total = answer\n";
+    let (state, uri) = open_inline("hover-reference.aivi", text);
+    let markup = hover_markup(hover(hover_params(uri, 1, 14), state).await);
+
+    assert!(
+        markup.contains("value answer : Int"),
+        "hover on a reference should resolve to the declaration's inferred type; got: {}",
+        markup
+    );
+}
+
+#[tokio::test]
+async fn hover_on_mismatched_annotation_mentions_declared_type() {
+    let text = "value answer : Text = 42\n";
+    let (state, uri) = open_inline("hover-mismatch.aivi", text);
+    let markup = hover_markup(hover(hover_params(uri, 0, 6), state).await);
+
+    assert!(
+        markup.contains("value answer : Int"),
+        "hover should lead with the inferred type when annotations disagree; got: {}",
+        markup
+    );
+    assert!(
+        markup.contains("Declared type: `Text`"),
+        "hover should also mention the declared type when it mismatches; got: {}",
+        markup
+    );
 }

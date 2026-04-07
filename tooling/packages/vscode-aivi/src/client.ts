@@ -42,6 +42,7 @@ export function createClient(
     initializationOptions: {
       diagnosticsDebounceMs: config.diagnosticsDebounceMs,
       inlayHintsEnabled: config.inlayHintsEnabled,
+      inlayHintsMaxLength: config.inlayHintsMaxLength,
       codeLensEnabled: config.codeLensEnabled,
       completionAutoImport: config.completionAutoImport,
     },

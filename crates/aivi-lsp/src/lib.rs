@@ -20,6 +20,7 @@ pub mod semantic_tokens;
 pub mod server;
 pub mod state;
 pub mod symbols;
+pub mod type_annotations;
 pub mod unused;
 
 /// Collect unused-symbol warnings as native [`aivi_base::Diagnostic`] items.

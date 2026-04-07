@@ -1,22 +1,33 @@
 use std::sync::Arc;
 
-use aivi_base::{ByteIndex, LspPosition};
+use aivi_base::{ByteIndex, LspPosition, SourceSpan};
 use aivi_hir::LspSymbol;
+
+use crate::type_annotations::TypedDeclarationSummary;
 
 /// Query-backed per-file analysis snapshot used by editor features.
 pub struct FileAnalysis {
     pub source: Arc<aivi_base::SourceFile>,
     pub diagnostics: Arc<[aivi_base::Diagnostic]>,
     pub symbols: Arc<[LspSymbol]>,
+    pub typed_declarations: Arc<[TypedDeclarationSummary]>,
 }
 
 impl FileAnalysis {
     pub fn load(db: &aivi_query::RootDatabase, file: aivi_query::SourceFile) -> Self {
         let hir = aivi_query::hir_module(db, file);
+        let parsed = aivi_query::parsed_file(db, file);
         Self {
             source: hir.source_arc(),
             diagnostics: hir.diagnostics_arc(),
             symbols: hir.symbols_arc(),
+            typed_declarations: Arc::<[TypedDeclarationSummary]>::from(
+                crate::type_annotations::collect_typed_declaration_summaries(
+                    hir.module(),
+                    parsed.cst(),
+                    hir.source(),
+                ),
+            ),
         }
     }
 
@@ -44,6 +55,32 @@ impl FileAnalysis {
 
         best
     }
+
+    pub fn typed_declaration_at_lsp_position(
+        &self,
+        position: LspPosition,
+    ) -> Option<&TypedDeclarationSummary> {
+        let cursor = self.source.lsp_position_to_offset(position)?;
+        self.typed_declaration_at_offset(cursor)
+    }
+
+    pub fn typed_declaration_at_offset(
+        &self,
+        cursor: ByteIndex,
+    ) -> Option<&TypedDeclarationSummary> {
+        self.typed_declarations
+            .iter()
+            .find(|declaration| declaration.name_span.span().contains(cursor))
+    }
+
+    pub fn typed_declaration_for_name_span(
+        &self,
+        name_span: SourceSpan,
+    ) -> Option<&TypedDeclarationSummary> {
+        self.typed_declarations
+            .iter()
+            .find(|declaration| declaration.name_span == name_span)
+    }
 }
 
 fn symbol_contains(symbol: &LspSymbol, cursor: ByteIndex) -> bool {
@@ -57,6 +94,7 @@ mod tests {
 
     use aivi_base::{ByteIndex, FileId, LspPosition, SourceSpan, Span};
     use aivi_hir::{LspSymbol, LspSymbolKind};
+    use crate::type_annotations::TypedDeclarationSummary;
 
     fn symbol(name: &str, span: std::ops::Range<usize>, children: Vec<LspSymbol>) -> LspSymbol {
         let span = SourceSpan::new(FileId::new(0), Span::from(span));
@@ -79,6 +117,7 @@ mod tests {
             )),
             diagnostics: Arc::<[aivi_base::Diagnostic]>::from(Vec::new()),
             symbols: Arc::<[LspSymbol]>::from(symbols),
+            typed_declarations: Arc::<[TypedDeclarationSummary]>::from(Vec::new()),
         }
     }
 

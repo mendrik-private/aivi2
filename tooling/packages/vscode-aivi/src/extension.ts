@@ -126,7 +126,11 @@ export async function activate(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (
         e.affectsConfiguration("aivi.compiler.path") ||
-        e.affectsConfiguration("aivi.compiler.args")
+        e.affectsConfiguration("aivi.compiler.args") ||
+        e.affectsConfiguration("aivi.diagnostics.debounceMs") ||
+        e.affectsConfiguration("aivi.inlayHints.enabled") ||
+        e.affectsConfiguration("aivi.inlayHints.maxLength") ||
+        e.affectsConfiguration("aivi.codeLens.enabled")
       ) {
         void restart();
       }

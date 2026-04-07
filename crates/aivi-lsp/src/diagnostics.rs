@@ -33,6 +33,11 @@ pub fn collect_lsp_diagnostics(
         .map(|diagnostic| convert_diagnostic(diagnostic, analysis.source.as_ref(), db, uri))
         .collect();
 
+    diagnostics.extend(crate::type_annotations::collect_type_annotation_diagnostics(
+        analysis.typed_declarations.as_ref(),
+        analysis.source.as_ref(),
+    ));
+
     // Append unused-symbol hints only when the file has no errors, to avoid
     // false positives while the user is actively editing.
     let has_errors = hir

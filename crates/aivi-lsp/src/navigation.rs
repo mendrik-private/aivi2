@@ -22,6 +22,10 @@ impl NavigationTarget {
         Self { file, span }
     }
 
+    pub(crate) fn file(&self) -> SourceFile {
+        self.file
+    }
+
     /// Try to find the `LspSymbol` declared at this target's span.  Used by
     /// hover to retrieve the declaration's type detail when the cursor is on a
     /// reference site rather than the declaration itself.
@@ -32,9 +36,10 @@ impl NavigationTarget {
         let mut stack: Vec<aivi_hir::LspSymbol> = symbols.iter().cloned().collect();
         let mut best: Option<aivi_hir::LspSymbol> = None;
         while let Some(sym) = stack.pop() {
-            if sym.span.file() == target_span.file()
-                && sym.span.span().contains(target_span.span().start())
-            {
+            if sym.selection_span == target_span {
+                return Some(sym);
+            }
+            if sym.span.file() == target_span.file() && sym.span.span().contains(target_span.span().start()) {
                 if best.as_ref().is_none_or(|b: &aivi_hir::LspSymbol| {
                     sym.span.span().len() < b.span.span().len()
                 }) {
@@ -89,6 +94,20 @@ impl NavigationAnalysis {
             return NavigationLookup::NoSite;
         };
         NavigationLookup::from_targets(self.definition_targets_for_site(db, &site))
+    }
+
+    pub fn preferred_definition_targets_at_lsp_position(
+        &self,
+        db: &RootDatabase,
+        position: LspPosition,
+    ) -> NavigationLookup {
+        let Some(cursor) = self.source.lsp_position_to_offset(position) else {
+            return NavigationLookup::NoSite;
+        };
+        let Some(site) = self.semantic_site_at_offset(cursor) else {
+            return NavigationLookup::NoSite;
+        };
+        NavigationLookup::from_targets(self.preferred_definition_targets_for_site(db, &site))
     }
 
     pub fn implementation_targets_at_lsp_position(
@@ -690,6 +709,20 @@ impl NavigationAnalysis {
         }
     }
 
+    fn preferred_definition_targets_for_site(
+        &self,
+        db: &RootDatabase,
+        site: &NavigationSite,
+    ) -> Vec<NavigationTarget> {
+        if self.definition_should_prefer_implementations(site) {
+            let implementation_targets = self.implementation_targets_for_site(db, site);
+            if !implementation_targets.is_empty() {
+                return implementation_targets;
+            }
+        }
+        self.definition_targets_for_site(db, site)
+    }
+
     fn implementation_targets_for_site(
         &self,
         _db: &RootDatabase,
@@ -720,6 +753,19 @@ impl NavigationAnalysis {
             | NavigationSite::DomainMemberDecl { .. }
             | NavigationSite::InstanceMemberDecl { .. } => Vec::new(),
         }
+    }
+
+    fn definition_should_prefer_implementations(&self, site: &NavigationSite) -> bool {
+        matches!(
+            site,
+            NavigationSite::TermReference {
+                resolution:
+                    ResolutionState::Resolved(TermResolution::ClassMember(_))
+                    | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_)),
+                ..
+            } | NavigationSite::ClassMemberDecl { .. }
+                | NavigationSite::BinaryOperator { .. }
+        )
     }
 
     fn definition_targets_for_term_reference(

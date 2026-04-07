@@ -25,6 +25,7 @@ mod source_lifecycle_elaboration;
 pub mod symbols;
 mod temporal_elaboration;
 mod truthy_falsy_elaboration;
+mod typed_declarations;
 mod typecheck;
 mod typecheck_context;
 mod validate;
@@ -140,6 +141,9 @@ pub use truthy_falsy_elaboration::{
     BlockedTruthyFalsyStage, TruthyFalsyBranchKind, TruthyFalsyBranchPlan,
     TruthyFalsyElaborationBlocker, TruthyFalsyElaborationReport, TruthyFalsyStageElaboration,
     TruthyFalsyStageOutcome, TruthyFalsyStagePlan, elaborate_truthy_falsy,
+};
+pub use typed_declarations::{
+    TypedDeclarationInfo, TypedDeclarationKind, collect_typed_declarations,
 };
 pub use typecheck::{
     ClassMemberImplementation, ConstraintClass, ResolvedClassMemberDispatch, TypeCheckReport,

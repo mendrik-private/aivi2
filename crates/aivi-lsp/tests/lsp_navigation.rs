@@ -207,7 +207,7 @@ async fn definition_resolves_class_member_use_site() {
     let locations = response_locations(response);
     assert_eq!(locations.len(), 1);
     assert_eq!(locations[0].uri, uri);
-    assert_eq!(locations[0].range.start, position_of_nth(&text, "(==)", 0));
+    assert_eq!(locations[0].range.start, position_of_nth(&text, "(==)", 1));
 }
 
 #[tokio::test]
@@ -223,6 +223,24 @@ async fn implementation_resolves_class_member_use_site() {
     .expect("implementation should resolve for a class member use site");
 
     let locations = implementation_locations(response);
+    assert_eq!(locations.len(), 1);
+    assert_eq!(locations[0].uri, uri);
+    assert_eq!(locations[0].range.start, position_of_nth(&text, "(==)", 1));
+}
+
+#[tokio::test]
+async fn definition_on_class_member_declaration_prefers_implementation_targets() {
+    let relative = "fixtures/frontend/milestone-2/valid/instance-declarations/main.aivi";
+    let (state, uri, text) = open_fixture_document(relative);
+
+    let response = definition(
+        definition_params(uri.clone(), position_of_nth(&text, "(==)", 0)),
+        state,
+    )
+    .await
+    .expect("definition on a class member declaration should return an implementation target");
+
+    let locations = response_locations(response);
     assert_eq!(locations.len(), 1);
     assert_eq!(locations[0].uri, uri);
     assert_eq!(locations[0].range.start, position_of_nth(&text, "(==)", 1));

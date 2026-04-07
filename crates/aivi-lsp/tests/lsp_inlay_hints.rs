@@ -31,47 +31,45 @@ fn inlay_hint_params(uri: Url) -> InlayHintParams {
 }
 
 #[test]
-fn inlay_hints_returns_none_for_value_without_type_info() {
-    // A simple value declaration without a type annotation — the compiler may
-    // or may not infer a type, but the test verifies we don't crash.
+fn inlay_hints_show_inferred_type_for_unannotated_value() {
     let (state, uri) = open_inline("hints-simple.aivi", "value answer = 42\n");
-    // This should not panic regardless of whether hints are produced.
-    let _ = inlay_hints(inlay_hint_params(uri), state);
+    let hints = inlay_hints(inlay_hint_params(uri), state)
+        .expect("expected an inferred inlay hint for an unannotated value");
+
+    assert_eq!(hints.len(), 1, "expected exactly one inlay hint");
+    assert_eq!(hints[0].kind, Some(InlayHintKind::TYPE));
+    assert!(
+        matches!(&hints[0].label, InlayHintLabel::String(label) if label == ": Int"),
+        "expected `: Int` inferred hint, got {:?}",
+        hints[0].label
+    );
 }
 
 #[test]
-fn inlay_hints_kind_is_type_for_annotated_value() {
-    // If the compiler emits a type detail for `answer`, all produced hints
-    // should carry `InlayHintKind::TYPE`.
-    let (state, uri) = open_inline("hints-kind.aivi", "value answer = 42\n");
+fn annotated_values_do_not_emit_inlay_hints() {
+    let (state, uri) = open_inline("hints-kind.aivi", "value answer : Int = 42\n");
     let hints = inlay_hints(inlay_hint_params(uri), state);
 
-    if let Some(hints) = hints {
-        for hint in &hints {
-            assert_eq!(
-                hint.kind,
-                Some(InlayHintKind::TYPE),
-                "every inlay hint for a value should have kind TYPE"
-            );
-        }
-    }
+    assert!(
+        hints.is_none(),
+        "explicitly annotated declarations should not emit inferred inlay hints"
+    );
 }
 
 #[test]
 fn inlay_hints_label_starts_with_colon_space() {
     // Every inlay hint label should start with ": " to format as ": Type".
     let (state, uri) = open_inline("hints-label.aivi", "value answer = 42\n");
-    let hints = inlay_hints(inlay_hint_params(uri), state);
+    let hints =
+        inlay_hints(inlay_hint_params(uri), state).expect("expected an inlay hint for `answer`");
 
-    if let Some(hints) = hints {
-        for hint in &hints {
-            if let InlayHintLabel::String(label) = &hint.label {
-                assert!(
-                    label.starts_with(": "),
-                    "inlay hint label should start with ': '; got: {:?}",
-                    label
-                );
-            }
+    for hint in &hints {
+        if let InlayHintLabel::String(label) = &hint.label {
+            assert!(
+                label.starts_with(": "),
+                "inlay hint label should start with ': '; got: {:?}",
+                label
+            );
         }
     }
 }

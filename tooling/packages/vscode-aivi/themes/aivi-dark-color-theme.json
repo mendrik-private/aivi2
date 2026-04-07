@@ -29,6 +29,7 @@
     "editorError.foreground": "#CC6666",
     "editorWarning.foreground": "#F0C674",
     "editorInfo.foreground": "#81A2BE",
+    "editorHint.foreground": "#4B4F55",
     "editorGutter.addedBackground": "#B5BD68",
     "editorGutter.modifiedBackground": "#F0C674",
     "editorGutter.deletedBackground": "#CC6666",

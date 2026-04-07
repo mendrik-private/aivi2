@@ -21,7 +21,7 @@ use tower_lsp::{
     },
 };
 
-use crate::state::ServerState;
+use crate::state::{ServerConfig, ServerState};
 
 pub struct Backend {
     pub client: Client,
@@ -56,7 +56,10 @@ impl Backend {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-    async fn initialize(&self, _params: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        let config = ServerConfig::from_initialization_options(params.initialization_options);
+        self.state.set_config(config);
+
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -81,12 +84,12 @@ impl LanguageServer for Backend {
                     prepare_provider: Some(true),
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 })),
-                inlay_hint_provider: Some(OneOf::Left(true)),
+                inlay_hint_provider: config.inlay_hints_enabled.then_some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Options(
                     CodeActionOptions::default(),
                 )),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
-                code_lens_provider: Some(CodeLensOptions {
+                code_lens_provider: config.code_lens_enabled.then_some(CodeLensOptions {
                     resolve_provider: Some(false),
                 }),
                 semantic_tokens_provider: Some(
@@ -135,12 +138,13 @@ impl LanguageServer for Backend {
             handle.abort();
         }
         // Spawn a debounced diagnostics task: if no further edits arrive within
-        // 100 ms the sleep completes and diagnostics are published.
+        // the configured debounce window, diagnostics are published.
         let state_clone = Arc::clone(&self.state);
         let client_clone = self.client.clone();
         let uri_clone = uri.clone();
+        let debounce_ms = self.state.config().diagnostics_debounce_ms;
         let handle = tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(debounce_ms)).await;
             let maybe_file = state_clone.files.get(&uri_clone).map(|f| *f);
             let Some(file) = maybe_file else {
                 tracing::error!(
@@ -303,6 +307,10 @@ impl LanguageServer for Backend {
     }
 
     async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
+        if !self.state.config().code_lens_enabled {
+            return Ok(None);
+        }
+
         let uri = &params.text_document.uri;
         let Some(file) = self.state.files.get(uri).map(|f| *f) else {
             return Ok(None);
