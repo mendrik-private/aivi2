@@ -1096,7 +1096,7 @@ fn check_accepts_bundled_stdlib_fallback() {
     workspace.write("aivi.toml", "");
     let main = workspace.write(
         "main.aivi",
-        "use aivi.bundledsmoketest (\n    bundledSentinel\n    BundledToken\n)\n\ntype Alias = BundledToken\nvalue marker = bundledSentinel\n",
+        "use aivi.bundledsmoketest (\n    bundledSentinel\n    BundledToken\n)\n\ntype Alias = BundledToken\nvalue marker = bundledSentinel\n\nexport Alias\nexport marker\n",
     );
     let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
         .arg("check")
@@ -1110,10 +1110,54 @@ fn check_accepts_bundled_stdlib_fallback() {
         "expected bundled stdlib fallback to pass check, stderr was: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        String::from_utf8_lossy(&output.stdout).contains("syntax + HIR passed"),
+        stdout.contains("syntax + HIR passed"),
         "expected success output, got stdout: {}",
-        String::from_utf8_lossy(&output.stdout)
+        stdout
+    );
+    assert!(
+        !stdout.contains("unused-symbol warning"),
+        "expected bundled stdlib fallback to stay warning-free, got stdout: {stdout}"
+    );
+    assert!(
+        !stderr.contains("defined but never used"),
+        "expected bundled stdlib fallback to stay warning-free, got stderr: {stderr}"
+    );
+}
+
+#[test]
+fn check_skips_unused_warnings_for_test_values() {
+    let dir = TempDir::new("check-test-values");
+    let path = dir.write(
+        "main.aivi",
+        concat!("@test\n", "value smoke : Task Text Bool = pure True\n"),
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        output.status.success(),
+        "expected @test-only program to pass check, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("syntax + HIR passed"),
+        "expected success output for @test-only program, got stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("unused-symbol warning"),
+        "expected @test-only program to skip unused warnings, got stdout: {stdout}"
+    );
+    assert!(
+        !stderr.contains("defined but never used"),
+        "expected @test-only program to skip unused warnings, got stderr: {stderr}"
     );
 }
 

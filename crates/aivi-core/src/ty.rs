@@ -2,8 +2,7 @@ use std::fmt;
 
 use aivi_hir::{
     BuiltinType, GateType as HirGateType, ImportId as HirImportId, ImportTypeDefinition,
-    ImportValueType,
-    ItemId as HirItemId, TypeParameterId as HirTypeParameterId,
+    ImportValueType, ItemId as HirItemId, TypeParameterId as HirTypeParameterId,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -346,10 +345,7 @@ impl Type {
             BuildValidation,
             BuildSignal,
             BuildTask,
-            BuildOpaqueImport {
-                name: Box<str>,
-                arguments: usize,
-            },
+            BuildOpaqueImport { name: Box<str>, arguments: usize },
         }
 
         let mut tasks = vec![Task::Visit(root)];

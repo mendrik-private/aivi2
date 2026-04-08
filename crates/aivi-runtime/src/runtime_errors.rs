@@ -105,7 +105,10 @@ fn push_eval_error_layout_notes(
     match error {
         EvaluationError::KernelInputLayoutMismatch { expected, .. }
         | EvaluationError::KernelResultLayoutMismatch { expected, .. } => {
-            diag = diag.with_note(format!("layout{expected} = {}", backend.layouts()[*expected]));
+            diag = diag.with_note(format!(
+                "layout{expected} = {}",
+                backend.layouts()[*expected]
+            ));
         }
         EvaluationError::KernelEnvironmentLayoutMismatch { expected, slot, .. } => {
             diag = diag.with_note(format!(

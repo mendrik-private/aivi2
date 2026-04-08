@@ -665,12 +665,9 @@ fn import_value_type_with_stack(
             // For user-defined types, emit a Named entry so field projection
             // can be resolved in importing modules via lower_import_value_type.
             match reference.resolution.as_ref() {
-                ResolutionState::Resolved(TypeResolution::Item(item_id)) => named_import_value_type_from_item(
-                    module,
-                    *item_id,
-                    Vec::new(),
-                    item_stack,
-                ),
+                ResolutionState::Resolved(TypeResolution::Item(item_id)) => {
+                    named_import_value_type_from_item(module, *item_id, Vec::new(), item_stack)
+                }
                 ResolutionState::Resolved(TypeResolution::Import(import_id)) => {
                     named_import_value_type_from_import(module, *import_id, Vec::new())
                 }
@@ -699,7 +696,9 @@ fn import_value_type_with_stack(
             apply_record_row_transform_import_value_type(transform, source)
         }
         TypeKind::Arrow { parameter, result } => Some(ImportValueType::Arrow {
-            parameter: Box::new(import_value_type_with_stack(module, *parameter, item_stack)?),
+            parameter: Box::new(import_value_type_with_stack(
+                module, *parameter, item_stack,
+            )?),
             result: Box::new(import_value_type_with_stack(module, *result, item_stack)?),
         }),
         TypeKind::Apply { .. } => applied_import_value_type(module, ty, item_stack),
@@ -788,58 +787,82 @@ fn applied_import_value_type(
 ) -> Option<ImportValueType> {
     let (constructor, arguments) = flatten_type_application(module, ty)?;
     match constructor {
-        ResolvedTypeConstructor::Builtin(crate::BuiltinType::List) if arguments.len() == 1 => Some(
-            ImportValueType::List(Box::new(import_value_type_with_stack(
-                module,
-                arguments[0],
-                item_stack,
-            )?)),
-        ),
+        ResolvedTypeConstructor::Builtin(crate::BuiltinType::List) if arguments.len() == 1 => {
+            Some(ImportValueType::List(Box::new(
+                import_value_type_with_stack(module, arguments[0], item_stack)?,
+            )))
+        }
         ResolvedTypeConstructor::Builtin(crate::BuiltinType::Map) if arguments.len() == 2 => {
             Some(ImportValueType::Map {
-                key: Box::new(import_value_type_with_stack(module, arguments[0], item_stack)?),
-                value: Box::new(import_value_type_with_stack(module, arguments[1], item_stack)?),
+                key: Box::new(import_value_type_with_stack(
+                    module,
+                    arguments[0],
+                    item_stack,
+                )?),
+                value: Box::new(import_value_type_with_stack(
+                    module,
+                    arguments[1],
+                    item_stack,
+                )?),
             })
         }
-        ResolvedTypeConstructor::Builtin(crate::BuiltinType::Set) if arguments.len() == 1 => Some(
-            ImportValueType::Set(Box::new(import_value_type_with_stack(
-                module,
-                arguments[0],
-                item_stack,
-            )?)),
-        ),
+        ResolvedTypeConstructor::Builtin(crate::BuiltinType::Set) if arguments.len() == 1 => {
+            Some(ImportValueType::Set(Box::new(
+                import_value_type_with_stack(module, arguments[0], item_stack)?,
+            )))
+        }
         ResolvedTypeConstructor::Builtin(crate::BuiltinType::Option) if arguments.len() == 1 => {
-            Some(ImportValueType::Option(Box::new(import_value_type_with_stack(
-                module,
-                arguments[0],
-                item_stack,
-            )?)))
+            Some(ImportValueType::Option(Box::new(
+                import_value_type_with_stack(module, arguments[0], item_stack)?,
+            )))
         }
         ResolvedTypeConstructor::Builtin(crate::BuiltinType::Result) if arguments.len() == 2 => {
             Some(ImportValueType::Result {
-                error: Box::new(import_value_type_with_stack(module, arguments[0], item_stack)?),
-                value: Box::new(import_value_type_with_stack(module, arguments[1], item_stack)?),
+                error: Box::new(import_value_type_with_stack(
+                    module,
+                    arguments[0],
+                    item_stack,
+                )?),
+                value: Box::new(import_value_type_with_stack(
+                    module,
+                    arguments[1],
+                    item_stack,
+                )?),
             })
         }
         ResolvedTypeConstructor::Builtin(crate::BuiltinType::Validation)
             if arguments.len() == 2 =>
         {
             Some(ImportValueType::Validation {
-                error: Box::new(import_value_type_with_stack(module, arguments[0], item_stack)?),
-                value: Box::new(import_value_type_with_stack(module, arguments[1], item_stack)?),
+                error: Box::new(import_value_type_with_stack(
+                    module,
+                    arguments[0],
+                    item_stack,
+                )?),
+                value: Box::new(import_value_type_with_stack(
+                    module,
+                    arguments[1],
+                    item_stack,
+                )?),
             })
         }
         ResolvedTypeConstructor::Builtin(crate::BuiltinType::Signal) if arguments.len() == 1 => {
-            Some(ImportValueType::Signal(Box::new(import_value_type_with_stack(
-                module,
-                arguments[0],
-                item_stack,
-            )?)))
+            Some(ImportValueType::Signal(Box::new(
+                import_value_type_with_stack(module, arguments[0], item_stack)?,
+            )))
         }
         ResolvedTypeConstructor::Builtin(crate::BuiltinType::Task) if arguments.len() == 2 => {
             Some(ImportValueType::Task {
-                error: Box::new(import_value_type_with_stack(module, arguments[0], item_stack)?),
-                value: Box::new(import_value_type_with_stack(module, arguments[1], item_stack)?),
+                error: Box::new(import_value_type_with_stack(
+                    module,
+                    arguments[0],
+                    item_stack,
+                )?),
+                value: Box::new(import_value_type_with_stack(
+                    module,
+                    arguments[1],
+                    item_stack,
+                )?),
             })
         }
         ResolvedTypeConstructor::Bundle(ImportBundleKind::BuiltinOption)
@@ -1315,9 +1338,8 @@ fn extract_type_definition_with_stack(
     item_stack: &mut Vec<ItemId>,
 ) -> Option<ImportTypeDefinition> {
     match &item.body {
-        TypeItemBody::Alias(alias) => {
-            import_value_type_with_stack(module, *alias, item_stack).map(ImportTypeDefinition::Alias)
-        }
+        TypeItemBody::Alias(alias) => import_value_type_with_stack(module, *alias, item_stack)
+            .map(ImportTypeDefinition::Alias),
         TypeItemBody::Sum(variants) => variants
             .iter()
             .map(|variant| {

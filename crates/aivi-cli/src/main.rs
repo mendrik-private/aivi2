@@ -1413,6 +1413,31 @@ fn check_all_apps(
     }
 }
 
+fn canonicalize_check_path(cwd: &Path, path: &Path) -> PathBuf {
+    fs::canonicalize(path)
+        .or_else(|_| fs::canonicalize(cwd.join(path)))
+        .unwrap_or_else(|_| cwd.join(path))
+}
+
+fn include_unused_check_warnings(
+    workspace_root: &Path,
+    bundled_stdlib_root: Option<&Path>,
+    file_path: &Path,
+) -> bool {
+    if !file_path.starts_with(workspace_root) {
+        return false;
+    }
+
+    if let Some(stdlib_root) = bundled_stdlib_root
+        && workspace_root != stdlib_root
+        && file_path.starts_with(stdlib_root)
+    {
+        return false;
+    }
+
+    true
+}
+
 fn check_file(path: &Path, timings: bool) -> Result<ExitCode, String> {
     let total_start = Instant::now();
     require_file_exists(path)?;
@@ -1443,8 +1468,21 @@ fn check_file(path: &Path, timings: bool) -> Result<ExitCode, String> {
 
     // After HIR passes, collect LSP-level unused-symbol warnings for each file.
     let t0 = Instant::now();
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let entry_path = canonicalize_check_path(&cwd, path);
+    let workspace_root_raw = discover_workspace_root(&entry_path);
+    let workspace_root = fs::canonicalize(&workspace_root_raw).unwrap_or(workspace_root_raw);
+    let bundled_stdlib_root = discover_bundled_stdlib_root().ok();
     let mut unused_count = 0usize;
     for file in &snapshot.files {
+        let file_path = canonicalize_check_path(&cwd, &file.path(&snapshot.frontend.db));
+        if !include_unused_check_warnings(
+            &workspace_root,
+            bundled_stdlib_root.as_deref(),
+            &file_path,
+        ) {
+            continue;
+        }
         let hir = query_hir_module(&snapshot.frontend.db, *file);
         let has_errors = hir
             .diagnostics()

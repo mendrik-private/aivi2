@@ -2,7 +2,8 @@ use std::collections::HashSet;
 
 use aivi_base::{Diagnostic, DiagnosticCode};
 use aivi_hir::{
-    ExprKind, Item, ItemId, Module, ResolutionState, TermResolution, TypeKind, TypeResolution,
+    DecoratorPayload, ExprKind, Item, ItemId, Module, ResolutionState, TermResolution, TypeKind,
+    TypeResolution,
 };
 use tower_lsp::lsp_types::{self as lsp, DiagnosticSeverity, DiagnosticTag, NumberOrString};
 
@@ -24,7 +25,10 @@ pub fn collect_unused_diagnostics(
 
     for item_id in module.root_items() {
         // Skip items that are referenced or exported.
-        if referenced.contains(item_id) || exported.contains(item_id) {
+        if referenced.contains(item_id)
+            || exported.contains(item_id)
+            || skip_unused_diagnostic(module, *item_id)
+        {
             continue;
         }
 
@@ -63,7 +67,10 @@ pub fn collect_unused_native_diagnostics(
     let mut diagnostics = Vec::new();
 
     for item_id in module.root_items() {
-        if referenced.contains(item_id) || exported.contains(item_id) {
+        if referenced.contains(item_id)
+            || exported.contains(item_id)
+            || skip_unused_diagnostic(module, *item_id)
+        {
             continue;
         }
 
@@ -151,6 +158,18 @@ fn collect_exported_items(module: &Module) -> HashSet<ItemId> {
     }
 
     exported
+}
+
+fn skip_unused_diagnostic(module: &Module, item_id: ItemId) -> bool {
+    module.items()[item_id]
+        .decorators()
+        .iter()
+        .any(|decorator_id| {
+            matches!(
+                module.decorators()[*decorator_id].payload,
+                DecoratorPayload::Test(_)
+            )
+        })
 }
 
 /// Extract the name text and name span for an item, if the item kind has a

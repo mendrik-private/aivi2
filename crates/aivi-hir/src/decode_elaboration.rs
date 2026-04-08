@@ -719,7 +719,9 @@ impl<'a> DecodeTypeLowerer<'a> {
             ResolutionState::Resolved(TypeResolution::Import(import_id)) => {
                 self.lower_import_type_reference(*import_id, &[], span)
             }
-            ResolutionState::Unresolved => Ok(self.external_reference(type_path_name(&reference.path))),
+            ResolutionState::Unresolved => {
+                Ok(self.external_reference(type_path_name(&reference.path)))
+            }
         }
     }
 
@@ -793,7 +795,9 @@ impl<'a> DecodeTypeLowerer<'a> {
             ResolutionState::Resolved(TypeResolution::Import(import_id)) => {
                 self.lower_import_type_reference(*import_id, arguments, span)
             }
-            ResolutionState::Unresolved => Ok(self.external_reference(type_path_name(&reference.path))),
+            ResolutionState::Unresolved => {
+                Ok(self.external_reference(type_path_name(&reference.path)))
+            }
         }
     }
 
@@ -960,7 +964,9 @@ impl<'a> DecodeTypeLowerer<'a> {
             | ImportBindingMetadata::IntrinsicValue { .. }
             | ImportBindingMetadata::OpaqueValue
             | ImportBindingMetadata::AmbientValue { .. }
-            | ImportBindingMetadata::TypeConstructor { definition: None, .. }
+            | ImportBindingMetadata::TypeConstructor {
+                definition: None, ..
+            }
             | ImportBindingMetadata::Domain { carrier: None, .. }
             | ImportBindingMetadata::BuiltinTerm(_)
             | ImportBindingMetadata::AmbientType
@@ -976,7 +982,9 @@ impl<'a> DecodeTypeLowerer<'a> {
         span: SourceSpan,
     ) -> Result<StructuralTypeId, DecodeTypeLoweringError> {
         match definition {
-            ImportTypeDefinition::Alias(alias) => self.lower_import_value_type(alias, arguments, span),
+            ImportTypeDefinition::Alias(alias) => {
+                self.lower_import_value_type(alias, arguments, span)
+            }
             ImportTypeDefinition::Sum(variants) => {
                 let lowered_variants = variants
                     .iter()
@@ -987,7 +995,9 @@ impl<'a> DecodeTypeLowerer<'a> {
                             many => {
                                 let lowered = many
                                     .iter()
-                                    .map(|field| self.lower_import_value_type(field, arguments, span))
+                                    .map(|field| {
+                                        self.lower_import_value_type(field, arguments, span)
+                                    })
                                     .collect::<Result<Vec<_>, _>>()?;
                                 Some(self.types.tuple(lowered).map_err(|error| {
                                     DecodeTypeLoweringError::invalid_shape(
@@ -1005,7 +1015,9 @@ impl<'a> DecodeTypeLowerer<'a> {
                     .collect::<Result<Vec<_>, DecodeTypeLoweringError>>()?;
                 self.types
                     .sum(Closedness::Closed, lowered_variants)
-                    .map_err(|error| DecodeTypeLoweringError::invalid_shape(span, error.kind().clone()))
+                    .map_err(|error| {
+                        DecodeTypeLoweringError::invalid_shape(span, error.kind().clone())
+                    })
             }
         }
     }
@@ -1023,9 +1035,9 @@ impl<'a> DecodeTypeLowerer<'a> {
                     .iter()
                     .map(|element| self.lower_import_value_type(element, arguments, span))
                     .collect::<Result<Vec<_>, _>>()?;
-                self.types
-                    .tuple(lowered)
-                    .map_err(|error| DecodeTypeLoweringError::invalid_shape(span, error.kind().clone()))
+                self.types.tuple(lowered).map_err(|error| {
+                    DecodeTypeLoweringError::invalid_shape(span, error.kind().clone())
+                })
             }
             ImportValueType::Record(fields) => {
                 let lowered = fields
@@ -1039,7 +1051,9 @@ impl<'a> DecodeTypeLowerer<'a> {
                     .collect::<Result<Vec<_>, DecodeTypeLoweringError>>()?;
                 self.types
                     .record(Closedness::Closed, lowered)
-                    .map_err(|error| DecodeTypeLoweringError::invalid_shape(span, error.kind().clone()))
+                    .map_err(|error| {
+                        DecodeTypeLoweringError::invalid_shape(span, error.kind().clone())
+                    })
             }
             ImportValueType::Arrow { .. } => Err(DecodeTypeLoweringError::unsupported(
                 span,
@@ -1087,7 +1101,8 @@ impl<'a> DecodeTypeLowerer<'a> {
                     .map(|argument| self.lower_import_value_type(argument, arguments, span))
                     .collect::<Result<Vec<_>, _>>()?;
                 if let Some((import_id, _)) = self.module.imports().iter().find(|(_, binding)| {
-                    (binding.imported_name.text() == type_name || binding.local_name.text() == type_name)
+                    (binding.imported_name.text() == type_name
+                        || binding.local_name.text() == type_name)
                         && matches!(
                             &binding.metadata,
                             ImportBindingMetadata::TypeConstructor { .. }
@@ -1098,7 +1113,11 @@ impl<'a> DecodeTypeLowerer<'a> {
                 }) {
                     self.lower_import_type_reference(import_id, &lowered_arguments, span)
                 } else if let Some(definition) = definition {
-                    if self.inline_named_in_progress.iter().any(|name| name == type_name) {
+                    if self
+                        .inline_named_in_progress
+                        .iter()
+                        .any(|name| name == type_name)
+                    {
                         Ok(self.external_reference(type_name.clone()))
                     } else {
                         self.inline_named_in_progress.push(type_name.clone());

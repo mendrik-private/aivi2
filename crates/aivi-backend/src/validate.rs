@@ -489,7 +489,11 @@ impl fmt::Display for ValidationError {
                     .zip(names.iter())
                     .map(|(id, name)| format!("{name} (item{id})"))
                     .collect();
-                write!(f, "circular dependency between items: {}", items.join(" -> "))
+                write!(
+                    f,
+                    "circular dependency between items: {}",
+                    items.join(" -> ")
+                )
             }
         }
     }

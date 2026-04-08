@@ -83,23 +83,25 @@ fn render_backend_runtime_link_error(
     module: &HirModule,
     backend: &BackendProgram,
 ) -> String {
-    let hir_item_name = |item: HirItemId| {
-        match &module.items()[item] {
-            Item::Type(item) => item.name.text(),
-            Item::Value(item) => item.name.text(),
-            Item::Function(item) => item.name.text(),
-            Item::Signal(item) => item.name.text(),
-            Item::Class(item) => item.name.text(),
-            Item::Domain(item) => item.name.text(),
-            Item::SourceProviderContract(_)
-            | Item::Instance(_)
-            | Item::Use(_)
-            | Item::Export(_)
-            | Item::Hoist(_) => "<anonymous>",
-        }
+    let hir_item_name = |item: HirItemId| match &module.items()[item] {
+        Item::Type(item) => item.name.text(),
+        Item::Value(item) => item.name.text(),
+        Item::Function(item) => item.name.text(),
+        Item::Signal(item) => item.name.text(),
+        Item::Class(item) => item.name.text(),
+        Item::Domain(item) => item.name.text(),
+        Item::SourceProviderContract(_)
+        | Item::Instance(_)
+        | Item::Use(_)
+        | Item::Export(_)
+        | Item::Hoist(_) => "<anonymous>",
     };
     match error {
-        aivi_runtime::BackendRuntimeLinkError::DuplicateBackendOrigin { item, first, second } => {
+        aivi_runtime::BackendRuntimeLinkError::DuplicateBackendOrigin {
+            item,
+            first,
+            second,
+        } => {
             format!(
                 "HIR item {} ({}) lowered to multiple backend items: item{} ({}) and item{} ({})",
                 item,
@@ -662,8 +664,12 @@ impl RunSessionState {
             for failure in &failures {
                 match failure {
                     GlibLinkedRuntimeFailure::Tick(error) => {
-                        let diagnostics =
-                            render_runtime_error(error, &source_map, &graph, Some(backend.as_ref()));
+                        let diagnostics = render_runtime_error(
+                            error,
+                            &source_map,
+                            &graph,
+                            Some(backend.as_ref()),
+                        );
                         for diag in &diagnostics {
                             rendered.push_str(&format!("  error: {}\n", diag.message));
                             for note in &diag.notes {
@@ -793,12 +799,14 @@ fn hold_startup_timer_sources(
         if !is_timer {
             continue;
         }
-        driver.evaluate_source_config(binding.instance).map_err(|error| {
-            format!(
-                "failed to evaluate startup source {}: {error}",
-                binding.instance.as_raw()
-            )
-        })?;
+        driver
+            .evaluate_source_config(binding.instance)
+            .map_err(|error| {
+                format!(
+                    "failed to evaluate startup source {}: {error}",
+                    binding.instance.as_raw()
+                )
+            })?;
         driver
             .set_source_mode(binding.instance, aivi_runtime::GlibLinkedSourceMode::Manual)
             .map_err(|error| {
@@ -831,15 +839,16 @@ pub(super) fn start_run_session_with_launch_config(
         event_handlers,
         stub_signal_defaults,
     } = artifact;
-    let linked = link_backend_runtime(runtime_assembly, &core, backend.clone()).map_err(|errors| {
-        let mut rendered = String::from("failed to link backend runtime for `aivi run`:\n");
-        for error in errors.errors() {
-            rendered.push_str("- ");
-            rendered.push_str(&render_backend_runtime_link_error(error, &module, &backend));
-            rendered.push('\n');
-        }
-        rendered
-    })?;
+    let linked =
+        link_backend_runtime(runtime_assembly, &core, backend.clone()).map_err(|errors| {
+            let mut rendered = String::from("failed to link backend runtime for `aivi run`:\n");
+            for error in errors.errors() {
+                rendered.push_str("- ");
+                rendered.push_str(&render_backend_runtime_link_error(error, &module, &backend));
+                rendered.push('\n');
+            }
+            rendered
+        })?;
 
     let context = glib::MainContext::default();
     let scheduled_session = Arc::new(std::sync::Mutex::new(

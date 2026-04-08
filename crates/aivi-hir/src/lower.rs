@@ -13541,7 +13541,8 @@ value next : Player = opponent Human
         let parameter_annotation = companion.parameters[0]
             .annotation
             .expect("explicit companion receiver type should split onto the parameter");
-        let TypeKind::Name(parameter_ref) = &lowered.module().types()[parameter_annotation].kind else {
+        let TypeKind::Name(parameter_ref) = &lowered.module().types()[parameter_annotation].kind
+        else {
             panic!("companion parameter type should lower to Player");
         };
         let result_annotation = companion
