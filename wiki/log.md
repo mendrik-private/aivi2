@@ -107,3 +107,8 @@ Documented the follow-up runtime and GTK bridge changes behind the Reversi laten
 
 - `crates/aivi-runtime/src/glib_adapter.rs`: direct UI publications can now drain only the current scheduler queue instead of also draining timer wakeups
 - `crates/aivi-gtk/src/schema.rs` + `crates/aivi-gtk/src/host.rs`: buttons now support `focusable={Bool}` so board cells can suppress focus flashes
+
+## [2026-04-08] ingest | ADT companion function syntax
+
+Updated companion syntax notes in [type-system.md](type-system.md) and [indexed-collections.md](indexed-collections.md) to match the new explicit receiver style.  
+Sources updated alongside the wiki: `syntax.md`, `AIVI_RFC.md`, `manual/guide/types.md`, `crates/aivi-syntax/src/parse.rs`, and `crates/aivi-hir/src/lower.rs`.

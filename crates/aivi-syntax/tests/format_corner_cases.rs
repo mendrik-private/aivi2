@@ -104,8 +104,24 @@ type Player = {
     | Human
     | Computer
 
-    type Player
-    opponent self = self
+    type Player -> Player
+    opponent = self => self
+     ||> Human -> Computer
+     ||> Computer -> Human
+}
+";
+    assert_idempotent(src);
+}
+
+#[test]
+fn sum_type_with_unary_subject_companion_members_is_idempotent() {
+    let src = "\
+type Player = {
+    | Human
+    | Computer
+
+    type Player -> Player
+    opponent = .
      ||> Human -> Computer
      ||> Computer -> Human
 }

@@ -1014,14 +1014,7 @@ impl<'a> Lowerer<'a> {
                 companions = sum
                     .companions
                     .iter()
-                    .map(|member| {
-                        self.lower_type_companion_member(
-                            member,
-                            item.name.as_ref(),
-                            &item.type_parameters,
-                            &parameters,
-                        )
-                    })
+                    .map(|member| self.lower_type_companion_member(member, &parameters))
                     .collect();
                 match crate::NonEmpty::from_vec(variants) {
                     Ok(variants) => TypeItemBody::Sum(variants),
@@ -1719,20 +1712,10 @@ impl<'a> Lowerer<'a> {
     fn lower_type_companion_member(
         &mut self,
         member: &syn::TypeCompanionMember,
-        owner_name: Option<&syn::Identifier>,
-        owner_type_parameters: &[syn::Identifier],
         owner_parameter_ids: &[TypeParameterId],
     ) -> FunctionItem {
         let header = self.lower_item_header(&[], ItemKind::Function, member.span);
         let name = self.make_name(&member.name.text, member.name.span);
-        let uses_self = member
-            .body
-            .as_ref()
-            .is_some_and(|body| body.contains_self_reference());
-        let has_explicit_self_parameter = member
-            .parameters
-            .first()
-            .is_some_and(|parameter| parameter.text == "self");
         let annotation = member
             .annotation
             .as_ref()
@@ -1748,44 +1731,11 @@ impl<'a> Lowerer<'a> {
                 );
                 self.placeholder_type(member.span)
             });
-        let annotation = if uses_self {
-            if let Some(owner_name) = owner_name {
-                let self_type = self.synthesise_owner_self_type(owner_name, owner_type_parameters);
-                self.alloc_type(TypeNode {
-                    span: member.span,
-                    kind: TypeKind::Arrow {
-                        parameter: self_type,
-                        result: annotation,
-                    },
-                })
-            } else {
-                annotation
-            }
-        } else {
-            annotation
-        };
-
-        let mut parameters: Vec<FunctionParameter> = if uses_self && !has_explicit_self_parameter {
-            let self_name = self.make_name("self", member.span);
-            let self_binding = self.alloc_binding(Binding {
-                span: member.span,
-                name: self_name,
-                kind: BindingKind::FunctionParameter,
-            });
-            vec![FunctionParameter {
-                span: member.span,
-                binding: self_binding,
-                annotation: None,
-            }]
-        } else {
-            Vec::new()
-        };
-        parameters.extend(
-            member
-                .parameters
-                .iter()
-                .map(|parameter| self.lower_instance_parameter(parameter)),
-        );
+        let parameters = member
+            .parameters
+            .iter()
+            .map(|parameter| self.lower_function_parameter(parameter))
+            .collect();
 
         let body = member
             .body
@@ -13546,8 +13496,8 @@ type Player = {
     | Human
     | Computer
 
-    type Player
-    opponent self = self
+    type Player -> Player
+    opponent = self => self
      ||> Human    -> Computer
      ||> Computer -> Human
 }
@@ -13579,7 +13529,20 @@ value next : Player = opponent Human
             })
             .expect("fixture should lower one synthetic companion function");
         assert_eq!(companion.parameters.len(), 1);
-        assert!(companion.annotation.is_some());
+        let parameter_annotation = companion.parameters[0]
+            .annotation
+            .expect("explicit companion receiver type should split onto the parameter");
+        let TypeKind::Name(parameter_ref) = &lowered.module().types()[parameter_annotation].kind else {
+            panic!("companion parameter type should lower to Player");
+        };
+        let result_annotation = companion
+            .annotation
+            .expect("explicit companion result type should remain on the function");
+        let TypeKind::Name(result_ref) = &lowered.module().types()[result_annotation].kind else {
+            panic!("companion result type should lower to Player");
+        };
+        assert_eq!(parameter_ref.path.to_string(), "Player");
+        assert_eq!(result_ref.path.to_string(), "Player");
     }
 
     #[test]
@@ -13590,8 +13553,8 @@ value next : Player = opponent Human
 type Box A = {
     | Box A
 
-    type A
-    unbox self = self
+    type Box A -> A
+    unbox = .
      ||> Box value -> value
 }
 
@@ -13621,6 +13584,7 @@ value current : Int = unbox (Box 1)
                 _ => None,
             })
             .expect("fixture should lower one generic companion function");
+        assert_eq!(companion.parameters.len(), 1);
         assert!(
             !companion.type_parameters.is_empty(),
             "generic companion should retain the owner type parameters"

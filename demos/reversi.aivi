@@ -26,14 +26,14 @@ type Disc = {
     | Black
     | White
 
-    type Bool
-    isHumanDisc self =
+    type Disc -> Bool
+    isHumanDisc = self =>
         self
         ||> Black -> True
         ||> _     -> False
 
-    type Bool
-    isComputerDisc self =
+    type Disc -> Bool
+    isComputerDisc = self =>
         self
         ||> White -> True
         ||> _     -> False
@@ -43,14 +43,14 @@ type Player = {
     | Human
     | Computer
 
-    type Player
-    otherPlayer self =
+    type Player -> Player
+    otherPlayer = self =>
         self
         ||> Human    -> Computer
         ||> Computer -> Human
 
-    type Disc
-    discFor self =
+    type Player -> Disc
+    discFor = self =>
         self
         ||> Human    -> Black
         ||> Computer -> White
@@ -76,32 +76,32 @@ type Phase = {
     | ComputerThinking
     | ComputerAnimating Coord Int
 
-    type Bool
-    phaseAllowsHumanInput self =
+    type Phase -> Bool
+    phaseAllowsHumanInput = self =>
         self
         ||> HumanReady -> True
         ||> _          -> False
 
-    type Bool
-    phaseIsComputerThinking self =
+    type Phase -> Bool
+    phaseIsComputerThinking = self =>
         self
         ||> ComputerThinking -> True
         ||> _                -> False
 
-    type Bool
-    phaseHasComputerAnimation self =
+    type Phase -> Bool
+    phaseHasComputerAnimation = self =>
         self
         ||> ComputerAnimating _ _ -> True
         ||> _                     -> False
 
-    type Option Coord
-    phaseComputerTarget self =
+    type Phase -> Option Coord
+    phaseComputerTarget = self =>
         self
         ||> ComputerAnimating coord _ -> Some coord
         ||> _                         -> None
 
-    type Bool
-    phaseShowsComputerTarget self =
+    type Phase -> Bool
+    phaseShowsComputerTarget = self =>
         self
         ||> ComputerAnimating _ step -> step == 1 or step == 3 or step == 5
         ||> _                        -> False

@@ -19,13 +19,13 @@ Module {
                                 0,
                             ),
                             end: ByteIndex(
-                                153,
+                                142,
                             ),
                         },
                     },
                     token_range: TokenRange {
                         start: 0,
-                        end: 58,
+                        end: 54,
                     },
                     decorators: [],
                     leading_comments: [],
@@ -243,12 +243,12 @@ Module {
                                                 },
                                             },
                                         ),
-                                        function_form: Explicit,
+                                        function_form: UnarySubjectSugar,
                                         parameters: [
                                             FunctionParam {
                                                 name: Some(
                                                     Identifier {
-                                                        text: "self",
+                                                        text: "arg1",
                                                         span: SourceSpan {
                                                             file: FileId(
                                                                 0,
@@ -258,7 +258,7 @@ Module {
                                                                     85,
                                                                 ),
                                                                 end: ByteIndex(
-                                                                    89,
+                                                                    86,
                                                                 ),
                                                             },
                                                         },
@@ -274,7 +274,7 @@ Module {
                                                             85,
                                                         ),
                                                         end: ByteIndex(
-                                                            89,
+                                                            86,
                                                         ),
                                                     },
                                                 },
@@ -288,17 +288,17 @@ Module {
                                                             Expr {
                                                                 kind: Name(
                                                                     Identifier {
-                                                                        text: "self",
+                                                                        text: "arg1",
                                                                         span: SourceSpan {
                                                                             file: FileId(
                                                                                 0,
                                                                             ),
                                                                             span: Span {
                                                                                 start: ByteIndex(
-                                                                                    93,
+                                                                                    85,
                                                                                 ),
                                                                                 end: ByteIndex(
-                                                                                    97,
+                                                                                    86,
                                                                                 ),
                                                                             },
                                                                         },
@@ -310,10 +310,10 @@ Module {
                                                                     ),
                                                                     span: Span {
                                                                         start: ByteIndex(
-                                                                            93,
+                                                                            85,
                                                                         ),
                                                                         end: ByteIndex(
-                                                                            97,
+                                                                            86,
                                                                         ),
                                                                     },
                                                                 },
@@ -335,10 +335,10 @@ Module {
                                                                                         ),
                                                                                         span: Span {
                                                                                             start: ByteIndex(
-                                                                                                107,
+                                                                                                96,
                                                                                             ),
                                                                                             end: ByteIndex(
-                                                                                                112,
+                                                                                                101,
                                                                                             ),
                                                                                         },
                                                                                     },
@@ -350,10 +350,10 @@ Module {
                                                                                 ),
                                                                                 span: Span {
                                                                                     start: ByteIndex(
-                                                                                        107,
+                                                                                        96,
                                                                                     ),
                                                                                     end: ByteIndex(
-                                                                                        112,
+                                                                                        101,
                                                                                     ),
                                                                                 },
                                                                             },
@@ -368,10 +368,10 @@ Module {
                                                                                         ),
                                                                                         span: Span {
                                                                                             start: ByteIndex(
-                                                                                                116,
+                                                                                                105,
                                                                                             ),
                                                                                             end: ByteIndex(
-                                                                                                124,
+                                                                                                113,
                                                                                             ),
                                                                                         },
                                                                                     },
@@ -383,10 +383,10 @@ Module {
                                                                                 ),
                                                                                 span: Span {
                                                                                     start: ByteIndex(
-                                                                                        116,
+                                                                                        105,
                                                                                     ),
                                                                                     end: ByteIndex(
-                                                                                        124,
+                                                                                        113,
                                                                                     ),
                                                                                 },
                                                                             },
@@ -397,10 +397,10 @@ Module {
                                                                             ),
                                                                             span: Span {
                                                                                 start: ByteIndex(
-                                                                                    107,
+                                                                                    96,
                                                                                 ),
                                                                                 end: ByteIndex(
-                                                                                    124,
+                                                                                    113,
                                                                                 ),
                                                                             },
                                                                         },
@@ -412,10 +412,10 @@ Module {
                                                                     ),
                                                                     span: Span {
                                                                         start: ByteIndex(
-                                                                            103,
+                                                                            92,
                                                                         ),
                                                                         end: ByteIndex(
-                                                                            124,
+                                                                            113,
                                                                         ),
                                                                     },
                                                                 },
@@ -435,10 +435,10 @@ Module {
                                                                                         ),
                                                                                         span: Span {
                                                                                             start: ByteIndex(
-                                                                                                134,
+                                                                                                123,
                                                                                             ),
                                                                                             end: ByteIndex(
-                                                                                                142,
+                                                                                                131,
                                                                                             ),
                                                                                         },
                                                                                     },
@@ -450,10 +450,10 @@ Module {
                                                                                 ),
                                                                                 span: Span {
                                                                                     start: ByteIndex(
-                                                                                        134,
+                                                                                        123,
                                                                                     ),
                                                                                     end: ByteIndex(
-                                                                                        142,
+                                                                                        131,
                                                                                     ),
                                                                                 },
                                                                             },
@@ -468,10 +468,10 @@ Module {
                                                                                         ),
                                                                                         span: Span {
                                                                                             start: ByteIndex(
-                                                                                                146,
+                                                                                                135,
                                                                                             ),
                                                                                             end: ByteIndex(
-                                                                                                151,
+                                                                                                140,
                                                                                             ),
                                                                                         },
                                                                                     },
@@ -483,10 +483,10 @@ Module {
                                                                                 ),
                                                                                 span: Span {
                                                                                     start: ByteIndex(
-                                                                                        146,
+                                                                                        135,
                                                                                     ),
                                                                                     end: ByteIndex(
-                                                                                        151,
+                                                                                        140,
                                                                                     ),
                                                                                 },
                                                                             },
@@ -497,10 +497,10 @@ Module {
                                                                             ),
                                                                             span: Span {
                                                                                 start: ByteIndex(
-                                                                                    134,
+                                                                                    123,
                                                                                 ),
                                                                                 end: ByteIndex(
-                                                                                    151,
+                                                                                    140,
                                                                                 ),
                                                                             },
                                                                         },
@@ -512,10 +512,10 @@ Module {
                                                                     ),
                                                                     span: Span {
                                                                         start: ByteIndex(
-                                                                            130,
+                                                                            119,
                                                                         ),
                                                                         end: ByteIndex(
-                                                                            151,
+                                                                            140,
                                                                         ),
                                                                     },
                                                                 },
@@ -527,10 +527,10 @@ Module {
                                                             ),
                                                             span: Span {
                                                                 start: ByteIndex(
-                                                                    93,
+                                                                    85,
                                                                 ),
                                                                 end: ByteIndex(
-                                                                    151,
+                                                                    140,
                                                                 ),
                                                             },
                                                         },
@@ -542,10 +542,10 @@ Module {
                                                     ),
                                                     span: Span {
                                                         start: ByteIndex(
-                                                            93,
+                                                            85,
                                                         ),
                                                         end: ByteIndex(
-                                                            151,
+                                                            140,
                                                         ),
                                                     },
                                                 },
@@ -560,7 +560,7 @@ Module {
                                                     74,
                                                 ),
                                                 end: ByteIndex(
-                                                    151,
+                                                    140,
                                                 ),
                                             },
                                         },
@@ -575,7 +575,7 @@ Module {
                                             14,
                                         ),
                                         end: ByteIndex(
-                                            153,
+                                            142,
                                         ),
                                     },
                                 },
@@ -586,5 +586,5 @@ Module {
             },
         ),
     ],
-    token_count: 58,
+    token_count: 54,
 }

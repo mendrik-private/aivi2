@@ -574,13 +574,13 @@ type Player = {
     | Human
     | Computer
 
-    type Player
-    opponent self = self
+    type Player -> Player
+    opponent = self => self
      ||> Human    -> Computer
      ||> Computer -> Human
 
-    type Text
-    label self = self
+    type Player -> Text
+    label = .
      ||> Human    -> "You"
      ||> Computer -> "Computer"
 }
@@ -595,8 +595,8 @@ Normative rules:
 - companion members elaborate to ordinary top-level callable items owned by the type declaration
 - companion members follow ordinary `use` / `export` rules; exporting the type does not implicitly
   export its companion members
-- when a companion body references `self`, the owner type is inserted automatically at the front of
-  the annotation
+- companion member `type` lines spell the full function type, including the receiver
+- companion bodies use ordinary function forms such as `name = self => ...` or `name = . ...`
 - naming the receiver as an explicit `self` parameter is accepted, but not required
 - the feature colocates total helpers; it does not introduce methods, mutation, or open-world
   extension

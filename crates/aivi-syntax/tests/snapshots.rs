@@ -49,7 +49,15 @@ fn snapshot_type_sum() {
 #[test]
 fn snapshot_type_sum_with_companions() {
     let module = parse(
-        "type Player = {\n    | Human\n    | Computer\n\n    type Player\n    opponent self = self\n     ||> Human -> Computer\n     ||> Computer -> Human\n}",
+        "type Player = {\n    | Human\n    | Computer\n\n    type Player -> Player\n    opponent = self => self\n     ||> Human -> Computer\n     ||> Computer -> Human\n}",
+    );
+    insta::assert_debug_snapshot!(module);
+}
+
+#[test]
+fn snapshot_type_sum_with_unary_subject_companion() {
+    let module = parse(
+        "type Player = {\n    | Human\n    | Computer\n\n    type Player -> Player\n    opponent = .\n     ||> Human -> Computer\n     ||> Computer -> Human\n}",
     );
     insta::assert_debug_snapshot!(module);
 }

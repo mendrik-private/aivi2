@@ -115,8 +115,8 @@ type Player = {
     | Human
     | Computer
 
-    type Player
-    opponent self = self
+    type Player -> Player
+    opponent = self => self
      ||> Human    -> Computer
      ||> Computer -> Human
 }
@@ -133,8 +133,8 @@ Rules:
 - In a companion sum body, constructors must come before companion members.
 - Companion members elaborate to ordinary top-level callables and use ordinary `use` / `export`
   rules.
-- When a companion body references `self`, the owner type is inserted automatically at the front of
-  its annotation.
+- Companion member `type` lines spell the full function type, including the receiver. Bodies use
+  ordinary function forms such as `name = self => ...` or the receiver-only shorthand `name = . ...`.
 
 ### 2.4 `class` and `instance`
 

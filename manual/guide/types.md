@@ -95,17 +95,15 @@ type Player = {
     | Human
     | Computer
 
-    type Player
-    opponent self =
-        self
-        ||> Human    -> Computer
-        ||> Computer -> Human
+    type Player -> Player
+    opponent = self => self
+     ||> Human    -> Computer
+     ||> Computer -> Human
 
-    type Text
-    label self =
-        self
-        ||> Human    -> "You"
-        ||> Computer -> "Computer"
+    type Player -> Text
+    label = .
+     ||> Human    -> "You"
+     ||> Computer -> "Computer"
 }
 
 value next : Player = opponent Human
@@ -115,9 +113,9 @@ value shown : Text = label Computer
 These companion bindings are still ordinary functions. You call them by name, and you import or
 export them the same way as any other function.
 
-When a companion body uses `self`, AIVI inserts the receiver type automatically at the front of the
-annotation. In the example above, `type Player` means `Player -> Player`, and `type Text` means
-`Player -> Text`.
+The `type` line spells the full function type, including the receiver. In the example above,
+`type Player -> Player` and `type Player -> Text` are written explicitly. When the receiver is the
+only parameter, `name = .` is shorthand for `name = self => ...`.
 
 The brace form is reserved for companion sums only when the first significant entry is a constructor
 line beginning with `|`. Ordinary record declarations still use the same `type Name = { field: T }`

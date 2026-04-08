@@ -48,8 +48,8 @@ type Player = {
     | Human
     | Computer
 
-    type Player
-    opponent self = self
+    type Player -> Player
+    opponent = self => self
      ||> Human    -> Computer
      ||> Computer -> Human
 }
@@ -61,7 +61,8 @@ Important rules:
 - constructors come first; companion members follow
 - companion members elaborate to ordinary top-level functions
 - companion members keep ordinary export/import rules rather than piggybacking on the type export
-- when the body references `self`, the owner type is inserted automatically at the front of the annotation
+- companion member `type` lines spell the full function type, including the receiver
+- companion bodies use ordinary function forms such as `name = self => ...` or `name = . ...`
 
 ## Current higher-kinded reality
 

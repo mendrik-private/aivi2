@@ -1728,8 +1728,125 @@ impl Formatter {
     }
 
     fn format_type_companion_member(&self, member: &crate::TypeCompanionMember) -> Vec<String> {
-        let mut lines = Vec::new();
+        if member.function_form == FunctionSurfaceForm::UnarySubjectSugar
+            && let Some(lines) = self.try_format_unary_subject_type_companion_member(member)
+        {
+            return lines;
+        }
+        self.format_explicit_type_companion_member(member)
+    }
 
+    fn format_explicit_type_companion_member(
+        &self,
+        member: &crate::TypeCompanionMember,
+    ) -> Vec<String> {
+        let mut lines = Vec::new();
+        self.push_type_companion_annotation(&mut lines, member);
+
+        let mut header = format!("{}{} =", spaces(INDENT_WIDTH), member.name.text);
+        for parameter in &member.parameters {
+            header.push(' ');
+            header.push_str(&self.format_function_param(parameter));
+        }
+        header.push_str(" =>");
+
+        let Some(body) = &member.body else {
+            if member.parameters.is_empty() {
+                lines.push(format!("{}{}", spaces(INDENT_WIDTH), member.name.text));
+            } else {
+                lines.push(header);
+            }
+            return lines;
+        };
+
+        if let ExprKind::Pipe(pipe) = &body.kind
+            && let Some(head) = &pipe.head
+        {
+            lines.push(format!("{header} {}", self.format_expr_inline(head, 0)));
+            let stage_lines = self.format_pipe_stage_lines(&pipe.stages);
+            if !stage_lines.is_empty() {
+                lines.extend(
+                    Block::from_lines(stage_lines)
+                        .indented(INDENT_WIDTH + PIPE_STAGE_INDENT)
+                        .into_lines(),
+                );
+            }
+            return lines;
+        }
+
+        let force_break = self.should_force_expr_break(INDENT_WIDTH * 2, body);
+        let block = self.format_expr_block(body, force_break);
+        lines.push(header);
+        lines.extend(block.indented(INDENT_WIDTH * 2).into_lines());
+        lines
+    }
+
+    fn try_format_unary_subject_type_companion_member(
+        &self,
+        member: &crate::TypeCompanionMember,
+    ) -> Option<Vec<String>> {
+        let mut lines = Vec::new();
+        self.push_type_companion_annotation(&mut lines, member);
+
+        let Some(body) = &member.body else {
+            lines.push(format!("{}{} = .", spaces(INDENT_WIDTH), member.name.text));
+            return Some(lines);
+        };
+        let [parameter] = member.parameters.as_slice() else {
+            return None;
+        };
+        let parameter_name = parameter.name.as_ref()?;
+
+        if let ExprKind::Pipe(pipe) = &body.kind {
+            let head = pipe.head.as_ref()?;
+            let (head, rewrote_subject) =
+                self.restore_free_function_subject_expr((**head).clone(), parameter_name, false);
+            if !rewrote_subject {
+                return None;
+            }
+            lines.push(format!(
+                "{}{} = {}",
+                spaces(INDENT_WIDTH),
+                member.name.text,
+                self.format_expr_inline(&head, 0)
+            ));
+            let stage_lines = self.format_pipe_stage_lines(&pipe.stages);
+            if !stage_lines.is_empty() {
+                lines.extend(
+                    Block::from_lines(stage_lines)
+                        .indented(INDENT_WIDTH + PIPE_STAGE_INDENT)
+                        .into_lines(),
+                );
+            }
+            return Some(lines);
+        }
+
+        let (body, rewrote_subject) =
+            self.restore_free_function_subject_expr(body.clone(), parameter_name, false);
+        if !rewrote_subject {
+            return None;
+        }
+
+        let header = format!("{}{} =", spaces(INDENT_WIDTH), member.name.text);
+        let force_break = self.should_force_expr_break(INDENT_WIDTH * 2, &body);
+        let block = self.format_expr_block(&body, force_break);
+        if block.is_inline() {
+            lines.push(format!(
+                "{header} {}",
+                block.inline_text().expect("inline companion body")
+            ));
+        } else {
+            lines.push(header);
+            lines.extend(block.indented(INDENT_WIDTH * 2).into_lines());
+        }
+        Some(lines)
+    }
+
+    fn push_type_companion_annotation(
+        &self,
+        lines: &mut Vec<String>,
+        member: &crate::TypeCompanionMember,
+    ) {
         if let Some(annotation) = &member.annotation {
             let prefix = format!("{}type ", spaces(INDENT_WIDTH));
             let force_break = self.should_force_type_break(display_width(&prefix), annotation);
@@ -1743,33 +1860,6 @@ impl Formatter {
                 lines.extend(block.prefixed(&prefix).into_lines());
             }
         }
-
-        let mut header = format!("{}{}", spaces(INDENT_WIDTH), member.name.text);
-        for parameter in &member.parameters {
-            header.push(' ');
-            header.push_str(&parameter.text);
-        }
-
-        let Some(body) = &member.body else {
-            lines.push(header);
-            return lines;
-        };
-
-        let force_break =
-            self.should_force_expr_break(display_width(&format!("{header} = ")), body);
-        let block = self.format_expr_block(body, force_break);
-        if block.is_inline() {
-            lines.push(format!(
-                "{header} = {}",
-                block.inline_text().expect("inline block")
-            ));
-        } else if block.starts_with_delimiter() {
-            lines.extend(block.prefixed(&format!("{header} = ")).into_lines());
-        } else {
-            lines.push(format!("{header} ="));
-            lines.extend(block.indented(INDENT_WIDTH * 2).into_lines());
-        }
-        lines
     }
 
     fn format_instance_member(&self, member: &InstanceMember) -> Vec<String> {

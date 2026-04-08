@@ -113,7 +113,8 @@ These correspond to the `Builtin*Carrier` types in `crates/aivi-core/src/expr.rs
 - Closed sums can now use brace-bodied companion sections when the first significant token inside the braces is a constructor line beginning with `|`
 - Constructors stay ordinary closed-sum constructors; companion helpers lower as ordinary top-level functions
 - Companion helpers use ordinary `use` / `export` rules, so exporting the type does not automatically export its helpers
-- When a companion body references `self`, the owner type is inserted automatically at the front of the annotation
+- Companion helper `type` lines spell the full function type, including the receiver
+- Companion bodies use ordinary function forms such as `name = self => ...` or `name = . ...`
 
 ## Constraints
 

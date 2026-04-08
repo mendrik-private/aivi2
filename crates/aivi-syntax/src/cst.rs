@@ -241,7 +241,8 @@ pub struct TypeVariantField {
 pub struct TypeCompanionMember {
     pub name: Identifier,
     pub annotation: Option<TypeExpr>,
-    pub parameters: Vec<Identifier>,
+    pub function_form: FunctionSurfaceForm,
+    pub parameters: Vec<FunctionParam>,
     pub body: Option<Expr>,
     pub span: SourceSpan,
 }

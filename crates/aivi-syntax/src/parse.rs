@@ -3725,6 +3725,7 @@ impl<'a> Parser<'a> {
         member_indent: usize,
     ) -> Option<TypeCompanionMember> {
         let start = *cursor;
+        let name_index = self.peek_nontrivia(*cursor, end).unwrap_or(start);
         let Some(name) = self.parse_identifier(cursor, end) else {
             self.diagnostics.push(
                 Diagnostic::error("type companion member is missing its name")
@@ -3750,6 +3751,7 @@ impl<'a> Parser<'a> {
                 return Some(TypeCompanionMember {
                     name,
                     annotation,
+                    function_form: FunctionSurfaceForm::Explicit,
                     parameters: Vec::new(),
                     body: None,
                     span: self.source_span_for_range(start, *cursor),
@@ -3757,64 +3759,106 @@ impl<'a> Parser<'a> {
             }
         }
 
-        let mut parameters = Vec::new();
-        while let Some(index) = self.peek_nontrivia(*cursor, end) {
-            if self.tokens[index].line_start() {
-                break;
-            }
-            match self.tokens[index].kind() {
-                TokenKind::Identifier => {
-                    parameters.push(self.identifier_from_token(index));
-                    *cursor = index + 1;
-                }
-                TokenKind::Equals => break,
-                _ => break,
-            }
-        }
-
         let Some(eq_index) = self.consume_kind(cursor, end, TokenKind::Equals) else {
             self.diagnostics.push(
                 Diagnostic::error("type companion member is missing `=` before its body")
                     .with_code(MISSING_TYPE_COMPANION_BODY)
-                    .with_primary_label(name.span, "expected `=` followed by an expression body"),
+                    .with_primary_label(name.span, "write `name = self => ...` or `name = . ...`"),
             );
             return None;
         };
-        let equals_span = self.source_span_of_token(eq_index);
         let member_end = self
             .find_next_type_companion_member_start(*cursor, end, member_indent)
             .unwrap_or(end);
-        let body = self
-            .parse_expr(cursor, member_end, ExprStop::default())
-            .or_else(|| {
-                self.diagnostics.push(
-                    Diagnostic::error("type companion member is missing its body after `=`")
+
+        let (function_form, parameters, body) = if let Some((parameters, body)) =
+            self.parse_unary_subject_function_body(name_index, cursor, member_end)
+        {
+            (
+                FunctionSurfaceForm::UnarySubjectSugar,
+                parameters,
+                body.and_then(|body| match body {
+                    NamedItemBody::Expr(expr) => Some(expr),
+                    _ => None,
+                }),
+            )
+        } else {
+            let mut parameters = Vec::new();
+            while self.starts_function_param(*cursor, member_end) {
+                let Some(parameter) = self.parse_function_param(cursor, member_end) else {
+                    break;
+                };
+                parameters.push(parameter);
+            }
+
+            let body = if let Some(arrow_index) =
+                self.consume_kind(cursor, member_end, TokenKind::Arrow)
+            {
+                let body = self
+                    .parse_expr(cursor, member_end, ExprStop::default())
+                    .or_else(|| {
+                        self.diagnostics.push(
+                            Diagnostic::error(
+                                "type companion member is missing its body after `=>`",
+                            )
+                            .with_code(MISSING_TYPE_COMPANION_BODY)
+                            .with_primary_label(
+                                self.source_span_of_token(arrow_index),
+                                "expected an expression body for this companion member",
+                            ),
+                        );
+                        None
+                    })
+                    .and_then(|expr| {
+                        self.finish_expression_body(
+                            cursor,
+                            member_end,
+                            "type companion member",
+                            expr,
+                        )
+                        .and_then(|body| match body {
+                            NamedItemBody::Expr(expr) => Some(expr),
+                            _ => None,
+                        })
+                    });
+                if parameters.is_empty() {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "type companion members require an explicit parameter before `=>`",
+                        )
                         .with_code(MISSING_TYPE_COMPANION_BODY)
                         .with_primary_label(
-                            equals_span,
-                            "expected an expression body for this companion member",
+                            self.source_span_of_token(arrow_index),
+                            "insert a parameter such as `self` before `=>`",
+                        )
+                        .with_note(
+                            "receiver-only helpers can use the shortcut `name = .field` or `name = .`",
+                        ),
+                    );
+                }
+                body
+            } else {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "type companion member body must use `name = self => ...` or `name = . ...`",
+                    )
+                        .with_code(MISSING_TYPE_COMPANION_BODY)
+                        .with_primary_label(
+                            self.source_span_of_token(eq_index),
+                            "expected `.` or parameters followed by `=>`",
                         ),
                 );
                 None
-            });
-        if body.is_some() {
-            if let Some(trailing_index) = self.next_significant_in_range(*cursor, member_end) {
-                self.diagnostics.push(
-                    Diagnostic::error(
-                        "type companion member body must contain exactly one expression",
-                    )
-                    .with_code(TRAILING_DECLARATION_BODY_TOKEN)
-                    .with_primary_label(
-                        self.source_span_of_token(trailing_index),
-                        "this token is outside the companion body",
-                    ),
-                );
-            }
-        }
+            };
+
+            (FunctionSurfaceForm::Explicit, parameters, body)
+        };
+
         *cursor = member_end;
         Some(TypeCompanionMember {
             name,
             annotation: None,
+            function_form,
             parameters,
             body,
             span: self.source_span_for_range(start, member_end),
@@ -7442,7 +7486,7 @@ export main
     | Computer
 
     type Player -> Player
-    opponent self = self
+    opponent = self => self
      ||> Human    -> Computer
      ||> Computer -> Human
 }
@@ -7463,6 +7507,46 @@ export main
         assert_eq!(sum.variants.len(), 2);
         assert_eq!(sum.companions.len(), 1);
         assert_eq!(sum.companions[0].name.text, "opponent");
+        assert_eq!(
+            sum.companions[0].function_form,
+            FunctionSurfaceForm::Explicit
+        );
+        assert_eq!(sum.companions[0].parameters.len(), 1);
+        assert!(sum.companions[0].annotation.is_some());
+        assert!(sum.companions[0].body.is_some());
+    }
+
+    #[test]
+    fn parser_builds_sum_type_companions_with_unary_subject_sugar() {
+        let (_, parsed) = load(
+            r#"type Player = {
+    | Human
+    | Computer
+
+    type Player -> Player
+    opponent = .
+     ||> Human    -> Computer
+     ||> Computer -> Human
+}
+"#,
+        );
+
+        assert!(
+            !parsed.has_errors(),
+            "{:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+        let Item::Type(item) = &parsed.module.items[0] else {
+            panic!("expected type item");
+        };
+        let Some(TypeDeclBody::Sum(sum)) = item.type_body() else {
+            panic!("expected sum type body");
+        };
+        assert_eq!(sum.companions.len(), 1);
+        assert_eq!(
+            sum.companions[0].function_form,
+            FunctionSurfaceForm::UnarySubjectSugar
+        );
         assert_eq!(sum.companions[0].parameters.len(), 1);
         assert!(sum.companions[0].annotation.is_some());
         assert!(sum.companions[0].body.is_some());
