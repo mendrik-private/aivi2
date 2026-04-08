@@ -267,6 +267,28 @@ impl fmt::Display for Program {
                                 "      diff-seed seed=kernel{seed} payload=layout{payload_layout}"
                             )?;
                         }
+                        StageKind::Temporal(TemporalStage::Delay {
+                            payload_layout,
+                            duration_layout,
+                            duration,
+                        }) => {
+                            writeln!(
+                                f,
+                                "      delay duration=kernel{duration} config=layout{duration_layout} payload=layout{payload_layout}"
+                            )?;
+                        }
+                        StageKind::Temporal(TemporalStage::Burst {
+                            payload_layout,
+                            every_layout,
+                            count_layout,
+                            every,
+                            count,
+                        }) => {
+                            writeln!(
+                                f,
+                                "      burst every=kernel{every} count=kernel{count} every-layout=layout{every_layout} count-layout=layout{count_layout} payload=layout{payload_layout}"
+                            )?;
+                        }
                     }
                 }
                 if let Some(recurrence) = &pipeline.recurrence {
@@ -556,6 +578,18 @@ pub enum TemporalStage {
     DiffSeed {
         payload_layout: LayoutId,
         seed: KernelId,
+    },
+    Delay {
+        payload_layout: LayoutId,
+        duration_layout: LayoutId,
+        duration: KernelId,
+    },
+    Burst {
+        payload_layout: LayoutId,
+        every_layout: LayoutId,
+        count_layout: LayoutId,
+        every: KernelId,
+        count: KernelId,
     },
 }
 

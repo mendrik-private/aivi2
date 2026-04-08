@@ -45,6 +45,8 @@ pub struct TemporalStageElaboration {
 pub enum TemporalStageOutcome {
     Previous(PreviousStagePlan),
     Diff(DiffStagePlan),
+    Delay(DelayStagePlan),
+    Burst(BurstStagePlan),
     Blocked(BlockedTemporalStage),
 }
 
@@ -53,6 +55,8 @@ impl TemporalStageOutcome {
         match self {
             Self::Previous(plan) => Some(&plan.result_subject),
             Self::Diff(plan) => Some(&plan.result_subject),
+            Self::Delay(plan) => Some(&plan.result_subject),
+            Self::Burst(plan) => Some(&plan.result_subject),
             Self::Blocked(_) => None,
         }
     }
@@ -70,6 +74,21 @@ pub struct DiffStagePlan {
     pub input_subject: GateType,
     pub result_subject: GateType,
     pub mode: DiffStageMode,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DelayStagePlan {
+    pub input_subject: GateType,
+    pub result_subject: GateType,
+    pub duration_expr: crate::GateRuntimeExpr,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BurstStagePlan {
+    pub input_subject: GateType,
+    pub result_subject: GateType,
+    pub every_expr: crate::GateRuntimeExpr,
+    pub count_expr: crate::GateRuntimeExpr,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -94,6 +113,8 @@ pub enum TemporalElaborationBlocker {
     UnsupportedSeededDiffSubject { found: GateType },
     DiffFunctionShapeMismatch { expected: String, found: GateType },
     SignalResultNotSupported { found: GateType },
+    InvalidDurationType { found: GateType },
+    InvalidBurstCountType { found: GateType },
     RuntimeExprBlocked(GateElaborationBlocker),
 }
 
@@ -222,6 +243,49 @@ fn collect_temporal_pipe(
                         module,
                         stage.span,
                         *expr,
+                        current_env,
+                        current,
+                        typing,
+                    );
+                    temporal_stages.push(TemporalStageElaboration {
+                        owner,
+                        pipe_expr,
+                        stage_index,
+                        stage_span: stage.span,
+                        outcome: outcome.clone(),
+                    });
+                    PipeSubjectStepOutcome::Continue {
+                        new_subject: outcome.result_subject().cloned(),
+                        advance_by: 1,
+                    }
+                }
+                PipeStageKind::Delay { duration } => {
+                    let outcome = elaborate_delay_stage(
+                        module,
+                        stage.span,
+                        *duration,
+                        current_env,
+                        current,
+                        typing,
+                    );
+                    temporal_stages.push(TemporalStageElaboration {
+                        owner,
+                        pipe_expr,
+                        stage_index,
+                        stage_span: stage.span,
+                        outcome: outcome.clone(),
+                    });
+                    PipeSubjectStepOutcome::Continue {
+                        new_subject: outcome.result_subject().cloned(),
+                        advance_by: 1,
+                    }
+                }
+                PipeStageKind::Burst { every, count } => {
+                    let outcome = elaborate_burst_stage(
+                        module,
+                        stage.span,
+                        *every,
+                        *count,
                         current_env,
                         current,
                         typing,
@@ -484,6 +548,150 @@ fn elaborate_diff_stage(
     })
 }
 
+fn elaborate_delay_stage(
+    module: &Module,
+    stage_span: SourceSpan,
+    duration_expr_id: ExprId,
+    env: &GateExprEnv,
+    current: Option<&GateType>,
+    typing: &mut GateTypeContext<'_>,
+) -> TemporalStageOutcome {
+    let Some(subject) = current.cloned() else {
+        return TemporalStageOutcome::Blocked(BlockedTemporalStage {
+            subject: None,
+            blockers: vec![TemporalElaborationBlocker::UnknownSubjectType],
+        });
+    };
+    let GateType::Signal(_) = &subject else {
+        return TemporalStageOutcome::Blocked(BlockedTemporalStage {
+            subject: Some(subject.clone()),
+            blockers: vec![TemporalElaborationBlocker::InvalidSubjectType { found: subject }],
+        });
+    };
+
+    let mut blockers = Vec::new();
+    let duration_info = typing.infer_expr(duration_expr_id, env, None);
+    if duration_info.contains_signal {
+        blockers.push(TemporalElaborationBlocker::StageReadsSignals);
+    }
+    let duration_ty = duration_info
+        .actual_gate_type()
+        .or(duration_info.ty.clone());
+    let Some(duration_ty) = duration_ty else {
+        blockers.push(TemporalElaborationBlocker::UnknownStageExprType { span: stage_span });
+        return TemporalStageOutcome::Blocked(BlockedTemporalStage {
+            subject: Some(subject),
+            blockers,
+        });
+    };
+    if !is_duration_stage_type(&duration_ty) {
+        blockers.push(TemporalElaborationBlocker::InvalidDurationType { found: duration_ty });
+    }
+    let duration_expr = match lower_gate_runtime_expr(module, duration_expr_id, env, None, typing) {
+        Ok(expr) => Some(expr),
+        Err(blocker) => {
+            blockers.push(TemporalElaborationBlocker::RuntimeExprBlocked(blocker));
+            None
+        }
+    };
+    if !blockers.is_empty() {
+        return TemporalStageOutcome::Blocked(BlockedTemporalStage {
+            subject: Some(subject.clone()),
+            blockers,
+        });
+    }
+
+    TemporalStageOutcome::Delay(DelayStagePlan {
+        input_subject: subject.clone(),
+        result_subject: subject,
+        duration_expr: duration_expr.expect("planned delay stage should lower its runtime expr"),
+    })
+}
+
+fn elaborate_burst_stage(
+    module: &Module,
+    stage_span: SourceSpan,
+    every_expr_id: ExprId,
+    count_expr_id: ExprId,
+    env: &GateExprEnv,
+    current: Option<&GateType>,
+    typing: &mut GateTypeContext<'_>,
+) -> TemporalStageOutcome {
+    let Some(subject) = current.cloned() else {
+        return TemporalStageOutcome::Blocked(BlockedTemporalStage {
+            subject: None,
+            blockers: vec![TemporalElaborationBlocker::UnknownSubjectType],
+        });
+    };
+    let GateType::Signal(_) = &subject else {
+        return TemporalStageOutcome::Blocked(BlockedTemporalStage {
+            subject: Some(subject.clone()),
+            blockers: vec![TemporalElaborationBlocker::InvalidSubjectType { found: subject }],
+        });
+    };
+
+    let mut blockers = Vec::new();
+    let every_info = typing.infer_expr(every_expr_id, env, None);
+    if every_info.contains_signal {
+        blockers.push(TemporalElaborationBlocker::StageReadsSignals);
+    }
+    let every_ty = every_info.actual_gate_type().or(every_info.ty.clone());
+    let Some(every_ty) = every_ty else {
+        blockers.push(TemporalElaborationBlocker::UnknownStageExprType { span: stage_span });
+        return TemporalStageOutcome::Blocked(BlockedTemporalStage {
+            subject: Some(subject),
+            blockers,
+        });
+    };
+    if !is_duration_stage_type(&every_ty) {
+        blockers.push(TemporalElaborationBlocker::InvalidDurationType { found: every_ty });
+    }
+
+    let count_info = typing.infer_expr(count_expr_id, env, None);
+    if count_info.contains_signal {
+        blockers.push(TemporalElaborationBlocker::StageReadsSignals);
+    }
+    let count_ty = count_info.actual_gate_type().or(count_info.ty.clone());
+    let Some(count_ty) = count_ty else {
+        blockers.push(TemporalElaborationBlocker::UnknownStageExprType { span: stage_span });
+        return TemporalStageOutcome::Blocked(BlockedTemporalStage {
+            subject: Some(subject),
+            blockers,
+        });
+    };
+    if !matches!(count_ty, GateType::Primitive(BuiltinType::Int)) {
+        blockers.push(TemporalElaborationBlocker::InvalidBurstCountType { found: count_ty });
+    }
+
+    let every_expr = match lower_gate_runtime_expr(module, every_expr_id, env, None, typing) {
+        Ok(expr) => Some(expr),
+        Err(blocker) => {
+            blockers.push(TemporalElaborationBlocker::RuntimeExprBlocked(blocker));
+            None
+        }
+    };
+    let count_expr = match lower_gate_runtime_expr(module, count_expr_id, env, None, typing) {
+        Ok(expr) => Some(expr),
+        Err(blocker) => {
+            blockers.push(TemporalElaborationBlocker::RuntimeExprBlocked(blocker));
+            None
+        }
+    };
+    if !blockers.is_empty() {
+        return TemporalStageOutcome::Blocked(BlockedTemporalStage {
+            subject: Some(subject.clone()),
+            blockers,
+        });
+    }
+
+    TemporalStageOutcome::Burst(BurstStagePlan {
+        input_subject: subject.clone(),
+        result_subject: subject,
+        every_expr: every_expr.expect("planned burst stage should lower its interval expr"),
+        count_expr: count_expr.expect("planned burst stage should lower its count expr"),
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DiffStageModeDiscriminant {
     Function,
@@ -497,4 +705,12 @@ fn is_numeric_payload(ty: &GateType) -> bool {
             BuiltinType::Int | BuiltinType::Float | BuiltinType::Decimal | BuiltinType::BigInt
         )
     )
+}
+
+fn is_duration_stage_type(ty: &GateType) -> bool {
+    matches!(ty, GateType::Primitive(BuiltinType::Int))
+        || matches!(
+            ty,
+            GateType::Domain { name, .. } if name == "Duration"
+        )
 }

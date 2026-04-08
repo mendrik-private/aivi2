@@ -336,6 +336,18 @@ pub enum KernelOriginKind {
         pipeline: PipelineId,
         stage_index: usize,
     },
+    DelayDuration {
+        pipeline: PipelineId,
+        stage_index: usize,
+    },
+    BurstEvery {
+        pipeline: PipelineId,
+        stage_index: usize,
+    },
+    BurstCount {
+        pipeline: PipelineId,
+        stage_index: usize,
+    },
     FanoutMap {
         pipeline: PipelineId,
         stage_index: usize,
@@ -400,6 +412,18 @@ impl fmt::Display for KernelOriginKind {
                 pipeline,
                 stage_index,
             } => write!(f, "diff-seed pipeline{pipeline}[{stage_index}]"),
+            Self::DelayDuration {
+                pipeline,
+                stage_index,
+            } => write!(f, "delay-duration pipeline{pipeline}[{stage_index}]"),
+            Self::BurstEvery {
+                pipeline,
+                stage_index,
+            } => write!(f, "burst-every pipeline{pipeline}[{stage_index}]"),
+            Self::BurstCount {
+                pipeline,
+                stage_index,
+            } => write!(f, "burst-count pipeline{pipeline}[{stage_index}]"),
             Self::FanoutMap {
                 pipeline,
                 stage_index,

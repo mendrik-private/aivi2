@@ -88,6 +88,8 @@ fn token_type_index(kind: TokenKind) -> Option<u32> {
         | TokenKind::PipePrevious
         | TokenKind::PipeAccumulate
         | TokenKind::PipeDiff
+        | TokenKind::PipeDelay
+        | TokenKind::PipeBurst
         | TokenKind::At
         | TokenKind::Hash
         | TokenKind::Colon

@@ -712,6 +712,51 @@ impl<'a> ProgramLowerer<'a> {
                     )?,
                 })
             }
+            lambda::StageKind::Temporal(lambda::TemporalStage::Delay { duration }) => {
+                let duration = self.lower_kernel(
+                    KernelOriginKind::DelayDuration {
+                        pipeline: pipeline_id,
+                        stage_index: stage.index,
+                    },
+                    *duration,
+                )?;
+                StageKind::Temporal(TemporalStage::Delay {
+                    payload_layout: self.signal_payload_layout(
+                        pipeline_id,
+                        stage.index,
+                        &stage.input_subject,
+                    )?,
+                    duration_layout: self.program.kernels()[duration].result_layout,
+                    duration,
+                })
+            }
+            lambda::StageKind::Temporal(lambda::TemporalStage::Burst { every, count }) => {
+                let every = self.lower_kernel(
+                    KernelOriginKind::BurstEvery {
+                        pipeline: pipeline_id,
+                        stage_index: stage.index,
+                    },
+                    *every,
+                )?;
+                let count = self.lower_kernel(
+                    KernelOriginKind::BurstCount {
+                        pipeline: pipeline_id,
+                        stage_index: stage.index,
+                    },
+                    *count,
+                )?;
+                StageKind::Temporal(TemporalStage::Burst {
+                    payload_layout: self.signal_payload_layout(
+                        pipeline_id,
+                        stage.index,
+                        &stage.input_subject,
+                    )?,
+                    every_layout: self.program.kernels()[every].result_layout,
+                    count_layout: self.program.kernels()[count].result_layout,
+                    every,
+                    count,
+                })
+            }
         };
 
         Ok(Stage {

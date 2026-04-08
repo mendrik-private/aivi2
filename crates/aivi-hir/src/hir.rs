@@ -1557,6 +1557,8 @@ pub enum PipeStageKind {
     Previous { expr: ExprId },
     Accumulate { seed: ExprId, step: ExprId },
     Diff { expr: ExprId },
+    Delay { duration: ExprId },
+    Burst { every: ExprId, count: ExprId },
 }
 
 /// Presentation-free structural view of one fan-out segment inside a pipe.

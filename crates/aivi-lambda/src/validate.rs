@@ -593,6 +593,51 @@ fn validate_stage(
                 errors,
             );
         }
+        (
+            StageKind::Temporal(TemporalStage::Delay { duration }),
+            core::StageKind::Temporal(core::TemporalStage::Delay { duration_expr }),
+        ) => {
+            let owner = module.core().pipes()[stage.pipe].owner;
+            validate_expected_closure(
+                module,
+                *duration,
+                owner,
+                ClosureKind::DelayDuration,
+                None,
+                &[],
+                *duration_expr,
+                errors,
+            );
+        }
+        (
+            StageKind::Temporal(TemporalStage::Burst { every, count }),
+            core::StageKind::Temporal(core::TemporalStage::Burst {
+                every_expr,
+                count_expr,
+            }),
+        ) => {
+            let owner = module.core().pipes()[stage.pipe].owner;
+            validate_expected_closure(
+                module,
+                *every,
+                owner,
+                ClosureKind::BurstEvery,
+                None,
+                &[],
+                *every_expr,
+                errors,
+            );
+            validate_expected_closure(
+                module,
+                *count,
+                owner,
+                ClosureKind::BurstCount,
+                None,
+                &[],
+                *count_expr,
+                errors,
+            );
+        }
         (StageKind::TruthyFalsy(pair), core::StageKind::TruthyFalsy(core_pair))
             if pair == core_pair => {}
         (StageKind::Fanout(fanout), core::StageKind::Fanout(core_fanout))

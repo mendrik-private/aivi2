@@ -249,6 +249,12 @@ impl fmt::Display for Module {
                         StageKind::Temporal(TemporalStage::DiffSeed { seed }) => {
                             writeln!(f, "      diff-seed = closure{seed}")?;
                         }
+                        StageKind::Temporal(TemporalStage::Delay { duration }) => {
+                            writeln!(f, "      delay = closure{duration}")?;
+                        }
+                        StageKind::Temporal(TemporalStage::Burst { every, count }) => {
+                            writeln!(f, "      burst every=closure{every} count=closure{count}")?;
+                        }
                     }
                 }
                 if let Some(recurrence) = &pipe.recurrence {
@@ -448,6 +454,8 @@ pub enum TemporalStage {
     Previous { seed: ClosureId },
     DiffFunction { diff: ClosureId },
     DiffSeed { seed: ClosureId },
+    Delay { duration: ClosureId },
+    Burst { every: ClosureId, count: ClosureId },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -521,6 +529,9 @@ pub enum ClosureKind {
     PreviousSeed,
     DiffFunction,
     DiffSeed,
+    DelayDuration,
+    BurstEvery,
+    BurstCount,
     FanoutMap,
     FanoutFilterPredicate,
     FanoutJoin,
@@ -540,6 +551,9 @@ impl fmt::Display for ClosureKind {
             Self::PreviousSeed => f.write_str("previous-seed"),
             Self::DiffFunction => f.write_str("diff-function"),
             Self::DiffSeed => f.write_str("diff-seed"),
+            Self::DelayDuration => f.write_str("delay-duration"),
+            Self::BurstEvery => f.write_str("burst-every"),
+            Self::BurstCount => f.write_str("burst-count"),
             Self::FanoutMap => f.write_str("fanout-map"),
             Self::FanoutFilterPredicate => f.write_str("fanout-filter-predicate"),
             Self::FanoutJoin => f.write_str("fanout-join"),

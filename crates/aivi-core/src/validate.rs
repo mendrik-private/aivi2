@@ -826,6 +826,28 @@ fn validate_stage(
                         errors.push(ValidationError::TemporalStageTypeMismatch { stage: stage_id });
                     }
                 }
+                TemporalStage::Delay { duration_expr } => {
+                    if !module.exprs().contains(*duration_expr)
+                        || !is_duration_stage_type(&module.exprs()[*duration_expr].ty)
+                        || stage.result_subject != stage.input_subject
+                    {
+                        errors.push(ValidationError::TemporalStageTypeMismatch { stage: stage_id });
+                    }
+                }
+                TemporalStage::Burst {
+                    every_expr,
+                    count_expr,
+                } => {
+                    if !module.exprs().contains(*every_expr)
+                        || !module.exprs().contains(*count_expr)
+                        || !is_duration_stage_type(&module.exprs()[*every_expr].ty)
+                        || module.exprs()[*count_expr].ty
+                            != crate::ty::Type::Primitive(aivi_hir::BuiltinType::Int)
+                        || stage.result_subject != stage.input_subject
+                    {
+                        errors.push(ValidationError::TemporalStageTypeMismatch { stage: stage_id });
+                    }
+                }
             }
         }
         StageKind::TruthyFalsy(pair) => {
@@ -868,6 +890,14 @@ fn validate_stage(
             }
         }
     }
+}
+
+fn is_duration_stage_type(ty: &crate::ty::Type) -> bool {
+    matches!(ty, crate::ty::Type::Primitive(aivi_hir::BuiltinType::Int))
+        || matches!(
+            ty,
+            crate::ty::Type::Domain { name, .. } if name.as_ref() == "Duration"
+        )
 }
 
 fn signal_payload_type(ty: &crate::ty::Type) -> Option<&crate::ty::Type> {

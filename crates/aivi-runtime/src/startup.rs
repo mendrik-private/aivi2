@@ -1,8 +1,9 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
-    sync::Arc,
+    sync::{Arc, mpsc},
     thread::{self, JoinHandle},
+    time::Duration,
 };
 
 use aivi_backend::{
@@ -20,7 +21,7 @@ use crate::{
     DerivedSignalUpdate, InputHandle, Publication, PublicationPortError, RuntimeSourceProvider,
     SourceInstanceId, SourceLifecycleActionKind, SourcePublicationPort, TaskCompletionPort,
     TaskInstanceId, TaskSourceRuntime, TaskSourceRuntimeError, TickOutcome,
-    TryDerivedNodeEvaluator,
+    TryDerivedNodeEvaluator, WorkerPublicationSender,
     graph::{DerivedHandle, OwnerHandle, ReactiveClauseHandle, SignalHandle},
     hir_adapter::{HirCompiledRuntimeExpr, HirRuntimeAssembly, HirRuntimeInstantiationError},
     providers::SourceProviderContext,
@@ -58,6 +59,7 @@ pub fn link_backend_runtime(
         task_bindings: linked.task_bindings,
         db_changed_routes: linked.db_changed_routes,
         temporal_states: BTreeMap::new(),
+        temporal_workers: BTreeMap::new(),
         db_commit_invalidation_sink: None,
         execution_context: SourceProviderContext::current(),
     };
@@ -85,6 +87,7 @@ pub struct BackendLinkedRuntime {
     task_bindings: BTreeMap<TaskInstanceId, LinkedTaskBinding>,
     db_changed_routes: Box<[LinkedDbChangedRoute]>,
     temporal_states: BTreeMap<TemporalStageKey, RuntimeValue>,
+    temporal_workers: BTreeMap<TemporalStageKey, TemporalWorkerHandle>,
     db_commit_invalidation_sink: Option<DbCommitInvalidationSink>,
     execution_context: SourceProviderContext,
 }
@@ -280,6 +283,7 @@ impl BackendLinkedRuntime {
         let committed = self.committed_signal_snapshots()?;
         let runtime_committed = materialize_detached_globals(&committed);
         let mut temporal_states = self.temporal_states.clone();
+        let mut pending_temporal_schedules = Vec::new();
         let mut evaluator = LinkedDerivedEvaluator {
             backend: self.backend.as_ref(),
             signal_items_by_handle: &self.signal_items_by_handle,
@@ -289,10 +293,77 @@ impl BackendLinkedRuntime {
             linked_recurrence_signals: &self.linked_recurrence_signals,
             committed_signals: &runtime_committed,
             temporal_states: &mut temporal_states,
+            pending_temporal_schedules: &mut pending_temporal_schedules,
         };
         let outcome = self.runtime.try_tick(&mut evaluator)?;
         self.temporal_states = temporal_states;
+        self.arm_pending_temporal_schedules(pending_temporal_schedules)?;
         Ok(outcome)
+    }
+
+    fn arm_pending_temporal_schedules(
+        &mut self,
+        schedules: Vec<PendingTemporalSchedule>,
+    ) -> Result<(), BackendRuntimeError> {
+        for schedule in schedules {
+            let binding = self
+                .derived_signals
+                .get(&schedule.signal)
+                .ok_or(BackendRuntimeError::UnknownDerivedSignal {
+                    signal: schedule.signal,
+                })?;
+            let helper =
+                binding
+                    .temporal_helper(schedule.key)
+                    .ok_or(BackendRuntimeError::MissingTemporalHelper {
+                        signal: schedule.signal,
+                        item: schedule.item,
+                        pipeline: schedule.key.pipeline,
+                        stage_index: schedule.key.stage_index,
+                    })?;
+            let stamp = self.runtime.advance_generation(helper.input)?;
+            let worker = self.ensure_temporal_worker(schedule.signal, schedule.item, schedule.key)?;
+            worker
+                .schedule(TemporalWorkerSchedule {
+                    stamp,
+                    value: schedule.value,
+                    kind: schedule.kind,
+                })
+                .map_err(|_| BackendRuntimeError::SpawnTemporalWorker {
+                    signal: schedule.signal,
+                    item: schedule.item,
+                    pipeline: schedule.key.pipeline,
+                    stage_index: schedule.key.stage_index,
+                    message: "temporal worker command channel closed".into(),
+                })?;
+        }
+        Ok(())
+    }
+
+    fn ensure_temporal_worker(
+        &mut self,
+        signal: DerivedHandle,
+        item: hir::ItemId,
+        key: TemporalStageKey,
+    ) -> Result<&TemporalWorkerHandle, BackendRuntimeError> {
+        if !self.temporal_workers.contains_key(&key) {
+            let sender = self.runtime.worker_sender();
+            let handle =
+                spawn_temporal_worker(signal, item, key, sender).map_err(|message| {
+                    BackendRuntimeError::SpawnTemporalWorker {
+                        signal,
+                        item,
+                        pipeline: key.pipeline,
+                        stage_index: key.stage_index,
+                        message: message.into_boxed_str(),
+                    }
+                })?;
+            self.temporal_workers.insert(key, handle);
+        }
+        Ok(self
+            .temporal_workers
+            .get(&key)
+            .expect("temporal worker should exist after insertion"))
     }
 
     pub fn tick_with_source_lifecycle(
@@ -662,6 +733,14 @@ impl BackendLinkedRuntime {
     }
 }
 
+impl Drop for BackendLinkedRuntime {
+    fn drop(&mut self) {
+        for worker in self.temporal_workers.values_mut() {
+            worker.stop();
+        }
+    }
+}
+
 fn materialize_detached_globals(
     globals: &BTreeMap<BackendItemId, DetachedRuntimeValue>,
 ) -> BTreeMap<BackendItemId, RuntimeValue> {
@@ -749,10 +828,50 @@ fn strip_runtime_signal(value: &RuntimeValue) -> &RuntimeValue {
     current
 }
 
+fn parse_temporal_duration(value: &RuntimeValue) -> Option<Duration> {
+    match strip_runtime_signal(value) {
+        RuntimeValue::Int(value) if *value > 0 => Some(Duration::from_millis(*value as u64)),
+        RuntimeValue::SuffixedInteger { raw, suffix } => {
+            let amount = raw.parse::<u64>().ok()?;
+            match suffix.as_ref() {
+                "ns" => Some(Duration::from_nanos(amount)),
+                "us" => Some(Duration::from_micros(amount)),
+                "ms" => Some(Duration::from_millis(amount)),
+                "s" | "sec" => Some(Duration::from_secs(amount)),
+                "m" | "min" => amount.checked_mul(60).map(Duration::from_secs),
+                "h" | "hr" => amount.checked_mul(60 * 60).map(Duration::from_secs),
+                "dy" => amount.checked_mul(60 * 60 * 24).map(Duration::from_secs),
+                _ => None,
+            }
+        }
+        other => match other {
+            RuntimeValue::Int(_) => None,
+            _ => None,
+        },
+    }
+}
+
+fn parse_temporal_count(value: &RuntimeValue) -> Option<u64> {
+    match strip_runtime_signal(value) {
+        RuntimeValue::Int(value) if *value > 0 => Some(*value as u64),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct TemporalStageKey {
     pipeline: BackendPipelineId,
     stage_index: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkedTemporalHelper {
+    pub input: InputHandle,
+    pub dependency_index: usize,
+    pub pipeline: BackendPipelineId,
+    pub pipeline_position: usize,
+    pub stage_index: usize,
+    pub stage_offset: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -764,6 +883,71 @@ pub struct LinkedDerivedSignal {
     pub source_input: Option<InputHandle>,
     /// Backend pipeline IDs that must be applied to the body result in order.
     pub pipeline_ids: Box<[BackendPipelineId]>,
+    pub temporal_helpers: Box<[LinkedTemporalHelper]>,
+}
+
+impl LinkedDerivedSignal {
+    fn temporal_helper(&self, key: TemporalStageKey) -> Option<&LinkedTemporalHelper> {
+        self.temporal_helpers
+            .iter()
+            .find(|helper| helper.pipeline == key.pipeline && helper.stage_index == key.stage_index)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TemporalResumePoint {
+    pipeline_position: usize,
+    stage_offset: usize,
+}
+
+#[derive(Debug)]
+struct TemporalWorkerHandle {
+    commands: mpsc::Sender<TemporalWorkerCommand>,
+    join: Option<JoinHandle<()>>,
+}
+
+impl TemporalWorkerHandle {
+    fn schedule(
+        &self,
+        schedule: TemporalWorkerSchedule,
+    ) -> Result<(), mpsc::SendError<TemporalWorkerCommand>> {
+        self.commands.send(TemporalWorkerCommand::Schedule(schedule))
+    }
+
+    fn stop(&mut self) {
+        let _ = self.commands.send(TemporalWorkerCommand::Stop);
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum TemporalWorkerCommand {
+    Schedule(TemporalWorkerSchedule),
+    Stop,
+}
+
+#[derive(Clone, Debug)]
+struct TemporalWorkerSchedule {
+    stamp: crate::PublicationStamp,
+    value: RuntimeValue,
+    kind: TemporalWorkerScheduleKind,
+}
+
+#[derive(Clone, Debug)]
+enum TemporalWorkerScheduleKind {
+    Delay { wait: Duration },
+    Burst { wait: Duration, remaining: u64 },
+}
+
+#[derive(Clone, Debug)]
+struct PendingTemporalSchedule {
+    signal: DerivedHandle,
+    item: hir::ItemId,
+    key: TemporalStageKey,
+    value: RuntimeValue,
+    kind: TemporalWorkerScheduleKind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1029,6 +1213,71 @@ fn map_detached_publication_port_error(
             stamp,
             value: DetachedRuntimeValue::from_runtime_owned(value),
         },
+    }
+}
+
+fn spawn_temporal_worker(
+    _signal: DerivedHandle,
+    _item: hir::ItemId,
+    _key: TemporalStageKey,
+    sender: WorkerPublicationSender<RuntimeValue>,
+) -> Result<TemporalWorkerHandle, String> {
+    let (command_tx, command_rx) = mpsc::channel();
+    let join = thread::Builder::new()
+        .name("aivi-temporal-stage".into())
+        .spawn(move || run_temporal_worker(command_rx, sender))
+        .map_err(|error| error.to_string())?;
+    Ok(TemporalWorkerHandle {
+        commands: command_tx,
+        join: Some(join),
+    })
+}
+
+fn run_temporal_worker(
+    command_rx: mpsc::Receiver<TemporalWorkerCommand>,
+    sender: WorkerPublicationSender<RuntimeValue>,
+) {
+    let mut active: Option<TemporalWorkerSchedule> = None;
+    loop {
+        let Some(mut schedule) = active.take() else {
+            match command_rx.recv() {
+                Ok(TemporalWorkerCommand::Schedule(schedule)) => {
+                    active = Some(schedule);
+                }
+                Ok(TemporalWorkerCommand::Stop) | Err(_) => break,
+            }
+            continue;
+        };
+
+        let wait = match schedule.kind {
+            TemporalWorkerScheduleKind::Delay { wait }
+            | TemporalWorkerScheduleKind::Burst { wait, .. } => wait,
+        };
+        match command_rx.recv_timeout(wait) {
+            Ok(TemporalWorkerCommand::Schedule(next)) => {
+                active = Some(next);
+            }
+            Ok(TemporalWorkerCommand::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if sender
+                    .publish(Publication::new(schedule.stamp, schedule.value.clone()))
+                    .is_err()
+                {
+                    break;
+                }
+                active = match schedule.kind {
+                    TemporalWorkerScheduleKind::Delay { .. } => None,
+                    TemporalWorkerScheduleKind::Burst { wait, remaining } if remaining > 1 => {
+                        schedule.kind = TemporalWorkerScheduleKind::Burst {
+                            wait,
+                            remaining: remaining - 1,
+                        };
+                        Some(schedule)
+                    }
+                    TemporalWorkerScheduleKind::Burst { .. } => None,
+                };
+            }
+        }
     }
 }
 
@@ -1429,6 +1678,40 @@ pub enum BackendRuntimeError {
         expected: usize,
         found: usize,
     },
+    MissingTemporalHelper {
+        signal: DerivedHandle,
+        item: hir::ItemId,
+        pipeline: BackendPipelineId,
+        stage_index: usize,
+    },
+    SpawnTemporalWorker {
+        signal: DerivedHandle,
+        item: hir::ItemId,
+        pipeline: BackendPipelineId,
+        stage_index: usize,
+        message: Box<str>,
+    },
+    InvalidTemporalDelayDuration {
+        signal: DerivedHandle,
+        item: hir::ItemId,
+        pipeline: BackendPipelineId,
+        stage_index: usize,
+        value: RuntimeValue,
+    },
+    InvalidTemporalBurstInterval {
+        signal: DerivedHandle,
+        item: hir::ItemId,
+        pipeline: BackendPipelineId,
+        stage_index: usize,
+        value: RuntimeValue,
+    },
+    InvalidTemporalBurstCount {
+        signal: DerivedHandle,
+        item: hir::ItemId,
+        pipeline: BackendPipelineId,
+        stage_index: usize,
+        value: RuntimeValue,
+    },
     UnknownSourceInstance {
         instance: SourceInstanceId,
     },
@@ -1565,6 +1848,60 @@ impl fmt::Display for BackendRuntimeError {
                 f,
                 "derived signal {:?} expected {expected} runtime dependencies, found {found}",
                 signal
+            ),
+            Self::MissingTemporalHelper {
+                signal,
+                item,
+                pipeline,
+                stage_index,
+            } => write!(
+                f,
+                "derived signal {:?} / item {item} is missing a temporal helper for pipeline {:?} stage {}",
+                signal, pipeline, stage_index
+            ),
+            Self::SpawnTemporalWorker {
+                signal,
+                item,
+                pipeline,
+                stage_index,
+                message,
+            } => write!(
+                f,
+                "derived signal {:?} / item {item} failed to start temporal worker for pipeline {:?} stage {}: {message}",
+                signal, pipeline, stage_index
+            ),
+            Self::InvalidTemporalDelayDuration {
+                signal,
+                item,
+                pipeline,
+                stage_index,
+                value,
+            } => write!(
+                f,
+                "derived signal {:?} / item {item} produced invalid delay duration for pipeline {:?} stage {}: {value:?}",
+                signal, pipeline, stage_index
+            ),
+            Self::InvalidTemporalBurstInterval {
+                signal,
+                item,
+                pipeline,
+                stage_index,
+                value,
+            } => write!(
+                f,
+                "derived signal {:?} / item {item} produced invalid burst interval for pipeline {:?} stage {}: {value:?}",
+                signal, pipeline, stage_index
+            ),
+            Self::InvalidTemporalBurstCount {
+                signal,
+                item,
+                pipeline,
+                stage_index,
+                value,
+            } => write!(
+                f,
+                "derived signal {:?} / item {item} produced invalid burst count for pipeline {:?} stage {}: {value:?}",
+                signal, pipeline, stage_index
             ),
             Self::UnknownSourceInstance { instance } => {
                 write!(
@@ -1751,6 +2088,7 @@ struct LinkedDerivedEvaluator<'a> {
     linked_recurrence_signals: &'a BTreeMap<DerivedHandle, LinkedRecurrenceSignal>,
     committed_signals: &'a BTreeMap<BackendItemId, RuntimeValue>,
     temporal_states: &'a mut BTreeMap<TemporalStageKey, RuntimeValue>,
+    pending_temporal_schedules: &'a mut Vec<PendingTemporalSchedule>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1776,8 +2114,9 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
             .derived_signals
             .get(&signal)
             .ok_or(BackendRuntimeError::UnknownDerivedSignal { signal })?;
-        let expected_inputs =
-            binding.dependency_items.len() + usize::from(binding.source_input.is_some());
+        let expected_inputs = binding.dependency_items.len()
+            + usize::from(binding.source_input.is_some())
+            + binding.temporal_helpers.len();
         if inputs.len() != expected_inputs {
             return Err(BackendRuntimeError::DerivedDependencyArityMismatch {
                 signal,
@@ -1803,17 +2142,36 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
             globals.insert(dependency, RuntimeValue::Signal(Box::new(value.clone())));
         }
 
+        let binding_item = binding.item;
+        let binding_pipeline_ids = binding.pipeline_ids.clone();
         let mut evaluator = KernelEvaluator::new(self.backend);
+        if let Some(helper) = self.updated_temporal_helper(binding, &inputs) {
+            let Some(value) = inputs.value(helper.dependency_index).cloned() else {
+                return Ok(self.suppressed_derived_update(binding.backend_item));
+            };
+            return self.apply_pipelines_from(
+                signal,
+                binding_item,
+                binding_pipeline_ids.as_ref(),
+                Some(TemporalResumePoint {
+                    pipeline_position: helper.pipeline_position,
+                    stage_offset: helper.stage_offset + 1,
+                }),
+                value,
+                &globals,
+                &mut evaluator,
+            );
+        }
+
         let value = evaluator
             .evaluate_item(binding.backend_item, &globals)
             .map_err(|error| self.derived_eval_error(signal, binding.item, error))?;
-        let binding_item = binding.item;
-        let binding_pipeline_ids = binding.pipeline_ids.clone();
 
-        self.apply_pipelines(
+        self.apply_pipelines_from(
             signal,
             binding_item,
             binding_pipeline_ids.as_ref(),
+            None,
             value,
             &globals,
             &mut evaluator,
@@ -2029,6 +2387,29 @@ impl LinkedDerivedEvaluator<'_> {
             .map(signal_payload_value)
     }
 
+    fn updated_temporal_helper<'b>(
+        &self,
+        binding: &'b LinkedDerivedSignal,
+        inputs: &DependencyValues<'_, RuntimeValue>,
+    ) -> Option<&'b LinkedTemporalHelper> {
+        binding
+            .temporal_helpers
+            .iter()
+            .rev()
+            .find(|helper| inputs.updated(helper.dependency_index))
+    }
+
+    fn suppressed_derived_update(
+        &self,
+        backend_item: BackendItemId,
+    ) -> DerivedSignalUpdate<RuntimeValue> {
+        if self.committed_signals.contains_key(&backend_item) {
+            DerivedSignalUpdate::Unchanged
+        } else {
+            DerivedSignalUpdate::Clear
+        }
+    }
+
     fn derived_eval_error(
         &self,
         signal: DerivedHandle,
@@ -2100,18 +2481,32 @@ impl LinkedDerivedEvaluator<'_> {
         }
     }
 
-    fn apply_pipelines(
+    fn apply_pipelines_from(
         &mut self,
         signal: DerivedHandle,
         item: hir::ItemId,
         pipeline_ids: &[BackendPipelineId],
+        mut resume: Option<TemporalResumePoint>,
         mut value: RuntimeValue,
         globals: &BTreeMap<BackendItemId, RuntimeValue>,
         evaluator: &mut KernelEvaluator<'_>,
     ) -> Result<DerivedSignalUpdate<RuntimeValue>, BackendRuntimeError> {
-        for &pipeline_id in pipeline_ids {
+        let binding = self
+            .derived_signals
+            .get(&signal)
+            .ok_or(BackendRuntimeError::UnknownDerivedSignal { signal })?
+            .clone();
+        for (pipeline_position, &pipeline_id) in pipeline_ids.iter().enumerate() {
+            let stage_start = match resume {
+                Some(point) if pipeline_position < point.pipeline_position => continue,
+                Some(point) if pipeline_position == point.pipeline_position => {
+                    resume = None;
+                    point.stage_offset
+                }
+                _ => 0,
+            };
             let pipeline = &self.backend.pipelines()[pipeline_id];
-            for stage in &pipeline.stages {
+            for stage in pipeline.stages.iter().skip(stage_start) {
                 match &stage.kind {
                     BackendStageKind::Gate(BackendGateStage::SignalFilter {
                         predicate,
@@ -2185,6 +2580,90 @@ impl LinkedDerivedEvaluator<'_> {
                             .subtract_runtime_values(*seed, current.clone(), previous)
                             .map_err(|error| self.derived_eval_error(signal, item, error))?;
                         self.temporal_states.insert(key, current);
+                    }
+                    BackendStageKind::Temporal(BackendTemporalStage::Delay { duration, .. }) => {
+                        let duration_value = evaluator
+                            .evaluate_kernel(*duration, None, &[], globals)
+                            .map_err(|error| self.derived_eval_error(signal, item, error))?;
+                        let wait = parse_temporal_duration(&duration_value).ok_or_else(|| {
+                            BackendRuntimeError::InvalidTemporalDelayDuration {
+                                signal,
+                                item,
+                                pipeline: pipeline_id,
+                                stage_index: stage.index,
+                                value: duration_value.clone(),
+                            }
+                        })?;
+                        if wait.is_zero() {
+                            return Err(BackendRuntimeError::InvalidTemporalDelayDuration {
+                                signal,
+                                item,
+                                pipeline: pipeline_id,
+                                stage_index: stage.index,
+                                value: duration_value,
+                            });
+                        }
+                        self.pending_temporal_schedules.push(PendingTemporalSchedule {
+                            signal,
+                            item,
+                            key: TemporalStageKey {
+                                pipeline: pipeline_id,
+                                stage_index: stage.index,
+                            },
+                            value: value.clone(),
+                            kind: TemporalWorkerScheduleKind::Delay { wait },
+                        });
+                        return Ok(self.suppressed_derived_update(binding.backend_item));
+                    }
+                    BackendStageKind::Temporal(BackendTemporalStage::Burst { every, count, .. }) => {
+                        let every_value = evaluator
+                            .evaluate_kernel(*every, None, &[], globals)
+                            .map_err(|error| self.derived_eval_error(signal, item, error))?;
+                        let wait = parse_temporal_duration(&every_value).ok_or_else(|| {
+                            BackendRuntimeError::InvalidTemporalBurstInterval {
+                                signal,
+                                item,
+                                pipeline: pipeline_id,
+                                stage_index: stage.index,
+                                value: every_value.clone(),
+                            }
+                        })?;
+                        let count_value = evaluator
+                            .evaluate_kernel(*count, None, &[], globals)
+                            .map_err(|error| self.derived_eval_error(signal, item, error))?;
+                        let repetitions =
+                            parse_temporal_count(&count_value).ok_or_else(|| {
+                                BackendRuntimeError::InvalidTemporalBurstCount {
+                                    signal,
+                                    item,
+                                    pipeline: pipeline_id,
+                                    stage_index: stage.index,
+                                    value: count_value.clone(),
+                                }
+                            })?;
+                        if wait.is_zero() {
+                            return Err(BackendRuntimeError::InvalidTemporalBurstInterval {
+                                signal,
+                                item,
+                                pipeline: pipeline_id,
+                                stage_index: stage.index,
+                                value: every_value,
+                            });
+                        }
+                        self.pending_temporal_schedules.push(PendingTemporalSchedule {
+                            signal,
+                            item,
+                            key: TemporalStageKey {
+                                pipeline: pipeline_id,
+                                stage_index: stage.index,
+                            },
+                            value: value.clone(),
+                            kind: TemporalWorkerScheduleKind::Burst {
+                                wait,
+                                remaining: repetitions,
+                            },
+                        });
+                        return Ok(self.suppressed_derived_update(binding.backend_item));
                     }
                     BackendStageKind::Fanout(fanout) => {
                         value = self
@@ -2969,10 +3448,16 @@ impl<'a> LinkBuilder<'a> {
                     self.runtime_signal_for_backend_item(binding.item, *dependency)
                 })
                 .collect::<Vec<_>>();
+            let temporal_helpers = self.collect_linked_temporal_helpers(binding, item);
             let mut expected_runtime_dependencies = backend_dependencies.clone();
             if let Some(source_input) = binding.source_input {
                 expected_runtime_dependencies.push(source_input.as_signal());
             }
+            expected_runtime_dependencies.extend(
+                temporal_helpers
+                    .iter()
+                    .map(|helper| helper.input.as_signal()),
+            );
             if expected_runtime_dependencies.as_slice() != binding.dependencies() {
                 self.errors
                     .push(BackendRuntimeLinkError::SignalDependencyMismatch {
@@ -2997,6 +3482,7 @@ impl<'a> LinkBuilder<'a> {
                         .copied()
                         .collect::<Vec<_>>()
                         .into_boxed_slice(),
+                    temporal_helpers: temporal_helpers.into_boxed_slice(),
                 },
             );
         }
@@ -3185,6 +3671,15 @@ impl<'a> LinkBuilder<'a> {
                     BackendStageKind::Temporal(BackendTemporalStage::DiffSeed { seed, .. }) => {
                         kernels.push(*seed);
                     }
+                    BackendStageKind::Temporal(BackendTemporalStage::Delay { duration, .. }) => {
+                        kernels.push(*duration);
+                    }
+                    BackendStageKind::Temporal(BackendTemporalStage::Burst {
+                        every, count, ..
+                    }) => {
+                        kernels.push(*every);
+                        kernels.push(*count);
+                    }
                     BackendStageKind::Fanout(fanout) => {
                         kernels.push(fanout.map);
                         kernels.extend(fanout.filters.iter().map(|filter| filter.predicate));
@@ -3200,6 +3695,47 @@ impl<'a> LinkBuilder<'a> {
             .iter()
             .filter_map(|dependency| self.runtime_signal_for_backend_item(owner, *dependency))
             .collect()
+    }
+
+    fn collect_linked_temporal_helpers(
+        &self,
+        binding: &crate::hir_adapter::HirSignalBinding,
+        item: &aivi_backend::Item,
+    ) -> Vec<LinkedTemporalHelper> {
+        let mut helpers = Vec::new();
+        let mut inputs = binding.temporal_helper_inputs().iter().copied();
+        for (pipeline_position, &pipeline_id) in item.pipelines.iter().enumerate() {
+            let pipeline = &self.backend.pipelines()[pipeline_id];
+            for (stage_offset, stage) in pipeline.stages.iter().enumerate() {
+                let needs_helper = matches!(
+                    stage.kind,
+                    BackendStageKind::Temporal(BackendTemporalStage::Delay { .. })
+                        | BackendStageKind::Temporal(BackendTemporalStage::Burst { .. })
+                );
+                if !needs_helper {
+                    continue;
+                }
+                let Some(input) = inputs.next() else {
+                    return Vec::new();
+                };
+                let Some(dependency_index) = binding
+                    .dependencies()
+                    .iter()
+                    .position(|&signal| signal == input.as_signal())
+                else {
+                    return Vec::new();
+                };
+                helpers.push(LinkedTemporalHelper {
+                    input,
+                    dependency_index,
+                    pipeline: pipeline_id,
+                    pipeline_position,
+                    stage_index: stage.index,
+                    stage_offset,
+                });
+            }
+        }
+        helpers
     }
 
     fn supported_body_backed_derived_signal_pipelines(&self, item: &aivi_backend::Item) -> bool {
@@ -3434,6 +3970,7 @@ mod tests {
             task_bindings: BTreeMap::from([(instance, binding)]),
             db_changed_routes: Vec::new().into_boxed_slice(),
             temporal_states: BTreeMap::new(),
+            temporal_workers: BTreeMap::new(),
             db_commit_invalidation_sink: None,
             execution_context: SourceProviderContext::current(),
         }
@@ -3473,6 +4010,57 @@ mod tests {
                 _ => None,
             })
             .unwrap_or_else(|| panic!("expected activation for source {owner_name}"))
+    }
+
+    fn pump_for_commit_count(
+        linked: &mut BackendLinkedRuntime,
+        signal: SignalHandle,
+        duration: std::time::Duration,
+    ) -> usize {
+        let deadline = std::time::Instant::now() + duration;
+        let mut commits = 0;
+        while std::time::Instant::now() < deadline {
+            let outcome = linked
+                .tick_with_source_lifecycle()
+                .expect("pump tick should succeed");
+            commits += outcome
+                .scheduler()
+                .committed()
+                .iter()
+                .filter(|&&committed| committed == signal)
+                .count();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        commits
+    }
+
+    fn pump_until_commit_count(
+        linked: &mut BackendLinkedRuntime,
+        signal: SignalHandle,
+        timeout: std::time::Duration,
+        expected: usize,
+    ) -> usize {
+        let deadline = std::time::Instant::now() + timeout;
+        let mut commits = 0;
+        loop {
+            let outcome = linked
+                .tick_with_source_lifecycle()
+                .expect("pump tick should succeed");
+            commits += outcome
+                .scheduler()
+                .committed()
+                .iter()
+                .filter(|&&committed| committed == signal)
+                .count();
+            if commits >= expected {
+                return commits;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for runtime condition"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
     }
 
     fn user_value(active: bool, email: &str) -> DetachedRuntimeValue {
@@ -5115,6 +5703,349 @@ signal scoreDeltaFn : Signal Int =
         assert_eq!(
             linked.runtime().current_value(delta_fn_signal).unwrap(),
             Some(&RuntimeValue::Int(3))
+        );
+    }
+
+    #[test]
+    fn linked_runtime_reemits_delay_stage_once_after_interval() {
+        let lowered = lower_text(
+            "runtime-startup-delay-signal.aivi",
+            r#"
+provider custom.feed
+    wakeup: providerTrigger
+
+@source custom.feed
+signal score : Signal Int
+
+signal delayedScore : Signal Int =
+    score
+     delay|> 25
+"#,
+        );
+        let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+            .expect("runtime assembly should build");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("delay temporal signals should link successfully");
+
+        let first = linked
+            .tick_with_source_lifecycle()
+            .expect("initial delay tick should succeed");
+        let port = activation_port_for_owner(&linked, lowered.hir.module(), &first, "score");
+        let delayed_signal = signal_handle(&linked, lowered.hir.module(), "delayedScore");
+
+        port.publish(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Int(
+            10,
+        )))
+        .expect("delayed source publication should queue");
+        let first_publication = linked
+            .tick_with_source_lifecycle()
+            .expect("delay publication tick should succeed");
+        assert_eq!(
+            first_publication
+                .scheduler()
+                .committed()
+                .iter()
+                .filter(|&&signal| signal == delayed_signal)
+                .count(),
+            0
+        );
+        assert_eq!(linked.runtime().current_value(delayed_signal).unwrap(), None);
+        assert_eq!(
+            pump_for_commit_count(
+                &mut linked,
+                delayed_signal,
+                std::time::Duration::from_millis(10)
+            ),
+            0
+        );
+        assert_eq!(linked.runtime().current_value(delayed_signal).unwrap(), None);
+        assert_eq!(
+            pump_until_commit_count(
+                &mut linked,
+                delayed_signal,
+                std::time::Duration::from_millis(250),
+                1
+            ),
+            1
+        );
+        assert_eq!(
+            linked.runtime().current_value(delayed_signal).unwrap(),
+            Some(&RuntimeValue::Int(10))
+        );
+
+        assert_eq!(
+            pump_for_commit_count(
+                &mut linked,
+                delayed_signal,
+                std::time::Duration::from_millis(50)
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn linked_runtime_reemits_burst_stage_exactly_n_times() {
+        let lowered = lower_text(
+            "runtime-startup-burst-signal.aivi",
+            r#"
+provider custom.feed
+    wakeup: providerTrigger
+
+@source custom.feed
+signal score : Signal Int
+
+signal burstScore : Signal Int =
+    score
+     burst|> 15 3
+"#,
+        );
+        let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+            .expect("runtime assembly should build");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("burst temporal signals should link successfully");
+
+        let first = linked
+            .tick_with_source_lifecycle()
+            .expect("initial burst tick should succeed");
+        let port = activation_port_for_owner(&linked, lowered.hir.module(), &first, "score");
+        let burst_signal = signal_handle(&linked, lowered.hir.module(), "burstScore");
+
+        port.publish(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Int(
+            7,
+        )))
+        .expect("burst source publication should queue");
+        let first_publication = linked
+            .tick_with_source_lifecycle()
+            .expect("burst publication tick should succeed");
+        assert_eq!(
+            first_publication
+                .scheduler()
+                .committed()
+                .iter()
+                .filter(|&&signal| signal == burst_signal)
+                .count(),
+            0
+        );
+
+        assert_eq!(
+            pump_for_commit_count(
+                &mut linked,
+                burst_signal,
+                std::time::Duration::from_millis(8)
+            ),
+            0
+        );
+
+        assert_eq!(
+            pump_until_commit_count(
+                &mut linked,
+                burst_signal,
+                std::time::Duration::from_millis(250),
+                3
+            ),
+            3
+        );
+        assert_eq!(
+            linked.runtime().current_value(burst_signal).unwrap(),
+            Some(&RuntimeValue::Int(7))
+        );
+
+        assert_eq!(
+            pump_for_commit_count(
+                &mut linked,
+                burst_signal,
+                std::time::Duration::from_millis(50)
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn linked_runtime_replaces_in_flight_delay_schedules_with_newer_payloads() {
+        let lowered = lower_text(
+            "runtime-startup-delay-retrigger-signal.aivi",
+            r#"
+provider custom.feed
+    wakeup: providerTrigger
+
+@source custom.feed
+signal score : Signal Int
+
+signal delayedScore : Signal Int =
+    score
+     delay|> 40
+"#,
+        );
+        let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+            .expect("runtime assembly should build");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("retriggered delay signals should link successfully");
+
+        let first = linked
+            .tick_with_source_lifecycle()
+            .expect("initial delay tick should succeed");
+        let port = activation_port_for_owner(&linked, lowered.hir.module(), &first, "score");
+        let delayed_signal = signal_handle(&linked, lowered.hir.module(), "delayedScore");
+
+        port.publish(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Int(
+            1,
+        )))
+        .expect("first delayed source publication should queue");
+        let first_publication = linked
+            .tick_with_source_lifecycle()
+            .expect("first delay publication tick should succeed");
+        assert_eq!(
+            first_publication
+                .scheduler()
+                .committed()
+                .iter()
+                .filter(|&&signal| signal == delayed_signal)
+                .count(),
+            0
+        );
+
+        assert_eq!(
+            pump_for_commit_count(
+                &mut linked,
+                delayed_signal,
+                std::time::Duration::from_millis(10)
+            ),
+            0
+        );
+
+        port.publish(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Int(
+            2,
+        )))
+        .expect("second delayed source publication should queue");
+        let second_publication = linked
+            .tick_with_source_lifecycle()
+            .expect("second delay publication tick should succeed");
+        assert_eq!(
+            second_publication
+                .scheduler()
+                .committed()
+                .iter()
+                .filter(|&&signal| signal == delayed_signal)
+                .count(),
+            0
+        );
+        assert_eq!(linked.runtime().current_value(delayed_signal).unwrap(), None);
+
+        assert_eq!(
+            pump_until_commit_count(
+                &mut linked,
+                delayed_signal,
+                std::time::Duration::from_millis(250),
+                1
+            ),
+            1
+        );
+        assert_eq!(
+            linked.runtime().current_value(delayed_signal).unwrap(),
+            Some(&RuntimeValue::Int(2))
+        );
+
+        assert_eq!(
+            pump_for_commit_count(
+                &mut linked,
+                delayed_signal,
+                std::time::Duration::from_millis(70)
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn linked_runtime_resumes_composed_temporal_stages_after_helper_wakeups() {
+        let lowered = lower_text(
+            "runtime-startup-delay-burst-composed-signal.aivi",
+            r#"
+provider custom.feed
+    wakeup: providerTrigger
+
+@source custom.feed
+signal score : Signal Int
+
+signal flashScore : Signal Int =
+    score
+     delay|> 15
+     burst|> 12 3
+"#,
+        );
+        let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+            .expect("runtime assembly should build");
+        let mut linked = link_backend_runtime(
+            assembly,
+            &lowered.core,
+            std::sync::Arc::new(lowered.backend.clone()),
+        )
+        .expect("composed temporal signals should link successfully");
+
+        let first = linked
+            .tick_with_source_lifecycle()
+            .expect("initial composed temporal tick should succeed");
+        let port = activation_port_for_owner(&linked, lowered.hir.module(), &first, "score");
+        let flash_signal = signal_handle(&linked, lowered.hir.module(), "flashScore");
+
+        port.publish(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Int(
+            9,
+        )))
+        .expect("composed temporal source publication should queue");
+        let first_publication = linked
+            .tick_with_source_lifecycle()
+            .expect("composed temporal publication tick should succeed");
+        assert_eq!(
+            first_publication
+                .scheduler()
+                .committed()
+                .iter()
+                .filter(|&&signal| signal == flash_signal)
+                .count(),
+            0
+        );
+
+        assert_eq!(
+            pump_for_commit_count(
+                &mut linked,
+                flash_signal,
+                std::time::Duration::from_millis(8)
+            ),
+            0
+        );
+
+        assert_eq!(
+            pump_until_commit_count(
+                &mut linked,
+                flash_signal,
+                std::time::Duration::from_millis(300),
+                3
+            ),
+            3
+        );
+        assert_eq!(
+            linked.runtime().current_value(flash_signal).unwrap(),
+            Some(&RuntimeValue::Int(9))
+        );
+
+        assert_eq!(
+            pump_for_commit_count(
+                &mut linked,
+                flash_signal,
+                std::time::Duration::from_millis(50)
+            ),
+            0
         );
     }
 

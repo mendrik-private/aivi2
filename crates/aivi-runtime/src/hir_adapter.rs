@@ -244,12 +244,30 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                 } else {
                     None
                 };
+                let temporal_helpers = match signal.body {
+                    Some(body) => add_temporal_helper_inputs(
+                        self.module,
+                        &mut graph_builder,
+                        signal.name.text(),
+                        owner,
+                        body,
+                    ),
+                    None => Ok(Vec::new().into_boxed_slice()),
+                };
+                let temporal_helpers = match temporal_helpers {
+                    Ok(helpers) => helpers,
+                    Err(err) => {
+                        errors.push(HirRuntimeAdapterError::GraphBuild(err));
+                        continue;
+                    }
+                };
                 public_signals.insert(item_id, derived.as_signal());
                 public_signal_names.insert(signal.name.text().to_owned(), derived.as_signal());
                 (
                     HirSignalBindingKind::Derived {
                         signal: derived,
                         dependencies: Vec::new().into_boxed_slice(),
+                        temporal_helpers,
                     },
                     source_input,
                 )
@@ -337,6 +355,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                 HirSignalBindingKind::Derived {
                     signal: derived,
                     dependencies,
+                    temporal_helpers,
                 } => {
                     let mut resolved = resolve_signal_dependencies(
                         self.module,
@@ -361,6 +380,9 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                     }
                     if let Some(source_input) = binding.source_input {
                         push_unique_signal(&mut resolved, source_input.as_signal());
+                    }
+                    for &helper in temporal_helpers.iter() {
+                        push_unique_signal(&mut resolved, helper.as_signal());
                     }
                     if let Err(err) =
                         graph_builder.define_derived(*derived, resolved.iter().copied())
@@ -1073,6 +1095,15 @@ impl HirSignalBinding {
         }
     }
 
+    pub fn temporal_helper_inputs(&self) -> &[InputHandle] {
+        match &self.kind {
+            HirSignalBindingKind::Derived {
+                temporal_helpers, ..
+            } => temporal_helpers,
+            HirSignalBindingKind::Input { .. } | HirSignalBindingKind::Reactive { .. } => &[],
+        }
+    }
+
     pub fn reactive_updates(&self) -> &[HirReactiveUpdateBinding] {
         match &self.kind {
             HirSignalBindingKind::Reactive { clauses, .. } => clauses,
@@ -1105,6 +1136,7 @@ pub enum HirSignalBindingKind {
     Derived {
         signal: DerivedHandle,
         dependencies: Box<[SignalHandle]>,
+        temporal_helpers: Box<[InputHandle]>,
     },
     Reactive {
         signal: SignalHandle,
@@ -1793,6 +1825,11 @@ fn collect_direct_signal_dependencies(
                         | hir::PipeStageKind::Validate { expr }
                         | hir::PipeStageKind::Previous { expr }
                         | hir::PipeStageKind::Diff { expr } => work.push_back(*expr),
+                        hir::PipeStageKind::Delay { duration } => work.push_back(*duration),
+                        hir::PipeStageKind::Burst { every, count } => {
+                            work.push_back(*every);
+                            work.push_back(*count);
+                        }
                         hir::PipeStageKind::Accumulate { seed, step } => {
                             work.push_back(*seed);
                             work.push_back(*step);
@@ -1841,7 +1878,9 @@ fn collect_pipe_stage_signal_dependencies(
             | hir::PipeStageKind::RecurStep { expr }
             | hir::PipeStageKind::Validate { expr }
             | hir::PipeStageKind::Previous { expr }
-            | hir::PipeStageKind::Diff { expr } => vec![*expr],
+            | hir::PipeStageKind::Diff { expr }
+            | hir::PipeStageKind::Delay { duration: expr } => vec![*expr],
+            hir::PipeStageKind::Burst { every, count } => vec![*every, *count],
             hir::PipeStageKind::Accumulate { seed, step } => vec![*seed, *step],
             hir::PipeStageKind::Case { body, .. } => vec![*body],
         };
@@ -1854,6 +1893,130 @@ fn collect_pipe_stage_signal_dependencies(
         }
     }
     resolved
+}
+
+fn add_temporal_helper_inputs(
+    module: &hir::Module,
+    graph_builder: &mut SignalGraphBuilder,
+    signal_name: &str,
+    owner: OwnerHandle,
+    expr: hir::ExprId,
+) -> Result<Box<[InputHandle]>, GraphBuildError> {
+    let helper_count = collect_temporal_helper_count(module, expr);
+    let mut helpers = Vec::with_capacity(helper_count);
+    for index in 0..helper_count {
+        let input = graph_builder.add_input(
+            format!("{signal_name}#temporal{}", index + 1),
+            Some(owner),
+        )?;
+        helpers.push(input);
+    }
+    Ok(helpers.into_boxed_slice())
+}
+
+fn collect_temporal_helper_count(module: &hir::Module, expr: hir::ExprId) -> usize {
+    let mut total = 0usize;
+    let mut work = vec![expr];
+    while let Some(expr_id) = work.pop() {
+        let expr = &module.exprs()[expr_id];
+        match &expr.kind {
+            hir::ExprKind::Pipe(pipe) => {
+                for stage in pipe.stages.iter().rev() {
+                    match &stage.kind {
+                        hir::PipeStageKind::Delay { .. } | hir::PipeStageKind::Burst { .. } => {
+                            total += 1;
+                        }
+                        _ => {}
+                    }
+                    match &stage.kind {
+                        hir::PipeStageKind::Transform { expr }
+                        | hir::PipeStageKind::Gate { expr }
+                        | hir::PipeStageKind::Map { expr }
+                        | hir::PipeStageKind::Apply { expr }
+                        | hir::PipeStageKind::Tap { expr }
+                        | hir::PipeStageKind::FanIn { expr }
+                        | hir::PipeStageKind::Truthy { expr }
+                        | hir::PipeStageKind::Falsy { expr }
+                        | hir::PipeStageKind::RecurStart { expr }
+                        | hir::PipeStageKind::RecurStep { expr }
+                        | hir::PipeStageKind::Validate { expr }
+                        | hir::PipeStageKind::Previous { expr }
+                        | hir::PipeStageKind::Diff { expr }
+                        | hir::PipeStageKind::Delay { duration: expr } => work.push(*expr),
+                        hir::PipeStageKind::Burst { every, count } => {
+                            work.push(*count);
+                            work.push(*every);
+                        }
+                        hir::PipeStageKind::Accumulate { seed, step } => {
+                            work.push(*step);
+                            work.push(*seed);
+                        }
+                        hir::PipeStageKind::Case { body, .. } => {
+                            work.push(*body);
+                        }
+                    }
+                }
+                work.push(pipe.head);
+            }
+            hir::ExprKind::Map(map) => {
+                for entry in map.entries.iter().rev() {
+                    work.push(entry.value);
+                    work.push(entry.key);
+                }
+            }
+            hir::ExprKind::Apply { callee, arguments } => {
+                for argument in arguments.iter().rev() {
+                    work.push(*argument);
+                }
+                work.push(*callee);
+            }
+            hir::ExprKind::Unary { expr, .. } => work.push(*expr),
+            hir::ExprKind::Binary { left, right, .. } => {
+                work.push(*right);
+                work.push(*left);
+            }
+            hir::ExprKind::Tuple(elements) => {
+                for element in elements.iter().rev() {
+                    work.push(*element);
+                }
+            }
+            hir::ExprKind::List(elements) | hir::ExprKind::Set(elements) => {
+                for element in elements.iter().rev() {
+                    work.push(*element);
+                }
+            }
+            hir::ExprKind::Record(record) => {
+                for field in record.fields.iter().rev() {
+                    work.push(field.value);
+                }
+            }
+            hir::ExprKind::Projection {
+                base: hir::ProjectionBase::Expr(base),
+                ..
+            } => work.push(*base),
+            hir::ExprKind::PatchApply { target, patch } => {
+                work.push(*target);
+                for entry in patch.entries.iter().rev() {
+                    match &entry.instruction.kind {
+                        hir::PatchInstructionKind::Replace(expr)
+                        | hir::PatchInstructionKind::Store(expr) => work.push(*expr),
+                        hir::PatchInstructionKind::Remove => {}
+                    }
+                }
+            }
+            hir::ExprKind::PatchLiteral(patch) => {
+                for entry in patch.entries.iter().rev() {
+                    match &entry.instruction.kind {
+                        hir::PatchInstructionKind::Replace(expr)
+                        | hir::PatchInstructionKind::Store(expr) => work.push(*expr),
+                        hir::PatchInstructionKind::Remove => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    total
 }
 
 #[derive(Clone, Copy)]

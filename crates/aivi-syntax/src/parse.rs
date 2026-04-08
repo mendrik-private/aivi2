@@ -3401,6 +3401,21 @@ impl<'a> Parser<'a> {
                     self.rewrite_free_function_subject_expr(expr, parameter, true);
                 (PipeStageKind::Diff { expr }, changed)
             }
+            PipeStageKind::Delay { duration } => {
+                let (duration, changed) =
+                    self.rewrite_free_function_subject_expr(duration, parameter, true);
+                (PipeStageKind::Delay { duration }, changed)
+            }
+            PipeStageKind::Burst { every, count } => {
+                let (every, every_changed) =
+                    self.rewrite_free_function_subject_expr(every, parameter, true);
+                let (count, count_changed) =
+                    self.rewrite_free_function_subject_expr(count, parameter, true);
+                (
+                    PipeStageKind::Burst { every, count },
+                    every_changed || count_changed,
+                )
+            }
         };
         (
             PipeStage {
@@ -4338,6 +4353,38 @@ impl<'a> Parser<'a> {
                     )?;
                     let result_memo = self.parse_optional_pipe_memo(cursor, end);
                     (subject_memo, PipeStageKind::Diff { expr }, result_memo)
+                }
+                TokenKind::PipeDelay => {
+                    cluster_active = false;
+                    let subject_memo = self.parse_optional_pipe_memo(cursor, end);
+                    let duration = self.parse_patch_apply_expr(
+                        cursor,
+                        end,
+                        stop.with_pipe_stage().with_hash(),
+                    )?;
+                    let result_memo = self.parse_optional_pipe_memo(cursor, end);
+                    (
+                        subject_memo,
+                        PipeStageKind::Delay { duration },
+                        result_memo,
+                    )
+                }
+                TokenKind::PipeBurst => {
+                    cluster_active = false;
+                    let subject_memo = self.parse_optional_pipe_memo(cursor, end);
+                    let every =
+                        self.parse_atomic_expr(cursor, end, stop.with_pipe_stage().with_hash())?;
+                    let count = self.parse_patch_apply_expr(
+                        cursor,
+                        end,
+                        stop.with_pipe_stage().with_hash(),
+                    )?;
+                    let result_memo = self.parse_optional_pipe_memo(cursor, end);
+                    (
+                        subject_memo,
+                        PipeStageKind::Burst { every, count },
+                        result_memo,
+                    )
                 }
                 _ => break,
             };
@@ -7733,6 +7780,47 @@ signal direction: Signal Direction = keyDown
         assert!(
             matches!(step.kind, ExprKind::Name(ref identifier) if identifier.text == "updateDirection")
         );
+    }
+
+    #[test]
+    fn parser_builds_delay_and_burst_pipe_signal_bodies() {
+        let (_, parsed) = load(
+            r#"signal clicks: Signal Int = 1
+signal delayed: Signal Int = clicks
+ delay|> 200ms
+signal flashed: Signal Int = clicks
+ burst|> 75ms 3
+"#,
+        );
+
+        assert!(
+            !parsed.has_errors(),
+            "{:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+
+        let Item::Signal(delayed) = &parsed.module.items[1] else {
+            panic!("expected delayed signal item");
+        };
+        let ExprKind::Pipe(delay_pipe) = &delayed.expr_body().expect("delay body").kind else {
+            panic!("expected delayed signal body to parse as a pipe");
+        };
+        let PipeStageKind::Delay { duration } = &delay_pipe.stages[0].kind else {
+            panic!("expected delay pipe stage");
+        };
+        assert!(matches!(duration.kind, ExprKind::SuffixedInteger(_)));
+
+        let Item::Signal(flashed) = &parsed.module.items[2] else {
+            panic!("expected flashed signal item");
+        };
+        let ExprKind::Pipe(burst_pipe) = &flashed.expr_body().expect("burst body").kind else {
+            panic!("expected burst signal body to parse as a pipe");
+        };
+        let PipeStageKind::Burst { every, count } = &burst_pipe.stages[0].kind else {
+            panic!("expected burst pipe stage");
+        };
+        assert!(matches!(every.kind, ExprKind::SuffixedInteger(_)));
+        assert!(matches!(count.kind, ExprKind::Integer(_)));
     }
 
     #[test]

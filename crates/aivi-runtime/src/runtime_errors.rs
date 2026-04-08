@@ -46,6 +46,8 @@ fn find_pipe_stage_for_kernel(
                     aivi_backend::TemporalStage::Previous { seed, .. } => *seed == kernel,
                     aivi_backend::TemporalStage::DiffFunction { diff, .. } => *diff == kernel,
                     aivi_backend::TemporalStage::DiffSeed { seed, .. } => *seed == kernel,
+                    aivi_backend::TemporalStage::Delay { .. }
+                    | aivi_backend::TemporalStage::Burst { .. } => false,
                 },
                 aivi_backend::StageKind::TruthyFalsy(_) => false,
             };
@@ -453,7 +455,97 @@ pub fn render_runtime_error(
             vec![diag]
         }
 
+        BackendRuntimeError::InvalidTemporalDelayDuration {
+            signal,
+            item,
+            pipeline,
+            stage_index,
+            value,
+        } => {
+            let name = source_map.derived_name(*signal).unwrap_or("(unknown)");
+            let mut diag = Diagnostic::error(format!(
+                "derived signal `{name}` produced an invalid delay duration: {value:?}"
+            ))
+            .with_code(SIGNAL_EVAL_FAILED)
+            .with_note(format!(
+                "pipe stage {:?}/{} must evaluate to a positive Int or Duration",
+                pipeline, stage_index
+            ));
+            if let Some(span) = source_map.item_span(*item) {
+                diag = diag.with_primary_label(span, "delay stage is configured here");
+            }
+            vec![diag]
+        }
+
+        BackendRuntimeError::InvalidTemporalBurstInterval {
+            signal,
+            item,
+            pipeline,
+            stage_index,
+            value,
+        } => {
+            let name = source_map.derived_name(*signal).unwrap_or("(unknown)");
+            let mut diag = Diagnostic::error(format!(
+                "derived signal `{name}` produced an invalid burst interval: {value:?}"
+            ))
+            .with_code(SIGNAL_EVAL_FAILED)
+            .with_note(format!(
+                "pipe stage {:?}/{} must evaluate to a positive Int or Duration",
+                pipeline, stage_index
+            ));
+            if let Some(span) = source_map.item_span(*item) {
+                diag = diag.with_primary_label(span, "burst stage is configured here");
+            }
+            vec![diag]
+        }
+
+        BackendRuntimeError::InvalidTemporalBurstCount {
+            signal,
+            item,
+            pipeline,
+            stage_index,
+            value,
+        } => {
+            let name = source_map.derived_name(*signal).unwrap_or("(unknown)");
+            let mut diag = Diagnostic::error(format!(
+                "derived signal `{name}` produced an invalid burst count: {value:?}"
+            ))
+            .with_code(SIGNAL_EVAL_FAILED)
+            .with_note(format!(
+                "pipe stage {:?}/{} must evaluate to a positive Int",
+                pipeline, stage_index
+            ));
+            if let Some(span) = source_map.item_span(*item) {
+                diag = diag.with_primary_label(span, "burst stage is configured here");
+            }
+            vec![diag]
+        }
+
         // Internal/infrastructure errors — render with whatever info we have.
+        BackendRuntimeError::MissingTemporalHelper {
+            signal,
+            item,
+            pipeline,
+            stage_index,
+        } => {
+            let name = source_map.derived_name(*signal).unwrap_or("(unknown)");
+            let mut diag = Diagnostic::error(format!(
+                "derived signal `{name}` is missing runtime state for temporal stage {:?}/{}",
+                pipeline, stage_index
+            ))
+            .with_code(RUNTIME_INTERNAL)
+            .with_note("this is likely a compiler/runtime linking bug".to_owned());
+            if let Some(span) = source_map.item_span(*item) {
+                diag = diag.with_primary_label(span, "signal declared here");
+            }
+            vec![diag]
+        }
+        BackendRuntimeError::SpawnTemporalWorker { message, .. } => {
+            vec![
+                Diagnostic::error(format!("failed to spawn temporal worker thread: {message}"))
+                    .with_code(RUNTIME_INTERNAL),
+            ]
+        }
         BackendRuntimeError::UnknownDerivedSignal { signal } => {
             let name = source_map.derived_name(*signal).unwrap_or("(unknown)");
             vec![

@@ -1160,6 +1160,21 @@ impl Formatter {
                     self.restore_free_function_subject_expr(expr, parameter_name, true);
                 (PipeStageKind::Diff { expr }, changed)
             }
+            PipeStageKind::Delay { duration } => {
+                let (duration, changed) =
+                    self.restore_free_function_subject_expr(duration, parameter_name, true);
+                (PipeStageKind::Delay { duration }, changed)
+            }
+            PipeStageKind::Burst { every, count } => {
+                let (every, every_changed) =
+                    self.restore_free_function_subject_expr(every, parameter_name, true);
+                let (count, count_changed) =
+                    self.restore_free_function_subject_expr(count, parameter_name, true);
+                (
+                    PipeStageKind::Burst { every, count },
+                    every_changed || count_changed,
+                )
+            }
         };
         (
             PipeStage {
@@ -2903,6 +2918,14 @@ impl Formatter {
                 format!("+|> {seed_str} {step_str}")
             }
             PipeStageKind::Diff { expr } => self.format_pipe_expr_stage("-|>", stage, expr),
+            PipeStageKind::Delay { duration } => {
+                self.format_pipe_expr_stage("delay|>", stage, duration)
+            }
+            PipeStageKind::Burst { every, count } => {
+                let every_str = self.format_expr_inline(every, EXPR_PIPE_PREC + 1);
+                let count_str = self.format_expr_inline(count, EXPR_PIPE_PREC + 1);
+                format!("burst|> {every_str} {count_str}")
+            }
         }
     }
 
@@ -2936,6 +2959,14 @@ impl Formatter {
                 format!("+|> {seed_str} {step_str}")
             }
             PipeStageKind::Diff { expr } => self.format_aligned_pipe_stage("-|>", stage, expr),
+            PipeStageKind::Delay { duration } => {
+                self.format_aligned_pipe_stage("delay|>", stage, duration)
+            }
+            PipeStageKind::Burst { every, count } => {
+                let every_str = self.format_expr_inline(every, EXPR_PIPE_PREC + 1);
+                let count_str = self.format_expr_inline(count, EXPR_PIPE_PREC + 1);
+                format!("burst|> {every_str} {count_str}")
+            }
         }
     }
 

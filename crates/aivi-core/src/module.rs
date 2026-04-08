@@ -287,6 +287,24 @@ impl fmt::Display for Module {
                                 ExprPrinter::new(self, *seed_expr)
                             )?;
                         }
+                        StageKind::Temporal(TemporalStage::Delay { duration_expr }) => {
+                            writeln!(
+                                f,
+                                "      delay = {}",
+                                ExprPrinter::new(self, *duration_expr)
+                            )?;
+                        }
+                        StageKind::Temporal(TemporalStage::Burst {
+                            every_expr,
+                            count_expr,
+                        }) => {
+                            writeln!(
+                                f,
+                                "      burst every={} count={}",
+                                ExprPrinter::new(self, *every_expr),
+                                ExprPrinter::new(self, *count_expr)
+                            )?;
+                        }
                     }
                 }
                 if let Some(recurrence) = &pipe.recurrence {
@@ -498,6 +516,8 @@ pub enum TemporalStage {
     Previous { seed_expr: ExprId },
     DiffFunction { diff_expr: ExprId },
     DiffSeed { seed_expr: ExprId },
+    Delay { duration_expr: ExprId },
+    Burst { every_expr: ExprId, count_expr: ExprId },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

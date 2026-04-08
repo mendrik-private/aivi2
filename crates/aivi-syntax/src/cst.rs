@@ -475,10 +475,14 @@ fn expr_contains_self(expr: &Expr) -> bool {
                     | PipeStageKind::Falsy { expr }
                     | PipeStageKind::Validate { expr }
                     | PipeStageKind::Previous { expr }
-                    | PipeStageKind::Diff { expr } => expr_contains_self(expr),
+                    | PipeStageKind::Diff { expr }
+                    | PipeStageKind::Delay { duration: expr } => expr_contains_self(expr),
                     PipeStageKind::Case(arm) => expr_contains_self(&arm.body),
                     PipeStageKind::Accumulate { seed, step } => {
                         expr_contains_self(seed) || expr_contains_self(step)
+                    }
+                    PipeStageKind::Burst { every, count } => {
+                        expr_contains_self(every) || expr_contains_self(count)
                     }
                 })
         }
@@ -702,6 +706,8 @@ pub enum PipeStageKind {
     Previous { expr: Expr },
     Accumulate { seed: Expr, step: Expr },
     Diff { expr: Expr },
+    Delay { duration: Expr },
+    Burst { every: Expr, count: Expr },
 }
 
 /// Pipe spine with an optional leading subject.

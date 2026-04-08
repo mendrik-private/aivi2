@@ -8333,6 +8333,15 @@ fn kernel_symbol(program: &Program, kernel_id: KernelId, kernel: &Kernel) -> Str
             KernelOriginKind::DiffSeed { stage_index, .. } => {
                 format!("diff_seed_s{stage_index}")
             }
+            KernelOriginKind::DelayDuration { stage_index, .. } => {
+                format!("delay_duration_s{stage_index}")
+            }
+            KernelOriginKind::BurstEvery { stage_index, .. } => {
+                format!("burst_every_s{stage_index}")
+            }
+            KernelOriginKind::BurstCount { stage_index, .. } => {
+                format!("burst_count_s{stage_index}")
+            }
             KernelOriginKind::FanoutMap { stage_index, .. } => {
                 format!("fanout_map_s{stage_index}")
             }

@@ -290,6 +290,51 @@ impl<'a> ModuleLowerer<'a> {
                     };
                     StageKind::Temporal(TemporalStage::DiffSeed { seed })
                 }
+                core::StageKind::Temporal(core::TemporalStage::Delay { duration_expr }) => {
+                    let Some(duration) = self.lower_closure(
+                        owner,
+                        stage.span,
+                        ClosureKind::DelayDuration,
+                        None,
+                        Vec::new(),
+                        *duration_expr,
+                        true,
+                        &runtime_names,
+                    ) else {
+                        continue;
+                    };
+                    StageKind::Temporal(TemporalStage::Delay { duration })
+                }
+                core::StageKind::Temporal(core::TemporalStage::Burst {
+                    every_expr,
+                    count_expr,
+                }) => {
+                    let Some(every) = self.lower_closure(
+                        owner,
+                        stage.span,
+                        ClosureKind::BurstEvery,
+                        None,
+                        Vec::new(),
+                        *every_expr,
+                        true,
+                        &runtime_names,
+                    ) else {
+                        continue;
+                    };
+                    let Some(count) = self.lower_closure(
+                        owner,
+                        stage.span,
+                        ClosureKind::BurstCount,
+                        None,
+                        Vec::new(),
+                        *count_expr,
+                        true,
+                        &runtime_names,
+                    ) else {
+                        continue;
+                    };
+                    StageKind::Temporal(TemporalStage::Burst { every, count })
+                }
             };
 
             let lowered_id = alloc_or_diag!(

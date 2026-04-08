@@ -927,6 +927,48 @@ fn validate_pipeline(
                         });
                     }
                 }
+                TemporalStage::Delay {
+                    payload_layout,
+                    duration_layout,
+                    duration,
+                } => {
+                    validate_kernel_contract(
+                        program,
+                        *duration,
+                        None,
+                        false,
+                        *duration_layout,
+                        errors,
+                    );
+                    if signal_payload_layout(program, stage.input_layout) != Some(*payload_layout)
+                        || signal_payload_layout(program, stage.result_layout)
+                            != Some(*payload_layout)
+                    {
+                        errors.push(ValidationError::TemporalStageContractMismatch {
+                            pipeline: pipeline_id,
+                            stage_index: stage.index,
+                        });
+                    }
+                }
+                TemporalStage::Burst {
+                    payload_layout,
+                    every_layout,
+                    count_layout,
+                    every,
+                    count,
+                } => {
+                    validate_kernel_contract(program, *every, None, false, *every_layout, errors);
+                    validate_kernel_contract(program, *count, None, false, *count_layout, errors);
+                    if signal_payload_layout(program, stage.input_layout) != Some(*payload_layout)
+                        || signal_payload_layout(program, stage.result_layout)
+                            != Some(*payload_layout)
+                    {
+                        errors.push(ValidationError::TemporalStageContractMismatch {
+                            pipeline: pipeline_id,
+                            stage_index: stage.index,
+                        });
+                    }
+                }
             },
             StageKind::Fanout(fanout) => {
                 validate_kernel_contract(

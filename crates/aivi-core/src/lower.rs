@@ -1788,6 +1788,47 @@ impl<'a> ModuleLowerer<'a> {
                         kind: StageKind::Temporal(kind),
                     }
                 }
+                TemporalStageOutcome::Delay(plan) => {
+                    let duration_expr =
+                        match self.lower_runtime_expr(stage.owner, &plan.duration_expr) {
+                            Ok(expr) => expr,
+                            Err(error) => {
+                                self.errors.push(error);
+                                continue;
+                            }
+                        };
+                    PendingStage::Lowered {
+                        span: stage.stage_span,
+                        input_subject: Type::lower(&plan.input_subject),
+                        result_subject: Type::lower(&plan.result_subject),
+                        kind: StageKind::Temporal(TemporalStage::Delay { duration_expr }),
+                    }
+                }
+                TemporalStageOutcome::Burst(plan) => {
+                    let every_expr = match self.lower_runtime_expr(stage.owner, &plan.every_expr) {
+                        Ok(expr) => expr,
+                        Err(error) => {
+                            self.errors.push(error);
+                            continue;
+                        }
+                    };
+                    let count_expr = match self.lower_runtime_expr(stage.owner, &plan.count_expr) {
+                        Ok(expr) => expr,
+                        Err(error) => {
+                            self.errors.push(error);
+                            continue;
+                        }
+                    };
+                    PendingStage::Lowered {
+                        span: stage.stage_span,
+                        input_subject: Type::lower(&plan.input_subject),
+                        result_subject: Type::lower(&plan.result_subject),
+                        kind: StageKind::Temporal(TemporalStage::Burst {
+                            every_expr,
+                            count_expr,
+                        }),
+                    }
+                }
                 TemporalStageOutcome::Blocked(blocked) => {
                     self.errors.push(LoweringError::BlockedTemporalStage {
                         owner: stage.owner,

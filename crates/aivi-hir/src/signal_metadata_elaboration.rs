@@ -371,12 +371,17 @@ fn collect_signal_deps_internal(
                                 | PipeStageKind::RecurStep { expr }
                                 | PipeStageKind::Validate { expr }
                                 | PipeStageKind::Previous { expr }
-                                | PipeStageKind::Diff { expr } => {
+                                | PipeStageKind::Diff { expr }
+                                | PipeStageKind::Delay { duration: expr } => {
                                     work.push(DependencyWork::Expr(*expr))
                                 }
                                 PipeStageKind::Accumulate { seed, step } => {
                                     work.push(DependencyWork::Expr(*seed));
                                     work.push(DependencyWork::Expr(*step));
+                                }
+                                PipeStageKind::Burst { every, count } => {
+                                    work.push(DependencyWork::Expr(*every));
+                                    work.push(DependencyWork::Expr(*count));
                                 }
                                 PipeStageKind::Case { pattern, body } => {
                                     work.push(DependencyWork::Expr(*body));

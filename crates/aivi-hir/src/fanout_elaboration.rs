@@ -299,10 +299,29 @@ fn collect_fanout_pipe(
                 | PipeStageKind::RecurStart { .. }
                 | PipeStageKind::RecurStep { .. }
                 | PipeStageKind::Validate { .. }
-                | PipeStageKind::Previous { .. }
-                | PipeStageKind::Diff { .. }
                 | PipeStageKind::Accumulate { .. } => PipeSubjectStepOutcome::Continue {
                     new_subject: None,
+                    advance_by: 1,
+                },
+                PipeStageKind::Previous { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_previous_stage_info(*expr, current_env, s).ty),
+                    advance_by: 1,
+                },
+                PipeStageKind::Diff { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_diff_stage_info(*expr, current_env, s).ty),
+                    advance_by: 1,
+                },
+                PipeStageKind::Delay { duration } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_delay_stage_info(*duration, current_env, s).ty),
+                    advance_by: 1,
+                },
+                PipeStageKind::Burst { every, count } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current.and_then(|s| {
+                        typing.infer_burst_stage_info(*every, *count, current_env, s).ty
+                    }),
                     advance_by: 1,
                 },
                 // Transform and Tap are handled by the walker itself.

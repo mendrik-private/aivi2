@@ -456,12 +456,9 @@ signal restartClick : Signal Unit
 }
 signal snapshotReady : Signal Unit
 
-@source timer.every 200ms with {
-    immediate: False,
-    activeWhen: computerAnimationActive,
-    coalesce: True
-}
-signal computerFlashTick : Signal Unit
+signal computerFlashTick : Signal Unit =
+    snapshotReady
+     burst|> 200ms computerFlashTicksTotal
 
 signal event : Signal Event = snapshotReady | computerFlashTick | placeCoord | restartClick
   ||> snapshotReady _ => RefreshSnapshot

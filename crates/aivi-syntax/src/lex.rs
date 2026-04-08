@@ -80,6 +80,8 @@ pub enum TokenKind {
     PipePrevious,
     PipeAccumulate,
     PipeDiff,
+    PipeDelay,
+    PipeBurst,
     TruthyBranch,
     FalsyBranch,
     Unknown,
@@ -132,6 +134,8 @@ impl TokenKind {
                 | TokenKind::PipePrevious
                 | TokenKind::PipeAccumulate
                 | TokenKind::PipeDiff
+                | TokenKind::PipeDelay
+                | TokenKind::PipeBurst
                 | TokenKind::TruthyBranch
                 | TokenKind::FalsyBranch
         )
@@ -549,7 +553,9 @@ fn lex_range(source: &SourceFile, range: std::ops::Range<usize>) -> LexedModule 
 
 fn match_compound(bytes: &[u8], cursor: usize, end: usize) -> Option<(TokenKind, usize)> {
     // Patterns ordered longest-first so no short prefix shadows a longer match.
-    const PATTERNS: [(&[u8], TokenKind); 26] = [
+    const PATTERNS: [(&[u8], TokenKind); 28] = [
+        (b"delay|>", TokenKind::PipeDelay),
+        (b"burst|>", TokenKind::PipeBurst),
         (b"<|@", TokenKind::PipeRecurStep),
         (b"<|*", TokenKind::PipeFanIn),
         (b"<|", TokenKind::PatchApply),

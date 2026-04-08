@@ -143,6 +143,8 @@ pub enum GateRuntimeUnsupportedPipeStageKind {
     Falsy,
     RecurStart,
     RecurStep,
+    Delay,
+    Burst,
 }
 
 impl fmt::Display for GateRuntimeUnsupportedKind {
@@ -173,6 +175,8 @@ impl fmt::Display for GateRuntimeUnsupportedPipeStageKind {
             Self::Falsy => f.write_str("falsy pipe stage"),
             Self::RecurStart => f.write_str("recurrence-start pipe stage"),
             Self::RecurStep => f.write_str("recurrence-step pipe stage"),
+            Self::Delay => f.write_str("delay pipe stage"),
+            Self::Burst => f.write_str("burst pipe stage"),
         }
     }
 }
@@ -558,10 +562,29 @@ fn collect_gate_pipe(
                 | PipeStageKind::RecurStart { .. }
                 | PipeStageKind::RecurStep { .. }
                 | PipeStageKind::Validate { .. }
-                | PipeStageKind::Previous { .. }
-                | PipeStageKind::Diff { .. }
                 | PipeStageKind::Accumulate { .. } => PipeSubjectStepOutcome::Continue {
                     new_subject: None,
+                    advance_by: 1,
+                },
+                PipeStageKind::Previous { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_previous_stage_info(*expr, current_env, s).ty),
+                    advance_by: 1,
+                },
+                PipeStageKind::Diff { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_diff_stage_info(*expr, current_env, s).ty),
+                    advance_by: 1,
+                },
+                PipeStageKind::Delay { duration } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_delay_stage_info(*duration, current_env, s).ty),
+                    advance_by: 1,
+                },
+                PipeStageKind::Burst { every, count } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current.and_then(|s| {
+                        typing.infer_burst_stage_info(*every, *count, current_env, s).ty
+                    }),
                     advance_by: 1,
                 },
                 PipeStageKind::Transform { .. } | PipeStageKind::Tap { .. } => {
@@ -1886,6 +1909,18 @@ fn lower_runtime_pipe_expr(
                     GateRuntimeUnsupportedPipeStageKind::RecurStart,
                 ));
             }
+            PipeStageKind::Delay { .. } => {
+                return Err(unsupported_runtime_pipe_stage(
+                    stage.span,
+                    GateRuntimeUnsupportedPipeStageKind::Delay,
+                ));
+            }
+            PipeStageKind::Burst { .. } => {
+                return Err(unsupported_runtime_pipe_stage(
+                    stage.span,
+                    GateRuntimeUnsupportedPipeStageKind::Burst,
+                ));
+            }
         };
         stages.push(GateRuntimePipeStage {
             span: stage.span,
@@ -2004,6 +2039,8 @@ fn nested_pipe_runtime_unsupported_kind(
             | PipeStageKind::Validate { .. }
             | PipeStageKind::Previous { .. }
             | PipeStageKind::Diff { .. }
+            | PipeStageKind::Delay { .. }
+            | PipeStageKind::Burst { .. }
             | PipeStageKind::Accumulate { .. } => {}
         }
     }

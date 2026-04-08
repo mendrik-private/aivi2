@@ -6741,6 +6741,97 @@ impl<'a> GateTypeContext<'a> {
         self.finalize_expr_info(info)
     }
 
+    pub(crate) fn infer_delay_stage_info(
+        &mut self,
+        duration_expr: ExprId,
+        env: &GateExprEnv,
+        subject: &GateType,
+    ) -> GateExprInfo {
+        let mut info = GateExprInfo::default();
+        let GateType::Signal(input_payload) = subject else {
+            info.issues.push(GateIssue::InvalidPipeStageInput {
+                span: self.module.exprs()[duration_expr].span,
+                stage: "delay|>",
+                expected: "Signal _".to_owned(),
+                actual: subject.to_string(),
+            });
+            return self.finalize_expr_info(info);
+        };
+
+        let duration_info = self.infer_expr(duration_expr, env, None);
+        let duration_ty = duration_info.actual_gate_type().or(duration_info.ty.clone());
+        info.merge(duration_info);
+        let Some(duration_ty) = duration_ty else {
+            return self.finalize_expr_info(info);
+        };
+        if !is_duration_gate_type(&duration_ty) {
+            info.issues.push(GateIssue::InvalidPipeStageInput {
+                span: self.module.exprs()[duration_expr].span,
+                stage: "delay|>",
+                expected: "Int or Duration".to_owned(),
+                actual: duration_ty.to_string(),
+            });
+            return self.finalize_expr_info(info);
+        }
+
+        info.ty = Some(GateType::Signal(input_payload.clone()));
+        self.finalize_expr_info(info)
+    }
+
+    pub(crate) fn infer_burst_stage_info(
+        &mut self,
+        every_expr: ExprId,
+        count_expr: ExprId,
+        env: &GateExprEnv,
+        subject: &GateType,
+    ) -> GateExprInfo {
+        let mut info = GateExprInfo::default();
+        let GateType::Signal(input_payload) = subject else {
+            info.issues.push(GateIssue::InvalidPipeStageInput {
+                span: self.module.exprs()[every_expr].span,
+                stage: "burst|>",
+                expected: "Signal _".to_owned(),
+                actual: subject.to_string(),
+            });
+            return self.finalize_expr_info(info);
+        };
+
+        let every_info = self.infer_expr(every_expr, env, None);
+        let every_ty = every_info.actual_gate_type().or(every_info.ty.clone());
+        info.merge(every_info);
+        let Some(every_ty) = every_ty else {
+            return self.finalize_expr_info(info);
+        };
+        if !is_duration_gate_type(&every_ty) {
+            info.issues.push(GateIssue::InvalidPipeStageInput {
+                span: self.module.exprs()[every_expr].span,
+                stage: "burst|>",
+                expected: "Int or Duration".to_owned(),
+                actual: every_ty.to_string(),
+            });
+            return self.finalize_expr_info(info);
+        }
+
+        let count_info = self.infer_expr(count_expr, env, None);
+        let count_ty = count_info.actual_gate_type().or(count_info.ty.clone());
+        info.merge(count_info);
+        let Some(count_ty) = count_ty else {
+            return self.finalize_expr_info(info);
+        };
+        if !matches!(count_ty, GateType::Primitive(BuiltinType::Int)) {
+            info.issues.push(GateIssue::InvalidPipeStageInput {
+                span: self.module.exprs()[count_expr].span,
+                stage: "burst|>",
+                expected: "Int".to_owned(),
+                actual: count_ty.to_string(),
+            });
+            return self.finalize_expr_info(info);
+        }
+
+        info.ty = Some(GateType::Signal(input_payload.clone()));
+        self.finalize_expr_info(info)
+    }
+
     pub(crate) fn infer_truthy_falsy_branch(
         &mut self,
         expr_id: ExprId,
@@ -7272,6 +7363,14 @@ impl<'a> GateTypeContext<'a> {
                     stage_index += 1;
                     self.infer_diff_stage_info(*expr, &pipe_env, &subject)
                 }
+                PipeStageKind::Delay { duration } => {
+                    stage_index += 1;
+                    self.infer_delay_stage_info(*duration, &pipe_env, &subject)
+                }
+                PipeStageKind::Burst { every, count } => {
+                    stage_index += 1;
+                    self.infer_burst_stage_info(*every, *count, &pipe_env, &subject)
+                }
                 PipeStageKind::Apply { .. }
                 | PipeStageKind::RecurStart { .. }
                 | PipeStageKind::RecurStep { .. } => {
@@ -7575,6 +7674,11 @@ pub(crate) fn is_numeric_gate_type(ty: &GateType) -> bool {
             BuiltinType::Int | BuiltinType::Float | BuiltinType::Decimal | BuiltinType::BigInt
         )
     )
+}
+
+pub(crate) fn is_duration_gate_type(ty: &GateType) -> bool {
+    matches!(ty, GateType::Primitive(BuiltinType::Int))
+        || matches!(ty, GateType::Domain { name, .. } if name == "Duration")
 }
 
 pub(crate) fn truthy_falsy_pair_stages<'a>(

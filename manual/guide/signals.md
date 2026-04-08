@@ -169,6 +169,25 @@ signal scoreDelta = score
  -|> 0
 ```
 
+## Delay and burst
+
+Signals can also schedule future replays of an existing payload without introducing a new source:
+
+```aivi
+signal click : Signal Text
+
+signal delayedClick = click
+ delay|> 80
+
+signal flashingClick = click
+ burst|> 150 3
+```
+
+- `delay|> d` publishes the upstream payload once after `d`.
+- `burst|> every count` publishes the same payload `count` times, one replay per interval.
+- A newer upstream event replaces any pending delay or burst schedule.
+- The first `burst|>` replay happens after the first interval.
+
 ## Shaping signal outputs
 
 Signals can still produce richer values without leaving the ordinary expression model:
@@ -264,19 +283,29 @@ it ever succeed? is there an error right now?*
 
 ```aivi
 type AsyncTracker E A = {
-    pending: Bool,    // True until the first result arrives
-    done: Option A,   // last successful value, or None before first success
-    error: Option E   // last error, or None when no error
+    pending: Bool,
+    done: Option A,
+    error: Option E
 }
 ```
 
 Combine it with `+|>` to turn any `Result`-producing signal into a tracker signal:
 
 ```aivi
-use aivi.async (AsyncTracker, step)
-use aivi.http (HttpError, HttpSource)
+use aivi.async (
+    AsyncTracker
+    step
+)
 
-type User = { id: Int, name: Text }
+use aivi.http (
+    HttpError
+    HttpSource
+)
+
+type User = {
+    id: Int,
+    name: Text
+}
 
 @source http "https://api.example.com"
 signal api : HttpSource
@@ -290,15 +319,12 @@ value initialUsers : AsyncTracker HttpError (List User) = {
 }
 
 signal users : Signal (AsyncTracker HttpError (List User)) = rawUsers
-  +|> initialUsers step
+ +|> initialUsers step
 ```
 
 Because `AsyncTracker` is a record, the three fields become independent signal projections:
 
 ```aivi
-// users.pending : Signal Bool
-// users.done    : Signal (Option (List User))
-// users.error   : Signal (Option HttpError)
 ```
 
 This is the `sig.pending`, `sig.done`, `sig.error` pattern — no magic, just record projection
@@ -308,15 +334,11 @@ on the tracker payload. Use them anywhere a `Signal Bool` or `Signal (Option A)`
 value main =
     <Window title="Users">
         <Box>
-            {users.pending T|> <Spinner />}
-            {users.error
-             ||> None     -> <Box />
-             ||> Some err -> <Label text="Failed to load" />
-            }
-            {users.done
-             ||> None       -> <Label text="No data yet" />
-             ||> Some items -> <Label text="{items}" />
-            }
+            <Spinner />
+            <Box />
+            <Label text="Failed to load" />
+            <Label text="No data yet" />
+            <Label text="{items}" />
         </Box>
     </Window>
 
@@ -335,15 +357,14 @@ syntax:
 ```aivi
 // A Bool that becomes True on the first success and never resets
 type Bool -> Option A -> Bool
-func trackFirstDone = hasFired newDone =>
-    hasFired
-    ||> True  -> True
-    ||> False -> newDone
-        ||> None   -> False
-        ||> Some _ -> True
+func trackFirstDone = hasFired newDone => hasFired
+ ||> True   -> True
+ ||> False  -> newDone
+ ||> None   -> False
+ ||> Some _ -> True
 
 signal firstLoadDone : Signal Bool = users.done
-  +|> False trackFirstDone
+ +|> False trackFirstDone
 ```
 
 `firstLoadDone` is `False` until `users.done` is first `Some`, then `True` forever. Gate any
