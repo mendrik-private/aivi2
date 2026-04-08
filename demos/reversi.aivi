@@ -21,12 +21,40 @@ use aivi.matrix (
 
 use aivi.result (withDefault as resultWithDefault)
 
-type Player = Human | Computer
+type Disc = {
+    | Empty
+    | Black
+    | White
 
-type Disc =
-  | Empty
-  | Black
-  | White
+    type Bool
+    isHumanDisc self =
+        self
+        ||> Black -> True
+        ||> _     -> False
+
+    type Bool
+    isComputerDisc self =
+        self
+        ||> White -> True
+        ||> _     -> False
+}
+
+type Player = {
+    | Human
+    | Computer
+
+    type Player
+    otherPlayer self =
+        self
+        ||> Human    -> Computer
+        ||> Computer -> Human
+
+    type Disc
+    discFor self =
+        self
+        ||> Human    -> Black
+        ||> Computer -> White
+}
 
 type Coord = Coord Int Int
 
@@ -43,10 +71,41 @@ type Event =
   | Reset
   | Idle
 
-type Phase =
-  | HumanReady
-  | ComputerThinking
-  | ComputerAnimating Coord Int
+type Phase = {
+    | HumanReady
+    | ComputerThinking
+    | ComputerAnimating Coord Int
+
+    type Bool
+    phaseAllowsHumanInput self =
+        self
+        ||> HumanReady -> True
+        ||> _          -> False
+
+    type Bool
+    phaseIsComputerThinking self =
+        self
+        ||> ComputerThinking -> True
+        ||> _                -> False
+
+    type Bool
+    phaseHasComputerAnimation self =
+        self
+        ||> ComputerAnimating _ _ -> True
+        ||> _                     -> False
+
+    type Option Coord
+    phaseComputerTarget self =
+        self
+        ||> ComputerAnimating coord _ -> Some coord
+        ||> _                         -> None
+
+    type Bool
+    phaseShowsComputerTarget self =
+        self
+        ||> ComputerAnimating _ step -> step == 1 or step == 3 or step == 5
+        ||> _                        -> False
+}
 
 type Score = {
     human: Int,
@@ -104,6 +163,7 @@ func buildInitialDisc = x y => (x, y)
 value initialBoardFallback : Matrix Disc = matrixFilled boardSize boardSize buildInitialDisc
 value initialBoard : Matrix Disc = resultWithDefault initialBoardFallback (matrixInit boardSize boardSize buildInitialDisc)
 value initialSnapshot : Snapshot = makeSnapshot initialBoard Human
+
 value initialGame : GameState = {
     board: initialBoard,
     turn: Human,
@@ -111,25 +171,6 @@ value initialGame : GameState = {
     phase: HumanReady,
     lastMove: None
 }
-
-type Player -> Player
-func otherPlayer = .
- ||> Human    -> Computer
- ||> Computer -> Human
-
-type Player -> Disc
-func discFor = .
- ||> Human    -> Black
- ||> Computer -> White
-
-type Player -> Text
-func playerLabel = .
- ||> Human    -> "You"
- ||> Computer -> "Computer"
-
-type Coord -> Text
-func coordLabel = .
- ||> Coord x y -> "({x},{y})"
 
 type Coord -> Bool
 func onBoard = .
@@ -291,43 +332,10 @@ func countScore = board =>
         computer: matrixCount isComputerDisc board
     }
 
-type Disc -> Bool
-func isHumanDisc = disc =>
-    disc == Black
-
-type Disc -> Bool
-func isComputerDisc = disc =>
-    disc == White
-
 type Snapshot -> Option Coord
 func snapshotAiTarget = snapshot => snapshotAiPending snapshot
  T|> listHead snapshot.computerMoves
  F|> None
-
-type Phase -> Bool
-func phaseAllowsHumanInput = phase => phase
- ||> HumanReady -> True
- ||> _          -> False
-
-type Phase -> Bool
-func phaseIsComputerThinking = phase => phase
- ||> ComputerThinking -> True
- ||> _                -> False
-
-type Phase -> Bool
-func phaseHasComputerAnimation = phase => phase
- ||> ComputerAnimating _ _ -> True
- ||> _                     -> False
-
-type Phase -> Option Coord
-func phaseComputerTarget = phase => phase
- ||> ComputerAnimating coord _ -> Some coord
- ||> _                        -> None
-
-type Phase -> Bool
-func phaseShowsComputerTarget = phase => phase
- ||> ComputerAnimating ignored step -> step == 1 or step == 3 or step == 5
- ||> _                             -> False
 
 type Coord -> Snapshot -> Bool
 func humanCanPlace = coord snapshot =>
@@ -366,8 +374,7 @@ func commitComputerPlacement = state coord =>
     commitComputerPlacementToBoard state coord (applyPlacement state.board Computer coord)
 
 type GameState -> Coord -> Matrix Disc -> GameState
-func commitComputerPlacementToBoard = state coord board =>
-    snapshotPassPending (makeSnapshot board Human)
+func commitComputerPlacementToBoard = state coord board => snapshotPassPending (makeSnapshot board Human)
  T|> computerThinkingState board (Some (Place Computer coord))
  F|> humanReadyState board (Some (Place Computer coord))
 
@@ -399,16 +406,6 @@ func stepGame = event state => event
  ||> Click coord       -> clickGameState state coord
  ||> Idle              -> state
 
-type Move -> Text
-func moveLabel = move => move
- ||> Pass player        -> "{playerLabel player} passes"
- ||> Place player coord -> "{playerLabel player} plays {coordLabel coord}"
-
-type Option Move -> Text
-func lastMoveLine = opt => opt
- ||> None      -> "Opening position"
- ||> Some move -> moveLabel move
-
 type Score -> Text
 func trailingWinnerLine = score => score.computer > score.human
  T|> "Computer wins."
@@ -418,46 +415,6 @@ type Score -> Text
 func winnerLine = score => score.human > score.computer
  T|> "You win."
  F|> trailingWinnerLine score
-
-type Player -> Text
-func turnLine = player => player == Human
- T|> "Your turn"
- F|> "Computer is choosing..."
-
-type Int -> Text
-func computerAnimationStatus = step => step == 0
- T|> "Computer is choosing..."
- F|> "Computer is placing..."
-
-type Phase -> Text
-func phaseStatusLine = phase => phase
- ||> HumanReady                -> "Your turn"
- ||> ComputerThinking          -> "Computer is choosing..."
- ||> ComputerAnimating _ step  -> computerAnimationStatus step
-
-type Snapshot -> Text
-func activeStatusLine = snapshot => snapshotPassPending snapshot
- T|> "{playerLabel snapshot.turn} must pass"
- F|> turnLine snapshot.turn
-
-type Score -> Text
-func scoreLine = score =>
-    "You 🔴: {score.human}   Computer ⚪: {score.computer}"
-
-type Phase -> Text
-func previewLine = phase => phase
- ||> HumanReady -> "Click a ◌ square to place 🔴."
- ||> _          -> ""
-
-type Phase -> Snapshot -> Text
-func activePhaseStatus = phase snapshot => phaseAllowsHumanInput phase
- T|> activeStatusLine snapshot
- F|> phaseStatusLine phase
-
-type Phase -> Snapshot -> Score -> Text
-func statusLine = phase snapshot score => snapshotGameOver snapshot
- T|> "Game over. {winnerLine score}"
- F|> activePhaseStatus phase snapshot
 
 type Bool -> Snapshot -> List Coord
 func currentMovesFromUi = humanTurn snapshot => humanTurn
@@ -508,12 +465,6 @@ signal restartClick : Signal Unit
 }
 signal snapshotReady : Signal Unit
 
-signal computerThinkingActive : Signal Bool = phase
-  |> phaseIsComputerThinking
-
-signal computerAnimationActive : Signal Bool = phase
-  |> phaseHasComputerAnimation
-
 @source timer.every 200ms with {
     immediate: False,
     activeWhen: computerAnimationActive,
@@ -528,59 +479,42 @@ signal event : Signal Event = snapshotReady | computerFlashTick | placeCoord | r
   ||> restartClick _ => Reset
   ||> _ => Idle
 
-signal game : Signal GameState = event
+signal state : Signal GameState = event
  +|> initialGame stepGame
 
-from game = {
+from state = {
     board: .board
     snapshot: .snapshot
     phase: .phase
-    lastMove: .lastMove
 }
 
-signal gameOver = snapshot
-  |> snapshotGameOver
+from phase = {
+    humanTurn: phaseAllowsHumanInput
+    computerThinkingActive: phaseIsComputerThinking
+    computerAnimationActive: phaseHasComputerAnimation
+    computerTarget: phaseComputerTarget
+    computerTargetVisible: phaseShowsComputerTarget
+}
 
-signal score = board
-  |> countScore
+from snapshot = {
+    gameOver: snapshotGameOver
+    currentMoves: currentMovesFromUi humanTurn
+}
 
-signal humanTurn : Signal Bool = phase
-  |> phaseAllowsHumanInput
+from board = {
+    score: countScore
+}
 
-signal currentMoves = currentMovesFromUi humanTurn snapshot
-
-signal computerTarget : Signal (Option Coord) = phase
-  |> phaseComputerTarget
-
-signal computerTargetVisible : Signal Bool = phase
-  |> phaseShowsComputerTarget
-
-signal statusText : Signal Text = statusLine phase snapshot score
-
-signal scoreText = score
-  |> scoreLine
-
-signal lastMoveText = lastMove
-  |> lastMoveLine
-
-signal previewText : Signal Text = phase
-  |> previewLine
-
-signal finalText = score
-  |> winnerLine
+from score = {
+    finalText: winnerLine
+}
 
 value main =
-    <Window title="AIVI Reversi" defaultWidth={640} defaultHeight={760}>
+    <Window title="AIVI Reversi" defaultWidth={520} defaultHeight={520}>
         <Box orientation="vertical" spacing={12} marginTop={16} marginBottom={16} marginStart={16} marginEnd={16}>
-            <Label text="Reversi" />
-            <Label text={statusText} />
-            <Label text={scoreText} />
-            <Label text={lastMoveText} />
-            <Label text={previewText} />
             <show when={gameOver}>
                 <Label text={finalText} />
             </show>
-            <Label text="🔴 = you, ⚪ = computer, ◌ = legal move." wrap />
             <Button label="Restart" onClick={restartClick} compact hasFrame={False} />
             <Box orientation="vertical" spacing={2}>
                 <each of={boardIndices} as={y} key={y}>

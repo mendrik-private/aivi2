@@ -152,15 +152,16 @@ impl NavigationAnalysis {
     /// but accumulates all entries instead of selecting the tightest one.
     fn collect_all_sites(&self) -> Vec<(SourceSpan, NavigationSite)> {
         let module = self.module();
-        let source_id = self.source.id();
         let mut sites: Vec<(SourceSpan, NavigationSite)> = Vec::new();
 
         macro_rules! push {
-            ($span:expr, $site:expr) => {
-                if $span.file() == source_id {
-                    sites.push(($span, $site));
+            ($span:expr, $site:expr) => {{
+                let span = $span;
+                let site = $site;
+                if self.site_span_is_authored(span, &site) {
+                    sites.push((span, site));
                 }
-            };
+            }};
         }
 
         for (binding_id, binding) in module.bindings().iter() {
@@ -654,7 +655,7 @@ impl NavigationAnalysis {
         site: NavigationSite,
         best: &mut Option<(u32, NavigationSite)>,
     ) {
-        if span.file() != self.source.id() || !span.span().contains(cursor) {
+        if !self.site_span_is_authored(span, &site) || !span.span().contains(cursor) {
             return;
         }
         let len = span.span().len();
@@ -663,6 +664,71 @@ impl NavigationAnalysis {
             .is_none_or(|(current_len, _)| len <= *current_len)
         {
             *best = Some((len, site));
+        }
+    }
+
+    fn site_span_is_authored(&self, span: SourceSpan, site: &NavigationSite) -> bool {
+        if span.file() != self.source.id() {
+            return false;
+        }
+        let range = span.span();
+        let Some(text) = self
+            .source
+            .text()
+            .get(range.start().as_usize()..range.end().as_usize())
+        else {
+            return false;
+        };
+        match site {
+            NavigationSite::BindingDecl { binding } => self
+                .module()
+                .bindings()
+                .get(*binding)
+                .is_some_and(|binding| span_text_matches_name(text, binding.name.text())),
+            NavigationSite::TypeParameterDecl { parameter } => self
+                .module()
+                .type_parameters()
+                .get(*parameter)
+                .is_some_and(|parameter| span_text_matches_name(text, parameter.name.text())),
+            NavigationSite::ImportName { import, .. } => {
+                self.module().imports().get(*import).is_some_and(|import| {
+                    span_text_matches_name(text, import.imported_name.text())
+                        || span_text_matches_name(text, import.local_name.text())
+                })
+            }
+            NavigationSite::ExportTarget { name, .. }
+            | NavigationSite::TypeReference { name, .. }
+            | NavigationSite::TermReference { name, .. }
+            | NavigationSite::ConstructorDecl {
+                variant_name: name, ..
+            } => span_text_matches_name(text, name.as_ref()),
+            NavigationSite::BinaryOperator { operator } => {
+                text.contains(binary_operator_text(*operator))
+            }
+            NavigationSite::LiteralSuffix { resolution } => match resolution {
+                ResolutionState::Resolved(resolution) => self
+                    .domain_member_name_text(DomainMemberResolution {
+                        domain: resolution.domain,
+                        member_index: resolution.member_index,
+                    })
+                    .is_some_and(|name| span_text_matches_name(text, name)),
+                ResolutionState::Unresolved => true,
+            },
+            NavigationSite::ItemDecl { item } => self
+                .item_name_text(*item)
+                .is_some_and(|name| span_text_matches_name(text, name)),
+            NavigationSite::ClassMemberDecl { resolution } => self
+                .class_member_name_text(*resolution)
+                .is_some_and(|name| span_text_matches_name(text, name)),
+            NavigationSite::DomainMemberDecl { resolution } => self
+                .domain_member_name_text(*resolution)
+                .is_some_and(|name| span_text_matches_name(text, name)),
+            NavigationSite::InstanceMemberDecl {
+                instance,
+                member_index,
+            } => self
+                .instance_member_name_text(*instance, *member_index)
+                .is_some_and(|name| span_text_matches_name(text, name)),
         }
     }
 
@@ -1052,6 +1118,49 @@ impl NavigationAnalysis {
         Some(instance_item.members.get(member_index)?.name.span())
     }
 
+    fn item_name_text(&self, item: ItemId) -> Option<&str> {
+        match self.module().items().get(item)? {
+            Item::Type(item) => Some(item.name.text()),
+            Item::Value(item) => Some(item.name.text()),
+            Item::Function(item) => Some(item.name.text()),
+            Item::Signal(item) => Some(item.name.text()),
+            Item::Class(item) => Some(item.name.text()),
+            Item::Domain(item) => Some(item.name.text()),
+            Item::Instance(_)
+            | Item::Use(_)
+            | Item::Export(_)
+            | Item::Hoist(_)
+            | Item::SourceProviderContract(_) => None,
+        }
+    }
+
+    fn class_member_name_text(&self, resolution: ClassMemberResolution) -> Option<&str> {
+        let Item::Class(class_item) = self.module().items().get(resolution.class)? else {
+            return None;
+        };
+        Some(class_item.members.get(resolution.member_index)?.name.text())
+    }
+
+    fn domain_member_name_text(&self, resolution: DomainMemberResolution) -> Option<&str> {
+        let Item::Domain(domain_item) = self.module().items().get(resolution.domain)? else {
+            return None;
+        };
+        Some(
+            domain_item
+                .members
+                .get(resolution.member_index)?
+                .name
+                .text(),
+        )
+    }
+
+    fn instance_member_name_text(&self, instance: ItemId, member_index: usize) -> Option<&str> {
+        let Item::Instance(instance_item) = self.module().items().get(instance)? else {
+            return None;
+        };
+        Some(instance_item.members.get(member_index)?.name.text())
+    }
+
     fn import_definition_targets_for_import_id(
         &self,
         db: &RootDatabase,
@@ -1320,7 +1429,9 @@ impl NavigationAnalysis {
             return None;
         }
 
-        let between = &self.source.text()[start..end];
+        let Some(between) = self.source.text().get(start..end) else {
+            return None;
+        };
         let trimmed = between.trim();
         if trimmed.is_empty() {
             return None;
@@ -1606,4 +1717,24 @@ fn binary_operator_text(operator: BinaryOperator) -> &'static str {
         BinaryOperator::And => "and",
         BinaryOperator::Or => "or",
     }
+}
+
+fn span_text_matches_name(text: &str, expected: &str) -> bool {
+    if text == expected {
+        return true;
+    }
+    if text
+        .strip_prefix('(')
+        .and_then(|inner| inner.strip_suffix(')'))
+        .is_some_and(|inner| inner == expected)
+    {
+        return true;
+    }
+    text.strip_prefix(expected)
+        .and_then(|rest| rest.chars().next())
+        .is_some_and(|next| next == '.' || !is_identifier_continue_char(next))
+}
+
+fn is_identifier_continue_char(character: char) -> bool {
+    character == '_' || character.is_alphanumeric()
 }

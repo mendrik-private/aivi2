@@ -2867,16 +2867,6 @@ mod tests {
                 .is_some_and(|revision| revision > 1),
             "MCP should keep pumping the run session until GTK applies a new hydration"
         );
-        assert!(
-            result.changed_signals.iter().any(|signal| {
-                signal.name == "lastMoveText"
-                    && signal
-                        .value
-                        .as_ref()
-                        .is_some_and(|value| value != &json!("Last move: opening layout"))
-            }),
-            "the click should update the reversi move summary"
-        );
 
         let clicked_path_refs: Vec<&str> = clicked_path
             .iter()

@@ -1272,6 +1272,20 @@ mod tests {
             .sum()
     }
 
+    fn find_sensitive_button_by_label(
+        harness: &super::RunSessionHarness,
+        label: &str,
+    ) -> Option<gtk::Button> {
+        harness.root_windows().iter().find_map(|window| {
+            find_button_by_label(&window.clone().upcast::<gtk::Widget>(), label)
+                .filter(|button| button.is_sensitive())
+        })
+    }
+
+    fn has_sensitive_button_by_label(harness: &super::RunSessionHarness, label: &str) -> bool {
+        find_sensitive_button_by_label(harness, label).is_some()
+    }
+
     #[test]
     fn main_context_request_queue_preserves_submission_order() {
         let queue = MainContextRequestQueue::new();
@@ -1655,18 +1669,12 @@ export main
         let _guard = crate::gtk_test_lock().lock().expect("gtk test lock");
         let path = repo_path("demos/reversi.aivi");
         let artifact = prepare_run_from_path(&path);
-        let status_item = required_signal_item(&artifact, "statusText");
         let harness =
             start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
                 .expect("reversi demo should start a run session");
         harness
             .present_root_windows()
             .expect("presenting the reversi window should release startup-held timers");
-        assert_eq!(
-            text_signal_for(&harness, status_item),
-            "Your turn",
-            "reversi should start on the human turn"
-        );
 
         let opening_move = harness
             .root_windows()
@@ -1686,7 +1694,6 @@ export main
         let _guard = crate::gtk_test_lock().lock().expect("gtk test lock");
         let path = repo_path("demos/reversi.aivi");
         let artifact = prepare_run_from_path(&path);
-        let last_move_item = required_signal_item(&artifact, "lastMoveText");
         let harness =
             start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
                 .expect("reversi demo should start a run session");
@@ -1695,6 +1702,7 @@ export main
             .present_root_windows()
             .expect("presenting the reversi window should release startup-held timers");
         let initial_hydration = harness.with_access(|access| access.latest_applied_hydration());
+        let opening_red_count = button_label_count_for(&harness, "🔴");
         pump_context(&context, Duration::from_millis(650));
         assert_eq!(
             harness.with_access(|access| access.latest_applied_hydration()),
@@ -1710,9 +1718,55 @@ export main
         opening_move.emit_clicked();
         assert!(
             pump_until(&context, Duration::from_millis(100), || {
-                text_signal_for(&harness, last_move_item) != "Opening position"
+                button_label_count_for(&harness, "🔴") > opening_red_count
             }),
             "an idle reversi session should still accept the first human move"
+        );
+
+        harness.shutdown();
+    }
+
+    #[gtk::test]
+    fn reversi_restart_resets_the_board_during_the_ai_turn() {
+        let _guard = crate::gtk_test_lock().lock().expect("gtk test lock");
+        let path = repo_path("demos/reversi.aivi");
+        let artifact = prepare_run_from_path(&path);
+        let harness =
+            start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
+                .expect("reversi demo should start a run session");
+        let context = harness.control().context();
+        harness
+            .present_root_windows()
+            .expect("presenting the reversi window should release startup-held timers");
+
+        let opening_red_count = button_label_count_for(&harness, "🔴");
+        let opening_state = debug_signal_value_for(&harness, "state");
+        let opening_move = find_sensitive_button_by_label(&harness, "◌")
+            .expect("reversi should expose a clickable opening move");
+        let restart = harness
+            .root_windows()
+            .iter()
+            .find_map(|window| {
+                find_button_by_label(&window.clone().upcast::<gtk::Widget>(), "Restart")
+            })
+            .expect("reversi window should expose a restart button");
+
+        opening_move.emit_clicked();
+        assert!(
+            pump_until(&context, Duration::from_millis(100), || {
+                button_label_count_for(&harness, "🔴") > opening_red_count
+            }),
+            "the opening human move should land before attempting a restart"
+        );
+
+        restart.emit_clicked();
+        assert!(
+            pump_until(&context, Duration::from_millis(250), || {
+                debug_signal_value_for(&harness, "state") == opening_state
+            }),
+            "restart should restore the opening board even if the AI turn had already started (phase: {}, state: {})",
+            debug_signal_value_for(&harness, "phase"),
+            debug_signal_value_for(&harness, "state"),
         );
 
         harness.shutdown();
@@ -1779,9 +1833,6 @@ export main
         let _guard = crate::gtk_test_lock().lock().expect("gtk test lock");
         let path = repo_path("demos/reversi.aivi");
         let artifact = prepare_run_from_path(&path);
-        let status_item = required_signal_item(&artifact, "statusText");
-        let last_move_item = required_signal_item(&artifact, "lastMoveText");
-        let preview_item = required_signal_item(&artifact, "previewText");
         let harness =
             start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
                 .expect("reversi demo should start a run session");
@@ -1805,14 +1856,9 @@ export main
             "clicking a legal move should put the new red stone on the board right away"
         );
         pump_context(&context, Duration::from_millis(100));
-        assert_eq!(
-            text_signal_for(&harness, status_item),
-            "Computer is choosing...",
-            "the first move should promptly hand control to the hidden computer-thinking phase"
-        );
         assert!(
-            text_signal_for(&harness, preview_item).is_empty(),
-            "the helper line should stay blank while the computer is thinking"
+            !has_sensitive_button_by_label(&harness, "◌"),
+            "the first move should promptly hand control away from the human player"
         );
         let thinking_white_count = button_label_count_for(&harness, "⚪");
         assert_eq!(
@@ -1823,46 +1869,32 @@ export main
         assert!(
             pump_until(&context, Duration::from_millis(600), || {
                 button_label_count_for(&harness, "⚪") > thinking_white_count
-                    && !text_signal_for(&harness, last_move_item).starts_with("Computer plays")
+                    && !has_sensitive_button_by_label(&harness, "◌")
             }),
             "the computer target should flash onto the board before the move commits"
         );
         assert!(
             !pump_until(&context, Duration::from_millis(600), || {
-                text_signal_for(&harness, status_item) == "Your turn"
+                has_sensitive_button_by_label(&harness, "◌")
             }),
             "the computer move should not commit before the flash sequence finishes"
         );
         assert!(
             pump_until(&context, Duration::from_secs(4), || {
-                text_signal_for(&harness, status_item) == "Your turn"
-                    && text_signal_for(&harness, last_move_item).starts_with("Computer plays")
+                has_sensitive_button_by_label(&harness, "◌")
             }),
-            "after the computer flash sequence the game should return to a playable human turn (status: {}, preview: {}, last move: {}, action: {}, session: {}, history: {})",
-            text_signal_for(&harness, status_item),
-            text_signal_for(&harness, preview_item),
-            text_signal_for(&harness, last_move_item),
-            debug_signal_value_for(&harness, "action"),
-            debug_signal_value_for(&harness, "session"),
-            debug_signal_value_for(&harness, "history"),
+            "after the computer flash sequence the game should return to a playable human turn (phase: {}, state: {})",
+            debug_signal_value_for(&harness, "phase"),
+            debug_signal_value_for(&harness, "state"),
         );
 
         assert!(
             pump_until(&context, Duration::from_secs(4), || {
-                harness.root_windows().iter().any(|window| {
-                    find_button_by_label(&window.clone().upcast::<gtk::Widget>(), "◌")
-                        .is_some_and(|button| button.is_sensitive())
-                })
+                has_sensitive_button_by_label(&harness, "◌")
             }),
             "after the AI reply the GTK tree should expose a clickable human move"
         );
-        let second_move = harness
-            .root_windows()
-            .iter()
-            .find_map(|window| {
-                find_button_by_label(&window.clone().upcast::<gtk::Widget>(), "◌")
-                    .filter(|button| button.is_sensitive())
-            })
+        let second_move = find_sensitive_button_by_label(&harness, "◌")
             .expect("reversi should expose another clickable human move after the AI reply");
         let second_turn_red_count = button_label_count_for(&harness, "🔴");
         second_move.emit_clicked();
@@ -1870,19 +1902,9 @@ export main
             pump_until(&context, Duration::from_millis(100), || {
                 button_label_count_for(&harness, "🔴") > second_turn_red_count
             }),
-            "the second human move should paint its red stone right away"
-        );
-        assert!(
-            pump_until(&context, Duration::from_millis(100), || {
-                text_signal_for(&harness, last_move_item).starts_with("You plays")
-            }),
-            "the second human move should update the move summary instead of crashing (status: {}, preview: {}, last move: {}, action: {}, session: {}, history: {})",
-            text_signal_for(&harness, status_item),
-            text_signal_for(&harness, preview_item),
-            text_signal_for(&harness, last_move_item),
-            debug_signal_value_for(&harness, "action"),
-            debug_signal_value_for(&harness, "session"),
-            debug_signal_value_for(&harness, "history"),
+            "the second human move should still land without crashing (phase: {}, state: {})",
+            debug_signal_value_for(&harness, "phase"),
+            debug_signal_value_for(&harness, "state"),
         );
 
         harness.shutdown();
@@ -1899,7 +1921,6 @@ export main
             bridge: artifact.bridge.clone(),
             inputs: artifact.hydration_inputs.clone(),
         };
-        let status_item = required_signal_item(&artifact, "statusText");
         let harness =
             start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
                 .expect("reversi demo should start a run session");
@@ -1908,6 +1929,7 @@ export main
             .present_root_windows()
             .expect("presenting the reversi window should release startup-held timers");
 
+        let opening_red_count = button_label_count_for(&harness, "🔴");
         let opening_move = harness
             .root_windows()
             .iter()
@@ -1916,9 +1938,14 @@ export main
         opening_move.emit_clicked();
         assert!(
             pump_until(&context, Duration::from_millis(100), || {
-                text_signal_for(&harness, status_item) == "Computer is choosing..."
+                button_label_count_for(&harness, "🔴") > opening_red_count
             }),
-            "opening move should quickly reach the AI-thinking state before profiling hydration"
+            "opening move should land before profiling hydration"
+        );
+        pump_context(&context, Duration::from_millis(100));
+        assert!(
+            !has_sensitive_button_by_label(&harness, "◌"),
+            "profiling should sample the live reversi session after it has left the opening human turn"
         );
 
         let globals = harness.with_access(|access| {

@@ -223,9 +223,10 @@
     },
 
     "from-signature": {
-      "begin": "\\b(from)\\b",
+      "begin": "\\b(from)\\s+([a-z_][a-zA-Z0-9_]*)",
       "beginCaptures": {
-        "1": { "name": "keyword.declaration.from.aivi" }
+        "1": { "name": "keyword.declaration.from.aivi" },
+        "2": { "name": "entity.name.variable.signal.aivi" }
       },
       "end": "$"
     },
@@ -401,9 +402,10 @@
         },
         {
           "comment": "from source = { ... } — grouped derived signal declaration",
-          "match": "\\b(from)\\b",
+          "match": "\\b(from)\\s+([a-z_][a-zA-Z0-9_]*)",
           "captures": {
-            "1": { "name": "keyword.declaration.from.aivi" }
+            "1": { "name": "keyword.declaration.from.aivi" },
+            "2": { "name": "entity.name.variable.signal.aivi" }
           }
         },
         {

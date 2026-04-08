@@ -174,13 +174,14 @@
       "scope": "keyword.other.unit.aivi",
       "settings": { "foreground": "#F0C674" } },
 
-    { "name": "Declaration keywords (type value func signal source result view adapter data class domain instance provider)",
+    { "name": "Declaration keywords (type value func signal from source result view adapter data class domain instance provider)",
       "scope": [
         "keyword.declaration.type.aivi",
         "keyword.declaration.value.aivi",
         "keyword.declaration.func.aivi",
         "keyword.declaration.fun.aivi",
         "keyword.declaration.signal.aivi",
+        "keyword.declaration.from.aivi",
         "keyword.declaration.source.aivi",
         "keyword.declaration.result.aivi",
         "keyword.declaration.view.aivi",

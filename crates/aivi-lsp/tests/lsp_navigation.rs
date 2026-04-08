@@ -289,3 +289,24 @@ async fn implementation_resolves_class_to_its_instances() {
         "there should be at least one instance implementation for class Eq"
     );
 }
+
+#[tokio::test]
+async fn definition_resolves_from_fanout_signal_use_site() {
+    let relative = "demos/reversi.aivi";
+    let (state, uri, text) = open_fixture_document(relative);
+
+    let response = definition(
+        definition_params(uri.clone(), position_of_nth(&text, "gameOver", 1)),
+        state,
+    )
+    .await
+    .expect("definition should resolve for a from-fanout signal use site");
+
+    let locations = response_locations(response);
+    assert_eq!(locations.len(), 1);
+    assert_eq!(locations[0].uri, uri);
+    assert_eq!(
+        locations[0].range.start,
+        position_of_nth(&text, "gameOver", 0)
+    );
+}

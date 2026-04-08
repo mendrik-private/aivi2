@@ -28,6 +28,32 @@ fn hover_params(uri: Url, line: u32, character: u32) -> HoverParams {
     }
 }
 
+fn position_at_byte(text: &str, byte_index: usize) -> Position {
+    let prefix = &text[..byte_index];
+    let line = prefix.bytes().filter(|b| *b == b'\n').count() as u32;
+    let line_start = prefix.rfind('\n').map_or(0, |index| index + 1);
+    Position {
+        line,
+        character: text[line_start..byte_index].encode_utf16().count() as u32,
+    }
+}
+
+fn position_of_nth(text: &str, needle: &str, occurrence: usize) -> Position {
+    let mut start = 0usize;
+    let mut seen = 0usize;
+    loop {
+        let relative = text[start..]
+            .find(needle)
+            .unwrap_or_else(|| panic!("could not find occurrence #{occurrence} of `{needle}`"));
+        let byte_index = start + relative;
+        if seen == occurrence {
+            return position_at_byte(text, byte_index);
+        }
+        seen += 1;
+        start = byte_index + needle.len();
+    }
+}
+
 fn hover_markup(result: Option<Hover>) -> String {
     let hover = result.expect("expected hover result");
     match hover.contents {
@@ -145,6 +171,40 @@ async fn hover_on_mismatched_annotation_mentions_declared_type() {
     assert!(
         markup.contains("Declared type: `Text`"),
         "hover should also mention the declared type when it mismatches; got: {}",
+        markup
+    );
+}
+
+#[tokio::test]
+async fn hover_on_from_source_survives_multibyte_text_in_reversi() {
+    let text = include_str!("../../../demos/reversi.aivi");
+    let (state, uri) = open_inline("hover-reversi-from.aivi", text);
+    let position = position_of_nth(text, "from state", 0);
+    let markup = hover_markup(
+        hover(
+            hover_params(uri, position.line, position.character + 5),
+            state,
+        )
+        .await,
+    );
+
+    assert!(
+        markup.contains("signal state : Signal {"),
+        "hover on the `from state` source should resolve without panicking; got: {}",
+        markup
+    );
+}
+
+#[tokio::test]
+async fn hover_survives_box_drawing_comments_before_binary_exprs() {
+    let text = "/**\n * Mailfox UI entry point.\n **/\n\n// ─── Imports ──────────────────────────────────────\nvalue total = 42\nvalue check = 1 + 2\n";
+    let (state, uri) = open_inline("hover-box-drawing-comment.aivi", text);
+    let position = position_of_nth(text, "total", 0);
+    let markup = hover_markup(hover(hover_params(uri, position.line, position.character), state).await);
+
+    assert!(
+        markup.contains("value total : Int"),
+        "hover should resolve without panicking when comments contain box-drawing Unicode; got: {}",
         markup
     );
 }
