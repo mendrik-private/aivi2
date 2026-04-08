@@ -206,6 +206,9 @@ impl McpHostState {
             queued_outcomes: access.outcome_count(),
             queued_failures: access.failure_count(),
         });
+        let hydration_in_sync = runtime.hydration_in_sync();
+        let pending_hydration_revision = runtime.pending_hydration_revision();
+        let runtime_idle = runtime.runtime_idle();
         Ok(SessionStatus {
             launched: true,
             configured_entry_path: self
@@ -220,12 +223,12 @@ impl McpHostState {
             root_window_count: session.harness.root_windows().len(),
             latest_requested_hydration: runtime.latest_requested_hydration,
             latest_applied_hydration: runtime.latest_applied_hydration,
-            hydration_in_sync: Some(runtime.hydration_in_sync()),
-            pending_hydration_revision: runtime.pending_hydration_revision(),
+            hydration_in_sync: Some(hydration_in_sync),
+            pending_hydration_revision,
             queued_messages: Some(runtime.queued_messages),
             queued_outcomes: Some(runtime.queued_outcomes),
             queued_failures: Some(runtime.queued_failures),
-            runtime_idle: Some(runtime.runtime_idle()),
+            runtime_idle: Some(runtime_idle),
         })
     }
 
@@ -2685,6 +2688,28 @@ mod tests {
             .join(path)
     }
 
+    fn near_endgame_reversi_source() -> String {
+        let original = include_str!("../../../demos/reversi.aivi");
+        let replaced = original.replacen(
+            r#"func buildInitialDisc = x y => (x, y)
+ ||> (3, 3) -> White
+ ||> (4, 4) -> White
+ ||> (3, 4) -> Black
+ ||> (4, 3) -> Black
+ ||> _      -> Empty"#,
+            r#"func buildInitialDisc = x y => (x, y)
+ ||> (7, 0) -> Empty
+ ||> (6, 0) -> White
+ ||> _      -> Black"#,
+            1,
+        );
+        assert_ne!(
+            replaced, original,
+            "near-endgame reversi fixture should replace the opening board"
+        );
+        replaced
+    }
+
     fn widget_snapshot_by_path<'a>(
         roots: &'a [WidgetSnapshot],
         path: &[&str],
@@ -2913,6 +2938,21 @@ mod tests {
                 .is_some_and(|revision| revision > 1),
             "MCP should keep pumping the run session until GTK applies a new hydration"
         );
+        assert_eq!(
+            result.session.latest_requested_hydration,
+            result.session.latest_applied_hydration,
+            "MCP should not return while GTK is still behind the latest requested hydration"
+        );
+        assert_eq!(
+            result.session.hydration_in_sync,
+            Some(true),
+            "session status should make runtime/UI hydration sync explicit after a click settles"
+        );
+        assert_eq!(
+            result.session.pending_hydration_revision,
+            None,
+            "session status should report no pending hydration once the click has settled"
+        );
 
         let clicked_path_refs: Vec<&str> = clicked_path
             .iter()
@@ -2928,6 +2968,94 @@ mod tests {
         assert!(
             !clicked_cell.sensitive,
             "occupied board cells should stop being clickable after the move lands"
+        );
+
+        host.stop_session();
+    }
+
+    #[gtk::test]
+    fn emit_gtk_event_waits_for_endgame_reversi_hydration() {
+        let _guard = crate::gtk_test_lock().lock().expect("gtk test lock");
+        let workspace = tempfile::tempdir().expect("tempdir should create");
+        let path = workspace.path().join("main.aivi");
+        std::fs::write(&path, near_endgame_reversi_source())
+            .expect("near-endgame reversi fixture should write");
+        let prepared = prepare_launch_request(&path, Some("main".to_owned()), LaunchSourceArgs::default())
+            .expect("near-endgame reversi launch request should prepare");
+        let mut host = McpHostState {
+            context: gtk::glib::MainContext::default(),
+            configured: ConfiguredTarget {
+                entry_path: Some(path.clone()),
+                default_view: Some("main".to_owned()),
+            },
+            session: None,
+            widget_ids: Default::default(),
+            next_widget_id: 0,
+            shutting_down: false,
+        };
+
+        host.launch_prepared(prepared)
+            .expect("near-endgame reversi should launch through the MCP host");
+        let final_move = host
+            .find_widgets(FindWidgetsArgs {
+                text_contains: Some("◌".to_owned()),
+                role: Some("button".to_owned()),
+                actionable: Some(true),
+                ..Default::default()
+            })
+            .expect("near-endgame reversi should expose the final legal move")
+            .into_iter()
+            .next()
+            .expect("near-endgame reversi should expose exactly one final clickable move");
+        let clicked_path = final_move.path.clone();
+
+        let result = host
+            .emit_gtk_event(EmitGtkEventArgs {
+                widget_id: Some(final_move.id),
+                event: "click".to_owned(),
+                text: None,
+                active: None,
+                key: None,
+                repeated: None,
+            })
+            .expect("clicking the terminal reversi move should settle fully in MCP");
+
+        assert_eq!(
+            result.session.latest_requested_hydration,
+            result.session.latest_applied_hydration,
+            "terminal reversi clicks should not report settled while GTK still trails the runtime hydration revision"
+        );
+        assert_eq!(
+            result.session.hydration_in_sync,
+            Some(true),
+            "session status should report terminal reversi hydration as synchronized"
+        );
+        assert_eq!(
+            result.session.pending_hydration_revision,
+            None,
+            "session status should report no pending GTK hydration after the terminal move settles"
+        );
+
+        let clicked_path_refs: Vec<&str> = clicked_path
+            .iter()
+            .map(|segment| segment.as_str())
+            .collect();
+        let clicked_cell = widget_snapshot_by_path(&result.gtk, &clicked_path_refs)
+            .expect("the terminal board cell should still exist in the GTK snapshot");
+        assert_eq!(
+            clicked_cell.text.as_deref(),
+            Some("🔴"),
+            "the final move should repaint the board cell before MCP reports the event as settled"
+        );
+
+        let winner_label = result
+            .gtk
+            .iter()
+            .find_map(|root| find_widget_snapshot_by_path(root, &["window[0]", "box[0]"]));
+        assert_eq!(
+            winner_label.and_then(|label| label.text.as_deref()),
+            Some("You win."),
+            "the terminal winner label should already be visible once MCP reports the click as settled"
         );
 
         host.stop_session();
