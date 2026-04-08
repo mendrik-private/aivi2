@@ -124,6 +124,25 @@ fn implicit_exported_names(module: &Module) -> Vec<ExportedName> {
         if let Item::Type(type_item) = item {
             if let TypeItemBody::Sum(variants) = &type_item.body {
                 let deprecation = item_deprecation_notice(module, item);
+                let type_param_map: TypeParamMap = type_item
+                    .parameters
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &p)| (p, i))
+                    .collect();
+                let result_args: Vec<ImportValueType> = type_item
+                    .parameters
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &p)| {
+                        let name = module
+                            .type_parameters()
+                            .get(p)
+                            .map(|param| param.name.text().to_owned())
+                            .unwrap_or_else(|| format!("T{}", i + 1));
+                        ImportValueType::TypeVariable { index: i, name }
+                    })
+                    .collect();
                 for variant in variants.iter() {
                     let name = variant.name.text().to_owned();
                     let metadata = builtin_term_metadata(&name).unwrap_or_else(|| {
@@ -132,24 +151,24 @@ fn implicit_exported_names(module: &Module) -> Vec<ExportedName> {
                             ImportBindingMetadata::Value {
                                 ty: ImportValueType::Named {
                                     type_name: owner_type_name,
-                                    arguments: Vec::new(),
+                                    arguments: result_args.clone(),
                                     definition: None,
                                 },
                             }
                         } else {
                             let result = ImportValueType::Named {
                                 type_name: owner_type_name,
-                                arguments: Vec::new(),
+                                arguments: result_args.clone(),
                                 definition: None,
                             };
                             let ty = variant.fields.iter().rev().fold(result, |acc, field| {
-                                let param_ty = import_value_type(module, field.ty).unwrap_or(
-                                    ImportValueType::Named {
-                                        type_name: "Unknown".into(),
-                                        arguments: Vec::new(),
-                                        definition: None,
-                                    },
-                                );
+                                let param_ty =
+                                    poly_import_value_type(module, field.ty, &type_param_map)
+                                        .unwrap_or(ImportValueType::Named {
+                                            type_name: "Unknown".into(),
+                                            arguments: Vec::new(),
+                                            definition: None,
+                                        });
                                 ImportValueType::Arrow {
                                     parameter: Box::new(param_ty),
                                     result: Box::new(acc),
@@ -276,6 +295,25 @@ fn explicit_item_exported_name(
             let TypeItemBody::Sum(variants) = &item.body else {
                 return None;
             };
+            let type_param_map: TypeParamMap = item
+                .parameters
+                .iter()
+                .enumerate()
+                .map(|(i, &p)| (p, i))
+                .collect();
+            let result_args: Vec<ImportValueType> = item
+                .parameters
+                .iter()
+                .enumerate()
+                .map(|(i, &p)| {
+                    let name = module
+                        .type_parameters()
+                        .get(p)
+                        .map(|param| param.name.text().to_owned())
+                        .unwrap_or_else(|| format!("T{}", i + 1));
+                    ImportValueType::TypeVariable { index: i, name }
+                })
+                .collect();
             variants
                 .iter()
                 .find(|variant| variant.name.text() == exported_name)
@@ -290,26 +328,26 @@ fn explicit_item_exported_name(
                             ImportBindingMetadata::Value {
                                 ty: ImportValueType::Named {
                                     type_name: owner_type_name,
-                                    arguments: Vec::new(),
+                                    arguments: result_args.clone(),
                                     definition: None,
                                 },
                             }
                         } else {
                             // Multi-field constructors: build Arrow chain over field types,
-                            // returning the owner Named type.
+                            // returning the owner Named type with proper type-variable arguments.
                             let result = ImportValueType::Named {
                                 type_name: owner_type_name,
-                                arguments: Vec::new(),
+                                arguments: result_args.clone(),
                                 definition: None,
                             };
                             let ty = variant.fields.iter().rev().fold(result, |acc, field| {
-                                let param_ty = import_value_type(module, field.ty).unwrap_or(
-                                    ImportValueType::Named {
-                                        type_name: "Unknown".into(),
-                                        arguments: Vec::new(),
-                                        definition: None,
-                                    },
-                                );
+                                let param_ty =
+                                    poly_import_value_type(module, field.ty, &type_param_map)
+                                        .unwrap_or(ImportValueType::Named {
+                                            type_name: "Unknown".into(),
+                                            arguments: Vec::new(),
+                                            definition: None,
+                                        });
                                 ImportValueType::Arrow {
                                     parameter: Box::new(param_ty),
                                     result: Box::new(acc),
@@ -1338,8 +1376,19 @@ fn extract_type_definition_with_stack(
     item_stack: &mut Vec<ItemId>,
 ) -> Option<ImportTypeDefinition> {
     match &item.body {
-        TypeItemBody::Alias(alias) => import_value_type_with_stack(module, *alias, item_stack)
-            .map(ImportTypeDefinition::Alias),
+        TypeItemBody::Alias(alias) => {
+            // Build a type parameter map so that type variables in the alias body
+            // (e.g. `A` in `type Envelope A = A`) serialize as TypeVariable entries,
+            // making transparent aliases round-trip correctly through the export surface.
+            let type_param_map: TypeParamMap = item
+                .parameters
+                .iter()
+                .enumerate()
+                .map(|(i, &p)| (p, i))
+                .collect();
+            poly_import_value_type(module, *alias, &type_param_map)
+                .map(ImportTypeDefinition::Alias)
+        }
         TypeItemBody::Sum(variants) => variants
             .iter()
             .map(|variant| {

@@ -1097,6 +1097,75 @@ impl GateType {
         }
     }
 
+    /// Expand a transparent imported type alias into a `GateType` by substituting
+    /// the provided type arguments for `TypeVariable` placeholders.  Returns `None`
+    /// when the alias body contains a `Named` reference that requires module context
+    /// to resolve; callers should treat `None` as "cannot expand, stay opaque".
+    fn expand_import_alias_type(
+        alias: &ImportValueType,
+        arguments: &[GateType],
+    ) -> Option<GateType> {
+        match alias {
+            ImportValueType::Primitive(builtin) => Some(GateType::Primitive(*builtin)),
+            ImportValueType::TypeVariable { index, .. } => arguments.get(*index).cloned(),
+            ImportValueType::Arrow { parameter, result } => Some(GateType::Arrow {
+                parameter: Box::new(Self::expand_import_alias_type(parameter, arguments)?),
+                result: Box::new(Self::expand_import_alias_type(result, arguments)?),
+            }),
+            ImportValueType::Tuple(elements) => {
+                let lowered: Option<Vec<_>> = elements
+                    .iter()
+                    .map(|e| Self::expand_import_alias_type(e, arguments))
+                    .collect();
+                Some(GateType::Tuple(lowered?))
+            }
+            ImportValueType::List(element) => Some(GateType::List(Box::new(
+                Self::expand_import_alias_type(element, arguments)?,
+            ))),
+            ImportValueType::Map { key, value } => Some(GateType::Map {
+                key: Box::new(Self::expand_import_alias_type(key, arguments)?),
+                value: Box::new(Self::expand_import_alias_type(value, arguments)?),
+            }),
+            ImportValueType::Set(element) => Some(GateType::Set(Box::new(
+                Self::expand_import_alias_type(element, arguments)?,
+            ))),
+            ImportValueType::Option(element) => Some(GateType::Option(Box::new(
+                Self::expand_import_alias_type(element, arguments)?,
+            ))),
+            ImportValueType::Result { error, value } => Some(GateType::Result {
+                error: Box::new(Self::expand_import_alias_type(error, arguments)?),
+                value: Box::new(Self::expand_import_alias_type(value, arguments)?),
+            }),
+            ImportValueType::Validation { error, value } => Some(GateType::Validation {
+                error: Box::new(Self::expand_import_alias_type(error, arguments)?),
+                value: Box::new(Self::expand_import_alias_type(value, arguments)?),
+            }),
+            ImportValueType::Signal(element) => Some(GateType::Signal(Box::new(
+                Self::expand_import_alias_type(element, arguments)?,
+            ))),
+            ImportValueType::Task { error, value } => Some(GateType::Task {
+                error: Box::new(Self::expand_import_alias_type(error, arguments)?),
+                value: Box::new(Self::expand_import_alias_type(value, arguments)?),
+            }),
+            ImportValueType::Record(fields) => {
+                let lowered: Option<Vec<_>> = fields
+                    .iter()
+                    .map(|f| {
+                        Self::expand_import_alias_type(&f.ty, arguments).map(|ty| {
+                            GateRecordField {
+                                name: f.name.to_string(),
+                                ty,
+                            }
+                        })
+                    })
+                    .collect();
+                Some(GateType::Record(lowered?))
+            }
+            // Named references require module context to resolve the import ID.
+            ImportValueType::Named { .. } => None,
+        }
+    }
+
     pub(crate) fn same_shape_inner(
         left: &Self,
         right: &Self,
@@ -1282,16 +1351,62 @@ impl GateType {
             // OpaqueImport all represent the same logical type when their canonical
             // names and argument shapes agree.  This covers ambient-prelude types
             // versus stdlib-imported types across all variant combinations.
-            _ => match (left.named_type_parts(), right.named_type_parts()) {
-                (Some((ln, la)), Some((rn, ra))) => {
-                    ln == rn
-                        && la.len() == ra.len()
-                        && la.iter().zip(ra.iter()).all(|(l, r)| {
-                            Self::same_shape_inner(l, r, left_to_right, right_to_left)
-                        })
+            _ => {
+                match (left.named_type_parts(), right.named_type_parts()) {
+                    (Some((ln, la)), Some((rn, ra))) => {
+                        if ln == rn
+                            && la.len() == ra.len()
+                            && la.iter().zip(ra.iter()).all(|(l, r)| {
+                                Self::same_shape_inner(l, r, left_to_right, right_to_left)
+                            })
+                        {
+                            return true;
+                        }
+                    }
+                    _ => {}
                 }
-                _ => false,
-            },
+                // Expand transparent imported type aliases (e.g. `type Envelope A = A`)
+                // so that `Envelope Text` is recognised as the same shape as `Text`.
+                if let Self::OpaqueImport {
+                    arguments,
+                    definition: Some(def),
+                    ..
+                } = left
+                {
+                    if let ImportTypeDefinition::Alias(alias) = def.as_ref() {
+                        if let Some(expanded) =
+                            Self::expand_import_alias_type(alias, arguments)
+                        {
+                            return Self::same_shape_inner(
+                                &expanded,
+                                right,
+                                left_to_right,
+                                right_to_left,
+                            );
+                        }
+                    }
+                }
+                if let Self::OpaqueImport {
+                    arguments,
+                    definition: Some(def),
+                    ..
+                } = right
+                {
+                    if let ImportTypeDefinition::Alias(alias) = def.as_ref() {
+                        if let Some(expanded) =
+                            Self::expand_import_alias_type(alias, arguments)
+                        {
+                            return Self::same_shape_inner(
+                                left,
+                                &expanded,
+                                left_to_right,
+                                right_to_left,
+                            );
+                        }
+                    }
+                }
+                false
+            }
         }
     }
 

@@ -2719,6 +2719,13 @@ mod tests {
             .find_map(|root| find_widget_snapshot_by_path(root, path))
     }
 
+    fn widget_snapshot_by_id<'a>(
+        roots: &'a [WidgetSnapshot],
+        id: &str,
+    ) -> Option<&'a WidgetSnapshot> {
+        roots.iter().find_map(|root| find_widget_snapshot_by_id(root, id))
+    }
+
     fn find_widget_snapshot_by_path<'a>(
         node: &'a WidgetSnapshot,
         path: &[&str],
@@ -2734,6 +2741,18 @@ mod tests {
         node.children
             .iter()
             .find_map(|child| find_widget_snapshot_by_path(child, path))
+    }
+
+    fn find_widget_snapshot_by_id<'a>(
+        node: &'a WidgetSnapshot,
+        id: &str,
+    ) -> Option<&'a WidgetSnapshot> {
+        if node.id == id {
+            return Some(node);
+        }
+        node.children
+            .iter()
+            .find_map(|child| find_widget_snapshot_by_id(child, id))
     }
 
     #[test]
@@ -2918,8 +2937,7 @@ mod tests {
             .into_iter()
             .next()
             .expect("reversi should expose at least one clickable opening move");
-        let clicked_path = opening_move.path.clone();
-
+        let opening_move_id = opening_move.id.clone();
         let result = host
             .emit_gtk_event(EmitGtkEventArgs {
                 widget_id: Some(opening_move.id),
@@ -2954,11 +2972,7 @@ mod tests {
             "session status should report no pending hydration once the click has settled"
         );
 
-        let clicked_path_refs: Vec<&str> = clicked_path
-            .iter()
-            .map(|segment| segment.as_str())
-            .collect();
-        let clicked_cell = widget_snapshot_by_path(&result.gtk, &clicked_path_refs)
+        let clicked_cell = widget_snapshot_by_id(&result.gtk, &opening_move_id)
             .expect("the clicked board cell should still exist in the GTK snapshot");
         assert_eq!(
             clicked_cell.text.as_deref(),
@@ -3007,8 +3021,7 @@ mod tests {
             .into_iter()
             .next()
             .expect("near-endgame reversi should expose exactly one final clickable move");
-        let clicked_path = final_move.path.clone();
-
+        let final_move_id = final_move.id.clone();
         let result = host
             .emit_gtk_event(EmitGtkEventArgs {
                 widget_id: Some(final_move.id),
@@ -3036,11 +3049,7 @@ mod tests {
             "session status should report no pending GTK hydration after the terminal move settles"
         );
 
-        let clicked_path_refs: Vec<&str> = clicked_path
-            .iter()
-            .map(|segment| segment.as_str())
-            .collect();
-        let clicked_cell = widget_snapshot_by_path(&result.gtk, &clicked_path_refs)
+        let clicked_cell = widget_snapshot_by_id(&result.gtk, &final_move_id)
             .expect("the terminal board cell should still exist in the GTK snapshot");
         assert_eq!(
             clicked_cell.text.as_deref(),
@@ -3048,10 +3057,7 @@ mod tests {
             "the final move should repaint the board cell before MCP reports the event as settled"
         );
 
-        let winner_label = result
-            .gtk
-            .iter()
-            .find_map(|root| find_widget_snapshot_by_path(root, &["window[0]", "box[0]"]));
+        let winner_label = widget_snapshot_by_path(&result.gtk, &["window[0]", "box[0]"]);
         assert_eq!(
             winner_label.and_then(|label| label.text.as_deref()),
             Some("You win."),

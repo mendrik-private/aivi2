@@ -61,7 +61,7 @@ type Move =
   | Pass Player
 
 type Event =
-  | RefreshSnapshot
+  | StartComputerTurn
   | ComputerFlashTick
   | Click Coord
   | Reset
@@ -69,7 +69,7 @@ type Event =
 
 type Phase = {
     | HumanReady
-    | ComputerThinking
+    | ComputerPreparing
     | ComputerAnimating Coord Int
 
     type Phase -> Bool
@@ -78,9 +78,9 @@ type Phase = {
      ||> _          -> False
 
     type Phase -> Bool
-    phaseIsComputerThinking = .
-     ||> ComputerThinking -> True
-     ||> _                -> False
+    phaseIsComputerPreparing = .
+     ||> ComputerPreparing -> True
+     ||> _                 -> False
 
     type Phase -> Bool
     phaseHasComputerAnimation = .
@@ -96,6 +96,11 @@ type Phase = {
     phaseShowsComputerTarget = .
      ||> ComputerAnimating _ step -> step == 1 or step == 3 or step == 5
      ||> _                        -> False
+
+    type Phase -> Bool
+    phaseStartsComputerAnimation = .
+     ||> ComputerAnimating _ 0 -> True
+     ||> _                     -> False
 }
 
 type Score = {
@@ -346,38 +351,45 @@ type Matrix Disc -> Option Move -> GameState
 func humanReadyState = board lastMove =>
     makeGameState board Human (makeSnapshot board Human) HumanReady lastMove
 
+type Matrix Disc -> Snapshot -> Option Move -> GameState
+func computerPreparingState = board snapshot lastMove =>
+    makeGameState board Computer snapshot ComputerPreparing lastMove
+
+type Matrix Disc -> Snapshot -> Option Move -> GameState
+func settleComputerSnapshot = board snapshot lastMove => snapshotPassPending snapshot
+ ||> True  -> humanReadyState board (Some (Pass Computer))
+ ||> False -> makeGameState board Computer snapshot HumanReady lastMove
+
+type Matrix Disc -> Snapshot -> Option Move -> GameState
+func startComputerTurnFromSnapshot = board snapshot lastMove => snapshotAiTarget snapshot
+ ||> Some coord -> makeGameState board Computer snapshot (ComputerAnimating coord 0) lastMove
+ ||> None       -> settleComputerSnapshot board snapshot lastMove
+
 type Matrix Disc -> Option Move -> GameState
-func computerThinkingState = board lastMove =>
-    makeGameState board Computer (makeSnapshot board Computer) ComputerThinking lastMove
+func startComputerTurn = board lastMove =>
+    startComputerTurnFromSnapshot board (makeSnapshot board Computer) lastMove
+
+type Matrix Disc -> Snapshot -> Option Move -> GameState
+func commitComputerPlacementFromSnapshot = board snapshot lastMove => snapshotPassPending snapshot
+ ||> True  -> computerPreparingState board snapshot lastMove
+ ||> False -> makeGameState board Human snapshot HumanReady lastMove
 
 type GameState -> Coord -> GameState
 func clickGameState = state coord => humanCanPlace coord state.snapshot
- ||> True  -> makeGameState (applyPlacement state.board Human coord) Computer state.snapshot ComputerThinking (Some (Place Human coord))
+ ||> True  -> computerPreparingState (applyPlacement state.board Human coord) state.snapshot (Some (Place Human coord))
  ||> False -> state
 
-type GameState -> Snapshot -> GameState
-func settleComputerWithoutMove = state refreshed => snapshotPassPending refreshed
- ||> True  -> humanReadyState state.board (Some (Pass Computer))
- ||> False -> makeGameState state.board state.turn refreshed HumanReady state.lastMove
+type GameState -> GameState
+func beginComputerTurn = state =>
+    startComputerTurn state.board state.lastMove
 
 type GameState -> Coord -> GameState
 func commitComputerPlacement = state coord =>
     commitComputerPlacementToBoard state coord (applyPlacement state.board Computer coord)
 
 type GameState -> Coord -> Matrix Disc -> GameState
-func commitComputerPlacementToBoard = state coord board => snapshotPassPending (makeSnapshot board Human)
- ||> True  -> computerThinkingState board (Some (Place Computer coord))
- ||> False -> humanReadyState board (Some (Place Computer coord))
-
-type GameState -> GameState
-func refreshGameState = state => state.phase
- ||> ComputerThinking -> beginComputerAnimation state (makeSnapshot state.board state.turn)
- ||> _                -> makeGameState state.board state.turn (makeSnapshot state.board state.turn) state.phase state.lastMove
-
-type GameState -> Snapshot -> GameState
-func beginComputerAnimation = state refreshed => snapshotAiTarget refreshed
- ||> Some coord -> makeGameState state.board state.turn refreshed (ComputerAnimating coord 0) state.lastMove
- ||> None       -> settleComputerWithoutMove state refreshed
+func commitComputerPlacementToBoard = state coord board =>
+    commitComputerPlacementFromSnapshot board (makeSnapshot board Human) (Some (Place Computer coord))
 
 type GameState -> Coord -> Int -> GameState
 func stepComputerAnimation = state coord step => step + 1 >= computerFlashTicksTotal
@@ -392,7 +404,7 @@ func advanceComputerAnimation = state => state.phase
 type Event -> GameState -> GameState
 func stepGame = event state => event
  ||> Reset             -> initialGame
- ||> RefreshSnapshot   -> refreshGameState state
+ ||> StartComputerTurn -> beginComputerTurn state
  ||> ComputerFlashTick -> advanceComputerAnimation state
  ||> Click coord       -> clickGameState state coord
  ||> Idle              -> state
@@ -449,18 +461,28 @@ func cellEnabledAt = humanTurn currentMoves x y =>
 signal placeCoord : Signal Coord
 signal restartClick : Signal Unit
 
+signal computerTurnRequest : Signal Phase = phase
+ ?|> phaseIsComputerPreparing
+
 @source timer.after 1ms with {
     immediate: False,
-    activeWhen: computerThinkingActive,
-    restartOn: placeCoord
+    activeWhen: computerPreparingActive,
+    restartOn: computerTurnRequest
 }
-signal snapshotReady : Signal Unit
+signal computerTurnReady : Signal Unit
 
-signal computerFlashTick : Signal Unit = snapshotReady
- burst|> 200ms computerFlashTicksTotal
+signal computerAnimationStart : Signal Phase = phase
+ ?|> phaseStartsComputerAnimation
 
-signal event : Signal Event = snapshotReady | computerFlashTick | placeCoord | restartClick
-  ||> snapshotReady _ => RefreshSnapshot
+@source timer.every 200ms with {
+    immediate: False,
+    activeWhen: computerAnimationActive,
+    restartOn: computerAnimationStart
+}
+signal computerFlashTick : Signal Unit
+
+signal event : Signal Event = computerTurnReady | computerFlashTick | placeCoord | restartClick
+  ||> computerTurnReady _ => StartComputerTurn
   ||> computerFlashTick _ => ComputerFlashTick
   ||> placeCoord coord => Click coord
   ||> restartClick _ => Reset
@@ -477,7 +499,7 @@ from state = {
 
 from phase = {
     humanTurn: phaseAllowsHumanInput
-    computerThinkingActive: phaseIsComputerThinking
+    computerPreparingActive: phaseIsComputerPreparing
     computerAnimationActive: phaseHasComputerAnimation
     computerTarget: phaseComputerTarget
     computerTargetVisible: phaseShowsComputerTarget
