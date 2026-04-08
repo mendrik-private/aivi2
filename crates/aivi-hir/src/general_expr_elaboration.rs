@@ -632,6 +632,7 @@ fn rewrite_domain_carrier_view(
             import,
             name,
             arguments,
+            definition,
         } => GateType::OpaqueImport {
             import: *import,
             name: name.clone(),
@@ -641,6 +642,7 @@ fn rewrite_domain_carrier_view(
                     rewrite_domain_carrier_view(argument, domain_item, domain_parameters, carrier)
                 })
                 .collect(),
+            definition: definition.clone(),
         },
     }
 }
@@ -730,6 +732,7 @@ fn substitute_gate_type(
             import,
             name,
             arguments,
+            definition,
         } => GateType::OpaqueImport {
             import: *import,
             name: name.clone(),
@@ -737,6 +740,7 @@ fn substitute_gate_type(
                 .iter()
                 .map(|argument| substitute_gate_type(argument, substitutions))
                 .collect(),
+            definition: definition.clone(),
         },
     }
 }

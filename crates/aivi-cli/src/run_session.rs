@@ -657,11 +657,13 @@ impl RunSessionState {
         if !failures.is_empty() {
             let source_map = self.driver.build_source_map();
             let graph = self.driver.signal_graph();
+            let backend = self.driver.backend();
             let mut rendered = String::from("live runtime failed during `aivi run`:\n");
             for failure in &failures {
                 match failure {
                     GlibLinkedRuntimeFailure::Tick(error) => {
-                        let diagnostics = render_runtime_error(error, &source_map, &graph, None);
+                        let diagnostics =
+                            render_runtime_error(error, &source_map, &graph, Some(backend.as_ref()));
                         for diag in &diagnostics {
                             rendered.push_str(&format!("  error: {}\n", diag.message));
                             for note in &diag.notes {
@@ -784,21 +786,19 @@ fn hold_startup_timer_sources(
 ) -> Result<Box<[aivi_runtime::SourceInstanceId]>, String> {
     let mut instances = Vec::new();
     for binding in driver.source_bindings() {
-        let config = driver
-            .evaluate_source_config(binding.instance)
-            .map_err(|error| {
-                format!(
-                    "failed to evaluate startup source {}: {error}",
-                    binding.instance.as_raw()
-                )
-            })?;
-        let is_timer = config
-            .provider
-            .builtin_provider()
+        let is_timer = driver
+            .source_provider(binding.instance)
+            .and_then(|provider| provider.builtin_provider())
             .is_some_and(|provider| matches!(provider.key(), "timer.every" | "timer.after"));
         if !is_timer {
             continue;
         }
+        driver.evaluate_source_config(binding.instance).map_err(|error| {
+            format!(
+                "failed to evaluate startup source {}: {error}",
+                binding.instance.as_raw()
+            )
+        })?;
         driver
             .set_source_mode(binding.instance, aivi_runtime::GlibLinkedSourceMode::Manual)
             .map_err(|error| {

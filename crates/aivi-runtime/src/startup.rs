@@ -98,6 +98,10 @@ impl BackendLinkedRuntime {
         self.backend.as_ref()
     }
 
+    pub fn backend_arc(&self) -> Arc<BackendProgram> {
+        self.backend.clone()
+    }
+
     pub fn runtime(
         &self,
     ) -> &TaskSourceRuntime<RuntimeValue, hir::SourceDecodeProgram, MovingRuntimeValueStore> {
@@ -143,6 +147,10 @@ impl BackendLinkedRuntime {
         // Enrich with pipeline IDs from reactive signals.
         for (_handle, linked) in &self.reactive_signals {
             map.set_signal_pipeline_ids(linked.signal, linked.pipeline_ids.clone());
+        }
+        // Enrich with pipeline IDs from recurrence-backed derived signals.
+        for (_handle, linked) in &self.linked_recurrence_signals {
+            map.set_signal_pipeline_ids(linked.signal.as_signal(), linked.pipeline_ids.clone());
         }
 
         map

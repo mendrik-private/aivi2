@@ -17,10 +17,10 @@ use crate::{
     hir::{
         ApplicativeSpineHead, BuiltinTerm, BuiltinType, ClassMemberResolution,
         CustomSourceRecurrenceWakeup, DomainMemberHandle, DomainMemberKind, DomainMemberResolution,
-        ExprKind, ImportBindingMetadata, ImportValueType, IntrinsicValue, Item, Module, Name,
-        NamePath, PatternKind, PipeStage, PipeStageKind, PipeTransformMode, ProjectionBase,
-        ResolutionState, TermReference, TermResolution, TextSegment, TypeItemBody, TypeKind,
-        TypeReference, TypeResolution, TypeVariantField,
+        ExprKind, ImportBindingMetadata, ImportTypeDefinition, ImportValueType, IntrinsicValue,
+        Item, Module, Name, NamePath, PatternKind, PipeStage, PipeStageKind, PipeTransformMode,
+        ProjectionBase, ResolutionState, TermReference, TermResolution, TextSegment, TypeItemBody,
+        TypeKind, TypeReference, TypeResolution, TypeVariantField,
     },
     ids::{BindingId, ClusterId, ExprId, ImportId, ItemId, PatternId, TypeId, TypeParameterId},
     source_contract_resolution::{ResolvedSourceContractType, ResolvedSourceTypeConstructor},
@@ -615,6 +615,7 @@ pub enum GateType {
         import: ImportId,
         name: String,
         arguments: Vec<GateType>,
+        definition: Option<Box<ImportTypeDefinition>>,
     },
 }
 
@@ -786,6 +787,7 @@ impl GateType {
                 import,
                 name,
                 arguments,
+                definition,
             } => Self::OpaqueImport {
                 import: *import,
                 name: name.clone(),
@@ -793,6 +795,7 @@ impl GateType {
                     .iter()
                     .map(|a| a.substitute_type_parameters(subs))
                     .collect(),
+                definition: definition.clone(),
             },
         }
     }
@@ -2587,6 +2590,30 @@ impl<'a> GateTypeContext<'a> {
         self.item_value_type(item_id)
     }
 
+    fn imported_type_definition(&self, import: ImportId) -> Option<Box<ImportTypeDefinition>> {
+        match &self.module.imports()[import].metadata {
+            ImportBindingMetadata::TypeConstructor {
+                definition: Some(definition),
+                ..
+            } => Some(Box::new(definition.clone())),
+            _ => None,
+        }
+    }
+
+    fn opaque_import_type(
+        &self,
+        import: ImportId,
+        name: String,
+        arguments: Vec<GateType>,
+    ) -> GateType {
+        GateType::OpaqueImport {
+            import,
+            name,
+            arguments,
+            definition: self.imported_type_definition(import),
+        }
+    }
+
     pub(crate) fn lower_import_value_type(&self, ty: &ImportValueType) -> GateType {
         match ty {
             ImportValueType::Primitive(builtin) => GateType::Primitive(*builtin),
@@ -2644,7 +2671,7 @@ impl<'a> GateTypeContext<'a> {
             ImportValueType::Named {
                 type_name,
                 arguments,
-                ..
+                definition,
             } => {
                 let lowered_args: Vec<GateType> = arguments
                     .iter()
@@ -2667,11 +2694,7 @@ impl<'a> GateTypeContext<'a> {
                     })
                     .map(|(id, _)| id);
                 if let Some(import) = import_id {
-                    GateType::OpaqueImport {
-                        import,
-                        name: type_name.clone(),
-                        arguments: lowered_args,
-                    }
+                    self.opaque_import_type(import, type_name.clone(), lowered_args)
                 } else {
                     // Fallback: create an opaque import with a sentinel; the type checker
                     // will treat this as an unknown opaque type.
@@ -2679,6 +2702,7 @@ impl<'a> GateTypeContext<'a> {
                         import: ImportId::from_raw(u32::MAX),
                         name: type_name.clone(),
                         arguments: lowered_args,
+                        definition: definition.clone(),
                     }
                 }
             }
@@ -4152,11 +4176,7 @@ impl<'a> GateTypeContext<'a> {
                     .local_name
                     .text()
                     .to_owned();
-                Some(GateType::OpaqueImport {
-                    import: *import_id,
-                    name,
-                    arguments: Vec::new(),
-                })
+                Some(self.opaque_import_type(*import_id, name, Vec::new()))
             }
         }
     }
@@ -4220,11 +4240,7 @@ impl<'a> GateTypeContext<'a> {
                     .local_name
                     .text()
                     .to_owned();
-                Some(GateType::OpaqueImport {
-                    import: *import_id,
-                    name,
-                    arguments: arguments.to_vec(),
-                })
+                Some(self.opaque_import_type(*import_id, name, arguments.to_vec()))
             }
             ResolutionState::Resolved(TypeResolution::Builtin(
                 BuiltinType::Int
@@ -4752,11 +4768,7 @@ impl<'a> GateTypeContext<'a> {
                     .local_name
                     .text()
                     .to_owned();
-                Some(GateType::OpaqueImport {
-                    import: import_id,
-                    name,
-                    arguments: arguments.to_vec(),
-                })
+                Some(self.opaque_import_type(import_id, name, arguments.to_vec()))
             }
         }
     }
@@ -7800,6 +7812,7 @@ pub(crate) enum SourceOptionActualType {
         import: ImportId,
         name: String,
         arguments: Vec<Self>,
+        definition: Option<Box<ImportTypeDefinition>>,
     },
 }
 
@@ -8191,10 +8204,12 @@ impl SourceOptionActualType {
                 import,
                 name,
                 arguments,
+                definition,
             } => Self::OpaqueImport {
                 import: *import,
                 name: name.clone(),
                 arguments: arguments.iter().map(Self::from_gate_type).collect(),
+                definition: definition.clone(),
             },
         }
     }
@@ -8272,6 +8287,7 @@ impl SourceOptionActualType {
                 import,
                 name,
                 arguments,
+                definition,
             } => Some(GateType::OpaqueImport {
                 import: *import,
                 name: name.clone(),
@@ -8279,6 +8295,7 @@ impl SourceOptionActualType {
                     .iter()
                     .map(Self::to_gate_type)
                     .collect::<Option<Vec<_>>>()?,
+                definition: definition.clone(),
             }),
         }
     }
@@ -8434,6 +8451,7 @@ impl SourceOptionActualType {
                     import: left_import,
                     name,
                     arguments: left_arguments,
+                    definition,
                 },
                 Self::OpaqueImport {
                     import: right_import,
@@ -8449,6 +8467,7 @@ impl SourceOptionActualType {
                         .zip(right_arguments)
                         .map(|(left, right)| left.unify(right))
                         .collect::<Option<Vec<_>>>()?,
+                    definition: definition.clone(),
                 })
             }
             _ => None,

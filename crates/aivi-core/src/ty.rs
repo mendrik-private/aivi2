@@ -1,7 +1,8 @@
 use std::fmt;
 
 use aivi_hir::{
-    BuiltinType, GateType as HirGateType, ImportId as HirImportId, ImportValueType,
+    BuiltinType, GateType as HirGateType, ImportId as HirImportId, ImportTypeDefinition,
+    ImportValueType,
     ItemId as HirItemId, TypeParameterId as HirTypeParameterId,
 };
 
@@ -196,16 +197,22 @@ impl Type {
                         import,
                         name,
                         arguments,
-                    } => {
-                        tasks.push(Task::BuildOpaqueImport {
-                            import: *import,
-                            name: name.clone().into_boxed_str(),
-                            arguments: arguments.len(),
-                        });
-                        for argument in arguments.iter().rev() {
-                            tasks.push(Task::Visit(argument));
+                        definition,
+                    } => match definition.as_deref() {
+                        Some(ImportTypeDefinition::Alias(alias)) => {
+                            values.push(Self::lower_import(alias));
                         }
-                    }
+                        Some(ImportTypeDefinition::Sum(_)) | None => {
+                            tasks.push(Task::BuildOpaqueImport {
+                                import: *import,
+                                name: name.clone().into_boxed_str(),
+                                arguments: arguments.len(),
+                            });
+                            for argument in arguments.iter().rev() {
+                                tasks.push(Task::Visit(argument));
+                            }
+                        }
+                    },
                 },
                 Task::BuildTuple(len) => {
                     let tuple = Self::Tuple(drain_tail(&mut values, len));
@@ -339,6 +346,10 @@ impl Type {
             BuildValidation,
             BuildSignal,
             BuildTask,
+            BuildOpaqueImport {
+                name: Box<str>,
+                arguments: usize,
+            },
         }
 
         let mut tasks = vec![Task::Visit(root)];
@@ -403,13 +414,31 @@ impl Type {
                         tasks.push(Task::Visit(value));
                         tasks.push(Task::Visit(error));
                     }
-                    ImportValueType::TypeVariable { .. } | ImportValueType::Named { .. } => {
+                    ImportValueType::TypeVariable { .. } => {
                         values.push(Self::OpaqueImport {
                             import: aivi_hir::ImportId::from_raw(u32::MAX),
                             name: "".into(),
                             arguments: Vec::new(),
                         });
                     }
+                    ImportValueType::Named {
+                        type_name,
+                        arguments,
+                        definition,
+                    } => match definition.as_deref() {
+                        Some(ImportTypeDefinition::Alias(alias)) => {
+                            tasks.push(Task::Visit(alias));
+                        }
+                        Some(ImportTypeDefinition::Sum(_)) | None => {
+                            tasks.push(Task::BuildOpaqueImport {
+                                name: type_name.clone().into_boxed_str(),
+                                arguments: arguments.len(),
+                            });
+                            for argument in arguments.iter().rev() {
+                                tasks.push(Task::Visit(argument));
+                            }
+                        }
+                    },
                 },
                 Task::BuildTuple(len) => {
                     let tuple = Self::Tuple(drain_tail(&mut values, len));
@@ -485,6 +514,14 @@ impl Type {
                     values.push(Self::Task {
                         error: Box::new(error),
                         value: Box::new(value),
+                    });
+                }
+                Task::BuildOpaqueImport { name, arguments } => {
+                    let arguments = drain_tail(&mut values, arguments);
+                    values.push(Self::OpaqueImport {
+                        import: aivi_hir::ImportId::from_raw(u32::MAX),
+                        name,
+                        arguments,
                     });
                 }
             }

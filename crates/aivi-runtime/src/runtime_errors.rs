@@ -1,7 +1,9 @@
 //! Converts runtime errors into structured [`Diagnostic`]s using the
 //! [`RuntimeSourceMap`] so that errors can be rendered with source context.
 
-use aivi_backend::{EvaluationError, KernelId, Program as BackendProgram};
+use aivi_backend::{
+    EvaluationError, KernelExprKind, KernelId, Program as BackendProgram, describe_expr_kind,
+};
 use aivi_base::{Diagnostic, DiagnosticCode};
 
 use crate::{graph::SignalGraph, source_map::RuntimeSourceMap, startup::BackendRuntimeError};
@@ -95,6 +97,27 @@ fn eval_error_kernel(error: &EvaluationError) -> Option<KernelId> {
     }
 }
 
+fn push_eval_error_layout_notes(
+    mut diag: Diagnostic,
+    backend: &BackendProgram,
+    error: &EvaluationError,
+) -> Diagnostic {
+    match error {
+        EvaluationError::KernelInputLayoutMismatch { expected, .. }
+        | EvaluationError::KernelResultLayoutMismatch { expected, .. } => {
+            diag = diag.with_note(format!("layout{expected} = {}", backend.layouts()[*expected]));
+        }
+        EvaluationError::KernelEnvironmentLayoutMismatch { expected, slot, .. } => {
+            diag = diag.with_note(format!(
+                "environment slot {slot} expects layout{expected} = {}",
+                backend.layouts()[*expected]
+            ));
+        }
+        _ => {}
+    }
+    diag
+}
+
 /// Convert a [`BackendRuntimeError`] into one or more [`Diagnostic`]s,
 /// using the source map, signal graph, and backend program for rich
 /// source-level context including pipe stage tracking.
@@ -124,6 +147,7 @@ pub fn render_runtime_error(
 
             // Try to identify which pipe stage failed.
             if let (Some(backend), Some(kernel)) = (backend, eval_error_kernel(eval_error)) {
+                diag = push_eval_error_layout_notes(diag, backend, eval_error);
                 if let Some(pipeline_ids) = source_map.signal_pipeline_ids(signal.as_signal()) {
                     if let Some((label, stage_span, index)) =
                         find_pipe_stage_for_kernel(backend, pipeline_ids, kernel)
@@ -159,6 +183,10 @@ pub fn render_runtime_error(
 
             if let Some(span) = source_map.item_span(*item) {
                 diag = diag.with_primary_label(span, "reactive seed failed here");
+            }
+
+            if let Some(backend) = backend {
+                diag = push_eval_error_layout_notes(diag, backend, eval_error);
             }
 
             let chains = source_map.trace_signal_dependencies(graph, *signal);
@@ -204,6 +232,10 @@ pub fn render_runtime_error(
 
             if let Some(span) = source_map.item_span(*item) {
                 diag = diag.with_primary_label(span, "reactive body failed here");
+            }
+
+            if let Some(backend) = backend {
+                diag = push_eval_error_layout_notes(diag, backend, eval_error);
             }
 
             vec![diag]
@@ -264,6 +296,65 @@ pub fn render_runtime_error(
 
             if let Some(span) = source_map.item_span(*item) {
                 diag = diag.with_primary_label(span, "recurrence step failed here");
+            }
+
+            if let (Some(backend), Some(kernel)) = (backend, eval_error_kernel(eval_error)) {
+                diag = push_eval_error_layout_notes(diag, backend, eval_error);
+                let backend_kernel = &backend.kernels()[kernel];
+                let root_expr = &backend_kernel.exprs()[backend_kernel.root];
+                let root_kind = describe_expr_kind(&root_expr.kind);
+                let root_item_note = match &root_expr.kind {
+                    KernelExprKind::Item(item) => {
+                        let backend_item = &backend.items()[*item];
+                        let body_note = backend_item.body.map_or_else(
+                            || "; item body = <none>".to_owned(),
+                            |body| {
+                                let body_kernel = &backend.kernels()[body];
+                                let body_root = &body_kernel.exprs()[body_kernel.root];
+                                let body_root_kind = describe_expr_kind(&body_root.kind);
+                                format!(
+                                    "; root item{} = {}; item body = kernel{} ({}) root {} layout{}",
+                                    item,
+                                    backend.item_name(*item),
+                                    body,
+                                    body_kernel.origin.kind,
+                                    body_root_kind,
+                                    body_kernel.result_layout
+                                )
+                            },
+                        );
+                        body_note
+                    }
+                    _ => String::new(),
+                };
+                diag = diag.with_note(format!(
+                    "kernel{kernel} origin: {} in item{} ({}); root expr: {root_kind}{root_item_note}; expr layout{}; result layout{}",
+                    backend_kernel.origin.kind,
+                    backend_kernel.origin.item,
+                    backend.item_name(backend_kernel.origin.item),
+                    root_expr.layout,
+                    backend_kernel.result_layout
+                ));
+                if let Some(pipeline_ids) = source_map.signal_pipeline_ids(signal.as_signal()) {
+                    if let Some((label, stage_span, index)) =
+                        find_pipe_stage_for_kernel(backend, pipeline_ids, kernel)
+                    {
+                        diag = diag
+                            .with_secondary_label(
+                                stage_span,
+                                format!("recurrence pipe stage {index} ({label}) failed"),
+                            )
+                            .with_note(format!(
+                                "failing recurrence pipe stage: stage {index} ({label})"
+                            ));
+                    }
+                }
+            }
+
+            let chains = source_map.trace_signal_dependencies(graph, signal.as_signal());
+            if let Some(chain) = chains.first() {
+                let trace = source_map.format_dependency_chain(chain);
+                diag = diag.with_note(format!("dependency chain: {trace}"));
             }
 
             vec![diag]

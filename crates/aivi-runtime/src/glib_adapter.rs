@@ -15,9 +15,10 @@ use glib::MainContext;
 use crate::{
     BackendLinkedRuntime, BackendRuntimeError, DerivedNodeEvaluator, EvaluatedSourceConfig,
     Generation, InputHandle, LinkedSourceBinding, LinkedSourceTickOutcome, OwnerHandle,
-    Publication, PublicationStamp, Scheduler, SchedulerAccessError, SignalGraph, SignalHandle,
-    SourceInstanceId, SourceProviderExecutionError, SourceProviderManager, TaskSourceRuntimeError,
-    TickOutcome, WorkerPublicationSender, WorkerSendError,
+    Publication, PublicationStamp, RuntimeSourceProvider, Scheduler, SchedulerAccessError,
+    SignalGraph, SignalHandle, SourceInstanceId, SourceProviderExecutionError,
+    SourceProviderManager, TaskSourceRuntimeError, TickOutcome, WorkerPublicationSender,
+    WorkerSendError,
 };
 
 /// Drive a scheduler from a GLib main context without letting worker threads mutate scheduler
@@ -551,12 +552,26 @@ impl GlibLinkedRuntimeDriver {
         self.with_state(|state| state.linked.source_binding(instance).cloned())
     }
 
+    pub fn source_provider(&self, instance: SourceInstanceId) -> Option<RuntimeSourceProvider> {
+        self.with_state(|state| {
+            state
+                .linked
+                .runtime()
+                .source_spec(instance)
+                .map(|spec| spec.provider.clone())
+        })
+    }
+
     pub fn evaluate_source_config(
         &self,
         instance: SourceInstanceId,
     ) -> Result<EvaluatedSourceConfig, GlibLinkedRuntimeAccessError> {
         self.with_state(|state| state.linked.evaluate_source_config(instance))
             .map_err(GlibLinkedRuntimeAccessError::Backend)
+    }
+
+    pub fn backend(&self) -> Arc<aivi_backend::Program> {
+        self.with_state(|state| state.linked.backend_arc())
     }
 
     pub fn is_source_active(&self, instance: SourceInstanceId) -> bool {
