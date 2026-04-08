@@ -168,11 +168,7 @@ pub(crate) fn infer_same_module_function_types(module: &Module) -> HashMap<ItemI
             .filter_map(|(item_id, state)| state.arrow_type().map(|ty| (*item_id, ty)))
             .collect::<HashMap<_, _>>();
 
-        let call_evidence = collect_call_evidence(
-            module,
-            &function_ids,
-            seeded_item_types.clone(),
-        );
+        let call_evidence = collect_call_evidence(module, &function_ids, seeded_item_types.clone());
         for evidence in call_evidence {
             let Some(state) = states.get_mut(&evidence.item_id) else {
                 continue;

@@ -163,6 +163,7 @@ impl GtkPropertyValueShape {
 pub enum GtkBoolPropertySetter {
     Visible,
     Sensitive,
+    Focusable,
     Hexpand,
     Vexpand,
     AnimateOpacity,
@@ -534,6 +535,12 @@ const SENSITIVE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
     name: "sensitive",
     value_shape: GtkPropertyValueShape::Bool,
     setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::Sensitive),
+};
+
+const FOCUSABLE_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
+    name: "focusable",
+    value_shape: GtkPropertyValueShape::Bool,
+    setter: GtkPropertySetter::Bool(GtkBoolPropertySetter::Focusable),
 };
 
 const HEXPAND_PROPERTY: GtkPropertyDescriptor = GtkPropertyDescriptor {
@@ -1159,6 +1166,7 @@ const WINDOW_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     properties: &[
         VISIBLE_PROPERTY,
         SENSITIVE_PROPERTY,
+        FOCUSABLE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
         OPACITY_PROPERTY,
@@ -1191,6 +1199,7 @@ const HEADER_BAR_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     properties: &[
         VISIBLE_PROPERTY,
         SENSITIVE_PROPERTY,
+        FOCUSABLE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
         OPACITY_PROPERTY,
@@ -1409,6 +1418,7 @@ const BUTTON_SCHEMA: GtkWidgetSchema = GtkWidgetSchema {
     properties: &[
         VISIBLE_PROPERTY,
         SENSITIVE_PROPERTY,
+        FOCUSABLE_PROPERTY,
         HEXPAND_PROPERTY,
         VEXPAND_PROPERTY,
         OPACITY_PROPERTY,
@@ -2953,6 +2963,7 @@ mod tests {
         assert!(lookup_widget_property(&button, "text").is_none());
         assert!(lookup_widget_property(&button, "compact").is_some());
         assert!(lookup_widget_property(&button, "hasFrame").is_some());
+        assert!(lookup_widget_property(&button, "focusable").is_some());
         assert!(lookup_widget_property(&button, "widthRequest").is_some());
         assert!(lookup_widget_property(&button, "heightRequest").is_some());
         assert!(lookup_widget_property(&button, "animateOpacity").is_some());

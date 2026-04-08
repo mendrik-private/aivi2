@@ -79,6 +79,11 @@ WorkerPublicationSender  →  Scheduler queue  →  tick()  →  TickOutcome
 
 Thread model: `WorkerPublicationSender` is `Send`; the scheduler itself is single-threaded (main thread).
 
+### 2026-04-08 live-click latency note
+
+- `GlibLinkedRuntimeDriver` now distinguishes between “drain until fully idle” and “drain only the current scheduler queue”.
+- The narrower path is used for direct UI publications so a click can settle its own synchronous work without also draining newly armed timer wakeups before GTK gets a chance to paint.
+
 ## Source Providers
 
 **Source**: `providers.rs`, `effects.rs`

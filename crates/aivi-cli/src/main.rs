@@ -6483,6 +6483,7 @@ value view =
             "window-titlebar-and-button-props.aivi",
             r#"
 value showButtons = True
+value canFocus = False
 value view =
     <Window title="Host">
         <Window.titlebar>
@@ -6491,11 +6492,11 @@ value view =
                     <Label text="Status" />
                 </HeaderBar.start>
                 <HeaderBar.end>
-                    <Button label="Restart" compact hasFrame={False} widthRequest={26} heightRequest={26} />
+                    <Button label="Restart" focusable={canFocus} compact hasFrame={False} widthRequest={26} heightRequest={26} />
                 </HeaderBar.end>
             </HeaderBar>
         </Window.titlebar>
-        <Button label="A" compact hasFrame={False} widthRequest={26} heightRequest={26} />
+        <Button label="A" focusable={canFocus} compact hasFrame={False} widthRequest={26} heightRequest={26} />
     </Window>
 "#,
             None,
@@ -6544,6 +6545,7 @@ value view =
             .iter()
             .map(|property| property.name().text().to_owned())
             .collect::<Vec<_>>();
+        assert!(property_names.iter().any(|name| name == "focusable"));
         assert!(property_names.iter().any(|name| name == "compact"));
         assert!(property_names.iter().any(|name| name == "hasFrame"));
         assert!(property_names.iter().any(|name| name == "widthRequest"));

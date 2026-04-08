@@ -95,3 +95,15 @@ Implemented top-level `from source = { ... }` syntax for grouped derived signals
 - `crates/aivi-hir/src/lower.rs`: `from` lowers into ordinary synthetic `Signal` items by piping the shared source into each entry body
 - `crates/aivi-lsp/src/semantic_tokens.rs`, `tooling/packages/vscode-aivi/syntaxes/aivi.tmLanguage.json`, `tooling/packages/vscode-aivi/snippets/aivi.json`: editor keyword highlighting and snippet support
 - `manual/guide/building-snake.md`, `demos/snake.aivi`, `syntax.md`, `manual/guide/surface-feature-matrix.md`: user-facing docs and demo updated to use/document the sugar
+
+## [2026-04-08] query | Reversi click latency
+
+Adjusted `demos/reversi.aivi` so human clicks update the board immediately, delay the full snapshot recompute by 1ms, and derive the AI preview from the current board.  
+Added a focused GTK regression test in `crates/aivi-cli/src/run_session.rs` that checks both the first and second human moves paint red stones promptly.
+
+## [2026-04-08] ingest | UI click-path responsiveness
+
+Documented the follow-up runtime and GTK bridge changes behind the Reversi latency fix.
+
+- `crates/aivi-runtime/src/glib_adapter.rs`: direct UI publications can now drain only the current scheduler queue instead of also draining timer wakeups
+- `crates/aivi-gtk/src/schema.rs` + `crates/aivi-gtk/src/host.rs`: buttons now support `focusable={Bool}` so board cells can suppress focus flashes

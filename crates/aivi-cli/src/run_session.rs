@@ -1006,7 +1006,7 @@ impl aivi_gtk::GtkEventSink<RunHostValue> for RunEventSink<'_> {
             .current_stamp(handler.signal_input)
             .map_err(|error| format!("{error}"))?;
         self.driver
-            .queue_publication_now(Publication::new(stamp, payload))
+            .queue_publication_now_current_queue(Publication::new(stamp, payload))
             .map_err(|error| {
                 format!(
                     "failed to publish GTK event on route {} into signal `{}` (item {}): {error}",
@@ -1715,6 +1715,62 @@ export main
     }
 
     #[gtk::test]
+    fn reversi_human_moves_paint_red_stones_promptly() {
+        let _guard = crate::gtk_test_lock().lock().expect("gtk test lock");
+        let path = repo_path("demos/reversi.aivi");
+        let artifact = prepare_run_from_path(&path);
+        let harness =
+            start_run_session_with_launch_config(&path, artifact, RunLaunchConfig::default())
+                .expect("reversi demo should start a run session");
+        let context = harness.control().context();
+        harness
+            .present_root_windows()
+            .expect("presenting the reversi window should release startup-held timers");
+
+        let opening_red_count = button_label_count_for(&harness, "🔴");
+        let opening_move = harness
+            .root_windows()
+            .iter()
+            .find_map(|window| find_button_by_label(&window.clone().upcast::<gtk::Widget>(), "◌"))
+            .expect("reversi board should expose a legal opening move");
+        opening_move.emit_clicked();
+        assert!(
+            pump_until(&context, Duration::from_millis(100), || {
+                button_label_count_for(&harness, "🔴") > opening_red_count
+            }),
+            "the first human move should paint its red stones without waiting for the AI turn"
+        );
+        assert!(
+            pump_until(&context, Duration::from_secs(1), || {
+                harness.root_windows().iter().any(|window| {
+                    find_button_by_label(&window.clone().upcast::<gtk::Widget>(), "◌")
+                        .is_some_and(|button| button.is_sensitive())
+                })
+            }),
+            "after the AI reply the GTK tree should expose a clickable human move"
+        );
+
+        let second_move = harness
+            .root_windows()
+            .iter()
+            .find_map(|window| {
+                find_button_by_label(&window.clone().upcast::<gtk::Widget>(), "◌")
+                    .filter(|button| button.is_sensitive())
+            })
+            .expect("reversi should expose another clickable human move after the AI reply");
+        let second_turn_red_count = button_label_count_for(&harness, "🔴");
+        second_move.emit_clicked();
+        assert!(
+            pump_until(&context, Duration::from_millis(100), || {
+                button_label_count_for(&harness, "🔴") > second_turn_red_count
+            }),
+            "the second human move should also paint its red stones right away"
+        );
+
+        harness.shutdown();
+    }
+
+    #[gtk::test]
     fn reversi_stays_playable_after_the_first_full_turn() {
         let _guard = crate::gtk_test_lock().lock().expect("gtk test lock");
         let path = repo_path("demos/reversi.aivi");
@@ -1795,7 +1851,14 @@ export main
                     .filter(|button| button.is_sensitive())
             })
             .expect("reversi should expose another clickable human move after the AI reply");
+        let second_turn_red_count = button_label_count_for(&harness, "🔴");
         second_move.emit_clicked();
+        assert!(
+            pump_until(&context, Duration::from_millis(100), || {
+                button_label_count_for(&harness, "🔴") > second_turn_red_count
+            }),
+            "the second human move should paint its red stone right away"
+        );
         assert!(
             pump_until(&context, Duration::from_millis(100), || {
                 text_signal_for(&harness, last_move_item).starts_with("You plays")

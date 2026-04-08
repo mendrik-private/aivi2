@@ -536,6 +536,9 @@ where
             GtkPropertySetter::Bool(GtkBoolPropertySetter::Sensitive) => {
                 widget.set_sensitive(value)
             }
+            GtkPropertySetter::Bool(GtkBoolPropertySetter::Focusable) => {
+                widget.set_focusable(value)
+            }
             GtkPropertySetter::Bool(GtkBoolPropertySetter::Hexpand) => widget.set_hexpand(value),
             GtkPropertySetter::Bool(GtkBoolPropertySetter::Vexpand) => widget.set_vexpand(value),
             GtkPropertySetter::Bool(GtkBoolPropertySetter::AnimateOpacity) => {
@@ -3809,6 +3812,48 @@ value view =
             assert!(!content.has_frame());
             assert_eq!(content.width_request(), 26);
             assert_eq!(content.height_request(), 26);
+        });
+    }
+
+    #[test]
+    fn concrete_host_applies_button_focusable_property() {
+        gtk::test_synced(|| {
+            let graph = lower_graph(
+                "gtk-host-button-focusable.aivi",
+                r#"
+value isFocusable = False
+value view =
+    <Window title="Host">
+        <Button label="A" focusable={isFocusable} />
+    </Window>
+"#,
+            );
+            let focusable_input = find_widget_input(&graph, "Button", "focusable");
+            let executor = GtkRuntimeExecutor::new_with_values(
+                graph,
+                GtkConcreteHost::<TestValue>::default(),
+                [(focusable_input, TestValue::Bool(false))],
+            )
+            .expect("concrete GTK host should mount a button with focusability");
+
+            let root = executor
+                .root_widgets()
+                .expect("root widget should exist")
+                .into_iter()
+                .next()
+                .expect("window root should exist");
+            let window = executor
+                .host()
+                .widget(&root)
+                .expect("window handle should resolve")
+                .downcast::<gtk::Window>()
+                .expect("root should be a GTK window");
+            let content = window
+                .child()
+                .expect("window should keep the button as content")
+                .downcast::<gtk::Button>()
+                .expect("window content should be a button");
+            assert!(!content.is_focusable());
         });
     }
 

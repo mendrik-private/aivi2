@@ -55,6 +55,11 @@ Key lookup functions:
 - `GtkF64PropertySetter` — sets a float property
 - `GtkTextOrI64PropertySetter` — union setter
 
+### 2026-04-08 widget note
+
+- Buttons now support `focusable={Bool}` in the GTK schema/host path.
+- Reversi uses `focusable={False}` on board cells so clicks do not show a transient focus-state flash before the red-stone paint lands.
+
 **Event signals** (`GtkEventSignal`): maps AIVI event names to GObject signal names.
 
 ## Widget Plan

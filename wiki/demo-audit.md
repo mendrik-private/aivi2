@@ -152,6 +152,11 @@ func candidateLessThan = left right =>
 
 The tiebreaker semantics (fewer flips wins when positional scores are equal) aligns with conservative positional play — the computer prefers corners and edges over greedy captures.
 
+### 2026-04-08 latency note
+
+- `demos/reversi.aivi` now takes the fast path on human clicks: the board and turn update immediately, while the heavier `Snapshot` recompute is deferred by a 1ms timer tick.
+- The AI preview dot is computed directly from the current board so the human red stones paint before the delayed snapshot bookkeeping catches up.
+
 ---
 
 ## Summary table

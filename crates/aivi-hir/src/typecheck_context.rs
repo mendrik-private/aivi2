@@ -2400,8 +2400,7 @@ impl<'a> GateTypeContext<'a> {
                             {
                                 return None;
                             }
-                            let inferred =
-                                self.inferred_function_types().get(&item_id).cloned()?;
+                            let inferred = self.inferred_function_types().get(&item_id).cloned()?;
                             let parameter_types =
                                 Self::arrow_parameter_types(&inferred, item.parameters.len())?;
                             parameter_types.get(parameters.len())?.clone()
@@ -2417,11 +2416,9 @@ impl<'a> GateTypeContext<'a> {
                         if self.allow_function_inference
                             && supports_same_module_function_inference(item)
                         {
-                            let inferred = self
-                                .inferred_function_types()
-                                .get(&item_id)
-                                .cloned();
-                            inferred.and_then(|ty| Self::arrow_result_type(&ty, item.parameters.len()))
+                            let inferred = self.inferred_function_types().get(&item_id).cloned();
+                            inferred
+                                .and_then(|ty| Self::arrow_result_type(&ty, item.parameters.len()))
                         } else {
                             self.infer_expr(item.body, &env, None).ty
                         }
@@ -5167,7 +5164,9 @@ impl<'a> GateTypeContext<'a> {
                     && argument_types
                         .iter()
                         .all(|argument_ty| !argument_ty.has_type_params())
-                    && current.as_ref().is_none_or(|result_ty| !result_ty.has_type_params())
+                    && current
+                        .as_ref()
+                        .is_none_or(|result_ty| !result_ty.has_type_params())
                 {
                     self.record_function_call_evidence(FunctionCallEvidence {
                         item_id,

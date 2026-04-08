@@ -207,10 +207,24 @@ const GLIB_ASYNC_WAKE_TICK_BUDGET: usize = 32;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GlibTickDrainMode {
     UntilIdle,
+    UntilCurrentQueue,
     AsyncWakeBudgeted,
 }
 
 impl GlibTickDrainMode {
+    fn should_continue_after_tick(self, async_wake_requested: bool, queued_messages: usize) -> bool {
+        match self {
+            Self::UntilIdle | Self::AsyncWakeBudgeted => {
+                async_wake_requested || queued_messages > 0
+            }
+            Self::UntilCurrentQueue => queued_messages > 0,
+        }
+    }
+
+    fn should_reschedule_after_break(self, async_wake_requested: bool) -> bool {
+        matches!(self, Self::UntilCurrentQueue) && async_wake_requested
+    }
+
     fn should_yield_after_tick(self, drained_ticks: usize) -> bool {
         matches!(self, Self::AsyncWakeBudgeted) && drained_ticks >= GLIB_ASYNC_WAKE_TICK_BUDGET
     }
@@ -317,12 +331,18 @@ where
                     state.outcomes.push_back(outcome);
                 }
                 *guard = Some(state);
-                self.tick_enqueued.load(Ordering::Acquire) || queued_count > 0
+                let async_wake_requested = self.tick_enqueued.load(Ordering::Acquire);
+                (
+                    async_wake_requested,
+                    mode.should_continue_after_tick(async_wake_requested, queued_count),
+                )
             };
 
             drained_ticks = drained_ticks.saturating_add(1);
+            let (async_wake_requested, should_continue) = should_continue;
 
             if !should_continue {
+                reschedule |= mode.should_reschedule_after_break(async_wake_requested);
                 break;
             }
             if mode.should_yield_after_tick(drained_ticks) {
@@ -427,6 +447,23 @@ impl GlibLinkedRuntimeDriver {
         })
         .map_err(GlibLinkedRuntimeAccessError::RuntimeAccess)?;
         self.tick_now();
+        Ok(())
+    }
+
+    pub fn queue_publication_now_current_queue(
+        &self,
+        publication: Publication<DetachedRuntimeValue>,
+    ) -> Result<(), GlibLinkedRuntimeAccessError> {
+        let (stamp, value) = publication.into_parts();
+        self.with_state_mut(|state| {
+            state
+                .linked
+                .runtime_mut()
+                .queue_publication(Publication::new(stamp, value.into_runtime()))
+        })
+        .map_err(GlibLinkedRuntimeAccessError::RuntimeAccess)?;
+        self.shared
+            .drive_pending_ticks(GlibTickDrainMode::UntilCurrentQueue);
         Ok(())
     }
 
@@ -822,14 +859,20 @@ impl GlibLinkedRuntimeShared {
                             .failures
                             .push_back(GlibLinkedRuntimeFailure::ProviderExecution(error));
                         notify = true;
-                        false
+                        (false, false)
                     } else {
                         if !outcome.scheduler().is_empty() {
                             state.outcomes.push_back(outcome);
                             notify = true;
                         }
-                        self.tick_enqueued.load(Ordering::Acquire)
-                            || state.linked.queued_message_count() > 0
+                        let async_wake_requested = self.tick_enqueued.load(Ordering::Acquire);
+                        (
+                            async_wake_requested,
+                            mode.should_continue_after_tick(
+                                async_wake_requested,
+                                state.linked.queued_message_count(),
+                            ),
+                        )
                     }
                 }
                 Err(error) => {
@@ -837,16 +880,18 @@ impl GlibLinkedRuntimeShared {
                         .failures
                         .push_back(GlibLinkedRuntimeFailure::Tick(error));
                     notify = true;
-                    false
+                    (false, false)
                 }
             };
             drained_ticks = drained_ticks.saturating_add(1);
             *self
                 .state
                 .lock()
-                .expect("GLib linked runtime state mutex should not be poisoned") = Some(state);
+                    .expect("GLib linked runtime state mutex should not be poisoned") = Some(state);
+            let (async_wake_requested, should_continue) = should_continue;
 
             if !should_continue {
+                reschedule |= mode.should_reschedule_after_break(async_wake_requested);
                 break;
             }
             if mode.should_yield_after_tick(drained_ticks) {
@@ -1271,6 +1316,83 @@ signal keyDown : Signal Text
                         Some(&expected_signal_text(name))
                     );
                 }
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn glib_linked_runtime_current_queue_does_not_drain_async_timer_wakes() {
+        let context = MainContext::new();
+        context
+            .with_thread_default(|| {
+                let lowered = lower_text(
+                    "glib-runtime-current-queue-only.aivi",
+                    r#"
+signal trigger : Signal Int
+
+@source timer.after 1 with {
+    immediate: False,
+    restartOn: trigger
+}
+signal wake : Signal Unit
+
+signal phase : Signal Text = wake | trigger
+  ||> wake _ => "timer"
+  ||> trigger _ => "trigger"
+"#,
+                );
+                let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+                    .expect("runtime assembly should build");
+                let trigger_input = assembly
+                    .signal(item_id(lowered.hir.module(), "trigger"))
+                    .expect("trigger signal binding should exist")
+                    .input()
+                    .expect("trigger should lower as a runtime input");
+                let phase_item = backend_item_id(&lowered.backend, "phase");
+                let linked = crate::link_backend_runtime(
+                    assembly,
+                    &lowered.core,
+                    Arc::new(lowered.backend.clone()),
+                )
+                .expect("startup link should succeed");
+                let driver = GlibLinkedRuntimeDriver::new(
+                    context.clone(),
+                    linked,
+                    SourceProviderManager::new(),
+                    None,
+                );
+
+                driver.tick_now();
+                let stamp = driver.current_stamp(trigger_input).unwrap();
+                driver
+                    .queue_publication_now_current_queue(Publication::new(stamp, expected_runtime_int(1)))
+                    .expect("current-queue publication should succeed");
+
+                assert_eq!(
+                    driver
+                        .current_signal_globals()
+                        .expect("signal globals should remain readable")
+                        .get(&phase_item),
+                    Some(&expected_signal_text("trigger")),
+                    "the direct publication should settle its own queue before timer follow-up wakes run"
+                );
+
+                pump_until(&context, || {
+                    driver.failure_count() > 0
+                        || driver
+                            .current_signal_globals()
+                            .ok()
+                            .and_then(|globals| globals.get(&phase_item).cloned())
+                            == Some(expected_signal_text("timer"))
+                });
+                assert_eq!(driver.failure_count(), 0);
+                assert_eq!(
+                    driver
+                        .current_signal_globals()
+                        .expect("signal globals should stay readable after the timer wake")
+                        .get(&phase_item),
+                    Some(&expected_signal_text("timer"))
+                );
             })
             .unwrap();
     }
