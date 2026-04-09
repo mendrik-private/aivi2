@@ -115,7 +115,9 @@ export them the same way as any other function.
 
 The `type` line spells the full function type, including the receiver. In the example above,
 `type Player -> Player` and `type Player -> Text` are written explicitly. When the receiver is the
-only parameter, `name = .` is shorthand for `name = self => ...`.
+only parameter, `name = .` is shorthand for `name = self => ...`. Companion members also accept the
+same selected-subject header sugar as top-level functions, so `name = self!` can begin a `|>` or
+`<|` continuation without an explicit `=>`.
 
 The brace form is reserved for companion sums only when the first significant entry is a constructor
 line beginning with `|`. Ordinary record declarations still use the same `type Name = { field: T }`

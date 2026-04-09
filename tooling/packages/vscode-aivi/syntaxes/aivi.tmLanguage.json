@@ -760,6 +760,10 @@
           "match": "==|!="
         },
         {
+          "name": "keyword.operator.subject-pick.aivi",
+          "match": "!(?!(?:=|\\|>))"
+        },
+        {
           "name": "keyword.operator.comparison.aivi",
           "match": "[<>]=?"
         },

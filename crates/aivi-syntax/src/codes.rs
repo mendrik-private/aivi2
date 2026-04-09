@@ -11,6 +11,8 @@ pub const DUPLICATE_STANDALONE_TYPE_ANNOTATION: DiagnosticCode =
 pub const EMPTY_RESULT_BLOCK: DiagnosticCode = DiagnosticCode::new("syntax", "empty-result-block");
 pub const INVALID_DISCARD_EXPR: DiagnosticCode =
     DiagnosticCode::new("syntax", "invalid-discard-expr");
+pub const INVALID_SUBJECT_PICK: DiagnosticCode =
+    DiagnosticCode::new("syntax", "invalid-subject-pick");
 pub const INVALID_ESCAPE_SEQUENCE: DiagnosticCode =
     DiagnosticCode::new("syntax", "invalid-escape-sequence");
 pub const INVALID_MARKUP_CHILD_CONTENT: DiagnosticCode =

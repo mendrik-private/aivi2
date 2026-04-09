@@ -814,6 +814,8 @@ pub enum FunctionSurfaceForm {
     Explicit,
     /// `func name = .`, `func name = .field`, or `func name = "Hello {.}"`.
     UnarySubjectSugar,
+    /// `func name = state! coord |> ...` or `func name = state { path.to.value! } |> ...`.
+    SelectedSubjectSugar,
 }
 
 /// Shared body forms for named top-level items.

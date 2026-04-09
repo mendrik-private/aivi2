@@ -142,3 +142,17 @@ and animation-step values without introducing throwaway helpers.
 Expanded the Reversi cleanup beyond the first memo pass: boolean routing now consistently uses
 `T|>` / `F|>`, additional helpers memo derived move and score values where that improves readability,
 and small `RayState` / animation updates now use `<|` patches instead of manual record rebuilds.
+
+## [2026-04-09] ingest | selected-subject function headers
+
+Implemented `param!` and `param { path! }` header sugar so `func` and companion bodies can begin
+with subject-rooted `|>` or `<|` continuations without an explicit `=>`.
+
+- `crates/aivi-syntax/`: standalone `!` token plus parser/formatter support for selected-subject
+  headers and projected subject selectors
+- `crates/aivi-hir/tests/selected_subject_sugar.rs` and `crates/aivi-cli/tests/check.rs`: focused
+  lowering/typechecking and `aivi check` coverage for direct, projected, and patch-rooted cases
+- `manual/guide/values-and-functions.md`, `manual/guide/pipes.md`,
+  `manual/guide/record-patterns.md`, `manual/guide/types.md`, `manual/guide/surface-feature-matrix.md`,
+  and `syntax.md`: user-facing docs updated
+- `demos/reversi.aivi`: `recordOpponent` and `flipsFromDirection` now use the new sugar

@@ -31,7 +31,7 @@ It answers "what checks, executes, runs, or compiles today?" rather than "what t
 
 | Surface form | Check | Execute | Run | Compile | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `value` / `func` | yes | yes | yes | yes | Core declaration surface is stable; same-module monomorphic `func` items also support contextual signature inference from nearby use sites. |
+| `value` / `func` | yes | yes | yes | yes | Core declaration surface is stable; same-module monomorphic `func` items also support contextual signature inference from nearby use sites. Function headers additionally support unary subject sugar plus selected-subject continuations via `param!` and `param { path! }`. |
 | `type` aliases, records, sums, and brace-bodied sum companions | yes | yes | yes | yes | Closed ADTs, companion helpers, and records are broadly accepted across the pipeline. Companion members lower as ordinary callable items. |
 | `class` / `instance` | yes | yes | yes | yes | Builtins, same-module, and imported user-authored instances all resolve. Cross-module instance resolution follows the `ImportedInstance` dispatch path through `ClassMemberImplementation`. |
 | `domain` declarations and member lookup | yes | yes | yes | yes | Runtime foundation tests cover domain operators and authored members. Codegen supports domain suffix literals, domain member access, and representational pointer forwarding for domain-typed values. |

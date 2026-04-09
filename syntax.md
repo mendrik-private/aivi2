@@ -77,15 +77,31 @@ func add = x y =>
 type Eq A => A -> Bool
 func same = v =>
     v == v
+
+type Int -> Int -> Int
+func addFrom = amount value!
+  |> add amount
+
+type Counter -> Int -> Counter
+func bump = counter! delta
+    <| {
+        total: counter.total + delta
+    }
+
+type State -> Int
+func readNested = state { x.y.z! }
+  |> addOne
 ```
 
 Rules:
 
 - `value` = constant binding only; uses `=`.
-- `func` = function declaration; uses `=` after the name, then either parameters plus `=>` or unary subject sugar rooted at `.`.
+- `func` = function declaration; uses `=` after the name, then either parameters plus `=>`, unary subject sugar rooted at `.`, or selected-subject header sugar rooted at `param!` / `param { path! }`.
 - Function signatures live on a preceding `type` line: `type Int -> Int -> Int`.
 - `func` headers keep parameters unannotated: `func add = x y => ...`.
 - Unary subject sugar is available for single-argument functions whose body starts from that argument: `func headOrFallback = .`, `func status = .status`, `func scoreLineFor = "Score: {.}"`.
+- Selected-subject header sugar is available when one explicit parameter should seed the following continuation: `func addFrom = amount value! |> add amount`, `func bump = counter! delta <| { total: counter.total + delta }`.
+- Record-selector subject picks are projection sugar over the immediately preceding named parameter: `func readNested = state { x.y.z! } |> addOne`.
 - Ignored unary inputs stay explicit: `func constant = _ => ...`.
 - Constraint prefixes, when present, live on the `type` line: `type Eq A => A -> Bool`.
 - `value` is a contextual keyword and can still be a parameter name:
@@ -539,6 +555,8 @@ Important:
 
 - Ordinary field access on named values still uses `value.field`.
 - `.field` is illegal where no ambient subject exists.
+- Selected-subject headers (`param!`, `param { path! }`) synthesize the initial subject so a
+  function body can begin with `|>` or `<|` without an explicit `=>`.
 
 ### 5.3 Ordinary-expression precedence
 
@@ -558,6 +576,8 @@ Rules:
 - `<|` is right-associative.
 - Pipe operators are **not** part of the ordinary binary precedence table.
 - A pipe spine starts from one ordinary expression and consumes stages left-to-right.
+- Selected-subject function/companion headers desugar to that same ordinary-expression head before
+  the continuation is parsed.
 
 ## 6. Pipe algebra
 

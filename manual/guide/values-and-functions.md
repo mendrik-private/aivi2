@@ -150,6 +150,70 @@ func constantLabel = _ =>
     "ready"
 ```
 
+## Selected subject headers
+
+When a function has multiple parameters but its body should immediately continue from one specific
+argument, mark that argument with `!` and omit `=>`:
+
+```aivi
+type Int -> Int -> Int
+func add = left right =>
+    left + right
+
+type Int -> Int -> Int
+func addFrom = amount value!
+  |> add amount
+
+value total = addFrom 2 40
+```
+
+The marked parameter becomes the subject for the following continuation, so the next line can start
+with `|>` directly. The same sugar also works for patch-rooted bodies:
+
+```aivi
+type Counter = {
+    total: Int,
+    ready: Bool
+}
+
+type Counter -> Int -> Counter
+func bump = counter! amount
+    <| {
+        total: counter.total + amount,
+        ready: True,
+    }
+
+value bumped = bump ({ total: 2, ready: False }) 3
+```
+
+You can also select a projection from the preceding named parameter:
+
+```aivi
+type Z = { z: Int }
+
+type Y = { y: Z }
+
+type X = { x: Y }
+
+type Int -> Int
+func addOne = value =>
+    value + 1
+
+type X -> Int
+func readNested = state { x.y.z! }
+  |> addOne
+
+value nestedTotal =
+    readNested (
+        {
+            x: { y: { z: 40 } }
+        }
+    )
+```
+
+`{ x.y.z! }` means "use `state.x.y.z` as the subject for the continuation." It is header sugar for
+subject selection, not a general parameter-destructuring form.
+
 ## Calling functions
 
 Call a function by writing the function name followed by its arguments:

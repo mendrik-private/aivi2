@@ -45,6 +45,27 @@ value scaled = 5
 
 `multiply 3` produces a function waiting for the final argument, so the pipeline stays compact.
 
+## Choosing the pipe subject in a function header
+
+When a helper takes extra arguments but the body should start from one chosen parameter, mark that
+parameter with `!` and begin the body with `|>`:
+
+```aivi
+type Int -> Int -> Int
+func add = left right =>
+    left + right
+
+type Int -> Int -> Int
+func addFrom = amount value!
+  |> add amount
+
+value total = addFrom 2 40
+```
+
+`value!` means "push `value` into the ordinary single-subject pipe flow." The same header form also
+works with patch-rooted continuations like `counter! amount` followed by `<| { ... }`, and with
+projection selectors like `state { x.y.z! }` when the flow should start from a nested field.
+
 ## Remembering stage values with `#name`
 
 `#name` is the pipe memo operator. Use it when you want the convenience of a local `let`

@@ -295,6 +295,79 @@ fn check_accepts_imported_type_companion_programs() {
 }
 
 #[test]
+fn check_accepts_selected_subject_function_headers() {
+    let dir = TempDir::new("check-selected-subject-headers");
+    let path = dir.write(
+        "main.aivi",
+        concat!(
+            "type Coord = Coord Int Int\n",
+            "type Inner = { z: Int }\n",
+            "type Middle = { y: Inner }\n",
+            "type Nested = { x: Middle }\n",
+            "type State = {\n",
+            "    collecting: Bool,\n",
+            "    closed: Bool,\n",
+            "    trail: List Coord,\n",
+            "    nested: Nested\n",
+            "}\n",
+            "\n",
+            "type Int -> Int -> Int\n",
+            "func add = left right => left + right\n",
+            "\n",
+            "type State -> Coord -> State\n",
+            "func recordOpponent = state! coord\n",
+            "    <| {\n",
+            "        collecting: True,\n",
+            "        closed: False,\n",
+            "        trail: [coord],\n",
+            "    }\n",
+            "\n",
+            "type Int -> State -> Int\n",
+            "func readDirect = amount state!\n",
+            "  |> .nested.x.y.z\n",
+            "  |> add amount\n",
+            "\n",
+            "type Int -> State -> Int\n",
+            "func readSelected = amount state { nested.x.y.z! }\n",
+            "  |> add amount\n",
+            "\n",
+            "value defaultState : State = {\n",
+            "    collecting: False,\n",
+            "    closed: True,\n",
+            "    trail: [],\n",
+            "    nested: {\n",
+            "        x: {\n",
+            "            y: {\n",
+            "                z: 41\n",
+            "            }\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+            "\n",
+            "value updated : State = recordOpponent defaultState (Coord 1 2)\n",
+            "value directTotal : Int = readDirect 1 defaultState\n",
+            "value selectedTotal : Int = readSelected 1 updated\n",
+        ),
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("check command should run");
+
+    assert!(
+        output.status.success(),
+        "expected selected-subject header program to pass check, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("syntax + HIR passed"),
+        "expected success output for selected-subject header program, got stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
 fn check_rejects_result_block_bindings_that_are_not_results() {
     let dir = TempDir::new("check-result-block-binding-not-result");
     let path = dir.write(

@@ -27,6 +27,12 @@ use crate::codes::*;
 const MAX_PARSE_DEPTH: usize = 256;
 const IMPLICIT_FUNCTION_SUBJECT_NAME: &str = "arg1";
 
+#[derive(Clone, Debug)]
+struct SubjectPickHead {
+    expr: Expr,
+    start_index: usize,
+}
+
 /// Parser output retaining the lossless token buffer and recoverable diagnostics.
 #[derive(Clone, Debug)]
 pub struct ParsedModule {
@@ -573,6 +579,10 @@ impl<'a> Parser<'a> {
             self.parse_unary_subject_function_body(keyword_index, &mut cursor, end)
         {
             (FunctionSurfaceForm::UnarySubjectSugar, parameters, body)
+        } else if let Some((parameters, body)) =
+            self.parse_selected_subject_function_body(&mut cursor, end, "func declaration")
+        {
+            (FunctionSurfaceForm::SelectedSubjectSugar, parameters, body)
         } else {
             let mut parameters = Vec::new();
             while self.starts_function_param(cursor, end) {
@@ -2677,7 +2687,7 @@ impl<'a> Parser<'a> {
             return None;
         }
         let body = self
-            .parse_pipe_expr_from_head(head_start, Some(head), cursor, end, ExprStop::default())
+            .parse_subject_root_expr_from_head(head_start, head, cursor, end, ExprStop::default())
             .and_then(|expr| self.finish_expression_body(cursor, end, "func declaration", expr))
             .or_else(|| {
                 self.missing_body_diagnostic(
@@ -2688,6 +2698,178 @@ impl<'a> Parser<'a> {
                 None
             });
         Some((vec![parameter], body))
+    }
+
+    fn parse_selected_subject_function_body(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+        declaration_name: &str,
+    ) -> Option<(Vec<FunctionParam>, Option<NamedItemBody>)> {
+        let checkpoint = *cursor;
+        let mut parameters = Vec::new();
+        let mut parameter_starts = Vec::new();
+        let mut selected_head: Option<SubjectPickHead> = None;
+
+        while self.starts_function_param(*cursor, end) {
+            let Some((parameter, start_index, selected)) =
+                self.parse_subject_pick_function_param(cursor, end)
+            else {
+                break;
+            };
+            if selected {
+                if selected_head.is_some() {
+                    self.emit_invalid_subject_pick(
+                        parameter.span,
+                        "function headers can only choose one subject with `!`",
+                        "remove this `!` or the earlier subject pick",
+                    );
+                } else if let Some(name) = parameter.name.as_ref() {
+                    selected_head = Some(SubjectPickHead {
+                        expr: Expr {
+                            span: name.span,
+                            kind: ExprKind::Name(name.clone()),
+                        },
+                        start_index,
+                    });
+                } else {
+                    self.emit_invalid_subject_pick(
+                        parameter.span,
+                        "the discard `_` cannot be the selected subject",
+                        "choose a named parameter before `!`",
+                    );
+                }
+            }
+            parameter_starts.push(start_index);
+            parameters.push(parameter);
+        }
+
+        if let Some(selector) = self.parse_subject_pick_record_selector(cursor, end) {
+            if selected_head.is_some() {
+                self.emit_invalid_subject_pick(
+                    selector.span,
+                    "function headers can only choose one subject with `!`",
+                    "remove either this `{ ...! }` selector or the earlier `!` marker",
+                );
+            } else if let Some((base_index, base_parameter)) = parameters
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, parameter)| parameter.name.is_some())
+            {
+                let base_name = base_parameter
+                    .name
+                    .as_ref()
+                    .expect("filtered parameter must keep its name")
+                    .clone();
+                let base_expr = Expr {
+                    span: base_name.span,
+                    kind: ExprKind::Name(base_name),
+                };
+                let head_span = self.join_spans(base_expr.span, selector.span);
+                selected_head = Some(SubjectPickHead {
+                    expr: Expr {
+                        span: head_span,
+                        kind: ExprKind::Projection {
+                            base: Box::new(base_expr),
+                            path: selector,
+                        },
+                    },
+                    start_index: parameter_starts[base_index],
+                });
+            } else {
+                self.emit_invalid_subject_pick(
+                    selector.span,
+                    "record subject selectors need a preceding named parameter",
+                    "write a named parameter before this `{ ...! }` selector",
+                );
+                *cursor = checkpoint;
+                return None;
+            }
+        }
+
+        let Some(head) = selected_head else {
+            *cursor = checkpoint;
+            return None;
+        };
+
+        let body = self
+            .parse_subject_root_expr_from_head(
+                head.start_index,
+                head.expr,
+                cursor,
+                end,
+                ExprStop::default(),
+            )
+            .and_then(|expr| self.finish_expression_body(cursor, end, declaration_name, expr));
+        Some((parameters, body))
+    }
+
+    fn parse_subject_pick_function_param(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+    ) -> Option<(FunctionParam, usize, bool)> {
+        let start_index = self.peek_nontrivia(*cursor, end)?;
+        let parameter = self.parse_function_param(cursor, end)?;
+        let selected = self.consume_kind(cursor, end, TokenKind::Bang).is_some();
+        Some((parameter, start_index, selected))
+    }
+
+    fn parse_subject_pick_record_selector(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+    ) -> Option<ProjectionPath> {
+        let checkpoint = *cursor;
+        let open_brace = self.peek_nontrivia(*cursor, end)?;
+        if self.tokens[open_brace].line_start()
+            || self.tokens[open_brace].kind() != TokenKind::LBrace
+        {
+            return None;
+        }
+        *cursor = open_brace + 1;
+        let first = match self.parse_identifier(cursor, end) {
+            Some(first) => first,
+            None => {
+                *cursor = checkpoint;
+                return None;
+            }
+        };
+        let mut fields = vec![first];
+        while self.consume_kind(cursor, end, TokenKind::Dot).is_some() {
+            let Some(segment) = self.parse_identifier(cursor, end) else {
+                *cursor = checkpoint;
+                return None;
+            };
+            fields.push(segment);
+        }
+        let Some(bang_index) = self.consume_kind(cursor, end, TokenKind::Bang) else {
+            *cursor = checkpoint;
+            return None;
+        };
+        let Some(close_brace) = self.consume_kind(cursor, end, TokenKind::RBrace) else {
+            *cursor = checkpoint;
+            return None;
+        };
+        let path_start = fields
+            .first()
+            .map(|field| field.span.span().start())
+            .unwrap_or_else(|| self.tokens[open_brace].span().start());
+        let span = SourceSpan::new(
+            self.source.id(),
+            Span::new(path_start, self.tokens[bang_index].span().end()),
+        );
+        let _ = self.source_span_for_range(open_brace, close_brace + 1);
+        Some(ProjectionPath { span, fields })
+    }
+
+    fn emit_invalid_subject_pick(&mut self, span: SourceSpan, message: &str, label: &str) {
+        self.diagnostics.push(
+            Diagnostic::error(message)
+                .with_code(INVALID_SUBJECT_PICK)
+                .with_primary_label(span, label),
+        );
     }
 
     fn implicit_function_subject_parameter_at(&self, span: SourceSpan) -> FunctionParam {
@@ -3820,6 +4002,17 @@ impl<'a> Parser<'a> {
                     _ => None,
                 }),
             )
+        } else if let Some((parameters, body)) =
+            self.parse_selected_subject_function_body(cursor, member_end, "type companion member")
+        {
+            (
+                FunctionSurfaceForm::SelectedSubjectSugar,
+                parameters,
+                body.and_then(|body| match body {
+                    NamedItemBody::Expr(expr) => Some(expr),
+                    _ => None,
+                }),
+            )
         } else {
             let mut parameters = Vec::new();
             while self.starts_function_param(*cursor, member_end) {
@@ -4137,7 +4330,17 @@ impl<'a> Parser<'a> {
         end: usize,
         stop: ExprStop,
     ) -> Option<Expr> {
-        let mut expr = self.parse_pipe_expr(cursor, end, stop)?;
+        let expr = self.parse_pipe_expr(cursor, end, stop)?;
+        Some(self.parse_patch_apply_suffix(expr, cursor, end, stop))
+    }
+
+    fn parse_patch_apply_suffix(
+        &mut self,
+        mut expr: Expr,
+        cursor: &mut usize,
+        end: usize,
+        stop: ExprStop,
+    ) -> Expr {
         loop {
             let Some(index) = self.peek_nontrivia(*cursor, end) else {
                 break;
@@ -4148,7 +4351,9 @@ impl<'a> Parser<'a> {
                 break;
             }
             *cursor = index + 1;
-            let patch = self.parse_patch_block(cursor, end)?;
+            let Some(patch) = self.parse_patch_block(cursor, end) else {
+                break;
+            };
             let span = self.join_spans(expr.span, patch.span);
             expr = Expr {
                 span,
@@ -4158,7 +4363,19 @@ impl<'a> Parser<'a> {
                 },
             };
         }
-        Some(expr)
+        expr
+    }
+
+    fn parse_subject_root_expr_from_head(
+        &mut self,
+        start: usize,
+        head: Expr,
+        cursor: &mut usize,
+        end: usize,
+        stop: ExprStop,
+    ) -> Option<Expr> {
+        let expr = self.parse_pipe_expr_from_head(start, Some(head), cursor, end, stop)?;
+        Some(self.parse_patch_apply_suffix(expr, cursor, end, stop))
     }
 
     fn parse_pipe_expr(&mut self, cursor: &mut usize, end: usize, stop: ExprStop) -> Option<Expr> {
@@ -7348,6 +7565,7 @@ domain Duration over Int = {
 signal flow = value |> compute ?|> ready ||> Ready -> keep *|> .email &|> build @|> loop <|@ step | debug <|* merge T|> start F|> stop
 value same = left == right
 value different = left != right
+fun picked = value!
 value quotient = left / right
 value remainder = left % right
 value range = 1..10
@@ -7375,6 +7593,7 @@ value datePattern = rx"\d{4}-\d{2}-\d{2}"
         assert!(kinds.contains(&TokenKind::DomainKw));
         assert!(kinds.contains(&TokenKind::ThinArrow));
         assert!(kinds.contains(&TokenKind::EqualEqual));
+        assert!(kinds.contains(&TokenKind::Bang));
         assert!(kinds.contains(&TokenKind::BangEqual));
         assert!(kinds.contains(&TokenKind::Star));
         assert!(kinds.contains(&TokenKind::Slash));
@@ -9199,6 +9418,131 @@ fun scoreLineFor:Text = "Score: {.}"
                             if identifier.text == IMPLICIT_FUNCTION_SUBJECT_NAME
                     )
         ));
+    }
+
+    #[test]
+    fn parser_accepts_selected_subject_pipe_bodies_without_arrows() {
+        let (_, parsed) = load(
+            r#"fun flipsFromDirection = board player coord vector!
+ |> rayFrom coord #ray
+ |> collectRay board ray
+"#,
+        );
+
+        assert!(
+            !parsed.has_errors(),
+            "expected selected-subject pipe sugar to parse cleanly: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+
+        let Item::Fun(flips_from_direction) = &parsed.module.items[0] else {
+            panic!("expected flipsFromDirection function item");
+        };
+        assert_eq!(
+            flips_from_direction.function_form,
+            FunctionSurfaceForm::SelectedSubjectSugar
+        );
+        assert_eq!(flips_from_direction.parameters.len(), 4);
+        let Some(Expr {
+            kind: ExprKind::Pipe(pipe),
+            ..
+        }) = flips_from_direction.expr_body()
+        else {
+            panic!("expected selected-subject body to parse as a pipe");
+        };
+        assert!(matches!(
+            pipe.head.as_deref().map(|expr| &expr.kind),
+            Some(ExprKind::Name(identifier)) if identifier.text == "vector"
+        ));
+        assert_eq!(pipe.stages.len(), 2);
+        assert_eq!(
+            pipe.stages[0]
+                .result_memo
+                .as_ref()
+                .map(|memo| memo.text.as_str()),
+            Some("ray")
+        );
+    }
+
+    #[test]
+    fn parser_accepts_selected_subject_patch_bodies_without_arrows() {
+        let (_, parsed) = load(
+            r#"fun recordOpponent = state! coord
+    <| {
+        collecting: True,
+        closed: False,
+        trail: [coord]
+    }
+"#,
+        );
+
+        assert!(
+            !parsed.has_errors(),
+            "expected selected-subject patch sugar to parse cleanly: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+
+        let Item::Fun(record_opponent) = &parsed.module.items[0] else {
+            panic!("expected recordOpponent function item");
+        };
+        assert_eq!(
+            record_opponent.function_form,
+            FunctionSurfaceForm::SelectedSubjectSugar
+        );
+        let Some(Expr {
+            kind: ExprKind::PatchApply { target, patch },
+            ..
+        }) = record_opponent.expr_body()
+        else {
+            panic!("expected selected-subject body to parse as a patch apply");
+        };
+        assert!(matches!(&target.kind, ExprKind::Name(identifier) if identifier.text == "state"));
+        assert_eq!(patch.entries.len(), 3);
+    }
+
+    #[test]
+    fn parser_accepts_selected_subject_record_selectors() {
+        let (_, parsed) = load(
+            r#"fun readNested = state { x.y.z! }
+ |> render
+"#,
+        );
+
+        assert!(
+            !parsed.has_errors(),
+            "expected selected-subject record selector to parse cleanly: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+
+        let Item::Fun(read_nested) = &parsed.module.items[0] else {
+            panic!("expected readNested function item");
+        };
+        assert_eq!(
+            read_nested.function_form,
+            FunctionSurfaceForm::SelectedSubjectSugar
+        );
+        let Some(Expr {
+            kind: ExprKind::Pipe(pipe),
+            ..
+        }) = read_nested.expr_body()
+        else {
+            panic!("expected record-selector body to parse as a pipe");
+        };
+        let Some(Expr {
+            kind: ExprKind::Projection { base, path },
+            ..
+        }) = pipe.head.as_deref()
+        else {
+            panic!("expected record-selector body head to parse as a projection");
+        };
+        assert!(matches!(&base.kind, ExprKind::Name(identifier) if identifier.text == "state"));
+        assert_eq!(
+            path.fields
+                .iter()
+                .map(|field| field.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["x", "y", "z"]
+        );
     }
 
     #[test]

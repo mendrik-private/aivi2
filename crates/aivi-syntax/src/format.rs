@@ -35,6 +35,17 @@ const TYPE_PIPE_PREC: u8 = 0;
 const TYPE_APPLY_PREC: u8 = 1;
 const PATTERN_APPLY_PREC: u8 = 1;
 
+#[derive(Clone, Copy)]
+enum SelectedSubjectSpec<'a> {
+    Parameter {
+        index: usize,
+    },
+    Projection {
+        base_index: usize,
+        path: &'a ProjectionPath,
+    },
+}
+
 /// Canonical formatter for the supported Milestone 1 surface subset.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Formatter;
@@ -373,6 +384,11 @@ impl Formatter {
         {
             return lines;
         }
+        if item.function_form == FunctionSurfaceForm::SelectedSubjectSugar
+            && let Some(lines) = self.try_format_selected_subject_fun_item(item)
+        {
+            return lines;
+        }
         self.format_explicit_fun_item(item)
     }
 
@@ -468,6 +484,158 @@ impl Formatter {
             lines.extend(block.indented(INDENT_WIDTH).into_lines());
         }
         Some(lines)
+    }
+
+    fn try_format_selected_subject_fun_item(&self, item: &NamedItem) -> Option<Vec<String>> {
+        let mut lines = Vec::new();
+        if let Some(annotation) = self.format_fun_signature_annotation(item) {
+            lines.push(format!("type {annotation}"));
+        }
+
+        let body = item.expr_body()?;
+        lines.extend(self.format_selected_subject_lines(
+            &format!("func {} =", self.item_name(&item.name)),
+            &item.parameters,
+            body,
+            PIPE_STAGE_INDENT,
+            INDENT_WIDTH,
+        )?);
+        Some(lines)
+    }
+
+    fn try_format_selected_subject_type_companion_member(
+        &self,
+        member: &crate::TypeCompanionMember,
+    ) -> Option<Vec<String>> {
+        let mut lines = Vec::new();
+        self.push_type_companion_annotation(&mut lines, member);
+
+        let body = member.body.as_ref()?;
+        lines.extend(self.format_selected_subject_lines(
+            &format!("{}{} =", spaces(INDENT_WIDTH), member.name.text),
+            &member.parameters,
+            body,
+            INDENT_WIDTH + PIPE_STAGE_INDENT,
+            INDENT_WIDTH * 2,
+        )?);
+        Some(lines)
+    }
+
+    fn format_selected_subject_lines(
+        &self,
+        prefix: &str,
+        parameters: &[FunctionParam],
+        body: &Expr,
+        pipe_indent: usize,
+        expr_indent: usize,
+    ) -> Option<Vec<String>> {
+        match &body.kind {
+            ExprKind::Name(_) | ExprKind::Projection { .. } => {
+                let spec = self.selected_subject_spec_from_expr(parameters, body)?;
+                Some(vec![
+                    self.format_selected_subject_header(prefix, parameters, spec),
+                ])
+            }
+            ExprKind::Pipe(pipe) => {
+                let head = pipe.head.as_ref()?;
+                let spec = self.selected_subject_spec_from_expr(parameters, head)?;
+                let mut lines = vec![self.format_selected_subject_header(prefix, parameters, spec)];
+                let stage_lines = self.format_pipe_stage_lines(&pipe.stages);
+                if !stage_lines.is_empty() {
+                    lines.extend(
+                        Block::from_lines(stage_lines)
+                            .indented(pipe_indent)
+                            .into_lines(),
+                    );
+                }
+                Some(lines)
+            }
+            ExprKind::PatchApply { target, patch } => {
+                let spec = self.selected_subject_spec_from_expr(parameters, target)?;
+                let mut lines = vec![self.format_selected_subject_header(prefix, parameters, spec)];
+                let patch_lines = self
+                    .format_patch_block(patch, patch.entries.len() > 1)
+                    .prefixed("<| ")
+                    .into_lines();
+                lines.extend(
+                    Block::from_lines(patch_lines)
+                        .indented(expr_indent)
+                        .into_lines(),
+                );
+                Some(lines)
+            }
+            _ => None,
+        }
+    }
+
+    fn selected_subject_spec_from_expr<'a>(
+        &self,
+        parameters: &[FunctionParam],
+        expr: &'a Expr,
+    ) -> Option<SelectedSubjectSpec<'a>> {
+        match &expr.kind {
+            ExprKind::Name(name) => self
+                .selected_subject_parameter_index(parameters, name)
+                .map(|index| SelectedSubjectSpec::Parameter { index }),
+            ExprKind::Projection { base, path } => match &base.kind {
+                ExprKind::Name(name) => self
+                    .selected_subject_parameter_index(parameters, name)
+                    .map(|base_index| SelectedSubjectSpec::Projection { base_index, path }),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn selected_subject_parameter_index(
+        &self,
+        parameters: &[FunctionParam],
+        name: &Identifier,
+    ) -> Option<usize> {
+        parameters.iter().position(|parameter| {
+            parameter
+                .name
+                .as_ref()
+                .is_some_and(|parameter_name| parameter_name.text == name.text)
+        })
+    }
+
+    fn format_selected_subject_header(
+        &self,
+        prefix: &str,
+        parameters: &[FunctionParam],
+        spec: SelectedSubjectSpec<'_>,
+    ) -> String {
+        let mut header = prefix.to_owned();
+        for (index, parameter) in parameters.iter().enumerate() {
+            header.push(' ');
+            header.push_str(&self.format_function_param(parameter));
+            match spec {
+                SelectedSubjectSpec::Parameter {
+                    index: selected_index,
+                } if selected_index == index => {
+                    header.push('!');
+                }
+                SelectedSubjectSpec::Projection { base_index, path } if base_index == index => {
+                    header.push(' ');
+                    header.push_str(&self.format_selected_subject_selector(path));
+                }
+                _ => {}
+            }
+        }
+        header
+    }
+
+    fn format_selected_subject_selector(&self, path: &ProjectionPath) -> String {
+        let mut rendered = String::from("{ ");
+        for (index, field) in path.fields.iter().enumerate() {
+            if index > 0 {
+                rendered.push('.');
+            }
+            rendered.push_str(&field.text);
+        }
+        rendered.push_str("! }");
+        rendered
     }
 
     fn restore_free_function_subject_expr(
@@ -1745,6 +1913,11 @@ impl Formatter {
     fn format_type_companion_member(&self, member: &crate::TypeCompanionMember) -> Vec<String> {
         if member.function_form == FunctionSurfaceForm::UnarySubjectSugar
             && let Some(lines) = self.try_format_unary_subject_type_companion_member(member)
+        {
+            return lines;
+        }
+        if member.function_form == FunctionSurfaceForm::SelectedSubjectSugar
+            && let Some(lines) = self.try_format_selected_subject_type_companion_member(member)
         {
             return lines;
         }
@@ -3985,6 +4158,37 @@ value view =
     }
 
     #[test]
+    fn formatter_preserves_selected_subject_function_bodies() {
+        let formatted = format_text(concat!(
+            "func flipsFromDirection = board player coord vector!\n",
+            "|>rayFrom coord #ray\n",
+            "|>collectRay board ray\n",
+            "func readNested = state {x.y.z!}\n",
+            "|>render\n",
+            "func recordOpponent = state! coord\n",
+            "<|{collecting:True,closed:False,trail:[coord]}\n",
+        ));
+        assert_eq!(
+            formatted,
+            concat!(
+                "func flipsFromDirection = board player coord vector!\n",
+                "  |> rayFrom coord #ray\n",
+                "  |> collectRay board ray\n",
+                "\n",
+                "func readNested = state { x.y.z! }\n",
+                "  |> render\n",
+                "\n",
+                "func recordOpponent = state! coord\n",
+                "    <| {\n",
+                "        collecting: True,\n",
+                "        closed: False,\n",
+                "        trail: [coord],\n",
+                "    }\n",
+            )
+        );
+    }
+
+    #[test]
     fn formatter_preserves_inline_annotated_type_companion_bodies() {
         let formatted = format_text(
             "type Player = {\n    | Human\n    | Computer\n\n    opponent:Player -> Player=.\n     ||> Human    -> Computer\n     ||> Computer -> Human\n}\n",
@@ -3998,6 +4202,27 @@ value view =
                 "\n",
                 "    type Player -> Player\n",
                 "    opponent = .\n",
+                "     ||> Human    -> Computer\n",
+                "     ||> Computer -> Human\n",
+                "}\n",
+            )
+        );
+    }
+
+    #[test]
+    fn formatter_preserves_selected_subject_type_companion_bodies() {
+        let formatted = format_text(
+            "type Player = {\n    | Human\n    | Computer\n\n    opponent:Player -> Player=self!\n     ||> Human    -> Computer\n     ||> Computer -> Human\n}\n",
+        );
+        assert_eq!(
+            formatted,
+            concat!(
+                "type Player = {\n",
+                "    | Human\n",
+                "    | Computer\n",
+                "\n",
+                "    type Player -> Player\n",
+                "    opponent = self!\n",
                 "     ||> Human    -> Computer\n",
                 "     ||> Computer -> Human\n",
                 "}\n",

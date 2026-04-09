@@ -116,6 +116,27 @@ func upperCityName = .address.city.name
   |> toUpperCase
 ```
 
+The same dotted-path idea is also available in selected-subject function headers:
+
+```aivi
+type Z = { z: Int }
+
+type Y = { y: Z }
+
+type X = { x: Y }
+
+type Int -> Int
+func addOne = value =>
+    value + 1
+
+type X -> Int
+func readNested = state { x.y.z! }
+  |> addOne
+```
+
+Here `{ x.y.z! }` means "select `state.x.y.z` as the subject for the continuation." It is
+projection sugar in the header, not a new general parameter-pattern form.
+
 ## Projection in pipes
 
 Projection expressions work naturally as pipe stages:

@@ -17,6 +17,20 @@ That split matters for pipe memos.
 The implementation now carries those memo bindings across the ordinary pipe-stage surface instead of
 restricting them to plain transform/tap stages.
 
+## Selected-subject function headers
+
+The syntax layer also now supports header sugar for seeding the ordinary single-subject flow from
+one explicit parameter.
+
+- `func addFrom = amount value! |> add amount` means "start the continuation from `value`"
+- `func bump = counter! delta <| { ... }` means "start the continuation from `counter`"
+- `func readNested = state { x.y.z! } |> ...` means "start the continuation from the projection
+  `state.x.y.z`"
+
+This is syntax sugar only. HIR lowering still sees an ordinary named or projection head feeding the
+rest of the expression, so runtime and typechecking semantics do not gain a special case. The
+record-selector form is header-level projection sugar, not general parameter destructuring.
+
 Covered ordinary stages:
 
 - transform `|>` and tap `|`
@@ -70,7 +84,11 @@ single-subject pipe flow, while cluster members/finalizers remain a separate app
 - `crates/aivi-syntax/src/parse.rs`
 - `crates/aivi-syntax/src/format.rs`
 - `crates/aivi-hir/src/lower.rs`
+- `crates/aivi-hir/tests/selected_subject_sugar.rs`
+- `crates/aivi-cli/tests/check.rs`
 - `crates/aivi-hir/src/typecheck_context.rs`
 - `crates/aivi-hir/src/general_expr_elaboration.rs`
+- `manual/guide/values-and-functions.md`
 - `manual/guide/pipes.md`
+- `manual/guide/record-patterns.md`
 - `syntax.md`

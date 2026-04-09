@@ -59,6 +59,7 @@ fn retained_token_key(kind: TokenKind, text: &str) -> Option<String> {
         | TokenKind::Hash
         | TokenKind::Equals
         | TokenKind::EqualEqual
+        | TokenKind::Bang
         | TokenKind::BangEqual
         | TokenKind::Ellipsis
         | TokenKind::DotDot

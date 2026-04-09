@@ -216,8 +216,8 @@ func paintMany = disc board coords =>
     reduce (paintDisc disc) board coords
 
 type RayState -> Coord -> RayState
-func recordOpponent = state coord =>
-    state <| {
+func recordOpponent = state! coord
+    <| {
         collecting: True,
         closed: False,
         trail: append state.trail [coord],
@@ -264,7 +264,7 @@ func collectRay = board own other coords => coords
   |> finalizeRay state
 
 type Matrix Disc -> Player -> Coord -> Vector -> List Coord
-func flipsFromDirection = board player coord vector => vector
+func flipsFromDirection = board player coord vector!
   |> rayFrom coord #ray
   |> discFor player #own
   |> discFor (otherPlayer player) #other
