@@ -5,10 +5,11 @@ use crate::{
     KernelEvaluationProfile, KernelEvaluator, KernelFingerprint, KernelId, Program, RuntimeValue,
     cache::{compile_kernel_cached, compile_program_cached},
     codegen::{CodegenErrors, compile_kernel, compile_program, compute_kernel_fingerprint},
+    jit::LazyJitExecutionEngine,
     runtime::TaskFunctionApplier,
 };
 
-/// Stable backend execution surface shared by the interpreter today and JIT engines later.
+/// Stable backend execution surface shared by the interpreter fallback and lazy JIT engine.
 pub trait BackendExecutionEngine: TaskFunctionApplier {
     fn kind(&self) -> BackendExecutionEngineKind;
 
@@ -54,13 +55,11 @@ pub trait BackendExecutionEngine: TaskFunctionApplier {
 pub type BackendExecutionEngineHandle<'a> = Box<dyn BackendExecutionEngine + 'a>;
 
 /// Runtime execution backends available to the backend layer.
-///
-/// The enum is non-exhaustive so a future JIT engine can be added without changing the public
-/// execution-program surface introduced here.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BackendExecutionEngineKind {
     Interpreter,
+    Jit,
 }
 
 impl BackendExecutionEngine for KernelEvaluator<'_> {
@@ -124,8 +123,8 @@ impl BackendExecutionEngine for KernelEvaluator<'_> {
 
 /// Backend-owned execution wrapper.
 ///
-/// It preserves the current `KernelEvaluator` interpreter path while allowing future execution
-/// engines (for example a JIT) to slot in behind the same construction and artifact surface.
+/// It preserves object-artifact compilation while routing live execution through the lazy JIT
+/// engine, which falls back to `KernelEvaluator` when a kernel is outside the supported JIT slice.
 #[derive(Clone, Debug)]
 pub struct BackendExecutableProgram<'a> {
     program: &'a Program,
@@ -133,7 +132,7 @@ pub struct BackendExecutableProgram<'a> {
 }
 
 impl<'a> BackendExecutableProgram<'a> {
-    /// Construct an executable program that uses the interpreter only.
+    /// Construct an executable program with no prebuilt object artifact.
     pub fn interpreted(program: &'a Program) -> Self {
         Self {
             program,
@@ -141,7 +140,7 @@ impl<'a> BackendExecutableProgram<'a> {
         }
     }
 
-    /// Attach an already-emitted object artifact while keeping interpreter execution available.
+    /// Attach an already-emitted object artifact while keeping lazy JIT execution available.
     pub fn from_compiled_object(program: &'a Program, compiled_object: CompiledProgram) -> Self {
         Self {
             program,
@@ -149,15 +148,15 @@ impl<'a> BackendExecutableProgram<'a> {
         }
     }
 
-    /// Compile object code for the backend program while keeping interpreter execution as the
-    /// active engine/fallback path.
+    /// Compile object code for the backend program while keeping lazy JIT execution as the active
+    /// runtime path.
     pub fn compile(program: &'a Program) -> Result<Self, CodegenErrors> {
         compile_program(program)
             .map(|compiled_object| Self::from_compiled_object(program, compiled_object))
     }
 
-    /// Compile or reuse a cached object artifact for the backend program while keeping interpreter
-    /// execution as the active engine/fallback path.
+    /// Compile or reuse a cached object artifact for the backend program while keeping lazy JIT
+    /// execution as the active runtime path.
     pub fn compile_cached(program: &'a Program) -> Result<Self, CodegenErrors> {
         compile_program_cached(program)
             .map(|compiled_object| Self::from_compiled_object(program, compiled_object))
@@ -186,7 +185,7 @@ impl<'a> BackendExecutableProgram<'a> {
     }
 
     pub fn engine_kind(&self) -> BackendExecutionEngineKind {
-        BackendExecutionEngineKind::Interpreter
+        BackendExecutionEngineKind::Jit
     }
 
     pub fn compiled_object(&self) -> Option<&CompiledProgram> {
@@ -198,10 +197,10 @@ impl<'a> BackendExecutableProgram<'a> {
     }
 
     pub fn create_engine(&self) -> BackendExecutionEngineHandle<'a> {
-        Box::new(KernelEvaluator::new(self.program))
+        Box::new(LazyJitExecutionEngine::new(self.program))
     }
 
     pub fn create_profiled_engine(&self) -> BackendExecutionEngineHandle<'a> {
-        Box::new(KernelEvaluator::new_profiled(self.program))
+        Box::new(LazyJitExecutionEngine::new_profiled(self.program))
     }
 }

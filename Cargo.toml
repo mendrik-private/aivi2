@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/aivi-base",
+    "crates/aivi-ffi-call",
     "crates/aivi-core",
     "crates/aivi-lambda",
     "crates/aivi-hir",

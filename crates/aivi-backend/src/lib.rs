@@ -21,6 +21,7 @@ mod codegen;
 mod engine;
 mod gc;
 mod ids;
+mod jit;
 mod kernel;
 mod layout;
 mod lower;

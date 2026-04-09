@@ -1,0 +1,8 @@
+[package]
+name = "aivi-ffi-call"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+libffi = "5.1.0"

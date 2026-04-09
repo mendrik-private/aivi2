@@ -62,7 +62,7 @@ fn kernel_evaluator_supports_the_backend_execution_engine_trait() {
 }
 
 #[test]
-fn interpreted_executable_program_creates_profiled_interpreter_engines() {
+fn interpreted_executable_program_creates_profiled_jit_engines() {
     let backend = lower_text(
         "backend-engine-profiled.aivi",
         "value total:Int = 21 + 21\n",
@@ -71,10 +71,7 @@ fn interpreted_executable_program_creates_profiled_interpreter_engines() {
     let executable = BackendExecutableProgram::interpreted(&backend);
     let mut engine = executable.create_profiled_engine();
 
-    assert_eq!(
-        executable.engine_kind(),
-        BackendExecutionEngineKind::Interpreter
-    );
+    assert_eq!(executable.engine_kind(), BackendExecutionEngineKind::Jit);
     assert!(executable.compiled_object().is_none());
     assert!(engine.profile().is_some());
     assert_eq!(
@@ -91,7 +88,7 @@ fn interpreted_executable_program_creates_profiled_interpreter_engines() {
 }
 
 #[test]
-fn compiled_executable_program_keeps_object_artifacts_and_interpreter_fallback() {
+fn compiled_executable_program_keeps_object_artifacts_and_jit_execution() {
     let backend = lower_text(
         "backend-engine-compiled.aivi",
         "value total:Int = 21 + 21\n",
@@ -104,17 +101,59 @@ fn compiled_executable_program_keeps_object_artifacts_and_interpreter_fallback()
         .expect("compiled executable program should retain object artifacts");
     let mut engine = executable.create_engine();
 
-    assert_eq!(
-        executable.engine_kind(),
-        BackendExecutionEngineKind::Interpreter
-    );
+    assert_eq!(executable.engine_kind(), BackendExecutionEngineKind::Jit);
     assert!(!compiled.object().is_empty());
     assert!(!compiled.kernels().is_empty());
     assert_eq!(
         engine.evaluate_item(total, &BTreeMap::new()).expect(
-            "compiled executable program should still evaluate through interpreter fallback"
+            "compiled executable program should still evaluate through the lazy JIT engine"
         ),
         RuntimeValue::Int(42)
+    );
+}
+
+#[test]
+fn jit_engine_executes_helper_backed_text_kernels() {
+    let backend = lower_text(
+        "backend-engine-text-jit.aivi",
+        r#"
+value host:Text = "Ada"
+value greeting:Text = "hello {host}"
+"#,
+    );
+    let greeting = find_item(&backend, "greeting");
+    let executable = BackendExecutableProgram::interpreted(&backend);
+    let mut engine = executable.create_engine();
+
+    assert_eq!(engine.kind(), BackendExecutionEngineKind::Jit);
+    assert_eq!(
+        engine
+            .evaluate_item(greeting, &BTreeMap::new())
+            .expect("JIT engine should evaluate helper-backed text interpolation"),
+        RuntimeValue::Text("hello Ada".into())
+    );
+}
+
+#[test]
+fn jit_engine_falls_back_for_unsupported_kernel_layouts() {
+    let backend = lower_text(
+        "backend-engine-list-fallback.aivi",
+        "value ids:List Int = [1, 2, 3]\n",
+    );
+    let ids = find_item(&backend, "ids");
+    let executable = BackendExecutableProgram::interpreted(&backend);
+    let mut engine = executable.create_engine();
+
+    assert_eq!(engine.kind(), BackendExecutionEngineKind::Jit);
+    assert_eq!(
+        engine
+            .evaluate_item(ids, &BTreeMap::new())
+            .expect("unsupported layouts should fall back to interpreter execution"),
+        RuntimeValue::List(vec![
+            RuntimeValue::Int(1),
+            RuntimeValue::Int(2),
+            RuntimeValue::Int(3),
+        ])
     );
 }
 

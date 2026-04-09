@@ -2,11 +2,13 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     fmt,
     hash::{Hash, Hasher},
+    sync::{Arc, Mutex},
 };
 
 use rayon::prelude::*;
 use rustc_hash::FxHasher;
 
+use aivi_ffi_call::{AbiValueKind, CallSignature, FunctionCaller};
 use aivi_hir::IntrinsicValue;
 use cranelift_codegen::{
     control::ControlPlane,
@@ -16,11 +18,13 @@ use cranelift_codegen::{
         immediates::Ieee64,
         types,
     },
+    isa::OwnedTargetIsa,
     print_errors::pretty_verifier_error,
     settings::{self, Configurable},
     verify_function,
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
+use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{
     DataDescription, DataId, FuncId, Linkage, Module, ModuleReloc, default_libcall_names,
 };
@@ -150,6 +154,21 @@ impl CompiledKernelArtifact {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct JitDataSlot {
+    pub(crate) item: ItemId,
+    pub(crate) layout: LayoutId,
+    pub(crate) cell: Box<[u8]>,
+}
+
+pub(crate) struct CompiledJitKernel {
+    pub(crate) function: *const u8,
+    pub(crate) caller: FunctionCaller,
+    pub(crate) signal_slots: Vec<JitDataSlot>,
+    pub(crate) imported_item_slots: Vec<JitDataSlot>,
+    pub(crate) _module: JITModule,
+}
+
 /// Intermediate result holding the built CLIF for one kernel, ready for parallel
 /// Cranelift compilation. Produced by `build_kernel_clif`; consumed by `compile()`.
 struct BuiltKernel {
@@ -181,6 +200,13 @@ pub enum CodegenError {
     },
     ObjectModuleCreation {
         message: Box<str>,
+    },
+    JitModuleCreation {
+        message: Box<str>,
+    },
+    UnsupportedJitSymbol {
+        kernel: KernelId,
+        symbol: Box<str>,
     },
     UnsupportedKernelConvention {
         kernel: KernelId,
@@ -267,6 +293,16 @@ impl fmt::Display for CodegenError {
                     "Cranelift codegen could not create an object module: {message}"
                 )
             }
+            Self::JitModuleCreation { message } => {
+                write!(
+                    f,
+                    "Cranelift codegen could not create a JIT module: {message}"
+                )
+            }
+            Self::UnsupportedJitSymbol { kernel, symbol } => write!(
+                f,
+                "kernel {kernel} requires external symbol `{symbol}` that the lazy JIT engine cannot bind yet"
+            ),
             Self::UnsupportedKernelConvention { kernel, kind } => {
                 write!(
                     f,
@@ -375,6 +411,15 @@ pub fn compile_kernel(
     compiler.compile_kernel(kernel_id)
 }
 
+pub(crate) fn compile_kernel_jit(
+    program: &Program,
+    kernel_id: KernelId,
+) -> Result<CompiledJitKernel, CodegenErrors> {
+    validate_backend_program(program)?;
+    let compiler = CraneliftCompiler::new_jit(program).map_err(wrap_one)?;
+    compiler.compile_kernel_jit(kernel_id)
+}
+
 /// Stable symbol name for one backend kernel.
 pub fn kernel_symbol(program: &Program, kernel_id: KernelId) -> String {
     let kernel = &program.kernels()[kernel_id];
@@ -387,16 +432,58 @@ pub fn compute_kernel_fingerprint(program: &Program, kernel_id: KernelId) -> Ker
     compute_kernel_fingerprint_for(program, kernel_id, kernel)
 }
 
-struct CraneliftCompiler<'a> {
+fn jit_dependency_kernel_ids(
+    program: &Program,
+    kernel_id: KernelId,
+) -> Result<Vec<KernelId>, CodegenError> {
+    if program.kernels().get(kernel_id).is_none() {
+        return Err(CodegenError::MissingKernel { kernel: kernel_id });
+    }
+    let mut kernels = BTreeSet::new();
+    let mut seen_items = BTreeSet::new();
+    collect_jit_kernel_dependencies(program, kernel_id, &mut kernels, &mut seen_items);
+    Ok(kernels.into_iter().collect())
+}
+
+fn collect_jit_kernel_dependencies(
+    program: &Program,
+    kernel_id: KernelId,
+    kernels: &mut BTreeSet<KernelId>,
+    seen_items: &mut BTreeSet<ItemId>,
+) {
+    if !kernels.insert(kernel_id) {
+        return;
+    }
+    let kernel = &program.kernels()[kernel_id];
+    for (_, expr) in kernel.exprs().iter() {
+        if let KernelExprKind::Item(item) = expr.kind {
+            if !seen_items.insert(item) {
+                continue;
+            }
+            let item_decl = &program.items()[item];
+            if matches!(item_decl.kind, ItemKind::Signal(_)) {
+                continue;
+            }
+            if let Some(body) = item_decl.body {
+                collect_jit_kernel_dependencies(program, body, kernels, seen_items);
+            }
+        }
+    }
+}
+
+struct CraneliftCompiler<'a, M: Module> {
     program: &'a Program,
-    module: ObjectModule,
+    module: M,
     declared_functions: BTreeMap<KernelId, FuncId>,
     declared_signal_slots: BTreeMap<ItemId, DataId>,
+    signal_slot_layouts: BTreeMap<ItemId, LayoutId>,
     declared_imported_item_slots: BTreeMap<ItemId, DataId>,
+    imported_item_slot_layouts: BTreeMap<ItemId, LayoutId>,
     declared_callable_descriptors: BTreeMap<ItemId, DataId>,
     declared_external_funcs: BTreeMap<Box<str>, FuncId>,
     function_builder_ctx: FunctionBuilderContext,
     next_data_symbol: u64,
+    jit_symbols: Option<Arc<Mutex<BTreeMap<Box<str>, usize>>>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -542,28 +629,32 @@ enum StaticMaterializationPlan {
     },
 }
 
-impl<'a> CraneliftCompiler<'a> {
+fn build_target_isa() -> Result<OwnedTargetIsa, CodegenError> {
+    let isa_builder =
+        cranelift_native::builder().map_err(|message| CodegenError::HostIsaUnavailable {
+            message: message.to_owned().into_boxed_str(),
+        })?;
+    let mut flags = settings::builder();
+    flags
+        .enable("enable_llvm_abi_extensions")
+        .map_err(|error| CodegenError::TargetIsaCreation {
+            message: error.to_string().into_boxed_str(),
+        })?;
+    flags
+        .set("opt_level", "speed")
+        .map_err(|error| CodegenError::TargetIsaCreation {
+            message: error.to_string().into_boxed_str(),
+        })?;
+    isa_builder
+        .finish(settings::Flags::new(flags))
+        .map_err(|error| CodegenError::TargetIsaCreation {
+            message: error.to_string().into_boxed_str(),
+        })
+}
+
+impl<'a> CraneliftCompiler<'a, ObjectModule> {
     fn new(program: &'a Program) -> Result<Self, CodegenError> {
-        let isa_builder =
-            cranelift_native::builder().map_err(|message| CodegenError::HostIsaUnavailable {
-                message: message.to_owned().into_boxed_str(),
-            })?;
-        let mut flags = settings::builder();
-        flags
-            .enable("enable_llvm_abi_extensions")
-            .map_err(|error| CodegenError::TargetIsaCreation {
-                message: error.to_string().into_boxed_str(),
-            })?;
-        flags
-            .set("opt_level", "speed")
-            .map_err(|error| CodegenError::TargetIsaCreation {
-                message: error.to_string().into_boxed_str(),
-            })?;
-        let isa = isa_builder
-            .finish(settings::Flags::new(flags))
-            .map_err(|error| CodegenError::TargetIsaCreation {
-                message: error.to_string().into_boxed_str(),
-            })?;
+        let isa = build_target_isa()?;
         let module = ObjectModule::new(
             ObjectBuilder::new(isa, "aivi_backend", default_libcall_names()).map_err(|error| {
                 CodegenError::ObjectModuleCreation {
@@ -571,18 +662,359 @@ impl<'a> CraneliftCompiler<'a> {
                 }
             })?,
         );
+        Ok(CraneliftCompiler::with_module(program, module, None))
+    }
+}
 
-        Ok(Self {
+impl<'a> CraneliftCompiler<'a, JITModule> {
+    fn new_jit(program: &'a Program) -> Result<Self, CodegenError> {
+        let isa = build_target_isa()?;
+        let jit_symbols = Arc::new(Mutex::new(BTreeMap::new()));
+        let lookup_symbols = Arc::clone(&jit_symbols);
+        let mut builder = JITBuilder::with_isa(isa, default_libcall_names());
+        builder.symbol_lookup_fn(Box::new(move |symbol| {
+            lookup_symbols
+                .lock()
+                .ok()
+                .and_then(|symbols| symbols.get(symbol).copied())
+                .map(|address| address as *const u8)
+                .or_else(|| aivi_ffi_call::lookup_runtime_symbol(symbol))
+        }));
+        let module = JITModule::new(builder);
+        Ok(CraneliftCompiler::with_module(
+            program,
+            module,
+            Some(jit_symbols),
+        ))
+    }
+}
+
+impl<'a> CraneliftCompiler<'a, ObjectModule> {
+    /// Three-phase compilation:
+    /// 1. Sequential declaration — declares all kernel function symbols in the module.
+    /// 2. Sequential CLIF build — lowers each kernel IR to Cranelift CLIF IR.
+    /// 3. **Parallel Cranelift compile** — `ctx.compile(isa)` is data-parallel; each
+    ///    kernel produces independent machine code with no module mutations.
+    /// 4. Sequential emit — writes the compiled machine code bytes into the object module.
+    ///
+    /// Phases 1–2 and 4 remain sequential because they mutate shared module state.
+    /// Phase 3 uses Rayon's par_iter and yields a speedup proportional to kernel count.
+    fn compile(mut self) -> Result<CompiledProgram, CodegenErrors> {
+        let kernel_ids = self.non_ambient_kernel_ids();
+        self.prevalidate_kernels(kernel_ids.iter().copied())?;
+        self.declare_kernels(kernel_ids.iter().copied(), KernelLinkage::Local)?;
+        let built_kernels = self.build_kernels(kernel_ids.iter().copied())?;
+        self.finish_object_compilation(built_kernels)
+    }
+
+    fn compile_kernel(
+        mut self,
+        kernel_id: KernelId,
+    ) -> Result<CompiledKernelArtifact, CodegenErrors> {
+        self.ensure_compileable_kernel(kernel_id)
+            .map_err(wrap_one)?;
+        self.prevalidate_kernels([kernel_id])?;
+        self.declare_kernels([kernel_id], KernelLinkage::Local)?;
+        let built_kernel = self
+            .build_kernels([kernel_id])?
+            .into_iter()
+            .next()
+            .expect("single-kernel build should yield exactly one CLIF artifact");
+        let compiled = self.finish_object_compilation(vec![built_kernel])?;
+        compiled.into_single_kernel_artifact().ok_or_else(|| {
+            wrap_one(CodegenError::CraneliftModule {
+                kernel: Some(kernel_id),
+                message: "single-kernel compilation should emit exactly one kernel artifact".into(),
+            })
+        })
+    }
+
+    fn finish_object_compilation(
+        mut self,
+        built_kernels: Vec<BuiltKernel>,
+    ) -> Result<CompiledProgram, CodegenErrors> {
+        let emit_inputs = self.compile_machine_code(built_kernels)?;
+        let alignment = self.module.isa().function_alignment().minimum as u64;
+        let mut compiled_kernels = Vec::with_capacity(emit_inputs.len());
+        let mut emit_errors = Vec::new();
+        for (built, code_size) in emit_inputs {
+            let compiled = built
+                .ctx
+                .compiled_code()
+                .expect("compilation succeeded in phase 3");
+            let bytes = compiled.code_buffer();
+            let relocs: Vec<ModuleReloc> = compiled
+                .buffer
+                .relocs()
+                .iter()
+                .map(|reloc| ModuleReloc::from_mach_reloc(reloc, &built.ctx.func, built.func_id))
+                .collect();
+            if let Err(error) =
+                self.module
+                    .define_function_bytes(built.func_id, alignment, bytes, &relocs)
+            {
+                emit_errors.push(CodegenError::CraneliftModule {
+                    kernel: Some(built.kernel_id),
+                    message: error.to_string().into_boxed_str(),
+                });
+            } else {
+                compiled_kernels.push(self.compiled_kernel_metadata(
+                    built.kernel_id,
+                    built.symbol,
+                    built.clif,
+                    code_size,
+                ));
+            }
+        }
+        if !emit_errors.is_empty() {
+            return Err(CodegenErrors::new(emit_errors));
+        }
+
+        let object = self.module.finish().emit().map_err(|error| {
+            wrap_one(CodegenError::ObjectEmission {
+                message: error.to_string().into_boxed_str(),
+            })
+        })?;
+        let kernel_index = compiled_kernels
+            .iter()
+            .enumerate()
+            .map(|(index, kernel)| (kernel.kernel, index))
+            .collect();
+
+        Ok(CompiledProgram {
+            object,
+            kernels: compiled_kernels,
+            kernel_index,
+        })
+    }
+}
+
+impl<'a> CraneliftCompiler<'a, JITModule> {
+    fn compile_kernel_jit(
+        mut self,
+        kernel_id: KernelId,
+    ) -> Result<CompiledJitKernel, CodegenErrors> {
+        let kernel_ids = jit_dependency_kernel_ids(self.program, kernel_id).map_err(wrap_one)?;
+        self.prevalidate_kernels(kernel_ids.iter().copied())?;
+        self.declare_kernels(kernel_ids.iter().copied(), KernelLinkage::Local)?;
+        let built_kernels = self.build_kernels(kernel_ids.iter().copied())?;
+        self.finish_jit_compilation(kernel_id, built_kernels)
+    }
+
+    fn finish_jit_compilation(
+        mut self,
+        requested_kernel: KernelId,
+        built_kernels: Vec<BuiltKernel>,
+    ) -> Result<CompiledJitKernel, CodegenErrors> {
+        let emit_inputs = self.compile_machine_code(built_kernels)?;
+        let alignment = self.module.isa().function_alignment().minimum as u64;
+        let mut compiled_metadata = BTreeMap::new();
+        let mut requested_func_id = None;
+        let mut emit_errors = Vec::new();
+        for (built, code_size) in emit_inputs {
+            let compiled = built
+                .ctx
+                .compiled_code()
+                .expect("compilation succeeded in phase 3");
+            let bytes = compiled.code_buffer();
+            let relocs: Vec<ModuleReloc> = compiled
+                .buffer
+                .relocs()
+                .iter()
+                .map(|reloc| ModuleReloc::from_mach_reloc(reloc, &built.ctx.func, built.func_id))
+                .collect();
+            if let Err(error) =
+                self.module
+                    .define_function_bytes(built.func_id, alignment, bytes, &relocs)
+            {
+                emit_errors.push(CodegenError::CraneliftModule {
+                    kernel: Some(built.kernel_id),
+                    message: error.to_string().into_boxed_str(),
+                });
+                continue;
+            }
+            if built.kernel_id == requested_kernel {
+                requested_func_id = Some(built.func_id);
+            }
+            compiled_metadata.insert(
+                built.kernel_id,
+                self.compiled_kernel_metadata(built.kernel_id, built.symbol, built.clif, code_size),
+            );
+        }
+        if !emit_errors.is_empty() {
+            return Err(CodegenErrors::new(emit_errors));
+        }
+
+        self.ensure_supported_jit_externals(requested_kernel)
+            .map_err(wrap_one)?;
+        let requested_func_id = requested_func_id.ok_or_else(|| {
+            wrap_one(CodegenError::MissingKernel {
+                kernel: requested_kernel,
+            })
+        })?;
+        let (signal_slots, imported_item_slots) =
+            self.materialize_jit_data_slots(requested_kernel)?;
+        self.module.finalize_definitions().map_err(|error| {
+            wrap_one(CodegenError::CraneliftModule {
+                kernel: Some(requested_kernel),
+                message: error.to_string().into_boxed_str(),
+            })
+        })?;
+        let function = self.module.get_finalized_function(requested_func_id);
+        let caller = FunctionCaller::new(
+            self.build_jit_call_signature(requested_kernel)
+                .map_err(wrap_one)?,
+        );
+        compiled_metadata.remove(&requested_kernel).ok_or_else(|| {
+            wrap_one(CodegenError::MissingKernel {
+                kernel: requested_kernel,
+            })
+        })?;
+
+        Ok(CompiledJitKernel {
+            function,
+            caller,
+            signal_slots,
+            imported_item_slots,
+            _module: self.module,
+        })
+    }
+
+    fn ensure_supported_jit_externals(&self, kernel_id: KernelId) -> Result<(), CodegenError> {
+        for symbol in self.declared_external_funcs.keys() {
+            if aivi_ffi_call::lookup_runtime_symbol(symbol).is_none() {
+                return Err(CodegenError::UnsupportedJitSymbol {
+                    kernel: kernel_id,
+                    symbol: symbol.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn materialize_jit_data_slots(
+        &mut self,
+        kernel_id: KernelId,
+    ) -> Result<(Vec<JitDataSlot>, Vec<JitDataSlot>), CodegenErrors> {
+        let Some(symbols) = self.jit_symbols.as_ref() else {
+            return Err(wrap_one(CodegenError::JitModuleCreation {
+                message: "JIT compiler was created without a symbol table".into(),
+            }));
+        };
+        let mut symbol_table = symbols.lock().map_err(|_| {
+            wrap_one(CodegenError::JitModuleCreation {
+                message: "JIT symbol table is poisoned".into(),
+            })
+        })?;
+        let signal_slots = self.build_jit_slots(
+            kernel_id,
+            &self.signal_slot_layouts,
+            |program, item| signal_slot_symbol(program, item),
+            &mut symbol_table,
+        )?;
+        let imported_item_slots = self.build_jit_slots(
+            kernel_id,
+            &self.imported_item_slot_layouts,
+            |program, item| imported_item_slot_symbol(program, item),
+            &mut symbol_table,
+        )?;
+        Ok((signal_slots, imported_item_slots))
+    }
+
+    fn build_jit_slots(
+        &self,
+        kernel_id: KernelId,
+        layouts: &BTreeMap<ItemId, LayoutId>,
+        symbol_for: impl Fn(&Program, ItemId) -> String,
+        symbol_table: &mut BTreeMap<Box<str>, usize>,
+    ) -> Result<Vec<JitDataSlot>, CodegenErrors> {
+        let mut slots = Vec::with_capacity(layouts.len());
+        let mut errors = Vec::new();
+        for (&item, &layout) in layouts {
+            match self.field_abi_shape(kernel_id, layout, "JIT imported data slot") {
+                Ok(abi) => {
+                    let mut cell = vec![0u8; abi.size as usize].into_boxed_slice();
+                    let symbol: Box<str> = symbol_for(self.program, item).into_boxed_str();
+                    symbol_table.insert(symbol.clone(), cell.as_mut_ptr() as usize);
+                    slots.push(JitDataSlot { item, layout, cell });
+                }
+                Err(error) => errors.push(error),
+            }
+        }
+        if errors.is_empty() {
+            Ok(slots)
+        } else {
+            Err(CodegenErrors::new(errors))
+        }
+    }
+
+    fn build_jit_call_signature(&self, kernel_id: KernelId) -> Result<CallSignature, CodegenError> {
+        let kernel = &self.program.kernels()[kernel_id];
+        let mut args = Vec::with_capacity(kernel.convention.parameters.len());
+        for (index, parameter) in kernel.convention.parameters.iter().enumerate() {
+            args.push(self.jit_abi_value_kind_for_pass(
+                kernel_id,
+                parameter.layout,
+                parameter.pass_mode,
+                &format!("JIT entry parameter {index}"),
+            )?);
+        }
+        let result = self.jit_abi_value_kind_for_pass(
+            kernel_id,
+            kernel.convention.result.layout,
+            kernel.convention.result.pass_mode,
+            "JIT entry result",
+        )?;
+        Ok(CallSignature::new(args, result))
+    }
+
+    fn jit_abi_value_kind_for_pass(
+        &self,
+        kernel_id: KernelId,
+        layout: LayoutId,
+        pass: AbiPassMode,
+        detail: &str,
+    ) -> Result<AbiValueKind, CodegenError> {
+        match pass {
+            AbiPassMode::ByReference { .. } => Ok(AbiValueKind::Pointer),
+            AbiPassMode::ByValue { .. } => {
+                let abi = self.field_abi_shape(kernel_id, layout, detail)?;
+                match abi.ty {
+                    types::I8 => Ok(AbiValueKind::I8),
+                    types::I64 => Ok(AbiValueKind::I64),
+                    types::F64 => Ok(AbiValueKind::F64),
+                    other => Err(CodegenError::UnsupportedLayout {
+                        kernel: kernel_id,
+                        layout,
+                        detail: format!("{detail} lowers to unsupported JIT ABI type {other}")
+                            .into(),
+                    }),
+                }
+            }
+        }
+    }
+}
+
+impl<'a, M: Module> CraneliftCompiler<'a, M> {
+    fn with_module(
+        program: &'a Program,
+        module: M,
+        jit_symbols: Option<Arc<Mutex<BTreeMap<Box<str>, usize>>>>,
+    ) -> Self {
+        Self {
             program,
             module,
             declared_functions: BTreeMap::new(),
             declared_signal_slots: BTreeMap::new(),
+            signal_slot_layouts: BTreeMap::new(),
             declared_imported_item_slots: BTreeMap::new(),
+            imported_item_slot_layouts: BTreeMap::new(),
             declared_callable_descriptors: BTreeMap::new(),
             declared_external_funcs: BTreeMap::new(),
             function_builder_ctx: FunctionBuilderContext::new(),
             next_data_symbol: 0,
-        })
+            jit_symbols,
+        }
     }
 
     /// Ambient prelude kernels (e.g. `__aivi_list_*`) use runtime-only
@@ -1055,45 +1487,6 @@ impl<'a> CraneliftCompiler<'a> {
             .collect()
     }
 
-    /// Three-phase compilation:
-    /// 1. Sequential declaration — declares all kernel function symbols in the module.
-    /// 2. Sequential CLIF build — lowers each kernel IR to Cranelift CLIF IR.
-    /// 3. **Parallel Cranelift compile** — `ctx.compile(isa)` is data-parallel; each
-    ///    kernel produces independent machine code with no module mutations.
-    /// 4. Sequential emit — writes the compiled machine code bytes into the object module.
-    ///
-    /// Phases 1–2 and 4 remain sequential because they mutate shared module state.
-    /// Phase 3 uses Rayon's par_iter and yields a speedup proportional to kernel count.
-    fn compile(mut self) -> Result<CompiledProgram, CodegenErrors> {
-        let kernel_ids = self.non_ambient_kernel_ids();
-        self.prevalidate_kernels(kernel_ids.iter().copied())?;
-        self.declare_kernels(kernel_ids.iter().copied(), KernelLinkage::Local)?;
-        let built_kernels = self.build_kernels(kernel_ids.iter().copied())?;
-        self.finish_compilation(built_kernels)
-    }
-
-    fn compile_kernel(
-        mut self,
-        kernel_id: KernelId,
-    ) -> Result<CompiledKernelArtifact, CodegenErrors> {
-        self.ensure_compileable_kernel(kernel_id)
-            .map_err(wrap_one)?;
-        self.prevalidate_kernels([kernel_id])?;
-        self.declare_kernels([kernel_id], KernelLinkage::Local)?;
-        let built_kernel = self
-            .build_kernels([kernel_id])?
-            .into_iter()
-            .next()
-            .expect("single-kernel build should yield exactly one CLIF artifact");
-        let compiled = self.finish_compilation(vec![built_kernel])?;
-        compiled.into_single_kernel_artifact().ok_or_else(|| {
-            wrap_one(CodegenError::CraneliftModule {
-                kernel: Some(kernel_id),
-                message: "single-kernel compilation should emit exactly one kernel artifact".into(),
-            })
-        })
-    }
-
     fn declare_kernels<I>(
         &mut self,
         kernel_ids: I,
@@ -1135,13 +1528,10 @@ impl<'a> CraneliftCompiler<'a> {
         }
     }
 
-    fn finish_compilation(
-        mut self,
+    fn compile_machine_code(
+        &self,
         built_kernels: Vec<BuiltKernel>,
-    ) -> Result<CompiledProgram, CodegenErrors> {
-        // ── Phase 3: Parallel Cranelift compile ───────────────────────────────────
-        // `ctx.compile(isa, ctrl_plane)` transforms CLIF → machine code purely in
-        // memory, with no writes to shared module state. Safe to parallelise.
+    ) -> Result<Vec<(BuiltKernel, usize)>, CodegenErrors> {
         let isa = self.module.isa();
         let compile_results: Vec<Result<(BuiltKernel, usize), CodegenError>> = built_kernels
             .into_par_iter()
@@ -1162,85 +1552,39 @@ impl<'a> CraneliftCompiler<'a> {
             })
             .collect();
 
-        let mut compiled_kernels = Vec::with_capacity(compile_results.len());
-        let mut compile_errors = Vec::new();
         let mut emit_inputs = Vec::with_capacity(compile_results.len());
+        let mut compile_errors = Vec::new();
         for result in compile_results {
             match result {
-                Ok((built, code_size)) => {
-                    emit_inputs.push((
-                        built.kernel_id,
-                        built.func_id,
-                        built.ctx,
-                        built.symbol,
-                        built.clif,
-                        code_size,
-                    ));
-                }
+                Ok(compiled) => emit_inputs.push(compiled),
                 Err(error) => compile_errors.push(error),
             }
         }
-        if !compile_errors.is_empty() {
-            return Err(CodegenErrors::new(compile_errors));
+        if compile_errors.is_empty() {
+            Ok(emit_inputs)
+        } else {
+            Err(CodegenErrors::new(compile_errors))
         }
+    }
 
-        // ── Phase 4: Sequential emit ──────────────────────────────────────────────
-        // Write machine code + relocations into the shared object module.
-        let alignment = isa.function_alignment().minimum as u64;
-        let mut emit_errors = Vec::new();
-        for (kernel_id, func_id, ctx, symbol, clif, code_size) in &emit_inputs {
-            let compiled = ctx
-                .compiled_code()
-                .expect("compilation succeeded in phase 3");
-            let bytes = compiled.code_buffer();
-            let relocs: Vec<ModuleReloc> = compiled
-                .buffer
-                .relocs()
-                .iter()
-                .map(|reloc| ModuleReloc::from_mach_reloc(reloc, &ctx.func, *func_id))
-                .collect();
-            if let Err(error) = self
-                .module
-                .define_function_bytes(*func_id, alignment, bytes, &relocs)
-            {
-                emit_errors.push(CodegenError::CraneliftModule {
-                    kernel: Some(*kernel_id),
-                    message: error.to_string().into_boxed_str(),
-                });
-            } else {
-                compiled_kernels.push(CompiledKernel {
-                    kernel: *kernel_id,
-                    fingerprint: compute_kernel_fingerprint_for(
-                        self.program,
-                        *kernel_id,
-                        &self.program.kernels()[*kernel_id],
-                    ),
-                    symbol: symbol.clone(),
-                    clif: clif.clone(),
-                    code_size: *code_size,
-                });
-            }
+    fn compiled_kernel_metadata(
+        &self,
+        kernel_id: KernelId,
+        symbol: Box<str>,
+        clif: Box<str>,
+        code_size: usize,
+    ) -> CompiledKernel {
+        CompiledKernel {
+            kernel: kernel_id,
+            fingerprint: compute_kernel_fingerprint_for(
+                self.program,
+                kernel_id,
+                &self.program.kernels()[kernel_id],
+            ),
+            symbol,
+            clif,
+            code_size,
         }
-        if !emit_errors.is_empty() {
-            return Err(CodegenErrors::new(emit_errors));
-        }
-
-        let object = self.module.finish().emit().map_err(|error| {
-            wrap_one(CodegenError::ObjectEmission {
-                message: error.to_string().into_boxed_str(),
-            })
-        })?;
-        let kernel_index = compiled_kernels
-            .iter()
-            .enumerate()
-            .map(|(index, kernel)| (kernel.kernel, index))
-            .collect();
-
-        Ok(CompiledProgram {
-            object,
-            kernels: compiled_kernels,
-            kernel_index,
-        })
     }
 
     fn ensure_kernel_declared(
@@ -3592,7 +3936,11 @@ impl<'a> CraneliftCompiler<'a> {
         Ok(DirectApplyPlan::Item { body })
     }
 
-    fn declare_signal_item_slot(&mut self, item: ItemId) -> Result<DataId, CodegenError> {
+    fn declare_signal_item_slot(
+        &mut self,
+        item: ItemId,
+        layout: LayoutId,
+    ) -> Result<DataId, CodegenError> {
         if let Some(data_id) = self.declared_signal_slots.get(&item).copied() {
             return Ok(data_id);
         }
@@ -3606,6 +3954,7 @@ impl<'a> CraneliftCompiler<'a> {
                 message: error.to_string().into_boxed_str(),
             })?;
         self.declared_signal_slots.insert(item, data_id);
+        self.signal_slot_layouts.insert(item, layout);
         Ok(data_id)
     }
 
@@ -3623,13 +3972,17 @@ impl<'a> CraneliftCompiler<'a> {
             expr_layout,
             &format!("signal item `{item_name}` current-value slot"),
         )?;
-        let data_id = self.declare_signal_item_slot(item)?;
+        let data_id = self.declare_signal_item_slot(item, expr_layout)?;
         let global = self.module.declare_data_in_func(data_id, builder.func);
         let slot = builder.ins().symbol_value(self.pointer_type(), global);
         Ok(builder.ins().load(abi.ty, MemFlags::new(), slot, 0))
     }
 
-    fn declare_imported_item_slot(&mut self, item: ItemId) -> Result<DataId, CodegenError> {
+    fn declare_imported_item_slot(
+        &mut self,
+        item: ItemId,
+        layout: LayoutId,
+    ) -> Result<DataId, CodegenError> {
         if let Some(data_id) = self.declared_imported_item_slots.get(&item).copied() {
             return Ok(data_id);
         }
@@ -3643,6 +3996,7 @@ impl<'a> CraneliftCompiler<'a> {
                 message: error.to_string().into_boxed_str(),
             })?;
         self.declared_imported_item_slots.insert(item, data_id);
+        self.imported_item_slot_layouts.insert(item, layout);
         Ok(data_id)
     }
 
@@ -3660,7 +4014,7 @@ impl<'a> CraneliftCompiler<'a> {
             expr_layout,
             &format!("imported item `{item_name}` value slot"),
         )?;
-        let data_id = self.declare_imported_item_slot(item)?;
+        let data_id = self.declare_imported_item_slot(item, expr_layout)?;
         let global = self.module.declare_data_in_func(data_id, builder.func);
         let slot = builder.ins().symbol_value(self.pointer_type(), global);
         Ok(builder.ins().load(abi.ty, MemFlags::new(), slot, 0))

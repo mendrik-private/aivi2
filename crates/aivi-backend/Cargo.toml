@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+aivi-ffi-call = { path = "../aivi-ffi-call" }
 aivi-base.workspace = true
 aivi-core = { path = "../aivi-core" }
 aivi-hir.workspace = true
@@ -12,6 +13,7 @@ aivi-lambda.workspace = true
 aivi-typing.workspace = true
 cranelift-codegen = "0.130.0"
 cranelift-frontend = "0.130.0"
+cranelift-jit = "0.130.0"
 cranelift-module = "0.130.0"
 cranelift-native = "0.130.0"
 cranelift-object = "0.130.0"
