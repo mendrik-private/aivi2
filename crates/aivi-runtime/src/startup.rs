@@ -853,6 +853,9 @@ fn parse_temporal_duration(value: &RuntimeValue) -> Option<Duration> {
 fn parse_temporal_count(value: &RuntimeValue) -> Option<u64> {
     match strip_runtime_signal(value) {
         RuntimeValue::Int(value) if *value > 0 => Some(*value as u64),
+        RuntimeValue::SuffixedInteger { raw, suffix } if suffix.as_ref() == "times" => {
+            raw.parse::<u64>().ok().filter(|value| *value > 0)
+        }
         _ => None,
     }
 }
@@ -5730,6 +5733,10 @@ signal scoreDeltaFn : Signal Int =
         let lowered = lower_text(
             "runtime-startup-delay-signal.aivi",
             r#"
+domain Duration over Int = {
+    literal ms : Int -> Duration
+}
+
 provider custom.feed
     wakeup: providerTrigger
 
@@ -5738,7 +5745,7 @@ signal score : Signal Int
 
 signal delayedScore : Signal Int =
     score
-     delay|> 25
+     |> delay 25ms
 "#,
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
@@ -5817,6 +5824,14 @@ signal delayedScore : Signal Int =
         let lowered = lower_text(
             "runtime-startup-burst-signal.aivi",
             r#"
+domain Duration over Int = {
+    literal ms : Int -> Duration
+}
+
+domain Retry over Int = {
+    literal times : Int -> Retry
+}
+
 provider custom.feed
     wakeup: providerTrigger
 
@@ -5825,7 +5840,7 @@ signal score : Signal Int
 
 signal burstScore : Signal Int =
     score
-     burst|> 15 3
+     |> burst 15ms 3times
 "#,
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
@@ -5898,6 +5913,10 @@ signal burstScore : Signal Int =
         let lowered = lower_text(
             "runtime-startup-delay-retrigger-signal.aivi",
             r#"
+domain Duration over Int = {
+    literal ms : Int -> Duration
+}
+
 provider custom.feed
     wakeup: providerTrigger
 
@@ -5906,7 +5925,7 @@ signal score : Signal Int
 
 signal delayedScore : Signal Int =
     score
-     delay|> 40
+     |> delay 40ms
 "#,
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())
@@ -6000,6 +6019,14 @@ signal delayedScore : Signal Int =
         let lowered = lower_text(
             "runtime-startup-delay-burst-composed-signal.aivi",
             r#"
+domain Duration over Int = {
+    literal ms : Int -> Duration
+}
+
+domain Retry over Int = {
+    literal times : Int -> Retry
+}
+
 provider custom.feed
     wakeup: providerTrigger
 
@@ -6008,8 +6035,8 @@ signal score : Signal Int
 
 signal flashScore : Signal Int =
     score
-     delay|> 15
-     burst|> 12 3
+     |> delay 15ms
+     |> burst 12ms 3times
 "#,
         );
         let assembly = crate::assemble_hir_runtime(lowered.hir.module())

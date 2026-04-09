@@ -3113,26 +3113,20 @@ impl Formatter {
                 )
             }
             PipeStageKind::Diff { expr } => self.format_pipe_expr_stage("-|>", stage, expr),
-            PipeStageKind::Delay { duration } => {
-                self.format_pipe_expr_stage("delay|>", stage, duration)
-            }
-            PipeStageKind::Burst { every, count } => {
-                let every_str = self.format_expr_inline(every, EXPR_PIPE_PREC + 1);
-                let count_str = self.format_expr_inline(count, EXPR_PIPE_PREC + 1);
+            PipeStageKind::Delay { duration } => self.format_prefixed_pipe_keyword_stage(
+                "delay",
+                stage,
+                self.format_temporal_duration_expr_inline(duration),
+            ),
+            PipeStageKind::Burst { every, count } => self.format_prefixed_pipe_keyword_stage(
+                "burst",
+                stage,
                 format!(
-                    "burst|>{} {every_str} {count_str}{}",
-                    stage
-                        .subject_memo
-                        .as_ref()
-                        .map(|memo| format!(" #{}", memo.text))
-                        .unwrap_or_default(),
-                    stage
-                        .result_memo
-                        .as_ref()
-                        .map(|memo| format!(" #{}", memo.text))
-                        .unwrap_or_default()
-                )
-            }
+                    "{} {}",
+                    self.format_temporal_duration_expr_inline(every),
+                    self.format_temporal_count_expr_inline(count)
+                ),
+            ),
         }
     }
 
@@ -3188,26 +3182,21 @@ impl Formatter {
                 )
             }
             PipeStageKind::Diff { expr } => self.format_aligned_pipe_stage("-|>", stage, expr),
-            PipeStageKind::Delay { duration } => {
-                self.format_aligned_pipe_stage("delay|>", stage, duration)
-            }
-            PipeStageKind::Burst { every, count } => {
-                let every_str = self.format_expr_inline(every, EXPR_PIPE_PREC + 1);
-                let count_str = self.format_expr_inline(count, EXPR_PIPE_PREC + 1);
-                format!(
-                    "burst|>{} {every_str} {count_str}{}",
-                    stage
-                        .subject_memo
-                        .as_ref()
-                        .map(|memo| format!(" #{}", memo.text))
-                        .unwrap_or_default(),
-                    stage
-                        .result_memo
-                        .as_ref()
-                        .map(|memo| format!(" #{}", memo.text))
-                        .unwrap_or_default()
-                )
-            }
+            PipeStageKind::Delay { duration } => self.format_aligned_prefixed_pipe_keyword_stage(
+                "delay",
+                stage,
+                self.format_temporal_duration_expr_inline(duration),
+            ),
+            PipeStageKind::Burst { every, count } => self
+                .format_aligned_prefixed_pipe_keyword_stage(
+                    "burst",
+                    stage,
+                    format!(
+                        "{} {}",
+                        self.format_temporal_duration_expr_inline(every),
+                        self.format_temporal_count_expr_inline(count)
+                    ),
+                ),
         }
     }
 
@@ -3286,6 +3275,63 @@ impl Formatter {
                 .map(|memo| format!(" #{}", memo.text))
                 .unwrap_or_default()
         )
+    }
+
+    fn format_prefixed_pipe_keyword_stage(
+        &self,
+        keyword: &str,
+        stage: &PipeStage,
+        args: String,
+    ) -> String {
+        format!(
+            "|>{} {keyword} {args}{}",
+            stage
+                .subject_memo
+                .as_ref()
+                .map(|memo| format!(" #{}", memo.text))
+                .unwrap_or_default(),
+            stage
+                .result_memo
+                .as_ref()
+                .map(|memo| format!(" #{}", memo.text))
+                .unwrap_or_default()
+        )
+    }
+
+    fn format_aligned_prefixed_pipe_keyword_stage(
+        &self,
+        keyword: &str,
+        stage: &PipeStage,
+        args: String,
+    ) -> String {
+        format!(
+            "{}|>{} {keyword} {args}{}",
+            self.pipe_alignment_prefix("|>"),
+            stage
+                .subject_memo
+                .as_ref()
+                .map(|memo| format!(" #{}", memo.text))
+                .unwrap_or_default(),
+            stage
+                .result_memo
+                .as_ref()
+                .map(|memo| format!(" #{}", memo.text))
+                .unwrap_or_default()
+        )
+    }
+
+    fn format_temporal_duration_expr_inline(&self, expr: &Expr) -> String {
+        match &expr.kind {
+            ExprKind::Integer(literal) => format!("{}ms", literal.raw),
+            _ => self.format_expr_inline(expr, EXPR_PIPE_PREC + 1),
+        }
+    }
+
+    fn format_temporal_count_expr_inline(&self, expr: &Expr) -> String {
+        match &expr.kind {
+            ExprKind::Integer(literal) => format!("{}times", literal.raw),
+            _ => self.format_expr_inline(expr, EXPR_PIPE_PREC + 1),
+        }
     }
 
     fn pipe_alignment_prefix(&self, operator: &str) -> &'static str {
@@ -4108,10 +4154,10 @@ value view =
             "|>resolved\n",
             "\n",
             "signal delayed=1\n",
-            "delay|>#current 10 #later\n",
+            "|>#current delay 10 #later\n",
             "\n",
             "signal replayed=1\n",
-            "burst|>#current 10 3 #later\n",
+            "|>#current burst 10 3 #later\n",
             "\n",
             "signal counted=1\n",
             "+|>#event 0 step #total\n",
@@ -4125,10 +4171,10 @@ value view =
                 "  |> resolved\n",
                 "\n",
                 "signal delayed = 1\n",
-                " delay|> #current 10 #later\n",
+                "  |> #current delay 10ms #later\n",
                 "\n",
                 "signal replayed = 1\n",
-                " burst|> #current 10 3 #later\n",
+                "  |> #current burst 10ms 3times #later\n",
                 "\n",
                 "signal counted = 1\n",
                 " +|> #event 0 step #total\n",

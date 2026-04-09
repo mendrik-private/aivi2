@@ -118,6 +118,8 @@ pub const ORPHAN_STANDALONE_TYPE_ANNOTATION: DiagnosticCode =
     DiagnosticCode::new("syntax", "orphan-standalone-type-annotation");
 pub const PARSE_DEPTH_EXCEEDED: DiagnosticCode =
     DiagnosticCode::new("syntax", "parse-depth-exceeded");
+pub const REMOVED_TEMPORAL_PIPE_OPERATOR: DiagnosticCode =
+    DiagnosticCode::new("syntax", "removed-temporal-pipe-operator");
 pub const TRAILING_DECLARATION_BODY_TOKEN: DiagnosticCode =
     DiagnosticCode::new("syntax", "trailing-declaration-body-token");
 pub const UNEXPECTED_CHARACTER: DiagnosticCode =

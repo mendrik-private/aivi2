@@ -614,7 +614,8 @@ Rules:
 - `operator #name expr` binds the stage input for that stage body only.
 - `operator expr #name` binds the stage result for the rest of the pipe after that stage.
 - Both forms may appear on the same stage.
-- Supported on ordinary pipe stages: `|>`, `|`, `?|>`, `||>`, `T|>`, `F|>`, `*|>`, `<|*`, `!|>`, `~|>`, `delay|>`, `burst|>`, `+|>`, `-|>`, `@|>`, and `<|@`.
+- Supported on ordinary pipe stages: `|>`, `|`, `?|>`, `||>`, `T|>`, `F|>`, `*|>`, `<|*`, `!|>`, `~|>`, `+|>`, `-|>`, `@|>`, and `<|@`.
+- Temporal replay stages use ordinary `|>` with reserved heads: `|> delay <duration>` and `|> burst <duration> <count>`.
 - `||>` runs and `T|>` / `F|>` pairs share memo flow across the grouped branches. Put the same result memo name on each arm when the merged branch result is needed later.
 - `&|>` applicative clusters follow separate applicative-cluster semantics rather than the single-subject memo flow above.
 

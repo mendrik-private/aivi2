@@ -130,8 +130,9 @@ pub async fn semantic_tokens_full(
     let mut prev_line: u32 = 0;
     let mut prev_char: u32 = 0;
 
-    for token in lexed.tokens() {
-        let Some(type_index) = soft_or_hard_token_type_index(*token, source) else {
+    for (index, token) in lexed.tokens().iter().copied().enumerate() {
+        let Some(type_index) = soft_or_hard_token_type_index(token, lexed.tokens(), index, source)
+        else {
             continue;
         };
 
@@ -176,10 +177,13 @@ pub async fn semantic_tokens_full(
 
 fn soft_or_hard_token_type_index(
     token: aivi_syntax::Token,
+    tokens: &[aivi_syntax::Token],
+    index: usize,
     source: &aivi_base::SourceFile,
 ) -> Option<u32> {
     match token.kind() {
         TokenKind::Identifier if token.text(source) == "when" => Some(IDX_KEYWORD),
+        TokenKind::Identifier if temporal_stage_head(tokens, index, source) => Some(IDX_KEYWORD),
         // Interpolated string literals need TextMate's nested scopes so the
         // interpolation braces and body can be themed independently.
         TokenKind::StringLiteral if string_literal_has_interpolation(token.text(source)) => None,
@@ -189,6 +193,53 @@ fn soft_or_hard_token_type_index(
         TokenKind::Identifier => None,
         kind => token_type_index(kind),
     }
+}
+
+fn temporal_stage_head(
+    tokens: &[aivi_syntax::Token],
+    index: usize,
+    source: &aivi_base::SourceFile,
+) -> bool {
+    let token = tokens[index];
+    if token.kind() != TokenKind::Identifier {
+        return false;
+    }
+    if !matches!(token.text(source), "delay" | "burst") {
+        return false;
+    }
+
+    let mut cursor = index;
+    loop {
+        let Some(previous) = previous_significant_token(tokens, cursor) else {
+            return false;
+        };
+        match tokens[previous].kind() {
+            TokenKind::PipeTransform => return true,
+            TokenKind::Identifier => {
+                let Some(hash) = previous_significant_token(tokens, previous) else {
+                    return false;
+                };
+                if tokens[hash].kind() != TokenKind::Hash {
+                    return false;
+                }
+                cursor = hash;
+            }
+            _ => return false,
+        }
+    }
+}
+
+fn previous_significant_token(tokens: &[aivi_syntax::Token], before: usize) -> Option<usize> {
+    (0..before).rev().find(|&index| {
+        !matches!(
+            tokens[index].kind(),
+            TokenKind::Whitespace
+                | TokenKind::Newline
+                | TokenKind::LineComment
+                | TokenKind::BlockComment
+                | TokenKind::DocComment
+        )
+    })
 }
 
 fn string_literal_has_interpolation(literal: &str) -> bool {
@@ -219,7 +270,7 @@ fn string_literal_has_interpolation(literal: &str) -> bool {
 mod tests {
     use super::{
         IDX_KEYWORD, IDX_STRING, soft_or_hard_token_type_index, string_literal_has_interpolation,
-        token_type_index,
+        temporal_stage_head, token_type_index,
     };
     use aivi_base::{FileId, SourceFile};
     use aivi_syntax::{TokenKind, lex_module};
@@ -242,7 +293,7 @@ mod tests {
             .copied()
             .expect("expected `when` token");
         assert_eq!(
-            soft_or_hard_token_type_index(when, &source),
+            soft_or_hard_token_type_index(when, lexed.tokens(), 0, &source),
             Some(IDX_KEYWORD)
         );
     }
@@ -282,7 +333,16 @@ mod tests {
             .copied()
             .expect("expected a string literal token");
 
-        assert_eq!(soft_or_hard_token_type_index(string, &source), None);
+        let string_index = lexed
+            .tokens()
+            .iter()
+            .position(|token| *token == string)
+            .expect("expected string token index");
+
+        assert_eq!(
+            soft_or_hard_token_type_index(string, lexed.tokens(), string_index, &source),
+            None
+        );
     }
 
     #[test]
@@ -300,9 +360,97 @@ mod tests {
             .copied()
             .expect("expected a string literal token");
 
+        let string_index = lexed
+            .tokens()
+            .iter()
+            .position(|token| *token == string)
+            .expect("expected string token index");
+
         assert_eq!(
-            soft_or_hard_token_type_index(string, &source),
+            soft_or_hard_token_type_index(string, lexed.tokens(), string_index, &source),
             Some(IDX_STRING)
+        );
+    }
+
+    #[test]
+    fn classifies_temporal_stage_heads_as_soft_keywords() {
+        let source = SourceFile::new(
+            FileId::new(0),
+            "test.aivi",
+            "signal later = click\n  |> #memo delay 80ms\n  |> burst 150ms 3times\n",
+        );
+        let lexed = lex_module(&source);
+        let delay_index = lexed
+            .tokens()
+            .iter()
+            .position(|token| {
+                token.kind() == TokenKind::Identifier && token.text(&source) == "delay"
+            })
+            .expect("expected `delay` token");
+        let burst_index = lexed
+            .tokens()
+            .iter()
+            .position(|token| {
+                token.kind() == TokenKind::Identifier && token.text(&source) == "burst"
+            })
+            .expect("expected `burst` token");
+
+        assert!(temporal_stage_head(lexed.tokens(), delay_index, &source));
+        assert!(temporal_stage_head(lexed.tokens(), burst_index, &source));
+        assert_eq!(
+            soft_or_hard_token_type_index(
+                lexed.tokens()[delay_index],
+                lexed.tokens(),
+                delay_index,
+                &source
+            ),
+            Some(IDX_KEYWORD)
+        );
+        assert_eq!(
+            soft_or_hard_token_type_index(
+                lexed.tokens()[burst_index],
+                lexed.tokens(),
+                burst_index,
+                &source
+            ),
+            Some(IDX_KEYWORD)
+        );
+    }
+
+    #[test]
+    fn leaves_ordinary_delay_identifiers_unclassified() {
+        let source = SourceFile::new(
+            FileId::new(0),
+            "test.aivi",
+            "value delay = 1\nsignal later = click |> transform delay\n",
+        );
+        let lexed = lex_module(&source);
+        let delay_index = lexed
+            .tokens()
+            .iter()
+            .position(|token| {
+                token.kind() == TokenKind::Identifier
+                    && token.text(&source) == "delay"
+                    && !temporal_stage_head(
+                        lexed.tokens(),
+                        lexed
+                            .tokens()
+                            .iter()
+                            .position(|candidate| candidate == token)
+                            .expect("expected delay index"),
+                        &source,
+                    )
+            })
+            .expect("expected ordinary `delay` identifier");
+
+        assert_eq!(
+            soft_or_hard_token_type_index(
+                lexed.tokens()[delay_index],
+                lexed.tokens(),
+                delay_index,
+                &source
+            ),
+            None
         );
     }
 }

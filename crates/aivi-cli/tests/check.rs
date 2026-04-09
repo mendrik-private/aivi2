@@ -1551,11 +1551,11 @@ fn check_accepts_delay_and_burst_pipe_stages() {
             "\n",
             "signal delayedScore : Signal Int =\n",
             "    score\n",
-            "     delay|> 200\n",
+            "     |> delay 200ms\n",
             "\n",
             "signal burstScore : Signal Int =\n",
             "    score\n",
-            "     burst|> 75 3\n",
+            "     |> burst 75ms 3times\n",
         ),
     );
     let output = Command::new(env!("CARGO_BIN_EXE_aivi"))

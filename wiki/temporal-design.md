@@ -52,7 +52,7 @@ signal snapshotReady = placeCoord
  |> delay 1ms
 
 signal computerFlashTick = flashStart
- |> burst every 200ms 3times
+ |> burst 200ms 3times
 ```
 
 Or, if the existing recurrence family stays visible:

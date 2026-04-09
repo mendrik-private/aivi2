@@ -659,7 +659,7 @@ fn elaborate_burst_stage(
             blockers,
         });
     };
-    if !matches!(count_ty, GateType::Primitive(BuiltinType::Int)) {
+    if !is_burst_count_stage_type(&count_ty) {
         blockers.push(TemporalElaborationBlocker::InvalidBurstCountType { found: count_ty });
     }
 
@@ -708,9 +708,10 @@ fn is_numeric_payload(ty: &GateType) -> bool {
 }
 
 fn is_duration_stage_type(ty: &GateType) -> bool {
+    matches!(ty, GateType::Domain { name, .. } if name == "Duration")
+}
+
+fn is_burst_count_stage_type(ty: &GateType) -> bool {
     matches!(ty, GateType::Primitive(BuiltinType::Int))
-        || matches!(
-            ty,
-            GateType::Domain { name, .. } if name == "Duration"
-        )
+        || matches!(ty, GateType::Domain { name, .. } if name == "Retry")
 }

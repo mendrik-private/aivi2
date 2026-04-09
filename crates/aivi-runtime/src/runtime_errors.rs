@@ -468,7 +468,7 @@ pub fn render_runtime_error(
             ))
             .with_code(SIGNAL_EVAL_FAILED)
             .with_note(format!(
-                "pipe stage {:?}/{} must evaluate to a positive Int or Duration",
+                "pipe stage {:?}/{} must evaluate to a positive Duration value such as `200ms`",
                 pipeline, stage_index
             ));
             if let Some(span) = source_map.item_span(*item) {
@@ -490,7 +490,7 @@ pub fn render_runtime_error(
             ))
             .with_code(SIGNAL_EVAL_FAILED)
             .with_note(format!(
-                "pipe stage {:?}/{} must evaluate to a positive Int or Duration",
+                "pipe stage {:?}/{} must evaluate to a positive Duration value such as `200ms`",
                 pipeline, stage_index
             ));
             if let Some(span) = source_map.item_span(*item) {
@@ -512,7 +512,7 @@ pub fn render_runtime_error(
             ))
             .with_code(SIGNAL_EVAL_FAILED)
             .with_note(format!(
-                "pipe stage {:?}/{} must evaluate to a positive Int",
+                "pipe stage {:?}/{} must evaluate to a positive burst count such as `3times`",
                 pipeline, stage_index
             ));
             if let Some(span) = source_map.item_span(*item) {

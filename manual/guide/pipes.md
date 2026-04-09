@@ -281,33 +281,33 @@ signal scoreDelta = score
  -|> 0
 ```
 
-## Delay pipe `delay|>`
+## Delay pipe `|> delay`
 
-`delay|>` re-emits the current signal payload once after a duration:
+`|> delay` re-emits the current signal payload once after a duration:
 
 ```aivi
 signal click : Signal Text
 
 signal delayedClick = click
- delay|> 120
+  |> delay 120ms
 ```
 
 The payload is preserved. If a new upstream event arrives before the delay fires, the newer event
 replaces the pending one.
 
-## Burst pipe `burst|>`
+## Burst pipe `|> burst`
 
-`burst|>` replays the current signal payload a fixed number of times on a scheduler-owned cadence:
+`|> burst` replays the current signal payload a fixed number of times on a scheduler-owned cadence:
 
 ```aivi
 signal click : Signal Text
 
 signal flashingClick = click
- burst|> 200 3
+  |> burst 200ms 3times
 ```
 
 This emits three delayed replays of the same payload. The first replay happens after the first
-interval, not immediately. As with `delay|>`, a newer upstream event replaces any in-flight burst.
+interval, not immediately. As with `|> delay`, a newer upstream event replaces any in-flight burst.
 
 ## Tap `|`
 

@@ -6918,7 +6918,7 @@ impl<'a> GateTypeContext<'a> {
         let GateType::Signal(input_payload) = subject else {
             info.issues.push(GateIssue::InvalidPipeStageInput {
                 span: self.module.exprs()[duration_expr].span,
-                stage: "delay|>",
+                stage: "|> delay",
                 expected: "Signal _".to_owned(),
                 actual: subject.to_string(),
             });
@@ -6936,8 +6936,8 @@ impl<'a> GateTypeContext<'a> {
         if !is_duration_gate_type(&duration_ty) {
             info.issues.push(GateIssue::InvalidPipeStageInput {
                 span: self.module.exprs()[duration_expr].span,
-                stage: "delay|>",
-                expected: "Int or Duration".to_owned(),
+                stage: "|> delay",
+                expected: "Duration".to_owned(),
                 actual: duration_ty.to_string(),
             });
             return self.finalize_expr_info(info);
@@ -6958,7 +6958,7 @@ impl<'a> GateTypeContext<'a> {
         let GateType::Signal(input_payload) = subject else {
             info.issues.push(GateIssue::InvalidPipeStageInput {
                 span: self.module.exprs()[every_expr].span,
-                stage: "burst|>",
+                stage: "|> burst",
                 expected: "Signal _".to_owned(),
                 actual: subject.to_string(),
             });
@@ -6974,8 +6974,8 @@ impl<'a> GateTypeContext<'a> {
         if !is_duration_gate_type(&every_ty) {
             info.issues.push(GateIssue::InvalidPipeStageInput {
                 span: self.module.exprs()[every_expr].span,
-                stage: "burst|>",
-                expected: "Int or Duration".to_owned(),
+                stage: "|> burst",
+                expected: "Duration".to_owned(),
                 actual: every_ty.to_string(),
             });
             return self.finalize_expr_info(info);
@@ -6987,11 +6987,11 @@ impl<'a> GateTypeContext<'a> {
         let Some(count_ty) = count_ty else {
             return self.finalize_expr_info(info);
         };
-        if !matches!(count_ty, GateType::Primitive(BuiltinType::Int)) {
+        if !is_burst_count_gate_type(&count_ty) {
             info.issues.push(GateIssue::InvalidPipeStageInput {
                 span: self.module.exprs()[count_expr].span,
-                stage: "burst|>",
-                expected: "Int".to_owned(),
+                stage: "|> burst",
+                expected: "Int or Retry (for example `3times`)".to_owned(),
                 actual: count_ty.to_string(),
             });
             return self.finalize_expr_info(info);
@@ -7837,8 +7837,12 @@ pub(crate) fn is_numeric_gate_type(ty: &GateType) -> bool {
 }
 
 pub(crate) fn is_duration_gate_type(ty: &GateType) -> bool {
+    matches!(ty, GateType::Domain { name, .. } if name == "Duration")
+}
+
+pub(crate) fn is_burst_count_gate_type(ty: &GateType) -> bool {
     matches!(ty, GateType::Primitive(BuiltinType::Int))
-        || matches!(ty, GateType::Domain { name, .. } if name == "Duration")
+        || matches!(ty, GateType::Domain { name, .. } if name == "Retry")
 }
 
 pub(crate) fn truthy_falsy_pair_stages<'a>(

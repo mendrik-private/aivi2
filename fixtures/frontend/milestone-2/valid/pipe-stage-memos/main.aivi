@@ -63,11 +63,11 @@ signal deltaValue : Signal Int = source
  -|> #current current
 
 signal delayedValue : Signal Int = source
- delay|> 10 #later
+ |> delay 10ms #later
  | later
 
 signal burstValue : Signal Int = source
- burst|> 10 3 #later
+ |> burst 10ms 3times #later
  | later
 
 signal accumulated : Signal Int = source

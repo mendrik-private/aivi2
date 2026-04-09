@@ -179,16 +179,16 @@ Signals can also schedule future replays of an existing payload without introduc
 signal click : Signal Text
 
 signal delayedClick = click
- delay|> 80
+  |> delay 80ms
 
 signal flashingClick = click
- burst|> 150 3
+  |> burst 150ms 3times
 ```
 
-- `delay|> d` publishes the upstream payload once after `d`.
-- `burst|> every count` publishes the same payload `count` times, one replay per interval.
+- `|> delay d` publishes the upstream payload once after `d`.
+- `|> burst d count` publishes the same payload `count` times, one replay per interval `d`.
 - A newer upstream event replaces any pending delay or burst schedule.
-- The first `burst|>` replay happens after the first interval.
+- The first `|> burst` replay happens after the first interval.
 
 ## Shaping signal outputs
 

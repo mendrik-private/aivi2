@@ -40,7 +40,7 @@ Covered ordinary stages:
 - fan-out `*|>` and join `<|*`
 - validation `!|>`
 - previous/diff `~|>` / `-|>`
-- delay/burst `delay|>` / `burst|>`
+- delay/burst `|> delay` / `|> burst`
 - accumulation `+|>`
 - recurrence `@|>` / `<|@`
 
@@ -61,7 +61,7 @@ transform.
 The syntax layer now preserves memos in the formatter for:
 
 - case groups
-- `burst|>`
+- `|> burst`
 - `+|>`
 
 The repo also has a dedicated valid fixture covering broad stage usage:

@@ -4412,21 +4412,35 @@ impl<'a> Parser<'a> {
             let (subject_memo, stage_kind, result_memo) = match kind {
                 TokenKind::PipeTransform => {
                     let subject_memo = self.parse_optional_pipe_memo(cursor, end);
-                    let expr = self.parse_patch_apply_expr(
-                        cursor,
-                        end,
-                        stop.with_pipe_stage().with_hash(),
-                    )?;
-                    let result_memo = self.parse_optional_pipe_memo(cursor, end);
-                    if cluster_active {
-                        cluster_active = false;
-                        (
-                            subject_memo,
-                            PipeStageKind::ClusterFinalizer { expr },
-                            result_memo,
-                        )
+                    let temporal_stage = if !cluster_active {
+                        self.try_parse_prefixed_temporal_pipe_stage(
+                            cursor,
+                            end,
+                            stop.with_pipe_stage().with_hash(),
+                        )?
                     } else {
-                        (subject_memo, PipeStageKind::Transform { expr }, result_memo)
+                        None
+                    };
+                    if let Some(stage_kind) = temporal_stage {
+                        let result_memo = self.parse_optional_pipe_memo(cursor, end);
+                        (subject_memo, stage_kind, result_memo)
+                    } else {
+                        let expr = self.parse_patch_apply_expr(
+                            cursor,
+                            end,
+                            stop.with_pipe_stage().with_hash(),
+                        )?;
+                        let result_memo = self.parse_optional_pipe_memo(cursor, end);
+                        if cluster_active {
+                            cluster_active = false;
+                            (
+                                subject_memo,
+                                PipeStageKind::ClusterFinalizer { expr },
+                                result_memo,
+                            )
+                        } else {
+                            (subject_memo, PipeStageKind::Transform { expr }, result_memo)
+                        }
                     }
                 }
                 TokenKind::PipeGate => {
@@ -4596,31 +4610,27 @@ impl<'a> Parser<'a> {
                 }
                 TokenKind::PipeDelay => {
                     cluster_active = false;
+                    self.emit_removed_temporal_pipe_operator(index, "|> delay <duration>");
                     let subject_memo = self.parse_optional_pipe_memo(cursor, end);
-                    let duration = self.parse_patch_apply_expr(
+                    let stage_kind = self.parse_delay_pipe_stage(
                         cursor,
                         end,
                         stop.with_pipe_stage().with_hash(),
                     )?;
                     let result_memo = self.parse_optional_pipe_memo(cursor, end);
-                    (subject_memo, PipeStageKind::Delay { duration }, result_memo)
+                    (subject_memo, stage_kind, result_memo)
                 }
                 TokenKind::PipeBurst => {
                     cluster_active = false;
+                    self.emit_removed_temporal_pipe_operator(index, "|> burst <duration> <count>");
                     let subject_memo = self.parse_optional_pipe_memo(cursor, end);
-                    let every =
-                        self.parse_atomic_expr(cursor, end, stop.with_pipe_stage().with_hash())?;
-                    let count = self.parse_patch_apply_expr(
+                    let stage_kind = self.parse_burst_pipe_stage(
                         cursor,
                         end,
                         stop.with_pipe_stage().with_hash(),
                     )?;
                     let result_memo = self.parse_optional_pipe_memo(cursor, end);
-                    (
-                        subject_memo,
-                        PipeStageKind::Burst { every, count },
-                        result_memo,
-                    )
+                    (subject_memo, stage_kind, result_memo)
                 }
                 _ => break,
             };
@@ -4645,6 +4655,64 @@ impl<'a> Parser<'a> {
                 span,
             }),
         })
+    }
+
+    fn try_parse_prefixed_temporal_pipe_stage(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+        stop: ExprStop,
+    ) -> Option<Option<PipeStageKind>> {
+        let Some(index) = self.peek_nontrivia(*cursor, end) else {
+            return Some(None);
+        };
+        if self.expr_should_stop(index, stop) || self.tokens[index].kind() != TokenKind::Identifier
+        {
+            return Some(None);
+        }
+        if self.is_identifier_text(index, "delay") {
+            *cursor = index + 1;
+            return Some(Some(self.parse_delay_pipe_stage(cursor, end, stop)?));
+        }
+        if self.is_identifier_text(index, "burst") {
+            *cursor = index + 1;
+            return Some(Some(self.parse_burst_pipe_stage(cursor, end, stop)?));
+        }
+        Some(None)
+    }
+
+    fn parse_delay_pipe_stage(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+        stop: ExprStop,
+    ) -> Option<PipeStageKind> {
+        let duration = self.parse_patch_apply_expr(cursor, end, stop)?;
+        Some(PipeStageKind::Delay { duration })
+    }
+
+    fn parse_burst_pipe_stage(
+        &mut self,
+        cursor: &mut usize,
+        end: usize,
+        stop: ExprStop,
+    ) -> Option<PipeStageKind> {
+        let every = self.parse_atomic_expr(cursor, end, stop)?;
+        let count = self.parse_atomic_expr(cursor, end, stop)?;
+        Some(PipeStageKind::Burst { every, count })
+    }
+
+    fn emit_removed_temporal_pipe_operator(&mut self, index: usize, replacement: &str) {
+        let operator = self.tokens[index].text(self.source);
+        self.diagnostics.push(
+            Diagnostic::error(format!("`{operator}` has been removed"))
+                .with_code(REMOVED_TEMPORAL_PIPE_OPERATOR)
+                .with_primary_label(
+                    self.source_span_of_token(index),
+                    "rewrite this temporal stage using the new prefix form",
+                )
+                .with_help(format!("use `{replacement}` instead")),
+        );
     }
 
     fn parse_range_expr(&mut self, cursor: &mut usize, end: usize, stop: ExprStop) -> Option<Expr> {
@@ -8061,9 +8129,9 @@ signal direction: Signal Direction = keyDown
         let (_, parsed) = load(
             r#"signal clicks: Signal Int = 1
 signal delayed: Signal Int = clicks
- delay|> 200ms
+ |> delay 200ms
 signal flashed: Signal Int = clicks
- burst|> 75ms 3
+ |> burst 75ms 3times
 "#,
         );
 
@@ -8094,7 +8162,26 @@ signal flashed: Signal Int = clicks
             panic!("expected burst pipe stage");
         };
         assert!(matches!(every.kind, ExprKind::SuffixedInteger(_)));
-        assert!(matches!(count.kind, ExprKind::Integer(_)));
+        assert!(matches!(count.kind, ExprKind::SuffixedInteger(_)));
+    }
+
+    #[test]
+    fn parser_reports_removed_temporal_pipe_operator_spellings() {
+        let (_, parsed) = load(
+            r#"signal clicks: Signal Int = 1
+signal delayed: Signal Int = clicks
+ delay|> 200ms
+signal flashed: Signal Int = clicks
+ burst|> 75ms 3times
+"#,
+        );
+
+        assert!(parsed.has_errors());
+        assert!(
+            parsed
+                .all_diagnostics()
+                .any(|diagnostic| diagnostic.code == Some(REMOVED_TEMPORAL_PIPE_OPERATOR))
+        );
     }
 
     #[test]
