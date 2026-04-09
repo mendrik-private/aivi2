@@ -13,7 +13,8 @@ use aivi_hir::{
     PatternId as HirPatternId, PipeTransformMode, RecurrenceNodeOutcome,
     ResolvedClassMemberDispatch, SourceDecodeProgram, SourceDecodeProgramOutcome,
     SourceLifecycleNodeOutcome, SumConstructorHandle, TemporalStageOutcome, TermResolution,
-    TruthyFalsyStageOutcome, TypeBinding, TypeConstructorHead, elaborate_ambient_items,
+    TruthyFalsyStageOutcome, TypeBinding, TypeConstructorHead, TypeItemBody,
+    elaborate_ambient_items,
     elaborate_fanouts, elaborate_gates, elaborate_general_expressions, elaborate_recurrences,
     elaborate_source_lifecycles, elaborate_temporal_stages, elaborate_truthy_falsy,
     generate_source_decode_programs,
@@ -569,6 +570,10 @@ struct ModuleLowerer<'a> {
     // Pre-compiled workspace module items: module_name → (exported_name → core ItemId).
     // Populated by compile_workspace_module before entry module compilation in aivi run.
     workspace_name_maps: HashMap<Box<str>, HashMap<Box<str>, ItemId>>,
+    // Pre-compiled workspace sum constructors: module_name → (constructor_name → parent type
+    // origin). Used so imported constructor values and imported workspace function bodies share
+    // the same runtime constructor identity.
+    workspace_constructor_origins: HashMap<Box<str>, HashMap<Box<str>, HirItemId>>,
     // Maps ImportId → module name string for the currently active HIR.
     // Rebuilt whenever self.hir changes (entry module or a workspace module).
     import_to_module: HashMap<ImportId, Box<str>>,
@@ -895,6 +900,44 @@ impl<'a> ModuleLowerer<'a> {
         self.workspace_name_maps
             .insert(module_name.into(), name_map);
 
+        let mut constructor_origin_map: HashMap<Box<str>, HirItemId> = HashMap::new();
+        for (hir_id, item) in ws_hir.items().iter() {
+            let HirItem::Type(type_item) = item else {
+                continue;
+            };
+            let TypeItemBody::Sum(variants) = &type_item.body else {
+                continue;
+            };
+            let origin = HirItemId::from_raw(hir_id.as_raw().saturating_add(module_origin_base));
+            for variant in variants.iter() {
+                constructor_origin_map
+                    .entry(variant.name.text().into())
+                    .or_insert(origin);
+            }
+        }
+        for (import_id, binding) in ws_hir.imports().iter() {
+            let local_name: Box<str> = binding.local_name.text().into();
+            if constructor_origin_map.contains_key(&local_name) {
+                continue;
+            }
+            let Some(source_module) = binding
+                .source_module
+                .as_deref()
+                .or_else(|| self.import_to_module.get(&import_id).map(|name| name.as_ref()))
+            else {
+                continue;
+            };
+            let Some(source_map) = self.workspace_constructor_origins.get(source_module) else {
+                continue;
+            };
+            let Some(&origin) = source_map.get(binding.imported_name.text()) else {
+                continue;
+            };
+            constructor_origin_map.insert(local_name, origin);
+        }
+        self.workspace_constructor_origins
+            .insert(module_name.into(), constructor_origin_map);
+
         // ── Restore entry module state ───────────────────────────────────────
         self.hir = saved_hir;
         self.included_items = saved_included_items;
@@ -948,6 +991,7 @@ impl<'a> ModuleLowerer<'a> {
             hir_item_count,
             errors: Vec::new(),
             workspace_name_maps: HashMap::new(),
+            workspace_constructor_origins: HashMap::new(),
             import_to_module: HashMap::new(),
             item_origin_offset: 0,
             ws_origin_base: 0,
@@ -2413,7 +2457,12 @@ impl<'a> ModuleLowerer<'a> {
             aivi_hir::ResolutionState::Resolved(aivi_hir::TermResolution::Item(item)) => self
                 .hir
                 .sum_constructor_handle(*item, reference.path.segments().last().text())
-                .map(Reference::SumConstructor)
+                .map(|mut handle| {
+                    handle.item = HirItemId::from_raw(
+                        handle.item.as_raw().saturating_add(self.item_origin_offset),
+                    );
+                    Reference::SumConstructor(handle)
+                })
                 .or_else(|| self.item_map.get(item).copied().map(Reference::Item))
                 .unwrap_or(Reference::HirItem(*item)),
             aivi_hir::ResolutionState::Resolved(aivi_hir::TermResolution::DomainMember(
@@ -2442,14 +2491,15 @@ impl<'a> ModuleLowerer<'a> {
             )) => Reference::IntrinsicValue(value.clone()),
             aivi_hir::ResolutionState::Resolved(aivi_hir::TermResolution::Import(import)) => {
                 // An imported term used in a pattern must be a sum constructor (e.g. `LightTheme`,
-                // `ChooseProviderStep`). Seed a synthetic item for this import — consistent with
-                // the expression-context path — and build a SumConstructorHandle whose `.item` is
-                // the synthetic item's `origin` HirItemId. Because `seed_import_item` caches by
-                // ImportId, the same import always gets the same origin, so pattern matching
-                // (`handle.item == value.item`) is consistent with value construction.
+                // `ChooseProviderStep`). Seed the import so regular expression lowering still has
+                // an item to reference, then build a SumConstructorHandle using the globally stable
+                // origin of the source sum type when available. That keeps imported constructor
+                // values aligned with pattern arms inside compiled workspace functions.
                 let variant_name: Box<str> = reference.path.segments().last().text().into();
                 if let Ok(item_id) = self.seed_import_item(*import) {
-                    let origin = self.module.items()[item_id].origin;
+                    let origin = self
+                        .workspace_constructor_origin(*import)
+                        .unwrap_or(self.module.items()[item_id].origin);
                     let binding = self.hir.imports().get(*import).cloned();
                     if let Some(binding) = binding {
                         let type_name: Box<str> = match &binding.metadata {
@@ -3044,6 +3094,18 @@ impl<'a> ModuleLowerer<'a> {
         Ok((kind, parameters))
     }
 
+    fn workspace_constructor_origin(&self, import: ImportId) -> Option<HirItemId> {
+        let binding = self.hir.imports().get(import)?;
+        let module_name = binding
+            .source_module
+            .as_deref()
+            .or_else(|| self.import_to_module.get(&import).map(|name| name.as_ref()))?;
+        self.workspace_constructor_origins
+            .get(module_name)?
+            .get(binding.imported_name.text())
+            .copied()
+    }
+
     fn seed_import_item(&mut self, import: ImportId) -> Result<ItemId, LoweringError> {
         if let Some(item) = self.import_item_map.get(&import).copied() {
             return Ok(item);
@@ -3146,9 +3208,9 @@ impl<'a> ModuleLowerer<'a> {
     ) -> Result<Option<ExprId>, LoweringError> {
         // For zero-argument sum constructor imports (e.g. `ChooseProviderStep`, `LightTheme`),
         // synthesize a `SumConstructor` expression so the value can be constructed at runtime
-        // without calling a separate item body. The `item` in the handle is set to `owner` — the
-        // synthetic item's own `origin` — which is also what `lower_term_reference` uses for the
-        // pattern side, ensuring `handle.item == value.item` at match time.
+        // without calling a separate item body. When the constructor comes from a compiled
+        // workspace module, reuse the source sum type's global origin so imported function bodies
+        // and imported constructor values agree on runtime constructor identity.
         if let (
             ImportBindingMetadata::Value {
                 ty: ImportValueType::Named { type_name, .. },
@@ -3157,8 +3219,9 @@ impl<'a> ModuleLowerer<'a> {
         ) = (&binding.metadata, parameters.is_empty())
         {
             let variant_name: Box<str> = binding.local_name.text().into();
+            let constructor_origin = self.workspace_constructor_origin(import).unwrap_or(owner);
             let handle = SumConstructorHandle {
-                item: owner,
+                item: constructor_origin,
                 type_name: type_name.as_str().into(),
                 variant_name,
                 field_count: 0,
@@ -3204,8 +3267,10 @@ impl<'a> ModuleLowerer<'a> {
                 if let ImportValueType::Named { type_name, .. } = result_ty_ref {
                     let variant_name: Box<str> = binding.local_name.text().into();
                     let field_count = parameters.len();
+                    let constructor_origin =
+                        self.workspace_constructor_origin(import).unwrap_or(owner);
                     let handle = SumConstructorHandle {
-                        item: owner,
+                        item: constructor_origin,
                         type_name: type_name.as_str().into(),
                         variant_name,
                         field_count,
@@ -3536,7 +3601,11 @@ impl<'a> ModuleLowerer<'a> {
                                     self.lower_import_reference(owner, *import)?
                                 }
                                 GateRuntimeReference::SumConstructor(handle) => {
-                                    Reference::SumConstructor(handle.clone())
+                                    let mut handle = handle.clone();
+                                    handle.item = HirItemId::from_raw(
+                                        handle.item.as_raw().saturating_add(self.item_origin_offset),
+                                    );
+                                    Reference::SumConstructor(handle)
                                 }
                                 GateRuntimeReference::DomainMember(handle) => self
                                     .domain_member_item_map
@@ -5062,14 +5131,18 @@ fn referenced_hir_dependencies(root: &GateRuntimeExpr) -> HirDependencies {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf};
+    use std::{collections::HashSet, fs, path::PathBuf};
 
     use aivi_base::{FileId, SourceDatabase, SourceSpan};
-    use aivi_hir::{BuiltinType, PipeTransformMode};
+    use aivi_hir::{
+        BuiltinType, ImportModuleResolution, ImportResolver, PipeTransformMode, exports,
+        lower_module_with_resolver, resolver::RawHoistItem,
+    };
     use aivi_syntax::parse_module;
 
     use super::{
         LoweringError, RuntimeFragmentSpec, lower_module, lower_runtime_fragment,
+        lower_runtime_module_with_workspace,
         validate_general_expr_report_completeness,
     };
     use crate::{
@@ -5097,6 +5170,52 @@ mod tests {
             parsed.all_diagnostics().collect::<Vec<_>>()
         );
         aivi_hir::lower_module(&parsed.module)
+    }
+
+    struct SingleImportResolver {
+        module_path: Vec<&'static str>,
+        module_file: &'static str,
+        module_text: &'static str,
+    }
+
+    impl ImportResolver for SingleImportResolver {
+        fn resolve(&self, path: &[&str]) -> ImportModuleResolution {
+            if path != self.module_path {
+                return ImportModuleResolution::Missing;
+            }
+            let lowered = lower_text(self.module_file, self.module_text);
+            if lowered.has_errors() {
+                return ImportModuleResolution::Missing;
+            }
+            ImportModuleResolution::Resolved(exports(lowered.module()))
+        }
+
+        fn workspace_hoist_items(&self) -> Vec<RawHoistItem> {
+            Vec::new()
+        }
+    }
+
+    fn lower_text_with_single_import(
+        path: &str,
+        text: &str,
+        import_path: Vec<&'static str>,
+        import_file: &'static str,
+        import_text: &'static str,
+    ) -> aivi_hir::LoweringResult {
+        let mut sources = SourceDatabase::new();
+        let file_id = sources.add_file(path, text);
+        let parsed = parse_module(&sources[file_id]);
+        assert!(
+            !parsed.has_errors(),
+            "fixture {path} should parse before HIR lowering: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+        let resolver = SingleImportResolver {
+            module_path: import_path,
+            module_file: import_file,
+            module_text: import_text,
+        };
+        lower_module_with_resolver(&parsed.module, Some(&resolver))
     }
 
     fn lower_fixture(path: &str) -> aivi_hir::LoweringResult {
@@ -5696,6 +5815,97 @@ signal cursor : Signal Cursor =
             imported.body.is_none(),
             "imported declaration stubs should stay bodyless in typed-core"
         );
+    }
+
+    #[test]
+    fn workspace_constructor_imports_share_runtime_identity_with_workspace_functions() {
+        let workspace_text = r#"
+type View = {
+    | MailView
+    | TodoView
+
+    type View -> Text
+    viewTitle = .
+     ||> MailView -> "Mail"
+     ||> TodoView -> "Todo"
+}
+
+export (View, MailView, TodoView, viewTitle)
+"#;
+        let entry = lower_text_with_single_import(
+            "main.aivi",
+            r#"
+use shared.nav (View, MailView, viewTitle)
+
+value currentView : View = MailView
+value headerTitle = viewTitle currentView
+"#,
+            vec!["shared", "nav"],
+            "shared/nav.aivi",
+            workspace_text,
+        );
+        assert!(
+            !entry.has_errors(),
+            "entry should lower cleanly before typed-core lowering: {:?}",
+            entry.diagnostics()
+        );
+        let workspace = lower_text("shared/nav.aivi", workspace_text);
+        assert!(
+            !workspace.has_errors(),
+            "workspace module should lower cleanly before typed-core lowering: {:?}",
+            workspace.diagnostics()
+        );
+
+        let included_items = entry.module().root_items().iter().copied().collect::<HashSet<_>>();
+        let core = lower_runtime_module_with_workspace(
+            entry.module(),
+            &[("shared.nav", workspace.module())],
+            &included_items,
+        )
+        .expect("workspace runtime lowering should succeed");
+
+        let mail_view = core
+            .items()
+            .iter()
+            .find(|(_, item)| item.name.as_ref() == "MailView")
+            .map(|(id, _)| id)
+            .expect("expected imported MailView stub");
+        let mail_view_body = core.items()[mail_view]
+            .body
+            .expect("MailView stub should synthesize a constructor body");
+        let constructor_origin = match &core.exprs()[mail_view_body].kind {
+            crate::ExprKind::Reference(crate::Reference::SumConstructor(handle)) => handle.item,
+            other => panic!("expected MailView body to be a sum constructor reference, got {other:?}"),
+        };
+
+        let view_title = core
+            .items()
+            .iter()
+            .find(|(_, item)| item.name.as_ref() == "viewTitle")
+            .map(|(id, _)| id)
+            .expect("expected workspace viewTitle function");
+        let view_title_body = core.items()[view_title]
+            .body
+            .expect("viewTitle should carry its compiled body");
+        let crate::ExprKind::Pipe(pipe) = &core.exprs()[view_title_body].kind else {
+            panic!("expected viewTitle body to lower into a pipe expression");
+        };
+        let stage = pipe.stages.first().expect("viewTitle pipe should have a case stage");
+        let crate::PipeStageKind::Case { arms } = &stage.kind else {
+            panic!("expected viewTitle pipe stage to be a case expression");
+        };
+        let pattern_origin = arms
+            .iter()
+            .find_map(|arm| match &arm.pattern.kind {
+                crate::PatternKind::Constructor { callee, .. } => match &callee.reference {
+                    crate::Reference::SumConstructor(handle) => Some(handle.item),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("expected viewTitle case arm constructor handle");
+
+        assert_eq!(constructor_origin, pattern_origin);
     }
 
     #[test]

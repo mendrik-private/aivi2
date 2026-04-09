@@ -1182,7 +1182,7 @@ mod tests {
             .expect("run-session text fixture should prepare")
     }
 
-    fn near_endgame_reversi_source() -> String {
+    fn reversi_source_with_initial_board(initial_board: &str) -> String {
         let original = include_str!("../../../demos/reversi.aivi");
         let replaced = original.replacen(
             r#"func buildInitialDisc = x y => (x, y)
@@ -1191,17 +1191,106 @@ mod tests {
  ||> (3, 4) -> Black
  ||> (4, 3) -> Black
  ||> _      -> Empty"#,
-            r#"func buildInitialDisc = x y => (x, y)
- ||> (7, 0) -> Empty
- ||> (6, 0) -> White
- ||> _      -> Black"#,
+            initial_board,
             1,
         );
         assert_ne!(
             replaced, original,
-            "near-endgame reversi fixture should replace the opening board"
+            "reversi fixture should replace the opening board"
         );
         replaced
+    }
+
+    fn near_endgame_reversi_source() -> String {
+        reversi_source_with_initial_board(
+            r#"func buildInitialDisc = x y => (x, y)
+ ||> (7, 0) -> Empty
+ ||> (6, 0) -> White
+ ||> _      -> Black"#,
+        )
+    }
+
+    fn computer_final_reversi_source() -> String {
+        reversi_source_with_initial_board(
+            r#"func buildInitialDisc = x y => (x, y)
+ ||> (0, 0) -> White
+ ||> (1, 0) -> Empty
+ ||> (2, 0) -> White
+ ||> (4, 0) -> Empty
+ ||> _      -> Black"#,
+        )
+    }
+
+    fn pass_chain_terminal_reversi_source() -> String {
+        reversi_source_with_initial_board(
+            r#"func buildInitialDisc = x y => (x, y)
+ ||> (1, 0) -> White
+ ||> (3, 0) -> White
+ ||> (4, 0) -> Empty
+ ||> (5, 0) -> Empty
+ ||> (7, 0) -> Empty
+ ||> _      -> Black"#,
+        )
+    }
+
+    fn assert_reversi_restart_resets_after_terminal_fixture(
+        source: String,
+        fixture_name: &str,
+        terminal_timeout: Duration,
+    ) {
+        let workspace = tempfile::tempdir().expect("reversi fixture workspace should create");
+        let fixture_path = workspace.path().join("main.aivi");
+        std::fs::write(&fixture_path, source).expect("reversi fixture should write");
+        let artifact = prepare_run_from_path(&fixture_path);
+        let harness =
+            start_run_session_with_launch_config(&fixture_path, artifact, RunLaunchConfig::default())
+                .expect("reversi fixture should start a run session");
+        let context = harness.control().context();
+        harness
+            .present_root_windows()
+            .expect("presenting the reversi window should release startup-held timers");
+
+        let opening_state = debug_signal_value_for(&harness, "state");
+        let opening_move = find_sensitive_button_by_label(&harness, "◌")
+            .expect("reversi fixture should expose the initial legal human move");
+        opening_move.emit_clicked();
+        assert!(
+            pump_until(&context, terminal_timeout, || {
+                debug_signal_value_for(&harness, "phase").contains("HumanReady")
+                    && !has_sensitive_button_by_label(&harness, "◌")
+                    && debug_signal_value_for(&harness, "state") != opening_state
+            }),
+            "{fixture_name} should settle into a terminal state after the final move sequence (phase: {}, state: {})",
+            debug_signal_value_for(&harness, "phase"),
+            debug_signal_value_for(&harness, "state"),
+        );
+        let restart = harness
+            .root_windows()
+            .iter()
+            .find_map(|window| {
+                find_button_by_label(&window.clone().upcast::<gtk::Widget>(), "Restart")
+            })
+            .expect("reversi window should expose a restart button");
+        assert!(
+            restart.is_visible() && restart.is_sensitive(),
+            "restart should stay visible and clickable after {fixture_name} reaches game over"
+        );
+        assert!(
+            restart.allocated_width() > 0 && restart.allocated_height() > 0,
+            "restart should keep a non-zero GTK allocation after {fixture_name} reaches game over"
+        );
+        restart.emit_clicked();
+        assert!(
+            pump_until(&context, Duration::from_millis(250), || {
+                debug_signal_value_for(&harness, "state") == opening_state
+                    && has_sensitive_button_by_label(&harness, "◌")
+            }),
+            "restart should restore the opening state after {fixture_name} reaches game over (phase: {}, state: {})",
+            debug_signal_value_for(&harness, "phase"),
+            debug_signal_value_for(&harness, "state"),
+        );
+
+        harness.shutdown();
     }
 
     fn pump_context(context: &gtk::glib::MainContext, duration: Duration) {
@@ -1875,55 +1964,31 @@ export main
     #[gtk::test]
     fn reversi_restart_resets_after_game_over() {
         let _guard = crate::gtk_test_lock().lock().expect("gtk test lock");
-        let source = near_endgame_reversi_source();
-        let workspace = tempfile::tempdir().expect("near-endgame reversi workspace should create");
-        let fixture_path = workspace.path().join("main.aivi");
-        std::fs::write(&fixture_path, source)
-            .expect("near-endgame reversi fixture should write");
-        let artifact = prepare_run_from_path(&fixture_path);
-        let harness =
-            start_run_session_with_launch_config(&fixture_path, artifact, RunLaunchConfig::default())
-                .expect("near-endgame reversi fixture should start a run session");
-        let context = harness.control().context();
-        harness
-            .present_root_windows()
-            .expect("presenting the reversi window should release startup-held timers");
-
-        let opening_state = debug_signal_value_for(&harness, "state");
-        let opening_move = find_sensitive_button_by_label(&harness, "◌")
-            .expect("near-endgame reversi should expose the final legal human move");
-        let restart = harness
-            .root_windows()
-            .iter()
-            .find_map(|window| {
-                find_button_by_label(&window.clone().upcast::<gtk::Widget>(), "Restart")
-            })
-            .expect("reversi window should expose a restart button");
-
-        opening_move.emit_clicked();
-        assert!(
-            pump_until(&context, Duration::from_millis(250), || {
-                debug_signal_value_for(&harness, "phase").contains("HumanReady")
-                    && !has_sensitive_button_by_label(&harness, "◌")
-                    && debug_signal_value_for(&harness, "state") != opening_state
-            }),
-            "the near-endgame reversi fixture should settle into a terminal state after the final move (phase: {}, state: {})",
-            debug_signal_value_for(&harness, "phase"),
-            debug_signal_value_for(&harness, "state"),
+        assert_reversi_restart_resets_after_terminal_fixture(
+            near_endgame_reversi_source(),
+            "the near-endgame human-final fixture",
+            Duration::from_millis(250),
         );
+    }
 
-        restart.emit_clicked();
-        assert!(
-            pump_until(&context, Duration::from_millis(250), || {
-                debug_signal_value_for(&harness, "state") == opening_state
-                    && has_sensitive_button_by_label(&harness, "◌")
-            }),
-            "restart should restore the near-endgame opening state after game over (phase: {}, state: {})",
-            debug_signal_value_for(&harness, "phase"),
-            debug_signal_value_for(&harness, "state"),
+    #[gtk::test]
+    fn reversi_restart_resets_after_computer_final_move() {
+        let _guard = crate::gtk_test_lock().lock().expect("gtk test lock");
+        assert_reversi_restart_resets_after_terminal_fixture(
+            computer_final_reversi_source(),
+            "the computer-final fixture",
+            Duration::from_secs(4),
         );
+    }
 
-        harness.shutdown();
+    #[gtk::test]
+    fn reversi_restart_resets_after_pass_chain_game_over() {
+        let _guard = crate::gtk_test_lock().lock().expect("gtk test lock");
+        assert_reversi_restart_resets_after_terminal_fixture(
+            pass_chain_terminal_reversi_source(),
+            "the pass-chain terminal fixture",
+            Duration::from_secs(8),
+        );
     }
 
     #[gtk::test]

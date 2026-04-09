@@ -1099,13 +1099,25 @@ fn poly_import_value_type(
     ty: TypeId,
     params: &TypeParamMap,
 ) -> Option<ImportValueType> {
+    let mut item_stack = Vec::new();
+    poly_import_value_type_with_stack(module, ty, params, &mut item_stack)
+}
+
+fn poly_import_value_type_with_stack(
+    module: &Module,
+    ty: TypeId,
+    params: &TypeParamMap,
+    item_stack: &mut Vec<ItemId>,
+) -> Option<ImportValueType> {
     let type_node = module.types().get(ty)?;
     match &type_node.kind {
-        TypeKind::Name(reference) => poly_name_import_value_type(module, reference, params),
+        TypeKind::Name(reference) => {
+            poly_name_import_value_type_with_stack(module, reference, params, item_stack)
+        }
         TypeKind::Tuple(elements) => Some(ImportValueType::Tuple(
             elements
                 .iter()
-                .map(|element| poly_import_value_type(module, *element, params))
+                .map(|element| poly_import_value_type_with_stack(module, *element, params, item_stack))
                 .collect::<Option<Vec<_>>>()?,
         )),
         TypeKind::Record(fields) => Some(ImportValueType::Record(
@@ -1114,28 +1126,33 @@ fn poly_import_value_type(
                 .map(|field| {
                     Some(ImportRecordField {
                         name: field.label.text().into(),
-                        ty: poly_import_value_type(module, field.ty, params)?,
+                        ty: poly_import_value_type_with_stack(module, field.ty, params, item_stack)?,
                     })
                 })
                 .collect::<Option<Vec<_>>>()?,
         )),
         TypeKind::RecordTransform { transform, source } => {
-            let source = poly_import_value_type(module, *source, params)?;
+            let source = poly_import_value_type_with_stack(module, *source, params, item_stack)?;
             apply_record_row_transform_import_value_type(transform, source)
         }
         TypeKind::Arrow { parameter, result } => Some(ImportValueType::Arrow {
-            parameter: Box::new(poly_import_value_type(module, *parameter, params)?),
-            result: Box::new(poly_import_value_type(module, *result, params)?),
+            parameter: Box::new(poly_import_value_type_with_stack(
+                module, *parameter, params, item_stack,
+            )?),
+            result: Box::new(poly_import_value_type_with_stack(
+                module, *result, params, item_stack,
+            )?),
         }),
-        TypeKind::Apply { .. } => poly_applied_import_value_type(module, ty, params),
+        TypeKind::Apply { .. } => poly_applied_import_value_type_with_stack(module, ty, params, item_stack),
     }
 }
 
 /// Handle a bare name reference: builtin primitives, type parameters, or same-module items.
-fn poly_name_import_value_type(
+fn poly_name_import_value_type_with_stack(
     module: &Module,
     reference: &TypeReference,
     params: &TypeParamMap,
+    item_stack: &mut Vec<ItemId>,
 ) -> Option<ImportValueType> {
     match reference.resolution.as_ref() {
         ResolutionState::Resolved(TypeResolution::Builtin(builtin)) => {
@@ -1152,19 +1169,42 @@ fn poly_name_import_value_type(
         }
         ResolutionState::Resolved(TypeResolution::Item(item_id)) => {
             let type_name = item_type_name(&module.items()[*item_id]);
+            let definition = if item_stack.contains(item_id) {
+                None
+            } else {
+                match module.items().get(*item_id)? {
+                    Item::Type(type_item) => {
+                        item_stack.push(*item_id);
+                        let definition =
+                            extract_type_definition_with_stack(module, type_item, item_stack)
+                                .map(Box::new);
+                        let popped = item_stack.pop();
+                        debug_assert_eq!(popped, Some(*item_id));
+                        definition
+                    }
+                    _ => None,
+                }
+            };
             Some(ImportValueType::Named {
                 type_name,
                 arguments: Vec::new(),
-                definition: None,
+                definition,
             })
         }
         ResolutionState::Resolved(TypeResolution::Import(import_id)) => {
             let binding = module.imports().get(*import_id)?;
             let name = binding.imported_name.text().to_owned();
+            let definition = match &binding.metadata {
+                ImportBindingMetadata::TypeConstructor {
+                    definition: Some(definition),
+                    ..
+                } => Some(Box::new(definition.clone())),
+                _ => None,
+            };
             Some(ImportValueType::Named {
                 type_name: name,
                 arguments: Vec::new(),
-                definition: None,
+                definition,
             })
         }
         _ => None,
@@ -1188,10 +1228,11 @@ fn primitive_import_value_type_from_builtin(
 }
 
 /// Handle type application: builtin constructors, same-module named types, and named fallback.
-fn poly_applied_import_value_type(
+fn poly_applied_import_value_type_with_stack(
     module: &Module,
     ty: TypeId,
     params: &TypeParamMap,
+    item_stack: &mut Vec<ItemId>,
 ) -> Option<ImportValueType> {
     let (constructor, arguments) = poly_flatten_type_application(module, ty)?;
     // Try builtin constructor first
@@ -1199,32 +1240,48 @@ fn poly_applied_import_value_type(
         PolyTypeConstructor::Resolved(ResolvedTypeConstructor::Builtin(builtin)) => {
             let result = match (builtin, arguments.len()) {
                 (crate::BuiltinType::List, 1) => Some(ImportValueType::List(Box::new(
-                    poly_import_value_type(module, arguments[0], params)?,
+                    poly_import_value_type_with_stack(module, arguments[0], params, item_stack)?,
                 ))),
                 (crate::BuiltinType::Map, 2) => Some(ImportValueType::Map {
-                    key: Box::new(poly_import_value_type(module, arguments[0], params)?),
-                    value: Box::new(poly_import_value_type(module, arguments[1], params)?),
+                    key: Box::new(poly_import_value_type_with_stack(
+                        module, arguments[0], params, item_stack,
+                    )?),
+                    value: Box::new(poly_import_value_type_with_stack(
+                        module, arguments[1], params, item_stack,
+                    )?),
                 }),
                 (crate::BuiltinType::Set, 1) => Some(ImportValueType::Set(Box::new(
-                    poly_import_value_type(module, arguments[0], params)?,
+                    poly_import_value_type_with_stack(module, arguments[0], params, item_stack)?,
                 ))),
                 (crate::BuiltinType::Option, 1) => Some(ImportValueType::Option(Box::new(
-                    poly_import_value_type(module, arguments[0], params)?,
+                    poly_import_value_type_with_stack(module, arguments[0], params, item_stack)?,
                 ))),
                 (crate::BuiltinType::Result, 2) => Some(ImportValueType::Result {
-                    error: Box::new(poly_import_value_type(module, arguments[0], params)?),
-                    value: Box::new(poly_import_value_type(module, arguments[1], params)?),
+                    error: Box::new(poly_import_value_type_with_stack(
+                        module, arguments[0], params, item_stack,
+                    )?),
+                    value: Box::new(poly_import_value_type_with_stack(
+                        module, arguments[1], params, item_stack,
+                    )?),
                 }),
                 (crate::BuiltinType::Validation, 2) => Some(ImportValueType::Validation {
-                    error: Box::new(poly_import_value_type(module, arguments[0], params)?),
-                    value: Box::new(poly_import_value_type(module, arguments[1], params)?),
+                    error: Box::new(poly_import_value_type_with_stack(
+                        module, arguments[0], params, item_stack,
+                    )?),
+                    value: Box::new(poly_import_value_type_with_stack(
+                        module, arguments[1], params, item_stack,
+                    )?),
                 }),
                 (crate::BuiltinType::Signal, 1) => Some(ImportValueType::Signal(Box::new(
-                    poly_import_value_type(module, arguments[0], params)?,
+                    poly_import_value_type_with_stack(module, arguments[0], params, item_stack)?,
                 ))),
                 (crate::BuiltinType::Task, 2) => Some(ImportValueType::Task {
-                    error: Box::new(poly_import_value_type(module, arguments[0], params)?),
-                    value: Box::new(poly_import_value_type(module, arguments[1], params)?),
+                    error: Box::new(poly_import_value_type_with_stack(
+                        module, arguments[0], params, item_stack,
+                    )?),
+                    value: Box::new(poly_import_value_type_with_stack(
+                        module, arguments[1], params, item_stack,
+                    )?),
                 }),
                 _ => None,
             };
@@ -1235,10 +1292,11 @@ fn poly_applied_import_value_type(
         PolyTypeConstructor::Resolved(ResolvedTypeConstructor::Bundle(
             ImportBundleKind::BuiltinOption,
         )) if arguments.len() == 1 => {
-            return Some(ImportValueType::Option(Box::new(poly_import_value_type(
+            return Some(ImportValueType::Option(Box::new(poly_import_value_type_with_stack(
                 module,
                 arguments[0],
                 params,
+                item_stack,
             )?)));
         }
         _ => {}
@@ -1250,7 +1308,7 @@ fn poly_applied_import_value_type(
     };
     let args = arguments
         .iter()
-        .map(|arg| poly_import_value_type(module, *arg, params))
+        .map(|arg| poly_import_value_type_with_stack(module, *arg, params, item_stack))
         .collect::<Option<Vec<_>>>()?;
     Some(ImportValueType::Named {
         type_name,
@@ -1386,7 +1444,7 @@ fn extract_type_definition_with_stack(
                 .enumerate()
                 .map(|(i, &p)| (p, i))
                 .collect();
-            poly_import_value_type(module, *alias, &type_param_map)
+            poly_import_value_type_with_stack(module, *alias, &type_param_map, item_stack)
                 .map(ImportTypeDefinition::Alias)
         }
         TypeItemBody::Sum(variants) => variants
@@ -1403,5 +1461,88 @@ fn extract_type_definition_with_stack(
             })
             .collect::<Option<Vec<_>>>()
             .map(ImportTypeDefinition::Sum),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use aivi_base::SourceDatabase;
+    use aivi_syntax::parse_module;
+
+    use super::{ImportBindingMetadata, ImportTypeDefinition, ImportValueType, exports};
+
+    fn lower_text(path: &str, text: &str) -> crate::LoweringResult {
+        let mut sources = SourceDatabase::new();
+        let file_id = sources.add_file(path, text);
+        let parsed = parse_module(&sources[file_id]);
+        assert!(
+            !parsed.has_errors(),
+            "exports test input should parse: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+        crate::lower_module(&parsed.module)
+    }
+
+    #[test]
+    fn exported_alias_preserves_nested_named_alias_definitions() {
+        let lowered = lower_text(
+            "types.aivi",
+            r#"
+type ComposeState = {
+    to: List Text,
+    subject: Text
+}
+
+type UIState = {
+    compose: ComposeState
+}
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "lowering should succeed: {:?}",
+            lowered.diagnostics()
+        );
+
+        let exported = exports(lowered.module());
+        let ui_state = exported
+            .find("UIState")
+            .expect("UIState should be exported");
+        let definition = match &ui_state.metadata {
+            ImportBindingMetadata::TypeConstructor {
+                definition: Some(definition),
+                ..
+            } => definition,
+            other => panic!("expected exported UIState type constructor metadata, got {other:?}"),
+        };
+
+        let compose_field_ty = match definition {
+            ImportTypeDefinition::Alias(ImportValueType::Record(fields)) => fields
+                .iter()
+                .find(|field| field.name.as_ref() == "compose")
+                .map(|field| &field.ty)
+                .expect("UIState alias should include compose field"),
+            other => panic!("expected UIState alias record definition, got {other:?}"),
+        };
+
+        match compose_field_ty {
+            ImportValueType::Named {
+                type_name,
+                definition: Some(definition),
+                ..
+            } => {
+                assert_eq!(type_name.as_str(), "ComposeState");
+                assert!(matches!(
+                    definition.as_ref(),
+                    ImportTypeDefinition::Alias(ImportValueType::Record(fields))
+                        if fields.len() == 2
+                            && fields[0].name.as_ref() == "to"
+                            && fields[1].name.as_ref() == "subject"
+                ));
+            }
+            other => panic!(
+                "expected compose field to retain nested ComposeState alias definition, got {other:?}"
+            ),
+        }
     }
 }

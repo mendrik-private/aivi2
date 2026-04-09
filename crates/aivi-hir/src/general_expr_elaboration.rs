@@ -3980,7 +3980,9 @@ mod tests {
         elaborate_general_expressions,
     };
     use crate::{
-        BuiltinType, PipeTransformMode,
+        BuiltinType, ImportModuleResolution, ImportResolver, PipeTransformMode,
+        exports, lower_module, lower_module_with_resolver,
+        resolver::RawHoistItem,
         typecheck::resolve_class_member_dispatch,
         validate::{GateExprEnv, GateType, GateTypeContext},
     };
@@ -4015,6 +4017,55 @@ mod tests {
 
     fn lower_text_with_stdlib(path: &str, text: &str) -> crate::LoweringResult {
         crate::test_support::lower_text_with_stdlib(path, text)
+    }
+
+    struct SingleImportResolver {
+        module_path: Vec<&'static str>,
+        module_file: &'static str,
+        module_text: &'static str,
+    }
+
+    impl ImportResolver for SingleImportResolver {
+        fn resolve(&self, path: &[&str]) -> ImportModuleResolution {
+            if path != self.module_path {
+                return ImportModuleResolution::Missing;
+            }
+            let mut sources = SourceDatabase::new();
+            let file_id = sources.add_file(self.module_file, self.module_text);
+            let parsed = parse_module(&sources[file_id]);
+            if parsed.has_errors() {
+                return ImportModuleResolution::Missing;
+            }
+            let lowered = lower_module(&parsed.module);
+            ImportModuleResolution::Resolved(exports(lowered.module()))
+        }
+
+        fn workspace_hoist_items(&self) -> Vec<RawHoistItem> {
+            Vec::new()
+        }
+    }
+
+    fn lower_text_with_single_import(
+        path: &str,
+        text: &str,
+        import_path: Vec<&'static str>,
+        import_file: &'static str,
+        import_text: &'static str,
+    ) -> crate::LoweringResult {
+        let mut sources = SourceDatabase::new();
+        let file_id = sources.add_file(path, text);
+        let parsed = parse_module(&sources[file_id]);
+        assert!(
+            !parsed.has_errors(),
+            "general-expression test input should parse: {:?}",
+            parsed.all_diagnostics().collect::<Vec<_>>()
+        );
+        let resolver = SingleImportResolver {
+            module_path: import_path,
+            module_file: import_file,
+            module_text: import_text,
+        };
+        lower_module_with_resolver(&parsed.module, Some(&resolver))
     }
 
     fn lower_fixture(path: &str) -> crate::LoweringResult {
@@ -5122,6 +5173,83 @@ fun any:Bool = predicate:(A -> Bool) items:(List A)=>    items
         assert!(
             blocked_domain_members.is_empty(),
             "snake demo should lower all domain member expressions cleanly, found blocked domain members: {blocked_domain_members:?}"
+        );
+    }
+
+    #[test]
+    fn imported_signal_pipe_through_inferred_case_result_lowers_cleanly() {
+        let lowered = lower_text_with_single_import(
+            "main.aivi",
+            r#"
+use shared.types (Participant)
+
+type List Participant -> Text
+func firstParticipantLabel = ps => "Unknown"
+
+type Signal (Option (List Participant))
+signal maybeParticipants = Some []
+
+signal participants = maybeParticipants
+ ||> Some ps -> ps
+ ||> None    -> []
+
+signal senderName = participants |> firstParticipantLabel
+"#,
+            vec!["shared", "types"],
+            "shared/types.aivi",
+            r#"
+type Participant = {
+    name: Text
+}
+
+export Participant
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "repro should lower to HIR cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let module = lowered.module();
+        let participants = module
+            .items()
+            .iter()
+            .find_map(|(id, item)| match item {
+                crate::Item::Signal(signal) if signal.name.text() == "participants" => Some(id),
+                _ => None,
+            })
+            .expect("participants signal should exist");
+        let sender_name = module
+            .items()
+            .iter()
+            .find_map(|(id, item)| match item {
+                crate::Item::Signal(signal) if signal.name.text() == "senderName" => Some(id),
+                _ => None,
+            })
+            .expect("senderName signal should exist");
+
+        let mut typing = GateTypeContext::new(module);
+        let participants_ty = typing.item_value_type(participants);
+        let participants_actual = typing.item_value_actual(participants);
+        let report = elaborate_general_expressions(module);
+        let sender_outcome = report
+            .items()
+            .iter()
+            .find(|item| item.owner == sender_name)
+            .map(|item| item.outcome.clone())
+            .expect("senderName elaboration should exist");
+        assert!(
+            participants_ty.is_some(),
+            "participants signal should infer a concrete type"
+        );
+        assert!(
+            participants_actual.is_some(),
+            "participants signal should infer a concrete actual type"
+        );
+        assert!(
+            matches!(sender_outcome, GeneralExprOutcome::Lowered(_)),
+            "senderName should lower cleanly, found {sender_outcome:?}"
         );
     }
 }

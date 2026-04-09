@@ -3396,59 +3396,57 @@ fn collect_stub_signal_defaults(
         let Some(input) = signal_binding.input() else {
             continue;
         };
-        let default_value = DetachedRuntimeValue::from_runtime_owned(
-            default_runtime_value_for_import_type(inner_ty),
-        );
+        let Some(default_value) = default_runtime_value_for_import_type(inner_ty) else {
+            continue;
+        };
+        let default_value = DetachedRuntimeValue::from_runtime_owned(default_value);
         defaults.push((input, default_value));
     }
     defaults
 }
 
-fn default_runtime_value_for_import_type(ty: &ImportValueType) -> RuntimeValue {
+fn default_runtime_value_for_import_type(ty: &ImportValueType) -> Option<RuntimeValue> {
     match ty {
         ImportValueType::Primitive(builtin) => match builtin {
-            BuiltinType::Text => RuntimeValue::Text("".into()),
-            BuiltinType::Int => RuntimeValue::Int(0),
-            BuiltinType::Bool => RuntimeValue::Bool(false),
-            BuiltinType::Float => {
-                RuntimeValue::Float(RuntimeFloat::new(0.0_f64).expect("0.0 is a valid float"))
-            }
-            BuiltinType::Unit => RuntimeValue::Unit,
-            _ => RuntimeValue::Unit,
+            BuiltinType::Text => Some(RuntimeValue::Text("".into())),
+            BuiltinType::Int => Some(RuntimeValue::Int(0)),
+            BuiltinType::Bool => Some(RuntimeValue::Bool(false)),
+            BuiltinType::Float => Some(RuntimeValue::Float(
+                RuntimeFloat::new(0.0_f64).expect("0.0 is a valid float"),
+            )),
+            BuiltinType::Unit => Some(RuntimeValue::Unit),
+            _ => None,
         },
-        ImportValueType::List(_) => RuntimeValue::List(vec![]),
-        ImportValueType::Set(_) => RuntimeValue::Set(vec![]),
-        ImportValueType::Map { .. } => RuntimeValue::Map(Default::default()),
-        ImportValueType::Option(_) => RuntimeValue::OptionNone,
-        ImportValueType::Result { error, .. } => {
-            RuntimeValue::ResultErr(Box::new(default_runtime_value_for_import_type(error)))
-        }
-        ImportValueType::Validation { error, .. } => {
-            RuntimeValue::ValidationInvalid(Box::new(default_runtime_value_for_import_type(error)))
-        }
-        ImportValueType::Tuple(elements) => RuntimeValue::Tuple(
-            elements
-                .iter()
-                .map(default_runtime_value_for_import_type)
-                .collect(),
-        ),
-        ImportValueType::Record(fields) => RuntimeValue::Record(
-            fields
-                .iter()
-                .map(|f| RuntimeRecordField {
-                    label: f.name.clone(),
-                    value: default_runtime_value_for_import_type(&f.ty),
+        ImportValueType::List(_) => Some(RuntimeValue::List(vec![])),
+        ImportValueType::Set(_) => Some(RuntimeValue::Set(vec![])),
+        ImportValueType::Map { .. } => Some(RuntimeValue::Map(Default::default())),
+        ImportValueType::Option(_) => Some(RuntimeValue::OptionNone),
+        ImportValueType::Result { error, .. } => default_runtime_value_for_import_type(error)
+            .map(|error| RuntimeValue::ResultErr(Box::new(error))),
+        ImportValueType::Validation { error, .. } => default_runtime_value_for_import_type(error)
+            .map(|error| RuntimeValue::ValidationInvalid(Box::new(error))),
+        ImportValueType::Tuple(elements) => elements
+            .iter()
+            .map(default_runtime_value_for_import_type)
+            .collect::<Option<Vec<_>>>()
+            .map(RuntimeValue::Tuple),
+        ImportValueType::Record(fields) => fields
+            .iter()
+            .map(|field| {
+                Some(RuntimeRecordField {
+                    label: field.name.clone(),
+                    value: default_runtime_value_for_import_type(&field.ty)?,
                 })
-                .collect(),
-        ),
-        ImportValueType::Signal(inner) => {
-            RuntimeValue::Signal(Box::new(default_runtime_value_for_import_type(inner)))
-        }
-        // Functions, tasks, and named/variable types cannot be trivially defaulted.
+            })
+            .collect::<Option<Vec<_>>>()
+            .map(RuntimeValue::Record),
+        ImportValueType::Signal(inner) => default_runtime_value_for_import_type(inner)
+            .map(|inner| RuntimeValue::Signal(Box::new(inner))),
+        // Functions, tasks, and named/variable types cannot be safely defaulted.
         ImportValueType::Arrow { .. }
         | ImportValueType::Task { .. }
         | ImportValueType::TypeVariable { .. }
-        | ImportValueType::Named { .. } => RuntimeValue::Unit,
+        | ImportValueType::Named { .. } => None,
     }
 }
 
@@ -5485,7 +5483,7 @@ mod tests {
     use aivi_backend::{DetachedRuntimeValue, RuntimeTaskPlan, RuntimeValue};
     use aivi_base::SourceDatabase;
     use aivi_gtk::{GtkBridgeNodeKind, RuntimePropertyBinding, RuntimeShowMountPolicy};
-    use aivi_hir::{ValidationMode, lower_module as lower_hir_module};
+    use aivi_hir::{BuiltinType, ImportValueType, ValidationMode, lower_module as lower_hir_module};
     use aivi_runtime::{SourceProviderContext, execute_runtime_task_plan};
     use aivi_syntax::parse_module;
     use std::{
@@ -5637,6 +5635,22 @@ mod tests {
         );
         let lowered = snapshot.entry_hir();
         prepare_run_artifact(&snapshot.sources, lowered.module(), &[], requested_view)
+    }
+
+    #[test]
+    fn stub_signal_defaults_skip_named_payloads() {
+        let named = ImportValueType::Named {
+            type_name: "Message".into(),
+            arguments: Vec::new(),
+            definition: None,
+        };
+        assert_eq!(super::default_runtime_value_for_import_type(&named), None);
+        assert_eq!(
+            super::default_runtime_value_for_import_type(&ImportValueType::Option(Box::new(
+                ImportValueType::Primitive(BuiltinType::Text),
+            ))),
+            Some(RuntimeValue::OptionNone)
+        );
     }
 
     #[test]

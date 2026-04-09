@@ -524,7 +524,7 @@ value main =
             <show when={gameOver}>
                 <Label text={finalText} />
             </show>
-            <Button label="Restart" onClick={restartClick} compact hasFrame={False} />
+            <Button label="Restart" onClick={restartClick} />
             <Box orientation="vertical" spacing={2}>
                 <each of={boardIndices} as={y} key={y}>
                     <Box orientation="horizontal" spacing={2}>

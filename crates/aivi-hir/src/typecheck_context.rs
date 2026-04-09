@@ -1161,8 +1161,33 @@ impl GateType {
                     .collect();
                 Some(GateType::Record(lowered?))
             }
-            // Named references require module context to resolve the import ID.
-            ImportValueType::Named { .. } => None,
+            // Named references: produce a sentinel OpaqueImport keyed by name so that
+            // same_shape_inner can match via named_type_parts even without a real ImportId.
+            ImportValueType::Named {
+                type_name,
+                arguments: type_args,
+                ..
+            } => {
+                let lowered_args: Vec<GateType> = type_args
+                    .iter()
+                    .map(|a| {
+                        Self::expand_import_alias_type(a, arguments).unwrap_or_else(|| {
+                            GateType::OpaqueImport {
+                                import: ImportId::from_raw(u32::MAX),
+                                name: String::new(),
+                                arguments: Vec::new(),
+                                definition: None,
+                            }
+                        })
+                    })
+                    .collect();
+                Some(GateType::OpaqueImport {
+                    import: ImportId::from_raw(u32::MAX),
+                    name: type_name.clone(),
+                    arguments: lowered_args,
+                    definition: None,
+                })
+            }
         }
     }
 
@@ -1329,16 +1354,26 @@ impl GateType {
             (
                 Self::OpaqueImport {
                     import: left_import,
+                    name: left_name,
                     arguments: left_arguments,
                     ..
                 },
                 Self::OpaqueImport {
                     import: right_import,
+                    name: right_name,
                     arguments: right_arguments,
                     ..
                 },
             ) => {
-                left_import == right_import
+                // Allow matching by name when either side has a sentinel import ID
+                // (u32::MAX), which is used when expanding type aliases without
+                // full module context (e.g. Named references in expand_import_alias_type).
+                let sentinel = ImportId::from_raw(u32::MAX);
+                let ids_match = left_import == right_import
+                    || *left_import == sentinel
+                    || *right_import == sentinel;
+                ids_match
+                    && left_name == right_name
                     && left_arguments.len() == right_arguments.len()
                     && left_arguments
                         .iter()
@@ -7248,7 +7283,6 @@ impl<'a> GateTypeContext<'a> {
             let branch_ty = branch.actual();
             info.merge(branch);
             let Some(branch_ty) = branch_ty else {
-                branch_result = None;
                 continue;
             };
             match branch_result.as_ref() {

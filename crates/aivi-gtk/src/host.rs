@@ -208,7 +208,7 @@ where
     events: BTreeMap<u64, MountedEvent>,
     queued_events: Rc<GtkEventQueue<V>>,
     queued_window_keys: Rc<GtkWindowKeyQueue>,
-    event_notifier: Option<Rc<dyn Fn()>>,
+    event_notifier: Rc<RefCell<Option<Rc<dyn Fn()>>>>,
 }
 
 impl<V> Default for GtkConcreteHost<V>
@@ -223,7 +223,7 @@ where
             events: BTreeMap::new(),
             queued_events: Rc::new(GtkEventQueue::default()),
             queued_window_keys: Rc::new(GtkWindowKeyQueue::default()),
-            event_notifier: None,
+            event_notifier: Rc::new(RefCell::new(None)),
         }
     }
 }
@@ -242,7 +242,7 @@ where
 
     pub fn set_event_notifier(&mut self, notifier: Option<Rc<dyn Fn()>>) {
         GtkConcreteHost::<V>::assert_gtk_main_thread();
-        self.event_notifier = notifier;
+        *self.event_notifier.borrow_mut() = notifier;
     }
 
     pub fn widget(&self, handle: &GtkConcreteWidget) -> Option<gtk::Widget> {
@@ -286,7 +286,7 @@ where
             name: name.into(),
             repeated,
         });
-        if let Some(notifier) = &self.event_notifier {
+        if let Some(notifier) = self.event_notifier.borrow().clone() {
             notifier();
         }
     }
@@ -335,7 +335,7 @@ where
                         !pressed.insert(name.clone())
                     };
                     key_events.push(GtkQueuedWindowKeyEvent { name, repeated });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                     glib::Propagation::Proceed
@@ -2191,7 +2191,7 @@ where
                         route: route_id,
                         value: V::unit(),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2208,7 +2208,7 @@ where
                         route: route_id,
                         value: V::from_text(text.as_str()),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2224,7 +2224,7 @@ where
                         route: route_id,
                         value: V::unit(),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2240,7 +2240,7 @@ where
                         route: route_id,
                         value: V::from_bool(switch.is_active()),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2256,7 +2256,7 @@ where
                         route: route_id,
                         value: V::from_bool(btn.is_active()),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2272,7 +2272,7 @@ where
                         route: route_id,
                         value: V::from_bool(btn.is_active()),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2288,7 +2288,7 @@ where
                         route: route_id,
                         value: V::from_f64(spin.value()),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2304,7 +2304,7 @@ where
                         route: route_id,
                         value: V::from_f64(scale.value()),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2320,7 +2320,7 @@ where
                         route: route_id,
                         value: V::from_bool(r.is_child_revealed()),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2331,7 +2331,7 @@ where
                         route: route_id,
                         value: V::unit(),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 });
@@ -2346,7 +2346,7 @@ where
                         route: route_id,
                         value: V::unit(),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 });
@@ -2362,7 +2362,7 @@ where
                         route: route_id,
                         value: V::from_f64(dy),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                     glib::Propagation::Proceed
@@ -2378,7 +2378,7 @@ where
                         route: route_id,
                         value: V::unit(),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 });
@@ -2393,7 +2393,7 @@ where
                         route: route_id,
                         value: V::unit(),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 });
@@ -2413,7 +2413,7 @@ where
                         route: route_id,
                         value: V::unit(),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2429,7 +2429,7 @@ where
                         route: route_id,
                         value: V::unit(),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2445,7 +2445,7 @@ where
                         route: route_id,
                         value: V::from_bool(row.is_active()),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2461,7 +2461,7 @@ where
                         route: route_id,
                         value: V::from_f64(row.value()),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2478,7 +2478,7 @@ where
                         route: route_id,
                         value: V::from_text(text.as_str()),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2494,7 +2494,7 @@ where
                         route: route_id,
                         value: V::unit(),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2511,7 +2511,7 @@ where
                         route: route_id,
                         value: V::from_i64(index),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2527,7 +2527,7 @@ where
                         route: route_id,
                         value: V::unit(),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2544,7 +2544,7 @@ where
                         route: route_id,
                         value: V::from_i64(selected),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2561,7 +2561,7 @@ where
                         route: route_id,
                         value: V::from_text(text.as_str()),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2577,7 +2577,7 @@ where
                         route: route_id,
                         value: V::unit(),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -2594,7 +2594,7 @@ where
                         route: route_id,
                         value: V::from_text(text.as_str()),
                     });
-                    if let Some(notifier) = &notifier {
+                    if let Some(notifier) = notifier.borrow().clone() {
                         notifier();
                     }
                 }),
@@ -3316,6 +3316,54 @@ value view =
             assert_eq!(label.text().as_str(), "Runtime title");
 
             button.emit_clicked();
+            let queued = executor.host_mut().drain_events();
+            assert_eq!(queued.len(), 1);
+            assert_eq!(queued[0].route, routes[0].id);
+            assert_eq!(queued[0].value, TestValue::Unit);
+        });
+    }
+
+    #[test]
+    fn concrete_host_notifier_installed_after_mount_wakes_existing_button() {
+        gtk::test_synced(|| {
+            let graph = lower_graph(
+                "gtk-host-late-notifier.aivi",
+                r#"
+value click = True
+value view =
+    <Window title="Host">
+        <Button label="Restart" onClick={click} />
+    </Window>
+"#,
+            );
+            let mut executor = GtkRuntimeExecutor::new(graph, GtkConcreteHost::<TestValue>::default())
+                .expect("concrete GTK host should mount the button before notifier wiring");
+
+            let routes = executor.event_routes();
+            assert_eq!(routes.len(), 1);
+            let button_handle = executor
+                .widget_handle(&routes[0].instance)
+                .expect("event route should point at the mounted button")
+                .clone();
+            let button = executor
+                .host()
+                .widget(&button_handle)
+                .expect("button handle should resolve")
+                .downcast::<gtk::Button>()
+                .expect("button handle should be a GTK button");
+
+            let notify_count = Rc::new(std::cell::Cell::new(0usize));
+            let notify_count_for_closure = notify_count.clone();
+            executor.host_mut().set_event_notifier(Some(Rc::new(move || {
+                notify_count_for_closure.set(notify_count_for_closure.get() + 1);
+            })));
+
+            button.emit_clicked();
+            assert_eq!(
+                notify_count.get(),
+                1,
+                "buttons mounted before notifier wiring should still notify once the notifier is installed"
+            );
             let queued = executor.host_mut().drain_events();
             assert_eq!(queued.len(), 1);
             assert_eq!(queued[0].route, routes[0].id);
