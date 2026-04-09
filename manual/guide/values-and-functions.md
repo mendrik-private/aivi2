@@ -111,6 +111,16 @@ func describeScore = . >= 50
 value scoreLabel = describeScore 88
 ```
 
+When a stage needs both the old and new value, use `#name` instead of breaking out into a helper
+just to simulate a local binding:
+
+```aivi
+type Int -> Int
+func nudge = value => value
+  |> #before before + 1 #after
+  |> after + before
+```
+
 ## Unary subject sugar
 
 When a unary function starts from its argument directly, you can omit the explicit parameter and use `.` as the implicit subject:

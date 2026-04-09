@@ -14,10 +14,9 @@ use aivi_hir::{
     ResolvedClassMemberDispatch, SourceDecodeProgram, SourceDecodeProgramOutcome,
     SourceLifecycleNodeOutcome, SumConstructorHandle, TemporalStageOutcome, TermResolution,
     TruthyFalsyStageOutcome, TypeBinding, TypeConstructorHead, TypeItemBody,
-    elaborate_ambient_items,
-    elaborate_fanouts, elaborate_gates, elaborate_general_expressions, elaborate_recurrences,
-    elaborate_source_lifecycles, elaborate_temporal_stages, elaborate_truthy_falsy,
-    generate_source_decode_programs,
+    elaborate_ambient_items, elaborate_fanouts, elaborate_gates, elaborate_general_expressions,
+    elaborate_recurrences, elaborate_source_lifecycles, elaborate_temporal_stages,
+    elaborate_truthy_falsy, generate_source_decode_programs,
 };
 
 use crate::{
@@ -920,11 +919,11 @@ impl<'a> ModuleLowerer<'a> {
             if constructor_origin_map.contains_key(&local_name) {
                 continue;
             }
-            let Some(source_module) = binding
-                .source_module
-                .as_deref()
-                .or_else(|| self.import_to_module.get(&import_id).map(|name| name.as_ref()))
-            else {
+            let Some(source_module) = binding.source_module.as_deref().or_else(|| {
+                self.import_to_module
+                    .get(&import_id)
+                    .map(|name| name.as_ref())
+            }) else {
                 continue;
             };
             let Some(source_map) = self.workspace_constructor_origins.get(source_module) else {
@@ -3603,7 +3602,10 @@ impl<'a> ModuleLowerer<'a> {
                                 GateRuntimeReference::SumConstructor(handle) => {
                                     let mut handle = handle.clone();
                                     handle.item = HirItemId::from_raw(
-                                        handle.item.as_raw().saturating_add(self.item_origin_offset),
+                                        handle
+                                            .item
+                                            .as_raw()
+                                            .saturating_add(self.item_origin_offset),
                                     );
                                     Reference::SumConstructor(handle)
                                 }
@@ -5142,8 +5144,7 @@ mod tests {
 
     use super::{
         LoweringError, RuntimeFragmentSpec, lower_module, lower_runtime_fragment,
-        lower_runtime_module_with_workspace,
-        validate_general_expr_report_completeness,
+        lower_runtime_module_with_workspace, validate_general_expr_report_completeness,
     };
     use crate::{
         BuiltinApplicativeCarrier, BuiltinBifunctorCarrier, BuiltinClassMemberIntrinsic,
@@ -5378,7 +5379,10 @@ fun truthyDemo:Int = input:Option Int=> input
         let crate::expr::ExprKind::Pipe(case_pipe) = &core.exprs()[case_body].kind else {
             panic!("expected caseDemo to lower into a pipe expression");
         };
-        assert!(matches!(case_pipe.stages[0].kind, crate::expr::PipeStageKind::Case { .. }));
+        assert!(matches!(
+            case_pipe.stages[0].kind,
+            crate::expr::PipeStageKind::Case { .. }
+        ));
         assert!(case_pipe.stages[0].result_memo.is_some());
 
         let truthy_demo = core
@@ -5917,7 +5921,12 @@ value headerTitle = viewTitle currentView
             workspace.diagnostics()
         );
 
-        let included_items = entry.module().root_items().iter().copied().collect::<HashSet<_>>();
+        let included_items = entry
+            .module()
+            .root_items()
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>();
         let core = lower_runtime_module_with_workspace(
             entry.module(),
             &[("shared.nav", workspace.module())],
@@ -5936,7 +5945,9 @@ value headerTitle = viewTitle currentView
             .expect("MailView stub should synthesize a constructor body");
         let constructor_origin = match &core.exprs()[mail_view_body].kind {
             crate::ExprKind::Reference(crate::Reference::SumConstructor(handle)) => handle.item,
-            other => panic!("expected MailView body to be a sum constructor reference, got {other:?}"),
+            other => {
+                panic!("expected MailView body to be a sum constructor reference, got {other:?}")
+            }
         };
 
         let view_title = core
@@ -5951,7 +5962,10 @@ value headerTitle = viewTitle currentView
         let crate::ExprKind::Pipe(pipe) = &core.exprs()[view_title_body].kind else {
             panic!("expected viewTitle body to lower into a pipe expression");
         };
-        let stage = pipe.stages.first().expect("viewTitle pipe should have a case stage");
+        let stage = pipe
+            .stages
+            .first()
+            .expect("viewTitle pipe should have a case stage");
         let crate::PipeStageKind::Case { arms } = &stage.kind else {
             panic!("expected viewTitle pipe stage to be a case expression");
         };

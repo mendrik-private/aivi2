@@ -3764,18 +3764,22 @@ impl<'a> Parser<'a> {
                 *cursor = colon_idx + 1;
                 let ann_end = self
                     .find_same_line_top_level_equals(*cursor, end)
-                    .or_else(|| self.find_next_type_companion_member_start(*cursor, end, member_indent))
+                    .or_else(|| {
+                        self.find_next_type_companion_member_start(*cursor, end, member_indent)
+                    })
                     .unwrap_or(end);
                 annotation = self
                     .parse_type_expr(cursor, ann_end, TypeStop::default())
                     .or_else(|| {
                         self.diagnostics.push(
-                            Diagnostic::error("type companion member is missing its type after `:`")
-                                .with_code(MISSING_TYPE_COMPANION_TYPE)
-                                .with_primary_label(
-                                    name_span,
-                                    "expected a companion type such as `Player -> Player`",
-                                ),
+                            Diagnostic::error(
+                                "type companion member is missing its type after `:`",
+                            )
+                            .with_code(MISSING_TYPE_COMPANION_TYPE)
+                            .with_primary_label(
+                                name_span,
+                                "expected a companion type such as `Player -> Player`",
+                            ),
                         );
                         None
                     });
@@ -4222,11 +4226,8 @@ impl<'a> Parser<'a> {
                 TokenKind::PipeCase => {
                     cluster_active = false;
                     let subject_memo = self.parse_optional_pipe_memo(cursor, end);
-                    let arm = self.parse_pipe_case_arm(
-                        cursor,
-                        end,
-                        stop.with_pipe_stage().with_hash(),
-                    )?;
+                    let arm =
+                        self.parse_pipe_case_arm(cursor, end, stop.with_pipe_stage().with_hash())?;
                     let result_memo = self.parse_optional_pipe_memo(cursor, end);
                     (subject_memo, PipeStageKind::Case(arm), result_memo)
                 }

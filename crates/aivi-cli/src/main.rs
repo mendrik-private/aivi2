@@ -5483,7 +5483,9 @@ mod tests {
     use aivi_backend::{DetachedRuntimeValue, RuntimeTaskPlan, RuntimeValue};
     use aivi_base::SourceDatabase;
     use aivi_gtk::{GtkBridgeNodeKind, RuntimePropertyBinding, RuntimeShowMountPolicy};
-    use aivi_hir::{BuiltinType, ImportValueType, ValidationMode, lower_module as lower_hir_module};
+    use aivi_hir::{
+        BuiltinType, ImportValueType, ValidationMode, lower_module as lower_hir_module,
+    };
     use aivi_runtime::{SourceProviderContext, execute_runtime_task_plan};
     use aivi_syntax::parse_module;
     use std::{

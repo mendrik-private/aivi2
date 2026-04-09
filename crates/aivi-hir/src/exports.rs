@@ -1117,7 +1117,9 @@ fn poly_import_value_type_with_stack(
         TypeKind::Tuple(elements) => Some(ImportValueType::Tuple(
             elements
                 .iter()
-                .map(|element| poly_import_value_type_with_stack(module, *element, params, item_stack))
+                .map(|element| {
+                    poly_import_value_type_with_stack(module, *element, params, item_stack)
+                })
                 .collect::<Option<Vec<_>>>()?,
         )),
         TypeKind::Record(fields) => Some(ImportValueType::Record(
@@ -1126,7 +1128,9 @@ fn poly_import_value_type_with_stack(
                 .map(|field| {
                     Some(ImportRecordField {
                         name: field.label.text().into(),
-                        ty: poly_import_value_type_with_stack(module, field.ty, params, item_stack)?,
+                        ty: poly_import_value_type_with_stack(
+                            module, field.ty, params, item_stack,
+                        )?,
                     })
                 })
                 .collect::<Option<Vec<_>>>()?,
@@ -1143,7 +1147,9 @@ fn poly_import_value_type_with_stack(
                 module, *result, params, item_stack,
             )?),
         }),
-        TypeKind::Apply { .. } => poly_applied_import_value_type_with_stack(module, ty, params, item_stack),
+        TypeKind::Apply { .. } => {
+            poly_applied_import_value_type_with_stack(module, ty, params, item_stack)
+        }
     }
 }
 
@@ -1244,10 +1250,16 @@ fn poly_applied_import_value_type_with_stack(
                 ))),
                 (crate::BuiltinType::Map, 2) => Some(ImportValueType::Map {
                     key: Box::new(poly_import_value_type_with_stack(
-                        module, arguments[0], params, item_stack,
+                        module,
+                        arguments[0],
+                        params,
+                        item_stack,
                     )?),
                     value: Box::new(poly_import_value_type_with_stack(
-                        module, arguments[1], params, item_stack,
+                        module,
+                        arguments[1],
+                        params,
+                        item_stack,
                     )?),
                 }),
                 (crate::BuiltinType::Set, 1) => Some(ImportValueType::Set(Box::new(
@@ -1258,18 +1270,30 @@ fn poly_applied_import_value_type_with_stack(
                 ))),
                 (crate::BuiltinType::Result, 2) => Some(ImportValueType::Result {
                     error: Box::new(poly_import_value_type_with_stack(
-                        module, arguments[0], params, item_stack,
+                        module,
+                        arguments[0],
+                        params,
+                        item_stack,
                     )?),
                     value: Box::new(poly_import_value_type_with_stack(
-                        module, arguments[1], params, item_stack,
+                        module,
+                        arguments[1],
+                        params,
+                        item_stack,
                     )?),
                 }),
                 (crate::BuiltinType::Validation, 2) => Some(ImportValueType::Validation {
                     error: Box::new(poly_import_value_type_with_stack(
-                        module, arguments[0], params, item_stack,
+                        module,
+                        arguments[0],
+                        params,
+                        item_stack,
                     )?),
                     value: Box::new(poly_import_value_type_with_stack(
-                        module, arguments[1], params, item_stack,
+                        module,
+                        arguments[1],
+                        params,
+                        item_stack,
                     )?),
                 }),
                 (crate::BuiltinType::Signal, 1) => Some(ImportValueType::Signal(Box::new(
@@ -1277,10 +1301,16 @@ fn poly_applied_import_value_type_with_stack(
                 ))),
                 (crate::BuiltinType::Task, 2) => Some(ImportValueType::Task {
                     error: Box::new(poly_import_value_type_with_stack(
-                        module, arguments[0], params, item_stack,
+                        module,
+                        arguments[0],
+                        params,
+                        item_stack,
                     )?),
                     value: Box::new(poly_import_value_type_with_stack(
-                        module, arguments[1], params, item_stack,
+                        module,
+                        arguments[1],
+                        params,
+                        item_stack,
                     )?),
                 }),
                 _ => None,
@@ -1292,12 +1322,9 @@ fn poly_applied_import_value_type_with_stack(
         PolyTypeConstructor::Resolved(ResolvedTypeConstructor::Bundle(
             ImportBundleKind::BuiltinOption,
         )) if arguments.len() == 1 => {
-            return Some(ImportValueType::Option(Box::new(poly_import_value_type_with_stack(
-                module,
-                arguments[0],
-                params,
-                item_stack,
-            )?)));
+            return Some(ImportValueType::Option(Box::new(
+                poly_import_value_type_with_stack(module, arguments[0], params, item_stack)?,
+            )));
         }
         _ => {}
     }

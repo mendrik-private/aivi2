@@ -155,14 +155,20 @@ function process(user) {
 }
 ```
 
-In AIVI, a function body is a single expression. If you need intermediate steps, use a pipe:
+In AIVI, a function body is a single expression. If you need intermediate steps, keep them in the
+pipe and name them with `#name` instead of reaching for a local `let`:
 
 ```aivi
+type User = { name: Text }
+
 type User -> Text
 func process = user => user.name
-  |> trim
-  |> "Hello, {.}!"
+  |> #raw trim raw #trimmed
+  |> "Hello, {trimmed}!"
 ```
+
+Use a top-level helper when the step should be reusable. Use `#name` when the name only matters
+inside one pipe.
 
 Or break the work into named helpers:
 

@@ -1242,9 +1242,12 @@ mod tests {
         let fixture_path = workspace.path().join("main.aivi");
         std::fs::write(&fixture_path, source).expect("reversi fixture should write");
         let artifact = prepare_run_from_path(&fixture_path);
-        let harness =
-            start_run_session_with_launch_config(&fixture_path, artifact, RunLaunchConfig::default())
-                .expect("reversi fixture should start a run session");
+        let harness = start_run_session_with_launch_config(
+            &fixture_path,
+            artifact,
+            RunLaunchConfig::default(),
+        )
+        .expect("reversi fixture should start a run session");
         let context = harness.control().context();
         harness
             .present_root_windows()

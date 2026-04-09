@@ -3732,7 +3732,8 @@ impl<'a> Lowerer<'a> {
             match stages[index].kind {
                 PipeStageKind::Case { .. } => {
                     let start = index;
-                    while index < stages.len() && matches!(stages[index].kind, PipeStageKind::Case { .. })
+                    while index < stages.len()
+                        && matches!(stages[index].kind, PipeStageKind::Case { .. })
                     {
                         index += 1;
                     }
@@ -7201,9 +7202,10 @@ impl<'a> Lowerer<'a> {
                             }
                         }
                         PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
-                            if let Some(pair) =
-                                crate::typecheck_context::truthy_falsy_pair_stages(&stages, stage_index)
-                            {
+                            if let Some(pair) = crate::typecheck_context::truthy_falsy_pair_stages(
+                                &stages,
+                                stage_index,
+                            ) {
                                 let first_stage = stages[stage_index];
                                 let mut pair_env = pipe_env.clone();
                                 if let Some(binding) = first_stage.subject_memo {
@@ -7223,10 +7225,8 @@ impl<'a> Lowerer<'a> {
                                 if let Some(binding) = stage.subject_memo {
                                     stage_env.push_term_scope(self.binding_scope([binding]));
                                 }
-                                let (
-                                    PipeStageKind::Truthy { expr }
-                                    | PipeStageKind::Falsy { expr }
-                                ) = &stage.kind
+                                let (PipeStageKind::Truthy { expr }
+                                | PipeStageKind::Falsy { expr }) = &stage.kind
                                 else {
                                     unreachable!();
                                 };
@@ -11636,6 +11636,100 @@ provider custom.feed
             "explicit recurrence wakeup fixture should validate cleanly, got diagnostics: {:?}",
             report.diagnostics()
         );
+    }
+
+    #[test]
+    fn resolved_validation_accepts_pipe_stage_memo_fixture() {
+        let lowered = lower_fixture("milestone-2/valid/pipe-stage-memos/main.aivi");
+        assert!(
+            !lowered.has_errors(),
+            "pipe stage memo fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+        let report = lowered
+            .module()
+            .validate(ValidationMode::RequireResolvedNames);
+        assert!(
+            report.is_ok(),
+            "pipe stage memo fixture should validate cleanly, got diagnostics: {:?}",
+            report.diagnostics()
+        );
+
+        let transformed = find_value(lowered.module(), "transformed");
+        let ExprKind::Pipe(transformed_pipe) = &lowered.module().exprs()[transformed.body].kind
+        else {
+            panic!("expected transformed to lower as a pipe expression");
+        };
+        assert!(matches!(
+            transformed_pipe.stages.first().kind,
+            PipeStageKind::Transform { .. }
+        ));
+        assert!(transformed_pipe.stages.first().subject_memo.is_some());
+        assert!(transformed_pipe.stages.first().result_memo.is_some());
+
+        let case_memo = find_value(lowered.module(), "caseMemo");
+        let ExprKind::Pipe(case_pipe) = &lowered.module().exprs()[case_memo.body].kind else {
+            panic!("expected caseMemo to lower as a pipe expression");
+        };
+        assert!(matches!(
+            case_pipe.stages.first().kind,
+            PipeStageKind::Case { .. }
+        ));
+        assert!(case_pipe.stages.first().subject_memo.is_some());
+        assert!(case_pipe.stages.first().result_memo.is_some());
+        assert!(
+            case_pipe
+                .stages
+                .iter()
+                .skip(1)
+                .all(|stage| stage.result_memo.is_none())
+        );
+
+        let truthy_memo = find_value(lowered.module(), "truthyMemo");
+        let ExprKind::Pipe(truthy_pipe) = &lowered.module().exprs()[truthy_memo.body].kind else {
+            panic!("expected truthyMemo to lower as a pipe expression");
+        };
+        assert!(matches!(
+            truthy_pipe.stages.first().kind,
+            PipeStageKind::Truthy { .. }
+        ));
+        assert!(truthy_pipe.stages.first().subject_memo.is_some());
+        assert!(truthy_pipe.stages.first().result_memo.is_some());
+        assert!(
+            truthy_pipe
+                .stages
+                .iter()
+                .skip(1)
+                .all(|stage| stage.result_memo.is_none())
+        );
+
+        let delayed_value = find_signal(lowered.module(), "delayedValue");
+        let delayed_body = delayed_value
+            .body
+            .expect("delayedValue should lower to a pipe expression");
+        let ExprKind::Pipe(delayed_pipe) = &lowered.module().exprs()[delayed_body].kind else {
+            panic!("expected delayedValue to lower as a pipe expression");
+        };
+        assert!(matches!(
+            delayed_pipe.stages.first().kind,
+            PipeStageKind::Delay { .. }
+        ));
+        assert!(delayed_pipe.stages.first().result_memo.is_some());
+
+        let accumulated = find_signal(lowered.module(), "accumulated");
+        let accumulated_body = accumulated
+            .body
+            .expect("accumulated should lower to a pipe expression");
+        let ExprKind::Pipe(accumulated_pipe) = &lowered.module().exprs()[accumulated_body].kind
+        else {
+            panic!("expected accumulated to lower as a pipe expression");
+        };
+        assert!(matches!(
+            accumulated_pipe.stages.first().kind,
+            PipeStageKind::Accumulate { .. }
+        ));
+        assert!(accumulated_pipe.stages.first().subject_memo.is_some());
+        assert!(accumulated_pipe.stages.first().result_memo.is_some());
     }
 
     #[test]

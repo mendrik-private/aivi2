@@ -566,6 +566,7 @@ Rules:
 | Operator | Shape | Meaning / guardrails |
 |---|---|---|
 | `|>` | `x |> f` or `x |> .field` | transform current subject |
+| Pipe memo `#name` | `x |> #before f before #after` | name a stage input/result without leaving the pipe |
 | `?|>` | `x ?|> predicate` | gate; predicate must be pure `Bool` |
 | `||>` | `x ||> Pattern -> expr` | case split / pattern match |
 | `T|>` / `F|>` | adjacent pair in one spine | truthy/falsy sugar for canonical carriers |
@@ -579,6 +580,23 @@ Rules:
 | `&|>` | applicative cluster stage | combine independent values under one applicative |
 | `@|>` / `<|@` | recurrent region | explicit recurrence; avoid unless runtime lowering target is known |
 | `<|` | `target <| patch` | structural patch application |
+
+### 6.1.1 Pipe memos `#name`
+
+```aivi
+value total : Int = 20
+ |> #before before + 1 #after
+  |> after + before
+```
+
+Rules:
+
+- `operator #name expr` binds the stage input for that stage body only.
+- `operator expr #name` binds the stage result for the rest of the pipe after that stage.
+- Both forms may appear on the same stage.
+- Supported on ordinary pipe stages: `|>`, `|`, `?|>`, `||>`, `T|>`, `F|>`, `*|>`, `<|*`, `!|>`, `~|>`, `delay|>`, `burst|>`, `+|>`, `-|>`, `@|>`, and `<|@`.
+- `||>` runs and `T|>` / `F|>` pairs share memo flow across the grouped branches. Put the same result memo name on each arm when the merged branch result is needed later.
+- `&|>` applicative clusters follow separate applicative-cluster semantics rather than the single-subject memo flow above.
 
 ### 6.2 `result { ... }`
 
@@ -711,6 +729,7 @@ Rules:
 - Safe builtin carriers: `List`, `Option`, `Result`, `Validation`, `Signal`, `Task`.
 - Finalizer must be a pure function or constructor.
 - If no explicit finalizer appears before pipe end, the cluster defaults to a tuple constructor.
+- Pipe memos are part of the ordinary single-subject pipe flow and do not currently participate inside `&|>` clusters.
 - Inside an unfinished cluster:
   - no ambient `.field` projections unless nested under an explicit subject
   - no `?|>` or `||>`

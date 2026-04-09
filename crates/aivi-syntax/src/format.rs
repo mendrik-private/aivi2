@@ -3928,23 +3928,21 @@ value view =
 
     #[test]
     fn formatter_preserves_pipe_stage_memos() {
-        let formatted = format_text(
-            concat!(
-                "value resolved=Some 2\n",
-                "||>#incoming Some value->value + 1 #resolved\n",
-                "||>None->0 #resolved\n",
-                "|>resolved\n",
-                "\n",
-                "signal delayed=1\n",
-                "delay|>#current 10 #later\n",
-                "\n",
-                "signal replayed=1\n",
-                "burst|>#current 10 3 #later\n",
-                "\n",
-                "signal counted=1\n",
-                "+|>#event 0 step #total\n",
-            ),
-        );
+        let formatted = format_text(concat!(
+            "value resolved=Some 2\n",
+            "||>#incoming Some value->value + 1 #resolved\n",
+            "||>None->0 #resolved\n",
+            "|>resolved\n",
+            "\n",
+            "signal delayed=1\n",
+            "delay|>#current 10 #later\n",
+            "\n",
+            "signal replayed=1\n",
+            "burst|>#current 10 3 #later\n",
+            "\n",
+            "signal counted=1\n",
+            "+|>#event 0 step #total\n",
+        ));
         assert_eq!(
             formatted,
             concat!(

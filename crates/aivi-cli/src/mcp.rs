@@ -494,9 +494,7 @@ impl McpHostState {
             })?;
             if runtime.hydration_in_sync() && runtime.runtime_idle() {
                 stable_since = Some(stable_since.unwrap_or_else(Instant::now));
-                if stable_since
-                    .is_some_and(|since| since.elapsed() >= HYDRATION_SETTLE_GRACE)
-                {
+                if stable_since.is_some_and(|since| since.elapsed() >= HYDRATION_SETTLE_GRACE) {
                     break;
                 }
             } else {
@@ -2231,7 +2229,10 @@ struct SessionRuntimeStatus {
 
 impl SessionRuntimeStatus {
     fn hydration_in_sync(&self) -> bool {
-        match (self.latest_requested_hydration, self.latest_applied_hydration) {
+        match (
+            self.latest_requested_hydration,
+            self.latest_applied_hydration,
+        ) {
             (Some(requested), Some(applied)) => applied >= requested,
             (Some(_), None) => false,
             (None, _) => true,
@@ -2239,7 +2240,10 @@ impl SessionRuntimeStatus {
     }
 
     fn pending_hydration_revision(&self) -> Option<u64> {
-        match (self.latest_requested_hydration, self.latest_applied_hydration) {
+        match (
+            self.latest_requested_hydration,
+            self.latest_applied_hydration,
+        ) {
             (Some(requested), Some(applied)) if applied < requested => Some(requested),
             (Some(requested), None) => Some(requested),
             _ => None,
@@ -2723,7 +2727,9 @@ mod tests {
         roots: &'a [WidgetSnapshot],
         id: &str,
     ) -> Option<&'a WidgetSnapshot> {
-        roots.iter().find_map(|root| find_widget_snapshot_by_id(root, id))
+        roots
+            .iter()
+            .find_map(|root| find_widget_snapshot_by_id(root, id))
     }
 
     fn find_widget_snapshot_by_path<'a>(
@@ -2957,8 +2963,7 @@ mod tests {
             "MCP should keep pumping the run session until GTK applies a new hydration"
         );
         assert_eq!(
-            result.session.latest_requested_hydration,
-            result.session.latest_applied_hydration,
+            result.session.latest_requested_hydration, result.session.latest_applied_hydration,
             "MCP should not return while GTK is still behind the latest requested hydration"
         );
         assert_eq!(
@@ -2967,8 +2972,7 @@ mod tests {
             "session status should make runtime/UI hydration sync explicit after a click settles"
         );
         assert_eq!(
-            result.session.pending_hydration_revision,
-            None,
+            result.session.pending_hydration_revision, None,
             "session status should report no pending hydration once the click has settled"
         );
 
@@ -2994,8 +2998,9 @@ mod tests {
         let path = workspace.path().join("main.aivi");
         std::fs::write(&path, near_endgame_reversi_source())
             .expect("near-endgame reversi fixture should write");
-        let prepared = prepare_launch_request(&path, Some("main".to_owned()), LaunchSourceArgs::default())
-            .expect("near-endgame reversi launch request should prepare");
+        let prepared =
+            prepare_launch_request(&path, Some("main".to_owned()), LaunchSourceArgs::default())
+                .expect("near-endgame reversi launch request should prepare");
         let mut host = McpHostState {
             context: gtk::glib::MainContext::default(),
             configured: ConfiguredTarget {
@@ -3034,8 +3039,7 @@ mod tests {
             .expect("clicking the terminal reversi move should settle fully in MCP");
 
         assert_eq!(
-            result.session.latest_requested_hydration,
-            result.session.latest_applied_hydration,
+            result.session.latest_requested_hydration, result.session.latest_applied_hydration,
             "terminal reversi clicks should not report settled while GTK still trails the runtime hydration revision"
         );
         assert_eq!(
@@ -3044,8 +3048,7 @@ mod tests {
             "session status should report terminal reversi hydration as synchronized"
         );
         assert_eq!(
-            result.session.pending_hydration_revision,
-            None,
+            result.session.pending_hydration_revision, None,
             "session status should report no pending GTK hydration after the terminal move settles"
         );
 

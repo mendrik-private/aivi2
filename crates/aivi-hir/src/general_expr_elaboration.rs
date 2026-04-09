@@ -2367,8 +2367,8 @@ impl<'a> GeneralExprElaborator<'a> {
                         .typing
                         .infer_gate_stage(*expr, &stage_env, &current)
                         .ok_or_else(|| {
-                        vec![GeneralExprBlocker::UnknownExprType { span: stage.span }]
-                    })?;
+                            vec![GeneralExprBlocker::UnknownExprType { span: stage.span }]
+                        })?;
                     let plan = GatePlanner::plan(self.typing.gate_carrier(&current));
                     if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary)
                         && current.is_signal()
@@ -4007,8 +4007,8 @@ mod tests {
         elaborate_general_expressions,
     };
     use crate::{
-        BuiltinType, ImportModuleResolution, ImportResolver, PipeTransformMode,
-        exports, lower_module, lower_module_with_resolver,
+        BuiltinType, ImportModuleResolution, ImportResolver, PipeTransformMode, exports,
+        lower_module, lower_module_with_resolver,
         resolver::RawHoistItem,
         typecheck::resolve_class_member_dispatch,
         validate::{GateExprEnv, GateType, GateTypeContext},

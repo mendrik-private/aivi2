@@ -3336,8 +3336,9 @@ value view =
     </Window>
 "#,
             );
-            let mut executor = GtkRuntimeExecutor::new(graph, GtkConcreteHost::<TestValue>::default())
-                .expect("concrete GTK host should mount the button before notifier wiring");
+            let mut executor =
+                GtkRuntimeExecutor::new(graph, GtkConcreteHost::<TestValue>::default())
+                    .expect("concrete GTK host should mount the button before notifier wiring");
 
             let routes = executor.event_routes();
             assert_eq!(routes.len(), 1);
@@ -3354,9 +3355,11 @@ value view =
 
             let notify_count = Rc::new(std::cell::Cell::new(0usize));
             let notify_count_for_closure = notify_count.clone();
-            executor.host_mut().set_event_notifier(Some(Rc::new(move || {
-                notify_count_for_closure.set(notify_count_for_closure.get() + 1);
-            })));
+            executor
+                .host_mut()
+                .set_event_notifier(Some(Rc::new(move || {
+                    notify_count_for_closure.set(notify_count_for_closure.get() + 1);
+                })));
 
             button.emit_clicked();
             assert_eq!(

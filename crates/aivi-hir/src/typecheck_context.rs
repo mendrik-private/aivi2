@@ -240,11 +240,10 @@ impl<'pipe> PipeSubjectWalker<'pipe> {
                 }
                 _ => {
                     let current_subject = self.current.clone();
-                    let stage_env = current_subject
-                        .as_ref()
-                        .map_or_else(|| self.env.clone(), |subject| {
-                            pipe_stage_expr_env(&self.env, stage, subject)
-                        });
+                    let stage_env = current_subject.as_ref().map_or_else(
+                        || self.env.clone(),
+                        |subject| pipe_stage_expr_env(&self.env, stage, subject),
+                    );
                     match on_stage(
                         stage_index,
                         stage,
@@ -1175,11 +1174,9 @@ impl GateType {
                 let lowered: Option<Vec<_>> = fields
                     .iter()
                     .map(|f| {
-                        Self::expand_import_alias_type(&f.ty, arguments).map(|ty| {
-                            GateRecordField {
-                                name: f.name.to_string(),
-                                ty,
-                            }
+                        Self::expand_import_alias_type(&f.ty, arguments).map(|ty| GateRecordField {
+                            name: f.name.to_string(),
+                            ty,
                         })
                     })
                     .collect();
@@ -1433,9 +1430,7 @@ impl GateType {
                 } = left
                 {
                     if let ImportTypeDefinition::Alias(alias) = def.as_ref() {
-                        if let Some(expanded) =
-                            Self::expand_import_alias_type(alias, arguments)
-                        {
+                        if let Some(expanded) = Self::expand_import_alias_type(alias, arguments) {
                             return Self::same_shape_inner(
                                 &expanded,
                                 right,
@@ -1452,9 +1447,7 @@ impl GateType {
                 } = right
                 {
                     if let ImportTypeDefinition::Alias(alias) = def.as_ref() {
-                        if let Some(expanded) =
-                            Self::expand_import_alias_type(alias, arguments)
-                        {
+                        if let Some(expanded) = Self::expand_import_alias_type(alias, arguments) {
                             return Self::same_shape_inner(
                                 left,
                                 &expanded,

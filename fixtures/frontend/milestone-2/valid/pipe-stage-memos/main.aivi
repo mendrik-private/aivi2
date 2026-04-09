@@ -74,7 +74,7 @@ signal accumulated : Signal Int = source
  +|> #event 0 addEvent #total
  | total
 
-@recur.timer 5sec
+@recur.timer 5
 signal recurred : Signal Int = 0
  @|> #seed seed + 1
  <|@ #next next + 1

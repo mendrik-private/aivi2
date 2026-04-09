@@ -124,3 +124,9 @@ Aligned the manual and wiki with the implemented `T|>` / `F|>` semantics.
 Documented the canonical carrier set (`Bool`, `Option`, `Result`, `Validation`)
 plus the one-outer-`Signal (...)` lift, clarified ambient `.` rebinding for
 single-payload constructors, and corrected the surface feature matrix note.
+
+## [2026-04-09] ingest | pipe stage memos
+
+Documented `#name` as the way to remember stage inputs/results inside ordinary pipe flows, added
+manual examples framing it as the local-`let` replacement for pipes, and recorded the grouped
+branch memo behavior plus the `&|>` cluster boundary in the wiki.

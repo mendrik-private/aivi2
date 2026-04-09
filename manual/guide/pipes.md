@@ -45,6 +45,43 @@ value scaled = 5
 
 `multiply 3` produces a function waiting for the final argument, so the pipeline stays compact.
 
+## Remembering stage values with `#name`
+
+`#name` is the pipe memo operator. Use it when you want the convenience of a local `let`
+without leaving the pipe.
+
+- Put `#name` right after the operator to name the stage input for that stage body.
+- Put `#name` at the end of the stage to name the stage result for later stages.
+
+```aivi
+value total : Int = 20
+  |> #before before + 1 #after
+  |> after + before
+```
+
+Here `before` only exists while the first stage body runs. `after` is available to the rest of
+the pipe.
+
+Branching stages support the same pattern. When you want the merged branch result later, write the
+same result memo on each arm:
+
+```aivi
+type StageChoice =
+  | Ready Int
+  | Missing
+
+value resolvedScore : Int = Ready 2
+ ||> #input Ready value -> value + 1 #resolved
+ ||> Missing            -> 0 #resolved
+  |> resolved
+```
+
+This is the pipe-native replacement for the local binding you might otherwise reach for in a
+statement-oriented language. Pipe memos work across ordinary pipe stages, including transforms,
+taps, gates, case splits, truthy/falsy pairs, fan-out and join, validation, temporal signal
+stages, accumulation, and explicit recurrence. Applicative clusters (`&|>`) use separate
+applicative-cluster semantics rather than this single-subject memo flow.
+
 ## Type-level record row pipes
 
 The same `|>` surface is also available in type position for record row transforms.
