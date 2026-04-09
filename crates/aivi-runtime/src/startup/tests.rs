@@ -1,4 +1,3 @@
-
 use std::{collections::BTreeMap, sync::Arc};
 
 use aivi_backend::{RuntimeCustomCapabilityCommandPlan, RuntimeNamedValue};
@@ -465,6 +464,34 @@ signal label = "Ada"
         text_ptr(second),
         "linked runtime must expose relocated committed text storage on the next tick"
     );
+}
+
+#[test]
+fn linked_runtime_exposes_reactive_program_dependencies() {
+    let lowered = lower_text(
+        "runtime-startup-reactive-program-metadata.aivi",
+        r#"
+signal id = 7
+signal next = id
+"#,
+    );
+    let assembly =
+        crate::assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");
+    let linked = link_backend_runtime(
+        assembly,
+        &lowered.core,
+        std::sync::Arc::new(lowered.backend.clone()),
+    )
+    .expect("startup link should succeed");
+    let id = signal_handle(&linked, lowered.hir.module(), "id");
+    let next = signal_handle(&linked, lowered.hir.module(), "next");
+    let node = linked
+        .reactive_program()
+        .signal(next)
+        .expect("next signal should appear in the linked reactive program");
+
+    assert_eq!(node.dependencies(), &[id]);
+    assert_eq!(node.root_signals(), &[id]);
 }
 
 #[test]

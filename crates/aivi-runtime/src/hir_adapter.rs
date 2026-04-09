@@ -25,6 +25,7 @@ use crate::{
         DerivedHandle, GraphBuildError, InputHandle, OwnerHandle, ReactiveClauseBuilderSpec,
         ReactiveClauseHandle, SignalGraph, SignalGraphBuilder, SignalHandle,
     },
+    reactive_program::{ReactiveProgram, build_reactive_program},
 };
 
 /// Build a concrete runtime assembly directly from the current HIR handoffs.
@@ -865,10 +866,13 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
         let graph = graph_builder.build().map_err(|err| {
             HirRuntimeAdapterErrors::new(vec![HirRuntimeAdapterError::GraphBuild(err)])
         })?;
+        let reactive_program =
+            build_reactive_program(&graph, &signals, &sources, &tasks, &recurrences);
 
         Ok(ProfiledHirRuntimeAssembly {
             assembly: HirRuntimeAssembly {
                 graph,
+                reactive_program,
                 owners: owners.into_boxed_slice(),
                 signals: signals.into_boxed_slice(),
                 sources: sources.into_boxed_slice(),
@@ -999,6 +1003,7 @@ fn resolve_db_changed_projection_base_item(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HirRuntimeAssembly {
     graph: SignalGraph,
+    reactive_program: ReactiveProgram,
     owners: Box<[HirOwnerBinding]>,
     signals: Box<[HirSignalBinding]>,
     sources: Box<[HirSourceBinding]>,
@@ -1011,6 +1016,10 @@ pub struct HirRuntimeAssembly {
 impl HirRuntimeAssembly {
     pub fn graph(&self) -> &SignalGraph {
         &self.graph
+    }
+
+    pub fn reactive_program(&self) -> &ReactiveProgram {
+        &self.reactive_program
     }
 
     pub fn owners(&self) -> &[HirOwnerBinding] {
@@ -2503,6 +2512,38 @@ signal retried : Signal Int =
             runtime.graph().signal_count(),
             assembly.graph().signal_count()
         );
+        let program = assembly.reactive_program();
+        let users_node = program
+            .signal(users.signal())
+            .expect("users signal should be present in the reactive program");
+        assert!(matches!(
+            users_node.kind(),
+            crate::ReactiveSignalNodeKind::Input(input)
+                if input.source_instance() == Some(source.spec.instance)
+        ));
+        let gated_users_node = program
+            .signal(gated_users.signal())
+            .expect("gatedUsers signal should be present in the reactive program");
+        assert!(matches!(
+            gated_users_node.kind(),
+            crate::ReactiveSignalNodeKind::Derived(info)
+                if info.source_input().is_none() && !info.has_recurrence()
+        ));
+        assert_eq!(gated_users_node.dependencies(), &[users.signal()]);
+        assert_eq!(gated_users_node.root_signals(), &[users.signal()]);
+        let retried_node = program
+            .signal(retried.signal())
+            .expect("retried signal should be present in the reactive program");
+        assert!(matches!(
+            retried_node.kind(),
+            crate::ReactiveSignalNodeKind::Derived(info) if info.has_recurrence()
+        ));
+        assert_eq!(program.signal_count(), assembly.graph().signal_count());
+        assert_eq!(program.topo_order().len(), assembly.graph().signal_count());
+        assert!(
+            program.partitions().len() >= assembly.graph().batches().len(),
+            "reactive program partitions should cover at least the scheduled topology batches"
+        );
     }
 
     #[test]
@@ -2957,6 +2998,68 @@ signal inbound : Signal Text
         assert_eq!(
             source.spec.provider,
             RuntimeSourceProvider::builtin(BuiltinSourceProvider::DbusSignal)
+        );
+    }
+
+    #[test]
+    fn reactive_program_keeps_same_block_parameterized_from_signal_dependencies() {
+        let lowered = lower_text(
+            "runtime-hir-adapter-parameterized-from-same-block-signals.aivi",
+            r#"
+type State = { score: Int, ready: Bool }
+
+signal state : Signal State = { score: 1, ready: True }
+
+from state = {
+    score: .score
+    ready: .ready
+
+    type Int -> Bool
+    atLeast threshold: ready and score >= threshold
+}
+
+signal thresholdMet : Signal Bool = atLeast 0
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "parameterized same-block selector fixture should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let assembly = assemble_hir_runtime(lowered.module())
+            .expect("parameterized same-block selector fixture should assemble");
+        let state = assembly
+            .signal(item_id(lowered.module(), "state"))
+            .expect("state signal binding should exist");
+        let threshold_met = assembly
+            .signal(item_id(lowered.module(), "thresholdMet"))
+            .expect("thresholdMet signal binding should exist");
+        let node = assembly
+            .reactive_program()
+            .signal(threshold_met.signal())
+            .expect("thresholdMet should appear in the reactive program");
+
+        assert!(matches!(
+            node.kind(),
+            crate::ReactiveSignalNodeKind::Derived(_)
+        ));
+        assert!(
+            node.dependencies().contains(&state.signal()),
+            "thresholdMet should retain its upstream state signal dependency"
+        );
+        assert!(
+            node.root_signals().contains(&state.signal()),
+            "thresholdMet should trace back to the state signal as a root"
+        );
+        assert!(
+            node.topo_index()
+                > assembly
+                    .reactive_program()
+                    .signal(state.signal())
+                    .expect("state should appear in the reactive program")
+                    .topo_index(),
+            "thresholdMet should evaluate after its upstream state signal"
         );
     }
 

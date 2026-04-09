@@ -7,6 +7,7 @@ pub mod glib_adapter;
 pub mod graph;
 pub mod hir_adapter;
 pub mod providers;
+pub mod reactive_program;
 pub mod runtime_errors;
 pub mod scheduler;
 mod source_decode;
@@ -41,6 +42,11 @@ pub use hir_adapter::{
 };
 pub use providers::{
     MailboxPublishError, SourceProviderContext, SourceProviderExecutionError, SourceProviderManager,
+};
+pub use reactive_program::{
+    ReactiveClauseNode, ReactiveDerivedNode, ReactiveInputNode, ReactivePartition,
+    ReactivePartitionId, ReactiveProgram, ReactiveReactiveNode, ReactiveSignalNode,
+    ReactiveSignalNodeKind,
 };
 pub use runtime_errors::render_runtime_error;
 pub use scheduler::{

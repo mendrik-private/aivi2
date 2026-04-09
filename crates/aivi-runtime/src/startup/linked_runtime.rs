@@ -32,6 +32,10 @@ impl BackendLinkedRuntime {
         self.runtime.graph()
     }
 
+    pub fn reactive_program(&self) -> &crate::ReactiveProgram {
+        self.assembly.reactive_program()
+    }
+
     pub fn derived_signal(&self, signal: DerivedHandle) -> Option<&LinkedDerivedSignal> {
         self.derived_signals.get(&signal)
     }
@@ -645,4 +649,3 @@ impl Drop for BackendLinkedRuntime {
         }
     }
 }
-
