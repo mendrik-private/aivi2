@@ -153,7 +153,7 @@ or a helper, branching with `T|>` / `F|>` if needed.
 `T|>` / `F|>` are shorthand for the built-in two-way carriers with a canonical
 truthy/falsy split:
 
-| Subject type | `T|>` matches | `F|>` matches |
+| Subject type | `T\|>` matches | `F\|>` matches |
 | --- | --- | --- |
 | `Bool` | `True` | `False` |
 | `Option A` | `Some _` | `None` |
