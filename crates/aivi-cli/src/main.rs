@@ -23,9 +23,10 @@ use std::{
 use std::os::unix::fs::PermissionsExt;
 
 use aivi_backend::{
-    DetachedRuntimeValue, ItemId as BackendItemId, KernelEvaluationProfile, KernelEvaluator,
-    Program as BackendProgram, RuntimeFloat, RuntimeRecordField, RuntimeValue,
-    compile_program_cached, lower_module as lower_backend_module, validate_program,
+    BackendExecutableProgram, BackendExecutionEngineHandle, DetachedRuntimeValue,
+    ItemId as BackendItemId, KernelEvaluationProfile, Program as BackendProgram, RuntimeFloat,
+    RuntimeRecordField, RuntimeValue, cache::compute_program_cache_key, compile_program_cached,
+    lower_module as lower_backend_module, validate_program,
 };
 use aivi_base::{Diagnostic, FileId, Severity, SourceDatabase, SourceSpan};
 use aivi_core::{
@@ -49,15 +50,16 @@ use aivi_hir::{
 };
 use aivi_lambda::{lower_module as lower_lambda_module, validate_module as validate_lambda_module};
 use aivi_query::{
-    HirModuleResult, RootDatabase, SourceFile as QuerySourceFile,
+    HirModuleResult, QueryCacheStats, RootDatabase, SourceFile as QuerySourceFile,
     discover_workspace_root_from_directory, hir_module as query_hir_module, parse_manifest,
-    parsed_file as query_parsed_file, resolve_v1_entrypoint,
+    parsed_file as query_parsed_file, resolve_v1_entrypoint, runtime_fragment_backend_unit,
+    whole_program_backend_unit_with_items,
 };
 use aivi_runtime::{
     BackendLinkedRuntime, GlibLinkedRuntimeDriver, GlibLinkedRuntimeFailure, HirRuntimeAssembly,
     InputHandle as RuntimeInputHandle, Publication, SourceProviderContext, SourceProviderManager,
-    assemble_hir_runtime_with_items, execute_runtime_value_with_context, link_backend_runtime,
-    render_runtime_error,
+    assemble_hir_runtime_with_items, assemble_hir_runtime_with_items_profiled,
+    execute_runtime_value_with_context, link_backend_runtime, render_runtime_error,
 };
 use aivi_syntax::{Formatter, lex_module, parse_module};
 use gtk::{glib, prelude::*};
@@ -515,6 +517,52 @@ fn run_markup(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Stri
         format!("failed to determine current directory for `aivi run`: {error}")
     })?;
 
+    // When no explicit path or --app was given and the manifest defines multiple
+    // [[app]] entries, launch every app as a separate subprocess so each gets its
+    // own GTK main loop.
+    if requested_path.is_none() && requested_app.is_none() {
+        let workspace_root = discover_workspace_root_from_directory(&cwd);
+        if let Ok(manifest) = parse_manifest(&workspace_root) {
+            if manifest.apps.len() > 1 {
+                let exe = env::current_exe()
+                    .map_err(|e| format!("failed to locate aivi executable: {e}"))?;
+                let mut children: Vec<std::process::Child> = manifest
+                    .apps
+                    .iter()
+                    .map(|app| {
+                        let mut cmd = std::process::Command::new(&exe);
+                        cmd.arg("run").arg("--app").arg(&app.name);
+                        if timings {
+                            cmd.arg("--timings");
+                        }
+                        if let Some(view) = requested_view.as_deref().or(app.view.as_deref()) {
+                            cmd.arg("--view").arg(view);
+                        }
+                        cmd.spawn().map_err(|e| {
+                            format!("failed to spawn `aivi run --app {}`: {e}", app.name)
+                        })
+                    })
+                    .collect::<Result<_, _>>()?;
+                let mut any_failed = false;
+                for child in &mut children {
+                    match child.wait() {
+                        Ok(status) if !status.success() => any_failed = true,
+                        Err(e) => {
+                            eprintln!("error waiting for child process: {e}");
+                            any_failed = true;
+                        }
+                        _ => {}
+                    }
+                }
+                return Ok(if any_failed {
+                    ExitCode::FAILURE
+                } else {
+                    ExitCode::SUCCESS
+                });
+            }
+        }
+    }
+
     let resolved =
         resolve_run_entrypoint(&cwd, requested_path.as_deref(), requested_app.as_deref())?;
     let view = requested_view
@@ -642,6 +690,12 @@ struct WorkspaceFrontend {
     entry: QuerySourceFile,
 }
 
+#[derive(Clone, Copy)]
+struct BackendQueryContext<'a> {
+    db: &'a RootDatabase,
+    entry: QuerySourceFile,
+}
+
 impl WorkspaceFrontend {
     fn load(path: &Path) -> Result<Self, String> {
         let text = fs::read_to_string(path)
@@ -689,6 +743,13 @@ impl WorkspaceHirSnapshot {
 
     fn entry_hir(&self) -> Arc<aivi_query::HirModuleResult> {
         query_hir_module(&self.frontend.db, self.frontend.entry)
+    }
+
+    fn backend_query_context(&self) -> BackendQueryContext<'_> {
+        BackendQueryContext {
+            db: &self.frontend.db,
+            entry: self.frontend.entry,
+        }
     }
 }
 
@@ -956,6 +1017,40 @@ struct RunArtifact {
     stub_signal_defaults: Vec<(RuntimeInputHandle, DetachedRuntimeValue)>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct RunArtifactPreparationMetrics {
+    workspace_collection: Duration,
+    markup_lowering: Duration,
+    widget_bridge_lowering: Duration,
+    run_plan_validation: Duration,
+    runtime_backend_lowering: Duration,
+    runtime_assembly: Duration,
+    reactive_fragment_compilation: Duration,
+    markup_site_collection: Duration,
+    hydration_fragment_compilation: Duration,
+    event_handler_resolution: Duration,
+    stub_signal_defaults: Duration,
+    total: Duration,
+    workspace_module_count: usize,
+    runtime_backend_item_count: usize,
+    runtime_backend_kernel_count: usize,
+    hydration_fragment_count: usize,
+    reactive_guard_fragment_count: usize,
+    reactive_body_fragment_count: usize,
+}
+
+impl RunArtifactPreparationMetrics {
+    fn reactive_fragment_count(self) -> usize {
+        self.reactive_guard_fragment_count + self.reactive_body_fragment_count
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PreparedRunArtifact {
+    artifact: RunArtifact,
+    metrics: RunArtifactPreparationMetrics,
+}
+
 #[derive(Clone, Debug)]
 struct RunValidationBlocker {
     span: SourceSpan,
@@ -963,10 +1058,34 @@ struct RunValidationBlocker {
 }
 
 #[derive(Clone, Debug)]
+struct RunFragmentExecutionUnit {
+    backend: Arc<BackendProgram>,
+}
+
+impl RunFragmentExecutionUnit {
+    fn new(backend: Arc<BackendProgram>) -> Self {
+        Self { backend }
+    }
+
+    fn backend(&self) -> &BackendProgram {
+        self.backend.as_ref()
+    }
+
+    fn create_engine(&self, profiled: bool) -> BackendExecutionEngineHandle<'_> {
+        let executable = BackendExecutableProgram::interpreted(self.backend.as_ref());
+        if profiled {
+            executable.create_profiled_engine()
+        } else {
+            executable.create_engine()
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 struct CompiledRunFragment {
     expr: HirExprId,
     parameters: Vec<GeneralExprParameter>,
-    program: Arc<BackendProgram>,
+    execution: Arc<RunFragmentExecutionUnit>,
     item: BackendItemId,
     required_signal_globals: Vec<CompiledRunSignalGlobal>,
 }
@@ -999,6 +1118,11 @@ enum CompiledRunTextSegment {
 enum RunInputSpec {
     Expr(HirExprId),
     Text(aivi_hir::TextLiteral),
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct RunInputCompilationMetrics {
+    compiled_fragment_count: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -1083,7 +1207,7 @@ impl RunHydrationProfiler {
         let Self::Enabled(profile) = self else {
             return;
         };
-        let program_key = Arc::as_ptr(&fragment.program) as usize;
+        let program_key = Arc::as_ptr(&fragment.execution) as usize;
         let entry = profile
             .fragment_profiles
             .entry(fragment.expr)
@@ -1102,13 +1226,13 @@ impl RunHydrationProfiler {
             return;
         };
         profile.total_time = total_time;
-        for (program_ptr, evaluator) in evaluators {
+        for (program_key, evaluator) in evaluators {
             let Some(kernel_profile) = evaluator.profile_snapshot() else {
                 continue;
             };
             profile
                 .program_profiles
-                .entry(*program_ptr as usize)
+                .entry(*program_key)
                 .or_default()
                 .merge_from(&kernel_profile);
         }
@@ -1500,12 +1624,18 @@ fn run_markup_file_with_launch_config(
     let t0 = Instant::now();
     let snapshot = WorkspaceHirSnapshot::load(path)?;
     let load_duration = t0.elapsed();
+    if timings {
+        print_run_prelaunch_stage_progress("load + parse", load_duration, total_start.elapsed());
+    }
 
     let t0 = Instant::now();
     let syntax_failed = workspace_syntax_failed(&snapshot, |sources, diagnostics| {
         print_diagnostics(sources, diagnostics.iter())
     });
     let syntax_duration = t0.elapsed();
+    if timings {
+        print_run_prelaunch_stage_progress("syntax check", syntax_duration, total_start.elapsed());
+    }
     if syntax_failed {
         return Ok(ExitCode::FAILURE);
     }
@@ -1517,42 +1647,75 @@ fn run_markup_file_with_launch_config(
         |sources, diagnostics| print_diagnostics(sources, diagnostics.iter()),
     );
     let hir_duration = t0.elapsed();
+    if timings {
+        print_run_prelaunch_stage_progress("HIR lowering", hir_duration, total_start.elapsed());
+    }
     if hir_lowering_failed || hir_validation_failed {
         return Ok(ExitCode::FAILURE);
     }
 
-    let t0 = Instant::now();
     let lowered = snapshot.entry_hir();
+    let t0 = Instant::now();
     let workspace_hir_arcs = collect_workspace_hirs_sorted(&snapshot);
+    let workspace_collection_duration = t0.elapsed();
+    if timings {
+        print_run_prelaunch_stage_progress(
+            "workspace collect",
+            workspace_collection_duration,
+            total_start.elapsed(),
+        );
+    }
     let workspace_hirs: Vec<(&str, &HirModule)> = workspace_hir_arcs
         .iter()
         .map(|(name, arc)| (name.as_str(), arc.module()))
         .collect();
-    let artifact = match prepare_run_artifact(
+    let mut report_prelaunch_stage = |stage: &'static str, duration: Duration| {
+        if timings {
+            print_run_prelaunch_stage_progress(stage, duration, total_start.elapsed());
+        }
+    };
+    let mut prepared = match prepare_run_artifact_with_metrics_and_progress(
         &snapshot.sources,
         lowered.module(),
         &workspace_hirs,
         requested_view,
+        Some(snapshot.backend_query_context()),
+        &mut report_prelaunch_stage,
     ) {
-        Ok(artifact) => artifact,
+        Ok(prepared) => prepared,
         Err(message) => {
             eprintln!("{message}");
             return Ok(ExitCode::FAILURE);
         }
     };
-    let artifact_duration = t0.elapsed();
+    prepared.metrics.workspace_collection = workspace_collection_duration;
+    let artifact_metrics = prepared.metrics;
+    let query_cache = snapshot.frontend.db.cache_stats();
 
-    if timings {
-        let total = total_start.elapsed();
-        eprintln!("timings for `aivi run` ({}):", path.display());
-        eprintln!("  load + parse:       {:>8.2?}", load_duration);
-        eprintln!("  syntax check:       {:>8.2?}", syntax_duration);
-        eprintln!("  HIR lowering:       {:>8.2?}", hir_duration);
-        eprintln!("  artifact prep:      {:>8.2?}", artifact_duration);
-        eprintln!("  total (pre-launch): {:>8.2?}", total);
-    }
-
-    run_session::launch_run_with_config(path, artifact, launch_config)
+    run_session::launch_run_with_config(
+        path,
+        prepared.artifact,
+        launch_config,
+        move |stage, startup_metrics| {
+            if timings {
+                print_run_startup_stage_progress(stage, *startup_metrics);
+            }
+        },
+        move |startup_metrics| {
+            if timings {
+                print_run_timing_report(
+                    path,
+                    load_duration,
+                    syntax_duration,
+                    hir_duration,
+                    query_cache,
+                    artifact_metrics,
+                    *startup_metrics,
+                    total_start.elapsed(),
+                );
+            }
+        },
+    )
 }
 
 #[derive(Debug)]
@@ -1619,7 +1782,11 @@ fn test_file_with_context(
     for test in tests {
         let hir = query_hir_module(&snapshot.frontend.db, test.file);
         let module = hir.module();
-        let artifact = match prepare_test_artifact(module, test.owner) {
+        let artifact = match prepare_test_artifact_with_query_context(
+            module,
+            test.owner,
+            Some(snapshot.backend_query_context()),
+        ) {
             Ok(artifact) => artifact,
             Err(message) => {
                 failed += 1;
@@ -1844,14 +2011,15 @@ fn prepare_execute_artifact(module: &HirModule) -> Result<ExecuteArtifact, Strin
     })
 }
 
-fn prepare_test_artifact(
+fn prepare_test_artifact_with_query_context(
     module: &HirModule,
     test_owner: HirItemId,
+    query_context: Option<BackendQueryContext<'_>>,
 ) -> Result<ExecuteArtifact, String> {
     let fragment = test_runtime_fragment(module, test_owner)?;
     let included_items = runtime_fragment_included_items(module, &fragment);
     if test_can_use_backend_only_path(module, test_owner, &included_items) {
-        if let Ok(artifact) = prepare_backend_only_test_artifact(module, &fragment) {
+        if let Ok(artifact) = prepare_backend_only_test_artifact(module, &fragment, query_context) {
             return Ok(artifact);
         }
     }
@@ -1883,8 +2051,14 @@ fn prepare_test_artifact(
 fn prepare_backend_only_test_artifact(
     module: &HirModule,
     fragment: &RuntimeFragmentSpec,
+    query_context: Option<BackendQueryContext<'_>>,
 ) -> Result<ExecuteArtifact, String> {
-    let lowered = lower_runtime_fragment_backend_stack(module, fragment, "`aivi test`")?;
+    let lowered = compile_runtime_fragment_backend_unit(
+        module,
+        fragment,
+        query_context,
+        "failed to compile backend-only `aivi test` fragment",
+    )?;
     let backend_item = lowered
         .backend
         .items()
@@ -2025,7 +2199,8 @@ fn evaluate_task_owner_value(
         backend_item,
     } = artifact;
     if let Some(backend_item) = backend_item {
-        let mut evaluator = KernelEvaluator::new(&backend);
+        let executable = BackendExecutableProgram::interpreted(backend.as_ref());
+        let mut evaluator = executable.create_engine();
         let globals = BTreeMap::new();
         return evaluator
             .evaluate_item(backend_item, &globals)
@@ -2217,6 +2392,59 @@ fn prepare_run_artifact(
     workspace_hirs: &[(&str, &HirModule)],
     requested_view: Option<&str>,
 ) -> Result<RunArtifact, String> {
+    prepare_run_artifact_with_query_context(sources, module, workspace_hirs, requested_view, None)
+}
+
+fn prepare_run_artifact_with_query_context(
+    sources: &SourceDatabase,
+    module: &HirModule,
+    workspace_hirs: &[(&str, &HirModule)],
+    requested_view: Option<&str>,
+    query_context: Option<BackendQueryContext<'_>>,
+) -> Result<RunArtifact, String> {
+    prepare_run_artifact_with_metrics_and_query_context(
+        sources,
+        module,
+        workspace_hirs,
+        requested_view,
+        query_context,
+    )
+    .map(|prepared| prepared.artifact)
+}
+
+fn prepare_run_artifact_with_metrics_and_query_context(
+    sources: &SourceDatabase,
+    module: &HirModule,
+    workspace_hirs: &[(&str, &HirModule)],
+    requested_view: Option<&str>,
+    query_context: Option<BackendQueryContext<'_>>,
+) -> Result<PreparedRunArtifact, String> {
+    prepare_run_artifact_with_metrics_and_progress(
+        sources,
+        module,
+        workspace_hirs,
+        requested_view,
+        query_context,
+        |_, _| {},
+    )
+}
+
+fn prepare_run_artifact_with_metrics_and_progress<F>(
+    sources: &SourceDatabase,
+    module: &HirModule,
+    workspace_hirs: &[(&str, &HirModule)],
+    requested_view: Option<&str>,
+    query_context: Option<BackendQueryContext<'_>>,
+    mut on_stage_completed: F,
+) -> Result<PreparedRunArtifact, String>
+where
+    F: FnMut(&'static str, Duration),
+{
+    let total_started = Instant::now();
+    let mut metrics = RunArtifactPreparationMetrics {
+        workspace_module_count: workspace_hirs.len(),
+        ..RunArtifactPreparationMetrics::default()
+    };
     let included_items = production_item_ids(module);
     let view = select_run_view(module, requested_view)?;
     let view_owner = find_value_owner(module, view).ok_or_else(|| {
@@ -2231,20 +2459,41 @@ fn prepare_run_artifact(
             view.name.text()
         ));
     };
+    let markup_lowering_started = Instant::now();
     let plan = lower_markup_expr(module, view.body).map_err(|error| {
         format!(
             "failed to lower run view `{}` into GTK markup: {error}",
             view.name.text()
         )
     })?;
+    metrics.markup_lowering = markup_lowering_started.elapsed();
+    on_stage_completed("markup lowering", metrics.markup_lowering);
+    let widget_bridge_lowering_started = Instant::now();
     let bridge = lower_widget_bridge(&plan).map_err(|error| {
         format!(
             "failed to lower run view `{}` into a GTK bridge graph: {error}",
             view.name.text()
         )
     })?;
+    metrics.widget_bridge_lowering = widget_bridge_lowering_started.elapsed();
+    on_stage_completed("GTK bridge lowering", metrics.widget_bridge_lowering);
+    let run_plan_validation_started = Instant::now();
     validate_run_plan(sources, &bridge)?;
-    let lowered = if workspace_hirs.is_empty() {
+    metrics.run_plan_validation = run_plan_validation_started.elapsed();
+    on_stage_completed("run plan validation", metrics.run_plan_validation);
+    let runtime_backend_lowering_started = Instant::now();
+    let lowered = if let Some(query_context) = query_context {
+        let unit = whole_program_backend_unit_with_items(
+            query_context.db,
+            query_context.entry,
+            &included_items,
+        )
+        .map_err(|error| format!("failed to lower `aivi run` module into backend unit: {error}"))?;
+        LoweredRunBackendStack {
+            core: unit.core().clone(),
+            backend: unit.backend_arc(),
+        }
+    } else if workspace_hirs.is_empty() {
         lower_runtime_backend_stack_with_items_fast(module, &included_items, "`aivi run`")?
     } else {
         lower_runtime_backend_stack_with_workspace(
@@ -2254,8 +2503,13 @@ fn prepare_run_artifact(
             "`aivi run`",
         )?
     };
-    let runtime_assembly =
-        assemble_hir_runtime_with_items(module, &included_items).map_err(|errors| {
+    metrics.runtime_backend_lowering = runtime_backend_lowering_started.elapsed();
+    on_stage_completed("full-program lowering", metrics.runtime_backend_lowering);
+    metrics.runtime_backend_item_count = lowered.backend.items().iter().count();
+    metrics.runtime_backend_kernel_count = lowered.backend.kernels().iter().count();
+    let runtime_assembly_started = Instant::now();
+    let profiled_runtime_assembly =
+        assemble_hir_runtime_with_items_profiled(module, &included_items).map_err(|errors| {
             let mut rendered = String::from("failed to assemble runtime plans for `aivi run`:\n");
             for error in errors.errors() {
                 rendered.push_str("- ");
@@ -2264,7 +2518,21 @@ fn prepare_run_artifact(
             }
             rendered
         })?;
+    metrics.runtime_assembly = runtime_assembly_started.elapsed();
+    on_stage_completed("runtime assembly", metrics.runtime_assembly);
+    metrics.reactive_guard_fragment_count =
+        profiled_runtime_assembly.stats.reactive_guard_fragments;
+    metrics.reactive_body_fragment_count = profiled_runtime_assembly.stats.reactive_body_fragments;
+    metrics.reactive_fragment_compilation = profiled_runtime_assembly
+        .stats
+        .reactive_fragment_compile_duration;
+    on_stage_completed(
+        "reactive fragment compile",
+        metrics.reactive_fragment_compilation,
+    );
+    let runtime_assembly = profiled_runtime_assembly.assembly;
     let runtime_backend_by_hir = backend_items_by_hir(&lowered.core, lowered.backend.as_ref());
+    let markup_site_collection_started = Instant::now();
     let sites = collect_markup_runtime_expr_sites(module, view.body).map_err(|error| {
         let span_info = match &error {
             aivi_hir::MarkupRuntimeExprSiteError::UnknownExprType { span, .. } => {
@@ -2277,7 +2545,10 @@ fn prepare_run_artifact(
             source_location(sources, module.exprs()[view.body].span)
         )
     })?;
-    let hydration_inputs = compile_run_inputs(
+    metrics.markup_site_collection = markup_site_collection_started.elapsed();
+    on_stage_completed("runtime expr sites", metrics.markup_site_collection);
+    let hydration_fragment_compilation_started = Instant::now();
+    let (hydration_inputs, hydration_metrics) = compile_run_inputs(
         sources,
         module,
         view_owner,
@@ -2285,22 +2556,39 @@ fn prepare_run_artifact(
         &bridge,
         lowered.backend.as_ref(),
         &runtime_backend_by_hir,
+        query_context,
     )?;
+    metrics.hydration_fragment_compilation = hydration_fragment_compilation_started.elapsed();
+    on_stage_completed(
+        "hydration fragments",
+        metrics.hydration_fragment_compilation,
+    );
+    metrics.hydration_fragment_count = hydration_metrics.compiled_fragment_count;
     let required_signal_globals = collect_run_required_signal_globals(&hydration_inputs);
+    let event_handler_resolution_started = Instant::now();
     let event_handlers =
         resolve_run_event_handlers(module, &sites, &bridge, &runtime_assembly, sources)?;
+    metrics.event_handler_resolution = event_handler_resolution_started.elapsed();
+    on_stage_completed("event handler resolve", metrics.event_handler_resolution);
+    let stub_signal_defaults_started = Instant::now();
     let stub_signal_defaults = collect_stub_signal_defaults(module, &runtime_assembly);
-    Ok(RunArtifact {
-        view_name: view.name.text().into(),
-        module: module.clone(),
-        bridge,
-        hydration_inputs,
-        required_signal_globals,
-        runtime_assembly,
-        core: lowered.core,
-        backend: lowered.backend,
-        event_handlers,
-        stub_signal_defaults,
+    metrics.stub_signal_defaults = stub_signal_defaults_started.elapsed();
+    on_stage_completed("stub signal defaults", metrics.stub_signal_defaults);
+    metrics.total = total_started.elapsed();
+    Ok(PreparedRunArtifact {
+        artifact: RunArtifact {
+            view_name: view.name.text().into(),
+            module: module.clone(),
+            bridge,
+            hydration_inputs,
+            required_signal_globals,
+            runtime_assembly,
+            core: lowered.core,
+            backend: lowered.backend,
+            event_handlers,
+            stub_signal_defaults,
+        },
+        metrics,
     })
 }
 
@@ -2800,71 +3088,6 @@ fn lower_runtime_backend_stack_with_workspace(
     })
 }
 
-fn lower_runtime_fragment_backend_stack(
-    module: &HirModule,
-    fragment: &RuntimeFragmentSpec,
-    command_name: &str,
-) -> Result<LoweredRunBackendStack, String> {
-    let core = lower_runtime_fragment(module, fragment).map_err(|errors| {
-        let mut rendered = format!("failed to lower {command_name} module into typed core:\n");
-        for error in errors.errors() {
-            rendered.push_str("- ");
-            rendered.push_str(&error.to_string());
-            rendered.push('\n');
-        }
-        rendered
-    })?;
-    validate_core_module(&core.module).map_err(|errors| {
-        let mut rendered = format!("typed-core validation failed for {command_name}:\n");
-        for error in errors.errors() {
-            rendered.push_str("- ");
-            rendered.push_str(&error.to_string());
-            rendered.push('\n');
-        }
-        rendered
-    })?;
-    let lambda = lower_lambda_module(&core.module).map_err(|errors| {
-        let mut rendered = format!("failed to lower {command_name} module into typed lambda:\n");
-        for error in errors.errors() {
-            rendered.push_str("- ");
-            rendered.push_str(&error.to_string());
-            rendered.push('\n');
-        }
-        rendered
-    })?;
-    validate_lambda_module(&lambda).map_err(|errors| {
-        let mut rendered = format!("typed-lambda validation failed for {command_name}:\n");
-        for error in errors.errors() {
-            rendered.push_str("- ");
-            rendered.push_str(&error.to_string());
-            rendered.push('\n');
-        }
-        rendered
-    })?;
-    let backend = lower_backend_module(&lambda).map_err(|errors| {
-        let mut rendered = format!("failed to lower {command_name} module into backend IR:\n");
-        for error in errors.errors() {
-            rendered.push_str("- ");
-            rendered.push_str(&error.to_string());
-            rendered.push('\n');
-        }
-        rendered
-    })?;
-    validate_program(&backend).map_err(|errors| {
-        let mut rendered = format!("backend validation failed for {command_name}:\n");
-        for error in errors.errors() {
-            rendered.push_str("- ");
-            rendered.push_str(&error.to_string());
-            rendered.push('\n');
-        }
-        rendered
-    })?;
-    Ok(LoweredRunBackendStack {
-        core: core.module,
-        backend: Arc::new(backend),
-    })
-}
-
 fn resolve_run_event_handlers(
     module: &HirModule,
     sites: &MarkupRuntimeExprSites,
@@ -3270,19 +3493,35 @@ fn compile_run_inputs(
     bridge: &GtkBridgeGraph,
     runtime_backend: &BackendProgram,
     runtime_backend_by_hir: &BTreeMap<aivi_hir::ItemId, BackendItemId>,
-) -> Result<BTreeMap<RuntimeInputHandle, CompiledRunInput>, String> {
+    query_context: Option<BackendQueryContext<'_>>,
+) -> Result<
+    (
+        BTreeMap<RuntimeInputHandle, CompiledRunInput>,
+        RunInputCompilationMetrics,
+    ),
+    String,
+> {
     let mut inputs = BTreeMap::new();
+    let mut metrics = RunInputCompilationMetrics::default();
+    let mut compiler = RunFragmentCompiler::new(
+        sources,
+        module,
+        view_owner,
+        sites,
+        runtime_backend,
+        runtime_backend_by_hir,
+        query_context,
+    );
+    let mut compile_fragment = |expr| {
+        let (fragment, compiled_now) = compiler.compile(expr)?;
+        if compiled_now {
+            metrics.compiled_fragment_count += 1;
+        }
+        Ok::<_, String>(fragment)
+    };
     for (input, spec) in collect_run_input_specs_from_bridge(module, bridge) {
         let compiled = match spec {
-            RunInputSpec::Expr(expr) => CompiledRunInput::Expr(compile_run_expr_fragment(
-                sources,
-                module,
-                view_owner,
-                sites,
-                expr,
-                runtime_backend,
-                runtime_backend_by_hir,
-            )?),
+            RunInputSpec::Expr(expr) => CompiledRunInput::Expr(compile_fragment(expr)?),
             RunInputSpec::Text(text) => {
                 let mut segments = Vec::with_capacity(text.segments.len());
                 for segment in text.segments {
@@ -3290,17 +3529,11 @@ fn compile_run_inputs(
                         aivi_hir::TextSegment::Text(text) => {
                             segments.push(CompiledRunTextSegment::Text(text.raw));
                         }
-                        aivi_hir::TextSegment::Interpolation(interpolation) => segments.push(
-                            CompiledRunTextSegment::Interpolation(compile_run_expr_fragment(
-                                sources,
-                                module,
-                                view_owner,
-                                sites,
+                        aivi_hir::TextSegment::Interpolation(interpolation) => {
+                            segments.push(CompiledRunTextSegment::Interpolation(compile_fragment(
                                 interpolation.expr,
-                                runtime_backend,
-                                runtime_backend_by_hir,
-                            )?),
-                        ),
+                            )?))
+                        }
                     }
                 }
                 CompiledRunInput::Text(CompiledRunText {
@@ -3310,7 +3543,165 @@ fn compile_run_inputs(
         };
         inputs.insert(input, compiled);
     }
-    Ok(inputs)
+    Ok((inputs, metrics))
+}
+
+fn print_run_timing_report(
+    path: &Path,
+    load_duration: Duration,
+    syntax_duration: Duration,
+    hir_duration: Duration,
+    query_cache: QueryCacheStats,
+    artifact: RunArtifactPreparationMetrics,
+    startup: run_session::RunStartupMetrics,
+    total_to_first_present: Duration,
+) {
+    eprintln!("timings for `aivi run` ({}):", path.display());
+    print_run_prelaunch_timing_details(
+        load_duration,
+        syntax_duration,
+        hir_duration,
+        query_cache,
+        artifact,
+    );
+    eprintln!("  GTK init:                  {:>8.2?}", startup.gtk_init);
+    eprintln!(
+        "  runtime link:              {:>8.2?}",
+        startup.runtime_link
+    );
+    eprintln!(
+        "  session setup:             {:>8.2?}",
+        startup.session_setup
+    );
+    eprintln!(
+        "  initial runtime tick:      {:>8.2?}",
+        startup.initial_runtime_tick
+    );
+    eprintln!(
+        "  initial hydration wait:    {:>8.2?}",
+        startup.initial_hydration_wait
+    );
+    eprintln!(
+        "  root window collect:       {:>8.2?}",
+        startup.root_window_collection
+    );
+    eprintln!(
+        "  first present:             {:>8.2?}",
+        startup.window_presentation
+    );
+    eprintln!(
+        "  launch startup total:      {:>8.2?}",
+        startup.total_to_first_present()
+    );
+    eprintln!(
+        "  total (first present):     {:>8.2?}",
+        total_to_first_present
+    );
+    flush_timing_output();
+}
+
+fn print_run_prelaunch_stage_progress(stage: &str, duration: Duration, total: Duration) {
+    eprintln!(
+        "pre-present stage complete: {:<24} {:>8.2?} (command total {:>8.2?})",
+        stage, duration, total
+    );
+    flush_timing_output();
+}
+
+fn print_run_prelaunch_timing_details(
+    load_duration: Duration,
+    syntax_duration: Duration,
+    hir_duration: Duration,
+    query_cache: QueryCacheStats,
+    artifact: RunArtifactPreparationMetrics,
+) {
+    eprintln!("  load + parse:              {:>8.2?}", load_duration);
+    eprintln!("  syntax check:              {:>8.2?}", syntax_duration);
+    eprintln!("  HIR lowering:              {:>8.2?}", hir_duration);
+    eprintln!(
+        "  workspace collect:         {:>8.2?}",
+        artifact.workspace_collection
+    );
+    eprintln!(
+        "  markup lowering:           {:>8.2?}",
+        artifact.markup_lowering
+    );
+    eprintln!(
+        "  GTK bridge lowering:       {:>8.2?}",
+        artifact.widget_bridge_lowering
+    );
+    eprintln!(
+        "  run plan validation:       {:>8.2?}",
+        artifact.run_plan_validation
+    );
+    eprintln!(
+        "  full-program lowering:     {:>8.2?}",
+        artifact.runtime_backend_lowering
+    );
+    eprintln!(
+        "  runtime assembly:          {:>8.2?}",
+        artifact.runtime_assembly
+    );
+    eprintln!(
+        "  reactive fragment compile: {:>8.2?}",
+        artifact.reactive_fragment_compilation
+    );
+    eprintln!(
+        "  runtime expr sites:        {:>8.2?}",
+        artifact.markup_site_collection
+    );
+    eprintln!(
+        "  hydration fragments:       {:>8.2?}",
+        artifact.hydration_fragment_compilation
+    );
+    eprintln!(
+        "  event handler resolve:     {:>8.2?}",
+        artifact.event_handler_resolution
+    );
+    eprintln!(
+        "  stub signal defaults:      {:>8.2?}",
+        artifact.stub_signal_defaults
+    );
+    eprintln!("  artifact prep total:       {:>8.2?}", artifact.total);
+    eprintln!(
+        "  workspace modules:         {:>8}",
+        artifact.workspace_module_count
+    );
+    eprintln!(
+        "  runtime backend size:      {:>8} items, {:>4} kernels",
+        artifact.runtime_backend_item_count, artifact.runtime_backend_kernel_count
+    );
+    eprintln!(
+        "  compiled fragments:        {:>8} hydration, {:>4} reactive ({} guards, {} bodies)",
+        artifact.hydration_fragment_count,
+        artifact.reactive_fragment_count(),
+        artifact.reactive_guard_fragment_count,
+        artifact.reactive_body_fragment_count
+    );
+    eprintln!(
+        "  query cache hot/cold:      parsed {}/{}, HIR {}/{}",
+        query_cache.parsed_hits,
+        query_cache.parsed_misses,
+        query_cache.hir_hits,
+        query_cache.hir_misses
+    );
+}
+
+fn print_run_startup_stage_progress(
+    stage: run_session::RunStartupStage,
+    startup: run_session::RunStartupMetrics,
+) {
+    eprintln!(
+        "  startup stage complete:    {:<24} {:>8.2?} (startup total {:>8.2?})",
+        stage.label(),
+        startup.stage_duration(stage),
+        startup.total_to_session_ready
+    );
+    flush_timing_output();
+}
+
+fn flush_timing_output() {
+    let _ = io::stderr().flush();
 }
 
 fn event_handler_payload_expr(module: &HirModule, handler: HirExprId) -> Option<HirExprId> {
@@ -3450,169 +3841,248 @@ fn default_runtime_value_for_import_type(ty: &ImportValueType) -> Option<Runtime
     }
 }
 
-fn compile_run_expr_fragment(
-    sources: &SourceDatabase,
-    module: &HirModule,
+#[derive(Clone)]
+struct CompiledRuntimeFragmentUnit {
+    core: Arc<aivi_core::LoweredRuntimeFragment>,
+    backend: Arc<BackendProgram>,
+    execution_cache_key: u64,
+}
+
+struct RunFragmentCompiler<'a> {
+    sources: &'a SourceDatabase,
+    module: &'a HirModule,
     view_owner: aivi_hir::ItemId,
-    sites: &aivi_hir::MarkupRuntimeExprSites,
-    expr: HirExprId,
-    runtime_backend: &BackendProgram,
-    runtime_backend_by_hir: &BTreeMap<aivi_hir::ItemId, BackendItemId>,
-) -> Result<CompiledRunFragment, String> {
-    let site = sites.get(expr).ok_or_else(|| {
-        format!(
-            "run view references expression {} at {} without a collected runtime environment",
-            expr.as_raw(),
-            source_location(sources, module.exprs()[expr].span)
-        )
-    })?;
-    let body = elaborate_runtime_expr_with_env(module, expr, &site.parameters, Some(&site.ty))
-        .map_err(|blocked| {
+    sites: &'a aivi_hir::MarkupRuntimeExprSites,
+    runtime_backend: &'a BackendProgram,
+    runtime_backend_by_hir: &'a BTreeMap<aivi_hir::ItemId, BackendItemId>,
+    query_context: Option<BackendQueryContext<'a>>,
+    compiled_fragments: BTreeMap<HirExprId, CompiledRunFragment>,
+    execution_units: BTreeMap<u64, Arc<RunFragmentExecutionUnit>>,
+}
+
+impl<'a> RunFragmentCompiler<'a> {
+    fn new(
+        sources: &'a SourceDatabase,
+        module: &'a HirModule,
+        view_owner: aivi_hir::ItemId,
+        sites: &'a aivi_hir::MarkupRuntimeExprSites,
+        runtime_backend: &'a BackendProgram,
+        runtime_backend_by_hir: &'a BTreeMap<aivi_hir::ItemId, BackendItemId>,
+        query_context: Option<BackendQueryContext<'a>>,
+    ) -> Self {
+        Self {
+            sources,
+            module,
+            view_owner,
+            sites,
+            runtime_backend,
+            runtime_backend_by_hir,
+            query_context,
+            compiled_fragments: BTreeMap::new(),
+            execution_units: BTreeMap::new(),
+        }
+    }
+
+    fn compile(&mut self, expr: HirExprId) -> Result<(CompiledRunFragment, bool), String> {
+        if let Some(cached) = self.compiled_fragments.get(&expr) {
+            return Ok((cached.clone(), false));
+        }
+
+        let compiled = self.compile_uncached(expr)?;
+        self.compiled_fragments.insert(expr, compiled.clone());
+        Ok((compiled, true))
+    }
+
+    fn compile_uncached(&mut self, expr: HirExprId) -> Result<CompiledRunFragment, String> {
+        let site = self.sites.get(expr).ok_or_else(|| {
             format!(
-                "failed to elaborate runtime expression at {}: {}",
-                source_location(sources, site.span),
-                blocked
+                "run view references expression {} at {} without a collected runtime environment",
+                expr.as_raw(),
+                source_location(self.sources, self.module.exprs()[expr].span)
             )
         })?;
-    let fragment = RuntimeFragmentSpec {
-        name: format!("__run_fragment_{}", expr.as_raw()).into_boxed_str(),
-        owner: view_owner,
-        body_expr: expr,
-        parameters: site.parameters.clone(),
-        body,
-    };
-    let core = lower_runtime_fragment(module, &fragment).map_err(|error| {
-        format!(
-            "failed to lower runtime expression at {} into typed core: {error}",
-            source_location(sources, site.span)
-        )
-    })?;
-    let lambda = lower_lambda_module(&core.module).map_err(|error| {
-        format!(
-            "failed to lower runtime expression at {} into typed lambda: {error}",
-            source_location(sources, site.span)
-        )
-    })?;
-    validate_lambda_module(&lambda).map_err(|error| {
-        format!(
-            "typed lambda validation failed for runtime expression at {}: {error}",
-            source_location(sources, site.span)
-        )
-    })?;
-    let backend = lower_backend_module(&lambda).map_err(|error| {
-        format!(
-            "failed to lower runtime expression at {} into backend IR: {error}",
-            source_location(sources, site.span)
-        )
-    })?;
-    validate_program(&backend).map_err(|error| {
-        format!(
-            "backend validation failed for runtime expression at {}: {error}",
-            source_location(sources, site.span)
-        )
-    })?;
-    let item = backend
-        .items()
-        .iter()
-        .find_map(|(item_id, item)| (item.name == core.entry_name).then_some(item_id))
-        .ok_or_else(|| {
-            format!(
-                "backend lowering did not preserve runtime fragment `{}` for expression at {}",
-                core.entry_name,
-                source_location(sources, site.span)
-            )
-        })?;
-    let required_signal_globals = backend.items()[item]
-        .body
-        .map(|kernel| backend.kernels()[kernel].global_items.clone())
-        .unwrap_or_default()
-        .into_iter()
-        .map(|fragment_item| {
-            let fragment_decl = backend.items().get(fragment_item).ok_or_else(|| {
+        let body =
+            elaborate_runtime_expr_with_env(self.module, expr, &site.parameters, Some(&site.ty))
+                .map_err(|blocked| {
+                    format!(
+                        "failed to elaborate runtime expression at {}: {}",
+                        source_location(self.sources, site.span),
+                        blocked
+                    )
+                })?;
+        let fragment = RuntimeFragmentSpec {
+            name: format!("__run_fragment_{}", expr.as_raw()).into_boxed_str(),
+            owner: self.view_owner,
+            body_expr: expr,
+            parameters: site.parameters.clone(),
+            body,
+        };
+        let unit = compile_runtime_fragment_backend_unit(
+            self.module,
+            &fragment,
+            self.query_context,
+            &format!(
+                "failed to compile runtime expression at {}",
+                source_location(self.sources, site.span)
+            ),
+        )?;
+        let execution = self
+            .execution_units
+            .entry(unit.execution_cache_key)
+            .or_insert_with(|| Arc::new(RunFragmentExecutionUnit::new(unit.backend.clone())))
+            .clone();
+        let backend = unit.backend.as_ref();
+        let item = backend
+            .items()
+            .iter()
+            .find_map(|(item_id, item)| (item.name == unit.core.entry_name).then_some(item_id))
+            .ok_or_else(|| {
                 format!(
-                    "compiled runtime fragment {} references missing backend item {}",
-                    expr.as_raw(),
-                    fragment_item
+                    "backend lowering did not preserve runtime fragment `{}` for expression at {}",
+                    unit.core.entry_name,
+                    source_location(self.sources, site.span)
                 )
             })?;
-            let core_item = core
-                .module
-                .items()
-                .get(fragment_decl.origin)
-                .ok_or_else(|| {
+        let required_signal_globals = backend.items()[item]
+            .body
+            .map(|kernel| backend.kernels()[kernel].global_items.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|fragment_item| {
+                let fragment_decl = backend.items().get(fragment_item).ok_or_else(|| {
                     format!(
-                        "compiled runtime fragment {} lost core→HIR origin for backend item {}",
+                        "compiled runtime fragment {} references missing backend item {}",
                         expr.as_raw(),
                         fragment_item
                     )
                 })?;
-            let hir_item = core_item.origin;
-            // eprintln!("DEBUG: fragment {} backend item {} core item {} hir_item {} name={}", expr.as_raw(), fragment_item, fragment_decl.origin, hir_item.as_raw(), core_item.name);
-            // Look up the HIR item. For cross-module signals, the origin is a synthetic ID
-            // that doesn't correspond to a real HIR item — in that case fall back to the
-            // core item's own name (which is the import's local name).
-            let hir_lookup = module.items().get(hir_item);
-            // eprintln!("DEBUG:   hir_lookup = {:?}", hir_lookup.map(|i| i.label()));
-            let signal_name: Box<str> = match hir_lookup {
-                Some(Item::Signal(signal)) => signal.name.text().into(),
-                Some(_) => return Ok(None),
-                None => core_item.name.clone(),
-            };
-            let runtime_item = if hir_lookup.is_some() {
-                runtime_backend_by_hir.get(&hir_item).copied().ok_or_else(|| {
-                    format!(
-                        "runtime fragment {} needs signal `{signal_name}` but the live run backend has no matching item",
-                        expr.as_raw(),
-                    )
-                })?
-            } else {
-                // Synthetic origin: find the backend item by signal name instead.
-                runtime_backend.items().iter()
-                    .find_map(|(bid, bitem)| {
-                        (bitem.name.as_ref() == signal_name.as_ref()
-                            && matches!(bitem.kind, aivi_backend::ItemKind::Signal(_)))
-                        .then_some(bid)
-                    })
+                let core_item = unit
+                    .core
+                    .module
+                    .items()
+                    .get(fragment_decl.origin)
                     .ok_or_else(|| {
                         format!(
-                            "runtime fragment {} needs signal `{signal_name}` (synthetic origin) but no matching signal found",
+                            "compiled runtime fragment {} lost core→HIR origin for backend item {}",
                             expr.as_raw(),
+                            fragment_item
                         )
-                    })?
-            };
-            let runtime_decl = runtime_backend.items().get(runtime_item).ok_or_else(|| {
-                format!(
-                    "live run backend is missing runtime item {} for signal `{signal_name}`",
+                    })?;
+                let hir_item = core_item.origin;
+                let hir_lookup = self.module.items().get(hir_item);
+                let signal_name: Box<str> = match hir_lookup {
+                    Some(Item::Signal(signal)) => signal.name.text().into(),
+                    Some(_) => return Ok(None),
+                    None => core_item.name.clone(),
+                };
+                let runtime_item = if hir_lookup.is_some() {
+                    self.runtime_backend_by_hir
+                        .get(&hir_item)
+                        .copied()
+                        .ok_or_else(|| {
+                            format!(
+                                "runtime fragment {} needs signal `{signal_name}` but the live run backend has no matching item",
+                                expr.as_raw(),
+                            )
+                        })?
+                } else {
+                    self.runtime_backend
+                        .items()
+                        .iter()
+                        .find_map(|(backend_item, item)| {
+                            (item.name.as_ref() == signal_name.as_ref()
+                                && matches!(item.kind, aivi_backend::ItemKind::Signal(_)))
+                            .then_some(backend_item)
+                        })
+                        .ok_or_else(|| {
+                            format!(
+                                "runtime fragment {} needs signal `{signal_name}` (synthetic origin) but no matching signal found",
+                                expr.as_raw(),
+                            )
+                        })?
+                };
+                let runtime_decl = self
+                    .runtime_backend
+                    .items()
+                    .get(runtime_item)
+                    .ok_or_else(|| {
+                        format!(
+                            "live run backend is missing runtime item {} for signal `{signal_name}`",
+                            runtime_item,
+                        )
+                    })?;
+                if !matches!(runtime_decl.kind, aivi_backend::ItemKind::Signal(_)) {
+                    return Err(format!(
+                        "live run backend item {} for signal `{signal_name}` is not a signal",
+                        runtime_item,
+                    ));
+                }
+                Ok(Some(CompiledRunSignalGlobal {
+                    fragment_item,
                     runtime_item,
-                )
-            })?;
-            if !matches!(runtime_decl.kind, aivi_backend::ItemKind::Signal(_)) {
-                return Err(format!(
-                    "live run backend item {} for signal `{signal_name}` is not a signal",
-                    runtime_item,
-                ));
-            }
-            Ok(Some(CompiledRunSignalGlobal {
-                fragment_item,
-                runtime_item,
-                name: signal_name,
-            }))
+                    name: signal_name,
+                }))
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect();
+        Ok(CompiledRunFragment {
+            expr,
+            parameters: site.parameters.clone(),
+            execution,
+            item,
+            required_signal_globals,
         })
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .flatten()
-        .collect();
-    Ok(CompiledRunFragment {
-        expr,
-        parameters: site.parameters.clone(),
-        program: Arc::new(backend),
-        item,
-        required_signal_globals,
+    }
+}
+
+fn compile_runtime_fragment_backend_unit(
+    module: &HirModule,
+    fragment: &RuntimeFragmentSpec,
+    query_context: Option<BackendQueryContext<'_>>,
+    error_context: &str,
+) -> Result<CompiledRuntimeFragmentUnit, String> {
+    if let Some(query_context) = query_context {
+        return runtime_fragment_backend_unit(query_context.db, query_context.entry, fragment)
+            .map(|unit| CompiledRuntimeFragmentUnit {
+                core: unit.core_arc(),
+                backend: unit.backend_arc(),
+                execution_cache_key: unit.fingerprint().as_u64(),
+            })
+            .map_err(|error| format!("{error_context}: {error}"));
+    }
+
+    compile_local_runtime_fragment_backend_unit(module, fragment, error_context)
+}
+
+fn compile_local_runtime_fragment_backend_unit(
+    module: &HirModule,
+    fragment: &RuntimeFragmentSpec,
+    error_context: &str,
+) -> Result<CompiledRuntimeFragmentUnit, String> {
+    let core = lower_runtime_fragment(module, fragment)
+        .map_err(|error| format!("{error_context} into typed core: {error}"))?;
+    validate_core_module(&core.module)
+        .map_err(|error| format!("{error_context} during typed-core validation: {error}"))?;
+    let lambda = lower_lambda_module(&core.module)
+        .map_err(|error| format!("{error_context} into typed lambda: {error}"))?;
+    validate_lambda_module(&lambda)
+        .map_err(|error| format!("{error_context} during typed-lambda validation: {error}"))?;
+    let backend = lower_backend_module(&lambda)
+        .map_err(|error| format!("{error_context} into backend IR: {error}"))?;
+    validate_program(&backend)
+        .map_err(|error| format!("{error_context} during backend validation: {error}"))?;
+    let execution_cache_key = compute_program_cache_key(&backend);
+    Ok(CompiledRuntimeFragmentUnit {
+        core: Arc::new(core),
+        backend: Arc::new(backend),
+        execution_cache_key,
     })
 }
 
 type RuntimeBindingEnv = BTreeMap<aivi_hir::BindingId, RuntimeValue>;
-type EvaluatorCache<'a> = BTreeMap<*const BackendProgram, KernelEvaluator<'a>>;
+type EvaluatorCache<'a> = BTreeMap<usize, BackendExecutionEngineHandle<'a>>;
 
 fn plan_run_hydration(
     shared: &RunHydrationStaticState,
@@ -4208,15 +4678,11 @@ fn evaluate_compiled_run_fragment<'a>(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let program_ptr = Arc::as_ptr(&fragment.program);
+    let execution_key = Arc::as_ptr(&fragment.execution) as usize;
     let kernel_profiling_enabled = profiler.kernel_profiling_enabled();
-    let evaluator = evaluators.entry(program_ptr).or_insert_with(|| {
-        if kernel_profiling_enabled {
-            KernelEvaluator::new_profiled(&fragment.program)
-        } else {
-            KernelEvaluator::new(&fragment.program)
-        }
-    });
+    let evaluator = evaluators
+        .entry(execution_key)
+        .or_insert_with(|| fragment.execution.create_engine(kernel_profiling_enabled));
     let required_globals = fragment
         .required_signal_globals
         .iter()
@@ -4240,7 +4706,7 @@ fn evaluate_compiled_run_fragment<'a>(
             .evaluate_item(fragment.item, &required_globals)
             .map_err(|error| format!("{error}"))
     } else {
-        let item = &fragment.program.items()[fragment.item];
+        let item = &fragment.execution.backend().items()[fragment.item];
         let kernel = item.body.ok_or_else(|| {
             format!(
                 "compiled runtime fragment {} has no executable body",
@@ -4675,14 +5141,19 @@ fn build_markup_bundle(
     }
 
     let lowered = snapshot.entry_hir();
-    let artifact =
-        match prepare_run_artifact(&snapshot.sources, lowered.module(), &[], requested_view) {
-            Ok(artifact) => artifact,
-            Err(message) => {
-                eprintln!("{message}");
-                return Ok(ExitCode::FAILURE);
-            }
-        };
+    let artifact = match prepare_run_artifact_with_query_context(
+        &snapshot.sources,
+        lowered.module(),
+        &[],
+        requested_view,
+        Some(snapshot.backend_query_context()),
+    ) {
+        Ok(artifact) => artifact,
+        Err(message) => {
+            eprintln!("{message}");
+            return Ok(ExitCode::FAILURE);
+        }
+    };
 
     let summary = write_run_bundle(&snapshot, path, output, artifact.view_name.as_ref())?;
     println!("build bundle passed: {}", path.display());
@@ -5493,6 +5964,7 @@ mod tests {
         env, fs,
         path::{Path, PathBuf},
         process::ExitCode,
+        sync::Arc,
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -5603,7 +6075,13 @@ mod tests {
             "workspace fixture should validate cleanly"
         );
         let lowered = snapshot.entry_hir();
-        prepare_run_artifact(&snapshot.sources, lowered.module(), &[], requested_view)
+        super::prepare_run_artifact_with_query_context(
+            &snapshot.sources,
+            lowered.module(),
+            &[],
+            requested_view,
+            Some(snapshot.backend_query_context()),
+        )
     }
 
     fn prepare_run_from_path(
@@ -5636,7 +6114,13 @@ mod tests {
             "workspace fixture should validate cleanly"
         );
         let lowered = snapshot.entry_hir();
-        prepare_run_artifact(&snapshot.sources, lowered.module(), &[], requested_view)
+        super::prepare_run_artifact_with_query_context(
+            &snapshot.sources,
+            lowered.module(),
+            &[],
+            requested_view,
+            Some(snapshot.backend_query_context()),
+        )
     }
 
     #[test]
@@ -5978,6 +6462,86 @@ value view =
             )
         }));
         assert!(!artifact.hydration_inputs.is_empty());
+    }
+
+    #[test]
+    fn run_fragment_compiler_reuses_query_backend_units_and_execution_cache() {
+        let workspace = TempDir::new("run-fragment-query-cache");
+        let entry = workspace.write(
+            "main.aivi",
+            r#"
+value title = "AIVI"
+
+value view =
+    <Window title={title} />
+"#,
+        );
+        let snapshot = WorkspaceHirSnapshot::load(&entry).expect("workspace snapshot should load");
+        let lowered = snapshot.entry_hir();
+        let module = lowered.module();
+        let view = super::select_run_view(module, None).expect("view should resolve");
+        let view_owner = super::find_value_owner(module, view).expect("view owner should resolve");
+        let plan = super::lower_markup_expr(module, view.body)
+            .expect("view markup should lower into a GTK plan");
+        let bridge =
+            super::lower_widget_bridge(&plan).expect("GTK plan should lower into a bridge");
+        let sites = super::collect_markup_runtime_expr_sites(module, view.body)
+            .expect("runtime expression sites should collect");
+        let included_items = super::production_item_ids(module);
+        let runtime_stack = super::lower_runtime_backend_stack_with_items_fast(
+            module,
+            &included_items,
+            "`aivi run`",
+        )
+        .expect("runtime backend stack should lower");
+        let runtime_backend_by_hir =
+            super::backend_items_by_hir(&runtime_stack.core, runtime_stack.backend.as_ref());
+        let expr = super::collect_run_input_specs_from_bridge(module, &bridge)
+            .into_values()
+            .find_map(|spec| match spec {
+                super::RunInputSpec::Expr(expr) => Some(expr),
+                super::RunInputSpec::Text(_) => None,
+            })
+            .expect("dynamic title should produce one runtime expression input");
+
+        let mut compiler = super::RunFragmentCompiler::new(
+            &snapshot.sources,
+            module,
+            view_owner,
+            &sites,
+            runtime_stack.backend.as_ref(),
+            &runtime_backend_by_hir,
+            Some(snapshot.backend_query_context()),
+        );
+        let (first, compiled_now) = compiler
+            .compile(expr)
+            .expect("first compilation should succeed");
+        let (second, compiled_again) = compiler
+            .compile(expr)
+            .expect("cached recompilation should succeed");
+
+        assert!(compiled_now);
+        assert!(!compiled_again);
+        assert!(Arc::ptr_eq(&first.execution, &second.execution));
+
+        let mut second_compiler = super::RunFragmentCompiler::new(
+            &snapshot.sources,
+            module,
+            view_owner,
+            &sites,
+            runtime_stack.backend.as_ref(),
+            &runtime_backend_by_hir,
+            Some(snapshot.backend_query_context()),
+        );
+        let (third, _) = second_compiler
+            .compile(expr)
+            .expect("second compiler should reuse the query-backed fragment backend");
+
+        assert!(Arc::ptr_eq(
+            &first.execution.backend,
+            &third.execution.backend
+        ));
+        assert_eq!(first.item, third.item);
     }
 
     #[test]

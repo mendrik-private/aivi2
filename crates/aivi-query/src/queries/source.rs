@@ -49,8 +49,10 @@ pub fn parsed_file(db: &RootDatabase, file: SourceFile) -> Arc<ParsedFileResult>
     loop {
         let input = db.source_input(file);
         if let Some(cached) = db.cached_parsed(file, input.revision) {
+            db.record_parsed_hit();
             return cached;
         }
+        db.record_parsed_miss();
 
         let source = db.make_source_file(file);
         let parsed = parse_module(source.as_ref());

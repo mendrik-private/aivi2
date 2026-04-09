@@ -1,6 +1,9 @@
 use std::{
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -9,7 +12,13 @@ use parking_lot::RwLock;
 
 use crate::{
     SourceFile,
-    queries::{HirModuleResult, ParsedFileResult},
+    queries::{
+        HirModuleResult, ParsedFileResult,
+        backend::{
+            RuntimeFragmentUnitCacheEntry, RuntimeFragmentUnitCacheKey, WholeProgramUnitCacheEntry,
+            WholeProgramUnitCacheKey,
+        },
+    },
 };
 
 #[derive(Clone)]
@@ -33,6 +42,22 @@ impl SourceInput {
 struct Cached<T> {
     revision: u64,
     value: Arc<T>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct QueryCacheStats {
+    pub parsed_hits: u64,
+    pub parsed_misses: u64,
+    pub hir_hits: u64,
+    pub hir_misses: u64,
+}
+
+#[derive(Default)]
+struct QueryCacheCounters {
+    parsed_hits: AtomicU64,
+    parsed_misses: AtomicU64,
+    hir_hits: AtomicU64,
+    hir_misses: AtomicU64,
 }
 
 /// Dependency graph kept alongside the query cache.
@@ -108,18 +133,33 @@ struct DbState {
     paths: FxHashMap<PathBuf, SourceFile>,
     parsed: FxHashMap<u32, Cached<ParsedFileResult>>,
     hir: FxHashMap<u32, Cached<HirModuleResult>>,
+    whole_program_units: FxHashMap<WholeProgramUnitCacheKey, WholeProgramUnitCacheEntry>,
+    runtime_fragment_units: FxHashMap<RuntimeFragmentUnitCacheKey, RuntimeFragmentUnitCacheEntry>,
     file_deps: FileDeps,
+}
+
+fn invalidate_file_caches(state: &mut DbState, file_id: u32) {
+    state.parsed.remove(&file_id);
+    state.hir.remove(&file_id);
+    state
+        .whole_program_units
+        .retain(|key, _| key.file_id != file_id);
+    state
+        .runtime_fragment_units
+        .retain(|key, _| key.file_id != file_id);
 }
 
 /// Shared query database for tooling features.
 pub struct RootDatabase {
     state: RwLock<DbState>,
+    cache_counters: QueryCacheCounters,
 }
 
 impl Default for RootDatabase {
     fn default() -> Self {
         Self {
             state: RwLock::new(DbState::default()),
+            cache_counters: QueryCacheCounters::default(),
         }
     }
 }
@@ -127,6 +167,37 @@ impl Default for RootDatabase {
 impl RootDatabase {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn cache_stats(&self) -> QueryCacheStats {
+        QueryCacheStats {
+            parsed_hits: self.cache_counters.parsed_hits.load(Ordering::Relaxed),
+            parsed_misses: self.cache_counters.parsed_misses.load(Ordering::Relaxed),
+            hir_hits: self.cache_counters.hir_hits.load(Ordering::Relaxed),
+            hir_misses: self.cache_counters.hir_misses.load(Ordering::Relaxed),
+        }
+    }
+
+    pub(crate) fn record_parsed_hit(&self) {
+        self.cache_counters
+            .parsed_hits
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn record_parsed_miss(&self) {
+        self.cache_counters
+            .parsed_misses
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn record_hir_hit(&self) {
+        self.cache_counters.hir_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn record_hir_miss(&self) {
+        self.cache_counters
+            .hir_misses
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Open a file input, reusing the existing handle when the same path is already known.
@@ -150,13 +221,12 @@ impl RootDatabase {
                 }
             };
             if changed {
-                state.parsed.remove(&file.id);
-                state.hir.remove(&file.id);
+                invalidate_file_caches(&mut state, file.id);
                 // Transitively invalidate all files that (directly or
                 // indirectly) import this file (M6).
                 let rdeps = state.file_deps.transitive_rdeps(file.id);
                 for rdep in rdeps {
-                    state.hir.remove(&rdep);
+                    invalidate_file_caches(&mut state, rdep);
                 }
             }
             return file;
@@ -177,9 +247,9 @@ impl RootDatabase {
         // introduce new competing workspace modules, so all HIR caches for
         // the new file and its transitive reverse dependents must be invalidated.
         let affected = state.file_deps.transitive_rdeps(file.id);
-        state.hir.remove(&file.id);
+        invalidate_file_caches(&mut state, file.id);
         for f in &affected {
-            state.hir.remove(f);
+            invalidate_file_caches(&mut state, *f);
         }
         file
     }
@@ -240,12 +310,11 @@ impl RootDatabase {
             }
         };
         if changed {
-            state.parsed.remove(&file.id);
-            state.hir.remove(&file.id);
+            invalidate_file_caches(&mut state, file.id);
             // Transitively invalidate all files that import this file (M6).
             let rdeps = state.file_deps.transitive_rdeps(file.id);
             for rdep in rdeps {
-                state.hir.remove(&rdep);
+                invalidate_file_caches(&mut state, rdep);
             }
         }
         changed
@@ -362,8 +431,7 @@ impl RootDatabase {
         let mut state = self.state.write();
         state.files.remove(&file.id);
         state.paths.retain(|_, v| v.id != file.id);
-        state.parsed.remove(&file.id);
-        state.hir.remove(&file.id);
+        invalidate_file_caches(&mut state, file.id);
         state.file_deps.remove_file(file.id);
     }
 
@@ -379,5 +447,41 @@ impl RootDatabase {
     pub fn register_file_deps(&self, importer: SourceFile, deps: &[SourceFile]) {
         let dep_ids: FxHashSet<u32> = deps.iter().map(|f| f.id).collect();
         self.state.write().file_deps.set_deps(importer.id, dep_ids);
+    }
+
+    pub(crate) fn whole_program_cache_entry(
+        &self,
+        key: WholeProgramUnitCacheKey,
+    ) -> Option<WholeProgramUnitCacheEntry> {
+        self.state.read().whole_program_units.get(&key).cloned()
+    }
+
+    pub(crate) fn store_whole_program_cache_entry(
+        &self,
+        key: WholeProgramUnitCacheKey,
+        entry: WholeProgramUnitCacheEntry,
+    ) {
+        let mut state = self.state.write();
+        if state.files.contains_key(&key.file_id) {
+            state.whole_program_units.insert(key, entry);
+        }
+    }
+
+    pub(crate) fn runtime_fragment_cache_entry(
+        &self,
+        key: RuntimeFragmentUnitCacheKey,
+    ) -> Option<RuntimeFragmentUnitCacheEntry> {
+        self.state.read().runtime_fragment_units.get(&key).cloned()
+    }
+
+    pub(crate) fn store_runtime_fragment_cache_entry(
+        &self,
+        key: RuntimeFragmentUnitCacheKey,
+        entry: RuntimeFragmentUnitCacheEntry,
+    ) {
+        let mut state = self.state.write();
+        if state.files.contains_key(&key.file_id) {
+            state.runtime_fragment_units.insert(key, entry);
+        }
     }
 }

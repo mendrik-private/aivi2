@@ -18,6 +18,7 @@
 
 pub mod cache;
 mod codegen;
+mod engine;
 mod gc;
 mod ids;
 mod kernel;
@@ -29,8 +30,18 @@ mod runtime;
 mod validate;
 
 pub use aivi_core::{Arena, ArenaId, ArenaOverflow};
-pub use cache::compile_program_cached;
-pub use codegen::{CodegenError, CodegenErrors, CompiledKernel, CompiledProgram, compile_program};
+pub use cache::{
+    BackendKernelArtifactCache, compile_kernel_cached, compile_program_cached,
+    compute_kernel_cache_key,
+};
+pub use codegen::{
+    CodegenError, CodegenErrors, CompiledKernel, CompiledKernelArtifact, CompiledProgram,
+    KernelFingerprint, compile_kernel, compile_program, compute_kernel_fingerprint, kernel_symbol,
+};
+pub use engine::{
+    BackendExecutableProgram, BackendExecutionEngine, BackendExecutionEngineHandle,
+    BackendExecutionEngineKind,
+};
 pub use gc::{
     CommittedValueStore, InlineCommittedValueStore, MovingRuntimeValueStore, RuntimeGcHandle,
 };

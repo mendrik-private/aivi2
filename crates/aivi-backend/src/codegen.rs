@@ -1,9 +1,11 @@
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     fmt,
+    hash::{Hash, Hasher},
 };
 
 use rayon::prelude::*;
+use rustc_hash::FxHasher;
 
 use aivi_hir::IntrinsicValue;
 use cranelift_codegen::{
@@ -30,8 +32,29 @@ use crate::{
     ParameterRole, PrimitiveType, Program, RuntimeMap, RuntimeMapEntry, RuntimeRecordField,
     RuntimeValue, SubjectRef, UnaryOperator, ValidationError, describe_expr_kind,
     numeric::{RuntimeBigInt, RuntimeDecimal, RuntimeFloat},
+    program::ItemKind,
     validate_program,
 };
+
+/// Stable content fingerprint for one backend kernel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct KernelFingerprint(u64);
+
+impl KernelFingerprint {
+    pub const fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub const fn as_raw(self) -> u64 {
+        self.0
+    }
+}
+
+impl fmt::Display for KernelFingerprint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:016x}", self.0)
+    }
+}
 
 /// Cranelift compilation results for one backend program.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,15 +93,61 @@ impl CompiledProgram {
             .get(&id)
             .and_then(|index| self.kernels.get(*index))
     }
+
+    pub fn into_single_kernel_artifact(self) -> Option<CompiledKernelArtifact> {
+        let CompiledProgram {
+            object, kernels, ..
+        } = self;
+        let mut kernels = kernels.into_iter();
+        let kernel = kernels.next()?;
+        if kernels.next().is_some() {
+            return None;
+        }
+        Some(CompiledKernelArtifact::new(object, kernel))
+    }
 }
 
 /// Cranelift artifacts for one backend kernel.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompiledKernel {
     pub kernel: KernelId,
+    pub fingerprint: KernelFingerprint,
     pub symbol: Box<str>,
     pub clif: Box<str>,
     pub code_size: usize,
+}
+
+/// Self-contained object artifact for one compiled backend kernel.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompiledKernelArtifact {
+    object: Vec<u8>,
+    metadata: CompiledKernel,
+}
+
+impl CompiledKernelArtifact {
+    pub fn new(object: Vec<u8>, metadata: CompiledKernel) -> Self {
+        Self { object, metadata }
+    }
+
+    pub fn object(&self) -> &[u8] {
+        &self.object
+    }
+
+    pub fn metadata(&self) -> &CompiledKernel {
+        &self.metadata
+    }
+
+    pub fn kernel_id(&self) -> KernelId {
+        self.metadata.kernel
+    }
+
+    pub fn fingerprint(&self) -> KernelFingerprint {
+        self.metadata.fingerprint
+    }
+
+    pub fn into_parts(self) -> (Vec<u8>, CompiledKernel) {
+        (self.object, self.metadata)
+    }
 }
 
 /// Intermediate result holding the built CLIF for one kernel, ready for parallel
@@ -98,6 +167,12 @@ pub type CodegenErrors = aivi_base::ErrorCollection<CodegenError>;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CodegenError {
     InvalidBackendProgram(ValidationError),
+    MissingKernel {
+        kernel: KernelId,
+    },
+    AmbientKernelUnsupported {
+        kernel: KernelId,
+    },
     HostIsaUnavailable {
         message: Box<str>,
     },
@@ -167,6 +242,13 @@ impl fmt::Display for CodegenError {
             Self::InvalidBackendProgram(error) => {
                 write!(f, "Cranelift codegen requires valid backend IR: {error}")
             }
+            Self::MissingKernel { kernel } => {
+                write!(f, "backend program does not contain kernel {kernel}")
+            }
+            Self::AmbientKernelUnsupported { kernel } => write!(
+                f,
+                "kernel {kernel} is ambient runtime-only state and cannot be compiled into a standalone backend artifact"
+            ),
             Self::HostIsaUnavailable { message } => {
                 write!(
                     f,
@@ -277,19 +359,32 @@ impl std::error::Error for CodegenError {}
 ///   lowering, plus inline-pipe `Case`/`TruthyFalsy`/`Debug` stages, until those contracts are
 ///   owned in this layer.
 pub fn compile_program(program: &Program) -> Result<CompiledProgram, CodegenErrors> {
-    if let Err(errors) = validate_program(program) {
-        return Err(CodegenErrors::new(
-            errors
-                .into_errors()
-                .into_iter()
-                .map(CodegenError::InvalidBackendProgram)
-                .collect(),
-        ));
-    }
-
+    validate_backend_program(program)?;
     let compiler = CraneliftCompiler::new(program).map_err(wrap_one)?;
-    compiler.prevalidate()?;
     compiler.compile()
+}
+
+/// Compile a single backend kernel into a standalone object artifact while leaving interpreter
+/// execution as the active runtime path.
+pub fn compile_kernel(
+    program: &Program,
+    kernel_id: KernelId,
+) -> Result<CompiledKernelArtifact, CodegenErrors> {
+    validate_backend_program(program)?;
+    let compiler = CraneliftCompiler::new(program).map_err(wrap_one)?;
+    compiler.compile_kernel(kernel_id)
+}
+
+/// Stable symbol name for one backend kernel.
+pub fn kernel_symbol(program: &Program, kernel_id: KernelId) -> String {
+    let kernel = &program.kernels()[kernel_id];
+    kernel_symbol_for(program, kernel_id, kernel)
+}
+
+/// Stable fingerprint for one backend kernel and its codegen-relevant dependencies.
+pub fn compute_kernel_fingerprint(program: &Program, kernel_id: KernelId) -> KernelFingerprint {
+    let kernel = &program.kernels()[kernel_id];
+    compute_kernel_fingerprint_for(program, kernel_id, kernel)
 }
 
 struct CraneliftCompiler<'a> {
@@ -377,6 +472,21 @@ enum ScalarOptionKind {
 enum OptionCodegenContract {
     NicheReference,
     InlineScalar(ScalarOptionKind),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum KernelLinkage {
+    Local,
+    Import,
+}
+
+impl KernelLinkage {
+    const fn into_cranelift(self) -> Linkage {
+        match self {
+            Self::Local => Linkage::Local,
+            Self::Import => Linkage::Import,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -483,10 +593,17 @@ impl<'a> CraneliftCompiler<'a> {
             .starts_with("__aivi_")
     }
 
-    fn prevalidate(&self) -> Result<(), CodegenErrors> {
+    fn prevalidate_kernels<I>(&self, kernel_ids: I) -> Result<(), CodegenErrors>
+    where
+        I: IntoIterator<Item = KernelId>,
+    {
         let mut errors = Vec::new();
 
-        for (kernel_id, kernel) in self.program.kernels().iter() {
+        for kernel_id in kernel_ids {
+            let Some(kernel) = self.program.kernels().get(kernel_id) else {
+                errors.push(CodegenError::MissingKernel { kernel: kernel_id });
+                continue;
+            };
             if self.is_ambient_kernel(kernel) {
                 continue;
             }
@@ -919,6 +1036,25 @@ impl<'a> CraneliftCompiler<'a> {
         }
     }
 
+    fn ensure_compileable_kernel(&self, kernel_id: KernelId) -> Result<(), CodegenError> {
+        let Some(kernel) = self.program.kernels().get(kernel_id) else {
+            return Err(CodegenError::MissingKernel { kernel: kernel_id });
+        };
+        if self.is_ambient_kernel(kernel) {
+            return Err(CodegenError::AmbientKernelUnsupported { kernel: kernel_id });
+        }
+        Ok(())
+    }
+
+    fn non_ambient_kernel_ids(&self) -> Vec<KernelId> {
+        self.program
+            .kernels()
+            .iter()
+            .filter(|(_, kernel)| !self.is_ambient_kernel(kernel))
+            .map(|(kernel_id, _)| kernel_id)
+            .collect()
+    }
+
     /// Three-phase compilation:
     /// 1. Sequential declaration — declares all kernel function symbols in the module.
     /// 2. Sequential CLIF build — lowers each kernel IR to Cranelift CLIF IR.
@@ -929,40 +1065,80 @@ impl<'a> CraneliftCompiler<'a> {
     /// Phases 1–2 and 4 remain sequential because they mutate shared module state.
     /// Phase 3 uses Rayon's par_iter and yields a speedup proportional to kernel count.
     fn compile(mut self) -> Result<CompiledProgram, CodegenErrors> {
-        let kernel_ids = self
-            .program
-            .kernels()
-            .iter()
-            .filter(|(_, kernel)| !self.is_ambient_kernel(kernel))
-            .map(|(kernel_id, _)| kernel_id)
-            .collect::<Vec<_>>();
+        let kernel_ids = self.non_ambient_kernel_ids();
+        self.prevalidate_kernels(kernel_ids.iter().copied())?;
+        self.declare_kernels(kernel_ids.iter().copied(), KernelLinkage::Local)?;
+        let built_kernels = self.build_kernels(kernel_ids.iter().copied())?;
+        self.finish_compilation(built_kernels)
+    }
 
-        // ── Phase 1: Sequential declaration ──────────────────────────────────────
+    fn compile_kernel(
+        mut self,
+        kernel_id: KernelId,
+    ) -> Result<CompiledKernelArtifact, CodegenErrors> {
+        self.ensure_compileable_kernel(kernel_id)
+            .map_err(wrap_one)?;
+        self.prevalidate_kernels([kernel_id])?;
+        self.declare_kernels([kernel_id], KernelLinkage::Local)?;
+        let built_kernel = self
+            .build_kernels([kernel_id])?
+            .into_iter()
+            .next()
+            .expect("single-kernel build should yield exactly one CLIF artifact");
+        let compiled = self.finish_compilation(vec![built_kernel])?;
+        compiled.into_single_kernel_artifact().ok_or_else(|| {
+            wrap_one(CodegenError::CraneliftModule {
+                kernel: Some(kernel_id),
+                message: "single-kernel compilation should emit exactly one kernel artifact".into(),
+            })
+        })
+    }
+
+    fn declare_kernels<I>(
+        &mut self,
+        kernel_ids: I,
+        linkage: KernelLinkage,
+    ) -> Result<(), CodegenErrors>
+    where
+        I: IntoIterator<Item = KernelId>,
+    {
         let mut declaration_errors = Vec::new();
-        for &kernel_id in &kernel_ids {
-            let kernel = &self.program.kernels()[kernel_id];
-            if let Err(error) = self.declare_kernel(kernel_id, kernel) {
+        for kernel_id in kernel_ids {
+            if let Err(error) = self.ensure_kernel_declared(kernel_id, linkage) {
                 declaration_errors.push(error);
             }
         }
-        if !declaration_errors.is_empty() {
-            return Err(CodegenErrors::new(declaration_errors));
+        if declaration_errors.is_empty() {
+            Ok(())
+        } else {
+            Err(CodegenErrors::new(declaration_errors))
         }
+    }
 
-        // ── Phase 2: Sequential CLIF build ────────────────────────────────────────
-        let mut built_kernels: Vec<BuiltKernel> = Vec::with_capacity(kernel_ids.len());
-        let mut build_errors: Vec<CodegenError> = Vec::new();
-        for &kernel_id in &kernel_ids {
+    fn build_kernels<I>(&mut self, kernel_ids: I) -> Result<Vec<BuiltKernel>, CodegenErrors>
+    where
+        I: IntoIterator<Item = KernelId>,
+    {
+        let mut built_kernels = Vec::new();
+        let mut build_errors = Vec::new();
+        for kernel_id in kernel_ids {
             let kernel = &self.program.kernels()[kernel_id];
             match self.build_kernel_clif(kernel_id, kernel) {
                 Ok(built) => built_kernels.push(built),
                 Err(error) => build_errors.push(error),
             }
         }
-        if !build_errors.is_empty() {
-            return Err(CodegenErrors::new(build_errors));
+        if build_errors.is_empty() {
+            Ok(built_kernels)
+        } else {
+            Err(CodegenErrors::new(build_errors))
         }
+    }
 
+    fn finish_compilation(
+        mut self,
+        built_kernels: Vec<BuiltKernel>,
+    ) -> Result<CompiledProgram, CodegenErrors> {
         // ── Phase 3: Parallel Cranelift compile ───────────────────────────────────
         // `ctx.compile(isa, ctrl_plane)` transforms CLIF → machine code purely in
         // memory, with no writes to shared module state. Safe to parallelise.
@@ -986,16 +1162,9 @@ impl<'a> CraneliftCompiler<'a> {
             })
             .collect();
 
-        let mut compiled_kernels: Vec<CompiledKernel> = Vec::with_capacity(compile_results.len());
-        let mut compile_errors: Vec<CodegenError> = Vec::new();
-        let mut emit_inputs: Vec<(
-            KernelId,
-            FuncId,
-            cranelift_codegen::Context,
-            Box<str>,
-            Box<str>,
-            usize,
-        )> = Vec::with_capacity(compile_results.len());
+        let mut compiled_kernels = Vec::with_capacity(compile_results.len());
+        let mut compile_errors = Vec::new();
+        let mut emit_inputs = Vec::with_capacity(compile_results.len());
         for result in compile_results {
             match result {
                 Ok((built, code_size)) => {
@@ -1018,7 +1187,7 @@ impl<'a> CraneliftCompiler<'a> {
         // ── Phase 4: Sequential emit ──────────────────────────────────────────────
         // Write machine code + relocations into the shared object module.
         let alignment = isa.function_alignment().minimum as u64;
-        let mut emit_errors: Vec<CodegenError> = Vec::new();
+        let mut emit_errors = Vec::new();
         for (kernel_id, func_id, ctx, symbol, clif, code_size) in &emit_inputs {
             let compiled = ctx
                 .compiled_code()
@@ -1028,7 +1197,7 @@ impl<'a> CraneliftCompiler<'a> {
                 .buffer
                 .relocs()
                 .iter()
-                .map(|r| ModuleReloc::from_mach_reloc(r, &ctx.func, *func_id))
+                .map(|reloc| ModuleReloc::from_mach_reloc(reloc, &ctx.func, *func_id))
                 .collect();
             if let Err(error) = self
                 .module
@@ -1041,6 +1210,11 @@ impl<'a> CraneliftCompiler<'a> {
             } else {
                 compiled_kernels.push(CompiledKernel {
                     kernel: *kernel_id,
+                    fingerprint: compute_kernel_fingerprint_for(
+                        self.program,
+                        *kernel_id,
+                        &self.program.kernels()[*kernel_id],
+                    ),
                     symbol: symbol.clone(),
                     clif: clif.clone(),
                     code_size: *code_size,
@@ -1069,18 +1243,28 @@ impl<'a> CraneliftCompiler<'a> {
         })
     }
 
-    fn declare_kernel(&mut self, kernel_id: KernelId, kernel: &Kernel) -> Result<(), CodegenError> {
+    fn ensure_kernel_declared(
+        &mut self,
+        kernel_id: KernelId,
+        linkage: KernelLinkage,
+    ) -> Result<FuncId, CodegenError> {
+        if let Some(func_id) = self.declared_functions.get(&kernel_id).copied() {
+            return Ok(func_id);
+        }
+
+        self.ensure_compileable_kernel(kernel_id)?;
+        let kernel = &self.program.kernels()[kernel_id];
         let signature = self.build_signature(kernel_id, kernel)?;
-        let symbol = kernel_symbol(self.program, kernel_id, kernel);
+        let symbol = kernel_symbol_for(self.program, kernel_id, kernel);
         let func_id = self
             .module
-            .declare_function(&symbol, Linkage::Local, &signature)
+            .declare_function(&symbol, linkage.into_cranelift(), &signature)
             .map_err(|error| CodegenError::CraneliftModule {
                 kernel: Some(kernel_id),
                 message: error.to_string().into_boxed_str(),
             })?;
         self.declared_functions.insert(kernel_id, func_id);
-        Ok(())
+        Ok(func_id)
     }
 
     /// Sequential phase 2: lower kernel IR to CLIF IR and verify it.
@@ -1095,7 +1279,7 @@ impl<'a> CraneliftCompiler<'a> {
             CallingConventionKind::RuntimeKernelV1 => {}
         }
 
-        let symbol = kernel_symbol(self.program, kernel_id, kernel);
+        let symbol = kernel_symbol_for(self.program, kernel_id, kernel);
         let signature = self.build_signature(kernel_id, kernel)?;
         let func_id = *self
             .declared_functions
@@ -3492,19 +3676,7 @@ impl<'a> CraneliftCompiler<'a> {
             return Ok(data_id);
         }
 
-        let func_id =
-            *self
-                .declared_functions
-                .get(&body)
-                .ok_or_else(|| {
-                    CodegenError::CraneliftModule {
-                kernel: Some(body),
-                message: format!(
-                    "item callable descriptor for item{item} requires declared body kernel {body}"
-                )
-                .into_boxed_str(),
-            }
-                })?;
+        let func_id = self.ensure_kernel_declared(body, KernelLinkage::Import)?;
         let symbol = callable_descriptor_symbol(self.program, item);
         let data_id = self
             .module
@@ -4218,18 +4390,12 @@ impl<'a> CraneliftCompiler<'a> {
 
     fn lower_direct_item_call(
         &mut self,
-        kernel_id: KernelId,
+        _kernel_id: KernelId,
         body: KernelId,
         arguments: &[Value],
         builder: &mut FunctionBuilder<'_>,
     ) -> Result<Value, CodegenError> {
-        let func_id = *self.declared_functions.get(&body).ok_or_else(|| {
-            self.unsupported_expression(
-                kernel_id,
-                self.program.kernels()[kernel_id].root,
-                &format!("item body kernel {body} was not declared before call lowering"),
-            )
-        })?;
+        let func_id = self.ensure_kernel_declared(body, KernelLinkage::Import)?;
         let local = self.module.declare_func_in_func(func_id, builder.func);
         let call = builder.ins().call(local, arguments);
         let results = builder.inst_results(call);
@@ -4272,12 +4438,7 @@ impl<'a> CraneliftCompiler<'a> {
                 }
             }
             DirectApplyPlan::LocalFunctionAddress { body } => {
-                let func_id = *self.declared_functions.get(&body).ok_or_else(|| {
-                    self.unsupported_expression(
-                        kernel_id, expr_id,
-                        &format!("local function body kernel {} was not declared before address lowering", body),
-                    )
-                })?;
+                let func_id = self.ensure_kernel_declared(body, KernelLinkage::Import)?;
                 let local = self.module.declare_func_in_func(func_id, builder.func);
                 Ok(builder.ins().func_addr(self.pointer_type(), local))
             }
@@ -8312,7 +8473,7 @@ fn sum_variant_tag_for_opaque(variant_name: &str) -> i64 {
         .fold(5381u64, |h, b| h.wrapping_mul(33).wrapping_add(b as u64)) as i64
 }
 
-fn kernel_symbol(program: &Program, kernel_id: KernelId, kernel: &Kernel) -> String {
+fn kernel_symbol_for(program: &Program, kernel_id: KernelId, kernel: &Kernel) -> String {
     format!(
         "aivi_{}_kernel{}_{}",
         sanitize_symbol_component(program.item_name(kernel.origin.item)),
@@ -8391,6 +8552,166 @@ fn callable_descriptor_symbol(program: &Program, item: ItemId) -> String {
     )
 }
 
+fn compute_kernel_fingerprint_for(
+    program: &Program,
+    kernel_id: KernelId,
+    kernel: &Kernel,
+) -> KernelFingerprint {
+    let mut hasher = FxHasher::default();
+    kernel_symbol_for(program, kernel_id, kernel).hash(&mut hasher);
+    format!("{kernel:?}").hash(&mut hasher);
+
+    let mut layout_ids = BTreeSet::new();
+    collect_kernel_layout_dependencies(program, kernel, &mut layout_ids);
+
+    let mut item_ids = BTreeSet::new();
+    collect_kernel_item_dependencies(kernel, &mut item_ids);
+    for item_id in &item_ids {
+        collect_item_layout_dependencies(program, *item_id, &mut layout_ids);
+    }
+
+    for layout_id in layout_ids {
+        layout_id.hash(&mut hasher);
+        format!("{:?}", program.layouts()[layout_id]).hash(&mut hasher);
+    }
+
+    for item_id in item_ids {
+        let item = &program.items()[item_id];
+        item_id.hash(&mut hasher);
+        item.name.hash(&mut hasher);
+        format!("{:?}", item.kind).hash(&mut hasher);
+        item.parameters.hash(&mut hasher);
+        item.body.hash(&mut hasher);
+
+        match &item.kind {
+            ItemKind::Signal(_) => signal_slot_symbol(program, item_id).hash(&mut hasher),
+            _ if item.body.is_none() => {
+                imported_item_slot_symbol(program, item_id).hash(&mut hasher)
+            }
+            _ => {}
+        }
+
+        if item.body.is_some() {
+            callable_descriptor_symbol(program, item_id).hash(&mut hasher);
+        }
+
+        if let Some(body) = item.body {
+            let body_kernel = &program.kernels()[body];
+            kernel_symbol_for(program, body, body_kernel).hash(&mut hasher);
+            format!("{:?}", body_kernel.convention).hash(&mut hasher);
+        }
+    }
+
+    KernelFingerprint::new(hasher.finish())
+}
+
+fn collect_kernel_layout_dependencies(
+    program: &Program,
+    kernel: &Kernel,
+    layout_ids: &mut BTreeSet<LayoutId>,
+) {
+    if let Some(input_subject) = kernel.input_subject {
+        collect_layout_dependency(program, input_subject, layout_ids);
+    }
+    for layout in &kernel.inline_subjects {
+        collect_layout_dependency(program, *layout, layout_ids);
+    }
+    for layout in &kernel.environment {
+        collect_layout_dependency(program, *layout, layout_ids);
+    }
+    collect_layout_dependency(program, kernel.result_layout, layout_ids);
+    for parameter in &kernel.convention.parameters {
+        collect_layout_dependency(program, parameter.layout, layout_ids);
+    }
+    collect_layout_dependency(program, kernel.convention.result.layout, layout_ids);
+    for (_, expr) in kernel.exprs().iter() {
+        collect_layout_dependency(program, expr.layout, layout_ids);
+    }
+}
+
+fn collect_kernel_item_dependencies(kernel: &Kernel, item_ids: &mut BTreeSet<ItemId>) {
+    item_ids.extend(kernel.global_items.iter().copied());
+    for (_, expr) in kernel.exprs().iter() {
+        if let KernelExprKind::Item(item) = &expr.kind {
+            item_ids.insert(*item);
+        }
+    }
+}
+
+fn collect_item_layout_dependencies(
+    program: &Program,
+    item_id: ItemId,
+    layout_ids: &mut BTreeSet<LayoutId>,
+) {
+    let item = &program.items()[item_id];
+    for layout in &item.parameters {
+        collect_layout_dependency(program, *layout, layout_ids);
+    }
+    if let Some(body) = item.body {
+        let kernel = &program.kernels()[body];
+        for parameter in &kernel.convention.parameters {
+            collect_layout_dependency(program, parameter.layout, layout_ids);
+        }
+        collect_layout_dependency(program, kernel.convention.result.layout, layout_ids);
+    }
+}
+
+fn collect_layout_dependency(
+    program: &Program,
+    layout_id: LayoutId,
+    layout_ids: &mut BTreeSet<LayoutId>,
+) {
+    if !layout_ids.insert(layout_id) {
+        return;
+    }
+
+    match &program.layouts()[layout_id].kind {
+        LayoutKind::Primitive(_) => {}
+        LayoutKind::Tuple(elements) => {
+            for element in elements {
+                collect_layout_dependency(program, *element, layout_ids);
+            }
+        }
+        LayoutKind::Record(fields) => {
+            for field in fields {
+                collect_layout_dependency(program, field.layout, layout_ids);
+            }
+        }
+        LayoutKind::Sum(variants) => {
+            for variant in variants {
+                if let Some(payload) = variant.payload {
+                    collect_layout_dependency(program, payload, layout_ids);
+                }
+            }
+        }
+        LayoutKind::Arrow { parameter, result } => {
+            collect_layout_dependency(program, *parameter, layout_ids);
+            collect_layout_dependency(program, *result, layout_ids);
+        }
+        LayoutKind::List { element }
+        | LayoutKind::Set { element }
+        | LayoutKind::Option { element }
+        | LayoutKind::Signal { element } => {
+            collect_layout_dependency(program, *element, layout_ids);
+        }
+        LayoutKind::Map { key, value }
+        | LayoutKind::Result { error: key, value }
+        | LayoutKind::Validation { error: key, value }
+        | LayoutKind::Task { error: key, value } => {
+            collect_layout_dependency(program, *key, layout_ids);
+            collect_layout_dependency(program, *value, layout_ids);
+        }
+        LayoutKind::AnonymousDomain { carrier, .. } => {
+            collect_layout_dependency(program, *carrier, layout_ids);
+        }
+        LayoutKind::Domain { arguments, .. } | LayoutKind::Opaque { arguments, .. } => {
+            for argument in arguments {
+                collect_layout_dependency(program, *argument, layout_ids);
+            }
+        }
+    }
+}
+
 fn sanitize_symbol_component(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     for ch in name.chars() {
@@ -8405,6 +8726,19 @@ fn sanitize_symbol_component(name: &str) -> String {
     } else {
         out
     }
+}
+
+fn validate_backend_program(program: &Program) -> Result<(), CodegenErrors> {
+    if let Err(errors) = validate_program(program) {
+        return Err(CodegenErrors::new(
+            errors
+                .into_errors()
+                .into_iter()
+                .map(CodegenError::InvalidBackendProgram)
+                .collect(),
+        ));
+    }
+    Ok(())
 }
 
 fn wrap_one(error: CodegenError) -> CodegenErrors {

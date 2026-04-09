@@ -7,12 +7,12 @@ use std::{
 };
 
 use aivi_backend::{
-    DetachedRuntimeValue, EvaluationError, GateStage as BackendGateStage, ItemId as BackendItemId,
-    ItemKind as BackendItemKind, KernelEvaluator, KernelId, LayoutKind, MovingRuntimeValueStore,
-    PipelineId as BackendPipelineId, Program as BackendProgram, RuntimeCallable,
-    RuntimeDbConnection, RuntimeRecordField, RuntimeSumValue, RuntimeValue,
-    SourceId as BackendSourceId, StageKind as BackendStageKind, TaskFunctionApplier,
-    TemporalStage as BackendTemporalStage,
+    BackendExecutableProgram, BackendExecutionEngine, DetachedRuntimeValue, EvaluationError,
+    GateStage as BackendGateStage, ItemId as BackendItemId, ItemKind as BackendItemKind, KernelId,
+    LayoutKind, MovingRuntimeValueStore, PipelineId as BackendPipelineId,
+    Program as BackendProgram, RuntimeCallable, RuntimeDbConnection, RuntimeRecordField,
+    RuntimeSumValue, RuntimeValue, SourceId as BackendSourceId, StageKind as BackendStageKind,
+    TaskFunctionApplier, TemporalStage as BackendTemporalStage,
 };
 use aivi_core as core;
 use aivi_hir as hir;
@@ -267,8 +267,9 @@ impl BackendLinkedRuntime {
             &snapshots,
         )?;
         let runtime_globals = materialize_detached_globals(&globals);
-        let mut evaluator = KernelEvaluator::new(self.backend.as_ref());
-        let value = evaluator
+        let mut engine =
+            BackendExecutableProgram::interpreted(self.backend.as_ref()).create_engine();
+        let value = engine
             .evaluate_item(binding.backend_item, &runtime_globals)
             .map_err(|error| BackendRuntimeError::EvaluateTaskBody {
                 instance: binding.instance,
@@ -454,7 +455,8 @@ impl BackendLinkedRuntime {
             .get(&instance)
             .ok_or(BackendRuntimeError::UnknownSourceInstance { instance })?;
         let snapshots = self.committed_signal_snapshots()?;
-        let mut evaluator = KernelEvaluator::new(self.backend.as_ref());
+        let mut engine =
+            BackendExecutableProgram::interpreted(self.backend.as_ref()).create_engine();
         let mut arguments = Vec::with_capacity(binding.arguments.len());
         for (index, argument) in binding.arguments.iter().enumerate() {
             let globals = self.required_signal_globals(
@@ -464,7 +466,7 @@ impl BackendLinkedRuntime {
                 &snapshots,
             )?;
             let runtime_globals = materialize_detached_globals(&globals);
-            let value = evaluator
+            let value = engine
                 .evaluate_kernel(argument.kernel, None, &[], &runtime_globals)
                 .map_err(|error| BackendRuntimeError::EvaluateSourceArgument {
                     instance,
@@ -482,7 +484,7 @@ impl BackendLinkedRuntime {
                 &snapshots,
             )?;
             let runtime_globals = materialize_detached_globals(&globals);
-            let value = evaluator
+            let value = engine
                 .evaluate_kernel(option.kernel, None, &[], &runtime_globals)
                 .map_err(|error| BackendRuntimeError::EvaluateSourceOption {
                     instance,
@@ -695,10 +697,9 @@ impl BackendLinkedRuntime {
                     snapshots,
                 )?;
                 let runtime_globals = materialize_detached_globals(&globals);
-                let mut evaluator = KernelEvaluator::new(self.backend.as_ref());
-                evaluator
-                    .evaluate_item(*backend_item, &runtime_globals)
-                    .ok()?
+                let mut engine =
+                    BackendExecutableProgram::interpreted(self.backend.as_ref()).create_engine();
+                engine.evaluate_item(*backend_item, &runtime_globals).ok()?
             }
         };
         runtime_db_table_identity(&value)
@@ -1381,9 +1382,9 @@ fn execute_task_plan(
     if completion.is_cancelled() {
         return Ok(LinkedTaskWorkerOutcome::Cancelled);
     }
-    let mut evaluator = KernelEvaluator::new(backend.as_ref());
+    let mut engine = BackendExecutableProgram::interpreted(backend.as_ref()).create_engine();
     let runtime_globals = materialize_detached_globals(&globals);
-    let value = evaluator
+    let value = engine
         .evaluate_item(backend_item, &runtime_globals)
         .map_err(|error| LinkedTaskWorkerError::Evaluation {
             instance,
@@ -1392,9 +1393,9 @@ fn execute_task_plan(
             error,
         })?;
     // Use the applier-aware executor so that deferred Task composition plans
-    // (Map, Apply, Chain, Join) can call back into the evaluator to apply closures.
+    // (Map, Apply, Chain, Join) can call back into the execution engine.
     let mut applier = EvaluatorApplier {
-        evaluator: &mut evaluator,
+        evaluator: &mut *engine,
         globals: &runtime_globals,
     };
     let stdout = std::io::stdout();
@@ -1434,10 +1435,10 @@ fn execute_task_plan(
     }
 }
 
-/// Bridges [`KernelEvaluator`] to the [`TaskFunctionApplier`] interface so the task executor
-/// can apply user closures while executing deferred `Map`/`Chain`/`Join` task plans.
+/// Bridges [`BackendExecutionEngine`] to the [`TaskFunctionApplier`] interface so the task
+/// executor can apply user closures while executing deferred `Map`/`Chain`/`Join` task plans.
 struct EvaluatorApplier<'a, 'b> {
-    evaluator: &'a mut KernelEvaluator<'b>,
+    evaluator: &'a mut (dyn BackendExecutionEngine + 'b),
     globals: &'a BTreeMap<BackendItemId, RuntimeValue>,
 }
 
@@ -1448,7 +1449,7 @@ impl TaskFunctionApplier for EvaluatorApplier<'_, '_> {
         args: Vec<RuntimeValue>,
         _globals: &BTreeMap<aivi_backend::ItemId, RuntimeValue>,
     ) -> Result<RuntimeValue, EvaluationError> {
-        // Delegate through KernelEvaluator's TaskFunctionApplier impl, which uses
+        // Delegate through the execution engine's TaskFunctionApplier impl, which uses
         // the sentinel composition context IDs for diagnostic purposes.
         self.evaluator
             .apply_task_function(function, args, self.globals)
@@ -2143,7 +2144,7 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
 
         let binding_item = binding.item;
         let binding_pipeline_ids = binding.pipeline_ids.clone();
-        let mut evaluator = KernelEvaluator::new(self.backend);
+        let mut engine = BackendExecutableProgram::interpreted(self.backend).create_engine();
         if let Some(helper) = self.updated_temporal_helper(binding, &inputs) {
             let Some(value) = inputs.value(helper.dependency_index).cloned() else {
                 return Ok(self.suppressed_derived_update(binding.backend_item));
@@ -2158,11 +2159,11 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
                 }),
                 value,
                 &globals,
-                &mut evaluator,
+                &mut *engine,
             );
         }
 
-        let value = evaluator
+        let value = engine
             .evaluate_item(binding.backend_item, &globals)
             .map_err(|error| self.derived_eval_error(signal, binding.item, error))?;
 
@@ -2173,7 +2174,7 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
             None,
             value,
             &globals,
-            &mut evaluator,
+            &mut *engine,
         )
     }
 
@@ -2191,8 +2192,8 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
         }
 
         let globals = self.build_signal_globals(binding.backend_item, &inputs);
-        let mut evaluator = KernelEvaluator::new(self.backend);
-        let value = evaluator
+        let mut engine = BackendExecutableProgram::interpreted(self.backend).create_engine();
+        let value = engine
             .evaluate_item(binding.backend_item, &globals)
             .map_err(|error| self.reactive_seed_eval_error(signal, binding.item, error))?;
         let binding_item = binding.item;
@@ -2204,7 +2205,7 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
             binding_pipeline_ids.as_ref(),
             value,
             &globals,
-            &mut evaluator,
+            &mut *engine,
         )
     }
 
@@ -2221,8 +2222,10 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
         let Some(globals) = self.build_fragment_globals(&binding.compiled_guard, &inputs) else {
             return Ok(false);
         };
-        let mut evaluator = KernelEvaluator::new(binding.compiled_guard.backend.as_ref());
-        let value = evaluator
+        let mut engine =
+            BackendExecutableProgram::interpreted(binding.compiled_guard.backend.as_ref())
+                .create_engine();
+        let value = engine
             .evaluate_item(binding.compiled_guard.entry_item, &globals)
             .map_err(|error| {
                 self.reactive_guard_eval_error(signal, clause, binding.owner, error)
@@ -2266,14 +2269,22 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
         else {
             return Ok(DerivedSignalUpdate::Clear);
         };
-        let mut fragment_evaluator =
-            KernelEvaluator::new(clause_binding.compiled_body.backend.as_ref());
-        let value = fragment_evaluator
-            .evaluate_item(clause_binding.compiled_body.entry_item, &fragment_globals)
-            .map_err(|error| {
-                self.reactive_body_eval_error(signal, clause, clause_binding.owner, error)
-            })?;
-        let value = match clause_binding.body_mode {
+        // Clone the Arc so that `fragment_engine`'s lifetime is not tied to the
+        // `clause_binding` borrow of `self`, allowing `self.apply_reactive_pipelines`
+        // to take a mutable borrow later.
+        let fragment_backend = Arc::clone(&clause_binding.compiled_body.backend);
+        let fragment_entry_item = clause_binding.compiled_body.entry_item;
+        let clause_owner = clause_binding.owner;
+        let body_mode = clause_binding.body_mode;
+        let clause_pipeline_ids = clause_binding.pipeline_ids.clone();
+        let signal_backend_item = signal_binding.backend_item;
+        // `clause_binding` and `signal_binding` borrows of `self` end here (NLL).
+        let mut fragment_engine =
+            BackendExecutableProgram::interpreted(fragment_backend.as_ref()).create_engine();
+        let value = fragment_engine
+            .evaluate_item(fragment_entry_item, &fragment_globals)
+            .map_err(|error| self.reactive_body_eval_error(signal, clause, clause_owner, error))?;
+        let value = match body_mode {
             hir::ReactiveUpdateBodyMode::Payload => value,
             hir::ReactiveUpdateBodyMode::OptionalPayload => match value {
                 RuntimeValue::OptionSome(value) => *value,
@@ -2285,7 +2296,7 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
                         return Err(BackendRuntimeError::ReactiveBodyReturnedNonOption {
                             signal,
                             clause,
-                            item: clause_binding.owner,
+                            item: clause_owner,
                             value: RuntimeValue::Signal(Box::new(other)),
                         });
                     }
@@ -2294,17 +2305,15 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
                     return Err(BackendRuntimeError::ReactiveBodyReturnedNonOption {
                         signal,
                         clause,
-                        item: clause_binding.owner,
+                        item: clause_owner,
                         value: other,
                     });
                 }
             },
         };
-        let clause_owner = clause_binding.owner;
-        let clause_pipeline_ids = clause_binding.pipeline_ids.clone();
-
-        let globals = self.build_signal_globals(signal_binding.backend_item, &inputs);
-        let mut evaluator = KernelEvaluator::new(self.backend);
+        drop(fragment_engine);
+        let globals = self.build_signal_globals(signal_backend_item, &inputs);
+        let mut engine = BackendExecutableProgram::interpreted(self.backend).create_engine();
         self.apply_reactive_pipelines(
             signal,
             clause_owner,
@@ -2312,7 +2321,7 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
             clause_pipeline_ids.as_ref(),
             value,
             &globals,
-            &mut evaluator,
+            &mut *engine,
         )
     }
 }
@@ -2488,7 +2497,7 @@ impl LinkedDerivedEvaluator<'_> {
         mut resume: Option<TemporalResumePoint>,
         mut value: RuntimeValue,
         globals: &BTreeMap<BackendItemId, RuntimeValue>,
-        evaluator: &mut KernelEvaluator<'_>,
+        evaluator: &mut dyn BackendExecutionEngine,
     ) -> Result<DerivedSignalUpdate<RuntimeValue>, BackendRuntimeError> {
         let binding = self
             .derived_signals
@@ -2692,7 +2701,7 @@ impl LinkedDerivedEvaluator<'_> {
         pipeline_ids: &[BackendPipelineId],
         mut value: RuntimeValue,
         globals: &BTreeMap<BackendItemId, RuntimeValue>,
-        evaluator: &mut KernelEvaluator<'_>,
+        evaluator: &mut dyn BackendExecutionEngine,
     ) -> Result<DerivedSignalUpdate<RuntimeValue>, BackendRuntimeError> {
         for &pipeline_id in pipeline_ids {
             let pipeline = &self.backend.pipelines()[pipeline_id];
@@ -2737,7 +2746,7 @@ impl LinkedDerivedEvaluator<'_> {
         fanout: &aivi_backend::FanoutStage,
         value: RuntimeValue,
         globals: &BTreeMap<BackendItemId, RuntimeValue>,
-        evaluator: &mut KernelEvaluator<'_>,
+        evaluator: &mut dyn BackendExecutionEngine,
     ) -> Result<RuntimeValue, BackendRuntimeError> {
         let current = match value {
             RuntimeValue::Signal(inner) => *inner,
@@ -2789,7 +2798,7 @@ impl LinkedDerivedEvaluator<'_> {
         fanout: &aivi_backend::FanoutStage,
         value: RuntimeValue,
         globals: &BTreeMap<BackendItemId, RuntimeValue>,
-        evaluator: &mut KernelEvaluator<'_>,
+        evaluator: &mut dyn BackendExecutionEngine,
     ) -> Result<RuntimeValue, BackendRuntimeError> {
         let current = match value {
             RuntimeValue::Signal(inner) => *inner,
@@ -2854,12 +2863,12 @@ impl LinkedDerivedEvaluator<'_> {
 
         let previous = self.committed_signals.get(&binding.backend_item).cloned();
 
-        let mut evaluator = KernelEvaluator::new(self.backend);
+        let mut engine = BackendExecutableProgram::interpreted(self.backend).create_engine();
 
         if previous.is_none() {
             // First tick: evaluate the seed kernel (no input subject).
             let seed_value = evaluate_kernel_coercing_zero_arity(
-                &mut evaluator,
+                &mut *engine,
                 binding.seed_kernel,
                 None,
                 &globals,
@@ -2887,7 +2896,7 @@ impl LinkedDerivedEvaluator<'_> {
         };
         let mut result = actual_prev.clone();
         for &step_kernel in binding.step_kernels.iter() {
-            result = evaluator
+            result = engine
                 .evaluate_kernel(step_kernel, Some(&result), &[], &globals)
                 .map_err(|error| BackendRuntimeError::EvaluateRecurrenceSignal {
                     signal,
@@ -2908,7 +2917,7 @@ impl LinkedDerivedEvaluator<'_> {
 /// when the constructor has no fields. This helper detects that case and applies the constructor to
 /// produce the expected `Sum` value.
 fn evaluate_kernel_coercing_zero_arity(
-    evaluator: &mut KernelEvaluator<'_>,
+    evaluator: &mut dyn BackendExecutionEngine,
     kernel_id: KernelId,
     input_subject: Option<&RuntimeValue>,
     globals: &std::collections::BTreeMap<BackendItemId, RuntimeValue>,

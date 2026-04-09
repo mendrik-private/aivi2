@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     fmt,
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 use aivi_backend::{
@@ -79,6 +80,38 @@ pub fn assemble_hir_runtime_with_items(
     .build()
 }
 
+pub fn assemble_hir_runtime_with_items_profiled(
+    module: &hir::Module,
+    included_items: &HashSet<hir::ItemId>,
+) -> Result<ProfiledHirRuntimeAssembly, HirRuntimeAdapterErrors> {
+    let source_lifecycles = hir::elaborate_source_lifecycles(module);
+    let source_decode_programs = hir::generate_source_decode_programs(module);
+    let recurrences = hir::elaborate_recurrences(module);
+    let gates = hir::elaborate_gates(module);
+    HirRuntimeAssemblyBuilder::new_with_items(
+        module,
+        &source_lifecycles,
+        &source_decode_programs,
+        &recurrences,
+        &gates,
+        included_items,
+    )
+    .build_profiled()
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HirRuntimeAssemblyStats {
+    pub reactive_guard_fragments: usize,
+    pub reactive_body_fragments: usize,
+    pub reactive_fragment_compile_duration: Duration,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProfiledHirRuntimeAssembly {
+    pub assembly: HirRuntimeAssembly,
+    pub stats: HirRuntimeAssemblyStats,
+}
+
 #[derive(Clone, Debug)]
 pub struct HirRuntimeAssemblyBuilder<'a> {
     module: &'a hir::Module,
@@ -150,7 +183,12 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
     }
 
     pub fn build(self) -> Result<HirRuntimeAssembly, HirRuntimeAdapterErrors> {
+        self.build_profiled().map(|profiled| profiled.assembly)
+    }
+
+    pub fn build_profiled(self) -> Result<ProfiledHirRuntimeAssembly, HirRuntimeAdapterErrors> {
         let mut errors = Vec::new();
+        let mut stats = HirRuntimeAssemblyStats::default();
         let report_index = ReportIndex::new(
             self.source_lifecycles,
             self.source_decode_programs,
@@ -450,6 +488,8 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                             },
                             None => None,
                         };
+                        stats.reactive_guard_fragments += 1;
+                        let guard_started = Instant::now();
                         let guard_fragment = match compile_runtime_expr_fragment(
                             self.module,
                             binding.item,
@@ -465,8 +505,12 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                             &public_signals,
                             ReactiveFragmentRole::Guard,
                         ) {
-                            Ok(fragment) => fragment,
+                            Ok(fragment) => {
+                                stats.reactive_fragment_compile_duration += guard_started.elapsed();
+                                fragment
+                            }
                             Err(error) => {
+                                stats.reactive_fragment_compile_duration += guard_started.elapsed();
                                 errors.push(error);
                                 continue;
                             }
@@ -484,6 +528,8 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                                 hir::GateType::Option(Box::new(payload_type.clone()))
                             }
                         };
+                        stats.reactive_body_fragments += 1;
+                        let body_started = Instant::now();
                         let body_fragment = match compile_runtime_expr_fragment(
                             self.module,
                             binding.item,
@@ -495,8 +541,12 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                             &public_signals,
                             ReactiveFragmentRole::Body,
                         ) {
-                            Ok(fragment) => fragment,
+                            Ok(fragment) => {
+                                stats.reactive_fragment_compile_duration += body_started.elapsed();
+                                fragment
+                            }
                             Err(error) => {
+                                stats.reactive_fragment_compile_duration += body_started.elapsed();
                                 errors.push(error);
                                 continue;
                             }
@@ -816,15 +866,18 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
             HirRuntimeAdapterErrors::new(vec![HirRuntimeAdapterError::GraphBuild(err)])
         })?;
 
-        Ok(HirRuntimeAssembly {
-            graph,
-            owners: owners.into_boxed_slice(),
-            signals: signals.into_boxed_slice(),
-            sources: sources.into_boxed_slice(),
-            tasks: tasks.into_boxed_slice(),
-            gates: gates.into_boxed_slice(),
-            recurrences: recurrences.into_boxed_slice(),
-            db_changed_bindings,
+        Ok(ProfiledHirRuntimeAssembly {
+            assembly: HirRuntimeAssembly {
+                graph,
+                owners: owners.into_boxed_slice(),
+                signals: signals.into_boxed_slice(),
+                sources: sources.into_boxed_slice(),
+                tasks: tasks.into_boxed_slice(),
+                gates: gates.into_boxed_slice(),
+                recurrences: recurrences.into_boxed_slice(),
+                db_changed_bindings,
+            },
+            stats,
         })
     }
 

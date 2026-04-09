@@ -161,8 +161,11 @@ dependencies = [
 name = "aivi-query"
 version = "0.1.0"
 dependencies = [
+ "aivi-backend",
  "aivi-base",
+ "aivi-core",
  "aivi-hir",
+ "aivi-lambda",
  "aivi-syntax",
  "aivi-typing",
  "parking_lot",

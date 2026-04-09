@@ -34,9 +34,10 @@ pub use graph::{
 pub use hir_adapter::{
     HirGateStageBinding, HirGateStageId, HirOwnerBinding, HirReactiveUpdateBinding,
     HirRecurrenceBinding, HirRecurrenceNodeId, HirRuntimeAdapterError, HirRuntimeAdapterErrors,
-    HirRuntimeAssembly, HirRuntimeAssemblyBuilder, HirRuntimeGatePlan,
+    HirRuntimeAssembly, HirRuntimeAssemblyBuilder, HirRuntimeAssemblyStats, HirRuntimeGatePlan,
     HirRuntimeInstantiationError, HirSignalBinding, HirSignalBindingKind, HirSourceBinding,
-    HirTaskBinding, assemble_hir_runtime, assemble_hir_runtime_with_items,
+    HirTaskBinding, ProfiledHirRuntimeAssembly, assemble_hir_runtime,
+    assemble_hir_runtime_with_items, assemble_hir_runtime_with_items_profiled,
 };
 pub use providers::{
     MailboxPublishError, SourceProviderContext, SourceProviderExecutionError, SourceProviderManager,

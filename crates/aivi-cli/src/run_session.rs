@@ -7,6 +7,81 @@ pub(super) struct RunLaunchConfig {
     providers: SourceProviderManager,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RunStartupStage {
+    GtkInit,
+    RuntimeLink,
+    SessionSetup,
+    InitialRuntimeTick,
+    InitialHydrationWait,
+    RootWindowCollection,
+}
+
+impl RunStartupStage {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::GtkInit => "GTK init",
+            Self::RuntimeLink => "runtime link",
+            Self::SessionSetup => "session setup",
+            Self::InitialRuntimeTick => "initial runtime tick",
+            Self::InitialHydrationWait => "initial hydration wait",
+            Self::RootWindowCollection => "root window collect",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct RunStartupMetrics {
+    pub gtk_init: Duration,
+    pub runtime_link: Duration,
+    pub session_setup: Duration,
+    pub initial_runtime_tick: Duration,
+    pub initial_hydration_wait: Duration,
+    pub root_window_collection: Duration,
+    pub window_presentation: Duration,
+    pub total_to_session_ready: Duration,
+}
+
+impl RunStartupMetrics {
+    fn with_stage_duration(
+        mut self,
+        stage: RunStartupStage,
+        duration: Duration,
+        total_to_session_ready: Duration,
+    ) -> Self {
+        match stage {
+            RunStartupStage::GtkInit => self.gtk_init = duration,
+            RunStartupStage::RuntimeLink => self.runtime_link = duration,
+            RunStartupStage::SessionSetup => self.session_setup = duration,
+            RunStartupStage::InitialRuntimeTick => self.initial_runtime_tick = duration,
+            RunStartupStage::InitialHydrationWait => self.initial_hydration_wait = duration,
+            RunStartupStage::RootWindowCollection => self.root_window_collection = duration,
+        }
+        self.total_to_session_ready = total_to_session_ready;
+        self
+    }
+
+    pub(super) fn stage_duration(self, stage: RunStartupStage) -> Duration {
+        match stage {
+            RunStartupStage::GtkInit => self.gtk_init,
+            RunStartupStage::RuntimeLink => self.runtime_link,
+            RunStartupStage::SessionSetup => self.session_setup,
+            RunStartupStage::InitialRuntimeTick => self.initial_runtime_tick,
+            RunStartupStage::InitialHydrationWait => self.initial_hydration_wait,
+            RunStartupStage::RootWindowCollection => self.root_window_collection,
+        }
+    }
+
+    pub(super) fn with_window_presentation(mut self, duration: Duration) -> Self {
+        self.window_presentation = duration;
+        self
+    }
+
+    pub(super) fn total_to_first_present(self) -> Duration {
+        self.total_to_session_ready + self.window_presentation
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Clone)]
 pub(super) struct RunSessionControl {
@@ -22,6 +97,7 @@ pub(super) struct RunSessionHarness {
     session: Rc<RefCell<RunSessionState>>,
     control: RunSessionControl,
     root_windows: Vec<gtk::Window>,
+    startup_metrics: RunStartupMetrics,
     startup_manual_sources: RefCell<Option<Box<[aivi_runtime::SourceInstanceId]>>>,
 }
 
@@ -233,6 +309,10 @@ impl RunSessionHarness {
 
     pub(super) fn root_windows(&self) -> &[gtk::Window] {
         &self.root_windows
+    }
+
+    pub(super) fn startup_metrics(&self) -> RunStartupMetrics {
+        self.startup_metrics
     }
 
     pub(super) fn install_quit_on_last_window_close(&self) {
@@ -820,13 +900,50 @@ fn hold_startup_timer_sources(
     Ok(instances.into_boxed_slice())
 }
 
+fn record_startup_stage<F>(
+    startup_metrics: &mut RunStartupMetrics,
+    stage: RunStartupStage,
+    duration: Duration,
+    total_to_session_ready: Duration,
+    on_stage_completed: &mut F,
+) where
+    F: FnMut(RunStartupStage, &RunStartupMetrics),
+{
+    *startup_metrics = startup_metrics.with_stage_duration(stage, duration, total_to_session_ready);
+    on_stage_completed(stage, startup_metrics);
+}
+
 pub(super) fn start_run_session_with_launch_config(
     path: &Path,
     artifact: RunArtifact,
     launch_config: RunLaunchConfig,
 ) -> Result<RunSessionHarness, String> {
+    start_run_session_with_launch_config_and_reporter(path, artifact, launch_config, |_, _| {})
+}
+
+fn start_run_session_with_launch_config_and_reporter<F>(
+    path: &Path,
+    artifact: RunArtifact,
+    launch_config: RunLaunchConfig,
+    mut on_stage_completed: F,
+) -> Result<RunSessionHarness, String>
+where
+    F: FnMut(RunStartupStage, &RunStartupMetrics),
+{
+    let startup_started = Instant::now();
+    let mut startup_metrics = RunStartupMetrics::default();
+
+    let gtk_init_started = Instant::now();
     gtk::init()
         .map_err(|error| format!("failed to initialize GTK for {}: {error}", path.display()))?;
+    let gtk_init = gtk_init_started.elapsed();
+    record_startup_stage(
+        &mut startup_metrics,
+        RunStartupStage::GtkInit,
+        gtk_init,
+        startup_started.elapsed(),
+        &mut on_stage_completed,
+    );
     let RunArtifact {
         view_name,
         module,
@@ -839,6 +956,7 @@ pub(super) fn start_run_session_with_launch_config(
         event_handlers,
         stub_signal_defaults,
     } = artifact;
+    let runtime_link_started = Instant::now();
     let linked =
         link_backend_runtime(runtime_assembly, &core, backend.clone()).map_err(|errors| {
             let mut rendered = String::from("failed to link backend runtime for `aivi run`:\n");
@@ -849,7 +967,16 @@ pub(super) fn start_run_session_with_launch_config(
             }
             rendered
         })?;
+    let runtime_link = runtime_link_started.elapsed();
+    record_startup_stage(
+        &mut startup_metrics,
+        RunStartupStage::RuntimeLink,
+        runtime_link,
+        startup_started.elapsed(),
+        &mut on_stage_completed,
+    );
 
+    let session_setup_started = Instant::now();
     let context = glib::MainContext::default();
     let scheduled_session = Arc::new(std::sync::Mutex::new(
         None::<Arc<glib::thread_guard::ThreadGuard<Box<dyn Fn() + 'static>>>>,
@@ -951,7 +1078,16 @@ pub(super) fn start_run_session_with_launch_config(
             .lock()
             .expect("run-session notifier state mutex should not be poisoned") = Some(callback);
     }
+    let session_setup = session_setup_started.elapsed();
+    record_startup_stage(
+        &mut startup_metrics,
+        RunStartupStage::SessionSetup,
+        session_setup,
+        startup_started.elapsed(),
+        &mut on_stage_completed,
+    );
 
+    let initial_runtime_tick_started = Instant::now();
     session.borrow().driver.tick_now();
     {
         let mut session = session.borrow_mut();
@@ -969,12 +1105,29 @@ pub(super) fn start_run_session_with_launch_config(
                 })?;
         }
     }
+    let initial_runtime_tick = initial_runtime_tick_started.elapsed();
+    record_startup_stage(
+        &mut startup_metrics,
+        RunStartupStage::InitialRuntimeTick,
+        initial_runtime_tick,
+        startup_started.elapsed(),
+        &mut on_stage_completed,
+    );
+    let initial_hydration_wait_started = Instant::now();
     while {
         let session = session.borrow();
         session.hydration.latest_applied().is_none() && !session.lifecycle.has_runtime_error()
     } {
         context.iteration(true);
     }
+    let initial_hydration_wait = initial_hydration_wait_started.elapsed();
+    record_startup_stage(
+        &mut startup_metrics,
+        RunStartupStage::InitialHydrationWait,
+        initial_hydration_wait,
+        startup_started.elapsed(),
+        &mut on_stage_completed,
+    );
     {
         let mut session = session.borrow_mut();
         if let Some(error) = session.lifecycle.take_runtime_error() {
@@ -984,7 +1137,16 @@ pub(super) fn start_run_session_with_launch_config(
             ));
         }
     }
+    let root_window_collection_started = Instant::now();
     let root_windows = session.borrow().collect_root_windows()?;
+    let root_window_collection = root_window_collection_started.elapsed();
+    record_startup_stage(
+        &mut startup_metrics,
+        RunStartupStage::RootWindowCollection,
+        root_window_collection,
+        startup_started.elapsed(),
+        &mut on_stage_completed,
+    );
     session.borrow_mut().lifecycle.mark_running();
 
     Ok(RunSessionHarness {
@@ -992,16 +1154,28 @@ pub(super) fn start_run_session_with_launch_config(
         session,
         control,
         root_windows,
+        startup_metrics,
         startup_manual_sources: RefCell::new(Some(startup_manual_sources)),
     })
 }
 
-pub(super) fn launch_run_with_config(
+pub(super) fn launch_run_with_config<P, F>(
     path: &Path,
     artifact: RunArtifact,
     launch_config: RunLaunchConfig,
-) -> Result<ExitCode, String> {
-    let harness = start_run_session_with_launch_config(path, artifact, launch_config)?;
+    mut on_progress: P,
+    on_started: F,
+) -> Result<ExitCode, String>
+where
+    P: FnMut(RunStartupStage, &RunStartupMetrics),
+    F: FnOnce(&RunStartupMetrics),
+{
+    let harness = start_run_session_with_launch_config_and_reporter(
+        path,
+        artifact,
+        launch_config,
+        &mut on_progress,
+    )?;
 
     println!(
         "running GTK view `{}` from {}",
@@ -1010,7 +1184,12 @@ pub(super) fn launch_run_with_config(
     );
 
     harness.install_quit_on_last_window_close();
+    let present_started = Instant::now();
     harness.present_root_windows()?;
+    let startup_metrics = harness
+        .startup_metrics()
+        .with_window_presentation(present_started.elapsed());
+    on_started(&startup_metrics);
     harness.run_main_loop()?;
     Ok(ExitCode::SUCCESS)
 }
@@ -1104,8 +1283,8 @@ impl aivi_gtk::GtkEventSink<RunHostValue> for RunEventSink<'_> {
 mod tests {
     use super::{
         HydrationRevisionState, MainContextRequestQueue, RunLaunchConfig, RunSessionLifecycle,
-        RunSessionPhase, RunSessionScheduleState, project_run_hydration_globals,
-        start_run_session_with_launch_config,
+        RunSessionPhase, RunSessionScheduleState, RunStartupStage, project_run_hydration_globals,
+        start_run_session_with_launch_config, start_run_session_with_launch_config_and_reporter,
     };
     use crate::{RunHydrationStaticState, plan_run_hydration_profiled};
     use aivi_backend::{DetachedRuntimeValue, ItemId as BackendItemId, RuntimeValue};
@@ -1624,6 +1803,62 @@ mod tests {
             Some(2_usize)
         );
         assert!(sources.borrow_mut().take().is_none());
+    }
+
+    #[gtk::test]
+    fn startup_progress_reports_completed_prepresent_stages() {
+        let _guard = crate::gtk_test_lock().lock().expect("gtk test lock");
+        let artifact = prepare_run_from_text(
+            "startup-progress.aivi",
+            r#"
+value main =
+    <Window title="Host">
+        <Label text="Ready" />
+    </Window>
+
+export main
+"#,
+        );
+        let reported = std::cell::RefCell::new(Vec::new());
+        let harness = start_run_session_with_launch_config_and_reporter(
+            Path::new("startup-progress.aivi"),
+            artifact,
+            RunLaunchConfig::default(),
+            |stage, metrics| reported.borrow_mut().push((stage, *metrics)),
+        )
+        .expect("startup progress fixture should start a run session");
+        let reported = reported.into_inner();
+        assert_eq!(
+            reported
+                .iter()
+                .map(|(stage, _)| *stage)
+                .collect::<Vec<RunStartupStage>>(),
+            vec![
+                RunStartupStage::GtkInit,
+                RunStartupStage::RuntimeLink,
+                RunStartupStage::SessionSetup,
+                RunStartupStage::InitialRuntimeTick,
+                RunStartupStage::InitialHydrationWait,
+                RunStartupStage::RootWindowCollection,
+            ]
+        );
+        assert_eq!(reported[0].1.runtime_link, Duration::default());
+        assert_eq!(reported[0].1.session_setup, Duration::default());
+        assert_eq!(reported[0].1.initial_runtime_tick, Duration::default());
+        assert_eq!(reported[0].1.initial_hydration_wait, Duration::default());
+        assert_eq!(reported[0].1.root_window_collection, Duration::default());
+        assert_eq!(reported[4].1.root_window_collection, Duration::default());
+        assert!(
+            reported.windows(2).all(|pair| {
+                pair[1].1.total_to_session_ready >= pair[0].1.total_to_session_ready
+            })
+        );
+        assert_eq!(
+            reported.last().map(|(_, metrics)| *metrics),
+            Some(harness.startup_metrics())
+        );
+
+        harness.shutdown();
     }
 
     #[gtk::test]

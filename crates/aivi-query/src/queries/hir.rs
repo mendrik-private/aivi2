@@ -173,6 +173,7 @@ impl ImportResolver for WorkspaceImportResolver<'_> {
         // Fast path: if the module is already compiled, return cached exports.
         let parsed = parsed_file(self.db, file);
         if let Some(cached) = self.db.cached_hir(file, parsed.revision()) {
+            self.db.record_hir_hit();
             return ImportModuleResolution::Resolved(cached.exported_names().clone());
         }
 
@@ -230,8 +231,9 @@ impl ImportResolver for WorkspaceImportResolver<'_> {
 pub fn hir_module(db: &RootDatabase, file: SourceFile) -> Arc<HirModuleResult> {
     // Fast path: already compiled.
     let parsed = parsed_file(db, file);
-    if db.cached_hir(file, parsed.revision()).is_some() {
-        return hir_module_with_stack(db, file, &[], None);
+    if let Some(cached) = db.cached_hir(file, parsed.revision()) {
+        db.record_hir_hit();
+        return cached;
     }
 
     // Warmup pass: compile with WARMUP_PASS=true so that NO modules get
@@ -277,8 +279,10 @@ fn hir_module_with_stack(
     loop {
         let parsed = parsed_file(db, file);
         if let Some(cached) = db.cached_hir(file, parsed.revision()) {
+            db.record_hir_hit();
             return cached;
         }
+        db.record_hir_miss();
 
         let resolver = WorkspaceImportResolver::new(db, workspace, &stack);
         let lowered: LoweringResult = lower_module_with_resolver(parsed.cst(), Some(&resolver));
