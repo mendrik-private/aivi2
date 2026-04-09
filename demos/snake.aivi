@@ -1,14 +1,10 @@
-// Aliases needed only inside the Snake domain body where domain operations
-// share names with hoisted stdlib functions.
 use aivi.nonEmpty (
     head as nelHead
     length as nelLength
     init as nelInit
 )
 
-use aivi.list (
-    contains as listContains
-)
+use aivi.list (contains as listContains)
 
 type Direction =
   | North
@@ -98,7 +94,7 @@ func dirLabel = .
 
 value initialSnake = fromCells (cons (Cell 6 10) (cons (Cell 5 10) (singleton (Cell 4 10))))
 
-value initial : GameState = {
+value initial = {
     snake: initialSnake,
     dir: East,
     food: spawnFood seed0,
@@ -139,16 +135,24 @@ func resolveMove = st h => h == st.food
  F|> resolveMoveStep st h
 
 type GameState -> Cell -> Int -> GameState
-func resolveMoveGrowWithSeed = st h newSeed =>
-    st <| { snake: st.snake.grow h, food: spawnFood newSeed, score: st.score + 1, seed: newSeed }
+func resolveMoveGrowWithSeed = st! h newSeed
+    <| {
+        snake: st.snake.grow h,
+        food: spawnFood newSeed,
+        score: st.score + 1,
+        seed: newSeed,
+    }
 
 type GameState -> Cell -> GameState
 func resolveMoveGrow = st h =>
     resolveMoveGrowWithSeed st h (nextSeed st.seed)
 
 type GameState -> Cell -> GameState
-func resolveMoveStep = st h =>
-    st <| { snake: st.snake.move h, seed: nextSeed st.seed }
+func resolveMoveStep = st! h
+    <| {
+        snake: st.snake.move h,
+        seed: nextSeed st.seed,
+    }
 
 type List Cell -> Cell -> Cell -> Int -> Int -> Text
 func cellGlyph = body head food y x => (Cell x y == head, listContains cellEq (Cell x y) body, Cell x y == food)

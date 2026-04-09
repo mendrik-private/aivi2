@@ -458,7 +458,7 @@ func renderTargetCell = matched legal disc => matched
 type Coord -> Bool -> Option Coord -> Bool -> Disc -> Text
 func renderCell = coord legal target visible disc => target
  ||> Some targetCoord -> renderTargetCell (visible and coordEq coord targetCoord) legal disc
- ||> None -> renderStillCell legal disc
+ ||> None             -> renderStillCell legal disc
 
 type Int -> Int -> Int
 func cellKey = y x!
@@ -501,12 +501,10 @@ from state = {
     board: .board
     phase: .phase
     snapshot: .snapshot
-
     type Coord -> Bool
     legalAt coord: phaseAllowsHumanInput phase
      T|> humanCanPlace coord snapshot
      F|> False
-
     type Coord -> Text
     cellLabel coord: phaseAllowsHumanInput phase
      T|> renderCell coord (humanCanPlace coord snapshot) (phaseComputerTarget phase) (phaseShowsComputerTarget phase) (discAt board coord)

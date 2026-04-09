@@ -26,6 +26,7 @@ mod source_lifecycle_elaboration;
 pub mod symbols;
 mod temporal_elaboration;
 mod truthy_falsy_elaboration;
+mod type_analysis;
 mod typecheck;
 mod typecheck_context;
 mod typed_declarations;
