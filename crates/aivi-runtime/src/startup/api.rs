@@ -58,4 +58,3 @@ pub struct BackendLinkedRuntime {
     db_commit_invalidation_sink: Option<DbCommitInvalidationSink>,
     execution_context: SourceProviderContext,
 }
-

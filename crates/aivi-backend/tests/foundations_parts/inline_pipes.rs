@@ -792,6 +792,44 @@ value failedLabel =
 }
 
 #[test]
+fn lowering_keeps_full_opaque_variant_set_for_case_subjects() {
+    let backend = lower_text(
+        "backend-inline-case-opaque-variants.aivi",
+        r#"
+type Direction = Up | Down
+type Event = Turn Direction | Tick
+
+signal event : Signal Event
+
+value tickSeen =
+  event
+    ||> Tick -> True
+    ||> _ -> False
+"#,
+    );
+
+    let variants = backend
+        .layouts()
+        .iter()
+        .find_map(|(_, layout)| match &layout.kind {
+            LayoutKind::Opaque { name, variants, .. } if name.as_ref() == "Event" => {
+                Some(variants)
+            }
+            _ => None,
+        })
+        .expect("backend should intern an Event layout");
+    let variant_names = variants
+        .iter()
+        .map(|variant| variant.name.as_ref())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        variant_names,
+        vec!["Tick", "Turn"],
+        "opaque Event layouts should preserve every declared variant, not only the constructor arms used in one case expression"
+    );
+}
+
+#[test]
 fn lowers_recurrence_targets_and_witnesses() {
     let backend = lower_text(
         "backend-recurrence.aivi",
@@ -886,4 +924,3 @@ fn retains_signal_fanout_map_and_join_kernels() {
         KernelOriginKind::FanoutJoin { stage_index, .. } if stage_index == join.stage_index
     ));
 }
-

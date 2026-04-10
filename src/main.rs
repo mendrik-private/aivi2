@@ -27,7 +27,7 @@ fn main() {
     let hir = lower_hir_module(&parsed.module);
     let core = aivi_core::lower_runtime_module(hir.module()).unwrap();
     let lambda = lower_lambda_module(&core).unwrap();
-    let backend = aivi_backend::lower_module(&lambda).unwrap();
+    let backend = aivi_backend::lower_module_with_hir(&lambda, hir.module()).unwrap();
     let assembly = assemble_hir_runtime(hir.module()).unwrap();
     let mut linked = link_backend_runtime(assembly, &core, Arc::new(backend)).unwrap();
     let mut providers = SourceProviderManager::new();

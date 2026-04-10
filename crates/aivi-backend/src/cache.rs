@@ -40,13 +40,15 @@ const KERNEL_CACHE_MAGIC: &[u8; 5] = b"AIVK\x01";
 const JIT_KERNEL_CACHE_MAGIC: &[u8; 5] = b"AIVJ\x01";
 
 const COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Bump when backend machine-code semantics change without a Cargo package-version change.
+const CODEGEN_NAMESPACE_REVISION: &str = "4";
 const SHARED_CODEGEN_SETTINGS: &[(&str, &str)] =
     &[("enable_llvm_abi_extensions", "1"), ("opt_level", "speed")];
 
 /// In-memory cache for per-kernel object artifacts owned by the backend layer.
 #[derive(Clone, Debug, Default)]
 pub struct BackendKernelArtifactCache {
-    artifacts: BTreeMap<KernelFingerprint, CompiledKernelArtifact>,
+    artifacts: BTreeMap<ProgramKernelCacheKey, CompiledKernelArtifact>,
 }
 
 impl BackendKernelArtifactCache {
@@ -62,8 +64,12 @@ impl BackendKernelArtifactCache {
         self.artifacts.is_empty()
     }
 
-    pub fn get(&self, fingerprint: KernelFingerprint) -> Option<&CompiledKernelArtifact> {
-        self.artifacts.get(&fingerprint)
+    pub fn get(
+        &self,
+        program: &Program,
+        fingerprint: KernelFingerprint,
+    ) -> Option<&CompiledKernelArtifact> {
+        self.artifacts.get(&program_kernel_cache_key(program, fingerprint))
     }
 
     pub fn get_by_kernel(
@@ -74,11 +80,16 @@ impl BackendKernelArtifactCache {
         if !program.kernels().contains(kernel_id) {
             return None;
         }
-        self.get(compute_kernel_fingerprint(program, kernel_id))
+        self.get(program, compute_kernel_fingerprint(program, kernel_id))
     }
 
-    pub fn insert(&mut self, artifact: CompiledKernelArtifact) -> Option<CompiledKernelArtifact> {
-        self.artifacts.insert(artifact.fingerprint(), artifact)
+    pub fn insert(
+        &mut self,
+        program: &Program,
+        artifact: CompiledKernelArtifact,
+    ) -> Option<CompiledKernelArtifact> {
+        self.artifacts
+            .insert(program_kernel_cache_key(program, artifact.fingerprint()), artifact)
     }
 
     pub fn get_or_compile(
@@ -93,13 +104,32 @@ impl BackendKernelArtifactCache {
             return Err(error);
         }
         let fingerprint = compute_kernel_fingerprint(program, kernel_id);
-        match self.artifacts.entry(fingerprint) {
+        match self
+            .artifacts
+            .entry(program_kernel_cache_key(program, fingerprint))
+        {
             Entry::Occupied(entry) => Ok(entry.into_mut()),
             Entry::Vacant(entry) => {
                 let artifact = compile_kernel(program, kernel_id)?;
                 Ok(entry.insert(artifact))
             }
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct ProgramKernelCacheKey {
+    program_fingerprint: u64,
+    kernel_fingerprint: KernelFingerprint,
+}
+
+fn program_kernel_cache_key(
+    program: &Program,
+    kernel_fingerprint: KernelFingerprint,
+) -> ProgramKernelCacheKey {
+    ProgramKernelCacheKey {
+        program_fingerprint: compute_program_fingerprint(program),
+        kernel_fingerprint,
     }
 }
 
@@ -121,9 +151,19 @@ pub fn compute_program_cache_key(program: &Program) -> u64 {
     compute_program_cache_key_from_fingerprint(compute_program_fingerprint(program))
 }
 
-/// Compute a disk-cache key for one kernel artifact from its stable content fingerprint.
+/// Compute a stable 64-bit cache key from a kernel fingerprint alone.
+///
+/// Full on-disk kernel artifact caches additionally scope this by the enclosing
+/// backend program fingerprint so changed helper bodies cannot alias one another
+/// across different programs.
 pub fn compute_kernel_cache_key(fingerprint: KernelFingerprint) -> u64 {
     compute_program_cache_key_from_fingerprint(fingerprint.as_raw())
+}
+
+fn compute_program_scoped_kernel_cache_key(program: &Program, fingerprint: KernelFingerprint) -> u64 {
+    let mut hasher = FxHasher::default();
+    program_kernel_cache_key(program, fingerprint).hash(&mut hasher);
+    compute_program_cache_key_from_fingerprint(hasher.finish())
 }
 
 fn compiler_version_hash() -> u64 {
@@ -135,6 +175,7 @@ fn compiler_version_hash() -> u64 {
 fn cache_namespace_hash() -> u64 {
     let mut hasher = FxHasher::default();
     compiler_version_hash().hash(&mut hasher);
+    CODEGEN_NAMESPACE_REVISION.hash(&mut hasher);
     native_codegen_target_identity().hash(&mut hasher);
     for (name, value) in SHARED_CODEGEN_SETTINGS {
         name.hash(&mut hasher);
@@ -660,17 +701,22 @@ fn store_cached_program_in(cache_root: &Path, key: u64, compiled: &CompiledProgr
 
 /// Load a cached per-kernel object artifact, if a valid entry exists.
 pub fn load_cached_kernel_artifact(
+    program: &Program,
     fingerprint: KernelFingerprint,
 ) -> Option<CompiledKernelArtifact> {
     let cache_root = cache_dir()?;
-    load_cached_kernel_artifact_from(&cache_root, fingerprint)
+    load_cached_kernel_artifact_from(&cache_root, program, fingerprint)
 }
 
 fn load_cached_kernel_artifact_from(
     cache_root: &Path,
+    program: &Program,
     fingerprint: KernelFingerprint,
 ) -> Option<CompiledKernelArtifact> {
-    let path = kernel_cache_path_in(cache_root, compute_kernel_cache_key(fingerprint));
+    let path = kernel_cache_path_in(
+        cache_root,
+        compute_program_scoped_kernel_cache_key(program, fingerprint),
+    );
     let bytes = fs::read(&path).ok()?;
     let artifact = deserialize_kernel_artifact(&bytes)?;
     (artifact.fingerprint() == fingerprint).then_some(artifact)
@@ -678,9 +724,13 @@ fn load_cached_kernel_artifact_from(
 
 fn load_cached_jit_kernel_artifact_from(
     cache_root: &Path,
+    program: &Program,
     fingerprint: KernelFingerprint,
 ) -> Option<CachedJitKernelArtifact> {
-    let path = jit_kernel_cache_path_in(cache_root, compute_kernel_cache_key(fingerprint));
+    let path = jit_kernel_cache_path_in(
+        cache_root,
+        compute_program_scoped_kernel_cache_key(program, fingerprint),
+    );
     let bytes = fs::read(&path).ok()?;
     deserialize_cached_jit_artifact(&bytes)
 }
@@ -688,6 +738,7 @@ fn load_cached_jit_kernel_artifact_from(
 /// Persist a per-kernel object artifact to the disk cache.
 /// Silently ignores I/O failures so a missing or read-only cache never breaks compilation.
 pub fn store_cached_kernel_artifact(
+    program: &Program,
     fingerprint: KernelFingerprint,
     artifact: &CompiledKernelArtifact,
 ) {
@@ -697,15 +748,19 @@ pub fn store_cached_kernel_artifact(
     let Some(cache_root) = cache_dir() else {
         return;
     };
-    store_cached_kernel_artifact_in(&cache_root, fingerprint, artifact);
+    store_cached_kernel_artifact_in(&cache_root, program, fingerprint, artifact);
 }
 
 fn store_cached_kernel_artifact_in(
     cache_root: &Path,
+    program: &Program,
     fingerprint: KernelFingerprint,
     artifact: &CompiledKernelArtifact,
 ) {
-    let path = kernel_cache_path_in(cache_root, compute_kernel_cache_key(fingerprint));
+    let path = kernel_cache_path_in(
+        cache_root,
+        compute_program_scoped_kernel_cache_key(program, fingerprint),
+    );
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -714,10 +769,14 @@ fn store_cached_kernel_artifact_in(
 
 fn store_cached_jit_kernel_artifact_in(
     cache_root: &Path,
+    program: &Program,
     fingerprint: KernelFingerprint,
     artifact: &CachedJitKernelArtifact,
 ) {
-    let path = jit_kernel_cache_path_in(cache_root, compute_kernel_cache_key(fingerprint));
+    let path = jit_kernel_cache_path_in(
+        cache_root,
+        compute_program_scoped_kernel_cache_key(program, fingerprint),
+    );
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -768,11 +827,11 @@ fn compile_kernel_cached_in_dir(
     kernel_id: KernelId,
 ) -> Result<CompiledKernelArtifact, CodegenErrors> {
     let fingerprint = compute_kernel_fingerprint(program, kernel_id);
-    if let Some(cached) = load_cached_kernel_artifact_from(cache_root, fingerprint) {
+    if let Some(cached) = load_cached_kernel_artifact_from(cache_root, program, fingerprint) {
         return Ok(cached);
     }
     let compiled = compile_kernel(program, kernel_id)?;
-    store_cached_kernel_artifact_in(cache_root, fingerprint, &compiled);
+    store_cached_kernel_artifact_in(cache_root, program, fingerprint, &compiled);
     Ok(compiled)
 }
 
@@ -795,14 +854,14 @@ fn compile_kernel_jit_cached_in_dir(
     kernel_id: KernelId,
 ) -> Result<crate::codegen::CompiledJitKernel, CodegenErrors> {
     let fingerprint = compute_kernel_fingerprint(program, kernel_id);
-    if let Some(cached) = load_cached_jit_kernel_artifact_from(cache_root, fingerprint) {
+    if let Some(cached) = load_cached_jit_kernel_artifact_from(cache_root, program, fingerprint) {
         if let Ok(compiled) = instantiate_cached_jit_kernel(program, kernel_id, &cached) {
             return Ok(compiled);
         }
     }
     let (compiled, artifact) = compile_kernel_jit_with_cache_artifact(program, kernel_id)?;
     if let Some(artifact) = artifact.as_ref() {
-        store_cached_jit_kernel_artifact_in(cache_root, fingerprint, artifact);
+        store_cached_jit_kernel_artifact_in(cache_root, program, fingerprint, artifact);
     }
     Ok(compiled)
 }
@@ -948,7 +1007,10 @@ mod tests {
 
         with_temp_cache_dir(|cache_root| {
             let fingerprint = compute_kernel_fingerprint(&backend, total);
-            let path = kernel_cache_path_in(cache_root, compute_kernel_cache_key(fingerprint));
+            let path = kernel_cache_path_in(
+                cache_root,
+                compute_program_scoped_kernel_cache_key(&backend, fingerprint),
+            );
             fs::create_dir_all(
                 path.parent()
                     .expect("cache file should have a parent directory"),
@@ -959,13 +1021,59 @@ mod tests {
 
             let compiled = compile_kernel_cached_in_dir(cache_root, &backend, total)
                 .expect("corrupt kernel cache should recompile");
-            let loaded = load_cached_kernel_artifact_from(cache_root, fingerprint)
+            let loaded = load_cached_kernel_artifact_from(cache_root, &backend, fingerprint)
                 .expect("recompiled kernel cache entry should deserialize cleanly");
 
             assert_eq!(compiled, loaded);
             assert_ne!(
                 fs::read(&path).expect("recompiled cache file should be readable"),
                 b"corrupt-kernel-cache"
+            );
+        });
+    }
+
+    #[test]
+    fn cached_jit_kernel_scopes_artifacts_by_program_identity() {
+        let first = lower_text(
+            "cache-jit-program-scope.aivi",
+            "value config:Int = 1\nvalue useConfig:Int = config\n",
+        );
+        let second = lower_text(
+            "cache-jit-program-scope.aivi",
+            "value config:Int = 2\nvalue useConfig:Int = config\n",
+        );
+        let first_kernel = first.items()[find_item(&first, "useConfig")]
+            .body
+            .expect("useConfig should lower into a body kernel");
+        let second_kernel = second.items()[find_item(&second, "useConfig")]
+            .body
+            .expect("useConfig should lower into a body kernel");
+        let first_fingerprint = compute_kernel_fingerprint(&first, first_kernel);
+        let second_fingerprint = compute_kernel_fingerprint(&second, second_kernel);
+
+        assert_eq!(
+            first_fingerprint, second_fingerprint,
+            "kernel fingerprint currently ignores dependent item body changes"
+        );
+        assert_ne!(
+            compute_program_scoped_kernel_cache_key(&first, first_fingerprint),
+            compute_program_scoped_kernel_cache_key(&second, second_fingerprint)
+        );
+
+        with_temp_cache_dir(|cache_root| {
+            let compiled_first = compile_kernel_jit_cached_in_dir(cache_root, &first, first_kernel)
+                .expect("first helper-backed kernel should compile");
+            assert_eq!(
+                call_i64_value(&compiled_first.caller, compiled_first.function, &[]),
+                AbiValue::I64(1)
+            );
+
+            let compiled_second =
+                compile_kernel_jit_cached_in_dir(cache_root, &second, second_kernel)
+                    .expect("changed helper-backed kernel should miss the stale cache entry");
+            assert_eq!(
+                call_i64_value(&compiled_second.caller, compiled_second.function, &[]),
+                AbiValue::I64(2)
             );
         });
     }
@@ -981,7 +1089,7 @@ mod tests {
             let compiled = compile_kernel_jit_cached_in_dir(cache_root, &backend, total)
                 .expect("JIT kernel should compile and store a replayable cache artifact");
             let fingerprint = compute_kernel_fingerprint(&backend, total);
-            let artifact = load_cached_jit_kernel_artifact_from(cache_root, fingerprint)
+            let artifact = load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
                 .expect("compiled JIT kernel should write a disk artifact");
             let replayed = instantiate_cached_jit_kernel(&backend, total, &artifact)
                 .expect("serialized JIT artifact should replay into a live kernel");
@@ -1027,7 +1135,8 @@ fun makeBlob:Bytes = seed:Int=>
                 "helper-backed JIT kernel should compile and persist a replayable cache artifact",
             );
             let fingerprint = compute_kernel_fingerprint(&backend, make_blob);
-            let artifact = load_cached_jit_kernel_artifact_from(cache_root, fingerprint)
+            let artifact =
+                load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
                 .expect("compiled helper-backed JIT kernel should write a disk artifact");
             let replayed = instantiate_cached_jit_kernel(&backend, make_blob, &artifact)
                 .expect("serialized helper-backed JIT artifact should replay into a live kernel");
@@ -1086,7 +1195,8 @@ value headers:Map Text Text =
                         "collection kernel should compile and persist a replayable cache artifact",
                     );
                 let fingerprint = compute_kernel_fingerprint(&backend, kernel);
-                let artifact = load_cached_jit_kernel_artifact_from(cache_root, fingerprint)
+                let artifact =
+                    load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
                     .expect("compiled collection kernel should write a disk artifact");
                 let replayed = instantiate_cached_jit_kernel(&backend, kernel, &artifact)
                     .expect("serialized collection artifact should replay into a live kernel");
@@ -1169,7 +1279,7 @@ value matrixWidth:Int =
             let compiled = compile_kernel_jit_cached_in_dir(cache_root, &backend, kernel)
                 .expect("Matrix kernel should compile and persist a replayable cache artifact");
             let fingerprint = compute_kernel_fingerprint(&backend, kernel);
-            let artifact = load_cached_jit_kernel_artifact_from(cache_root, fingerprint)
+            let artifact = load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
                 .expect("compiled Matrix kernel should write a disk artifact");
             let replayed = instantiate_cached_jit_kernel(&backend, kernel, &artifact)
                 .expect("serialized Matrix artifact should replay into a live kernel");
@@ -1213,7 +1323,8 @@ value bigintTotal:BigInt = 123456789012345678901234567890n + 10n
                 let compiled = compile_kernel_jit_cached_in_dir(cache_root, &backend, kernel)
                     .expect("numeric helper kernel should compile and persist a replayable cache artifact");
                 let fingerprint = compute_kernel_fingerprint(&backend, kernel);
-                let artifact = load_cached_jit_kernel_artifact_from(cache_root, fingerprint)
+                let artifact =
+                    load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
                     .expect("compiled numeric helper kernel should write a disk artifact");
                 let replayed = instantiate_cached_jit_kernel(&backend, kernel, &artifact)
                     .expect("serialized numeric helper artifact should replay into a live kernel");
@@ -1295,7 +1406,8 @@ fun passMaybeBool:(Option Bool) = value:(Option Bool)=>    value
                 let compiled = compile_kernel_jit_cached_in_dir(cache_root, &backend, kernel)
                     .expect("inline scalar option kernel should compile and persist a replayable cache artifact");
                 let fingerprint = compute_kernel_fingerprint(&backend, kernel);
-                let artifact = load_cached_jit_kernel_artifact_from(cache_root, fingerprint)
+                let artifact =
+                    load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
                     .expect("compiled inline scalar option kernel should write a disk artifact");
                 let replayed = instantiate_cached_jit_kernel(&backend, kernel, &artifact).expect(
                     "serialized inline scalar option artifact should replay into a live kernel",
@@ -1328,7 +1440,10 @@ fun passMaybeBool:(Option Bool) = value:(Option Bool)=>    value
 
         with_temp_cache_dir(|cache_root| {
             let fingerprint = compute_kernel_fingerprint(&backend, total);
-            let path = jit_kernel_cache_path_in(cache_root, compute_kernel_cache_key(fingerprint));
+            let path = jit_kernel_cache_path_in(
+                cache_root,
+                compute_program_scoped_kernel_cache_key(&backend, fingerprint),
+            );
             fs::create_dir_all(
                 path.parent()
                     .expect("JIT cache file should have a parent directory"),
@@ -1339,7 +1454,7 @@ fun passMaybeBool:(Option Bool) = value:(Option Bool)=>    value
 
             let compiled = compile_kernel_jit_cached_in_dir(cache_root, &backend, total)
                 .expect("corrupt JIT kernel cache should recompile");
-            let artifact = load_cached_jit_kernel_artifact_from(cache_root, fingerprint)
+            let artifact = load_cached_jit_kernel_artifact_from(cache_root, &backend, fingerprint)
                 .expect("recompiled JIT cache entry should deserialize cleanly");
             let replayed = instantiate_cached_jit_kernel(&backend, total, &artifact)
                 .expect("recompiled JIT artifact should replay cleanly");

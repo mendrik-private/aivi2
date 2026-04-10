@@ -7,7 +7,7 @@ use std::{
 
 use aivi_backend::{
     CommittedValueStore, InlineCommittedValueStore, ItemId as BackendItemId,
-    Program as BackendProgram, lower_module as lower_backend_module, validate_program,
+    Program as BackendProgram, lower_module_with_hir as lower_backend_module, validate_program,
 };
 use aivi_base::SourceSpan;
 use aivi_core::{RuntimeFragmentSpec, lower_runtime_fragment};
@@ -489,23 +489,64 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                             },
                             None => None,
                         };
+                        let Some(payload_type) = payload_type.as_ref() else {
+                            errors.push(HirRuntimeAdapterError::ReactiveUpdateUnknownPayloadType {
+                                owner: binding.item,
+                                clause_span: update.span,
+                            });
+                            continue;
+                        };
+                        let bool_type = hir::GateType::Primitive(hir::BuiltinType::Bool);
+                        let body_type = match update.body_mode {
+                            hir::ReactiveUpdateBodyMode::Payload => payload_type.clone(),
+                            hir::ReactiveUpdateBodyMode::OptionalPayload => {
+                                hir::GateType::Option(Box::new(payload_type.clone()))
+                            }
+                        };
                         stats.reactive_guard_fragments += 1;
                         let guard_started = Instant::now();
-                        let guard_fragment = match compile_runtime_expr_fragment(
-                            self.module,
-                            binding.item,
-                            update.span,
-                            update.guard,
-                            &hir::GateType::Primitive(hir::BuiltinType::Bool),
-                            format!(
-                                "__reactive_guard_{}_{}",
-                                binding.item.as_raw(),
-                                clause_index
+                        let guard_name =
+                            format!("__reactive_guard_{}_{}", binding.item.as_raw(), clause_index)
+                                .into_boxed_str();
+                        let guard_fragment = match if update.body_mode
+                            == hir::ReactiveUpdateBodyMode::OptionalPayload
+                        {
+                            let signal_bool_type =
+                                hir::GateType::Signal(Box::new(bool_type.clone()));
+                            compile_runtime_expr_fragment(
+                                self.module,
+                                binding.item,
+                                update.span,
+                                update.guard,
+                                &signal_bool_type,
+                                guard_name.clone(),
+                                &public_signals,
+                                ReactiveFragmentRole::Guard,
                             )
-                            .into_boxed_str(),
-                            &public_signals,
-                            ReactiveFragmentRole::Guard,
-                        ) {
+                            .or_else(|_| {
+                                compile_runtime_expr_fragment(
+                                    self.module,
+                                    binding.item,
+                                    update.span,
+                                    update.guard,
+                                    &bool_type,
+                                    guard_name,
+                                    &public_signals,
+                                    ReactiveFragmentRole::Guard,
+                                )
+                            })
+                        } else {
+                            compile_runtime_expr_fragment(
+                                self.module,
+                                binding.item,
+                                update.span,
+                                update.guard,
+                                &bool_type,
+                                guard_name,
+                                &public_signals,
+                                ReactiveFragmentRole::Guard,
+                            )
+                        } {
                             Ok(fragment) => {
                                 stats.reactive_fragment_compile_duration += guard_started.elapsed();
                                 fragment
@@ -516,32 +557,50 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                                 continue;
                             }
                         };
-                        let Some(payload_type) = payload_type.as_ref() else {
-                            errors.push(HirRuntimeAdapterError::ReactiveUpdateUnknownPayloadType {
-                                owner: binding.item,
-                                clause_span: update.span,
-                            });
-                            continue;
-                        };
-                        let body_type = match update.body_mode {
-                            hir::ReactiveUpdateBodyMode::Payload => payload_type.clone(),
-                            hir::ReactiveUpdateBodyMode::OptionalPayload => {
-                                hir::GateType::Option(Box::new(payload_type.clone()))
-                            }
-                        };
                         stats.reactive_body_fragments += 1;
                         let body_started = Instant::now();
-                        let body_fragment = match compile_runtime_expr_fragment(
-                            self.module,
-                            binding.item,
-                            update.span,
-                            update.body,
-                            &body_type,
+                        let body_name =
                             format!("__reactive_body_{}_{}", binding.item.as_raw(), clause_index)
-                                .into_boxed_str(),
-                            &public_signals,
-                            ReactiveFragmentRole::Body,
-                        ) {
+                                .into_boxed_str();
+                        let body_fragment = match if update.body_mode
+                            == hir::ReactiveUpdateBodyMode::OptionalPayload
+                        {
+                            let signal_body_type =
+                                hir::GateType::Signal(Box::new(body_type.clone()));
+                            compile_runtime_expr_fragment(
+                                self.module,
+                                binding.item,
+                                update.span,
+                                update.body,
+                                &signal_body_type,
+                                body_name.clone(),
+                                &public_signals,
+                                ReactiveFragmentRole::Body,
+                            )
+                            .or_else(|_| {
+                                compile_runtime_expr_fragment(
+                                    self.module,
+                                    binding.item,
+                                    update.span,
+                                    update.body,
+                                    &body_type,
+                                    body_name,
+                                    &public_signals,
+                                    ReactiveFragmentRole::Body,
+                                )
+                            })
+                        } else {
+                            compile_runtime_expr_fragment(
+                                self.module,
+                                binding.item,
+                                update.span,
+                                update.body,
+                                &body_type,
+                                body_name,
+                                &public_signals,
+                                ReactiveFragmentRole::Body,
+                            )
+                        } {
                             Ok(fragment) => {
                                 stats.reactive_fragment_compile_duration += body_started.elapsed();
                                 fragment
@@ -2161,7 +2220,7 @@ fn compile_runtime_expr_fragment(
             message: error.to_string().into_boxed_str(),
         }
     })?;
-    let backend = lower_backend_module(&lambda).map_err(|error| {
+    let backend = lower_backend_module(&lambda, module).map_err(|error| {
         HirRuntimeAdapterError::ReactiveUpdateFragmentLowering {
             owner,
             clause_span,

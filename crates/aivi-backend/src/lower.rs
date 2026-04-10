@@ -6,8 +6,9 @@ use std::{
 use aivi_base::SourceSpan;
 use aivi_core::{self as core, Arena, ArenaOverflow};
 use aivi_hir::{
-    BinaryOperator as HirBinaryOperator, BuiltinTerm as HirBuiltinTerm, PipeTransformMode,
-    UnaryOperator as HirUnaryOperator,
+    BinaryOperator as HirBinaryOperator, BuiltinTerm as HirBuiltinTerm, GateType as HirGateType,
+    PipeTransformMode, UnaryOperator as HirUnaryOperator,
+    opaque_type_variants as hir_opaque_type_variants,
 };
 use aivi_lambda::{self as lambda};
 use aivi_typing::{
@@ -209,8 +210,26 @@ pub fn lower_module(lambda_module: &lambda::Module) -> Result<Program, LoweringE
     ProgramLowerer::new(lambda_module).build()
 }
 
+pub fn lower_module_with_hir(
+    lambda_module: &lambda::Module,
+    hir_module: &aivi_hir::Module,
+) -> Result<Program, LoweringErrors> {
+    if let Err(errors) = lambda::validate_module(lambda_module) {
+        return Err(LoweringErrors::new(
+            errors
+                .into_errors()
+                .into_iter()
+                .map(LoweringError::InvalidLambdaModule)
+                .collect(),
+        ));
+    }
+
+    ProgramLowerer::new_with_hir(lambda_module, Some(hir_module)).build()
+}
+
 struct ProgramLowerer<'a> {
     lambda: &'a lambda::Module,
+    hir: Option<&'a aivi_hir::Module>,
     program: Program,
     item_map: HashMap<core::ItemId, ItemId>,
     layout_interner: HashMap<Layout, LayoutId>,
@@ -236,8 +255,13 @@ impl<'a> ProgramLowerer<'a> {
     }
 
     fn new(lambda: &'a lambda::Module) -> Self {
+        Self::new_with_hir(lambda, None)
+    }
+
+    fn new_with_hir(lambda: &'a lambda::Module, hir: Option<&'a aivi_hir::Module>) -> Self {
         Self {
             lambda,
+            hir,
             program: Program::new(),
             item_map: HashMap::new(),
             layout_interner: HashMap::new(),
@@ -997,6 +1021,20 @@ impl<'a> ProgramLowerer<'a> {
                 layout_info.variants.entry(name).or_insert(fields);
             }
         }
+        if let Some(hir) = self.hir {
+            for (ty, collected) in self.collect_declared_opaque_variants(hir) {
+                let Some(layout_id) = self.core_layouts.get(&ty).copied() else {
+                    continue;
+                };
+                let layout_info = variants_by_layout.entry(layout_id).or_default();
+                if layout_info.item.is_none() {
+                    layout_info.item = collected.item;
+                }
+                for (name, fields) in collected.variants {
+                    layout_info.variants.entry(name).or_insert(fields);
+                }
+            }
+        }
         for (layout_id, collected) in variants_by_layout {
             let mut lowered_variants = collected
                 .variants
@@ -1038,12 +1076,44 @@ impl<'a> ProgramLowerer<'a> {
         Ok(())
     }
 
+    fn collect_declared_opaque_variants(
+        &self,
+        hir_module: &aivi_hir::Module,
+    ) -> HashMap<core::Type, CollectedOpaqueLayout> {
+        let mut collected = HashMap::new();
+        for ty in self.core_layouts.keys() {
+            let item = match ty {
+                core::Type::OpaqueItem { item, .. } => Some(*item),
+                core::Type::OpaqueImport { .. } => None,
+                _ => continue,
+            };
+            let subject = hir_gate_type_for_core_type(ty);
+            let Some(variants) = hir_opaque_type_variants(hir_module, &subject) else {
+                continue;
+            };
+            for variant in variants {
+                record_opaque_variant(
+                    &mut collected,
+                    ty,
+                    item,
+                    variant.name,
+                    variant
+                        .fields
+                        .into_iter()
+                        .map(|field| core::Type::lower(&field))
+                        .collect(),
+                );
+            }
+        }
+        collected
+    }
+
     fn collect_opaque_variants(&self) -> HashMap<core::Type, CollectedOpaqueLayout> {
         let mut collected = HashMap::new();
         for (_, expr) in self.lambda.core().exprs().iter() {
             match &expr.kind {
                 core::ExprKind::Apply { callee, arguments }
-                    if is_opaque_type(&expr.ty)
+                    if opaque_variant_type(&expr.ty).is_some()
                         && matches!(
                             &self.lambda.core().exprs()[*callee].kind,
                             core::ExprKind::Reference(core::Reference::SumConstructor(_))
@@ -1055,28 +1125,32 @@ impl<'a> ProgramLowerer<'a> {
                         unreachable!();
                     };
                     if handle.field_count == arguments.len() {
-                        record_opaque_variant(
-                            &mut collected,
-                            &expr.ty,
-                            Some(handle.item),
-                            handle.variant_name.clone(),
-                            arguments
-                                .iter()
-                                .map(|argument| self.lambda.core().exprs()[*argument].ty.clone())
-                                .collect(),
-                        );
+                        if let Some(opaque_ty) = opaque_variant_type(&expr.ty) {
+                            record_opaque_variant(
+                                &mut collected,
+                                opaque_ty,
+                                Some(handle.item),
+                                handle.variant_name.clone(),
+                                arguments
+                                    .iter()
+                                    .map(|argument| self.lambda.core().exprs()[*argument].ty.clone())
+                                    .collect(),
+                            );
+                        }
                     }
                 }
                 core::ExprKind::Reference(core::Reference::SumConstructor(handle))
-                    if is_opaque_type(&expr.ty) && handle.field_count == 0 =>
+                    if opaque_variant_type(&expr.ty).is_some() && handle.field_count == 0 =>
                 {
-                    record_opaque_variant(
-                        &mut collected,
-                        &expr.ty,
-                        Some(handle.item),
-                        handle.variant_name.clone(),
-                        Vec::new(),
-                    );
+                    if let Some(opaque_ty) = opaque_variant_type(&expr.ty) {
+                        record_opaque_variant(
+                            &mut collected,
+                            opaque_ty,
+                            Some(handle.item),
+                            handle.variant_name.clone(),
+                            Vec::new(),
+                        );
+                    }
                 }
                 core::ExprKind::Pipe(pipe) => {
                     for stage in &pipe.stages {
@@ -1145,10 +1219,10 @@ impl<'a> ProgramLowerer<'a> {
             core::PatternKind::Constructor { callee, arguments } => {
                 let field_types = constructor_pattern_field_types(subject_ty, callee);
                 if let core::Reference::SumConstructor(handle) = &callee.reference {
-                    if is_opaque_type(subject_ty) {
+                    if let Some(opaque_ty) = opaque_variant_type(subject_ty) {
                         record_opaque_variant(
                             collected,
-                            subject_ty,
+                            opaque_ty,
                             Some(handle.item),
                             handle.variant_name.clone(),
                             field_types.clone(),
@@ -3440,6 +3514,96 @@ fn is_opaque_type(ty: &core::Type) -> bool {
         ty,
         core::Type::OpaqueItem { .. } | core::Type::OpaqueImport { .. }
     )
+}
+
+fn opaque_variant_type(ty: &core::Type) -> Option<&core::Type> {
+    match ty {
+        core::Type::Signal(payload) if is_opaque_type(payload.as_ref()) => Some(payload.as_ref()),
+        _ if is_opaque_type(ty) => Some(ty),
+        _ => None,
+    }
+}
+
+fn hir_gate_type_for_core_type(ty: &core::Type) -> HirGateType {
+    match ty {
+        core::Type::Primitive(builtin) => HirGateType::Primitive(*builtin),
+        core::Type::TypeParameter { parameter, name } => HirGateType::TypeParameter {
+            parameter: *parameter,
+            name: name.to_string(),
+        },
+        core::Type::Tuple(elements) => {
+            HirGateType::Tuple(elements.iter().map(hir_gate_type_for_core_type).collect())
+        }
+        core::Type::Record(fields) => HirGateType::Record(
+            fields
+                .iter()
+                .map(|field| aivi_hir::GateRecordField {
+                    name: field.name.to_string(),
+                    ty: hir_gate_type_for_core_type(&field.ty),
+                })
+                .collect(),
+        ),
+        core::Type::Arrow { parameter, result } => HirGateType::Arrow {
+            parameter: Box::new(hir_gate_type_for_core_type(parameter)),
+            result: Box::new(hir_gate_type_for_core_type(result)),
+        },
+        core::Type::List(element) => {
+            HirGateType::List(Box::new(hir_gate_type_for_core_type(element)))
+        }
+        core::Type::Map { key, value } => HirGateType::Map {
+            key: Box::new(hir_gate_type_for_core_type(key)),
+            value: Box::new(hir_gate_type_for_core_type(value)),
+        },
+        core::Type::Set(element) => {
+            HirGateType::Set(Box::new(hir_gate_type_for_core_type(element)))
+        }
+        core::Type::Option(element) => {
+            HirGateType::Option(Box::new(hir_gate_type_for_core_type(element)))
+        }
+        core::Type::Result { error, value } => HirGateType::Result {
+            error: Box::new(hir_gate_type_for_core_type(error)),
+            value: Box::new(hir_gate_type_for_core_type(value)),
+        },
+        core::Type::Validation { error, value } => HirGateType::Validation {
+            error: Box::new(hir_gate_type_for_core_type(error)),
+            value: Box::new(hir_gate_type_for_core_type(value)),
+        },
+        core::Type::Signal(inner) => {
+            HirGateType::Signal(Box::new(hir_gate_type_for_core_type(inner)))
+        }
+        core::Type::Task { error, value } => HirGateType::Task {
+            error: Box::new(hir_gate_type_for_core_type(error)),
+            value: Box::new(hir_gate_type_for_core_type(value)),
+        },
+        core::Type::Domain {
+            item,
+            name,
+            arguments,
+        } => HirGateType::Domain {
+            item: *item,
+            name: name.to_string(),
+            arguments: arguments.iter().map(hir_gate_type_for_core_type).collect(),
+        },
+        core::Type::OpaqueItem {
+            item,
+            name,
+            arguments,
+        } => HirGateType::OpaqueItem {
+            item: *item,
+            name: name.to_string(),
+            arguments: arguments.iter().map(hir_gate_type_for_core_type).collect(),
+        },
+        core::Type::OpaqueImport {
+            import,
+            name,
+            arguments,
+        } => HirGateType::OpaqueImport {
+            import: *import,
+            name: name.to_string(),
+            arguments: arguments.iter().map(hir_gate_type_for_core_type).collect(),
+            definition: None,
+        },
+    }
 }
 
 #[derive(Default)]

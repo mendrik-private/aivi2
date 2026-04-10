@@ -179,7 +179,7 @@ fn execute_task_plan(
     if completion.is_cancelled() {
         return Ok(LinkedTaskWorkerOutcome::Cancelled);
     }
-    let mut engine = BackendExecutableProgram::interpreted(backend.as_ref()).create_engine();
+    let mut engine = KernelEvaluator::new(backend.as_ref());
     let runtime_globals = materialize_detached_globals(&globals);
     let value = engine
         .evaluate_item(backend_item, &runtime_globals)
@@ -192,7 +192,7 @@ fn execute_task_plan(
     // Use the applier-aware executor so that deferred Task composition plans
     // (Map, Apply, Chain, Join) can call back into the execution engine.
     let mut applier = EvaluatorApplier {
-        evaluator: &mut *engine,
+        evaluator: &mut engine,
         globals: &runtime_globals,
     };
     let stdout = std::io::stdout();

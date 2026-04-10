@@ -187,13 +187,7 @@ impl BackendExecutionEngine for LazyJitExecutionEngine<'_> {
                 .expect("prepared plan should remain cached");
             match plan {
                 CachedKernelPlan::Compiled(compiled) => {
-                    validate_compiled_inputs(
-                        kernel_id,
-                        &kernel,
-                        compiled,
-                        input_subject,
-                        environment,
-                    )?;
+                    validate_compiled_inputs(compiled, input_subject, environment)?;
                     execute_compiled_kernel(
                         kernel_id,
                         compiled,
@@ -284,7 +278,7 @@ impl BackendExecutionEngine for LazyJitExecutionEngine<'_> {
                 .expect("prepared plan should remain cached");
             match plan {
                 CachedKernelPlan::Compiled(compiled) => {
-                    validate_compiled_inputs(kernel_id, &kernel, compiled, None, environment)?;
+                    validate_compiled_inputs(compiled, None, environment)?;
                     execute_compiled_kernel(kernel_id, compiled, None, environment, globals)
                 }
                 CachedKernelPlan::Fallback => Err(CompiledKernelFailure::Fallback),
@@ -585,9 +579,7 @@ signal derived = base
 }
 
 fn validate_compiled_inputs(
-    kernel_id: KernelId,
-    kernel: &crate::Kernel,
-    plan: &CompiledKernelPlan,
+    plan: &NativeKernelPlan,
     input_subject: Option<&RuntimeValue>,
     environment: &[RuntimeValue],
 ) -> Result<(), EvaluationError> {
@@ -595,24 +587,28 @@ fn validate_compiled_inputs(
         (Some(expected), Some(value)) if expected.matches(value) => {}
         (Some(_), Some(value)) => {
             return Err(EvaluationError::KernelInputLayoutMismatch {
-                kernel: kernel_id,
-                expected: kernel
-                    .input_subject
+                kernel: plan.kernel_id,
+                expected: plan
+                    .input_layout
                     .expect("compiled subject plan implies subject"),
                 found: value.clone(),
             });
         }
         (Some(_), None) => {
-            return Err(EvaluationError::MissingInputSubject { kernel: kernel_id });
+            return Err(EvaluationError::MissingInputSubject {
+                kernel: plan.kernel_id,
+            });
         }
         (None, Some(_)) => {
-            return Err(EvaluationError::UnexpectedInputSubject { kernel: kernel_id });
+            return Err(EvaluationError::UnexpectedInputSubject {
+                kernel: plan.kernel_id,
+            });
         }
         (None, None) => {}
     }
     if environment.len() != plan.environment_plans.len() {
         return Err(EvaluationError::KernelEnvironmentCountMismatch {
-            kernel: kernel_id,
+            kernel: plan.kernel_id,
             expected: plan.environment_plans.len(),
             found: environment.len(),
         });
@@ -625,9 +621,9 @@ fn validate_compiled_inputs(
     {
         if !expected.matches(value) {
             return Err(EvaluationError::KernelEnvironmentLayoutMismatch {
-                kernel: kernel_id,
+                kernel: plan.kernel_id,
                 slot: crate::EnvSlotId::from_raw(index as u32),
-                expected: kernel.environment[index],
+                expected: plan.environment_layouts[index],
                 found: value.clone(),
             });
         }
@@ -637,7 +633,7 @@ fn validate_compiled_inputs(
 
 fn execute_compiled_kernel(
     kernel_id: KernelId,
-    plan: &mut CompiledKernelPlan,
+    plan: &mut NativeKernelPlan,
     input_subject: Option<&RuntimeValue>,
     environment: &[RuntimeValue],
     globals: &BTreeMap<ItemId, RuntimeValue>,
@@ -715,20 +711,30 @@ fn execute_compiled_kernel(
 }
 
 enum CachedKernelPlan {
-    Compiled(CompiledKernelPlan),
+    Compiled(NativeKernelPlan),
     Fallback,
 }
 
 impl CachedKernelPlan {
     fn build(program: &Program, kernel_id: KernelId) -> Self {
-        let Some(compiled) = CompiledKernelPlan::compile(program, kernel_id) else {
+        let Some(compiled) = NativeKernelPlan::compile(program, kernel_id) else {
             return Self::Fallback;
         };
         Self::Compiled(compiled)
     }
 }
 
-struct CompiledKernelPlan {
+#[derive(Clone, Debug)]
+pub enum NativeKernelExecutionError {
+    FallbackRequired,
+    Evaluation(EvaluationError),
+}
+
+pub struct NativeKernelPlan {
+    kernel_id: KernelId,
+    input_layout: Option<LayoutId>,
+    environment_layouts: Vec<LayoutId>,
+    result_layout: LayoutId,
     artifact: CompiledJitKernel,
     input_plan: Option<MarshalPlan>,
     environment_plans: Vec<MarshalPlan>,
@@ -737,8 +743,8 @@ struct CompiledKernelPlan {
     imported_item_slot_plans: Vec<MarshalPlan>,
 }
 
-impl CompiledKernelPlan {
-    fn compile(program: &Program, kernel_id: KernelId) -> Option<Self> {
+impl NativeKernelPlan {
+    pub fn compile(program: &Program, kernel_id: KernelId) -> Option<Self> {
         let kernel = &program.kernels()[kernel_id];
         let input_plan = match kernel.input_subject {
             Some(layout) => Some(MarshalPlan::for_layout(program, layout)?),
@@ -762,6 +768,10 @@ impl CompiledKernelPlan {
             .map(|slot| MarshalPlan::for_layout(program, slot.layout))
             .collect::<Option<Vec<_>>>()?;
         Some(Self {
+            kernel_id,
+            input_layout: kernel.input_subject,
+            environment_layouts: kernel.environment.clone(),
+            result_layout: kernel.result_layout,
             artifact,
             input_plan,
             environment_plans,
@@ -769,6 +779,37 @@ impl CompiledKernelPlan {
             signal_slot_plans,
             imported_item_slot_plans,
         })
+    }
+
+    pub fn kernel_id(&self) -> KernelId {
+        self.kernel_id
+    }
+
+    pub fn result_layout(&self) -> LayoutId {
+        self.result_layout
+    }
+
+    pub fn dependency_layouts(&self) -> &[LayoutId] {
+        &self.environment_layouts
+    }
+
+    pub fn execute(
+        &mut self,
+        input_subject: Option<&RuntimeValue>,
+        environment: &[RuntimeValue],
+        globals: &BTreeMap<ItemId, RuntimeValue>,
+    ) -> Result<RuntimeValue, NativeKernelExecutionError> {
+        validate_compiled_inputs(self, input_subject, environment)
+            .map_err(NativeKernelExecutionError::Evaluation)?;
+        match execute_compiled_kernel(self.kernel_id, self, input_subject, environment, globals) {
+            Ok(value) => Ok(value),
+            Err(CompiledKernelFailure::Fallback) => {
+                Err(NativeKernelExecutionError::FallbackRequired)
+            }
+            Err(CompiledKernelFailure::Evaluation(error)) => {
+                Err(NativeKernelExecutionError::Evaluation(error))
+            }
+        }
     }
 }
 

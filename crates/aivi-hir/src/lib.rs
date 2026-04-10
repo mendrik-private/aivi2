@@ -149,6 +149,7 @@ pub use typecheck::{
     TypeConstraint, apply_defaults, elaborate_default_record_fields, signal_payload_type,
     typecheck_module,
 };
+pub use typecheck_context::{OpaqueTypeVariant, opaque_type_variants};
 pub use typed_declarations::{
     TypedDeclarationInfo, TypedDeclarationKind, collect_typed_declarations,
 };

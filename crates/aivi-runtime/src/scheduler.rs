@@ -908,7 +908,7 @@ where
             if !should_commit {
                 continue;
             }
-            next = pending_value_from_update(evaluator.try_evaluate_reactive_body(
+            let update = pending_value_from_update(evaluator.try_evaluate_reactive_body(
                 signal,
                 clause,
                 DependencyValues {
@@ -917,6 +917,9 @@ where
                     committed,
                 },
             )?);
+            if !update.is_unchanged() {
+                next = update;
+            }
         }
 
         Ok(next)

@@ -25,7 +25,8 @@ fn lower_text(path: &str, text: &str) -> aivi_backend::Program {
     validate_core_module(&core).expect("typed core should validate before backend lowering");
     let lambda = lower_lambda_module(&core).expect("typed lambda lowering should succeed");
     validate_lambda_module(&lambda).expect("typed lambda should validate before backend lowering");
-    let backend = lower_backend_module(&lambda).expect("backend lowering should succeed");
+    let backend = aivi_backend::lower_module_with_hir(&lambda, hir.module())
+        .expect("backend lowering should succeed");
     validate_program(&backend).expect("backend program should validate");
     backend
 }
@@ -50,7 +51,8 @@ fn lower_workspace_text(path: &str, text: &str) -> aivi_backend::Program {
     validate_core_module(&core).expect("workspace typed core should validate");
     let lambda = lower_lambda_module(&core).expect("workspace lambda lowering should succeed");
     validate_lambda_module(&lambda).expect("workspace lambda module should validate");
-    let backend = lower_backend_module(&lambda).expect("workspace backend lowering should succeed");
+    let backend = aivi_backend::lower_module_with_hir(&lambda, lowered.module())
+        .expect("workspace backend lowering should succeed");
     validate_program(&backend).expect("workspace backend program should validate");
     backend
 }
@@ -300,4 +302,3 @@ fn manual_core_source_argument_signal(
     info.source = Some(source_id);
     module
 }
-

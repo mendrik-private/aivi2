@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 
 use aivi_backend::{
     BackendExecutableProgram, BackendExecutionEngine, BackendExecutionEngineKind,
-    BackendKernelArtifactCache, KernelEvaluator, RuntimeBigInt, RuntimeDecimal, RuntimeFloat,
-    RuntimeMap, RuntimeMapEntry, RuntimeRecordField, RuntimeValue, compile_program,
-    lower_module as lower_backend_module, validate_program,
+    BackendKernelArtifactCache, ItemKind, KernelEvaluator, NativeKernelPlan, RuntimeBigInt,
+    RuntimeDecimal, RuntimeFloat, RuntimeMap, RuntimeMapEntry, RuntimeRecordField, RuntimeValue,
+    compile_program, lower_module as lower_backend_module, validate_program,
 };
 use aivi_base::SourceDatabase;
 use aivi_core::{lower_module as lower_core_module, validate_module as validate_core_module};
@@ -128,6 +128,39 @@ fn compiled_executable_program_keeps_object_artifacts_and_jit_execution() {
             "compiled executable program should still evaluate through the lazy JIT engine"
         ),
         RuntimeValue::Int(42)
+    );
+}
+
+#[test]
+fn native_kernel_plan_executes_supported_signal_body_kernels() {
+    let backend = lower_text(
+        "backend-native-plan-signal-body.aivi",
+        r#"
+fun increment:Int = value:Int=>    value + 1
+
+signal base = 7
+signal next = increment base
+"#,
+    );
+    let next = find_item(&backend, "next");
+    let body_kernel = match &backend.items()[next].kind {
+        ItemKind::Signal(signal) => signal
+            .body_kernel
+            .expect("derived signals should lower a dedicated body kernel"),
+        other => panic!("expected signal item, found {other:?}"),
+    };
+    let mut plan =
+        NativeKernelPlan::compile(&backend, body_kernel).expect("supported signal body should compile natively");
+
+    assert_eq!(plan.kernel_id(), body_kernel);
+    assert_eq!(
+        plan.dependency_layouts(),
+        backend.kernels()[body_kernel].environment.as_slice()
+    );
+    assert_eq!(
+        plan.execute(None, &[RuntimeValue::Int(7)], &BTreeMap::new())
+            .expect("native plan should execute the signal body"),
+        RuntimeValue::Int(8)
     );
 }
 
@@ -809,6 +842,49 @@ fun bigintGt:Bool = left:BigInt right:BigInt =>    left > right
             )
         );
     }
+}
+
+#[test]
+fn jit_engine_falls_back_to_interpreter_for_inline_text_constructor_patterns() {
+    let backend = lower_text(
+        "backend-engine-inline-text-patterns.aivi",
+        r#"
+type Key =
+  | Key Text
+
+type Direction =
+  | Up
+  | Down
+
+fun arrowKey:(Option Direction) = key:Key=>    key
+     ||> Key "ArrowUp"   -> Some Up
+     ||> Key "ArrowDown" -> Some Down
+     ||> _               -> None
+
+value isDown:Bool = arrowKey (Key "ArrowDown")
+     ||> Some Down -> True
+     ||> _         -> False
+"#,
+    );
+    let executable = BackendExecutableProgram::interpreted(&backend);
+    let mut jit = executable.create_engine();
+    let mut interpreter = KernelEvaluator::new(&backend);
+    let globals = BTreeMap::new();
+    let item = find_item(&backend, "isDown");
+
+    assert_eq!(
+        jit.evaluate_item(item, &globals)
+            .expect("lazy JIT should evaluate text-pattern items via fallback"),
+        interpreter
+            .evaluate_item(item, &globals)
+            .expect("interpreter should evaluate text-pattern items")
+    );
+    assert_eq!(
+        interpreter
+            .evaluate_item(item, &globals)
+            .expect("interpreter should evaluate the same item"),
+        RuntimeValue::Bool(true)
+    );
 }
 
 #[test]

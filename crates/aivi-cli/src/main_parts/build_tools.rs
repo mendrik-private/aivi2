@@ -70,7 +70,7 @@ fn compile_file(path: &Path, output: Option<&Path>) -> Result<ExitCode, String> 
         return Ok(ExitCode::FAILURE);
     }
 
-    let backend = match lower_backend_module(&lambda) {
+    let backend = match lower_backend_module(&lambda, hir_module) {
         Ok(backend) => backend,
         Err(errors) => {
             print_stage_errors(CompileStage::BackendLowering, errors.errors());
@@ -993,4 +993,3 @@ DESCRIPTION:
     };
     Some(text.to_owned())
 }
-

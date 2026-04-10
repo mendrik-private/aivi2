@@ -575,7 +575,7 @@ fn compile_local_runtime_fragment_backend_unit(
         .map_err(|error| format!("{error_context} into typed lambda: {error}"))?;
     validate_lambda_module(&lambda)
         .map_err(|error| format!("{error_context} during typed-lambda validation: {error}"))?;
-    let backend = lower_backend_module(&lambda)
+    let backend = lower_backend_module(&lambda, module)
         .map_err(|error| format!("{error_context} into backend IR: {error}"))?;
     validate_program(&backend)
         .map_err(|error| format!("{error_context} during backend validation: {error}"))?;
@@ -1452,4 +1452,3 @@ fn text_literal_static_text(text: &aivi_hir::TextLiteral) -> Option<String> {
     }
     Some(rendered)
 }
-

@@ -7179,13 +7179,25 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                 let n = lit.raw.parse::<i64>().unwrap_or(0);
                 Ok(builder.ins().icmp_imm(IntCC::Equal, current, n))
             }
-            crate::InlinePipePatternKind::Text(_s) => Ok(builder.ins().iconst(types::I8, 1)),
+            crate::InlinePipePatternKind::Text(_s) => Err(CodegenError::UnsupportedLayout {
+                kernel: kernel_id,
+                layout: input_layout,
+                detail: "lazy JIT does not lower inline text literal patterns yet".into(),
+            }),
             crate::InlinePipePatternKind::Constructor {
                 constructor,
                 arguments,
             } => {
                 match constructor {
                     crate::InlinePipeConstructor::Builtin(crate::BuiltinTerm::None) => {
+                        if !arguments.is_empty() {
+                            return Err(CodegenError::UnsupportedLayout {
+                                kernel: kernel_id,
+                                layout: input_layout,
+                                detail:
+                                    "lazy JIT only supports zero-argument None patterns".into(),
+                            });
+                        }
                         match self.option_codegen_contract(input_layout) {
                             Some(OptionCodegenContract::NicheReference) => {
                                 Ok(builder.ins().icmp_imm(IntCC::Equal, current, 0))
@@ -7201,29 +7213,96 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                         match self.option_codegen_contract(input_layout) {
                             Some(OptionCodegenContract::NicheReference) => {
                                 let is_some = builder.ins().icmp_imm(IntCC::NotEqual, current, 0);
-                                if let [sub_pat] = arguments.as_slice() {
-                                    let element_layout =
-                                        match &self.program.layouts()[input_layout].kind {
-                                            LayoutKind::Option { element } => *element,
-                                            _ => input_layout,
-                                        };
-                                    let payload = current;
-                                    let sub_test = self.emit_pattern_test(
-                                        kernel_id,
-                                        payload,
-                                        sub_pat,
-                                        element_layout,
-                                        inline_subjects,
-                                        builder,
-                                    )?;
-                                    Ok(builder.ins().band(is_some, sub_test))
-                                } else {
-                                    Ok(is_some)
+                                match arguments.as_slice() {
+                                    [] => Ok(is_some),
+                                    [sub_pat]
+                                        if matches!(
+                                            sub_pat.kind,
+                                            crate::InlinePipePatternKind::Wildcard
+                                                | crate::InlinePipePatternKind::Binding { .. }
+                                        ) => Ok(is_some),
+                                    [_] => Err(CodegenError::UnsupportedLayout {
+                                        kernel: kernel_id,
+                                        layout: input_layout,
+                                        detail:
+                                            "lazy JIT does not lower payload-sensitive Some patterns for reference-backed options yet"
+                                                .into(),
+                                    }),
+                                    _ => Err(CodegenError::UnsupportedLayout {
+                                        kernel: kernel_id,
+                                        layout: input_layout,
+                                        detail:
+                                            "lazy JIT only supports single-payload Some patterns"
+                                                .into(),
+                                    }),
                                 }
                             }
                             Some(OptionCodegenContract::InlineScalar(_)) => {
                                 let low = builder.ins().ireduce(types::I64, current);
-                                Ok(builder.ins().icmp_imm(IntCC::NotEqual, low, 0))
+                                let is_some = builder.ins().icmp_imm(IntCC::NotEqual, low, 0);
+                                match arguments.as_slice() {
+                                    [] => Ok(is_some),
+                                    [sub_pat] => {
+                                        let shifted = builder.ins().ushr_imm(current, 64);
+                                        let payload_i64 =
+                                            builder.ins().ireduce(types::I64, shifted);
+                                        let payload = match self.option_codegen_contract(input_layout)
+                                        {
+                                            Some(OptionCodegenContract::InlineScalar(
+                                                ScalarOptionKind::Int,
+                                            )) => payload_i64,
+                                            Some(OptionCodegenContract::InlineScalar(
+                                                ScalarOptionKind::Float,
+                                            )) => builder.ins().bitcast(
+                                                cranelift_codegen::ir::types::F64,
+                                                MemFlags::new(),
+                                                payload_i64,
+                                            ),
+                                            Some(OptionCodegenContract::InlineScalar(
+                                                ScalarOptionKind::Bool,
+                                            )) => builder.ins().ireduce(
+                                                cranelift_codegen::ir::types::I8,
+                                                payload_i64,
+                                            ),
+                                            _ => payload_i64,
+                                        };
+                                        let element_layout =
+                                            match &self.program.layouts()[input_layout].kind {
+                                                LayoutKind::Option { element } => *element,
+                                                _ => input_layout,
+                                            };
+                                        let sub_test = self.emit_pattern_test(
+                                            kernel_id,
+                                            payload,
+                                            sub_pat,
+                                            element_layout,
+                                            inline_subjects,
+                                            builder,
+                                        )?;
+                                        let is_some = if builder.func.dfg.value_type(is_some)
+                                            == types::I8
+                                        {
+                                            is_some
+                                        } else {
+                                            builder.ins().ireduce(types::I8, is_some)
+                                        };
+                                        let sub_test = if builder.func.dfg.value_type(sub_test)
+                                            == types::I8
+                                        {
+                                            sub_test
+                                        } else {
+                                            builder.ins().ireduce(types::I8, sub_test)
+                                        };
+                                        Ok(builder.ins().band(is_some, sub_test))
+                                    }
+                                    _ => Err(CodegenError::UnsupportedLayout {
+                                        kernel: kernel_id,
+                                        layout: input_layout,
+                                        detail:
+                                            "lazy JIT only supports single-payload Some patterns"
+                                                .into(),
+                                    }),
+                                }
                             }
                             None => Ok(builder.ins().iconst(types::I8, 1)),
                         }
@@ -7242,7 +7321,29 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                         };
                         let loaded_tag =
                             builder.ins().load(types::I64, MemFlags::new(), current, 0);
-                        Ok(builder.ins().icmp_imm(IntCC::Equal, loaded_tag, tag))
+                        let tag_test = builder.ins().icmp_imm(IntCC::Equal, loaded_tag, tag);
+                        let combined = if builder.func.dfg.value_type(tag_test) == types::I8 {
+                            tag_test
+                        } else {
+                            builder.ins().ireduce(types::I8, tag_test)
+                        };
+                        if arguments.iter().all(|pattern| {
+                            matches!(
+                                pattern.kind,
+                                crate::InlinePipePatternKind::Wildcard
+                                    | crate::InlinePipePatternKind::Binding { .. }
+                            )
+                        }) {
+                            Ok(combined)
+                        } else {
+                            Err(CodegenError::UnsupportedLayout {
+                                kernel: kernel_id,
+                                layout: input_layout,
+                                detail:
+                                    "lazy JIT does not lower payload-sensitive sum constructor patterns yet"
+                                        .into(),
+                            })
+                        }
                     }
                     // Result/Validation constructors used in patterns
                     crate::InlinePipeConstructor::Builtin(
@@ -7272,7 +7373,31 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                         };
                         let loaded_tag =
                             builder.ins().load(types::I64, MemFlags::new(), current, 0);
-                        Ok(builder.ins().icmp_imm(IntCC::Equal, loaded_tag, tag))
+                        let tag_test = builder.ins().icmp_imm(IntCC::Equal, loaded_tag, tag);
+                        let combined = if builder.func.dfg.value_type(tag_test) == types::I8 {
+                            tag_test
+                        } else {
+                            builder.ins().ireduce(types::I8, tag_test)
+                        };
+                        if arguments.is_empty()
+                            || arguments.iter().all(|pattern| {
+                                matches!(
+                                    pattern.kind,
+                                    crate::InlinePipePatternKind::Wildcard
+                                        | crate::InlinePipePatternKind::Binding { .. }
+                                )
+                            })
+                        {
+                            Ok(combined)
+                        } else {
+                            Err(CodegenError::UnsupportedLayout {
+                                kernel: kernel_id,
+                                layout: input_layout,
+                                detail:
+                                    "lazy JIT does not lower payload-sensitive result/validation patterns yet"
+                                        .into(),
+                            })
+                        }
                     }
                     _ => Ok(builder.ins().iconst(types::I8, 1)),
                 }
@@ -8676,4 +8801,3 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
         }
     }
 }
-

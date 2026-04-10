@@ -14,13 +14,6 @@ fn signal_global_value(value: &RuntimeValue) -> RuntimeValue {
     }
 }
 
-fn signal_payload_value(value: &RuntimeValue) -> RuntimeValue {
-    match value {
-        RuntimeValue::Signal(inner) => inner.as_ref().clone(),
-        other => other.clone(),
-    }
-}
-
 fn stage_subject_value(
     backend: &BackendProgram,
     layout: aivi_backend::LayoutId,
@@ -135,12 +128,36 @@ pub struct LinkedTemporalHelper {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LinkedEvalLane {
+    Native(LinkedNativeKernelEval),
+    Fallback,
+}
+
+impl LinkedEvalLane {
+    pub fn as_native(&self) -> Option<&LinkedNativeKernelEval> {
+        match self {
+            Self::Native(eval) => Some(eval),
+            Self::Fallback => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkedNativeKernelEval {
+    pub kernel: KernelId,
+    pub dependency_layouts: Box<[aivi_backend::LayoutId]>,
+    pub result_layout: aivi_backend::LayoutId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LinkedDerivedSignal {
     pub item: hir::ItemId,
     pub signal: DerivedHandle,
     pub backend_item: BackendItemId,
     pub body_kernel: Option<KernelId>,
+    pub eval_lane: LinkedEvalLane,
     pub dependency_items: Box<[BackendItemId]>,
+    pub dependency_layouts: Box<[aivi_backend::LayoutId]>,
     pub source_input: Option<InputHandle>,
     /// Backend pipeline IDs that must be applied to the body result in order.
     pub pipeline_ids: Box<[BackendPipelineId]>,
@@ -230,6 +247,10 @@ pub struct LinkedReactiveSignal {
     pub signal: SignalHandle,
     pub backend_item: BackendItemId,
     pub has_seed_body: bool,
+    pub body_kernel: Option<KernelId>,
+    pub seed_eval_lane: LinkedEvalLane,
+    pub dependency_items: Box<[BackendItemId]>,
+    pub dependency_layouts: Box<[aivi_backend::LayoutId]>,
     pub pipeline_signals: Box<[SignalHandle]>,
     pub pipeline_ids: Box<[BackendPipelineId]>,
 }
@@ -241,6 +262,8 @@ pub struct LinkedReactiveClause {
     pub clause: ReactiveClauseHandle,
     pub pipeline_ids: Box<[BackendPipelineId]>,
     pub body_mode: hir::ReactiveUpdateBodyMode,
+    pub guard_eval_lane: LinkedEvalLane,
+    pub body_eval_lane: LinkedEvalLane,
     pub compiled_guard: HirCompiledRuntimeExpr,
     pub compiled_body: HirCompiledRuntimeExpr,
 }
@@ -462,4 +485,3 @@ impl DetachedRuntimeCompletionPort {
             .map_err(map_detached_publication_port_error)
     }
 }
-

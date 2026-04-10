@@ -278,7 +278,7 @@ impl<'a> LinkBuilder<'a> {
                 continue;
             };
             let item = &self.backend.items()[backend_item];
-            let BackendItemKind::Signal(_) = &item.kind else {
+            let BackendItemKind::Signal(info) = &item.kind else {
                 self.errors
                     .push(BackendRuntimeLinkError::BackendItemNotSignal {
                         item: binding.item,
@@ -306,6 +306,8 @@ impl<'a> LinkBuilder<'a> {
             let pipeline_signals = self
                 .collect_pipeline_signal_handles(binding.item, pipeline_ids.as_ref())
                 .into_boxed_slice();
+            let seed_eval_lane =
+                self.kernel_eval_lane(self.backend, info.body_kernel, info.dependency_layouts.as_slice());
             self.reactive_signals.insert(
                 reactive,
                 LinkedReactiveSignal {
@@ -313,6 +315,10 @@ impl<'a> LinkBuilder<'a> {
                     signal: reactive,
                     backend_item,
                     has_seed_body,
+                    body_kernel: info.body_kernel,
+                    seed_eval_lane,
+                    dependency_items: info.dependencies.clone().into_boxed_slice(),
+                    dependency_layouts: info.dependency_layouts.clone().into_boxed_slice(),
                     pipeline_signals,
                     pipeline_ids: pipeline_ids.clone(),
                 },
@@ -326,6 +332,8 @@ impl<'a> LinkBuilder<'a> {
                         clause: clause.clause,
                         pipeline_ids: pipeline_ids.clone(),
                         body_mode: clause.body_mode,
+                        guard_eval_lane: self.fragment_eval_lane(&clause.compiled_guard),
+                        body_eval_lane: self.fragment_eval_lane(&clause.compiled_body),
                         compiled_guard: clause.compiled_guard.clone(),
                         compiled_body: clause.compiled_body.clone(),
                     },
@@ -534,6 +542,10 @@ impl<'a> LinkBuilder<'a> {
                 continue;
             }
 
+            let dependency_layouts = info.dependency_layouts.clone().into_boxed_slice();
+            let eval_lane =
+                self.kernel_eval_lane(self.backend, body_kernel, dependency_layouts.as_ref());
+
             self.derived_signals.insert(
                 derived,
                 LinkedDerivedSignal {
@@ -541,7 +553,9 @@ impl<'a> LinkBuilder<'a> {
                     signal: derived,
                     backend_item,
                     body_kernel,
+                    eval_lane,
                     dependency_items: info.dependencies.clone().into_boxed_slice(),
+                    dependency_layouts,
                     source_input: binding.source_input,
                     pipeline_ids: item
                         .pipelines
@@ -703,6 +717,37 @@ impl<'a> LinkBuilder<'a> {
             }
         }
         required.into_iter().collect::<Vec<_>>().into_boxed_slice()
+    }
+
+    fn kernel_eval_lane(
+        &self,
+        backend: &BackendProgram,
+        kernel: Option<KernelId>,
+        dependency_layouts: &[aivi_backend::LayoutId],
+    ) -> LinkedEvalLane {
+        let Some(kernel) = kernel else {
+            return LinkedEvalLane::Fallback;
+        };
+        let Some(native_plan) = aivi_backend::NativeKernelPlan::compile(backend, kernel) else {
+            return LinkedEvalLane::Fallback;
+        };
+        LinkedEvalLane::Native(LinkedNativeKernelEval {
+            kernel,
+            dependency_layouts: dependency_layouts.to_vec().into_boxed_slice(),
+            result_layout: native_plan.result_layout(),
+        })
+    }
+
+    fn fragment_eval_lane(&self, fragment: &HirCompiledRuntimeExpr) -> LinkedEvalLane {
+        let Some(kernel) = fragment
+            .backend
+            .items()
+            .get(fragment.entry_item)
+            .and_then(|item| item.body)
+        else {
+            return LinkedEvalLane::Fallback;
+        };
+        self.kernel_eval_lane(fragment.backend.as_ref(), Some(kernel), &[])
     }
 
     fn collect_pipeline_signal_handles(
@@ -871,4 +916,3 @@ fn active_when_value(
         }),
     }
 }
-

@@ -36,7 +36,8 @@ fn lower_text(path: &str, text: &str) -> LoweredStack {
     );
     let core = aivi_core::lower_module(hir.module()).expect("typed-core lowering should succeed");
     let lambda = lower_lambda_module(&core).expect("lambda lowering should succeed");
-    let backend = aivi_backend::lower_module(&lambda).expect("backend lowering should succeed");
+    let backend = aivi_backend::lower_module_with_hir(&lambda, hir.module())
+        .expect("backend lowering should succeed");
     LoweredStack { hir, core, backend }
 }
 

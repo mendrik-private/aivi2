@@ -1,3 +1,4 @@
+#[cfg(test)]
 pub(crate) fn gtk_test_lock() -> &'static std::sync::Mutex<()> {
     static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
     LOCK.get_or_init(|| std::sync::Mutex::new(()))
@@ -617,4 +618,3 @@ fn load_source(path: &Path) -> Result<(SourceDatabase, FileId), String> {
     let file_id = sources.add_file(path.to_path_buf(), text);
     Ok((sources, file_id))
 }
-

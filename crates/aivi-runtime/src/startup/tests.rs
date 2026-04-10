@@ -73,7 +73,8 @@ fn lower_text(path: &str, text: &str) -> LoweredStack {
     );
     let core = core::lower_module(hir.module()).expect("typed-core lowering should succeed");
     let lambda = lower_lambda_module(&core).expect("lambda lowering should succeed");
-    let backend = aivi_backend::lower_module(&lambda).expect("backend lowering should succeed");
+    let backend = aivi_backend::lower_module_with_hir(&lambda, hir.module())
+        .expect("backend lowering should succeed");
     LoweredStack { hir, core, backend }
 }
 
@@ -411,6 +412,117 @@ signal next = id
             .current_value(next_signal.as_signal())
             .expect("next signal lookup should succeed"),
         Some(&RuntimeValue::Int(7))
+    );
+}
+
+#[test]
+fn linked_runtime_marks_supported_derived_signal_bodies_native() {
+    let lowered = lower_text(
+        "runtime-startup-derived-native-lane.aivi",
+        r#"
+fun increment:Int = value:Int=>    value + 1
+
+signal base = 7
+signal next = increment base
+"#,
+    );
+    let assembly =
+        crate::assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");
+    let mut linked = link_backend_runtime(
+        assembly,
+        &lowered.core,
+        std::sync::Arc::new(lowered.backend.clone()),
+    )
+    .expect("startup link should succeed");
+    let next_item = item_id(lowered.hir.module(), "next");
+    let next_signal = linked
+        .assembly()
+        .signal(next_item)
+        .expect("next signal binding should exist")
+        .derived()
+        .expect("next should be a derived signal");
+    let backend_next = backend_item_id(&lowered.backend, "next");
+    let body_kernel = match &lowered.backend.items()[backend_next].kind {
+        BackendItemKind::Signal(info) => info
+            .body_kernel
+            .expect("derived signals should carry a dedicated signal body kernel"),
+        other => panic!("next should lower as a backend signal, found {other:?}"),
+    };
+    let linked_next = linked
+        .derived_signal(next_signal)
+        .expect("next derived signal should link");
+
+    match &linked_next.eval_lane {
+        LinkedEvalLane::Native(native) => {
+            assert_eq!(native.kernel, body_kernel);
+            assert_eq!(
+                native.dependency_layouts.as_ref(),
+                linked_next.dependency_layouts.as_ref()
+            );
+            assert_eq!(native.result_layout, lowered.backend.kernels()[body_kernel].result_layout);
+        }
+        LinkedEvalLane::Fallback => {
+            panic!("simple arithmetic derived signal should link onto the native lane")
+        }
+    }
+
+    linked.tick().expect("linked runtime tick should succeed");
+    assert_eq!(
+        linked
+            .runtime()
+            .current_value(next_signal.as_signal())
+            .expect("next signal lookup should succeed"),
+        Some(&RuntimeValue::Int(8))
+    );
+}
+
+#[test]
+fn linked_runtime_keeps_payload_sensitive_text_option_bodies_on_fallback_lane() {
+    let lowered = lower_text(
+        "runtime-startup-derived-fallback-lane.aivi",
+        r#"
+signal maybeName : Signal (Option Text) = Some "Ada"
+
+signal chosen : Signal Text =
+    maybeName
+     ||> Some name -> name
+     ||> None -> "guest"
+"#,
+    );
+    let assembly =
+        crate::assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");
+    let mut linked = link_backend_runtime(
+        assembly,
+        &lowered.core,
+        std::sync::Arc::new(lowered.backend.clone()),
+    )
+    .expect("startup link should succeed");
+    let chosen_signal = linked
+        .assembly()
+        .signal(item_id(lowered.hir.module(), "chosen"))
+        .expect("chosen signal binding should exist")
+        .derived()
+        .expect("chosen should be a derived signal");
+    let linked_chosen = linked
+        .derived_signal(chosen_signal)
+        .expect("chosen derived signal should link");
+
+    assert!(
+        linked_chosen.body_kernel.is_some(),
+        "signal body kernels should still be linked for fallback evaluation"
+    );
+    assert!(
+        matches!(linked_chosen.eval_lane, LinkedEvalLane::Fallback),
+        "payload-sensitive Option Text matches must remain on the fallback lane"
+    );
+
+    linked.tick().expect("linked runtime tick should succeed");
+    assert_eq!(
+        linked
+            .runtime()
+            .current_value(chosen_signal.as_signal())
+            .expect("chosen signal lookup should succeed"),
+        Some(&RuntimeValue::Text("Ada".into()))
     );
 }
 
@@ -1456,6 +1568,78 @@ signal total : Signal Int = ready | readyAndEnabled
 }
 
 #[test]
+fn linked_runtime_tracks_reactive_seed_guard_and_body_eval_lanes() {
+    let lowered = lower_text(
+        "runtime-startup-reactive-native-lanes.aivi",
+        r#"
+provider custom.ready
+    wakeup: providerTrigger
+
+provider custom.enabled
+    wakeup: providerTrigger
+
+@source custom.ready
+signal ready : Signal Bool
+
+@source custom.enabled
+signal enabled : Signal Bool
+
+fun addPair:Int = left:Int right:Int=>    left + right
+fun addPairPlusOne:Int = left:Int right:Int=>    left + right + 1
+
+signal left = 20
+signal right = 22
+
+signal readyAndEnabled = ready and enabled
+
+signal total : Signal Int = ready | readyAndEnabled
+  ||> readyAndEnabled True => addPairPlusOne left right
+  ||> ready True => addPair left right
+  ||> _ => 0
+"#,
+    );
+    let assembly =
+        crate::assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");
+    let linked = link_backend_runtime(
+        assembly,
+        &lowered.core,
+        std::sync::Arc::new(lowered.backend.clone()),
+    )
+    .expect("reactive lane fixture should link successfully");
+    let total_signal = linked
+        .assembly()
+        .signal(item_id(lowered.hir.module(), "total"))
+        .expect("total signal binding should exist")
+        .signal();
+    let reactive = linked
+        .reactive_signals
+        .get(&total_signal)
+        .expect("reactive signal metadata should link");
+
+    assert!(
+        matches!(reactive.seed_eval_lane, LinkedEvalLane::Fallback),
+        "reactive seeds should now be classified onto an explicit eval lane even when they stay on fallback"
+    );
+
+    let clauses = linked
+        .reactive_clauses
+        .values()
+        .filter(|clause| clause.target == total_signal)
+        .collect::<Vec<_>>();
+    assert_eq!(clauses.len(), 2, "fixture should link all non-seed reactive clauses");
+    for clause in clauses {
+        assert!(
+            matches!(clause.guard_eval_lane, LinkedEvalLane::Fallback),
+            "reactive guards should now be classified onto explicit eval lanes even when they stay on fallback"
+        );
+        assert!(
+            matches!(clause.body_eval_lane, LinkedEvalLane::Fallback),
+            "reactive bodies should now be classified onto explicit eval lanes even when they stay on fallback"
+        );
+    }
+}
+
+#[test]
 fn linked_runtime_executes_pattern_armed_reactive_updates_end_to_end() {
     let lowered = lower_text(
         "runtime-startup-pattern-reactive-when.aivi",
@@ -1504,6 +1688,52 @@ signal tickSeen : Signal Bool = event
         linked.runtime().current_value(tick_seen_signal).unwrap(),
         Some(&RuntimeValue::Bool(false)),
         "non-matching pattern arms should leave the other target untouched"
+    );
+}
+
+#[test]
+fn linked_runtime_keeps_pattern_reactive_guards_on_fallback_lanes() {
+    let lowered = lower_text(
+        "runtime-startup-pattern-reactive-fallback-lanes.aivi",
+        r#"
+type Direction = Up | Down
+type Event = Turn Direction | Tick
+
+signal event = Turn Down
+
+signal heading : Signal Direction = event
+  ||> Turn dir => dir
+  ||> _ => Up
+
+signal tickSeen : Signal Bool = event
+  ||> Tick => True
+  ||> _ => False
+"#,
+    );
+    let assembly = crate::assemble_hir_runtime(lowered.hir.module())
+        .expect("runtime assembly should build for pattern reactive fallback metadata");
+    let linked = link_backend_runtime(
+        assembly,
+        &lowered.core,
+        std::sync::Arc::new(lowered.backend.clone()),
+    )
+    .expect("pattern reactive fallback fixture should link successfully");
+    let heading_signal = linked
+        .assembly()
+        .signal(item_id(lowered.hir.module(), "heading"))
+        .expect("heading signal binding should exist")
+        .signal();
+    let clauses = linked
+        .reactive_clauses
+        .values()
+        .filter(|clause| clause.target == heading_signal)
+        .collect::<Vec<_>>();
+
+    assert!(
+        clauses
+            .iter()
+            .any(|clause| matches!(clause.guard_eval_lane, LinkedEvalLane::Fallback)),
+        "payload-sensitive pattern guards should stay on the fallback lane"
     );
 }
 

@@ -557,3 +557,229 @@ pub fn case_pattern_field_types(
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpaqueTypeVariant {
+    pub name: Box<str>,
+    pub fields: Vec<GateType>,
+}
+
+pub fn opaque_type_variants(module: &Module, subject: &GateType) -> Option<Vec<OpaqueTypeVariant>> {
+    fn lower_import_value_type_with_substitutions(
+        module: &Module,
+        ty: &ImportValueType,
+        substitutions: &[GateType],
+    ) -> GateType {
+        match ty {
+            ImportValueType::Primitive(builtin) => GateType::Primitive(*builtin),
+            ImportValueType::Tuple(elements) => GateType::Tuple(
+                elements
+                    .iter()
+                    .map(|element| {
+                        lower_import_value_type_with_substitutions(module, element, substitutions)
+                    })
+                    .collect(),
+            ),
+            ImportValueType::Record(fields) => GateType::Record(
+                fields
+                    .iter()
+                    .map(|field| GateRecordField {
+                        name: field.name.to_string(),
+                        ty: lower_import_value_type_with_substitutions(
+                            module,
+                            &field.ty,
+                            substitutions,
+                        ),
+                    })
+                    .collect(),
+            ),
+            ImportValueType::Arrow { parameter, result } => GateType::Arrow {
+                parameter: Box::new(lower_import_value_type_with_substitutions(
+                    module,
+                    parameter,
+                    substitutions,
+                )),
+                result: Box::new(lower_import_value_type_with_substitutions(
+                    module,
+                    result,
+                    substitutions,
+                )),
+            },
+            ImportValueType::List(element) => GateType::List(Box::new(
+                lower_import_value_type_with_substitutions(module, element, substitutions),
+            )),
+            ImportValueType::Map { key, value } => GateType::Map {
+                key: Box::new(lower_import_value_type_with_substitutions(
+                    module,
+                    key,
+                    substitutions,
+                )),
+                value: Box::new(lower_import_value_type_with_substitutions(
+                    module,
+                    value,
+                    substitutions,
+                )),
+            },
+            ImportValueType::Set(element) => GateType::Set(Box::new(
+                lower_import_value_type_with_substitutions(module, element, substitutions),
+            )),
+            ImportValueType::Option(element) => GateType::Option(Box::new(
+                lower_import_value_type_with_substitutions(module, element, substitutions),
+            )),
+            ImportValueType::Result { error, value } => GateType::Result {
+                error: Box::new(lower_import_value_type_with_substitutions(
+                    module,
+                    error,
+                    substitutions,
+                )),
+                value: Box::new(lower_import_value_type_with_substitutions(
+                    module,
+                    value,
+                    substitutions,
+                )),
+            },
+            ImportValueType::Validation { error, value } => GateType::Validation {
+                error: Box::new(lower_import_value_type_with_substitutions(
+                    module,
+                    error,
+                    substitutions,
+                )),
+                value: Box::new(lower_import_value_type_with_substitutions(
+                    module,
+                    value,
+                    substitutions,
+                )),
+            },
+            ImportValueType::Signal(element) => GateType::Signal(Box::new(
+                lower_import_value_type_with_substitutions(module, element, substitutions),
+            )),
+            ImportValueType::Task { error, value } => GateType::Task {
+                error: Box::new(lower_import_value_type_with_substitutions(
+                    module,
+                    error,
+                    substitutions,
+                )),
+                value: Box::new(lower_import_value_type_with_substitutions(
+                    module,
+                    value,
+                    substitutions,
+                )),
+            },
+            ImportValueType::TypeVariable { index, name } => substitutions
+                .get(*index)
+                .cloned()
+                .unwrap_or_else(|| GateType::TypeParameter {
+                    parameter: TypeParameterId::from_raw(u32::MAX - *index as u32),
+                    name: name.clone(),
+                }),
+            ImportValueType::Named {
+                type_name,
+                arguments,
+                definition,
+            } => {
+                let lowered_args = arguments
+                    .iter()
+                    .map(|argument| {
+                        lower_import_value_type_with_substitutions(
+                            module,
+                            argument,
+                            substitutions,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                match definition.as_deref() {
+                    Some(ImportTypeDefinition::Alias(alias)) => {
+                        lower_import_value_type_with_substitutions(module, alias, &lowered_args)
+                    }
+                    Some(ImportTypeDefinition::Sum(_)) | None => {
+                        let import_id = module
+                            .imports()
+                            .iter()
+                            .find(|(_, binding)| {
+                                binding.imported_name.text() == type_name
+                                    && matches!(
+                                        &binding.metadata,
+                                        ImportBindingMetadata::TypeConstructor { .. }
+                                            | ImportBindingMetadata::AmbientType
+                                            | ImportBindingMetadata::BuiltinType(_)
+                                            | ImportBindingMetadata::Domain { .. }
+                                    )
+                            })
+                            .map(|(id, _)| id);
+                        GateType::OpaqueImport {
+                            import: import_id.unwrap_or_else(|| ImportId::from_raw(u32::MAX)),
+                            name: type_name.clone(),
+                            arguments: lowered_args,
+                            definition: definition.clone(),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    match subject {
+        GateType::OpaqueItem {
+            item,
+            arguments,
+            ..
+        } => {
+            let Item::Type(type_item) = &module.items()[*item] else {
+                return None;
+            };
+            let TypeItemBody::Sum(variants) = &type_item.body else {
+                return None;
+            };
+            if type_item.parameters.len() != arguments.len() {
+                return None;
+            }
+            let substitutions = type_item
+                .parameters
+                .iter()
+                .copied()
+                .zip(arguments.iter().cloned())
+                .collect::<HashMap<_, _>>();
+            let mut typing = GateTypeContext::new(module);
+            variants
+                .iter()
+                .map(|variant| {
+                    Some(OpaqueTypeVariant {
+                        name: variant.name.text().into(),
+                        fields: variant
+                            .fields
+                            .iter()
+                            .map(|field| typing.lower_hir_type(field.ty, &substitutions))
+                            .collect::<Option<Vec<_>>>()?,
+                    })
+                })
+                .collect()
+        }
+        GateType::OpaqueImport {
+            definition: Some(definition),
+            arguments,
+            ..
+        } => match definition.as_ref() {
+            ImportTypeDefinition::Alias(alias) => {
+                opaque_type_variants(
+                    module,
+                    &lower_import_value_type_with_substitutions(module, alias, arguments),
+                )
+            }
+            ImportTypeDefinition::Sum(variants) => Some(
+                variants
+                    .iter()
+                    .map(|variant| OpaqueTypeVariant {
+                        name: variant.name.clone(),
+                        fields: variant
+                            .fields
+                            .iter()
+                            .map(|field| {
+                                lower_import_value_type_with_substitutions(module, field, arguments)
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            ),
+        },
+        _ => None,
+    }
+}

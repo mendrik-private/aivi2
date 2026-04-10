@@ -43,6 +43,7 @@ pub use engine::{
     BackendExecutableProgram, BackendExecutionEngine, BackendExecutionEngineHandle,
     BackendExecutionEngineKind, BackendExecutionOptions,
 };
+pub use jit::{NativeKernelExecutionError, NativeKernelPlan};
 pub use gc::{
     CommittedValueStore, InlineCommittedValueStore, MovingRuntimeValueStore, RuntimeGcHandle,
 };
@@ -65,7 +66,7 @@ pub use kernel::{
 pub use layout::{
     AbiPassMode, Layout, LayoutKind, PrimitiveType, RecordFieldLayout, VariantLayout,
 };
-pub use lower::{LoweringError, LoweringErrors, lower_module};
+pub use lower::{LoweringError, LoweringErrors, lower_module, lower_module_with_hir};
 pub use numeric::{RuntimeBigInt, RuntimeDecimal, RuntimeFloat};
 pub use program::{
     DecodeExtraFieldPolicy, DecodeField, DecodeFieldRequirement, DecodeMode, DecodePlan,

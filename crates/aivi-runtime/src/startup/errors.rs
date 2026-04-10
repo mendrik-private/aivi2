@@ -303,6 +303,28 @@ pub enum BackendRuntimeError {
         item: hir::ItemId,
         error: EvaluationError,
     },
+    MissingNativeDerivedPlan {
+        signal: DerivedHandle,
+        item: hir::ItemId,
+        kernel: KernelId,
+    },
+    MissingNativeReactiveSeedPlan {
+        signal: SignalHandle,
+        item: hir::ItemId,
+        kernel: KernelId,
+    },
+    MissingNativeReactiveGuardPlan {
+        signal: SignalHandle,
+        clause: ReactiveClauseHandle,
+        item: hir::ItemId,
+        kernel: KernelId,
+    },
+    MissingNativeReactiveBodyPlan {
+        signal: SignalHandle,
+        clause: ReactiveClauseHandle,
+        item: hir::ItemId,
+        kernel: KernelId,
+    },
     EvaluateReactiveSeed {
         signal: SignalHandle,
         item: hir::ItemId,
@@ -532,6 +554,44 @@ impl fmt::Display for BackendRuntimeError {
                 f,
                 "failed to evaluate derived signal {:?} for item {item}: {error}",
                 signal
+            ),
+            Self::MissingNativeDerivedPlan {
+                signal,
+                item,
+                kernel,
+            } => write!(
+                f,
+                "derived signal {:?} for item {item} was linked for native kernel{kernel} execution but no compiled plan is available",
+                signal
+            ),
+            Self::MissingNativeReactiveSeedPlan {
+                signal,
+                item,
+                kernel,
+            } => write!(
+                f,
+                "reactive seed for signal {:?} / item {item} was linked for native kernel{kernel} execution but no compiled plan is available",
+                signal
+            ),
+            Self::MissingNativeReactiveGuardPlan {
+                signal,
+                clause,
+                item,
+                kernel,
+            } => write!(
+                f,
+                "reactive guard {:?} for signal {:?} / item {item} was linked for native kernel{kernel} execution but no compiled plan is available",
+                clause, signal
+            ),
+            Self::MissingNativeReactiveBodyPlan {
+                signal,
+                clause,
+                item,
+                kernel,
+            } => write!(
+                f,
+                "reactive body {:?} for signal {:?} / item {item} was linked for native kernel{kernel} execution but no compiled plan is available",
+                clause, signal
             ),
             Self::EvaluateReactiveSeed {
                 signal,

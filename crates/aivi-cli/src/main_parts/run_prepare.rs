@@ -607,7 +607,7 @@ fn lower_runtime_backend_stack_impl(
             rendered
         })?;
     }
-    let backend = lower_backend_module(&lambda).map_err(|errors| {
+    let backend = lower_backend_module(&lambda, module).map_err(|errors| {
         let mut rendered = format!("failed to lower {command_name} module into backend IR:\n");
         for error in errors.errors() {
             rendered.push_str("- ");
@@ -676,7 +676,7 @@ fn lower_runtime_backend_stack_with_workspace(
         }
         rendered
     })?;
-    let backend = lower_backend_module(&lambda).map_err(|errors| {
+    let backend = lower_backend_module(&lambda, module).map_err(|errors| {
         let mut rendered = format!("failed to lower {command_name} module into backend IR:\n");
         for error in errors.errors() {
             rendered.push_str("- ");
@@ -1157,4 +1157,3 @@ fn compile_run_inputs(
     }
     Ok((inputs, metrics))
 }
-

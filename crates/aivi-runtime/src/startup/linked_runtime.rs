@@ -177,9 +177,8 @@ impl BackendLinkedRuntime {
             &snapshots,
         )?;
         let runtime_globals = materialize_detached_globals(&globals);
-        let mut engine =
-            BackendExecutableProgram::interpreted(self.backend.as_ref()).create_engine();
-        let value = engine
+        let mut evaluator = KernelEvaluator::new(self.backend.as_ref());
+        let value = evaluator
             .evaluate_item(binding.backend_item, &runtime_globals)
             .map_err(|error| BackendRuntimeError::EvaluateTaskBody {
                 instance: binding.instance,
@@ -195,10 +194,12 @@ impl BackendLinkedRuntime {
         let runtime_committed = materialize_detached_globals(&committed);
         let mut temporal_states = self.temporal_states.clone();
         let mut pending_temporal_schedules = Vec::new();
+        let mut native_kernel_plans = BTreeMap::new();
         let mut evaluator = LinkedDerivedEvaluator {
             backend: self.backend.as_ref(),
             signal_items_by_handle: &self.signal_items_by_handle,
             derived_signals: &self.derived_signals,
+            native_kernel_plans: &mut native_kernel_plans,
             reactive_signals: &self.reactive_signals,
             reactive_clauses: &self.reactive_clauses,
             linked_recurrence_signals: &self.linked_recurrence_signals,

@@ -455,6 +455,90 @@ pub fn render_runtime_error(
             vec![diag]
         }
 
+        BackendRuntimeError::MissingNativeDerivedPlan {
+            signal,
+            item,
+            kernel,
+        } => {
+            let name = source_map.derived_name(*signal).unwrap_or("(unknown)");
+            let mut diag = Diagnostic::error(format!(
+                "derived signal `{name}` could not materialize native kernel{kernel} execution"
+            ))
+            .with_code(RUNTIME_INTERNAL)
+            .with_note(
+                "the signal was linked as natively executable, but the backend no longer produced a native plan"
+                    .to_owned(),
+            );
+            if let Some(span) = source_map.item_span(*item) {
+                diag = diag.with_primary_label(span, "signal declared here");
+            }
+            vec![diag]
+        }
+
+        BackendRuntimeError::MissingNativeReactiveSeedPlan {
+            signal,
+            item,
+            kernel,
+        } => {
+            let name = source_map.signal_name(*signal).unwrap_or("(unknown)");
+            let mut diag = Diagnostic::error(format!(
+                "reactive seed for `{name}` could not materialize native kernel{kernel} execution"
+            ))
+            .with_code(RUNTIME_INTERNAL)
+            .with_note(
+                "the reactive seed was linked as natively executable, but the backend no longer produced a native plan"
+                    .to_owned(),
+            );
+            if let Some(span) = source_map.item_span(*item) {
+                diag = diag.with_primary_label(span, "reactive signal declared here");
+            }
+            vec![diag]
+        }
+
+        BackendRuntimeError::MissingNativeReactiveGuardPlan {
+            signal,
+            clause,
+            item,
+            kernel,
+        } => {
+            let name = source_map.signal_name(*signal).unwrap_or("(unknown)");
+            let mut diag = Diagnostic::error(format!(
+                "reactive guard {:?} for `{name}` could not materialize native kernel{kernel} execution",
+                clause
+            ))
+            .with_code(RUNTIME_INTERNAL)
+            .with_note(
+                "the reactive guard was linked as natively executable, but the backend no longer produced a native plan"
+                    .to_owned(),
+            );
+            if let Some(span) = source_map.item_span(*item) {
+                diag = diag.with_primary_label(span, "reactive signal declared here");
+            }
+            vec![diag]
+        }
+
+        BackendRuntimeError::MissingNativeReactiveBodyPlan {
+            signal,
+            clause,
+            item,
+            kernel,
+        } => {
+            let name = source_map.signal_name(*signal).unwrap_or("(unknown)");
+            let mut diag = Diagnostic::error(format!(
+                "reactive body {:?} for `{name}` could not materialize native kernel{kernel} execution",
+                clause
+            ))
+            .with_code(RUNTIME_INTERNAL)
+            .with_note(
+                "the reactive body was linked as natively executable, but the backend no longer produced a native plan"
+                    .to_owned(),
+            );
+            if let Some(span) = source_map.item_span(*item) {
+                diag = diag.with_primary_label(span, "reactive signal declared here");
+            }
+            vec![diag]
+        }
+
         BackendRuntimeError::InvalidTemporalDelayDuration {
             signal,
             item,
