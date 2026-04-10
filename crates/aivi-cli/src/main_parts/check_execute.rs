@@ -186,7 +186,7 @@ fn check_file(path: &Path, timings: bool) -> Result<ExitCode, String> {
             .iter()
             .any(|d| d.severity == Severity::Error);
         if !has_errors {
-            let warnings = aivi_lsp::collect_unused_native_diagnostics(hir.module(), &hir.source());
+            let warnings = aivi_lsp::collect_unused_native_diagnostics(hir.module(), hir.source());
             unused_count += warnings.len();
             print_diagnostics(&snapshot.sources, warnings.iter());
         }
@@ -649,11 +649,10 @@ fn prepare_test_artifact_with_query_context(
 ) -> Result<ExecuteArtifact, String> {
     let fragment = test_runtime_fragment(module, test_owner)?;
     let included_items = runtime_fragment_included_items(module, &fragment);
-    if test_can_use_backend_only_path(module, test_owner, &included_items) {
-        if let Ok(artifact) = prepare_backend_only_test_artifact(module, &fragment, query_context) {
+    if test_can_use_backend_only_path(module, test_owner, &included_items)
+        && let Ok(artifact) = prepare_backend_only_test_artifact(module, &fragment, query_context) {
             return Ok(artifact);
         }
-    }
     let lowered = lower_runtime_backend_stack_with_items(module, &included_items, "`aivi test`")?;
     let runtime_assembly =
         assemble_hir_runtime_with_items(module, &included_items).map_err(|errors| {
@@ -767,7 +766,7 @@ fn test_runtime_fragment(
     })
 }
 
-fn select_execute_main<'a>(module: &'a HirModule) -> Result<&'a ValueItem, String> {
+fn select_execute_main(module: &HirModule) -> Result<&ValueItem, String> {
     let mut found_value = None;
     let mut found_non_value_kind = None;
     for (item_id, item) in module.items().iter() {

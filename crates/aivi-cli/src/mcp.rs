@@ -41,7 +41,7 @@ pub(super) fn run_mcp(mut args: impl Iterator<Item = OsString>) -> Result<ExitCo
             return super::print_help(Some(std::ffi::OsStr::new("mcp")));
         }
 
-        if argument == OsString::from("--path") {
+        if argument == "--path" {
             let path = args
                 .next()
                 .map(PathBuf::from)
@@ -52,7 +52,7 @@ pub(super) fn run_mcp(mut args: impl Iterator<Item = OsString>) -> Result<ExitCo
             continue;
         }
 
-        if argument == OsString::from("--view") {
+        if argument == "--view" {
             let view = args
                 .next()
                 .ok_or_else(|| "expected a value name after `--view` for `mcp`".to_owned())?;
@@ -1171,13 +1171,13 @@ fn handle_tool_call(
                 character: args.character,
             };
             let Some(symbol) = analysis.tightest_symbol_at_lsp_position(position) else {
-                return Ok(tool_error(
+                return tool_error(
                     format!(
                         "no symbol found at {}:{}:{} in `{}`",
                         args.file, args.line, args.character, args.file
                     ),
                     json!({ "found": false }),
-                )?);
+                );
             };
             let sources = db.source_database();
             let span_lsp = sources

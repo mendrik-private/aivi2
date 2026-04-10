@@ -397,23 +397,23 @@ pub fn validate_module(module: &Module) -> Result<(), ValidationErrors> {
                 if !item.parameters.is_empty() {
                     errors.push(ValidationError::UnexpectedItemParameters { item: item_id });
                 }
-                if let Some(body) = item.body {
-                    if !module.exprs().contains(body) {
-                        errors.push(ValidationError::UnknownItemBody {
-                            item: item_id,
-                            expr: body,
-                        });
-                    }
+                if let Some(body) = item.body
+                    && !module.exprs().contains(body)
+                {
+                    errors.push(ValidationError::UnknownItemBody {
+                        item: item_id,
+                        expr: body,
+                    });
                 }
             }
             ItemKind::Function => {
-                if let Some(body) = item.body {
-                    if !module.exprs().contains(body) {
-                        errors.push(ValidationError::UnknownItemBody {
-                            item: item_id,
-                            expr: body,
-                        });
-                    }
+                if let Some(body) = item.body
+                    && !module.exprs().contains(body)
+                {
+                    errors.push(ValidationError::UnknownItemBody {
+                        item: item_id,
+                        expr: body,
+                    });
                 }
             }
             ItemKind::Signal(_) | ItemKind::Instance => {
@@ -474,23 +474,23 @@ pub fn validate_module(module: &Module) -> Result<(), ValidationErrors> {
                     pipe: stage.pipe,
                 });
             }
-            if let Some(previous) = previous_index {
-                if stage.index <= previous {
-                    errors.push(ValidationError::PipeStageOrder {
-                        pipe: pipe_id,
-                        previous,
-                        current: stage.index,
-                    });
-                }
+            if let Some(previous) = previous_index
+                && stage.index <= previous
+            {
+                errors.push(ValidationError::PipeStageOrder {
+                    pipe: pipe_id,
+                    previous,
+                    current: stage.index,
+                });
             }
-            if let Some(previous) = previous_result.as_ref() {
-                if previous != &stage.input_subject {
-                    errors.push(ValidationError::PipeStageTypeDiscontinuity {
-                        pipe: pipe_id,
-                        previous: previous.clone(),
-                        current: stage.input_subject.clone(),
-                    });
-                }
+            if let Some(previous) = previous_result.as_ref()
+                && previous != &stage.input_subject
+            {
+                errors.push(ValidationError::PipeStageTypeDiscontinuity {
+                    pipe: pipe_id,
+                    previous: previous.clone(),
+                    current: stage.input_subject.clone(),
+                });
             }
             previous_index = Some(stage.index);
             previous_result = Some(stage.result_subject.clone());
@@ -872,12 +872,12 @@ fn validate_stage(
                     errors.push(ValidationError::GatePredicateNotBool { stage: stage_id });
                 }
             }
-            if let Some(join) = &fanout.join {
-                if !module.exprs().contains(join.runtime_expr) {
-                    errors.push(ValidationError::UnknownExpr {
-                        expr: join.runtime_expr,
-                    });
-                }
+            if let Some(join) = &fanout.join
+                && !module.exprs().contains(join.runtime_expr)
+            {
+                errors.push(ValidationError::UnknownExpr {
+                    expr: join.runtime_expr,
+                });
             }
             let expected = fanout
                 .join
@@ -951,12 +951,12 @@ fn validate_recurrence(
             });
         }
     }
-    if let Some(witness) = &recurrence.non_source_wakeup {
-        if !module.exprs().contains(witness.runtime_witness) {
-            errors.push(ValidationError::UnknownExpr {
-                expr: witness.runtime_witness,
-            });
-        }
+    if let Some(witness) = &recurrence.non_source_wakeup
+        && !module.exprs().contains(witness.runtime_witness)
+    {
+        errors.push(ValidationError::UnknownExpr {
+            expr: witness.runtime_witness,
+        });
     }
 }
 

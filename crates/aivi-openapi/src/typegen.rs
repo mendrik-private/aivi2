@@ -160,7 +160,7 @@ fn schema_to_aivi_type(
                     .map(|(k, _)| to_pascal_case(k))
                     .unwrap_or_else(|| match sor {
                         SchemaOrRef::Ref(r) => {
-                            to_pascal_case(r.ref_path.split('/').last().unwrap_or(""))
+                            to_pascal_case(r.ref_path.split('/').next_back().unwrap_or(""))
                         }
                         SchemaOrRef::Schema(s) => s
                             .title
@@ -170,7 +170,8 @@ fn schema_to_aivi_type(
                     });
                 match sor {
                     SchemaOrRef::Ref(r) => {
-                        let ref_name = to_pascal_case(r.ref_path.split('/').last().unwrap_or(""));
+                        let ref_name =
+                            to_pascal_case(r.ref_path.split('/').next_back().unwrap_or(""));
                         format!("  | {variant_name} {ref_name}")
                     }
                     SchemaOrRef::Schema(_) => format!("  | {variant_name}"),
@@ -188,7 +189,7 @@ fn schema_to_aivi_type(
             let s = match sor {
                 SchemaOrRef::Schema(s) => *s.clone(),
                 SchemaOrRef::Ref(r) => {
-                    let ref_name = r.ref_path.split('/').last().unwrap_or("");
+                    let ref_name = r.ref_path.split('/').next_back().unwrap_or("");
                     components.get(ref_name).cloned().unwrap_or_default()
                 }
             };
@@ -246,7 +247,7 @@ fn schema_to_aivi_type(
 
 fn ref_last_segment(sor: &SchemaOrRef) -> &str {
     match sor {
-        SchemaOrRef::Ref(r) => r.ref_path.split('/').last().unwrap_or(""),
+        SchemaOrRef::Ref(r) => r.ref_path.split('/').next_back().unwrap_or(""),
         _ => "",
     }
 }
@@ -256,7 +257,9 @@ fn schema_to_aivi_type_expr(
     components: &indexmap::IndexMap<String, Schema>,
 ) -> String {
     match sor {
-        SchemaOrRef::Ref(r) => to_pascal_case(r.ref_path.split('/').last().unwrap_or("Unknown")),
+        SchemaOrRef::Ref(r) => {
+            to_pascal_case(r.ref_path.split('/').next_back().unwrap_or("Unknown"))
+        }
         SchemaOrRef::Schema(s) => schema_type_expr(s, components),
     }
 }
@@ -309,7 +312,7 @@ fn schema_type_expr(schema: &Schema, components: &indexmap::IndexMap<String, Sch
 }
 
 fn to_pascal_case(s: &str) -> String {
-    s.split(|c: char| c == '_' || c == '-' || c == ' ')
+    s.split(['_', '-', ' '])
         .filter(|p| !p.is_empty())
         .map(|part| {
             let mut chars = part.chars();

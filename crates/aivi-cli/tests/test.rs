@@ -28,7 +28,6 @@ impl TempDir {
         fs::write(&path, text).expect("temporary file should be writable");
         path
     }
-
 }
 
 impl Drop for TempDir {

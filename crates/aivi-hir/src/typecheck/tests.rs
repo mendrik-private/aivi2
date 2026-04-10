@@ -1,4 +1,4 @@
-use aivi_base::{DiagnosticCode, FileId, SourceDatabase, SourceSpan};
+use aivi_base::{FileId, SourceDatabase, SourceSpan};
 use aivi_syntax::parse_module;
 
 use crate::{BuiltinType, Item, PipeTransformMode, RecordFieldSurface, lower_module};

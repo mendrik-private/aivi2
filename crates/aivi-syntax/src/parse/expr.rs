@@ -558,9 +558,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_optional_pipe_memo(&mut self, cursor: &mut usize, end: usize) -> Option<Identifier> {
-        let Some(hash_index) = self.consume_kind(cursor, end, TokenKind::Hash) else {
-            return None;
-        };
+        let hash_index = self.consume_kind(cursor, end, TokenKind::Hash)?;
         match self.parse_identifier(cursor, end) {
             Some(identifier) => Some(identifier),
             None => {
@@ -913,8 +911,8 @@ impl<'a> Parser<'a> {
                 segments.push(self.parse_patch_bracket_selector(cursor, end)?);
                 continue;
             }
-            if segments.is_empty() {
-                if let Some(name) = self.parse_identifier(cursor, end) {
+            if segments.is_empty()
+                && let Some(name) = self.parse_identifier(cursor, end) {
                     let span = name.span;
                     segments.push(PatchSelectorSegment::Named {
                         name,
@@ -923,7 +921,6 @@ impl<'a> Parser<'a> {
                     });
                     continue;
                 }
-            }
             break;
         }
         if segments.is_empty() {
@@ -1234,8 +1231,8 @@ impl<'a> Parser<'a> {
             raw: self.numeric_literal_raw(minus_index, index),
             span,
         };
-        if let Some(suffix_index) = self.peek_nontrivia(*cursor, end) {
-            if self.tokens[suffix_index].kind() == TokenKind::Identifier
+        if let Some(suffix_index) = self.peek_nontrivia(*cursor, end)
+            && self.tokens[suffix_index].kind() == TokenKind::Identifier
                 && self.tokens_are_adjacent(index, suffix_index)
             {
                 *cursor = suffix_index + 1;
@@ -1250,7 +1247,6 @@ impl<'a> Parser<'a> {
                     }),
                 };
             }
-        }
 
         Expr {
             span,
@@ -1346,10 +1342,10 @@ impl<'a> Parser<'a> {
         }
 
         // Detect operator section: (op) where the content is a single binary operator token.
-        if let Some(op_index) = self.peek_nontrivia(*cursor, end) {
-            if let Some((op, _)) = self.binary_operator(op_index) {
+        if let Some(op_index) = self.peek_nontrivia(*cursor, end)
+            && let Some((op, _)) = self.binary_operator(op_index) {
                 let after_op = self.peek_nontrivia(op_index + 1, end);
-                if after_op.map_or(false, |i| self.tokens[i].kind() == TokenKind::RParen) {
+                if after_op.is_some_and(|i| self.tokens[i].kind() == TokenKind::RParen) {
                     *cursor = op_index + 1;
                     let _ = self.consume_kind(cursor, end, TokenKind::RParen);
                     return Some(Expr {
@@ -1358,7 +1354,6 @@ impl<'a> Parser<'a> {
                     });
                 }
             }
-        }
 
         loop {
             let element = self.parse_expr(cursor, end, ExprStop::paren_context())?;
@@ -1592,8 +1587,8 @@ impl<'a> Parser<'a> {
                     *cursor = index + 1;
                     close_name = self.parse_qualified_name(cursor, end);
                     let _ = self.consume_kind(cursor, end, TokenKind::Greater);
-                    if let Some(close_name_value) = close_name.as_ref() {
-                        if close_name_value.as_dotted() != name.as_dotted() {
+                    if let Some(close_name_value) = close_name.as_ref()
+                        && close_name_value.as_dotted() != name.as_dotted() {
                             self.diagnostics.push(
                                 Diagnostic::error("markup closing tag does not match the open tag")
                                     .with_code(MISMATCHED_MARKUP_CLOSE)
@@ -1611,7 +1606,6 @@ impl<'a> Parser<'a> {
                                     .with_help("ensure opening and closing tags match"),
                             );
                         }
-                    }
                     return Some(MarkupNode {
                         name,
                         attributes,

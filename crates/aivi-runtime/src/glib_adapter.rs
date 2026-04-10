@@ -1232,14 +1232,13 @@ mod tests {
                     Scheduler::new(builder.build().unwrap()),
                     move |_signal, inputs: DependencyValues<'_, i32>| {
                         let current = inputs.value(0).copied();
-                        if let Some(current) = current {
-                            if let Some(callback) = publish_next_in_evaluator
+                        if let Some(current) = current
+                            && let Some(callback) = publish_next_in_evaluator
                                 .lock()
                                 .expect("publish-next hook mutex should not be poisoned")
                                 .as_ref()
-                            {
-                                callback(current);
-                            }
+                        {
+                            callback(current);
                         }
                         current
                     },

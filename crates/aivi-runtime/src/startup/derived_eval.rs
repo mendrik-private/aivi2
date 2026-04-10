@@ -600,9 +600,9 @@ impl LinkedDerivedEvaluator<'_> {
         backend: &BackendProgram,
         native: &LinkedNativeKernelEval,
     ) -> Option<&'a mut NativeKernelPlan> {
-        if !self.native_kernel_plans.contains_key(&key) {
+        if let std::collections::btree_map::Entry::Vacant(e) = self.native_kernel_plans.entry(key) {
             let compiled = NativeKernelPlan::compile(backend, native.kernel)?;
-            self.native_kernel_plans.insert(key, compiled);
+            e.insert(compiled);
         }
         self.native_kernel_plans.get_mut(&key)
     }
@@ -1122,8 +1122,7 @@ fn evaluate_kernel_coercing_zero_arity(
                 ref handle,
                 ref bound_arguments,
             }) = found
-            {
-                if handle.field_count == 0 && bound_arguments.is_empty() {
+                && handle.field_count == 0 && bound_arguments.is_empty() {
                     return Ok(RuntimeValue::Sum(RuntimeSumValue {
                         item: handle.item,
                         type_name: handle.type_name.clone(),
@@ -1131,7 +1130,6 @@ fn evaluate_kernel_coercing_zero_arity(
                         fields: Vec::new(),
                     }));
                 }
-            }
             Err(EvaluationError::KernelResultLayoutMismatch {
                 kernel: kernel_id,
                 expected,

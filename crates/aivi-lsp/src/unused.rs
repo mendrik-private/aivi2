@@ -96,19 +96,19 @@ fn collect_referenced_items(module: &Module) -> HashSet<ItemId> {
 
     // Scan all expressions for term-level item references.
     for (_, expr) in module.exprs().iter() {
-        if let ExprKind::Name(reference) = &expr.kind {
-            if let ResolutionState::Resolved(TermResolution::Item(id)) = reference.resolution {
-                referenced.insert(id);
-            }
+        if let ExprKind::Name(reference) = &expr.kind
+            && let ResolutionState::Resolved(TermResolution::Item(id)) = reference.resolution
+        {
+            referenced.insert(id);
         }
     }
 
     // Scan all type nodes for type-level item references.
     for (_, ty) in module.types().iter() {
-        if let TypeKind::Name(reference) = &ty.kind {
-            if let ResolutionState::Resolved(TypeResolution::Item(id)) = reference.resolution {
-                referenced.insert(id);
-            }
+        if let TypeKind::Name(reference) = &ty.kind
+            && let ResolutionState::Resolved(TypeResolution::Item(id)) = reference.resolution
+        {
+            referenced.insert(id);
         }
     }
 
@@ -148,12 +148,11 @@ fn collect_exported_items(module: &Module) -> HashSet<ItemId> {
     let mut exported = HashSet::new();
 
     for item_id in module.root_items() {
-        if let Item::Export(export) = &module.items()[*item_id] {
-            if let ResolutionState::Resolved(aivi_hir::ExportResolution::Item(id)) =
+        if let Item::Export(export) = &module.items()[*item_id]
+            && let ResolutionState::Resolved(aivi_hir::ExportResolution::Item(id)) =
                 export.resolution
-            {
-                exported.insert(id);
-            }
+        {
+            exported.insert(id);
         }
     }
 

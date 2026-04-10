@@ -409,8 +409,8 @@ impl<'a> Parser<'a> {
                 // Detect record projection pattern: { field: . } or { a.b.c: . }
                 // When a field value is SubjectPlaceholder, this extracts a field from
                 // the subject rather than constructing a record.
-                if !ambient_allowed {
-                    if let Some(proj_field) = record.fields.iter().find(|f| {
+                if !ambient_allowed
+                    && let Some(proj_field) = record.fields.iter().find(|f| {
                         matches!(
                             f.value.as_ref().map(|v| &v.kind),
                             Some(ExprKind::SubjectPlaceholder)
@@ -435,7 +435,6 @@ impl<'a> Parser<'a> {
                             true,
                         );
                     }
-                }
                 let (record, changed) = self.rewrite_free_function_subject_record_expr(
                     record,
                     parameter,

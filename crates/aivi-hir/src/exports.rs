@@ -121,73 +121,73 @@ fn implicit_exported_names(module: &Module) -> Vec<ExportedName> {
         }
         // For sum types, also export each constructor individually so that
         // `use module (ConstructorName)` works for modules using implicit exports.
-        if let Item::Type(type_item) = item {
-            if let TypeItemBody::Sum(variants) = &type_item.body {
-                let deprecation = item_deprecation_notice(module, item);
-                let type_param_map: TypeParamMap = type_item
-                    .parameters
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &p)| (p, i))
-                    .collect();
-                let result_args: Vec<ImportValueType> = type_item
-                    .parameters
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &p)| {
-                        let name = module
-                            .type_parameters()
-                            .get(p)
-                            .map(|param| param.name.text().to_owned())
-                            .unwrap_or_else(|| format!("T{}", i + 1));
-                        ImportValueType::TypeVariable { index: i, name }
-                    })
-                    .collect();
-                for variant in variants.iter() {
-                    let name = variant.name.text().to_owned();
-                    let metadata = builtin_term_metadata(&name).unwrap_or_else(|| {
-                        let owner_type_name: String = type_item.name.text().into();
-                        if variant.fields.is_empty() {
-                            ImportBindingMetadata::Value {
-                                ty: ImportValueType::Named {
-                                    type_name: owner_type_name,
-                                    arguments: result_args.clone(),
-                                    definition: None,
-                                },
-                            }
-                        } else {
-                            let result = ImportValueType::Named {
+        if let Item::Type(type_item) = item
+            && let TypeItemBody::Sum(variants) = &type_item.body
+        {
+            let deprecation = item_deprecation_notice(module, item);
+            let type_param_map: TypeParamMap = type_item
+                .parameters
+                .iter()
+                .enumerate()
+                .map(|(i, &p)| (p, i))
+                .collect();
+            let result_args: Vec<ImportValueType> = type_item
+                .parameters
+                .iter()
+                .enumerate()
+                .map(|(i, &p)| {
+                    let name = module
+                        .type_parameters()
+                        .get(p)
+                        .map(|param| param.name.text().to_owned())
+                        .unwrap_or_else(|| format!("T{}", i + 1));
+                    ImportValueType::TypeVariable { index: i, name }
+                })
+                .collect();
+            for variant in variants.iter() {
+                let name = variant.name.text().to_owned();
+                let metadata = builtin_term_metadata(&name).unwrap_or_else(|| {
+                    let owner_type_name: String = type_item.name.text().into();
+                    if variant.fields.is_empty() {
+                        ImportBindingMetadata::Value {
+                            ty: ImportValueType::Named {
                                 type_name: owner_type_name,
                                 arguments: result_args.clone(),
                                 definition: None,
-                            };
-                            let ty = variant.fields.iter().rev().fold(result, |acc, field| {
-                                let param_ty =
-                                    poly_import_value_type(module, field.ty, &type_param_map)
-                                        .unwrap_or(ImportValueType::Named {
-                                            type_name: "Unknown".into(),
-                                            arguments: Vec::new(),
-                                            definition: None,
-                                        });
-                                ImportValueType::Arrow {
-                                    parameter: Box::new(param_ty),
-                                    result: Box::new(acc),
-                                }
-                            });
-                            ImportBindingMetadata::Value { ty }
+                            },
                         }
-                    });
-                    push_unique_exported_name(
-                        &mut names,
-                        ExportedName {
-                            name,
-                            kind: ExportedNameKind::Value,
-                            metadata,
-                            callable_type: None,
-                            deprecation: deprecation.clone(),
-                        },
-                    );
-                }
+                    } else {
+                        let result = ImportValueType::Named {
+                            type_name: owner_type_name,
+                            arguments: result_args.clone(),
+                            definition: None,
+                        };
+                        let ty = variant.fields.iter().rev().fold(result, |acc, field| {
+                            let param_ty =
+                                poly_import_value_type(module, field.ty, &type_param_map)
+                                    .unwrap_or(ImportValueType::Named {
+                                        type_name: "Unknown".into(),
+                                        arguments: Vec::new(),
+                                        definition: None,
+                                    });
+                            ImportValueType::Arrow {
+                                parameter: Box::new(param_ty),
+                                result: Box::new(acc),
+                            }
+                        });
+                        ImportBindingMetadata::Value { ty }
+                    }
+                });
+                push_unique_exported_name(
+                    &mut names,
+                    ExportedName {
+                        name,
+                        kind: ExportedNameKind::Value,
+                        metadata,
+                        callable_type: None,
+                        deprecation: deprecation.clone(),
+                    },
+                );
             }
         }
     }
@@ -264,10 +264,7 @@ fn explicit_item_exported_name(
     if item_has_test_decorator(module, item) {
         return None;
     }
-    let ambient = module
-        .ambient_items()
-        .iter()
-        .any(|ambient_id| *ambient_id == item_id);
+    let ambient = module.ambient_items().contains(&item_id);
     let deprecation = item_deprecation_notice(module, item);
     match item {
         Item::Type(item) => {
@@ -390,12 +387,12 @@ fn explicit_item_exported_name(
                     .members
                     .iter()
                     .enumerate()
-                    .filter_map(|(i, m)| {
-                        (m.kind == DomainMemberKind::Literal && m.name.text().chars().count() >= 2)
-                            .then(|| ImportedDomainLiteralSuffix {
-                                name: m.name.text().into(),
-                                member_index: i,
-                            })
+                    .filter(|&(_i, m)| {
+                        m.kind == DomainMemberKind::Literal && m.name.text().chars().count() >= 2
+                    })
+                    .map(|(i, m)| ImportedDomainLiteralSuffix {
+                        name: m.name.text().into(),
+                        member_index: i,
                     })
                     .collect();
                 ImportBindingMetadata::Domain {
@@ -509,12 +506,12 @@ fn item_to_exported_name(module: &Module, item_id: ItemId, item: &Item) -> Optio
                     .members
                     .iter()
                     .enumerate()
-                    .filter_map(|(i, m)| {
-                        (m.kind == DomainMemberKind::Literal && m.name.text().chars().count() >= 2)
-                            .then(|| ImportedDomainLiteralSuffix {
-                                name: m.name.text().into(),
-                                member_index: i,
-                            })
+                    .filter(|&(_i, m)| {
+                        m.kind == DomainMemberKind::Literal && m.name.text().chars().count() >= 2
+                    })
+                    .map(|(i, m)| ImportedDomainLiteralSuffix {
+                        name: m.name.text().into(),
+                        member_index: i,
                     })
                     .collect();
                 ImportBindingMetadata::Domain {
@@ -625,19 +622,13 @@ fn exported_function_type(module: &Module, item: &crate::FunctionItem) -> Option
         .enumerate()
         .map(|(i, &p)| (p, i))
         .collect();
-    let Some(mut result) = item
+    let mut result = item
         .annotation
-        .and_then(|annotation| poly_import_value_type(module, annotation, &type_param_map))
-    else {
-        return None;
-    };
+        .and_then(|annotation| poly_import_value_type(module, annotation, &type_param_map))?;
     for parameter in item.parameters.iter().rev() {
-        let Some(parameter_ty) = parameter
+        let parameter_ty = parameter
             .annotation
-            .and_then(|annotation| poly_import_value_type(module, annotation, &type_param_map))
-        else {
-            return None;
-        };
+            .and_then(|annotation| poly_import_value_type(module, annotation, &type_param_map))?;
         result = ImportValueType::Arrow {
             parameter: Box::new(parameter_ty),
             result: Box::new(result),
@@ -1374,11 +1365,10 @@ fn poly_flatten_type_application(
             // Imported type: use the imported name
             if let ResolutionState::Resolved(TypeResolution::Import(import_id)) =
                 reference.resolution.as_ref()
+                && let Some(binding) = module.imports().get(*import_id)
             {
-                if let Some(binding) = module.imports().get(*import_id) {
-                    let name = binding.imported_name.text().to_owned();
-                    return Some((PolyTypeConstructor::Named(name), Vec::new()));
-                }
+                let name = binding.imported_name.text().to_owned();
+                return Some((PolyTypeConstructor::Named(name), Vec::new()));
             }
             None
         }

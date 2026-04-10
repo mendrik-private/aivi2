@@ -651,7 +651,7 @@ fn execute_http_cycle(
             Err(HttpRequestFailure::TimedOut) => {
                 if attempt < plan.retry_attempts {
                     attempt += 1;
-                    if sleep_with_cancellation(retry_backoff(attempt), &port) {
+                    if sleep_with_cancellation(retry_backoff(attempt), port) {
                         return None;
                     }
                     continue;
@@ -664,7 +664,7 @@ fn execute_http_cycle(
             Err(HttpRequestFailure::Failed(message)) => {
                 if attempt < plan.retry_attempts {
                     attempt += 1;
-                    if sleep_with_cancellation(retry_backoff(attempt), &port) {
+                    if sleep_with_cancellation(retry_backoff(attempt), port) {
                         return None;
                     }
                     continue;
@@ -751,11 +751,10 @@ fn spawn_fs_watch_worker(
                     }
                 }
                 for path in previous.keys() {
-                    if !current.contains_key(path) {
-                        if emit_fs_event("Deleted", &plan, &port).is_err() {
+                    if !current.contains_key(path)
+                        && emit_fs_event("Deleted", &plan, &port).is_err() {
                             return;
                         }
-                    }
                 }
                 previous = current;
             }
@@ -949,14 +948,13 @@ fn spawn_mailbox_worker(
                 return;
             }
             // Check if a heartbeat ping is due.
-            if let Some(interval) = plan.heartbeat {
-                if last_heartbeat.elapsed() >= interval {
+            if let Some(interval) = plan.heartbeat
+                && last_heartbeat.elapsed() >= interval {
                     last_heartbeat = Instant::now();
                     if port.publish(DetachedRuntimeValue::unit()).is_err() {
                         return;
                     }
                 }
-            }
             match receiver.recv_timeout(Duration::from_millis(100)) {
                 Ok(message) => {
                     let value = match plan.result.success_from_text(&message) {
@@ -1038,8 +1036,8 @@ fn spawn_process_worker(
                 thread::sleep(Duration::from_millis(20));
             }
         });
-        if let Some(value) = plan.events.spawned_value().ok().flatten() {
-            if port
+        if let Some(value) = plan.events.spawned_value().ok().flatten()
+            && port
                 .publish(DetachedRuntimeValue::from_runtime_owned(value))
                 .is_err()
             {
@@ -1047,7 +1045,6 @@ fn spawn_process_worker(
                 kill_pid(pid);
                 return;
             }
-        }
         let stdout_handle = child.stdout.take().map(|stdout| {
             let port = port.clone();
             let events = plan.events.clone();

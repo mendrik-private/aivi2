@@ -1125,10 +1125,10 @@ where
                 .graph
                 .reactive_clause(clause)
                 .expect("reactive signal clauses are built from the same graph");
-            if let Some(trigger_signal) = clause_spec.trigger_signal() {
-                if pending[trigger_signal.index()].is_unchanged() {
-                    continue;
-                }
+            if let Some(trigger_signal) = clause_spec.trigger_signal()
+                && pending[trigger_signal.index()].is_unchanged()
+            {
+                continue;
             }
             let should_commit = evaluator.try_evaluate_reactive_guard(
                 signal,
@@ -1845,8 +1845,8 @@ mod tests {
         scheduler.queue_dispose_owner(session).unwrap();
         let outcome = scheduler.tick(&mut evaluator);
 
-        assert_eq!(scheduler.is_owner_active(session).unwrap(), false);
-        assert_eq!(scheduler.is_owner_active(widget).unwrap(), false);
+        assert!(!scheduler.is_owner_active(session).unwrap());
+        assert!(!scheduler.is_owner_active(widget).unwrap());
         assert_eq!(scheduler.current_value(source.as_signal()).unwrap(), None);
         assert_eq!(scheduler.current_value(local.as_signal()).unwrap(), None);
         assert_eq!(scheduler.current_value(view.as_signal()).unwrap(), None);
@@ -2069,8 +2069,8 @@ mod tests {
         }
 
         let outcome = scheduler.tick(&mut evaluator);
-        assert_eq!(scheduler.is_owner_active(session).unwrap(), false);
-        assert_eq!(scheduler.is_owner_active(widget).unwrap(), false);
+        assert!(!scheduler.is_owner_active(session).unwrap());
+        assert!(!scheduler.is_owner_active(widget).unwrap());
         assert_eq!(
             scheduler.current_value(root.as_signal()).unwrap().copied(),
             Some(999)
@@ -2448,7 +2448,7 @@ mod tests {
             for step in 0..20 {
                 let mut changed_inputs = std::collections::BTreeSet::new();
                 changed_inputs.insert(rng.next_usize(inputs.len()));
-                while changed_inputs.len() < inputs.len() && rng.next_u32() % 3 == 0 {
+                while changed_inputs.len() < inputs.len() && rng.next_u32().is_multiple_of(3) {
                     changed_inputs.insert(rng.next_usize(inputs.len()));
                 }
 
@@ -2524,7 +2524,7 @@ mod tests {
             .queue_publication(Publication::new(stamp, 100_i32))
             .unwrap();
 
-        let mut eval_counts = vec![0usize; N];
+        let mut eval_counts = [0usize; N];
         let outcome = scheduler.tick(&mut |signal, inputs: DependencyValues<'_, i32>| {
             let idx = derived_handles
                 .iter()

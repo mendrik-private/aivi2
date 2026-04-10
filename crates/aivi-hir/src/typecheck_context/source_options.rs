@@ -1030,11 +1030,10 @@ pub(crate) fn source_option_expected_matches_actual_type(
     actual: &SourceOptionActualType,
     bindings: &mut SourceOptionTypeBindings,
 ) -> bool {
-    if !expected.is_signal_contract() {
-        if let SourceOptionActualType::Signal(inner) = actual {
+    if !expected.is_signal_contract()
+        && let SourceOptionActualType::Signal(inner) = actual {
             return source_option_expected_matches_actual_type_inner(expected, inner, bindings);
         }
-    }
 
     source_option_expected_matches_actual_type_inner(expected, actual, bindings)
 }

@@ -81,21 +81,21 @@ impl Formatter {
     }
 
     fn format_item(&self, item: &Item) -> Vec<String> {
-        if let Item::Fun(fun) = item {
-            if fun.annotation.is_some() {
-                let rendered = self.format_fun_item(fun);
-                let mut lines = Vec::new();
-                for comment in &item.base().leading_comments {
-                    lines.push(comment.clone());
+        if let Item::Fun(fun) = item
+            && fun.annotation.is_some()
+        {
+            let rendered = self.format_fun_item(fun);
+            let mut lines = Vec::new();
+            for comment in &item.base().leading_comments {
+                lines.push(comment.clone());
+            }
+            if let Some((type_line, rest)) = rendered.split_first() {
+                lines.push(type_line.clone());
+                for decorator in item.decorators() {
+                    lines.extend(self.format_decorator(decorator).into_lines());
                 }
-                if let Some((type_line, rest)) = rendered.split_first() {
-                    lines.push(type_line.clone());
-                    for decorator in item.decorators() {
-                        lines.extend(self.format_decorator(decorator).into_lines());
-                    }
-                    lines.extend(rest.iter().cloned());
-                    return lines;
-                }
+                lines.extend(rest.iter().cloned());
+                return lines;
             }
         }
 
@@ -238,10 +238,10 @@ impl Formatter {
             return vec![header];
         };
 
-        if let ExprKind::Pipe(pipe) = &body.kind {
-            if let Some(lines) = self.format_pipe_with_head_lines(&format!("{header} ="), pipe) {
-                return lines;
-            }
+        if let ExprKind::Pipe(pipe) = &body.kind
+            && let Some(lines) = self.format_pipe_with_head_lines(&format!("{header} ="), pipe)
+        {
+            return lines;
         }
 
         let force_break =
@@ -337,17 +337,16 @@ impl Formatter {
                     return rendered;
                 }
 
-                if let ExprKind::Pipe(pipe) = &body.kind {
-                    if let Some(lines) =
+                if let ExprKind::Pipe(pipe) = &body.kind
+                    && let Some(lines) =
                         self.format_pipe_with_head_lines(&format!("{prefix}:"), pipe)
-                    {
-                        rendered.extend(
-                            lines
-                                .into_iter()
-                                .map(|line| format!("{}{}", spaces(INDENT_WIDTH), line)),
-                        );
-                        return rendered;
-                    }
+                {
+                    rendered.extend(
+                        lines
+                            .into_iter()
+                            .map(|line| format!("{}{}", spaces(INDENT_WIDTH), line)),
+                    );
+                    return rendered;
                 }
 
                 let block = self.format_expr_block(body, true);
@@ -444,14 +443,14 @@ impl Formatter {
             return lines;
         };
 
-        if let ExprKind::Pipe(pipe) = &body.kind {
-            if let Some(lines) = self.format_pipe_with_head_lines(&header, pipe) {
-                let mut rendered = lines;
-                if let Some(annotation) = self.format_fun_signature_annotation(item) {
-                    rendered.insert(0, format!("type {annotation}"));
-                }
-                return rendered;
+        if let ExprKind::Pipe(pipe) = &body.kind
+            && let Some(lines) = self.format_pipe_with_head_lines(&header, pipe)
+        {
+            let mut rendered = lines;
+            if let Some(annotation) = self.format_fun_signature_annotation(item) {
+                rendered.insert(0, format!("type {annotation}"));
             }
+            return rendered;
         }
 
         let force_break = self.should_force_expr_break(INDENT_WIDTH, body);
@@ -1542,10 +1541,10 @@ impl Formatter {
         None
     }
 
-    fn split_type_signature_annotation<'a>(
-        annotation: &'a TypeExpr,
+    fn split_type_signature_annotation(
+        annotation: &TypeExpr,
         arity: usize,
-    ) -> Option<(Vec<&'a TypeExpr>, &'a TypeExpr)> {
+    ) -> Option<(Vec<&TypeExpr>, &TypeExpr)> {
         let mut parameters = Vec::with_capacity(arity);
         let mut current = annotation;
         for _ in 0..arity {

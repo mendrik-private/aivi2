@@ -33,31 +33,31 @@ fn run() -> Result<ExitCode, String> {
         return Ok(ExitCode::SUCCESS);
     }
 
-    if first == OsString::from("check") {
+    if first == "check" {
         return run_check(args);
     }
 
-    if first == OsString::from("compile") {
+    if first == "compile" {
         return run_compile(args);
     }
 
-    if first == OsString::from("build") {
+    if first == "build" {
         return run_build(args);
     }
 
-    if first == OsString::from("run") {
+    if first == "run" {
         return run_markup(args);
     }
 
-    if first == OsString::from("execute") {
+    if first == "execute" {
         return run_execute(args);
     }
 
-    if first == OsString::from("test") {
+    if first == "test" {
         return run_test(args);
     }
 
-    if first == OsString::from("lex") {
+    if first == "lex" {
         let path_arg = take_path_or_help(args)?;
         return match path_arg {
             PathOrHelp::Help => print_help(Some(std::ffi::OsStr::new("lex"))),
@@ -65,23 +65,23 @@ fn run() -> Result<ExitCode, String> {
         };
     }
 
-    if first == OsString::from("lsp") {
+    if first == "lsp" {
         return run_lsp(args);
     }
 
-    if first == OsString::from("mcp") {
+    if first == "mcp" {
         return mcp::run_mcp(args);
     }
 
-    if first == OsString::from("manual-snippets") {
+    if first == "manual-snippets" {
         return manual_snippets::run(args);
     }
 
-    if first == OsString::from("fmt") {
+    if first == "fmt" {
         return run_fmt(args);
     }
 
-    if first == OsString::from("openapi-gen") {
+    if first == "openapi-gen" {
         return run_openapi_gen(args);
     }
 
@@ -118,11 +118,11 @@ fn run_fmt(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String>
         return print_help(Some(std::ffi::OsStr::new("fmt")));
     }
 
-    if next == OsString::from("--stdin") {
+    if next == "--stdin" {
         return format_stdin();
     }
 
-    if next == OsString::from("--check") {
+    if next == "--check" {
         // Collect remaining paths; if none given use no-op (no files = no changes).
         let paths: Vec<PathBuf> = args.map(PathBuf::from).collect();
         return format_check(&paths);
@@ -150,7 +150,7 @@ fn run_openapi_gen(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode,
 
     let mut output_path: Option<PathBuf> = None;
     while let Some(arg) = args.next() {
-        if arg == OsString::from("-o") {
+        if arg == "-o" {
             let out = args
                 .next()
                 .ok_or_else(|| "expected a path after `-o`".to_owned())?;
@@ -203,11 +203,11 @@ fn run_check(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Strin
         if argument == "--help" || argument == "-h" {
             return print_help(Some(std::ffi::OsStr::new("check")));
         }
-        if argument == OsString::from("--timings") {
+        if argument == "--timings" {
             timings = true;
             continue;
         }
-        if argument == OsString::from("--path") {
+        if argument == "--path" {
             let path = args
                 .next()
                 .map(PathBuf::from)
@@ -223,11 +223,10 @@ fn run_check(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Strin
     }
 
     // Directory: check every .aivi file found recursively inside it.
-    if let Some(ref dir) = requested_path {
-        if dir.is_dir() {
+    if let Some(ref dir) = requested_path
+        && dir.is_dir() {
             return check_directory(dir, timings);
         }
-    }
 
     // No path given and the manifest declares multiple apps: check them all.
     if requested_path.is_none() {
@@ -254,7 +253,7 @@ fn run_compile(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Str
         if argument == "--help" || argument == "-h" {
             return print_help(Some(std::ffi::OsStr::new("compile")));
         }
-        if argument == OsString::from("--path") {
+        if argument == "--path" {
             let path = args
                 .next()
                 .map(PathBuf::from)
@@ -264,7 +263,7 @@ fn run_compile(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Str
             }
             continue;
         }
-        if argument == OsString::from("-o") || argument == OsString::from("--output") {
+        if argument == "-o" || argument == "--output" {
             let artifact = args
                 .next()
                 .map(PathBuf::from)
@@ -293,7 +292,7 @@ fn run_build(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Strin
         if argument == "--help" || argument == "-h" {
             return print_help(Some(std::ffi::OsStr::new("build")));
         }
-        if argument == OsString::from("--app") {
+        if argument == "--app" {
             let name = args
                 .next()
                 .ok_or_else(|| "expected a name after `--app` for `build`".to_owned())?;
@@ -305,7 +304,7 @@ fn run_build(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Strin
             }
             continue;
         }
-        if argument == OsString::from("--path") {
+        if argument == "--path" {
             let path = args
                 .next()
                 .map(PathBuf::from)
@@ -315,7 +314,7 @@ fn run_build(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Strin
             }
             continue;
         }
-        if argument == OsString::from("-o") || argument == OsString::from("--output") {
+        if argument == "-o" || argument == "--output" {
             let bundle = args
                 .next()
                 .map(PathBuf::from)
@@ -326,7 +325,7 @@ fn run_build(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Strin
             continue;
         }
 
-        if argument == OsString::from("--view") {
+        if argument == "--view" {
             let view = args
                 .next()
                 .ok_or_else(|| "expected a value name after `--view` for `build`".to_owned())?;
@@ -393,12 +392,12 @@ fn run_markup(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Stri
             return print_help(Some(std::ffi::OsStr::new("run")));
         }
 
-        if argument == OsString::from("--timings") {
+        if argument == "--timings" {
             timings = true;
             continue;
         }
 
-        if argument == OsString::from("--app") {
+        if argument == "--app" {
             let name = args
                 .next()
                 .ok_or_else(|| "expected a name after `--app` for `run`".to_owned())?;
@@ -411,7 +410,7 @@ fn run_markup(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Stri
             continue;
         }
 
-        if argument == OsString::from("--path") {
+        if argument == "--path" {
             let path = args
                 .next()
                 .map(PathBuf::from)
@@ -422,7 +421,7 @@ fn run_markup(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Stri
             continue;
         }
 
-        if argument == OsString::from("--view") {
+        if argument == "--view" {
             let view = args
                 .next()
                 .ok_or_else(|| "expected a value name after `--view` for `run`".to_owned())?;
@@ -456,8 +455,8 @@ fn run_markup(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Stri
     // own GTK main loop.
     if requested_path.is_none() && requested_app.is_none() {
         let workspace_root = discover_workspace_root_from_directory(&cwd);
-        if let Ok(manifest) = parse_manifest(&workspace_root) {
-            if manifest.apps.len() > 1 {
+        if let Ok(manifest) = parse_manifest(&workspace_root)
+            && manifest.apps.len() > 1 {
                 let exe = env::current_exe()
                     .map_err(|e| format!("failed to locate aivi executable: {e}"))?;
                 let mut children: Vec<std::process::Child> = manifest
@@ -494,7 +493,6 @@ fn run_markup(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Stri
                     ExitCode::SUCCESS
                 });
             }
-        }
     }
 
     let resolved =
@@ -543,7 +541,7 @@ fn run_execute(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Str
         if argument == "--help" || argument == "-h" {
             return print_help(Some(std::ffi::OsStr::new("execute")));
         }
-        if argument == OsString::from("--path") {
+        if argument == "--path" {
             let path = args
                 .next()
                 .map(PathBuf::from)
@@ -553,7 +551,7 @@ fn run_execute(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, Str
             }
             continue;
         }
-        if argument == OsString::from("--") {
+        if argument == "--" {
             accepting_program_args = true;
             continue;
         }
@@ -578,7 +576,7 @@ fn run_test(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, String
         if argument == "--help" || argument == "-h" {
             return print_help(Some(std::ffi::OsStr::new("test")));
         }
-        if argument == OsString::from("--path") {
+        if argument == "--path" {
             let path = args
                 .next()
                 .map(PathBuf::from)

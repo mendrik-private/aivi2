@@ -303,6 +303,12 @@ pub struct CustomSourceRecurrenceWakeupContext {
     has_reactive_inputs: bool,
 }
 
+impl Default for CustomSourceRecurrenceWakeupContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CustomSourceRecurrenceWakeupContext {
     pub const fn new() -> Self {
         Self {

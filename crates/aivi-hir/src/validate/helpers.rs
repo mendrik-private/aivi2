@@ -237,11 +237,10 @@ fn suggest_similar_name(module: &Module, target: &str) -> Option<String> {
     for (_, item) in module.items().iter() {
         if let Some(name) = item_name(Some(item)) {
             let d = levenshtein(target, &name);
-            if d > 0 && d <= max_distance {
-                if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+            if d > 0 && d <= max_distance
+                && best.as_ref().is_none_or(|(bd, _)| d < *bd) {
                     best = Some((d, name));
                 }
-            }
         }
     }
 
@@ -249,11 +248,10 @@ fn suggest_similar_name(module: &Module, target: &str) -> Option<String> {
     for (_, import) in module.imports().iter() {
         let name = import.local_name.text();
         let d = levenshtein(target, name);
-        if d > 0 && d <= max_distance {
-            if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+        if d > 0 && d <= max_distance
+            && best.as_ref().is_none_or(|(bd, _)| d < *bd) {
                 best = Some((d, name.to_owned()));
             }
-        }
     }
 
     best.map(|(_, name)| name)

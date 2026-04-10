@@ -370,10 +370,10 @@ impl RootDatabase {
         if current.revision != revision {
             return None;
         }
-        if let Some(cached) = state.parsed.get(&file.id) {
-            if cached.revision == revision {
-                return Some(Arc::clone(&cached.value));
-            }
+        if let Some(cached) = state.parsed.get(&file.id)
+            && cached.revision == revision
+        {
+            return Some(Arc::clone(&cached.value));
         }
         state.parsed.insert(
             file.id,
@@ -409,10 +409,10 @@ impl RootDatabase {
         if current.revision != revision {
             return None;
         }
-        if let Some(cached) = state.hir.get(&file.id) {
-            if cached.revision == revision {
-                return Some(Arc::clone(&cached.value));
-            }
+        if let Some(cached) = state.hir.get(&file.id)
+            && cached.revision == revision
+        {
+            return Some(Arc::clone(&cached.value));
         }
         state.hir.insert(
             file.id,

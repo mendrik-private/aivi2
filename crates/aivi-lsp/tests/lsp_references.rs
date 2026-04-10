@@ -104,7 +104,7 @@ async fn find_refs_at_use_site_matches_declaration_site_results() {
         "find-refs at the use site of a binding should return locations"
     );
     assert!(
-        result.unwrap().len() >= 1,
+        !result.unwrap().is_empty(),
         "at least the reference site itself should be returned"
     );
 }

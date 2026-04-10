@@ -809,13 +809,13 @@ pub fn validate_program(program: &Program) -> Result<(), ValidationErrors> {
                     });
                 });
         }
-        if let Some(decode) = source.decode {
-            if !program.decode_plans().contains(decode) {
-                errors.push(ValidationError::SourceUnknownDecode {
-                    source: source_id,
-                    decode,
-                });
-            }
+        if let Some(decode) = source.decode
+            && !program.decode_plans().contains(decode)
+        {
+            errors.push(ValidationError::SourceUnknownDecode {
+                source: source_id,
+                decode,
+            });
         }
     }
 
@@ -1006,12 +1006,11 @@ fn validate_pipeline(
                 } else {
                     errors.push(ValidationError::UnknownKernel { kernel: *predicate });
                 }
-                if let Some(kernel) = program.kernels().get(*predicate) {
-                    if !is_bool_layout(program, kernel.result_layout) {
-                        errors.push(ValidationError::SignalFilterPredicateNotBool {
-                            kernel: *predicate,
-                        });
-                    }
+                if let Some(kernel) = program.kernels().get(*predicate)
+                    && !is_bool_layout(program, kernel.result_layout)
+                {
+                    errors
+                        .push(ValidationError::SignalFilterPredicateNotBool { kernel: *predicate });
                 }
             }
             StageKind::TruthyFalsy(pair) => {
@@ -1166,12 +1165,12 @@ fn validate_pipeline(
                             kernel: filter.predicate,
                         });
                     }
-                    if let Some(kernel) = program.kernels().get(filter.predicate) {
-                        if !is_bool_layout(program, kernel.result_layout) {
-                            errors.push(ValidationError::SignalFilterPredicateNotBool {
-                                kernel: filter.predicate,
-                            });
-                        }
+                    if let Some(kernel) = program.kernels().get(filter.predicate)
+                        && !is_bool_layout(program, kernel.result_layout)
+                    {
+                        errors.push(ValidationError::SignalFilterPredicateNotBool {
+                            kernel: filter.predicate,
+                        });
                     }
                 }
                 if let Some(join) = &fanout.join {
@@ -1323,13 +1322,13 @@ fn validate_kernel(
     kernel: &crate::Kernel,
     errors: &mut Vec<ValidationError>,
 ) {
-    if let Some(layout) = kernel.input_subject {
-        if !program.layouts().contains(layout) {
-            errors.push(ValidationError::KernelUnknownLayout {
-                kernel: kernel_id,
-                layout,
-            });
-        }
+    if let Some(layout) = kernel.input_subject
+        && !program.layouts().contains(layout)
+    {
+        errors.push(ValidationError::KernelUnknownLayout {
+            kernel: kernel_id,
+            layout,
+        });
     }
     for layout in &kernel.inline_subjects {
         if !program.layouts().contains(*layout) {
@@ -1591,13 +1590,13 @@ fn validate_kernel(
                         InlinePipeStageKind::Debug { .. } => {}
                         InlinePipeStageKind::Gate { predicate, .. } => {
                             push_expr(kernel_id, *predicate, kernel, &mut work, errors);
-                            if let Some(pred_expr) = kernel.exprs().get(*predicate) {
-                                if !is_bool_layout(program, pred_expr.layout) {
-                                    errors.push(ValidationError::InlinePipeGatePredicateNotBool {
-                                        kernel: kernel_id,
-                                        expr: *predicate,
-                                    });
-                                }
+                            if let Some(pred_expr) = kernel.exprs().get(*predicate)
+                                && !is_bool_layout(program, pred_expr.layout)
+                            {
+                                errors.push(ValidationError::InlinePipeGatePredicateNotBool {
+                                    kernel: kernel_id,
+                                    expr: *predicate,
+                                });
                             }
                         }
                         InlinePipeStageKind::Case { arms } => {
@@ -1859,11 +1858,7 @@ fn validate_no_item_dep_cycles(program: &Program, errors: &mut Vec<ValidationErr
             color.insert(start, 1);
             path.push(start);
             let mut stack: Vec<(ItemId, usize)> = vec![(start, 0)];
-            loop {
-                let (node, idx) = match stack.last().copied() {
-                    Some(top) => top,
-                    None => break,
-                };
+            while let Some((node, idx)) = stack.last().copied() {
                 let neighbors: Vec<ItemId> = deps.get(&node).cloned().unwrap_or_default();
                 if idx < neighbors.len() {
                     // Advance the index on the stack top before touching stack structure.

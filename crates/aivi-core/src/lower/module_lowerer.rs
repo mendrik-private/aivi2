@@ -313,12 +313,11 @@ impl<'a> ModuleLowerer<'a> {
         // Signal imports are excluded: they use deterministic synthetic origins that must not
         // be remapped.
         for (import_id, &core_id) in &self.import_item_map {
-            if let Some(binding) = ws_hir.imports().get(*import_id) {
-                if !matches!(self.module.items()[core_id].kind, ItemKind::Signal(_)) {
+            if let Some(binding) = ws_hir.imports().get(*import_id)
+                && !matches!(self.module.items()[core_id].kind, ItemKind::Signal(_)) {
                     let local_name: Box<str> = binding.local_name.text().into();
                     name_map.entry(local_name).or_insert(core_id);
                 }
-            }
         }
         // Second pass: directly resolve imports not yet in import_item_map by looking up the
         // workspace name maps of their source modules. This handles pure re-export shims where
@@ -339,14 +338,11 @@ impl<'a> ModuleLowerer<'a> {
             if is_signal {
                 continue;
             }
-            if let Some(source_module) = self.import_to_module.get(&import_id) {
-                if let Some(source_name_map) = self.workspace_name_maps.get(source_module.as_ref())
-                {
-                    if let Some(&core_id) = source_name_map.get(binding.imported_name.text()) {
+            if let Some(source_module) = self.import_to_module.get(&import_id)
+                && let Some(source_name_map) = self.workspace_name_maps.get(source_module.as_ref())
+                    && let Some(&core_id) = source_name_map.get(binding.imported_name.text()) {
                         name_map.insert(local_name, core_id);
                     }
-                }
-            }
         }
         self.workspace_name_maps
             .insert(module_name.into(), name_map);
@@ -1453,11 +1449,10 @@ impl<'a> ModuleLowerer<'a> {
                     pipe_expr: node.pipe_expr,
                 });
             }
-            if let Some(&owner) = self.item_map.get(&node.owner) {
-                if let Some(item) = self.module.items_mut().get_mut(owner) {
+            if let Some(&owner) = self.item_map.get(&node.owner)
+                && let Some(item) = self.module.items_mut().get_mut(owner) {
                     item.body = None;
                 }
-            }
         }
     }
 
@@ -1939,7 +1934,7 @@ impl<'a> ModuleLowerer<'a> {
             }
             aivi_hir::ResolutionState::Resolved(aivi_hir::TermResolution::IntrinsicValue(
                 value,
-            )) => Reference::IntrinsicValue(value.clone()),
+            )) => Reference::IntrinsicValue(*value),
             aivi_hir::ResolutionState::Resolved(aivi_hir::TermResolution::Import(import)) => {
                 // An imported term used in a pattern must be a sum constructor (e.g. `LightTheme`,
                 // `ChooseProviderStep`). Seed the import so regular expression lowering still has
@@ -2575,20 +2570,16 @@ impl<'a> ModuleLowerer<'a> {
         // signal lookup. Using the workspace item's origin (which has a different base) would
         // break the assembly → backend item mapping in startup.rs index_origins.
         let (kind, parameters) = self.import_item_shape(import, &binding)?;
-        if !matches!(kind, ItemKind::Signal(_)) {
-            if let Some(module_name) = binding
+        if !matches!(kind, ItemKind::Signal(_))
+            && let Some(module_name) = binding
                 .source_module
                 .as_deref()
                 .or_else(|| self.import_to_module.get(&import).map(|name| name.as_ref()))
-            {
-                if let Some(name_map) = self.workspace_name_maps.get(module_name) {
-                    if let Some(&core_item_id) = name_map.get(binding.imported_name.text()) {
+                && let Some(name_map) = self.workspace_name_maps.get(module_name)
+                    && let Some(&core_item_id) = name_map.get(binding.imported_name.text()) {
                         self.import_item_map.insert(import, core_item_id);
                         return Ok(core_item_id);
                     }
-                }
-            }
-        }
 
         // Use a deterministic synthetic origin for Signal imports so that the runtime assembly
         // builder can independently derive the same HirItemId for the same import without
@@ -2703,8 +2694,8 @@ impl<'a> ModuleLowerer<'a> {
         //   `filled : Int -> Int -> (Int -> Int -> A) -> Matrix A`
         // (result type Named("Matrix")) would be misidentified as a constructor,
         // producing a fake Sum value at runtime instead of calling the real function body.
-        if let ImportBindingMetadata::Value { ty } = &binding.metadata {
-            if !parameters.is_empty() && binding.callable_type.is_none() {
+        if let ImportBindingMetadata::Value { ty } = &binding.metadata
+            && !parameters.is_empty() && binding.callable_type.is_none() {
                 // Peel Arrow layers to find the result type
                 let mut result_ty_ref = ty;
                 for _ in parameters {
@@ -2769,7 +2760,6 @@ impl<'a> ModuleLowerer<'a> {
                     return Ok(Some(apply_id));
                 }
             }
-        }
 
         let ImportBindingMetadata::IntrinsicValue { value, .. } = &binding.metadata else {
             return Ok(None);
@@ -2785,7 +2775,7 @@ impl<'a> ModuleLowerer<'a> {
                         _ => unreachable!("non-intrinsic imports are filtered above"),
                     }
                 })),
-                kind: ExprKind::Reference(Reference::IntrinsicValue(value.clone())),
+                kind: ExprKind::Reference(Reference::IntrinsicValue(*value)),
             },
         )?;
         if parameters.is_empty() {
@@ -3076,7 +3066,7 @@ impl<'a> ModuleLowerer<'a> {
                                     )?,
                                 GateRuntimeReference::Builtin(term) => Reference::Builtin(*term),
                                 GateRuntimeReference::IntrinsicValue(value) => {
-                                    Reference::IntrinsicValue(value.clone())
+                                    Reference::IntrinsicValue(*value)
                                 }
                             };
                             values.push(self.alloc_expr(

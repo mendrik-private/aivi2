@@ -143,18 +143,17 @@ impl Workspace {
         }
 
         // For the bundled stdlib, check the embedded map first to avoid disk I/O.
-        if let Some(bundled_root) = &self.bundled_stdlib_root {
-            if root == bundled_root.as_path() {
-                if let Ok(relative) = path.strip_prefix(bundled_root) {
-                    let key = relative.to_str()?.replace('\\', "/");
-                    if let Some(text) = STDLIB_EMBEDDED
-                        .iter()
-                        .find(|(k, _)| *k == key)
-                        .map(|(_, v)| *v)
-                    {
-                        return Some(SourceFile::new(db, path, text.to_owned()));
-                    }
-                }
+        if let Some(bundled_root) = &self.bundled_stdlib_root
+            && root == bundled_root.as_path()
+            && let Ok(relative) = path.strip_prefix(bundled_root)
+        {
+            let key = relative.to_str()?.replace('\\', "/");
+            if let Some(text) = STDLIB_EMBEDDED
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| *v)
+            {
+                return Some(SourceFile::new(db, path, text.to_owned()));
             }
         }
 
@@ -238,11 +237,11 @@ fn discover_bundled_stdlib_root() -> Option<PathBuf> {
 fn find_bundled_stdlib_root() -> Option<PathBuf> {
     let mut candidates = vec![PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib")];
 
-    if let Ok(executable) = env::current_exe() {
-        if let Some(parent) = executable.parent() {
-            candidates.push(parent.join("stdlib"));
-            candidates.push(parent.join("../stdlib"));
-        }
+    if let Ok(executable) = env::current_exe()
+        && let Some(parent) = executable.parent()
+    {
+        candidates.push(parent.join("stdlib"));
+        candidates.push(parent.join("../stdlib"));
     }
 
     candidates

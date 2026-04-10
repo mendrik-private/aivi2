@@ -88,16 +88,16 @@ pub(crate) fn run(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, 
     let mut write = false;
 
     while let Some(argument) = args.next() {
-        if argument == OsString::from("--help") || argument == OsString::from("-h") {
+        if argument == "--help" || argument == "-h" {
             return super::print_help(Some(std::ffi::OsStr::new("manual-snippets")));
         }
 
-        if argument == OsString::from("--write") {
+        if argument == "--write" {
             write = true;
             continue;
         }
 
-        if argument == OsString::from("--root") {
+        if argument == "--root" {
             let path = args
                 .next()
                 .map(PathBuf::from)
@@ -106,7 +106,7 @@ pub(crate) fn run(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, 
             continue;
         }
 
-        if argument == OsString::from("--todo") {
+        if argument == "--todo" {
             let path = args
                 .next()
                 .map(PathBuf::from)
@@ -216,9 +216,7 @@ pub(crate) fn run(mut args: impl Iterator<Item = OsString>) -> Result<ExitCode, 
     )
     .map_err(|error| format!("failed to write summary: {error}"))?;
 
-    if write && count_unresolved_in_report(&todo_path)? == 0 {
-        Ok(ExitCode::SUCCESS)
-    } else if !write && rewritten_blocks == 0 && count_unresolved_in_report(&todo_path)? == 0 {
+    if (write || (rewritten_blocks == 0)) && count_unresolved_in_report(&todo_path)? == 0 {
         Ok(ExitCode::SUCCESS)
     } else {
         Ok(ExitCode::FAILURE)

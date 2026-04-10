@@ -586,16 +586,13 @@ impl<'a> KindInference<'a> {
     fn resolve(&mut self, term: KindTermId) -> KindTermId {
         let mut current = term;
         let mut trail = Vec::new();
-        loop {
-            match self.terms[current.index()] {
-                KindTerm::Var(var) => match self.bindings[var.index()] {
-                    Some(next) => {
-                        trail.push(current);
-                        current = next;
-                    }
-                    None => break,
-                },
-                KindTerm::Type | KindTerm::Arrow { .. } => break,
+        while let KindTerm::Var(var) = self.terms[current.index()] {
+            match self.bindings[var.index()] {
+                Some(next) => {
+                    trail.push(current);
+                    current = next;
+                }
+                None => break,
             }
         }
         for seen in trail {

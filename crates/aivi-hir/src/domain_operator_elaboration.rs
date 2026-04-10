@@ -44,12 +44,11 @@ pub(crate) fn select_domain_binary_operator(
     {
         matches.push(result);
     }
-    if !left.same_shape(right) {
-        if let Some(result) =
+    if !left.same_shape(right)
+        && let Some(result) =
             match_domain_binary_operator(module, typing, right, left, right, operator)
-        {
-            matches.push(result);
-        }
+    {
+        matches.push(result);
     }
     match matches.len() {
         0 => Ok(None),

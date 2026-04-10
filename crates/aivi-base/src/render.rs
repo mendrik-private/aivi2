@@ -15,20 +15,15 @@ use crate::diagnostic::{Diagnostic, LabelStyle, Severity};
 use crate::source::{SourceDatabase, SourceSpan};
 
 /// Whether to emit ANSI color escapes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ColorMode {
     /// Detect from terminal capabilities (isatty + env vars).
+    #[default]
     Auto,
     /// Always emit ANSI escapes.
     Always,
     /// Never emit ANSI escapes (plain text).
     Never,
-}
-
-impl Default for ColorMode {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 // ── ANSI escape helpers ─────────────────────────────────────────────────────

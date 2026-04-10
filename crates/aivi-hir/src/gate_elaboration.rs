@@ -2005,7 +2005,7 @@ fn runtime_reference_for_name(
             Ok(GateRuntimeReference::Builtin(*builtin))
         }
         crate::ResolutionState::Resolved(TermResolution::IntrinsicValue(value)) => {
-            Ok(GateRuntimeReference::IntrinsicValue(value.clone()))
+            Ok(GateRuntimeReference::IntrinsicValue(*value))
         }
         crate::ResolutionState::Resolved(TermResolution::Import(import_id)) => {
             if let Some(item_id) = ambient_item_for_import(module, *import_id) {
@@ -2091,7 +2091,7 @@ mod tests {
         GateCoreExprKind, GateElaborationBlocker, GateRuntimeExprKind, GateRuntimeProjectionBase,
         GateRuntimeReference, GateRuntimeUnsupportedKind, GateStageOutcome, elaborate_gates,
     };
-    use crate::test_support::{fixture_root, item_name, lower_fixture, lower_text};
+    use crate::test_support::{item_name, lower_fixture, lower_text};
     use crate::{BuiltinType, GateType};
 
     #[test]

@@ -136,12 +136,11 @@ impl NavigationAnalysis {
         let mut locations = Vec::new();
         for (span, site) in self.collect_all_sites() {
             let site_targets = self.definition_targets_for_site(db, &site);
-            if site_targets.iter().any(|t| targets.contains(t)) {
-                if let Some(loc) = location_for_target(db, NavigationTarget::new(self.file, span)) {
-                    if !locations.contains(&loc) {
-                        locations.push(loc);
-                    }
-                }
+            if site_targets.iter().any(|t| targets.contains(t))
+                && let Some(loc) = location_for_target(db, NavigationTarget::new(self.file, span))
+                && !locations.contains(&loc)
+            {
+                locations.push(loc);
             }
         }
         locations
@@ -855,7 +854,7 @@ impl NavigationAnalysis {
                 self.import_definition_targets_for_import_id(db, *import)
             }
             ResolutionState::Resolved(TermResolution::IntrinsicValue(value)) => {
-                self.intrinsic_import_targets(db, name, value.clone())
+                self.intrinsic_import_targets(db, name, *value)
             }
             ResolutionState::Resolved(TermResolution::DomainMember(resolution)) => {
                 self.domain_member_targets(*resolution)
@@ -1431,9 +1430,7 @@ impl NavigationAnalysis {
             return None;
         }
 
-        let Some(between) = self.source.text().get(start..end) else {
-            return None;
-        };
+        let between = self.source.text().get(start..end)?;
         let trimmed = between.trim();
         if trimmed.is_empty() {
             return None;

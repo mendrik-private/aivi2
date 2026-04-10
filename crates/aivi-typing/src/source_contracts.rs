@@ -519,8 +519,8 @@ impl SourceContractType {
     pub fn to_kind_expr(self, store: &mut KindStore) -> KindExprId {
         match self {
             Self::Atom(atom) => atom.to_kind_expr(store),
-            Self::List(element) => apply_unary_kind_constructor("List", element, store),
-            Self::Map { key, value } => apply_binary_kind_constructor("Map", key, value, store),
+            Self::List(element) => apply_unary_kind_constructor("List", *element, store),
+            Self::Map { key, value } => apply_binary_kind_constructor("Map", key, *value, store),
             Self::Signal(payload) => {
                 let constructor = store.add_constructor("Signal".to_owned(), Kind::constructor(1));
                 let callee = store.constructor_expr(constructor);
@@ -533,7 +533,7 @@ impl SourceContractType {
 
 fn apply_unary_kind_constructor(
     name: &str,
-    element: Box<SourceContractType>,
+    element: SourceContractType,
     store: &mut KindStore,
 ) -> KindExprId {
     let constructor = store.add_constructor(name.to_owned(), Kind::constructor(1));
@@ -545,7 +545,7 @@ fn apply_unary_kind_constructor(
 fn apply_binary_kind_constructor(
     name: &str,
     key: SourceTypeAtom,
-    value: Box<SourceContractType>,
+    value: SourceContractType,
     store: &mut KindStore,
 ) -> KindExprId {
     let constructor = store.add_constructor(name.to_owned(), Kind::constructor(2));

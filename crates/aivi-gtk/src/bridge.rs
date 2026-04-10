@@ -559,12 +559,13 @@ impl GtkBridgeGraph {
         }
 
         let mut edits = Vec::new();
-        if previous_len == 0 && next_len > 0 {
-            if let Some(empty_branch) = &each.empty_branch {
-                edits.push(GtkEachEdit::Group(GtkChildGroupEdit::Unmount {
-                    group: empty_branch.body.clone(),
-                }));
-            }
+        if previous_len == 0
+            && next_len > 0
+            && let Some(empty_branch) = &each.empty_branch
+        {
+            edits.push(GtkEachEdit::Group(GtkChildGroupEdit::Unmount {
+                group: empty_branch.body.clone(),
+            }));
         }
 
         if next_len < previous_len {
@@ -583,12 +584,13 @@ impl GtkBridgeGraph {
             }
         }
 
-        if previous_len > 0 && next_len == 0 {
-            if let Some(empty_branch) = &each.empty_branch {
-                edits.push(GtkEachEdit::Group(GtkChildGroupEdit::Mount {
-                    group: empty_branch.body.clone(),
-                }));
-            }
+        if previous_len > 0
+            && next_len == 0
+            && let Some(empty_branch) = &each.empty_branch
+        {
+            edits.push(GtkEachEdit::Group(GtkChildGroupEdit::Mount {
+                group: empty_branch.body.clone(),
+            }));
         }
 
         Ok(GtkEachTransition {
@@ -619,12 +621,13 @@ impl GtkBridgeGraph {
         validate_unique_collection_keys(node, GtkCollectionStateSide::Next, next)?;
 
         let mut edits = Vec::new();
-        if previous.is_empty() && !next.is_empty() {
-            if let Some(empty_branch) = &each.empty_branch {
-                edits.push(GtkEachEdit::Group(GtkChildGroupEdit::Unmount {
-                    group: empty_branch.body.clone(),
-                }));
-            }
+        if previous.is_empty()
+            && !next.is_empty()
+            && let Some(empty_branch) = &each.empty_branch
+        {
+            edits.push(GtkEachEdit::Group(GtkChildGroupEdit::Unmount {
+                group: empty_branch.body.clone(),
+            }));
         }
 
         let mut current = previous.to_vec();
@@ -667,12 +670,13 @@ impl GtkBridgeGraph {
 
         debug_assert_eq!(current, next);
 
-        if !previous.is_empty() && next.is_empty() {
-            if let Some(empty_branch) = &each.empty_branch {
-                edits.push(GtkEachEdit::Group(GtkChildGroupEdit::Mount {
-                    group: empty_branch.body.clone(),
-                }));
-            }
+        if !previous.is_empty()
+            && next.is_empty()
+            && let Some(empty_branch) = &each.empty_branch
+        {
+            edits.push(GtkEachEdit::Group(GtkChildGroupEdit::Mount {
+                group: empty_branch.body.clone(),
+            }));
         }
 
         Ok(GtkEachTransition {

@@ -1444,7 +1444,7 @@ mod tests {
             .unwrap();
         let outcome = runtime.tick(&mut |_, _: DependencyValues<'_, i32>| None);
 
-        assert_eq!(runtime.is_owner_active(owner).unwrap(), false);
+        assert!(!runtime.is_owner_active(owner).unwrap());
         assert_eq!(outcome.dropped_publications().len(), 2);
         assert!(
             outcome
@@ -1540,8 +1540,8 @@ mod tests {
         }
 
         let outcome = runtime.tick(&mut |_, _: DependencyValues<'_, i32>| None);
-        assert_eq!(runtime.is_owner_active(session).unwrap(), false);
-        assert_eq!(runtime.is_owner_active(widget).unwrap(), false);
+        assert!(!runtime.is_owner_active(session).unwrap());
+        assert!(!runtime.is_owner_active(widget).unwrap());
         assert_eq!(runtime.current_value(input.as_signal()).unwrap(), None);
         assert_eq!(outcome.dropped_publications().len(), stale_stamps.len() + 1);
         assert!(
@@ -1639,8 +1639,8 @@ mod tests {
         }
 
         let outcome = runtime.tick(&mut |_, _: DependencyValues<'_, i32>| None);
-        assert_eq!(runtime.is_owner_active(session).unwrap(), false);
-        assert_eq!(runtime.is_owner_active(widget).unwrap(), false);
+        assert!(!runtime.is_owner_active(session).unwrap());
+        assert!(!runtime.is_owner_active(widget).unwrap());
         assert_eq!(runtime.current_value(input.as_signal()).unwrap(), None);
         assert_eq!(outcome.dropped_publications().len(), stale_stamps.len() + 1);
         assert!(

@@ -297,10 +297,7 @@ impl<'a> LinkBuilder<'a> {
                 continue;
             }
             let pipeline_ids = item
-                .pipelines
-                .iter()
-                .copied()
-                .collect::<Vec<_>>()
+                .pipelines.to_vec()
                 .into_boxed_slice();
             let has_seed_body = item.body.is_some();
             let pipeline_signals = self
@@ -469,10 +466,7 @@ impl<'a> LinkBuilder<'a> {
                         step_kernels,
                         dependency_items: dependency_items.into_boxed_slice(),
                         pipeline_ids: item
-                            .pipelines
-                            .iter()
-                            .copied()
-                            .collect::<Vec<_>>()
+                            .pipelines.to_vec()
                             .into_boxed_slice(),
                     },
                 );
@@ -558,10 +552,7 @@ impl<'a> LinkBuilder<'a> {
                     dependency_layouts,
                     source_input: binding.source_input,
                     pipeline_ids: item
-                        .pipelines
-                        .iter()
-                        .copied()
-                        .collect::<Vec<_>>()
+                        .pipelines.to_vec()
                         .into_boxed_slice(),
                     temporal_helpers: temporal_helpers.into_boxed_slice(),
                 },

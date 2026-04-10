@@ -161,45 +161,44 @@ impl Diagnostic {
             .iter()
             .find(|label| label.style == LabelStyle::Primary)
             .or_else(|| self.labels.first())
+            && let Some(file) = sources.file(label.span.file())
         {
-            if let Some(file) = sources.file(label.span.file()) {
-                let location = file.line_column(label.span.span().start());
+            let location = file.line_column(label.span.span().start());
+            let _ = writeln!(
+                rendered,
+                " --> {}:{}:{}",
+                file.path().display(),
+                location.line,
+                location.column
+            );
+            let _ = writeln!(rendered, "  |");
+            if let Some(line_text) = file.line_text(location.line - 1) {
+                let _ = writeln!(rendered, "{:>2} | {}", location.line, line_text);
+                let line_span = file
+                    .line_span(location.line - 1)
+                    .expect("line already resolved for rendered diagnostic");
+                let label_span = label.span.span();
+                let max_width = line_span
+                    .end()
+                    .as_usize()
+                    .saturating_sub(label_span.start().as_usize());
+                // NOTE: caret width is computed from byte positions (label_span.len() is a
+                // byte count), not Unicode character widths.  Wide characters (e.g. CJK) or
+                // multi-byte UTF-8 sequences will cause the caret to be wider or narrower
+                // than the rendered glyph columns, producing visually misaligned output.
+                let caret_width = if label_span.is_empty() {
+                    1
+                } else {
+                    usize::max(1, label_span.len() as usize).min(usize::max(1, max_width))
+                };
                 let _ = writeln!(
                     rendered,
-                    " --> {}:{}:{}",
-                    file.path().display(),
-                    location.line,
-                    location.column
+                    "  | {}{}",
+                    " ".repeat(location.column.saturating_sub(1)),
+                    "^".repeat(caret_width)
                 );
-                let _ = writeln!(rendered, "  |");
-                if let Some(line_text) = file.line_text(location.line - 1) {
-                    let _ = writeln!(rendered, "{:>2} | {}", location.line, line_text);
-                    let line_span = file
-                        .line_span(location.line - 1)
-                        .expect("line already resolved for rendered diagnostic");
-                    let label_span = label.span.span();
-                    let max_width = line_span
-                        .end()
-                        .as_usize()
-                        .saturating_sub(label_span.start().as_usize());
-                    // NOTE: caret width is computed from byte positions (label_span.len() is a
-                    // byte count), not Unicode character widths.  Wide characters (e.g. CJK) or
-                    // multi-byte UTF-8 sequences will cause the caret to be wider or narrower
-                    // than the rendered glyph columns, producing visually misaligned output.
-                    let caret_width = if label_span.is_empty() {
-                        1
-                    } else {
-                        usize::max(1, label_span.len() as usize).min(usize::max(1, max_width))
-                    };
-                    let _ = writeln!(
-                        rendered,
-                        "  | {}{}",
-                        " ".repeat(location.column.saturating_sub(1)),
-                        "^".repeat(caret_width)
-                    );
-                    if !label.message.is_empty() {
-                        let _ = writeln!(rendered, "  = {}", label.message);
-                    }
+                if !label.message.is_empty() {
+                    let _ = writeln!(rendered, "  = {}", label.message);
                 }
             }
         }

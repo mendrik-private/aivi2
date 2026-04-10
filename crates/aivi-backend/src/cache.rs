@@ -102,8 +102,7 @@ impl BackendKernelArtifactCache {
     ) -> Result<&CompiledKernelArtifact, CodegenErrors> {
         if !program.kernels().contains(kernel_id) {
             let error = compile_kernel(program, kernel_id)
-                .err()
-                .expect("compiling a missing kernel should produce a backend codegen error");
+                .expect_err("compiling a missing kernel should produce a backend codegen error");
             return Err(error);
         }
         let fingerprint = compute_kernel_fingerprint(program, kernel_id);
@@ -860,10 +859,10 @@ fn compile_kernel_jit_cached_in_dir(
     kernel_id: KernelId,
 ) -> Result<crate::codegen::CompiledJitKernel, CodegenErrors> {
     let fingerprint = compute_kernel_fingerprint(program, kernel_id);
-    if let Some(cached) = load_cached_jit_kernel_artifact_from(cache_root, program, fingerprint) {
-        if let Ok(compiled) = instantiate_cached_jit_kernel(program, kernel_id, &cached) {
-            return Ok(compiled);
-        }
+    if let Some(cached) = load_cached_jit_kernel_artifact_from(cache_root, program, fingerprint)
+        && let Ok(compiled) = instantiate_cached_jit_kernel(program, kernel_id, &cached)
+    {
+        return Ok(compiled);
     }
     let (compiled, artifact) = compile_kernel_jit_with_cache_artifact(program, kernel_id)?;
     if let Some(artifact) = artifact.as_ref() {

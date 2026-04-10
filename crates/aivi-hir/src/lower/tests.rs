@@ -739,7 +739,8 @@ fn resolved_validation_rejects_custom_source_provider_contract_invalid_fixtures(
 
 #[test]
 fn resolved_validation_rejects_recurrence_wakeup_invalid_fixtures() {
-    for path in ["milestone-2/invalid/missing-recurrence-wakeup/main.aivi"] {
+    {
+        let path = "milestone-2/invalid/missing-recurrence-wakeup/main.aivi";
         let lowered = lower_fixture(path);
         assert!(
             !lowered.has_errors(),
@@ -3092,7 +3093,7 @@ fn use_member_imports_preserve_compiler_known_metadata() {
         .imports()
         .iter()
         .filter_map(
-            |(_, import)| match (&*import.local_name.text(), &import.metadata) {
+            |(_, import)| match (import.local_name.text(), &import.metadata) {
                 ("http" | "socket", ImportBindingMetadata::Value { ty }) => Some(ty),
                 _ => None,
             },
@@ -3112,7 +3113,7 @@ fn use_member_imports_preserve_compiler_known_metadata() {
     );
 
     let request_import = lowered.module().imports().iter().find_map(|(_, import)| {
-        match (&*import.local_name.text(), &import.metadata) {
+        match (import.local_name.text(), &import.metadata) {
             ("Request", ImportBindingMetadata::TypeConstructor { kind, .. }) => Some(kind),
             _ => None,
         }
@@ -3124,7 +3125,7 @@ fn use_member_imports_preserve_compiler_known_metadata() {
     );
 
     let channel_import = lowered.module().imports().iter().find_map(|(_, import)| {
-        match (&*import.local_name.text(), &import.metadata) {
+        match (import.local_name.text(), &import.metadata) {
             ("Channel", ImportBindingMetadata::TypeConstructor { kind, .. }) => Some(kind),
             _ => None,
         }

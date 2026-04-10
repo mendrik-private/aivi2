@@ -599,14 +599,13 @@ impl Validator<'_> {
                 }
                 MarkupNodeKind::Control(control) => {
                     self.require_control_node(node.span, "markup node", "control node", *control);
-                    if let Some(control) = self.module.control_nodes().get(*control) {
-                        if matches!(
+                    if let Some(control) = self.module.control_nodes().get(*control)
+                        && matches!(
                             control.kind(),
                             ControlNodeKind::Empty | ControlNodeKind::Case
                         ) {
                             self.illegal_direct_control(node.span, control.kind());
                         }
-                    }
                 }
             }
         }
@@ -646,8 +645,8 @@ impl Validator<'_> {
                     }
                     if let Some(empty) = each.empty {
                         self.require_control_node(each.span, "control node", "empty branch", empty);
-                        if let Some(node) = self.module.control_nodes().get(empty) {
-                            if node.kind() != ControlNodeKind::Empty {
+                        if let Some(node) = self.module.control_nodes().get(empty)
+                            && node.kind() != ControlNodeKind::Empty {
                                 self.wrong_control_kind(
                                     each.span,
                                     "each empty branch",
@@ -655,7 +654,6 @@ impl Validator<'_> {
                                     node.kind(),
                                 );
                             }
-                        }
                     }
                 }
                 ControlNode::Empty(empty) => {
@@ -677,8 +675,8 @@ impl Validator<'_> {
                             "match case",
                             *case,
                         );
-                        if let Some(node) = self.module.control_nodes().get(*case) {
-                            if node.kind() != ControlNodeKind::Case {
+                        if let Some(node) = self.module.control_nodes().get(*case)
+                            && node.kind() != ControlNodeKind::Case {
                                 self.wrong_control_kind(
                                     match_node.span,
                                     "match case",
@@ -686,7 +684,6 @@ impl Validator<'_> {
                                     node.kind(),
                                 );
                             }
-                        }
                     }
                 }
                 ControlNode::Case(case) => {
@@ -3184,14 +3181,13 @@ impl Validator<'_> {
         }
 
         if actual.field_types.is_empty() {
-            if let Some((parameter, bound_type)) = bind_parameter.as_ref() {
-                if !bindings.bind_or_match_actual(*parameter, bound_type) {
+            if let Some((parameter, bound_type)) = bind_parameter.as_ref()
+                && !bindings.bind_or_match_actual(*parameter, bound_type) {
                     return SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
                         span: reference.path.span(),
                         actual: actual.parent_name.clone(),
                     });
                 }
-            }
             return SourceOptionTypeCheck::Match;
         }
 
@@ -3226,14 +3222,13 @@ impl Validator<'_> {
         if saw_unknown {
             SourceOptionTypeCheck::Unknown
         } else {
-            if let Some((parameter, bound_type)) = bind_parameter.as_ref() {
-                if !bindings.bind_or_match_actual(*parameter, bound_type) {
+            if let Some((parameter, bound_type)) = bind_parameter.as_ref()
+                && !bindings.bind_or_match_actual(*parameter, bound_type) {
                     return SourceOptionTypeCheck::Mismatch(SourceOptionTypeMismatch {
                         span: reference.path.span(),
                         actual: actual.parent_name.clone(),
                     });
                 }
-            }
             SourceOptionTypeCheck::Match
         }
     }
@@ -3986,15 +3981,14 @@ impl Validator<'_> {
         actual: &SourceOptionActualType,
         substitutions: &mut HashMap<TypeParameterId, SourceOptionActualType>,
     ) -> Option<bool> {
-        if !self.source_option_hir_type_is_signal_contract(expected) {
-            if let SourceOptionActualType::Signal(inner) = actual {
+        if !self.source_option_hir_type_is_signal_contract(expected)
+            && let SourceOptionActualType::Signal(inner) = actual {
                 return self.source_option_hir_type_matches_actual_type_inner(
                     expected,
                     inner,
                     substitutions,
                 );
             }
-        }
 
         self.source_option_hir_type_matches_actual_type_inner(expected, actual, substitutions)
     }
@@ -5540,7 +5534,7 @@ impl Validator<'_> {
         let span = case_stages
             .first()
             .map(|stage| stage.span)
-            .unwrap_or_else(SourceSpan::default);
+            .unwrap_or_default();
         self.emit_non_exhaustive_case_diagnostic(CaseSiteKind::PipeCase, span, subject, &missing);
     }
 
@@ -5803,9 +5797,7 @@ impl Validator<'_> {
             );
             return None;
         };
-        let Some(element_subject) = subject.fanout_element().cloned() else {
-            return None;
-        };
+        let element_subject = subject.fanout_element().cloned()?;
         let body_info = typing.infer_pipe_body(segment.map_expr(), env, &element_subject);
         let mut saw_error = false;
         for issue in body_info.issues {
@@ -5820,12 +5812,8 @@ impl Validator<'_> {
             let PipeStageKind::Gate { expr } = stage.kind else {
                 unreachable!("validated fan-out filters must use `?|>`");
             };
-            if self
-                .validate_fanout_filter_stage(stage.span, expr, env, &mapped_element_type, typing)
-                .is_none()
-            {
-                return None;
-            }
+            self
+                .validate_fanout_filter_stage(stage.span, expr, env, &mapped_element_type, typing)?;
         }
         let mapped_collection_type = typing.apply_fanout_plan(
             FanoutPlanner::plan(FanoutStageKind::Map, carrier),
@@ -6042,8 +6030,8 @@ impl Validator<'_> {
             context = context.with_reactive_inputs();
         }
         let contract = provider.contract();
-        if let Some(options) = source.options {
-            if let ExprKind::Record(record) = &self.module.exprs()[options].kind {
+        if let Some(options) = source.options
+            && let ExprKind::Record(record) = &self.module.exprs()[options].kind {
                 for field in &record.fields {
                     let Some(cause) = contract
                         .wakeup_option(field.label.text())
@@ -6061,7 +6049,6 @@ impl Validator<'_> {
                     };
                 }
             }
-        }
         Some(RecurrenceWakeupHint::BuiltinSource(context))
     }
 
@@ -6513,8 +6500,8 @@ impl Validator<'_> {
     fn validate_no_nested_pipes(&mut self, root: ExprId) {
         let module = self.module;
         walk_expr_tree(module, root, |_, expr, is_root| {
-            if !is_root {
-                if let ExprKind::Pipe(pipe) = &expr.kind {
+            if !is_root
+                && let ExprKind::Pipe(pipe) = &expr.kind {
                     // Result-block desugaring legitimately nests PipeExprs (each
                     // `a <- result { … }` binding produces an inner pipe as the head of
                     // the outer result-block pipe).  Skip the diagnostic for those
@@ -6532,7 +6519,6 @@ impl Validator<'_> {
                         );
                     }
                 }
-            }
         });
     }
 
@@ -6668,12 +6654,8 @@ impl Validator<'_> {
             return None;
         }
 
-        let Some(truthy_ty) = truthy_ty else {
-            return None;
-        };
-        let Some(falsy_ty) = falsy_ty else {
-            return None;
-        };
+        let truthy_ty = truthy_ty?;
+        let falsy_ty = falsy_ty?;
         if !truthy_ty.same_shape(&falsy_ty) {
             self.emit_truthy_falsy_branch_type_mismatch(pair, &truthy_ty, &falsy_ty);
             return None;
@@ -6703,9 +6685,7 @@ impl Validator<'_> {
             );
             return None;
         };
-        let Some(element_subject) = subject.fanout_element().cloned() else {
-            return None;
-        };
+        let element_subject = subject.fanout_element().cloned()?;
         let body_info = typing.infer_pipe_body(expr, env, &element_subject);
         let mut saw_error = false;
         for issue in body_info.issues {
@@ -6727,9 +6707,7 @@ impl Validator<'_> {
         subject: &GateType,
         typing: &mut GateTypeContext<'_>,
     ) -> Option<GateType> {
-        let Some(carrier) = typing.fanout_carrier(subject) else {
-            return None;
-        };
+        let carrier = typing.fanout_carrier(subject)?;
         let body_info = typing.infer_pipe_body(expr, env, subject);
         let mut saw_error = false;
         for issue in body_info.issues {
@@ -6775,8 +6753,8 @@ impl Validator<'_> {
         // other result type cannot meaningfully drive the keep/discard decision, so it must be
         // rejected here. The check is performed against the inferred type rather than delegated
         // to a downstream pass so that the error is anchored to the predicate expression itself.
-        if let Some(predicate_ty) = predicate_info.ty {
-            if !predicate_ty.is_bool() {
+        if let Some(predicate_ty) = predicate_info.ty
+            && !predicate_ty.is_bool() {
                 self.diagnostics.push(
                     Diagnostic::error(format!(
                         "gate predicate must produce `Bool`, found `{predicate_ty}`"
@@ -6789,7 +6767,6 @@ impl Validator<'_> {
                 );
                 saw_error = true;
             }
-        }
         if saw_error {
             return None;
         }
@@ -8290,8 +8267,8 @@ impl Validator<'_> {
         let mut previous = None;
         for dependency in dependencies {
             self.require_item(span, "source lifecycle", "signal dependency", *dependency);
-            if let Some(item) = self.module.items().get(*dependency) {
-                if !matches!(item, Item::Signal(_)) {
+            if let Some(item) = self.module.items().get(*dependency)
+                && !matches!(item, Item::Signal(_)) {
                     self.diagnostics.push(
                         Diagnostic::error(format!(
                             "{role} dependency must point at a signal item"
@@ -8303,9 +8280,8 @@ impl Validator<'_> {
                         )),
                     );
                 }
-            }
-            if let Some(previous) = previous {
-                if previous >= *dependency {
+            if let Some(previous) = previous
+                && previous >= *dependency {
                     self.diagnostics.push(
                         Diagnostic::error(format!(
                             "{role} dependency lists must stay sorted and duplicate-free"
@@ -8318,7 +8294,6 @@ impl Validator<'_> {
                     );
                     break;
                 }
-            }
             previous = Some(*dependency);
         }
     }
@@ -8327,8 +8302,8 @@ impl Validator<'_> {
         let mut previous = None;
         for dependency in dependencies {
             self.require_item(span, "signal item", "signal dependency", *dependency);
-            if let Some(item) = self.module.items().get(*dependency) {
-                if !matches!(item, Item::Signal(_)) {
+            if let Some(item) = self.module.items().get(*dependency)
+                && !matches!(item, Item::Signal(_)) {
                     self.diagnostics.push(
                         Diagnostic::error("signal dependency must point at a signal item")
                             .with_code(code("invalid-signal-dependency"))
@@ -8338,9 +8313,8 @@ impl Validator<'_> {
                             )),
                     );
                 }
-            }
-            if let Some(previous) = previous {
-                if previous >= *dependency {
+            if let Some(previous) = previous
+                && previous >= *dependency {
                     self.diagnostics.push(
                         Diagnostic::error(
                             "signal dependency lists must stay sorted and duplicate-free",
@@ -8353,7 +8327,6 @@ impl Validator<'_> {
                     );
                     break;
                 }
-            }
             previous = Some(*dependency);
         }
     }
@@ -8405,11 +8378,10 @@ impl Validator<'_> {
                             span,
                             "Milestone 2 HIR should resolve this reference before validation",
                         ));
-                if let Some(name) = name_hint {
-                    if let Some(suggestion) = suggest_similar_name(self.module, name) {
+                if let Some(name) = name_hint
+                    && let Some(suggestion) = suggest_similar_name(self.module, name) {
                         diag = diag.with_help(format!("did you mean `{suggestion}`?"));
                     }
-                }
                 self.diagnostics.push(diag);
             }
             ResolutionState::Unresolved => {}

@@ -191,7 +191,7 @@ impl Token {
         self.line_start
     }
 
-    pub fn text<'a>(self, source: &'a SourceFile) -> &'a str {
+    pub fn text(self, source: &SourceFile) -> &str {
         source.slice(self.span)
     }
 }

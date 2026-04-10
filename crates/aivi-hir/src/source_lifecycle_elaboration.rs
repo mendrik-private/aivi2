@@ -356,15 +356,11 @@ fn active_when_binding(
     provider: &SourceProviderRef,
 ) -> Option<SourceOptionSignalBinding> {
     let builtin_provider = provider.builtin()?;
-    let Some(options) = source.options else {
-        return None;
-    };
+    let options = source.options?;
     let ExprKind::Record(record) = &module.exprs()[options].kind else {
         return None;
     };
-    if builtin_provider.contract().option("activeWhen").is_none() {
-        return None;
-    }
+    builtin_provider.contract().option("activeWhen")?;
     let field = record
         .fields
         .iter()
@@ -439,7 +435,7 @@ mod tests {
         SourceReplacementPolicy, SourceStaleWorkPolicy, SourceTeardownPolicy,
         elaborate_source_lifecycles,
     };
-    use crate::test_support::{fixture_root, item_name, lower_fixture, lower_text};
+    use crate::test_support::{item_name, lower_fixture, lower_text};
     use crate::{Item, SourceProviderRef};
 
     fn dependency_names(module: &crate::Module, dependencies: &[crate::ItemId]) -> Vec<String> {

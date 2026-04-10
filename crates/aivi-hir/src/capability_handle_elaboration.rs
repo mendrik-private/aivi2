@@ -252,12 +252,10 @@ fn rewrite_capability_uses(
                     );
                     continue;
                 }
-                match lower_signal_capability_use(module, &signal, handle, &invocation, diagnostics)
+                if let Some(rewrite) =
+                    lower_signal_capability_use(module, &signal, handle, &invocation, diagnostics)
                 {
-                    Some(rewrite) => {
-                        signal_rewrites.push(SignalCapabilityRewrite { item_id, rewrite })
-                    }
-                    None => {}
+                    signal_rewrites.push(SignalCapabilityRewrite { item_id, rewrite })
                 }
             }
             Item::Value(value) => {
@@ -268,9 +266,10 @@ fn rewrite_capability_uses(
                 let Some(handle) = handles.get(&invocation.handle) else {
                     continue;
                 };
-                match lower_value_capability_use(module, &value, handle, &invocation, diagnostics) {
-                    Some(body) => value_rewrites.push(ValueCapabilityRewrite { item_id, body }),
-                    None => {}
+                if let Some(body) =
+                    lower_value_capability_use(module, &value, handle, &invocation, diagnostics)
+                {
+                    value_rewrites.push(ValueCapabilityRewrite { item_id, body })
                 }
             }
             _ => {}
@@ -535,15 +534,13 @@ fn lower_custom_value_member(
 ) -> Option<ExprId> {
     let captured_options =
         captured_custom_command_options(module, handle, resolved.option_schemas.as_slice());
-    let Some(ty) = custom_command_import_type(
+    let ty = custom_command_import_type(
         module,
         invocation,
         resolved,
         captured_options.as_slice(),
         diagnostics,
-    ) else {
-        return None;
-    };
+    )?;
     let spec = CustomCapabilityCommandSpec {
         provider_key: resolved.contract_key.clone(),
         command: resolved.member.name.text().into(),
@@ -1241,7 +1238,7 @@ fn inherited_arguments(
     arguments
 }
 
-fn try_get_plain_text_literal<'a>(module: &'a Module, expr_id: ExprId) -> Option<&'a str> {
+fn try_get_plain_text_literal(module: &Module, expr_id: ExprId) -> Option<&str> {
     let expr = module.arenas.exprs.get(expr_id)?;
     match &expr.kind {
         ExprKind::Text(lit) if !lit.has_interpolation() => match lit.segments.as_slice() {
@@ -1537,7 +1534,7 @@ fn build_intrinsic_call(
         .alloc_expr(Expr {
             span,
             kind: ExprKind::Name(TermReference::resolved(
-                intrinsic_name_path(intrinsic.clone(), span),
+                intrinsic_name_path(intrinsic, span),
                 TermResolution::IntrinsicValue(intrinsic),
             )),
         })
@@ -1581,10 +1578,10 @@ fn apply_value_rewrite(module: &mut Module, rewrite: ValueCapabilityRewrite) {
     value.body = rewrite.body;
 }
 
-fn signal_with_source_decorator<'a>(
-    module: &'a Module,
+fn signal_with_source_decorator(
+    module: &Module,
     item_id: ItemId,
-) -> Option<(&'a SignalItem, &'a SourceDecorator)> {
+) -> Option<(&SignalItem, &SourceDecorator)> {
     let Item::Signal(signal) = &module.items()[item_id] else {
         return None;
     };

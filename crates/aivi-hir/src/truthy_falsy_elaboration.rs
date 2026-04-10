@@ -478,13 +478,12 @@ fn blocker_for_branch_issue(
 
 #[cfg(test)]
 mod tests {
-    use aivi_base::DiagnosticCode;
 
     use super::{
         TruthyFalsyBranchKind, TruthyFalsyElaborationBlocker, TruthyFalsyStageOutcome,
         elaborate_truthy_falsy,
     };
-    use crate::test_support::{fixture_root, item_name, lower_fixture, lower_text};
+    use crate::test_support::{item_name, lower_fixture};
     use crate::{BuiltinTerm, BuiltinType, GateType, ValidationMode};
 
     #[test]

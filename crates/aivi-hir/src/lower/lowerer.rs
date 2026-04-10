@@ -1518,7 +1518,7 @@ impl<'a> Lowerer<'a> {
             // separator), the cycle is an artefact of hoist-chain compilation order, not
             // a real circular import dependency.
             let is_hoist_induced_cycle = cycle.modules().iter().any(|m| m.contains('/'));
-            if !(is_direct_self_import && all_intrinsics) && !is_hoist_induced_cycle {
+            if !(is_hoist_induced_cycle || is_direct_self_import && all_intrinsics) {
                 self.diagnostics.push(
                     Diagnostic::error(format!(
                         "import cycle detected: {}",
@@ -1706,15 +1706,13 @@ impl<'a> Lowerer<'a> {
                     // prelude item system. Always prefer them over exported callable_type,
                     // which only carries the portable ImportValueType representation.
                     if let Some(metadata) = known_import_metadata(module_name, imported_name.text())
-                    {
-                        if matches!(
+                        && matches!(
                             metadata,
                             ImportBindingMetadata::AmbientValue { .. }
                                 | ImportBindingMetadata::AmbientType
                         ) {
                             return (ImportBindingResolution::Resolved, metadata, None, None);
                         }
-                    }
                     // For non-ambient exports, fall back to known_import_metadata when the
                     // export is opaque (e.g. stdlib modules that can't resolve their own
                     // self-imports), OR when the compiler explicitly marks the function as an
@@ -1723,22 +1721,18 @@ impl<'a> Lowerer<'a> {
                     // as Value, but the compiler can lower it as a direct intrinsic call).
                     let export_is_plain_value =
                         matches!(exported.metadata, ImportBindingMetadata::Value { .. });
-                    if matches!(exported.metadata, ImportBindingMetadata::OpaqueValue) {
-                        if let Some(metadata) =
+                    if matches!(exported.metadata, ImportBindingMetadata::OpaqueValue)
+                        && let Some(metadata) =
                             known_import_metadata(module_name, imported_name.text())
                         {
                             return (ImportBindingResolution::Resolved, metadata, None, None);
                         }
-                    }
-                    if export_is_plain_value {
-                        if let Some(metadata) =
+                    if export_is_plain_value
+                        && let Some(metadata) =
                             known_import_metadata(module_name, imported_name.text())
-                        {
-                            if matches!(metadata, ImportBindingMetadata::IntrinsicValue { .. }) {
+                            && matches!(metadata, ImportBindingMetadata::IntrinsicValue { .. }) {
                                 return (ImportBindingResolution::Resolved, metadata, None, None);
                             }
-                        }
-                    }
                     (
                         ImportBindingResolution::Resolved,
                         exported.metadata.clone(),
@@ -4351,15 +4345,15 @@ impl<'a> Lowerer<'a> {
 
     fn optional_markup_expr_attr(&mut self, node: &syn::MarkupNode, name: &str) -> Option<ExprId> {
         self.find_markup_attr(node, name)
-            .and_then(|attribute| match &attribute.value {
-                Some(syn::MarkupAttributeValue::Expr(expr)) => Some(self.lower_expr(expr)),
+            .map(|attribute| match &attribute.value {
+                Some(syn::MarkupAttributeValue::Expr(expr)) => self.lower_expr(expr),
                 Some(syn::MarkupAttributeValue::Text(_)) => {
                     self.emit_error(
                         attribute.span,
                         format!("attribute `{name}` expects an expression"),
                         code("invalid-control-attr"),
                     );
-                    Some(self.placeholder_expr(attribute.span))
+                    self.placeholder_expr(attribute.span)
                 }
                 Some(syn::MarkupAttributeValue::Pattern(_)) => {
                     self.emit_error(
@@ -4367,7 +4361,7 @@ impl<'a> Lowerer<'a> {
                         format!("attribute `{name}` expects an expression"),
                         code("invalid-control-attr"),
                     );
-                    Some(self.placeholder_expr(attribute.span))
+                    self.placeholder_expr(attribute.span)
                 }
                 None => {
                     self.emit_error(
@@ -4375,7 +4369,7 @@ impl<'a> Lowerer<'a> {
                         format!("attribute `{name}` expects an expression"),
                         code("invalid-control-attr"),
                     );
-                    Some(self.placeholder_expr(attribute.span))
+                    self.placeholder_expr(attribute.span)
                 }
             })
     }
@@ -5089,15 +5083,15 @@ impl<'a> Lowerer<'a> {
 
         for exported in exports.names.iter() {
             if !kind_filters.is_empty() {
-                let kind_matches = kind_filters.iter().any(|f| match (f, &exported.kind) {
-                    (HoistKindFilter::Func, ExportedNameKind::Function) => true,
-                    (HoistKindFilter::Value, ExportedNameKind::Value) => true,
-                    (HoistKindFilter::Signal, ExportedNameKind::Signal) => true,
-                    (HoistKindFilter::Type, ExportedNameKind::Type) => true,
-                    (HoistKindFilter::Domain, ExportedNameKind::Domain) => true,
-                    (HoistKindFilter::Class, ExportedNameKind::Class) => true,
-                    _ => false,
-                });
+                let kind_matches = kind_filters.iter().any(|f| matches!(
+                    (f, &exported.kind),
+                    (HoistKindFilter::Func, ExportedNameKind::Function)
+                    | (HoistKindFilter::Value, ExportedNameKind::Value)
+                    | (HoistKindFilter::Signal, ExportedNameKind::Signal)
+                    | (HoistKindFilter::Type, ExportedNameKind::Type)
+                    | (HoistKindFilter::Domain, ExportedNameKind::Domain)
+                    | (HoistKindFilter::Class, ExportedNameKind::Class)
+                ));
                 if !kind_matches {
                     continue;
                 }
@@ -5912,11 +5906,10 @@ impl<'a> Lowerer<'a> {
         if matches!(
             lambda.surface_form,
             crate::hir::LambdaSurfaceForm::SubjectShorthand
-        ) {
-            if let Some(parameter) = lambda.parameters.first() {
+        )
+            && let Some(parameter) = lambda.parameters.first() {
                 self.rewrite_subject_shorthand_expr(lambda.body, parameter.binding, false);
             }
-        }
 
         let lambda_bindings = lambda
             .parameters
@@ -5955,13 +5948,11 @@ impl<'a> Lowerer<'a> {
         let mut lambda_params = lambda.parameters.clone();
         if let Some(hint) = callee_hint {
             for (index, param) in lambda_params.iter_mut().enumerate() {
-                if param.annotation.is_none() {
-                    if let Some(ty) = self.arrow_at_position(hint, index) {
-                        if !self.type_contains_type_params(ty) {
+                if param.annotation.is_none()
+                    && let Some(ty) = self.arrow_at_position(hint, index)
+                        && !self.type_contains_type_params(ty) {
                             param.annotation = Some(ty);
                         }
-                    }
-                }
             }
         }
         parameters.extend(lambda_params);
@@ -6160,11 +6151,9 @@ impl<'a> Lowerer<'a> {
         match expr.kind {
             ExprKind::Name(reference) => {
                 if let ResolutionState::Resolved(TermResolution::Local(binding)) = reference.resolution
-                {
-                    if !scope.contains(binding) && seen.insert(binding) {
+                    && !scope.contains(binding) && seen.insert(binding) {
                         ordered.push(binding);
                     }
-                }
             }
             ExprKind::Integer(_)
             | ExprKind::Float(_)
@@ -6539,12 +6528,10 @@ impl<'a> Lowerer<'a> {
         let kind = match expr.kind {
             ExprKind::Name(mut reference) => {
                 if let ResolutionState::Resolved(TermResolution::Local(binding)) = reference.resolution
-                {
-                    if let Some(mapped) = captures.get(&binding) {
+                    && let Some(mapped) = captures.get(&binding) {
                         let text = self.module.bindings()[*mapped].name.text().to_owned();
                         reference = self.resolved_local_reference(&text, expr.span, *mapped);
                     }
-                }
                 ExprKind::Name(reference)
             }
             ExprKind::Integer(_)
@@ -7499,11 +7486,10 @@ impl<'a> Lowerer<'a> {
                 self.emit_illegal_cluster_ambient_projection(span, cluster.span);
             }
         }
-        if let ApplicativeSpineHead::Expr(finalizer) = spine.pure_head() {
-            if let Some(span) = self.find_free_ambient_projection(finalizer) {
+        if let ApplicativeSpineHead::Expr(finalizer) = spine.pure_head()
+            && let Some(span) = self.find_free_ambient_projection(finalizer) {
                 self.emit_illegal_cluster_ambient_projection(span, cluster.span);
             }
-        }
     }
 
     fn emit_illegal_cluster_ambient_projection(
@@ -8054,7 +8040,6 @@ impl<'a> Lowerer<'a> {
                 if prefer_ambient_names {
                     env.set_prefer_ambient_names();
                 }
-                let item = item;
                 for argument in &item.contract.arguments {
                     self.resolve_type(argument.annotation, namespaces, &mut env);
                 }
@@ -8924,7 +8909,7 @@ impl<'a> Lowerer<'a> {
                         ResolutionState::Resolved(TermResolution::Builtin(*builtin))
                     }
                     ImportBindingMetadata::IntrinsicValue { value, .. } => {
-                        ResolutionState::Resolved(TermResolution::IntrinsicValue(value.clone()))
+                        ResolutionState::Resolved(TermResolution::IntrinsicValue(*value))
                     }
                     ImportBindingMetadata::AmbientValue { name } => {
                         match lookup_item(&namespaces.ambient_term_items, name) {
@@ -8961,7 +8946,7 @@ impl<'a> Lowerer<'a> {
                         ResolutionState::Resolved(TermResolution::Builtin(*builtin))
                     }
                     ImportBindingMetadata::IntrinsicValue { value, .. } => {
-                        ResolutionState::Resolved(TermResolution::IntrinsicValue(value.clone()))
+                        ResolutionState::Resolved(TermResolution::IntrinsicValue(*value))
                     }
                     ImportBindingMetadata::AmbientValue { name } => {
                         match lookup_item(&namespaces.ambient_term_items, name) {

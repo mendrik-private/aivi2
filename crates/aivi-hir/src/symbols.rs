@@ -56,10 +56,10 @@ pub fn extract_symbols(module: &Module) -> Vec<LspSymbol> {
     let mut symbols = Vec::new();
 
     for &id in module.root_items() {
-        if let Some(item) = module.items().get(id) {
-            if let Some(sym) = item_to_lsp_symbol(item, module) {
-                symbols.push(sym);
-            }
+        if let Some(item) = module.items().get(id)
+            && let Some(sym) = item_to_lsp_symbol(item, module)
+        {
+            symbols.push(sym);
         }
     }
 
@@ -375,7 +375,7 @@ signal total : Signal Int = ready
             .expect("expected total signal symbol");
         assert_eq!(total.kind, LspSymbolKind::Event);
         // Signal merge arms should appear as children
-        assert!(total.children.len() >= 1);
+        assert!(!total.children.is_empty());
         // selection_span must be contained within span (LSP invariant)
         for child in &total.children {
             let span = child.span.span();

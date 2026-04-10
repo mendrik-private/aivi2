@@ -3,13 +3,12 @@ impl<'a> Parser<'a> {
         let index = self.peek_nontrivia(*cursor, end)?;
         if self.tokens[index].kind() == TokenKind::LBrace {
             let inner_end = self.find_matching_brace(index, end).unwrap_or(end);
-            if let Some(first_inside) = self.peek_nontrivia(index + 1, inner_end) {
-                if self.tokens[first_inside].kind() == TokenKind::PipeTap {
+            if let Some(first_inside) = self.peek_nontrivia(index + 1, inner_end)
+                && self.tokens[first_inside].kind() == TokenKind::PipeTap {
                     return self
                         .parse_sum_type_block_body(cursor, end)
                         .map(TypeDeclBody::Sum);
                 }
-            }
         }
         if self.tokens[index].kind() == TokenKind::PipeTap {
             return self.parse_sum_type_body(cursor, end);
@@ -17,16 +16,13 @@ impl<'a> Parser<'a> {
         if self.tokens[index].kind() == TokenKind::Identifier {
             let identifier = self.identifier_from_token(index);
             if identifier.is_uppercase_initial() && !is_record_row_transform_name(&identifier.text)
-            {
-                if let Some(next_index) = self.peek_nontrivia(index + 1, end) {
-                    if self.tokens[next_index].kind() == TokenKind::PipeTap
+                && let Some(next_index) = self.peek_nontrivia(index + 1, end)
+                    && (self.tokens[next_index].kind() == TokenKind::PipeTap
                         || (self.starts_type_atom(next_index)
-                            && !self.tokens[next_index].line_start())
+                            && !self.tokens[next_index].line_start()))
                     {
                         return self.parse_sum_type_body(cursor, end);
                     }
-                }
-            }
         }
         self.parse_type_expr(cursor, end, TypeStop::default())
             .map(TypeDeclBody::Alias)
@@ -131,8 +127,8 @@ impl<'a> Parser<'a> {
                 member.annotation = Some(annotation);
             }
 
-            if member.annotation.is_none() {
-                if let Some(held) = pending_colon_member.take() {
+            if member.annotation.is_none()
+                && let Some(held) = pending_colon_member.take() {
                     if held.name.text == member.name.text {
                         member.annotation = held.annotation;
                     } else {
@@ -149,7 +145,6 @@ impl<'a> Parser<'a> {
                         );
                     }
                 }
-            }
 
             if member.annotation.is_some() && member.body.is_none() && member.parameters.is_empty()
             {
@@ -260,8 +255,8 @@ impl<'a> Parser<'a> {
         let name_span = name.span;
         let mut annotation = None;
 
-        if let Some(colon_idx) = self.peek_nontrivia(*cursor, end) {
-            if self.tokens[colon_idx].kind() == TokenKind::Colon
+        if let Some(colon_idx) = self.peek_nontrivia(*cursor, end)
+            && self.tokens[colon_idx].kind() == TokenKind::Colon
                 && !self.tokens[colon_idx].line_start()
             {
                 *cursor = colon_idx + 1;
@@ -298,7 +293,6 @@ impl<'a> Parser<'a> {
                     });
                 }
             }
-        }
 
         let Some(eq_index) = self.consume_kind(cursor, end, TokenKind::Equals) else {
             self.diagnostics.push(
@@ -425,13 +419,13 @@ impl<'a> Parser<'a> {
         let field_start = *cursor;
         // Try named field: `label:Type` (lowercase identifier followed by colon)
         let checkpoint = *cursor;
-        if let Some(index) = self.peek_nontrivia(*cursor, end) {
-            if self.tokens[index].kind() == TokenKind::Identifier {
+        if let Some(index) = self.peek_nontrivia(*cursor, end)
+            && self.tokens[index].kind() == TokenKind::Identifier {
                 let ident = self.identifier_from_token(index);
                 if !ident.is_uppercase_initial() {
                     // Peek ahead for colon
-                    if let Some(colon_index) = self.peek_nontrivia(index + 1, end) {
-                        if self.tokens[colon_index].kind() == TokenKind::Colon {
+                    if let Some(colon_index) = self.peek_nontrivia(index + 1, end)
+                        && self.tokens[colon_index].kind() == TokenKind::Colon {
                             // Consume label and colon
                             let label = self.parse_identifier(cursor, end)?;
                             let _ = self.consume_kind(cursor, end, TokenKind::Colon);
@@ -442,10 +436,8 @@ impl<'a> Parser<'a> {
                                 ty,
                             });
                         }
-                    }
                 }
             }
-        }
         *cursor = checkpoint;
         // Fall back to anonymous field
         let ty = self.parse_type_atom(cursor, end, TypeStop::default())?;

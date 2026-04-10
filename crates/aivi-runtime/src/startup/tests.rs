@@ -1015,12 +1015,11 @@ value answer = 42
         LinkedTaskWorkerOutcome::Cancelled
     );
     linked.tick().expect("owner-disposal tick should succeed");
-    assert_eq!(
-        linked
+    assert!(
+        !linked
             .runtime()
             .is_owner_active(binding.owner_handle)
-            .expect("task owner should be queryable"),
-        false
+            .expect("task owner should be queryable")
     );
 }
 

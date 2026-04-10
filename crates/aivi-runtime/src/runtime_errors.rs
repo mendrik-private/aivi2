@@ -40,7 +40,7 @@ fn find_pipe_stage_for_kernel(
                 aivi_backend::StageKind::Fanout(f) => {
                     f.map == kernel
                         || f.filters.iter().any(|ff| ff.predicate == kernel)
-                        || f.join.as_ref().map_or(false, |j| j.kernel == kernel)
+                        || f.join.as_ref().is_some_and(|j| j.kernel == kernel)
                 }
                 aivi_backend::StageKind::Temporal(t) => match t {
                     aivi_backend::TemporalStage::Previous { seed, .. } => *seed == kernel,
@@ -153,15 +153,14 @@ pub fn render_runtime_error(
             // Try to identify which pipe stage failed.
             if let (Some(backend), Some(kernel)) = (backend, eval_error_kernel(eval_error)) {
                 diag = push_eval_error_layout_notes(diag, backend, eval_error);
-                if let Some(pipeline_ids) = source_map.signal_pipeline_ids(signal.as_signal()) {
-                    if let Some((label, stage_span, index)) =
+                if let Some(pipeline_ids) = source_map.signal_pipeline_ids(signal.as_signal())
+                    && let Some((label, stage_span, index)) =
                         find_pipe_stage_for_kernel(backend, pipeline_ids, kernel)
-                    {
-                        diag = diag.with_secondary_label(
-                            stage_span,
-                            format!("pipe stage {index} ({label}) failed"),
-                        );
-                    }
+                {
+                    diag = diag.with_secondary_label(
+                        stage_span,
+                        format!("pipe stage {index} ({label}) failed"),
+                    );
                 }
             }
 
@@ -311,7 +310,8 @@ pub fn render_runtime_error(
                 let root_item_note = match &root_expr.kind {
                     KernelExprKind::Item(item) => {
                         let backend_item = &backend.items()[*item];
-                        let body_note = backend_item.body.map_or_else(
+
+                        backend_item.body.map_or_else(
                             || "; item body = <none>".to_owned(),
                             |body| {
                                 let body_kernel = &backend.kernels()[body];
@@ -327,8 +327,7 @@ pub fn render_runtime_error(
                                     body_kernel.result_layout
                                 )
                             },
-                        );
-                        body_note
+                        )
                     }
                     _ => String::new(),
                 };
@@ -340,19 +339,18 @@ pub fn render_runtime_error(
                     root_expr.layout,
                     backend_kernel.result_layout
                 ));
-                if let Some(pipeline_ids) = source_map.signal_pipeline_ids(signal.as_signal()) {
-                    if let Some((label, stage_span, index)) =
+                if let Some(pipeline_ids) = source_map.signal_pipeline_ids(signal.as_signal())
+                    && let Some((label, stage_span, index)) =
                         find_pipe_stage_for_kernel(backend, pipeline_ids, kernel)
-                    {
-                        diag = diag
-                            .with_secondary_label(
-                                stage_span,
-                                format!("recurrence pipe stage {index} ({label}) failed"),
-                            )
-                            .with_note(format!(
-                                "failing recurrence pipe stage: stage {index} ({label})"
-                            ));
-                    }
+                {
+                    diag = diag
+                        .with_secondary_label(
+                            stage_span,
+                            format!("recurrence pipe stage {index} ({label}) failed"),
+                        )
+                        .with_note(format!(
+                            "failing recurrence pipe stage: stage {index} ({label})"
+                        ));
                 }
             }
 

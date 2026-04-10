@@ -347,7 +347,7 @@ pub fn execute_runtime_task_plan_with_context(
                 .find_iter(text.as_ref())
                 .map(|m| RuntimeValue::Text(m.as_str().into()))
                 .collect();
-            Ok(RuntimeValue::List(matches.into()))
+            Ok(RuntimeValue::List(matches))
         }
         RuntimeTaskPlan::RegexReplace {
             pattern,

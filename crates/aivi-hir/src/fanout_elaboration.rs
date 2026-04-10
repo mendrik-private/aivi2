@@ -687,11 +687,11 @@ fn fanout_env_for_function(
 
 #[cfg(test)]
 mod tests {
-    use aivi_base::DiagnosticCode;
+
     use aivi_typing::FanoutCarrier;
 
     use super::{FanoutElaborationBlocker, FanoutSegmentOutcome, elaborate_fanouts};
-    use crate::test_support::{fixture_root, item_name, lower_fixture, lower_text};
+    use crate::test_support::{item_name, lower_fixture, lower_text};
     use crate::{
         BuiltinType, GateRuntimeExprKind, GateRuntimeProjectionBase, GateType, ValidationMode,
     };

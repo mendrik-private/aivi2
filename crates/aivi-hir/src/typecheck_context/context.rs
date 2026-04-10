@@ -477,14 +477,9 @@ impl<'a> GateTypeContext<'a> {
         // Collect all Arrow `parameter` types from the chain; the final `result` is the sum type.
         let mut fields = Vec::new();
         let mut current = &ty;
-        loop {
-            match current {
-                ImportValueType::Arrow { parameter, result } => {
-                    fields.push(self.lower_import_value_type(parameter));
-                    current = result;
-                }
-                _ => break,
-            }
+        while let ImportValueType::Arrow { parameter, result } = current {
+            fields.push(self.lower_import_value_type(parameter));
+            current = result;
         }
         fields
     }
@@ -997,12 +992,10 @@ impl<'a> GateTypeContext<'a> {
                 self.module.exprs()[expr_id].kind,
                 ExprKind::Name(_) | ExprKind::Apply { .. }
             )
-        {
-            if let Some(GateType::Signal(payload)) = info.ty.clone() {
+            && let Some(GateType::Signal(payload)) = info.ty.clone() {
                 info.ty = Some(*payload);
                 info.actual = None;
             }
-        }
         info
     }
 
@@ -2182,11 +2175,10 @@ impl<'a> GateTypeContext<'a> {
         }
         let mut item_stack = Vec::new();
         let result = self.lower_type(current, &substitutions, &mut item_stack, false)?;
-        if let Some(expected) = expected_result {
-            if !result.same_shape(expected) {
+        if let Some(expected) = expected_result
+            && !result.same_shape(expected) {
                 return None;
             }
-        }
         Some(DomainMemberCallMatch { parameters, result })
     }
 
@@ -3385,8 +3377,8 @@ impl<'a> GateTypeContext<'a> {
                 let mut consistent = true;
                 for element in &elements {
                     let child = self.infer_expr(*element, env, ambient);
-                    if consistent {
-                        if let Some(child_ty) = child.actual_gate_type().or(child.ty.clone()) {
+                    if consistent
+                        && let Some(child_ty) = child.actual_gate_type().or(child.ty.clone()) {
                             element_gate_type = match element_gate_type.take() {
                                 None => Some(child_ty),
                                 Some(current) => {
@@ -3399,7 +3391,6 @@ impl<'a> GateTypeContext<'a> {
                                 }
                             };
                         }
-                    }
                     if consistent {
                         if let Some(child_ty) = child.actual() {
                             element_type = match element_type.take() {
@@ -3421,11 +3412,10 @@ impl<'a> GateTypeContext<'a> {
                 if consistent {
                     if let Some(element_type) = element_type {
                         info.set_actual(SourceOptionActualType::List(Box::new(element_type)));
-                        if info.ty.is_none() {
-                            if let Some(element_gate_type) = element_gate_type {
+                        if info.ty.is_none()
+                            && let Some(element_gate_type) = element_gate_type {
                                 info.ty = Some(GateType::List(Box::new(element_gate_type)));
                             }
-                        }
                     } else if let Some(element_gate_type) = element_gate_type {
                         info.ty = Some(GateType::List(Box::new(element_gate_type)));
                     }
@@ -3440,8 +3430,8 @@ impl<'a> GateTypeContext<'a> {
                 let mut values_consistent = true;
                 for entry in &map.entries {
                     let key = self.infer_expr(entry.key, env, ambient);
-                    if keys_consistent {
-                        if let Some(child_ty) = key.actual() {
+                    if keys_consistent
+                        && let Some(child_ty) = key.actual() {
                             key_type = match key_type.take() {
                                 None => Some(child_ty),
                                 Some(current) => match current.unify(&child_ty) {
@@ -3453,12 +3443,11 @@ impl<'a> GateTypeContext<'a> {
                                 },
                             };
                         }
-                    }
                     info.merge(key);
 
                     let value = self.infer_expr(entry.value, env, ambient);
-                    if values_consistent {
-                        if let Some(child_ty) = value.actual() {
+                    if values_consistent
+                        && let Some(child_ty) = value.actual() {
                             value_type = match value_type.take() {
                                 None => Some(child_ty),
                                 Some(current) => match current.unify(&child_ty) {
@@ -3470,17 +3459,15 @@ impl<'a> GateTypeContext<'a> {
                                 },
                             };
                         }
-                    }
                     info.merge(value);
                 }
-                if keys_consistent && values_consistent {
-                    if let (Some(key), Some(value)) = (key_type, value_type) {
+                if keys_consistent && values_consistent
+                    && let (Some(key), Some(value)) = (key_type, value_type) {
                         info.set_actual(SourceOptionActualType::Map {
                             key: Box::new(key),
                             value: Box::new(value),
                         });
                     }
-                }
                 info
             }
             ExprKind::Set(elements) => {
@@ -3489,8 +3476,8 @@ impl<'a> GateTypeContext<'a> {
                 let mut consistent = true;
                 for element in elements {
                     let child = self.infer_expr(element, env, ambient);
-                    if consistent {
-                        if let Some(child_ty) = child.actual() {
+                    if consistent
+                        && let Some(child_ty) = child.actual() {
                             element_type = match element_type.take() {
                                 None => Some(child_ty),
                                 Some(current) => match current.unify(&child_ty) {
@@ -3502,14 +3489,12 @@ impl<'a> GateTypeContext<'a> {
                                 },
                             };
                         }
-                    }
                     info.merge(child);
                 }
-                if consistent {
-                    if let Some(element_type) = element_type {
+                if consistent
+                    && let Some(element_type) = element_type {
                         info.set_actual(SourceOptionActualType::Set(Box::new(element_type)));
                     }
-                }
                 info
             }
             ExprKind::Lambda(_) => GateExprInfo::default(),
@@ -3883,7 +3868,7 @@ impl<'a> GateTypeContext<'a> {
                 }
             }
             ResolutionState::Resolved(TermResolution::IntrinsicValue(value)) => GateExprInfo {
-                ty: Some(self.intrinsic_value_type(value.clone())),
+                ty: Some(self.intrinsic_value_type(*value)),
                 ..GateExprInfo::default()
             },
             ResolutionState::Resolved(TermResolution::Builtin(builtin)) => {
@@ -4356,13 +4341,11 @@ impl<'a> GateTypeContext<'a> {
                     signal_payload_arguments.push(false);
                     continue;
                 };
-                let Some(reads_signal_payload) = self.match_pipe_argument_parameter_annotation(
+                let reads_signal_payload = self.match_pipe_argument_parameter_annotation(
                     annotation,
                     &argument_ty,
                     &mut bindings,
-                ) else {
-                    return None;
-                };
+                )?;
                 signal_payload_arguments.push(reads_signal_payload);
             }
 
@@ -4457,7 +4440,7 @@ impl<'a> GateTypeContext<'a> {
             let mut current = member_annotation;
             let mut parameter_type_ids = Vec::with_capacity(explicit_arguments.len() + 1);
             let mut signal_payload_arguments = Vec::with_capacity(explicit_arguments.len());
-            for argument_ty in explicit_argument_types.iter().cloned() {
+            for argument_ty in explicit_argument_types.iter() {
                 let TypeKind::Arrow { parameter, result } =
                     self.module.types()[current].kind.clone()
                 else {
@@ -4638,11 +4621,10 @@ impl<'a> GateTypeContext<'a> {
                 continue;
             };
 
-            if let Some(expected) = expected_result {
-                if !result_ty.same_shape(expected) {
+            if let Some(expected) = expected_result
+                && !result_ty.same_shape(expected) {
                     continue;
                 }
-            }
 
             let concrete_ambient_param = match current {
                 GateType::Arrow { parameter, .. } => {
@@ -5391,13 +5373,11 @@ impl<'a> GateTypeContext<'a> {
         );
         let falsy_ty = falsy.actual();
         info.merge(falsy);
-        if info.issues.is_empty() {
-            if let (Some(truthy_ty), Some(falsy_ty)) = (truthy_ty, falsy_ty) {
-                if let Some(branch_ty) = truthy_ty.unify(&falsy_ty) {
+        if info.issues.is_empty()
+            && let (Some(truthy_ty), Some(falsy_ty)) = (truthy_ty, falsy_ty)
+                && let Some(branch_ty) = truthy_ty.unify(&falsy_ty) {
                     info.set_actual(self.apply_truthy_falsy_result_actual(subject, branch_ty));
                 }
-            }
-        }
         self.finalize_expr_info(info)
     }
 
@@ -5648,14 +5628,13 @@ impl<'a> GateTypeContext<'a> {
                 }
             }
         }
-        if info.issues.is_empty() {
-            if let Some(branch_result) = branch_result {
+        if info.issues.is_empty()
+            && let Some(branch_result) = branch_result {
                 info.set_actual(match subject.gate_carrier() {
                     GateCarrier::Ordinary => branch_result,
                     GateCarrier::Signal => SourceOptionActualType::Signal(Box::new(branch_result)),
                 });
             }
-        }
         self.finalize_expr_info(info)
     }
 

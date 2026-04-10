@@ -58,11 +58,11 @@ impl BackendLinkedRuntime {
             map.set_signal_pipeline_ids(handle.as_signal(), linked.pipeline_ids.clone());
         }
         // Enrich with pipeline IDs from reactive signals.
-        for (_handle, linked) in &self.reactive_signals {
+        for linked in self.reactive_signals.values() {
             map.set_signal_pipeline_ids(linked.signal, linked.pipeline_ids.clone());
         }
         // Enrich with pipeline IDs from recurrence-backed derived signals.
-        for (_handle, linked) in &self.linked_recurrence_signals {
+        for linked in self.linked_recurrence_signals.values() {
             map.set_signal_pipeline_ids(linked.signal.as_signal(), linked.pipeline_ids.clone());
         }
 

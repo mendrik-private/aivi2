@@ -419,10 +419,8 @@ fn elaborate_accumulate_pipe(
     env: &GateExprEnv,
     typing: &mut GateTypeContext<'_>,
 ) -> RecurrenceNodeOutcome {
-    let target = Some(
-        RecurrencePlanner::plan(Some(RecurrenceTargetEvidence::SignalItemBody))
-            .expect("signal accumulate nodes should always plan to signal recurrence"),
-    );
+    let target = RecurrencePlanner::plan(Some(RecurrenceTargetEvidence::SignalItemBody))
+        .expect("signal accumulate nodes should always plan to signal recurrence");
     let wakeup_signal = signal_item_reference(module, pipe.head);
     let wakeup = wakeup_signal
         .map(|_| RecurrenceWakeupPlan::from_evidence(RecurrenceWakeupEvidence::SignalDependency));
@@ -481,7 +479,7 @@ fn elaborate_accumulate_pipe(
     if blockers.is_empty() {
         let start = start.expect("planned accumulate nodes should have a start");
         RecurrenceNodeOutcome::Planned(RecurrenceNodePlan {
-            target: target.expect("planned accumulate nodes should have a target"),
+            target,
             wakeup: wakeup.expect("planned accumulate nodes should have a wakeup"),
             wakeup_signal,
             seed: seed.expect("planned accumulate nodes should have a seed"),
@@ -492,7 +490,7 @@ fn elaborate_accumulate_pipe(
         })
     } else {
         RecurrenceNodeOutcome::Blocked(BlockedRecurrenceNode {
-            target,
+            target: Some(target),
             wakeup,
             input_subject: seed.as_ref().map(|expr| expr.ty.clone()),
             blockers,
@@ -940,24 +938,24 @@ fn recurrence_wakeup_hint_for_signal(
         context = context.with_reactive_inputs();
     }
     let contract = provider.contract();
-    if let Some(options) = source.options {
-        if let ExprKind::Record(record) = &module.exprs()[options].kind {
-            for field in &record.fields {
-                let Some(cause) = contract
-                    .wakeup_option(field.label.text())
-                    .map(|option| builtin_source_option_wakeup_cause(option.cause()))
-                else {
-                    continue;
-                };
-                context = match cause {
-                    BuiltinSourceWakeupCause::RetryPolicy => context.with_retry_policy(),
-                    BuiltinSourceWakeupCause::PollingPolicy => context.with_polling_policy(),
-                    BuiltinSourceWakeupCause::TriggerSignal => context.with_signal_trigger(),
-                    BuiltinSourceWakeupCause::ProviderTimer
-                    | BuiltinSourceWakeupCause::ReactiveInputs
-                    | BuiltinSourceWakeupCause::ProviderDefinedTrigger => context,
-                };
-            }
+    if let Some(options) = source.options
+        && let ExprKind::Record(record) = &module.exprs()[options].kind
+    {
+        for field in &record.fields {
+            let Some(cause) = contract
+                .wakeup_option(field.label.text())
+                .map(|option| builtin_source_option_wakeup_cause(option.cause()))
+            else {
+                continue;
+            };
+            context = match cause {
+                BuiltinSourceWakeupCause::RetryPolicy => context.with_retry_policy(),
+                BuiltinSourceWakeupCause::PollingPolicy => context.with_polling_policy(),
+                BuiltinSourceWakeupCause::TriggerSignal => context.with_signal_trigger(),
+                BuiltinSourceWakeupCause::ProviderTimer
+                | BuiltinSourceWakeupCause::ReactiveInputs
+                | BuiltinSourceWakeupCause::ProviderDefinedTrigger => context,
+            };
         }
     }
     Some(LocalRecurrenceWakeupHint::BuiltinSource(context))
@@ -1038,7 +1036,7 @@ mod tests {
     use aivi_typing::{RecurrenceTarget, RecurrenceWakeupEvidence, RecurrenceWakeupKind};
 
     use super::{RecurrenceElaborationBlocker, RecurrenceNodeOutcome, elaborate_recurrences};
-    use crate::test_support::{fixture_root, item_name, lower_fixture, lower_text};
+    use crate::test_support::{item_name, lower_fixture, lower_text};
     use crate::{GateRuntimeExprKind, GateRuntimeProjectionBase, GateType};
 
     #[test]

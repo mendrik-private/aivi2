@@ -683,11 +683,10 @@ impl<'a> Parser<'a> {
                 let annotation_end = self
                     .find_next_from_block_item_start(index + 1, end, entry_indent)
                     .unwrap_or(end);
-                if let Some(pending) = self.parse_from_type_annotation(index, annotation_end) {
-                    if let Some(previous) = pending_type_annotation.replace(pending) {
+                if let Some(pending) = self.parse_from_type_annotation(index, annotation_end)
+                    && let Some(previous) = pending_type_annotation.replace(pending) {
                         self.emit_orphan_from_type_annotation(&previous, None);
                     }
-                }
                 *cursor = annotation_end;
                 continue;
             }
@@ -1203,9 +1202,7 @@ impl<'a> Parser<'a> {
         }
 
         // lowercase identifier. Check if it's followed by another token (pattern) before `=>`.
-        let Some(next_idx) = self.peek_nontrivia(ident_idx + 1, end) else {
-            return None;
-        };
+        let next_idx = self.peek_nontrivia(ident_idx + 1, end)?;
         // If immediately followed by `=>`, this identifier IS the pattern, not a source prefix.
         if self.tokens[next_idx].kind() == TokenKind::Arrow {
             return None;
@@ -1294,12 +1291,10 @@ impl<'a> Parser<'a> {
                     }
                 } else if text == "require"
                     && self.peek_kind(index + 1, inner_end) != Some(TokenKind::Colon)
-                {
-                    if let Some(decl) = self.parse_class_require_decl(cursor, inner_end) {
+                    && let Some(decl) = self.parse_class_require_decl(cursor, inner_end) {
                         require_decls.push(decl);
                         continue;
                     }
-                }
             }
             let before = *cursor;
             let Some(member) = self.parse_class_member(cursor, inner_end) else {
@@ -1578,8 +1573,8 @@ impl<'a> Parser<'a> {
             }
 
             // Try to pair a pending `name : TypeExpr` annotation with this implementation.
-            if member.annotation.is_none() {
-                if let Some(held) = pending_colon_member.take() {
+            if member.annotation.is_none()
+                && let Some(held) = pending_colon_member.take() {
                     let held_name = domain_member_surface_name_str(&held.name);
                     let this_name = domain_member_surface_name_str(&member.name);
                     if held_name == this_name {
@@ -1590,7 +1585,6 @@ impl<'a> Parser<'a> {
                         members.push(held);
                     }
                 }
-            }
 
             // If this member is annotation-only (from `name : TypeExpr`), hold it.
             if member.annotation.is_some()
@@ -1753,8 +1747,8 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        if body.is_some() {
-            if let Some(trailing_index) = self.next_significant_in_range(*cursor, member_end) {
+        if body.is_some()
+            && let Some(trailing_index) = self.next_significant_in_range(*cursor, member_end) {
                 self.diagnostics.push(
                     Diagnostic::error("instance member body must contain exactly one expression")
                         .with_code(TRAILING_DECLARATION_BODY_TOKEN)
@@ -1764,7 +1758,6 @@ impl<'a> Parser<'a> {
                         ),
                 );
             }
-        }
         *cursor = member_end;
         Some(InstanceMember {
             name,
@@ -1833,8 +1826,8 @@ impl<'a> Parser<'a> {
 
         // Inline colon annotation: `name : TypeExpr` — returns annotation-only member.
         // The implementation `name params = body` may follow on the next line with the same name.
-        if let Some(colon_idx) = self.peek_nontrivia(*cursor, end) {
-            if self.tokens[colon_idx].kind() == TokenKind::Colon
+        if let Some(colon_idx) = self.peek_nontrivia(*cursor, end)
+            && self.tokens[colon_idx].kind() == TokenKind::Colon
                 && !self.tokens[colon_idx].line_start()
             {
                 *cursor = colon_idx + 1;
@@ -1851,7 +1844,6 @@ impl<'a> Parser<'a> {
                     span: self.source_span_for_range(start, *cursor),
                 });
             }
-        }
 
         let mut parameters = Vec::new();
         while let Some(index) = self.peek_nontrivia(*cursor, end) {
@@ -1886,8 +1878,8 @@ impl<'a> Parser<'a> {
                     );
                     None
                 });
-            if body.is_some() {
-                if let Some(trailing_index) = self.next_significant_in_range(*cursor, member_end) {
+            if body.is_some()
+                && let Some(trailing_index) = self.next_significant_in_range(*cursor, member_end) {
                     self.diagnostics.push(
                         Diagnostic::error("domain member body must contain exactly one expression")
                             .with_code(TRAILING_DECLARATION_BODY_TOKEN)
@@ -1897,7 +1889,6 @@ impl<'a> Parser<'a> {
                             ),
                     );
                 }
-            }
             *cursor = member_end;
             return Some(DomainMember {
                 name: DomainMemberName::Signature(name),

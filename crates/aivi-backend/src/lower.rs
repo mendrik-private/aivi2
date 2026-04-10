@@ -1124,21 +1124,19 @@ impl<'a> ProgramLowerer<'a> {
                     else {
                         unreachable!();
                     };
-                    if handle.field_count == arguments.len() {
-                        if let Some(opaque_ty) = opaque_variant_type(&expr.ty) {
-                            record_opaque_variant(
-                                &mut collected,
-                                opaque_ty,
-                                Some(handle.item),
-                                handle.variant_name.clone(),
-                                arguments
-                                    .iter()
-                                    .map(|argument| {
-                                        self.lambda.core().exprs()[*argument].ty.clone()
-                                    })
-                                    .collect(),
-                            );
-                        }
+                    if handle.field_count == arguments.len()
+                        && let Some(opaque_ty) = opaque_variant_type(&expr.ty)
+                    {
+                        record_opaque_variant(
+                            &mut collected,
+                            opaque_ty,
+                            Some(handle.item),
+                            handle.variant_name.clone(),
+                            arguments
+                                .iter()
+                                .map(|argument| self.lambda.core().exprs()[*argument].ty.clone())
+                                .collect(),
+                        );
                     }
                 }
                 core::ExprKind::Reference(core::Reference::SumConstructor(handle))
@@ -1220,16 +1218,16 @@ impl<'a> ProgramLowerer<'a> {
             }
             core::PatternKind::Constructor { callee, arguments } => {
                 let field_types = constructor_pattern_field_types(subject_ty, callee);
-                if let core::Reference::SumConstructor(handle) = &callee.reference {
-                    if let Some(opaque_ty) = opaque_variant_type(subject_ty) {
-                        record_opaque_variant(
-                            collected,
-                            opaque_ty,
-                            Some(handle.item),
-                            handle.variant_name.clone(),
-                            field_types.clone(),
-                        );
-                    }
+                if let core::Reference::SumConstructor(handle) = &callee.reference
+                    && let Some(opaque_ty) = opaque_variant_type(subject_ty)
+                {
+                    record_opaque_variant(
+                        collected,
+                        opaque_ty,
+                        Some(handle.item),
+                        handle.variant_name.clone(),
+                        field_types.clone(),
+                    );
                 }
                 for (argument, field_ty) in arguments.iter().zip(field_types.iter()) {
                     self.collect_opaque_pattern_variants(argument, field_ty, collected);
@@ -2303,16 +2301,16 @@ impl<'a> ProgramLowerer<'a> {
                                     layout: input_layout,
                                 });
                                 let mut stage_locals = pipe_locals.clone();
-                                if let Some(slot) = subject_memo {
-                                    if let Some(binding) = stage.subject_memo {
-                                        stage_locals.insert(
-                                            binding.as_raw(),
-                                            SubjectContext {
-                                                reference: SubjectRef::Inline(slot),
-                                                layout: input_layout,
-                                            },
-                                        );
-                                    }
+                                if let Some(slot) = subject_memo
+                                    && let Some(binding) = stage.subject_memo
+                                {
+                                    stage_locals.insert(
+                                        binding.as_raw(),
+                                        SubjectContext {
+                                            reference: SubjectRef::Inline(slot),
+                                            layout: input_layout,
+                                        },
+                                    );
                                 }
                                 let kind = match &stage.kind {
                                     core::PipeStageKind::Transform { mode, expr } => {

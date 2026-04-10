@@ -818,16 +818,15 @@ impl SignalGraphBuilder {
             let cycle = indegree
                 .iter()
                 .enumerate()
-                .filter_map(|(index, remaining)| {
-                    (*remaining > 0).then(|| {
-                        debug_assert!(
-                            (index as u32) < signals.len() as u32,
-                            "Handle::from_raw: raw index {} out of bounds (signals len {})",
-                            index,
-                            signals.len()
-                        );
-                        SignalHandle::from_raw(index as u32)
-                    })
+                .filter(|&(_index, remaining)| *remaining > 0)
+                .map(|(index, _remaining)| {
+                    debug_assert!(
+                        (index as u32) < signals.len() as u32,
+                        "Handle::from_raw: raw index {} out of bounds (signals len {})",
+                        index,
+                        signals.len()
+                    );
+                    SignalHandle::from_raw(index as u32)
                 })
                 .collect::<Vec<_>>();
             return Err(GraphBuildError::DependencyCycle { signals: cycle });

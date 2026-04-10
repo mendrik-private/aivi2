@@ -158,10 +158,10 @@ fn spin_source_runtime_until_match(
     let start = Instant::now();
     while start.elapsed() < timeout {
         runtime.tick(&mut |_, _: crate::DependencyValues<'_, RuntimeValue>| None);
-        if let Some(value) = runtime.current_value(signal).unwrap() {
-            if predicate(value) {
-                return Some(value.clone());
-            }
+        if let Some(value) = runtime.current_value(signal).unwrap()
+            && predicate(value)
+        {
+            return Some(value.clone());
         }
         thread::sleep(Duration::from_millis(10));
     }
@@ -711,22 +711,20 @@ fn dbus_signal_source_publishes_structured_bus_messages() {
     }
     let lowered = lower_text(
         "runtime-provider-dbus-signal.aivi",
-        &format!(
-            r#"
-type DbusSignal = {{
+        r#"
+type DbusSignal = {
     path: Text,
     interface: Text,
     member: Text,
     body: Text
-}}
+}
 
-@source dbus.signal "/org/aivi/Test" with {{
+@source dbus.signal "/org/aivi/Test" with {
     interface: "org.aivi.Test"
     member: "Ping"
-}}
+}
 signal inbound : Signal DbusSignal
 "#,
-        ),
     );
     let assembly =
         assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");

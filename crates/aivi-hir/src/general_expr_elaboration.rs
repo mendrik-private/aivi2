@@ -1103,22 +1103,26 @@ impl<'a> GeneralExprElaborator<'a> {
         let inferred_parameter_types = inferred_signature
             .as_ref()
             .map(|(parameters, _)| parameters.as_slice());
-        let (parameters, env) = match self.lower_parameters(&function.parameters, inferred_parameter_types)
-        {
-            Ok(lowered) => lowered,
-            Err(blockers) => {
-                return GeneralExprItemElaboration {
-                    owner,
-                    body_expr: function.body,
-                    parameters: Vec::new(),
-                    outcome: GeneralExprOutcome::Blocked(BlockedGeneralExpr { blockers }),
-                };
-            }
-        };
+        let (parameters, env) =
+            match self.lower_parameters(&function.parameters, inferred_parameter_types) {
+                Ok(lowered) => lowered,
+                Err(blockers) => {
+                    return GeneralExprItemElaboration {
+                        owner,
+                        body_expr: function.body,
+                        parameters: Vec::new(),
+                        outcome: GeneralExprOutcome::Blocked(BlockedGeneralExpr { blockers }),
+                    };
+                }
+            };
         let expected = function
             .annotation
             .and_then(|annotation| self.typing.lower_open_annotation(annotation))
-            .or_else(|| inferred_signature.as_ref().map(|(_, result)| result.clone()));
+            .or_else(|| {
+                inferred_signature
+                    .as_ref()
+                    .map(|(_, result)| result.clone())
+            });
         let outcome = match self.lower_expr_with_signal_result_fallback(
             function.body,
             &env,
@@ -1546,18 +1550,15 @@ impl<'a> GeneralExprElaborator<'a> {
         expected: Option<&GateType>,
     ) -> Result<GateRuntimeExpr, Vec<GeneralExprBlocker>> {
         let expr = self.module.exprs()[expr_id].clone();
-        if let ExprKind::Name(reference) = &expr.kind {
-            if let Some(expected) = expected {
-                if let Some(reference) =
-                    self.constructor_reference_with_expected(&reference, expr.span)
-                {
-                    return Ok(GateRuntimeExpr {
-                        span: expr.span,
-                        ty: expected.clone(),
-                        kind: GateRuntimeExprKind::Reference(reference),
-                    });
-                }
-            }
+        if let ExprKind::Name(reference) = &expr.kind
+            && let Some(expected) = expected
+            && let Some(reference) = self.constructor_reference_with_expected(reference, expr.span)
+        {
+            return Ok(GateRuntimeExpr {
+                span: expr.span,
+                ty: expected.clone(),
+                kind: GateRuntimeExprKind::Reference(reference),
+            });
         }
         match &expr.kind {
             ExprKind::Markup(_) => {
@@ -1590,18 +1591,15 @@ impl<'a> GeneralExprElaborator<'a> {
                 if let ExprKind::Apply {
                     callee, arguments, ..
                 } = &expr.kind
+                    && let Some(result_ty) = expected
+                    && let Ok(kind) =
+                        self.lower_apply_expr(expr_id, *callee, arguments, env, ambient, result_ty)
                 {
-                    if let Some(result_ty) = expected {
-                        if let Ok(kind) = self
-                            .lower_apply_expr(expr_id, *callee, arguments, env, ambient, result_ty)
-                        {
-                            return Ok(GateRuntimeExpr {
-                                span: expr.span,
-                                ty: result_ty.clone(),
-                                kind,
-                            });
-                        }
-                    }
+                    return Ok(GateRuntimeExpr {
+                        span: expr.span,
+                        ty: result_ty.clone(),
+                        kind,
+                    });
                 }
                 return Err(original_err);
             }
@@ -2032,13 +2030,13 @@ impl<'a> GeneralExprElaborator<'a> {
                         _ => {}
                     }
                 }
-            } else if segments.len() > 1 {
-                if let PatchSelectorSegment::Named { name, .. } = &segments[0] {
-                    nested_patches
-                        .entry(name.text().to_owned())
-                        .or_default()
-                        .push((segments[1..].to_vec(), entry.instruction.kind.clone()));
-                }
+            } else if segments.len() > 1
+                && let PatchSelectorSegment::Named { name, .. } = &segments[0]
+            {
+                nested_patches
+                    .entry(name.text().to_owned())
+                    .or_default()
+                    .push((segments[1..].to_vec(), entry.instruction.kind.clone()));
             }
         }
 
@@ -2086,17 +2084,17 @@ impl<'a> GeneralExprElaborator<'a> {
                     let mut nested_replace: HashMap<String, ExprId> = HashMap::new();
                     let mut nested_remove: HashSet<String> = HashSet::new();
                     for (segs, kind) in nested {
-                        if segs.len() == 1 {
-                            if let PatchSelectorSegment::Named { name, .. } = &segs[0] {
-                                match kind {
-                                    PatchInstructionKind::Replace(value_id) => {
-                                        nested_replace.insert(name.text().to_owned(), *value_id);
-                                    }
-                                    PatchInstructionKind::Remove => {
-                                        nested_remove.insert(name.text().to_owned());
-                                    }
-                                    _ => {}
+                        if segs.len() == 1
+                            && let PatchSelectorSegment::Named { name, .. } = &segs[0]
+                        {
+                            match kind {
+                                PatchInstructionKind::Replace(value_id) => {
+                                    nested_replace.insert(name.text().to_owned(), *value_id);
                                 }
+                                PatchInstructionKind::Remove => {
+                                    nested_remove.insert(name.text().to_owned());
+                                }
+                                _ => {}
                             }
                         }
                     }
@@ -2229,7 +2227,8 @@ impl<'a> GeneralExprElaborator<'a> {
             // When the callee is polymorphic but the concrete result type is known,
             // pre-substitute TypeParameters so argument expectations are concrete.
             if !result_ty.has_type_params() && inferred_result.has_type_params() {
-                let subs = collect_type_param_subs(&[inferred_result], &[result_ty.clone()]);
+                let subs =
+                    collect_type_param_subs(&[inferred_result], std::slice::from_ref(result_ty));
                 if !subs.is_empty() {
                     return Some(
                         parameters
@@ -2260,10 +2259,10 @@ impl<'a> GeneralExprElaborator<'a> {
             let lowered = self.lower_expr(*argument, env, ambient, expected.as_ref())?;
             // After lowering each argument, collect type-parameter bindings from the observed
             // concrete type so that remaining argument expectations can be specialized.
-            if let Some(param_types) = &inferred_parameter_types {
-                if let Some(param_ty) = param_types.get(index) {
-                    collect_type_param_subs_inner(param_ty, &lowered.ty, &mut accumulated_subs);
-                }
+            if let Some(param_types) = &inferred_parameter_types
+                && let Some(param_ty) = param_types.get(index)
+            {
+                collect_type_param_subs_inner(param_ty, &lowered.ty, &mut accumulated_subs);
             }
             argument_types.push(lowered.ty.clone());
             lowered_arguments.push(lowered);
@@ -3093,18 +3092,16 @@ impl<'a> GeneralExprElaborator<'a> {
                 let spine = cluster.normalized_spine();
                 if let crate::ApplicativeSpineHead::Expr(callee) = spine.pure_head() {
                     let args: Vec<ExprId> = spine.apply_arguments().collect();
-                    if let Ok(arguments) = crate::NonEmpty::from_vec(args) {
-                        if let Some(result_ty) = expected.cloned() {
-                            if let Ok(kind) = self.lower_apply_expr(
-                                expr_id, callee, &arguments, env, ambient, &result_ty,
-                            ) {
-                                return Ok(GateRuntimeExpr {
-                                    span: cluster.span,
-                                    ty: result_ty,
-                                    kind,
-                                });
-                            }
-                        }
+                    if let Ok(arguments) = crate::NonEmpty::from_vec(args)
+                        && let Some(result_ty) = expected.cloned()
+                        && let Ok(kind) = self
+                            .lower_apply_expr(expr_id, callee, &arguments, env, ambient, &result_ty)
+                    {
+                        return Ok(GateRuntimeExpr {
+                            span: cluster.span,
+                            ty: result_ty,
+                            kind,
+                        });
                     }
                 }
                 return Err(original_err);
@@ -3376,10 +3373,11 @@ impl<'a> GeneralExprElaborator<'a> {
                 if !info.issues.is_empty() {
                     return Err(self.blockers_from_issues(info.issues));
                 }
-                if let Some(inferred) = info.actual_gate_type().or(info.ty.clone()) {
-                    if inferred.has_type_params() && expected.fits_template(&inferred) {
-                        return Ok(expected.clone());
-                    }
+                if let Some(inferred) = info.actual_gate_type().or(info.ty.clone())
+                    && inferred.has_type_params()
+                    && expected.fits_template(&inferred)
+                {
+                    return Ok(expected.clone());
                 }
                 return Ok(info
                     .actual_gate_type()
@@ -3431,7 +3429,7 @@ impl<'a> GeneralExprElaborator<'a> {
                 Ok(GateRuntimeReference::Builtin(*builtin))
             }
             ResolutionState::Resolved(TermResolution::IntrinsicValue(value)) => {
-                Ok(GateRuntimeReference::IntrinsicValue(value.clone()))
+                Ok(GateRuntimeReference::IntrinsicValue(*value))
             }
             ResolutionState::Resolved(TermResolution::ClassMember(_))
             | ResolutionState::Resolved(TermResolution::AmbiguousClassMembers(_)) => {
@@ -3729,14 +3727,9 @@ impl<'a> GeneralExprElaborator<'a> {
                 };
                 let mut fields = Vec::new();
                 let mut current = &ty_clone;
-                loop {
-                    match current {
-                        crate::ImportValueType::Arrow { parameter, result } => {
-                            fields.push(self.typing.lower_import_value_type(parameter));
-                            current = result;
-                        }
-                        _ => break,
-                    }
+                while let crate::ImportValueType::Arrow { parameter, result } = current {
+                    fields.push(self.typing.lower_import_value_type(parameter));
+                    current = result;
                 }
                 Some(fields)
             }
@@ -3997,10 +3990,7 @@ fn env_parameters(module: &Module, env: &GateExprEnv) -> Vec<GeneralExprParamete
 }
 
 fn join_stage_spans(stages: &[&crate::PipeStage]) -> SourceSpan {
-    let mut span = stages
-        .first()
-        .map(|stage| stage.span)
-        .unwrap_or_else(SourceSpan::default);
+    let mut span = stages.first().map(|stage| stage.span).unwrap_or_default();
     for stage in stages.iter().skip(1) {
         span = join_spans(span, stage.span);
     }
@@ -4985,7 +4975,7 @@ export Envelope
                 }
                 current
             };
-            let hoisted_candidates = typing.hoisted_import_candidates(&reference);
+            let hoisted_candidates = typing.hoisted_import_candidates(reference);
             let hoisted_types = hoisted_candidates
                 .clone()
                 .unwrap_or_default()
@@ -4995,9 +4985,9 @@ export Envelope
                     (import, ty)
                 })
                 .collect::<Vec<_>>();
-            let selected_hoisted = typing.select_hoisted_import(&reference, Some(&callee_expected));
+            let selected_hoisted = typing.select_hoisted_import(reference, Some(&callee_expected));
             let dispatch =
-                resolve_class_member_dispatch(module, &reference, &argument_types, Some(&expected));
+                resolve_class_member_dispatch(module, reference, &argument_types, Some(&expected));
             panic!(
                 "expected workspace alias map body to lower, found {:?}; expected={expected:?}; callee_expected={callee_expected:?}; argument_types={argument_types:?}; hoisted_types={hoisted_types:?}; selected_hoisted={selected_hoisted:?}; dispatch={dispatch:?}",
                 lifted.outcome

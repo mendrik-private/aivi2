@@ -408,11 +408,11 @@ fn collect_workspace_hoist_items(
     // `hoist` themselves (e.g. `aivi/list.aivi` declaring `hoist`).
     // all_bundled_stdlib_files() already filters out workspace-overridden files.
     for file in workspace.all_bundled_stdlib_files(db) {
-        if seen.insert(file.id) {
-            if let Some(module_name) = workspace.module_name_for_file(db, file) {
-                let parsed = parsed_file(db, file);
-                collect_hoists_from_module(parsed.cst(), &module_name, &mut result);
-            }
+        if seen.insert(file.id)
+            && let Some(module_name) = workspace.module_name_for_file(db, file)
+        {
+            let parsed = parsed_file(db, file);
+            collect_hoists_from_module(parsed.cst(), &module_name, &mut result);
         }
     }
 

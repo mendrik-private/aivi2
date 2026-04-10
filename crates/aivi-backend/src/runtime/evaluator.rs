@@ -1200,13 +1200,13 @@ impl<'a> KernelEvaluator<'a> {
                 mut bound_arguments,
             } => {
                 bound_arguments.extend(arguments.into_iter().map(strip_signal));
-                if bound_arguments.len() < handle.field_count as usize {
+                if bound_arguments.len() < handle.field_count {
                     return Ok(RuntimeValue::Callable(RuntimeCallable::SumConstructor {
                         handle,
                         bound_arguments,
                     }));
                 }
-                let remaining = bound_arguments.split_off(handle.field_count as usize);
+                let remaining = bound_arguments.split_off(handle.field_count);
                 let value = RuntimeValue::Sum(RuntimeSumValue {
                     item: handle.item,
                     type_name: handle.type_name.clone(),

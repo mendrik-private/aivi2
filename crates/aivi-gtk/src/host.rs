@@ -478,10 +478,10 @@ where
         Ok(())
     }
 
-    fn lookup_property<'a>(
+    fn lookup_property(
         &self,
         schema: &'static GtkWidgetSchema,
-        property: &'a str,
+        property: &str,
     ) -> Result<&'static GtkPropertyDescriptor, GtkConcreteHostError> {
         schema
             .property(property)

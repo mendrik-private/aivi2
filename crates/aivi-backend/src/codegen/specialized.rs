@@ -546,7 +546,7 @@ impl<'a> CraneliftCompiler<'a, JITModule> {
                 .declared_functions
                 .get(kernel)
                 .copied()
-                .ok_or_else(|| CodegenError::MissingKernel { kernel: *kernel }),
+                .ok_or(CodegenError::MissingKernel { kernel: *kernel }),
             CachedJitFunctionTarget::External(symbol) => self
                 .declared_external_funcs
                 .get(symbol)
@@ -767,13 +767,13 @@ impl<'a> CraneliftCompiler<'a, JITModule> {
         let signal_slots = self.build_jit_slots(
             kernel_id,
             &self.signal_slot_layouts,
-            |program, item| signal_slot_symbol(program, item),
+            signal_slot_symbol,
             &mut symbol_table,
         )?;
         let imported_item_slots = self.build_jit_slots(
             kernel_id,
             &self.imported_item_slot_layouts,
-            |program, item| imported_item_slot_symbol(program, item),
+            imported_item_slot_symbol,
             &mut symbol_table,
         )?;
         Ok((signal_slots, imported_item_slots))
@@ -834,8 +834,8 @@ impl<'a> CraneliftCompiler<'a, JITModule> {
         detail: &str,
     ) -> Result<AbiValueKind, CodegenError> {
         match pass {
-            AbiPassMode::ByReference { .. } => Ok(AbiValueKind::Pointer),
-            AbiPassMode::ByValue { .. } => {
+            AbiPassMode::ByReference => Ok(AbiValueKind::Pointer),
+            AbiPassMode::ByValue => {
                 let abi = self.field_abi_shape(kernel_id, layout, detail)?;
                 match abi.ty {
                     types::I8 => Ok(AbiValueKind::I8),

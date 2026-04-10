@@ -98,7 +98,7 @@ fn convert_diagnostic(
         .labels
         .iter()
         .filter(|l| l.style == LabelStyle::Secondary)
-        .filter_map(|label| {
+        .map(|label| {
             let label_file_id = label.span.file();
             // Prefer looking up the URI from the database so cross-file
             // secondary labels resolve to the correct document URI.  Fall back
@@ -120,13 +120,13 @@ fn convert_diagnostic(
 
             let lsp_r = label_source.span_to_lsp_range(label.span.span());
             let label_range = lsp_range(lsp_r);
-            Some(DiagnosticRelatedInformation {
+            DiagnosticRelatedInformation {
                 location: Location {
                     uri: label_uri,
                     range: label_range,
                 },
                 message: label.message.clone(),
-            })
+            }
         })
         .collect();
 

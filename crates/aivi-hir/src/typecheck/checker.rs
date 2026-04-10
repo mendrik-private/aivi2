@@ -635,13 +635,12 @@ impl<'a> TypeChecker<'a> {
             return result;
         }
 
-        if let Some(expected) = expected {
-            if let Some(result) =
+        if let Some(expected) = expected
+            && let Some(result) =
                 self.check_expected_special_case(expr_id, env, expected, value_stack)
             {
                 return result;
             }
-        }
 
         self.check_inferred_expr(expr_id, env, expected)
     }
@@ -854,8 +853,7 @@ impl<'a> TypeChecker<'a> {
         let right_actual = self.inferred_expr_type(right, env);
         if let (Some(left_actual), Some(right_actual)) =
             (left_actual.as_ref(), right_actual.as_ref())
-        {
-            if let Some(domain_operator) = select_domain_binary_operator(
+            && let Some(domain_operator) = select_domain_binary_operator(
                 self.module,
                 &mut self.typing,
                 operator,
@@ -881,7 +879,6 @@ impl<'a> TypeChecker<'a> {
                 }
                 return self.check_result_type(expr_id, expected, &domain_operator.result_type);
             }
-        }
         let Some(operand_ty) = self.select_numeric_operand_type(
             operator,
             left_actual.as_ref(),
@@ -997,8 +994,8 @@ impl<'a> TypeChecker<'a> {
         let checkpoint = self.diagnostics.len();
         let left_ok = self.check_expr(left, env, Some(&operand_ty), value_stack);
         let right_ok = self.check_expr(right, env, Some(&operand_ty), value_stack);
-        if !left_ok || !right_ok {
-            if self.diagnostics.len() > checkpoint {
+        if (!left_ok || !right_ok)
+            && self.diagnostics.len() > checkpoint {
                 // At least one side emitted a concrete type error; propagate it.
                 return false;
             }
@@ -1006,7 +1003,6 @@ impl<'a> TypeChecker<'a> {
             // (e.g. an imported generic function whose return type cannot be inferred
             // at the gate level). Treat as valid rather than emitting a spurious
             // invalid-binary-operator diagnostic.
-        }
 
         self.handle_constraints(&[TypeConstraint::eq(
             self.module.exprs()[expr_id].span,
@@ -1458,9 +1454,7 @@ impl<'a> TypeChecker<'a> {
                             None
                         }
                     };
-                    let Some(field_types) = field_types else {
-                        return None;
-                    };
+                    let field_types = field_types?;
                     let checkpoint = self.diagnostics.len();
                     let ok = record.fields.iter().all(|field| {
                         if let Some(expected_ty) = field_types.get(field.label.text()) {
@@ -1600,9 +1594,7 @@ impl<'a> TypeChecker<'a> {
         let mut env = GateExprEnv::default();
         for (parameter, expected_parameter_ty) in parameters.iter().zip(parameter_types.iter()) {
             if let Some(annotation) = parameter.annotation {
-                let Some(parameter_ty) = self.typing.lower_annotation(annotation) else {
-                    return None;
-                };
+                let parameter_ty = self.typing.lower_annotation(annotation)?;
                 if !parameter_ty.same_shape(expected_parameter_ty) {
                     self.emit_type_mismatch(reference.span(), expected_parameter_ty, &parameter_ty);
                     return Some(false);
@@ -1614,9 +1606,7 @@ impl<'a> TypeChecker<'a> {
             }
         }
         if let Some(annotation) = result_annotation {
-            let Some(result_ty) = self.typing.lower_open_annotation(annotation) else {
-                return None;
-            };
+            let result_ty = self.typing.lower_open_annotation(annotation)?;
             if !result_ty.same_shape(&result_expected) {
                 self.emit_type_mismatch(reference.span(), &result_expected, &result_ty);
                 return Some(false);
@@ -1845,9 +1835,7 @@ impl<'a> TypeChecker<'a> {
             let info = self.typing.infer_expr(*argument, env, None);
             self.emit_expr_issues(&info.issues);
             self.handle_constraints(&info.constraints);
-            let Some(argument_ty) = info.ty.clone().or_else(|| info.actual_gate_type()) else {
-                return None;
-            };
+            let argument_ty = info.ty.clone().or_else(|| info.actual_gate_type())?;
             argument_types.push(argument_ty);
         }
         match self
@@ -1933,9 +1921,7 @@ impl<'a> TypeChecker<'a> {
             let info = self.typing.infer_expr(*argument, env, None);
             self.emit_expr_issues(&info.issues);
             self.handle_constraints(&info.constraints);
-            let Some(argument_ty) = info.ty.clone().or_else(|| info.actual_gate_type()) else {
-                return None;
-            };
+            let argument_ty = info.ty.clone().or_else(|| info.actual_gate_type())?;
             argument_types.push(argument_ty);
         }
         match self
@@ -2005,9 +1991,7 @@ impl<'a> TypeChecker<'a> {
             let info = self.typing.infer_expr(*argument, env, None);
             self.emit_expr_issues(&info.issues);
             self.handle_constraints(&info.constraints);
-            let Some(argument_ty) = info.ty else {
-                return None;
-            };
+            let argument_ty = info.ty?;
             argument_types.push(argument_ty);
         }
         if let Some((parameter_types, result_type)) =
@@ -2021,11 +2005,8 @@ impl<'a> TypeChecker<'a> {
             }
             return Some(true);
         }
-        let Some((matched_parameters, constraints)) =
-            self.match_function_constraints(&function, arguments, &argument_types, expected)
-        else {
-            return None;
-        };
+        let (matched_parameters, constraints) =
+            self.match_function_constraints(&function, arguments, &argument_types, expected)?;
         for constraint in &constraints {
             if let Err(reason) = self.require_class_binding(constraint) {
                 self.diagnostics.push(
@@ -2138,7 +2119,7 @@ impl<'a> TypeChecker<'a> {
             }
             None => {
                 let parameter_types =
-                    self.fallback_apply_parameter_types(callee, &arguments, env)?;
+                    self.fallback_apply_parameter_types(callee, arguments, env)?;
                 let callee_expected = self.arrow_type(&parameter_types, expected);
                 let checkpoint = self.diagnostics.len();
                 if !self.check_expr(callee, env, Some(&callee_expected), value_stack) {
@@ -2331,9 +2312,7 @@ impl<'a> TypeChecker<'a> {
         if self.diagnostics.len() != checkpoint {
             return Some(false);
         }
-        let Some(subject) = subject else {
-            return None;
-        };
+        let subject = subject?;
 
         if !self.check_expected_expr(*base_expr, env, &subject, value_stack) {
             return Some(false);
@@ -2443,12 +2422,11 @@ impl<'a> TypeChecker<'a> {
                 continue;
             }
             // Only handle top-level removals: selector has exactly one Named segment.
-            if entry.selector.segments.len() == 1 {
-                if let crate::PatchSelectorSegment::Named { name, .. } = &entry.selector.segments[0]
+            if entry.selector.segments.len() == 1
+                && let crate::PatchSelectorSegment::Named { name, .. } = &entry.selector.segments[0]
                 {
                     removed.push(name.text().to_string());
                 }
-            }
         }
         removed
     }
@@ -3086,13 +3064,12 @@ impl<'a> TypeChecker<'a> {
                     diag.with_help("logical operators `and`, `or` require both sides to be `Bool`");
             }
             BinaryOperatorExpectation::MatchingNumericOperands => {
-                if let (Some(l), Some(r)) = (left, right) {
-                    if l != r {
+                if let (Some(l), Some(r)) = (left, right)
+                    && l != r {
                         diag = diag.with_help(
                             "convert one operand so both sides share the same numeric type",
                         );
                     }
-                }
             }
             BinaryOperatorExpectation::CommonTypeOperands => {}
         }
@@ -3157,9 +3134,7 @@ impl<'a> TypeChecker<'a> {
             scope: self.current_eq_constraint_scope(),
         };
         if self
-            .pending_eq_constraints
-            .iter()
-            .any(|existing| *existing == pending)
+            .pending_eq_constraints.contains(&pending)
         {
             return;
         }
@@ -3209,8 +3184,8 @@ impl<'a> TypeChecker<'a> {
             .iter()
             .map(|argument| self.inferred_expr_type(*argument, env))
             .collect::<Vec<_>>();
-        if let ExprKind::Name(reference) = &self.module.exprs()[callee].kind {
-            if let Some(named_parameter_types) =
+        if let ExprKind::Name(reference) = &self.module.exprs()[callee].kind
+            && let Some(named_parameter_types) =
                 self.named_function_parameter_types(reference, arguments.len())
             {
                 for (slot, named_parameter_ty) in parameter_types
@@ -3222,7 +3197,6 @@ impl<'a> TypeChecker<'a> {
                     }
                 }
             }
-        }
         parameter_types.into_iter().collect()
     }
 
@@ -3387,14 +3361,13 @@ impl<'a> TypeChecker<'a> {
         {
             return Ok(());
         }
-        if let Some(class_item_id) = self.class_item_id_by_name("Eq") {
-            if self
+        if let Some(class_item_id) = self.class_item_id_by_name("Eq")
+            && self
                 .resolve_same_module_instance(class_item_id, ty)?
                 .is_some()
             {
                 return Ok(());
             }
-        }
         self.require_compiler_derived_eq_with_scope(ty, scope, item_stack)
     }
 
@@ -3673,14 +3646,12 @@ impl<'a> TypeChecker<'a> {
                 subject: is,
                 ..
             } = &import.metadata
-            {
-                if ic.as_ref() == class_name
+                && ic.as_ref() == class_name
                     && im.as_ref() == member_name
                     && is.as_ref() == subject_label.as_str()
                 {
                     return Some(import_id);
                 }
-            }
         }
         None
     }

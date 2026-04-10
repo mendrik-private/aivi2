@@ -298,11 +298,11 @@ fn diagnostic_message(
     }
 }
 
-fn matching_named_item<'a>(
-    parsed: &'a aivi_syntax::Module,
+fn matching_named_item(
+    parsed: &aivi_syntax::Module,
     kind: aivi_hir::TypedDeclarationKind,
     header_span: SourceSpan,
-) -> Option<&'a aivi_syntax::NamedItem> {
+) -> Option<&aivi_syntax::NamedItem> {
     parsed.items.iter().find_map(|item| match (kind, item) {
         (aivi_hir::TypedDeclarationKind::Value, aivi_syntax::Item::Value(named))
         | (aivi_hir::TypedDeclarationKind::Function, aivi_syntax::Item::Fun(named))
@@ -365,8 +365,8 @@ fn annotation_coverage_span(
 ) -> Option<SourceSpan> {
     item.constraints
         .iter()
-        .fold(Some(annotation_span), |current, constraint| {
-            current?.join(constraint.span)
+        .try_fold(annotation_span, |current, constraint| {
+            current.join(constraint.span)
         })
 }
 

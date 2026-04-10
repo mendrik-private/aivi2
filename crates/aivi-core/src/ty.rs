@@ -63,6 +63,7 @@ pub enum Type {
 
 impl Type {
     pub fn lower(root: &HirGateType) -> Self {
+        #[allow(clippy::enum_variant_names)]
         enum Task<'a> {
             Visit(&'a HirGateType),
             BuildTuple(usize),
@@ -344,6 +345,7 @@ impl Type {
     }
 
     fn lower_import_with_substitutions(root: &ImportValueType, substitutions: Rc<[Type]>) -> Self {
+        #[allow(clippy::enum_variant_names)]
         enum Task<'a> {
             Visit(&'a ImportValueType, Rc<[Type]>),
             BuildTuple(usize),

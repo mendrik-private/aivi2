@@ -265,7 +265,7 @@ fn resolve_schema_or_ref(sor: &SchemaOrRef, components: &ResolvedComponents) -> 
     match sor {
         SchemaOrRef::Schema(s) => *s.clone(),
         SchemaOrRef::Ref(r) => {
-            let name = r.ref_path.split('/').last().unwrap_or("");
+            let name = r.ref_path.split('/').next_back().unwrap_or("");
             components.schemas.get(name).cloned().unwrap_or_default()
         }
     }

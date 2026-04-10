@@ -401,8 +401,8 @@ impl<'a> ModuleLowerer<'a> {
                     })
                 });
                 Some(PipeRecurrence {
-                    target: recurrence.target.clone(),
-                    wakeup: recurrence.wakeup.clone(),
+                    target: recurrence.target,
+                    wakeup: recurrence.wakeup,
                     seed,
                     start,
                     steps,
@@ -556,17 +556,15 @@ impl<'a> ModuleLowerer<'a> {
             }
         };
 
-        if !allow_captures {
-            if !captures.is_empty() {
-                for capture in &captures {
-                    self.errors.push(UnboundLocalReference {
-                        item: owner,
-                        binding: capture.binding,
-                        span: capture.span,
-                    });
-                }
-                return None;
+        if !allow_captures && !captures.is_empty() {
+            for capture in &captures {
+                self.errors.push(UnboundLocalReference {
+                    item: owner,
+                    binding: capture.binding,
+                    span: capture.span,
+                });
             }
+            return None;
         }
 
         let closure_id = alloc_or_diag!(

@@ -1,11 +1,10 @@
 
 /// Return an XDG base directory: use the env var if set and non-empty, otherwise `$HOME/fallback`.
 fn xdg_dir(env_var: &str, fallback: &str) -> String {
-    if let Ok(val) = std::env::var(env_var) {
-        if !val.is_empty() {
+    if let Ok(val) = std::env::var(env_var)
+        && !val.is_empty() {
             return val;
         }
-    }
     let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_owned());
     format!("{home}/{fallback}")
 }
@@ -166,7 +165,7 @@ fn evaluate_intrinsic_value(
                     kernel,
                     expr,
                     value: IntrinsicValue::FloatFloor,
-                    reason: "floor result is not finite".into(),
+                    reason: "floor result is not finite",
                 })
         }
         (IntrinsicValue::FloatCeil, [n]) => {
@@ -177,7 +176,7 @@ fn evaluate_intrinsic_value(
                     kernel,
                     expr,
                     value: IntrinsicValue::FloatCeil,
-                    reason: "ceil result is not finite".into(),
+                    reason: "ceil result is not finite",
                 })
         }
         (IntrinsicValue::FloatRound, [n]) => {
@@ -188,7 +187,7 @@ fn evaluate_intrinsic_value(
                     kernel,
                     expr,
                     value: IntrinsicValue::FloatRound,
-                    reason: "round result is not finite".into(),
+                    reason: "round result is not finite",
                 })
         }
         (IntrinsicValue::FloatSqrt, [n]) => {
@@ -210,7 +209,7 @@ fn evaluate_intrinsic_value(
                     kernel,
                     expr,
                     value: IntrinsicValue::FloatAbs,
-                    reason: "abs result is not finite".into(),
+                    reason: "abs result is not finite",
                 })
         }
         (IntrinsicValue::FloatToInt, [n]) => {
@@ -225,7 +224,7 @@ fn evaluate_intrinsic_value(
                     kernel,
                     expr,
                     value: IntrinsicValue::FloatFromInt,
-                    reason: "int-to-float result is not finite".into(),
+                    reason: "int-to-float result is not finite",
                 })
         }
         (IntrinsicValue::FloatToText, [n]) => {
@@ -362,7 +361,7 @@ fn evaluate_intrinsic_value(
             let left = expect_intrinsic_bytes(kernel, expr, value, 0, a)?;
             let right = expect_intrinsic_bytes(kernel, expr, value, 1, b)?;
             let mut combined = left.to_vec();
-            combined.extend_from_slice(&*right);
+            combined.extend_from_slice(&right);
             Ok(RuntimeValue::Bytes(combined.into()))
         }
         (IntrinsicValue::BytesFromText, [t]) => {
@@ -371,7 +370,7 @@ fn evaluate_intrinsic_value(
         }
         (IntrinsicValue::BytesToText, [b]) => {
             let bytes = expect_intrinsic_bytes(kernel, expr, value, 0, b)?;
-            Ok(std::str::from_utf8(&*bytes)
+            Ok(std::str::from_utf8(&bytes)
                 .ok()
                 .map(|s| RuntimeValue::OptionSome(Box::new(RuntimeValue::Text(s.into()))))
                 .unwrap_or(RuntimeValue::OptionNone))

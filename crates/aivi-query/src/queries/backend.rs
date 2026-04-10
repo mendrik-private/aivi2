@@ -351,10 +351,10 @@ pub fn runtime_fragment_backend_unit(
 ) -> Result<Arc<RuntimeFragmentBackendUnit>, BackendUnitError> {
     let entry_hir = hir_module(db, file);
     let key = runtime_fragment_cache_key(file, fragment);
-    if let Some(cached) = db.runtime_fragment_cache_entry(key) {
-        if Arc::ptr_eq(&cached.entry_hir, &entry_hir) {
-            return clone_cached_value(&cached.value);
-        }
+    if let Some(cached) = db.runtime_fragment_cache_entry(key)
+        && Arc::ptr_eq(&cached.entry_hir, &entry_hir)
+    {
+        return clone_cached_value(&cached.value);
     }
 
     let value = Arc::new(lower_runtime_fragment_backend_unit(
@@ -389,12 +389,11 @@ fn whole_program_backend_unit_with_items_inner(
     let normalized_included_items = normalize_included_items(included_items);
     let workspace_modules = collect_workspace_hir_modules(db, file, &entry_hir);
     let key = whole_program_cache_key(file, &normalized_included_items);
-    if let Some(cached) = db.whole_program_cache_entry(key) {
-        if Arc::ptr_eq(&cached.entry_hir, &entry_hir)
-            && workspace_modules_match(&cached.workspace_modules, &workspace_modules)
-        {
-            return clone_cached_value(&cached.value);
-        }
+    if let Some(cached) = db.whole_program_cache_entry(key)
+        && Arc::ptr_eq(&cached.entry_hir, &entry_hir)
+        && workspace_modules_match(&cached.workspace_modules, &workspace_modules)
+    {
+        return clone_cached_value(&cached.value);
     }
 
     let value = Arc::new(lower_whole_program_backend_unit(

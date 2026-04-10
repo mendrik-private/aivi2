@@ -891,8 +891,8 @@ fn extract_auth_header(
                     }
                 }
                 "BasicAuth" => {
-                    if sum.fields.len() >= 2 {
-                        if let (RuntimeValue::Text(user), RuntimeValue::Text(pass)) =
+                    if sum.fields.len() >= 2
+                        && let (RuntimeValue::Text(user), RuntimeValue::Text(pass)) =
                             (&sum.fields[0], &sum.fields[1])
                         {
                             let credentials = format!("{user}:{pass}");
@@ -902,7 +902,6 @@ fn extract_auth_header(
                                 format!("Basic {encoded}").into_boxed_str(),
                             )));
                         }
-                    }
                 }
                 "ApiKey" => {
                     if let Some(RuntimeValue::Text(key)) = sum.fields.first() {
@@ -935,7 +934,7 @@ fn extract_auth_header(
 
 fn base64_encode(input: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
     for chunk in input.chunks(3) {
         let b0 = chunk[0] as usize;
         let b1 = chunk.get(1).copied().unwrap_or(0) as usize;
@@ -1686,9 +1685,7 @@ impl WindowKeyOutputPlan {
             } => Ok(Self::Text),
             hir::DecodeProgramStep::Sum { variants, .. } => {
                 if let Some(variant) = variants.iter().find_map(|variant| {
-                    let Some(payload) = variant.payload else {
-                        return None;
-                    };
+                    let payload = variant.payload?;
                     if matches!(
                         decode.step(payload),
                         hir::DecodeProgramStep::Scalar {

@@ -261,7 +261,7 @@ fn decode_text_fragment(raw: &str) -> String {
                 consumed.push(chars.next().expect("peeked opening brace must exist"));
                 let mut digits = String::new();
                 let mut terminated = false;
-                while let Some(next) = chars.next() {
+                for next in chars.by_ref() {
                     consumed.push(next);
                     if next == '}' {
                         terminated = true;

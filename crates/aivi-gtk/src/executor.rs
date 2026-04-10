@@ -756,7 +756,7 @@ where
     /// Rollback rules per edit kind:
     /// - `Mount`   → `Unmount` the just-created subtree.
     /// - `Unmount` → `Mount` from scratch (creates fresh widget instances; original
-    ///               widget handles are unrecoverable once torn down).
+    ///   widget handles are unrecoverable once torn down).
     /// - `SetVisibility` → re-apply the opposite visibility.
     ///
     /// Rollback errors are suppressed so the primary error is always returned.
@@ -1252,20 +1252,20 @@ where
         }
         let block_widgets = self.instance_root_widgets(&child)?;
         let target = self.widget_mount_target(parent, Some(&child))?;
-        if let Some(target) = target {
-            if !block_widgets.is_empty() {
-                let local_offset = self.root_widget_offset_in_mount_target(
-                    parent,
-                    &self.instance_state(parent)?.children,
-                    index,
-                    &target,
-                )?;
-                let abs_index = self.offset_within_mount_target(&target, local_offset)?;
-                let widget = self.widget_handle(&target.widget)?.clone();
-                self.host
-                    .insert_children(&widget, target.group, abs_index, &block_widgets)
-                    .map_err(GtkExecutorError::Host)?;
-            }
+        if let Some(target) = target
+            && !block_widgets.is_empty()
+        {
+            let local_offset = self.root_widget_offset_in_mount_target(
+                parent,
+                &self.instance_state(parent)?.children,
+                index,
+                &target,
+            )?;
+            let abs_index = self.offset_within_mount_target(&target, local_offset)?;
+            let widget = self.widget_handle(&target.widget)?.clone();
+            self.host
+                .insert_children(&widget, target.group, abs_index, &block_widgets)
+                .map_err(GtkExecutorError::Host)?;
         }
         {
             let parent_state = self.instance_state_mut(parent)?;
@@ -1313,14 +1313,14 @@ where
             (child_count, removed, block_widgets, target, local_offset)
         };
         debug_assert!(start <= child_count);
-        if let Some(target) = target {
-            if !block_widgets.is_empty() {
-                let abs_index = self.offset_within_mount_target(&target, local_offset)?;
-                let widget = self.widget_handle(&target.widget)?.clone();
-                self.host
-                    .remove_children(&widget, target.group, abs_index, &block_widgets)
-                    .map_err(GtkExecutorError::Host)?;
-            }
+        if let Some(target) = target
+            && !block_widgets.is_empty()
+        {
+            let abs_index = self.offset_within_mount_target(&target, local_offset)?;
+            let widget = self.widget_handle(&target.widget)?.clone();
+            self.host
+                .remove_children(&widget, target.group, abs_index, &block_widgets)
+                .map_err(GtkExecutorError::Host)?;
         }
         self.instance_state_mut(parent)?
             .children
@@ -1384,22 +1384,23 @@ where
             (child_count, block_widgets, target, local_from, local_to)
         };
         debug_assert!(start <= child_count);
-        if let Some(target) = target {
-            if !block_widgets.is_empty() && local_from != local_to {
-                let abs_from = self.offset_within_mount_target(&target, local_from)?;
-                let abs_to = self.offset_within_mount_target(&target, local_to)?;
-                let widget = self.widget_handle(&target.widget)?.clone();
-                self.host
-                    .move_children(
-                        &widget,
-                        target.group,
-                        abs_from,
-                        block_widgets.len(),
-                        abs_to,
-                        &block_widgets,
-                    )
-                    .map_err(GtkExecutorError::Host)?;
-            }
+        if let Some(target) = target
+            && !block_widgets.is_empty()
+            && local_from != local_to
+        {
+            let abs_from = self.offset_within_mount_target(&target, local_from)?;
+            let abs_to = self.offset_within_mount_target(&target, local_to)?;
+            let widget = self.widget_handle(&target.widget)?.clone();
+            self.host
+                .move_children(
+                    &widget,
+                    target.group,
+                    abs_from,
+                    block_widgets.len(),
+                    abs_to,
+                    &block_widgets,
+                )
+                .map_err(GtkExecutorError::Host)?;
         }
         let block = self
             .instance_state_mut(parent)?

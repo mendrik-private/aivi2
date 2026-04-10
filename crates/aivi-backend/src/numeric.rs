@@ -187,7 +187,7 @@ impl RuntimeBigInt {
         let mut n = exp;
         while n > 0 {
             if n & 1 == 1 {
-                result = result * &base;
+                result *= &base;
             }
             base = &base * &base;
             n >>= 1;

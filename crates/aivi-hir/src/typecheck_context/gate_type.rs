@@ -822,19 +822,15 @@ impl GateType {
             // names and argument shapes agree.  This covers ambient-prelude types
             // versus stdlib-imported types across all variant combinations.
             _ => {
-                match (left.named_type_parts(), right.named_type_parts()) {
-                    (Some((ln, la)), Some((rn, ra))) => {
-                        if ln == rn
-                            && la.len() == ra.len()
-                            && la.iter().zip(ra.iter()).all(|(l, r)| {
-                                Self::same_shape_inner(l, r, left_to_right, right_to_left)
-                            })
-                        {
-                            return true;
-                        }
+                if let (Some((ln, la)), Some((rn, ra))) = (left.named_type_parts(), right.named_type_parts())
+                    && ln == rn
+                        && la.len() == ra.len()
+                        && la.iter().zip(ra.iter()).all(|(l, r)| {
+                            Self::same_shape_inner(l, r, left_to_right, right_to_left)
+                        })
+                    {
+                        return true;
                     }
-                    _ => {}
-                }
                 // Expand transparent imported type aliases (e.g. `type Envelope A = A`)
                 // so that `Envelope Text` is recognised as the same shape as `Text`.
                 if let Self::OpaqueImport {
@@ -842,9 +838,8 @@ impl GateType {
                     definition: Some(def),
                     ..
                 } = left
-                {
-                    if let ImportTypeDefinition::Alias(alias) = def.as_ref() {
-                        if let Some(expanded) = Self::expand_import_alias_type(alias, arguments) {
+                    && let ImportTypeDefinition::Alias(alias) = def.as_ref()
+                        && let Some(expanded) = Self::expand_import_alias_type(alias, arguments) {
                             return Self::same_shape_inner(
                                 &expanded,
                                 right,
@@ -852,16 +847,13 @@ impl GateType {
                                 right_to_left,
                             );
                         }
-                    }
-                }
                 if let Self::OpaqueImport {
                     arguments,
                     definition: Some(def),
                     ..
                 } = right
-                {
-                    if let ImportTypeDefinition::Alias(alias) = def.as_ref() {
-                        if let Some(expanded) = Self::expand_import_alias_type(alias, arguments) {
+                    && let ImportTypeDefinition::Alias(alias) = def.as_ref()
+                        && let Some(expanded) = Self::expand_import_alias_type(alias, arguments) {
                             return Self::same_shape_inner(
                                 left,
                                 &expanded,
@@ -869,8 +861,6 @@ impl GateType {
                                 right_to_left,
                             );
                         }
-                    }
-                }
                 false
             }
         }

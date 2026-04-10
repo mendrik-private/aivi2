@@ -1964,7 +1964,7 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                             let merge_block = builder.create_block();
                             builder.append_block_param(merge_block, result_abi.ty);
 
-                            let truthy_constructor = truthy.constructor.clone();
+                            let truthy_constructor = truthy.constructor;
                             let truthy_payload_subject = truthy.payload_subject;
                             let truthy_body = truthy.body;
                             let cond = self.emit_truthy_falsy_condition(
@@ -2544,7 +2544,7 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                         else {
                             unreachable!()
                         };
-                        (falsy.payload_subject, falsy.constructor.clone(), falsy.body)
+                        (falsy.payload_subject, falsy.constructor, falsy.body)
                     };
 
                     if let Some(slot) = falsy_payload_subject {
@@ -4692,9 +4692,7 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                 Ok(self.emit_tagged_reference(
                     kernel_id,
                     variant_tag,
-                    payload
-                        .zip(payload_layout)
-                        .map(|(payload, layout)| (payload, layout)),
+                    payload.zip(payload_layout),
                     builder,
                 )?)
             }
@@ -6605,7 +6603,7 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
         match pass_mode {
             AbiPassMode::ByReference => {
                 let ty = self.pointer_type();
-                let bytes = u32::from(ty.bytes());
+                let bytes = ty.bytes();
                 Ok(AbiShape {
                     ty,
                     size: bytes,
@@ -8527,7 +8525,7 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                                     tasks.push(Task::Visit(arguments[0]));
                                 }
                                 KernelExprKind::SumConstructor(handle) => {
-                                    if arguments.len() != handle.field_count as usize {
+                                    if arguments.len() != handle.field_count {
                                         return Ok(None);
                                     }
                                     tasks.push(Task::BuildSumValue {
@@ -8600,7 +8598,7 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                     values.push(value);
                 }
                 Task::BuildSumValue { handle } => {
-                    let fields = drain_tail(&mut values, handle.field_count as usize);
+                    let fields = drain_tail(&mut values, handle.field_count);
                     values.push(RuntimeValue::Sum(crate::RuntimeSumValue {
                         item: handle.item,
                         type_name: handle.type_name,
