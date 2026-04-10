@@ -29,6 +29,7 @@ A persistent, LLM-maintained knowledge base for the AIVI compiler project.
 | [openapi-source.md](openapi-source.md) | OpenAPI capability handle: `@source api`, codegen, auth |
 
 | [demo-audit.md](demo-audit.md) | Snake & Reversi audit — issues found and fixed |
+| [manual-hallucination-report.md](manual-hallucination-report.md) | Hallucination audit of 78 manual files: 7 critical, 5 high, 3 medium, 2 low findings |
 
 ## Log
 

@@ -182,10 +182,6 @@ type Int -> List Coord
 func coordsInRow = y =>
     map (coordAt y) (matrixIndices 8)
 
-type Coord -> Coord -> Bool
-func coordEq = left right =>
-    left == right
-
 type Matrix Disc -> Disc -> List Coord
 func legalMoves = board disc =>
     filter (legalMove board disc) (flatMap coordsInRow (matrixIndices 8))
@@ -314,7 +310,7 @@ func stateWinnerLine = state =>
 
 type Coord -> State -> Bool
 func stateLegalAt = cell state =>
-    phaseAllowsHumanInput state.phase and listContains (coordEq cell) state.humanMoves
+    phaseAllowsHumanInput state.phase and listContains (coord: Coord => coord == cell) state.humanMoves
 
 type Coord -> State -> Text
 func stateCellLabel = cell state =>
@@ -335,23 +331,13 @@ from state = {
 signal placeCell : Signal Coord
 signal restartClick : Signal Unit
 
-signal computerPreparing : Signal Bool = phase
- |> phaseIsPreparing
-
 signal computerTurnRequest = phase
  ?|> phaseIsPreparing
 
-@source timer.after 16ms with {
-    immediate: False,
-    activeWhen: computerPreparing,
-    restartOn: computerTurnRequest
-}
-signal computerTurnReady : Signal Unit
-
-signal computerFlashSchedule : Signal ComputerFlashSchedule = computerTurnReady | restartClick
-  ||> computerTurnReady _ => ArmComputerFlash
-  ||> restartClick _      => CancelComputerFlash
-  ||> _                   => CancelComputerFlash
+signal computerFlashSchedule : Signal ComputerFlashSchedule = computerTurnRequest | restartClick
+  ||> computerTurnRequest _ => ArmComputerFlash
+  ||> restartClick _        => CancelComputerFlash
+  ||> _                     => CancelComputerFlash
 
 signal delayedComputerFlash : Signal ComputerFlashSchedule = computerFlashSchedule
   |> burst 120ms 4times
@@ -360,8 +346,8 @@ signal computerFlashTick : Signal Event = delayedComputerFlash
   ||> ArmComputerFlash    => ComputerFlash
   ||> CancelComputerFlash => Idle
 
-signal event = computerTurnReady | placeCell | computerFlashTick | restartClick
-  ||> computerTurnReady _             => StartComputerTurn
+signal event = computerTurnRequest | placeCell | computerFlashTick | restartClick
+  ||> computerTurnRequest _           => StartComputerTurn
   ||> placeCell cell                  => Click cell
   ||> computerFlashTick computerEvent => computerEvent
   ||> restartClick _                  => Reset

@@ -241,3 +241,9 @@ Updated [demo-audit.md](demo-audit.md) with the Reversi run-path compatibility f
 - replaced implicit `. == cell` comparator lambdas with explicit `coordEq`
 - routed `clickState` through `stateLegalAt` so the run path sees an explicit Bool helper instead of an inline branch subject
 - documented that this fixes the typed-core/runtime launch blocker without widening compiler semantics
+
+## [2026-04-10] audit | manual hallucination scan
+- Scanned 78 manual markdown files (guide + stdlib) against stdlib source, syntax.md, AIVI_RFC.md, schema.rs
+- Found 7 critical, 5 high, 3 medium, 2 low findings — overall risk: HIGH
+- Three main patterns: domain-member-as-standalone-export (url.md, duration.md, color.md), stale source option names (integrations.md), and nonexistent/placeholder stdlib names (record-patterns.md, modules.md, openapi-source.md)
+- See wiki/manual-hallucination-report.md for full findings

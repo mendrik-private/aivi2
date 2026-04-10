@@ -5,6 +5,21 @@
       "source": "sickn33/antigravity-awesome-skills",
       "sourceType": "github",
       "computedHash": "c6caae2e9bde463bab6e817a9c0ad98c0848f0aea69d7eaf35b11c2ba16c944c"
+    },
+    "developing-gtk-apps": {
+      "source": "mhagrelius/dotfiles",
+      "sourceType": "github",
+      "computedHash": "b69aa2d24add96983f34f545d9c1355d3c383d8b2c434b9749436bbb10b223ae"
+    },
+    "rust-async-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "1e68b5edfa95069e54af75acf2a34634a5d0266021fa4af3b9706eaec5b6207e"
+    },
+    "rust-engineer": {
+      "source": "jeffallan/claude-skills",
+      "sourceType": "github",
+      "computedHash": "5a8b4c69ded4bec7009af144c8aea3de5f463765f211c780afea8d7a47fb35e6"
     }
   }
 }
