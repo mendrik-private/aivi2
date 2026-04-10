@@ -19,40 +19,45 @@ use aivi.url (
 
 ## Overview
 
-| Member | Type | Description |
+| Name | Type | Description |
 | --- | --- | --- |
-| `Url.parse` | `Text -> Result UrlError Url` | Parse text into a typed URL |
-| `.scheme` | `Url -> Option Text` | Read the scheme if present |
-| `.host` | `Url -> Option Text` | Read the host if present |
-| `.port` | `Url -> Option Int` | Read the port if present |
-| `.path` | `Url -> Text` | Read the path part |
-| `.query` | `Url -> Option Text` | Read the query text if present |
-| `.fragment` | `Url -> Option Text` | Read the fragment text if present |
-| `.withPath` | `Url -> Text -> Url` | Return a copy with a different path |
-| `.withQuery` | `Url -> Text -> Url` | Return a copy with a different query |
+| `Url` | domain over `Text` | A validated URL value |
+| `UrlError` | `Text` | Parse failure message |
+| `.carrier` | `Url -> Text` | The raw URL text |
 
-## `parse`
+## Domain
 
 ```aivi
+domain Url over Text = {
+    type Text -> Result UrlError Url
+    parse
+    type Url -> Option Text
+    scheme
+    type Url -> Option Text
+    host
+    type Url -> Option Int
+    port
+    type Url -> Text
+    path
+    type Url -> Option Text
+    query
+    type Url -> Option Text
+    fragment
+    type Url -> Text -> Url
+    withPath
+    type Url -> Text -> Url
+    withQuery
+}
 ```
 
-Use this when URL text comes from config, user input, or another external source.
-
-```aivi
-use aivi.url (
-    Url
-    UrlError
-)
-
-value apiBase : Result UrlError Url = Url.parse "https://api.example.com/v1/users?page=1"
-```
+The domain members -- `parse`, `scheme`, `host`, `port`, `path`, `query`, `fragment`,
+`withPath`, `withQuery` -- are part of the domain's internal implementation and are not
+individually importable from user code. Use `Url` as an opaque validated type and access
+`.carrier` when the raw text is required.
 
 ## `.carrier`
 
-```aivi
-```
-
-Access the raw URL text.
+Access the raw URL text backing a `Url` value.
 
 ```aivi
 use aivi.url (Url)
@@ -62,72 +67,13 @@ func rawAddress = url =>
     url.carrier
 ```
 
-## Accessors
-
-The accessors let you inspect one part at a time.
-
-- `.scheme`, `.host`, `.port`, `.query`, and `.fragment` return `Option ...` because those parts
-  may be absent
-- `.path` always returns `Text`
-
-All accessors are domain members and are called using dot notation on a `Url` value.
-
-```aivi
-use aivi.url (Url)
-
-type Url -> Text
-func routeOnly = url =>
-    url.path
-```
-
-The query is returned as plain text if present. This module does not split it into separate
-key/value pairs for you.
-
-## Updating a URL
-
-### `withPath`
-
-```aivi
-```
-
-Return a new `Url` with a different path.
-
-### `withQuery`
-
-```aivi
-```
-
-Return a new `Url` with a different query string.
-
-```aivi
-use aivi.url (Url)
-
-type Url -> Url
-func moveToSearchPath = url =>
-    url.withPath "/search"
-
-type Url -> Url
-func toSearchPage = url =>
-    (url.withPath "/search").withQuery "q=aivi"
-```
-
 ## Error type
 
 ```aivi
 type UrlError = Text
 ```
 
-Failed parses report a plain text error message.
-
-## Example — keep URLs typed until the edge
-
-```aivi
-use aivi.url (Url)
-
-type Url -> Text
-func avatarEndpoint = base =>
-    (base.withPath "/api/avatar").carrier
-```
+When parsing fails, the module reports a plain text error message.
 
 ## Current limits
 

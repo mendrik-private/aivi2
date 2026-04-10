@@ -16,7 +16,7 @@ use aivi.duration (
 )
 ```
 
-Because `aivi.duration` declares `hoist`, the literal suffixes (`ms`, `sec`, `min`, `hr`, `dy`) and constructor helpers (`millis`, `trySeconds`) are available project-wide in every AIVI file without any `use` statement. Import `Duration` explicitly when you need the type name in annotations, and `DurationError` when you need to handle construction failures.
+Because `aivi.duration` declares `hoist`, the literal suffixes (`ms`, `sec`, `min`, `hr`, `dy`) and constructor helpers (`millis`, `trySeconds`) are available project-wide in every AIVI file without any `use` statement. The type names `Duration` and `DurationError` are also hoisted, so no `use` is needed at all in most files. Import them explicitly only when you want them to appear in your module's own `export` list or if your tooling requires an explicit declaration.
 
 ## Overview
 
@@ -39,8 +39,6 @@ Because `aivi.duration` declares `hoist`, the literal suffixes (`ms`, `sec`, `mi
 The shortest way to make a duration is with a suffix literal:
 
 ```aivi
-use aivi.duration (Duration)
-
 value debounce : Duration = 250ms
 value retryDelay : Duration = 5sec
 value sessionLength : Duration = 30min
@@ -61,8 +59,6 @@ values elsewhere in your program.
 Build a duration from a raw millisecond count.
 
 ```aivi
-use aivi.duration (Duration)
-
 value shortDelay : Duration = millis 150
 ```
 
@@ -75,11 +71,6 @@ A safe constructor for whole seconds. Use this when you want construction to rep
 `DurationError` instead of assuming the input is valid.
 
 ```aivi
-use aivi.duration (
-    Duration
-    DurationError
-)
-
 value pollInterval : Result DurationError Duration = trySeconds 10
 ```
 
@@ -89,8 +80,6 @@ Access the raw `Int` carrier. In this module the direct constructor is `millis`,
 the millisecond count that backs the duration value.
 
 ```aivi
-use aivi.duration (Duration)
-
 value totalWait : Duration = 1min + 30sec
 value totalWaitMs : Int = totalWait.carrier
 ```
@@ -100,8 +89,6 @@ value totalWaitMs : Int = totalWait.carrier
 The `Duration` domain includes a small set of arithmetic and comparison operators.
 
 ```aivi
-use aivi.duration (Duration)
-
 value total : Duration = 45sec + 15sec
 value remaining : Duration = total - 10sec
 value doubled : Duration = 250ms * 2
@@ -120,8 +107,6 @@ When a smart constructor fails, the module reports a plain text message.
 ## Example — readable scheduling values
 
 ```aivi
-use aivi.duration (Duration)
-
 value animationFrame : Duration = 16ms
 value autosaveEvery : Duration = 30sec
 value timeout : Duration = 2min

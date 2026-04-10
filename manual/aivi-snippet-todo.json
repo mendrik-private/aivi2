@@ -1,9 +1,9 @@
 {
   "root": "manual",
   "scanned_files": 78,
-  "scanned_blocks": 949,
-  "rewritten_blocks": 3,
-  "unresolved_fragments": 176,
+  "scanned_blocks": 937,
+  "rewritten_blocks": 0,
+  "unresolved_fragments": 167,
   "entries": [
     {
       "markdown_path": "manual/guide/building-snake.md",
@@ -240,10 +240,10 @@
           "severity": "error",
           "code": "hir::missing-eq-instance",
           "message": "this expression requires `Eq` for `Cell`",
-          "rendered": "error[hir::missing-eq-instance]: this expression requires `Eq` for `Cell`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/building-snake/block_8.aivi:3:5\n  |\n 3 |     a == b\n  |     ^^^^^^\n  = `Cell` does not currently have `Eq` evidence\nnote: open type parameter `Cell` does not have a compiler-derived `Eq` instance in v1; add `(Eq Cell) ->` to the function annotation to require it"
+          "rendered": "error[hir::missing-eq-instance]: this expression requires `Eq` for `Cell`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/building-snake/block_8.aivi:3:5\n  |\n 3 |     candidate == target\n  |     ^^^^^^^^^^^^^^^^^^^\n  = `Cell` does not currently have `Eq` evidence\nnote: open type parameter `Cell` does not have a compiler-derived `Eq` instance in v1; add `(Eq Cell) ->` to the function annotation to require it"
         }
       ],
-      "suggested_snippet": "type Cell -> Cell -> Bool\nfunc cellEq = a b =>\n    a == b\n"
+      "suggested_snippet": "type Cell -> Cell -> Bool\nfunc cellEq = target candidate =>\n    candidate == target\n"
     },
     {
       "markdown_path": "manual/guide/building-snake.md",
@@ -260,13 +260,13 @@
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `cellEq`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `cellEq`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/building-snake/block_9.aivi:7:34\n  |\n 7 |     contains cell = listContains cellEq cell (toList self)\n  |                                  ^^^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `cell`?"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `cellEq`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/building-snake/block_9.aivi:7:35\n  |\n 7 |     contains cell = listContains (cellEq cell) (toList self)\n  |                                   ^^^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `cell`?"
         },
         {
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `listContains`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `listContains`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/building-snake/block_9.aivi:7:21\n  |\n 7 |     contains cell = listContains cellEq cell (toList self)\n  |                     ^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `listContains`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/building-snake/block_9.aivi:7:21\n  |\n 7 |     contains cell = listContains (cellEq cell) (toList self)\n  |                     ^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
         },
         {
           "severity": "error",
@@ -347,7 +347,7 @@
           "rendered": "error[hir::unresolved-type-name]: unknown type `Direction`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/building-snake/block_9.aivi:14:10\n  |\n14 |     type Direction -> Cell\n  |          ^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
         }
       ],
-      "suggested_snippet": "domain Snake over NonEmptyList Cell = {\n    type NonEmptyList Cell -> Snake\n    fromCells cells = cells\n    type Cell\n    head = nelHead self\n    type Cell -> Bool\n    contains cell = listContains cellEq cell (toList self)\n    type Int\n    length = nelLength self\n    type Cell -> Snake\n    grow cell = cons cell self\n    type Cell -> Snake\n    move cell = fromHeadTail cell (nelInit self)\n    type Direction -> Cell\n    nextHead dir = moveDir dir (nelHead self)\n}\n"
+      "suggested_snippet": "domain Snake over NonEmptyList Cell = {\n    type NonEmptyList Cell -> Snake\n    fromCells cells = cells\n    type Cell\n    head = nelHead self\n    type Cell -> Bool\n    contains cell = listContains (cellEq cell) (toList self)\n    type Int\n    length = nelLength self\n    type Cell -> Snake\n    grow cell = cons cell self\n    type Cell -> Snake\n    move cell = fromHeadTail cell (nelInit self)\n    type Direction -> Cell\n    nextHead dir = moveDir dir (nelHead self)\n}\n"
     },
     {
       "markdown_path": "manual/guide/building-snake.md",
@@ -900,7 +900,7 @@
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `state`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `state`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/building-snake/block_20.aivi:1:6\n  |\n 1 | from state = {\n  |      ^^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `status`?"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `state`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/building-snake/block_20.aivi:1:6\n  |\n 1 | from state = {\n  |      ^^^^^\n  = reported during Milestone 2 HIR lowering\nhelp: did you mean `snake`?"
         },
         {
           "severity": "error",
@@ -926,34 +926,34 @@
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `Cell`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/building-snake/block_21.aivi:2:41\n  |\n 2 | func cellGlyph = body head food y x => (Cell x y == head, listContains cellEq (Cell x y) body, Cell x y == food)\n  |                                         ^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/building-snake/block_21.aivi:2:41\n  |\n 2 | func cellGlyph = body head food y x => (Cell x y == head, listContains (cellEq (Cell x y)) body, Cell x y == food)\n  |                                         ^^^^\n  = reported during Milestone 2 HIR lowering"
         },
         {
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `Cell`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/building-snake/block_21.aivi:2:80\n  |\n 2 | func cellGlyph = body head food y x => (Cell x y == head, listContains cellEq (Cell x y) body, Cell x y == food)\n  |                                                                                ^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/building-snake/block_21.aivi:2:81\n  |\n 2 | func cellGlyph = body head food y x => (Cell x y == head, listContains (cellEq (Cell x y)) body, Cell x y == food)\n  |                                                                                 ^^^^\n  = reported during Milestone 2 HIR lowering"
         },
         {
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `Cell`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/building-snake/block_21.aivi:2:96\n  |\n 2 | func cellGlyph = body head food y x => (Cell x y == head, listContains cellEq (Cell x y) body, Cell x y == food)\n  |                                                                                                ^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `Cell`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/building-snake/block_21.aivi:2:98\n  |\n 2 | func cellGlyph = body head food y x => (Cell x y == head, listContains (cellEq (Cell x y)) body, Cell x y == food)\n  |                                                                                                  ^^^^\n  = reported during Milestone 2 HIR lowering"
         },
         {
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `cellEq`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `cellEq`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/building-snake/block_21.aivi:2:72\n  |\n 2 | func cellGlyph = body head food y x => (Cell x y == head, listContains cellEq (Cell x y) body, Cell x y == food)\n  |                                                                        ^^^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `cellEq`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/building-snake/block_21.aivi:2:73\n  |\n 2 | func cellGlyph = body head food y x => (Cell x y == head, listContains (cellEq (Cell x y)) body, Cell x y == food)\n  |                                                                         ^^^^^^\n  = reported during Milestone 2 HIR lowering"
         },
         {
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `listContains`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `listContains`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/building-snake/block_21.aivi:2:59\n  |\n 2 | func cellGlyph = body head food y x => (Cell x y == head, listContains cellEq (Cell x y) body, Cell x y == food)\n  |                                                           ^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `listContains`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/building-snake/block_21.aivi:2:59\n  |\n 2 | func cellGlyph = body head food y x => (Cell x y == head, listContains (cellEq (Cell x y)) body, Cell x y == food)\n  |                                                           ^^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
         }
       ],
-      "suggested_snippet": "type List Cell -> Cell -> Cell -> Int -> Int -> Text\nfunc cellGlyph = body head food y x => (Cell x y == head, listContains cellEq (Cell x y) body, Cell x y == food)\n ||> (True, _, _)          -> \"@\"\n ||> (_, True, _)          -> \"o\"\n ||> (_, _, True)          -> \"*\"\n ||> (False, False, False) -> \"·\"\n"
+      "suggested_snippet": "type List Cell -> Cell -> Cell -> Int -> Int -> Text\nfunc cellGlyph = body head food y x => (Cell x y == head, listContains (cellEq (Cell x y)) body, Cell x y == food)\n ||> (True, _, _)          -> \"@\"\n ||> (_, True, _)          -> \"o\"\n ||> (_, _, True)          -> \"*\"\n ||> (False, False, False) -> \"·\"\n"
     },
     {
       "markdown_path": "manual/guide/building-snake.md",
@@ -1495,8 +1495,8 @@
       "end_line": 96,
       "formatting_changed": false,
       "syntax_problem_count": 0,
-      "lsp_problem_count": 4,
-      "compiler_problem_count": 4,
+      "lsp_problem_count": 3,
+      "compiler_problem_count": 3,
       "diagnostics": [
         {
           "severity": "error",
@@ -1512,18 +1512,12 @@
         },
         {
           "severity": "error",
-          "code": "hir::unknown-source-option",
-          "message": "unknown source option `trigger` for `http.get`",
-          "rendered": "error[hir::unknown-source-option]: unknown source option `trigger` for `http.get`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/integrations/block_5.aivi:8:5\n  |\n 8 |     trigger: refreshTick,\n  |     ^^^^^^^^^^^^^^^^^^^^\n  = this option is not supported for the selected source provider"
-        },
-        {
-          "severity": "error",
           "code": "hir::unresolved-type-name",
           "message": "unknown type `FeedItem`",
           "rendered": "error[hir::unresolved-type-name]: unknown type `FeedItem`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/integrations/block_5.aivi:11:54\n  |\n11 | signal feedResponse : Signal (Result HttpError (List FeedItem))\n  |                                                      ^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
         }
       ],
-      "suggested_snippet": "@source timer.every 30s with {\n    immediate: True,\n    coalesce: True\n}\nsignal refreshTick : Signal Unit\n\n@source http.get \"https://api.example.com/feed\" with {\n    trigger: refreshTick,\n    timeout: 10s\n}\nsignal feedResponse : Signal (Result HttpError (List FeedItem))\n"
+      "suggested_snippet": "@source timer.every 30s with {\n    immediate: True,\n    coalesce: True\n}\nsignal refreshTick : Signal Unit\n\n@source http.get \"https://api.example.com/feed\" with {\n    refreshOn: refreshTick,\n    timeout: 10s\n}\nsignal feedResponse : Signal (Result HttpError (List FeedItem))\n"
     },
     {
       "markdown_path": "manual/guide/integrations.md",
@@ -1533,15 +1527,9 @@
       "end_line": 110,
       "formatting_changed": false,
       "syntax_problem_count": 0,
-      "lsp_problem_count": 3,
-      "compiler_problem_count": 3,
+      "lsp_problem_count": 2,
+      "compiler_problem_count": 2,
       "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::unknown-source-option",
-          "message": "unknown source option `trigger` for `http.post`",
-          "rendered": "error[hir::unknown-source-option]: unknown source option `trigger` for `http.post`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/integrations/block_6.aivi:4:5\n  |\n 4 |     trigger: submitPayload,\n  |     ^^^^^^^^^^^^^^^^^^^^^^\n  = this option is not supported for the selected source provider"
-        },
         {
           "severity": "error",
           "code": "hir::unresolved-type-name",
@@ -1555,7 +1543,7 @@
           "rendered": "error[hir::unresolved-type-name]: unknown type `User`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/integrations/block_6.aivi:7:48\n  |\n 7 | signal createResult : Signal (Result HttpError User)\n  |                                                ^^^^\n  = reported during Milestone 2 HIR lowering"
         }
       ],
-      "suggested_snippet": "signal submitPayload : Signal CreateUserRequest\n\n@source http.post \"https://api.example.com/users\" with {\n    trigger: submitPayload,\n    body: submitPayload\n}\nsignal createResult : Signal (Result HttpError User)\n"
+      "suggested_snippet": "signal submitPayload : Signal CreateUserRequest\n\n@source http.post \"https://api.example.com/users\" with {\n    refreshOn: submitPayload,\n    body: submitPayload\n}\nsignal createResult : Signal (Result HttpError User)\n"
     },
     {
       "markdown_path": "manual/guide/integrations.md",
@@ -1576,26 +1564,6 @@
         }
       ],
       "suggested_snippet": "value configPath = \"/etc/myapp/config.json\"\n\n@source fs.read configPath\nsignal configText : Signal (Result FsError AppConfig)\n"
-    },
-    {
-      "markdown_path": "manual/guide/integrations.md",
-      "block_index": 8,
-      "fence_info": "aivi",
-      "start_line": 131,
-      "end_line": 139,
-      "formatting_changed": false,
-      "syntax_problem_count": 0,
-      "lsp_problem_count": 1,
-      "compiler_problem_count": 1,
-      "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::unknown-source-option",
-          "message": "unknown source option `trigger` for `fs.read`",
-          "rendered": "error[hir::unknown-source-option]: unknown source option `trigger` for `fs.read`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/integrations/block_8.aivi:7:5\n  |\n 7 |     trigger: notesChanged\n  |     ^^^^^^^^^^^^^^^^^^^^^\n  = this option is not supported for the selected source provider"
-        }
-      ],
-      "suggested_snippet": "@source fs.watch \"/home/user/notes\" with {\n    recursive: False\n}\nsignal notesChanged : Signal FsEvent\n\n@source fs.read \"/home/user/notes/index.md\" with {\n    trigger: notesChanged\n}\nsignal notesIndex : Signal (Result FsError Text)\n"
     },
     {
       "markdown_path": "manual/guide/integrations.md",
@@ -1643,15 +1611,9 @@
       "end_line": 182,
       "formatting_changed": false,
       "syntax_problem_count": 0,
-      "lsp_problem_count": 4,
-      "compiler_problem_count": 4,
+      "lsp_problem_count": 3,
+      "compiler_problem_count": 3,
       "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::unknown-source-option",
-          "message": "unknown source option `params` for `db.live`",
-          "rendered": "error[hir::unknown-source-option]: unknown source option `params` for `db.live`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/integrations/block_11.aivi:4:5\n  |\n 4 |     params: [selectedTag]\n  |     ^^^^^^^^^^^^^^^^^^^^^\n  = this option is not supported for the selected source provider"
-        },
         {
           "severity": "error",
           "code": "hir::unresolved-term-name",
@@ -1671,52 +1633,14 @@
           "rendered": "error[hir::unresolved-type-name]: unknown type `Post`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/integrations/block_11.aivi:6:51\n  |\n 6 | signal taggedPosts : Signal (Result DbError (List Post))\n  |                                                   ^^^^\n  = reported during Milestone 2 HIR lowering"
         }
       ],
-      "suggested_snippet": "signal selectedTag : Signal Text\n\n@source db.live db \"SELECT * FROM posts WHERE tag = $1\" with {\n    params: [selectedTag]\n}\nsignal taggedPosts : Signal (Result DbError (List Post))\n"
+      "suggested_snippet": "signal selectedTag : Signal Text\n\n@source db.live db \"SELECT * FROM posts WHERE tag = $1\" with {\n    refreshOn: selectedTag\n}\nsignal taggedPosts : Signal (Result DbError (List Post))\n"
     },
     {
       "markdown_path": "manual/guide/integrations.md",
       "block_index": 12,
       "fence_info": "aivi",
       "start_line": 194,
-      "end_line": 200,
-      "formatting_changed": false,
-      "syntax_problem_count": 0,
-      "lsp_problem_count": 4,
-      "compiler_problem_count": 4,
-      "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::unknown-source-option",
-          "message": "unknown source option `destination` for `dbus.signal`",
-          "rendered": "error[hir::unknown-source-option]: unknown source option `destination` for `dbus.signal`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/integrations/block_12.aivi:2:5\n  |\n 2 |     destination: \"org.freedesktop.NetworkManager\",\n  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  = this option is not supported for the selected source provider"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unknown-source-option",
-          "message": "unknown source option `path` for `dbus.signal`",
-          "rendered": "error[hir::unknown-source-option]: unknown source option `path` for `dbus.signal`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/integrations/block_12.aivi:3:5\n  |\n 3 |     path: \"/org/freedesktop/NetworkManager\",\n  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  = this option is not supported for the selected source provider"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unresolved-type-name",
-          "message": "unknown type `DbusError`",
-          "rendered": "error[hir::unresolved-type-name]: unknown type `DbusError`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/integrations/block_12.aivi:7:38\n  |\n 7 | signal nmProperties : Signal (Result DbusError DbusMessage)\n  |                                      ^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unresolved-type-name",
-          "message": "unknown type `DbusMessage`",
-          "rendered": "error[hir::unresolved-type-name]: unknown type `DbusMessage`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/integrations/block_12.aivi:7:48\n  |\n 7 | signal nmProperties : Signal (Result DbusError DbusMessage)\n  |                                                ^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
-        }
-      ],
-      "suggested_snippet": "@source dbus.signal with {\n    destination: \"org.freedesktop.NetworkManager\",\n    path: \"/org/freedesktop/NetworkManager\",\n    interface: \"org.freedesktop.DBus.Properties\",\n    member: \"PropertiesChanged\"\n}\nsignal nmProperties : Signal (Result DbusError DbusMessage)\n"
-    },
-    {
-      "markdown_path": "manual/guide/integrations.md",
-      "block_index": 13,
-      "fence_info": "aivi",
-      "start_line": 206,
-      "end_line": 212,
+      "end_line": 198,
       "formatting_changed": false,
       "syntax_problem_count": 0,
       "lsp_problem_count": 2,
@@ -1724,25 +1648,45 @@
       "diagnostics": [
         {
           "severity": "error",
-          "code": "hir::unknown-source-option",
-          "message": "unknown source option `destination` for `dbus.method`",
-          "rendered": "error[hir::unknown-source-option]: unknown source option `destination` for `dbus.method`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/integrations/block_13.aivi:2:5\n  |\n 2 |     destination: \"org.freedesktop.NetworkManager\",\n  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  = this option is not supported for the selected source provider"
+          "code": "hir::unresolved-type-name",
+          "message": "unknown type `DbusError`",
+          "rendered": "error[hir::unresolved-type-name]: unknown type `DbusError`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/integrations/block_12.aivi:5:38\n  |\n 5 | signal nmProperties : Signal (Result DbusError DbusMessage)\n  |                                      ^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
         },
         {
           "severity": "error",
           "code": "hir::unresolved-type-name",
-          "message": "unknown type `DbusError`",
-          "rendered": "error[hir::unresolved-type-name]: unknown type `DbusError`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/integrations/block_13.aivi:7:33\n  |\n 7 | signal devices : Signal (Result DbusError (List Text))\n  |                                 ^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+          "message": "unknown type `DbusMessage`",
+          "rendered": "error[hir::unresolved-type-name]: unknown type `DbusMessage`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/integrations/block_12.aivi:5:48\n  |\n 5 | signal nmProperties : Signal (Result DbusError DbusMessage)\n  |                                                ^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
         }
       ],
-      "suggested_snippet": "@source dbus.method with {\n    destination: \"org.freedesktop.NetworkManager\",\n    path: \"/org/freedesktop/NetworkManager\",\n    interface: \"org.freedesktop.NetworkManager\",\n    member: \"GetDevices\"\n}\nsignal devices : Signal (Result DbusError (List Text))\n"
+      "suggested_snippet": "@source dbus.signal \"/org/freedesktop/NetworkManager\" with {\n    interface: \"org.freedesktop.DBus.Properties\",\n    member: \"PropertiesChanged\"\n}\nsignal nmProperties : Signal (Result DbusError DbusMessage)\n"
+    },
+    {
+      "markdown_path": "manual/guide/integrations.md",
+      "block_index": 13,
+      "fence_info": "aivi",
+      "start_line": 206,
+      "end_line": 211,
+      "formatting_changed": false,
+      "syntax_problem_count": 0,
+      "lsp_problem_count": 1,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::unresolved-type-name",
+          "message": "unknown type `DbusError`",
+          "rendered": "error[hir::unresolved-type-name]: unknown type `DbusError`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/integrations/block_13.aivi:6:33\n  |\n 6 | signal devices : Signal (Result DbusError (List Text))\n  |                                 ^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+        }
+      ],
+      "suggested_snippet": "@source dbus.method \"org.freedesktop.NetworkManager\" with {\n    path: \"/org/freedesktop/NetworkManager\",\n    interface: \"org.freedesktop.NetworkManager\",\n    member: \"GetDevices\"\n}\nsignal devices : Signal (Result DbusError (List Text))\n"
     },
     {
       "markdown_path": "manual/guide/integrations.md",
       "block_index": 14,
       "fence_info": "aivi",
-      "start_line": 222,
-      "end_line": 228,
+      "start_line": 223,
+      "end_line": 229,
       "formatting_changed": false,
       "syntax_problem_count": 0,
       "lsp_problem_count": 1,
@@ -1761,8 +1705,8 @@
       "markdown_path": "manual/guide/integrations.md",
       "block_index": 15,
       "fence_info": "aivi",
-      "start_line": 236,
-      "end_line": 241,
+      "start_line": 237,
+      "end_line": 242,
       "formatting_changed": false,
       "syntax_problem_count": 0,
       "lsp_problem_count": 3,
@@ -1793,12 +1737,12 @@
       "markdown_path": "manual/guide/integrations.md",
       "block_index": 16,
       "fence_info": "aivi",
-      "start_line": 251,
-      "end_line": 265,
+      "start_line": 252,
+      "end_line": 266,
       "formatting_changed": false,
       "syntax_problem_count": 0,
-      "lsp_problem_count": 6,
-      "compiler_problem_count": 6,
+      "lsp_problem_count": 5,
+      "compiler_problem_count": 5,
       "diagnostics": [
         {
           "severity": "error",
@@ -1814,12 +1758,6 @@
         },
         {
           "severity": "error",
-          "code": "hir::unknown-source-option",
-          "message": "unknown source option `trigger` for `http.get`",
-          "rendered": "error[hir::unknown-source-option]: unknown source option `trigger` for `http.get`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/integrations/block_16.aivi:13:5\n  |\n13 |     trigger: refresh\n  |     ^^^^^^^^^^^^^^^^\n  = this option is not supported for the selected source provider"
-        },
-        {
-          "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `invalid`",
           "rendered": "error[hir::unresolved-term-name]: unknown term `invalid`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/integrations/block_16.aivi:10:14\n  |\n10 |   ||> _ _ => ()\n  |              ^^\n  = reported during Milestone 2 HIR lowering"
@@ -1831,15 +1769,15 @@
           "rendered": "error[hir::unresolved-type-name]: unknown type `Item`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/integrations/block_16.aivi:15:46\n  |\n15 | signal data : Signal (Result HttpError (List Item))\n  |                                              ^^^^\n  = reported during Milestone 2 HIR lowering"
         }
       ],
-      "suggested_snippet": "signal refreshClick : Signal Unit\n\n@source timer.every 60s with {\n    immediate: True,\n    coalesce: True\n}\nsignal autoRefresh : Signal Unit\n\nsignal refresh : Signal Unit = refreshClick | autoRefresh\n  ||> _ _ => ()\n\n@source http.get \"https://api.example.com/data\" with {\n    trigger: refresh\n}\nsignal data : Signal (Result HttpError (List Item))\n"
+      "suggested_snippet": "signal refreshClick : Signal Unit\n\n@source timer.every 60s with {\n    immediate: True,\n    coalesce: True\n}\nsignal autoRefresh : Signal Unit\n\nsignal refresh : Signal Unit = refreshClick | autoRefresh\n  ||> _ _ => ()\n\n@source http.get \"https://api.example.com/data\" with {\n    refreshOn: refresh\n}\nsignal data : Signal (Result HttpError (List Item))\n"
     },
     {
       "markdown_path": "manual/guide/integrations.md",
       "block_index": 17,
       "fence_info": "aivi",
-      "start_line": 277,
+      "start_line": 278,
       "end_line": 283,
-      "formatting_changed": true,
+      "formatting_changed": false,
       "syntax_problem_count": 0,
       "lsp_problem_count": 3,
       "compiler_problem_count": 3,
@@ -1975,10 +1913,30 @@
     },
     {
       "markdown_path": "manual/guide/modules.md",
+      "block_index": 2,
+      "fence_info": "aivi",
+      "start_line": 23,
+      "end_line": 30,
+      "formatting_changed": false,
+      "syntax_problem_count": 0,
+      "lsp_problem_count": 0,
+      "compiler_problem_count": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "hir::type-mismatch",
+          "message": "expected `Result E A` but found `Response Text`",
+          "rendered": "error[hir::type-mismatch]: expected `Result E A` but found `Response Text`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/modules/block_2.aivi:8:10\n  |\n 8 |     isOk resp\n  |          ^^^^\n  = found `Response Text` here, expected `Result E A`"
+        }
+      ],
+      "suggested_snippet": "use aivi.http (\n    HttpError as FetchError\n    HttpResponse as Response\n)\n\ntype Response Text -> Bool\nfunc isSuccess = resp =>\n    isOk resp\n"
+    },
+    {
+      "markdown_path": "manual/guide/modules.md",
       "block_index": 12,
       "fence_info": "aivi",
-      "start_line": 166,
-      "end_line": 169,
+      "start_line": 162,
+      "end_line": 165,
       "formatting_changed": false,
       "syntax_problem_count": 2,
       "lsp_problem_count": 6,
@@ -2112,33 +2070,45 @@
       "block_index": 4,
       "fence_info": "aivi",
       "start_line": 69,
-      "end_line": 69,
+      "end_line": 74,
       "formatting_changed": false,
       "syntax_problem_count": 0,
-      "lsp_problem_count": 2,
-      "compiler_problem_count": 2,
+      "lsp_problem_count": 4,
+      "compiler_problem_count": 4,
       "diagnostics": [
         {
           "severity": "error",
-          "code": "hir::empty-use-imports",
-          "message": "use declaration must import at least one member",
-          "rendered": "error[hir::empty-use-imports]: use declaration must import at least one member\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/openapi-source/block_4.aivi:1:1\n  |\n 1 | use _\n  | ^^^^^\n  = reported during Milestone 2 HIR lowering"
+          "code": "hir::unknown-import-module",
+          "message": "unknown import module `types.petstore`",
+          "rendered": "error[hir::unknown-import-module]: unknown import module `types.petstore`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/openapi-source/block_4.aivi:2:5\n  |\n 2 |     Pet\n  |     ^^^\n  = this workspace does not contain the imported module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/openapi-source/block_4.aivi:1:1\n  |\n 1 | use types.petstore (\n  | ------------------------------------------------------------------\n  | note: declared by this `use` item"
         },
         {
           "severity": "error",
           "code": "hir::unknown-import-module",
-          "message": "unknown import module `_`",
-          "rendered": "error[hir::unknown-import-module]: unknown import module `_`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/openapi-source/block_4.aivi:1:1\n  |\n 1 | use _\n  | ^^^^^\n  = this workspace does not contain the imported module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/openapi-source/block_4.aivi:1:1\n  |\n 1 | use _\n  | -----\n  | note: declared by this `use` item"
+          "message": "unknown import module `types.petstore`",
+          "rendered": "error[hir::unknown-import-module]: unknown import module `types.petstore`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/openapi-source/block_4.aivi:3:5\n  |\n 3 |     NewPet\n  |     ^^^^^^\n  = this workspace does not contain the imported module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/openapi-source/block_4.aivi:1:1\n  |\n 1 | use types.petstore (\n  | ------------------------------------------------------------------\n  | note: declared by this `use` item"
+        },
+        {
+          "severity": "error",
+          "code": "hir::unknown-import-module",
+          "message": "unknown import module `types.petstore`",
+          "rendered": "error[hir::unknown-import-module]: unknown import module `types.petstore`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/openapi-source/block_4.aivi:4:5\n  |\n 4 |     ApiError\n  |     ^^^^^^^^\n  = this workspace does not contain the imported module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/openapi-source/block_4.aivi:1:1\n  |\n 1 | use types.petstore (\n  | ------------------------------------------------------------------\n  | note: declared by this `use` item"
+        },
+        {
+          "severity": "error",
+          "code": "hir::unknown-import-module",
+          "message": "unknown import module `types.petstore`",
+          "rendered": "error[hir::unknown-import-module]: unknown import module `types.petstore`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/openapi-source/block_4.aivi:5:5\n  |\n 5 |     ApiAuth\n  |     ^^^^^^^\n  = this workspace does not contain the imported module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/openapi-source/block_4.aivi:1:1\n  |\n 1 | use types.petstore (\n  | ------------------------------------------------------------------\n  | note: declared by this `use` item"
         }
       ],
-      "suggested_snippet": "use _\n"
+      "suggested_snippet": "use types.petstore (\n    Pet\n    NewPet\n    ApiError\n    ApiAuth\n)\n"
     },
     {
       "markdown_path": "manual/guide/openapi-source.md",
       "block_index": 5,
       "fence_info": "aivi",
-      "start_line": 87,
-      "end_line": 110,
+      "start_line": 92,
+      "end_line": 115,
       "formatting_changed": false,
       "syntax_problem_count": 0,
       "lsp_problem_count": 2,
@@ -2445,17 +2415,17 @@
       "end_line": 116,
       "formatting_changed": false,
       "syntax_problem_count": 0,
-      "lsp_problem_count": 1,
+      "lsp_problem_count": 0,
       "compiler_problem_count": 1,
       "diagnostics": [
         {
           "severity": "error",
-          "code": "hir::unresolved-term-name",
-          "message": "unknown term `toUpperCase`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `toUpperCase`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/record-patterns/block_10.aivi:3:6\n  |\n 3 |   |> toUpperCase\n  |      ^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+          "code": "hir::invalid-projection",
+          "message": "projection `.address.city.name` cannot be applied to `User`",
+          "rendered": "error[hir::invalid-projection]: projection `.address.city.name` cannot be applied to `User`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/record-patterns/block_10.aivi:2:23\n  |\n 2 | func upperCityName = .address.city.name\n  |                       ^^^^^^^^^^^^^^^^^\n  = this projection target does not support field access"
         }
       ],
-      "suggested_snippet": "type User -> Text\nfunc upperCityName = .address.city.name\n  |> toUpperCase\n"
+      "suggested_snippet": "type User -> Text\nfunc upperCityName = .address.city.name\n  |> toUpper\n"
     },
     {
       "markdown_path": "manual/guide/record-patterns.md",
@@ -2465,15 +2435,9 @@
       "end_line": 147,
       "formatting_changed": false,
       "syntax_problem_count": 0,
-      "lsp_problem_count": 2,
-      "compiler_problem_count": 2,
+      "lsp_problem_count": 1,
+      "compiler_problem_count": 1,
       "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::unresolved-term-name",
-          "message": "unknown term `toUpperCase`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `toUpperCase`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/record-patterns/block_12.aivi:3:6\n  |\n 3 |   |> toUpperCase\n  |      ^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
-        },
         {
           "severity": "error",
           "code": "hir::unresolved-term-name",
@@ -2481,7 +2445,7 @@
           "rendered": "error[hir::unresolved-term-name]: unknown term `user`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/record-patterns/block_12.aivi:1:24\n  |\n 1 | value uppercasedCity = user\n  |                        ^^^^\n  = reported during Milestone 2 HIR lowering"
         }
       ],
-      "suggested_snippet": "value uppercasedCity = user\n  |> { address.city.name: . }\n  |> toUpperCase\n"
+      "suggested_snippet": "value uppercasedCity = user\n  |> { address.city.name: . }\n  |> toUpper\n"
     },
     {
       "markdown_path": "manual/guide/record-patterns.md",
@@ -2491,15 +2455,9 @@
       "end_line": 157,
       "formatting_changed": false,
       "syntax_problem_count": 0,
-      "lsp_problem_count": 2,
-      "compiler_problem_count": 2,
+      "lsp_problem_count": 1,
+      "compiler_problem_count": 1,
       "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::unresolved-term-name",
-          "message": "unknown term `toUpperCase`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `toUpperCase`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/record-patterns/block_13.aivi:5:6\n  |\n 5 |   |> toUpperCase\n  |      ^^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
-        },
         {
           "severity": "error",
           "code": "hir::unresolved-term-name",
@@ -2507,7 +2465,7 @@
           "rendered": "error[hir::unresolved-term-name]: unknown term `user`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/record-patterns/block_13.aivi:1:24\n  |\n 1 | value uppercasedCity = user\n  |                        ^^^^\n  = reported during Milestone 2 HIR lowering"
         }
       ],
-      "suggested_snippet": "value uppercasedCity = user\n  |> .address\n  |> .city\n  |> .name\n  |> toUpperCase\n"
+      "suggested_snippet": "value uppercasedCity = user\n  |> .address\n  |> .city\n  |> .name\n  |> toUpper\n"
     },
     {
       "markdown_path": "manual/guide/record-patterns.md",
@@ -2620,7 +2578,7 @@
       "block_index": 17,
       "fence_info": "aivi",
       "start_line": 393,
-      "end_line": 402,
+      "end_line": 400,
       "formatting_changed": false,
       "syntax_problem_count": 0,
       "lsp_problem_count": 1,
@@ -2630,10 +2588,10 @@
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `users`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `users`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/signals/block_17.aivi:9:38\n  |\n 9 | signal firstLoadDone : Signal Bool = users.done\n  |                                      ^^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `users`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/guide/signals/block_17.aivi:7:38\n  |\n 7 | signal firstLoadDone : Signal Bool = users.done\n  |                                      ^^^^^\n  = reported during Milestone 2 HIR lowering"
         }
       ],
-      "suggested_snippet": "// A Bool that becomes True on the first success and never resets\ntype Bool -> Option A -> Bool\nfunc trackFirstDone = hasFired newDone => hasFired\n ||> True   -> True\n ||> False  -> newDone\n ||> None   -> False\n ||> Some _ -> True\n\nsignal firstLoadDone : Signal Bool = users.done\n +|> False trackFirstDone\n"
+      "suggested_snippet": "// A Bool that becomes True on the first success and never resets\ntype Bool -> Option A -> Bool\nfunc trackFirstDone = hasFired newDone => hasFired\n T|> True\n F|> isSome newDone\n\nsignal firstLoadDone : Signal Bool = users.done\n +|> False trackFirstDone\n"
     },
     {
       "markdown_path": "manual/guide/source-catalog.md",
@@ -3067,8 +3025,8 @@
       "markdown_path": "manual/guide/values-and-functions.md",
       "block_index": 23,
       "fence_info": "aivi",
-      "start_line": 333,
-      "end_line": 336,
+      "start_line": 342,
+      "end_line": 345,
       "formatting_changed": false,
       "syntax_problem_count": 0,
       "lsp_problem_count": 2,
@@ -3315,29 +3273,17 @@
       "end_line": 83,
       "formatting_changed": false,
       "syntax_problem_count": 0,
-      "lsp_problem_count": 3,
-      "compiler_problem_count": 3,
+      "lsp_problem_count": 0,
+      "compiler_problem_count": 1,
       "diagnostics": [
         {
           "severity": "error",
-          "code": "hir::unresolved-type-name",
-          "message": "unknown type `User`",
-          "rendered": "error[hir::unresolved-type-name]: unknown type `User`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/async/block_4.aivi:19:50\n  |\n19 | signal rawUsers : Signal (Result HttpError (List User)) = api.get \"/users\"\n  |                                                  ^^^^\n  = reported during Milestone 2 HIR lowering"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unresolved-type-name",
-          "message": "unknown type `User`",
-          "rendered": "error[hir::unresolved-type-name]: unknown type `User`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/async/block_4.aivi:21:51\n  |\n21 | value initialUsers : AsyncTracker HttpError (List User) = {\n  |                                                   ^^^^\n  = reported during Milestone 2 HIR lowering"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unresolved-type-name",
-          "message": "unknown type `User`",
-          "rendered": "error[hir::unresolved-type-name]: unknown type `User`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/async/block_4.aivi:27:53\n  |\n27 | signal users : Signal (AsyncTracker HttpError (List User)) = rawUsers\n  |                                                     ^^^^\n  = reported during Milestone 2 HIR lowering"
+          "code": "hir::invalid-pipe-stage-input",
+          "message": "`+|>` stage expects `AsyncTracker E A -> Result E A -> AsyncTracker E A` but the current subject is `Result HttpError List { id: Int, name: Text } -> AsyncTracker HttpError List { id: Int, name: Text } -> AsyncTracker HttpError List { id: Int, name: Text }`",
+          "rendered": "error[hir::invalid-pipe-stage-input]: `+|>` stage expects `AsyncTracker E A -> Result E A -> AsyncTracker E A` but the current subject is `Result HttpError List { id: Int, name: Text } -> AsyncTracker HttpError List { id: Int, name: Text } -> AsyncTracker HttpError List { id: Int, name: Text }`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/async/block_4.aivi:28:19\n  |\n28 |  +|> initialUsers step\n  |                   ^^^^\n  = this pipe stage cannot accept the current subject type"
         }
       ],
-      "suggested_snippet": "use aivi.async (\n    AsyncTracker\n    step\n)\n\nuse aivi.http (\n    HttpError\n    HttpSource\n)\n\ntype List User = {\n    id: Int,\n    name: Text\n}\n\n@source http \"https://api.example.com\"\nsignal api : HttpSource\n\nsignal rawUsers : Signal (Result HttpError (List User)) = api.get \"/users\"\n\nvalue initialUsers : AsyncTracker HttpError (List User) = {\n    pending: True,\n    done: None,\n    error: None\n}\n\nsignal users : Signal (AsyncTracker HttpError (List User)) = rawUsers\n +|> initialUsers step\n"
+      "suggested_snippet": "use aivi.async (\n    AsyncTracker\n    step\n)\n\nuse aivi.http (\n    HttpError\n    HttpSource\n)\n\ntype User = {\n    id: Int,\n    name: Text\n}\n\n@source http \"https://api.example.com\"\nsignal api : HttpSource\n\nsignal rawUsers : Signal (Result HttpError (List User)) = api.get \"/users\"\n\nvalue initialUsers : AsyncTracker HttpError (List User) = {\n    pending: True,\n    done: None,\n    error: None\n}\n\nsignal users : Signal (AsyncTracker HttpError (List User)) = rawUsers\n +|> initialUsers step\n"
     },
     {
       "markdown_path": "manual/stdlib/async.md",
@@ -3396,18 +3342,12 @@
       "block_index": 10,
       "fence_info": "aivi",
       "start_line": 210,
-      "end_line": 247,
+      "end_line": 245,
       "formatting_changed": false,
       "syntax_problem_count": 0,
       "lsp_problem_count": 0,
-      "compiler_problem_count": 3,
+      "compiler_problem_count": 2,
       "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::case-branch-type-mismatch",
-          "message": "case split branches must agree on one result type, found `Bool` and `Option List { id: Int, name: Text }`",
-          "rendered": "error[hir::case-branch-type-mismatch]: case split branches must agree on one result type, found `Bool` and `Option List { id: Int, name: Text }`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/async/block_10.aivi:33:2\n  |\n33 |  ||> False  -> newDone\n  |  ^^^^^^^^^^^^^^^^^^^^^\n  = this branch produces a different type than earlier branches in the same case split"
-        },
         {
           "severity": "error",
           "code": "hir::invalid-pipe-stage-input",
@@ -3418,10 +3358,10 @@
           "severity": "error",
           "code": "hir::invalid-projection",
           "message": "projection `.done` cannot be applied to `Signal AsyncTracker HttpError List { id: Int, name: Text }`",
-          "rendered": "error[hir::invalid-projection]: projection `.done` cannot be applied to `Signal AsyncTracker HttpError List { id: Int, name: Text }`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/async/block_10.aivi:37:44\n  |\n37 | signal firstLoadDone : Signal Bool = users.done\n  |                                            ^^^^\n  = this projection target does not support field access"
+          "rendered": "error[hir::invalid-projection]: projection `.done` cannot be applied to `Signal AsyncTracker HttpError List { id: Int, name: Text }`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/async/block_10.aivi:35:44\n  |\n35 | signal firstLoadDone : Signal Bool = users.done\n  |                                            ^^^^\n  = this projection target does not support field access"
         }
       ],
-      "suggested_snippet": "use aivi.async (\n    AsyncTracker\n    step\n)\n\nuse aivi.http (\n    HttpError\n    HttpSource\n)\n\ntype User = {\n    id: Int,\n    name: Text\n}\n\n@source http \"https://api.example.com\"\nsignal api : HttpSource\n\nsignal rawUsers : Signal (Result HttpError (List User)) = api.get \"/users\"\n\nvalue initialUsers : AsyncTracker HttpError (List User) = {\n    pending: True,\n    done: None,\n    error: None\n}\n\nsignal users : Signal (AsyncTracker HttpError (List User)) = rawUsers\n +|> initialUsers step\n\ntype Bool -> Option (List User) -> Bool\nfunc trackFirstLoad = hasFired newDone => hasFired\n ||> True   -> True\n ||> False  -> newDone\n ||> None   -> False\n ||> Some _ -> True\n\nsignal firstLoadDone : Signal Bool = users.done\n +|> False trackFirstLoad\n"
+      "suggested_snippet": "use aivi.async (\n    AsyncTracker\n    step\n)\n\nuse aivi.http (\n    HttpError\n    HttpSource\n)\n\ntype User = {\n    id: Int,\n    name: Text\n}\n\n@source http \"https://api.example.com\"\nsignal api : HttpSource\n\nsignal rawUsers : Signal (Result HttpError (List User)) = api.get \"/users\"\n\nvalue initialUsers : AsyncTracker HttpError (List User) = {\n    pending: True,\n    done: None,\n    error: None\n}\n\nsignal users : Signal (AsyncTracker HttpError (List User)) = rawUsers\n +|> initialUsers step\n\ntype Bool -> Option (List User) -> Bool\nfunc trackFirstLoad = hasFired newDone => hasFired\n T|> True\n F|> isSome newDone\n\nsignal firstLoadDone : Signal Bool = users.done\n +|> False trackFirstLoad\n"
     },
     {
       "markdown_path": "manual/stdlib/auth.md",
@@ -3610,46 +3550,6 @@
         }
       ],
       "suggested_snippet": "@source clipboard.watch\nsignal clipboardContent : Signal (Result ClipboardError ClipboardContent)\n"
-    },
-    {
-      "markdown_path": "manual/stdlib/color.md",
-      "block_index": 7,
-      "fence_info": "aivi",
-      "start_line": 86,
-      "end_line": 92,
-      "formatting_changed": false,
-      "syntax_problem_count": 0,
-      "lsp_problem_count": 1,
-      "compiler_problem_count": 1,
-      "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::unresolved-term-name",
-          "message": "unknown term `withAlpha`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `withAlpha`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/color/block_7.aivi:7:5\n  |\n 7 |     withAlpha theme.accent 180\n  |     ^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
-        }
-      ],
-      "suggested_snippet": "use aivi.color (Color)\n\ntype Theme = { accent: Color }\n\ntype Theme -> Color\nfunc dimAccent = theme =>\n    withAlpha theme.accent 180\n"
-    },
-    {
-      "markdown_path": "manual/stdlib/color.md",
-      "block_index": 9,
-      "fence_info": "aivi",
-      "start_line": 104,
-      "end_line": 113,
-      "formatting_changed": false,
-      "syntax_problem_count": 0,
-      "lsp_problem_count": 1,
-      "compiler_problem_count": 1,
-      "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::unresolved-term-name",
-          "message": "unknown term `blend`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `blend`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/color/block_9.aivi:10:5\n  |\n10 |     blend theme.background theme.accent 0.15\n  |     ^^^^^\n  = reported during Milestone 2 HIR lowering"
-        }
-      ],
-      "suggested_snippet": "use aivi.color (Color)\n\ntype Theme = {\n    accent: Color,\n    background: Color\n}\n\ntype Theme -> Color\nfunc hoverColor = theme =>\n    blend theme.background theme.accent 0.15\n"
     },
     {
       "markdown_path": "manual/stdlib/date.md",
@@ -3979,10 +3879,10 @@
     },
     {
       "markdown_path": "manual/stdlib/duration.md",
-      "block_index": 1,
+      "block_index": 4,
       "fence_info": "aivi",
-      "start_line": 13,
-      "end_line": 17,
+      "start_line": 62,
+      "end_line": 62,
       "formatting_changed": false,
       "syntax_problem_count": 0,
       "lsp_problem_count": 1,
@@ -3990,216 +3890,90 @@
       "diagnostics": [
         {
           "severity": "error",
-          "code": "hir::unknown-imported-name",
-          "message": "module `aivi.duration` does not export `trySeconds`",
-          "rendered": "error[hir::unknown-imported-name]: module `aivi.duration` does not export `trySeconds`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_1.aivi:4:5\n  |\n 4 |     trySeconds\n  |     ^^^^^^^^^^\n  = this imported name is not exported by the target module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_1.aivi:1:1\n  |\n 1 | use aivi.duration (\n  | -------------------------------------------------------------------\n  | note: declared by this `use` item"
-        }
-      ],
-      "suggested_snippet": "use aivi.duration (\n    Duration\n    DurationError\n    trySeconds\n)\n"
-    },
-    {
-      "markdown_path": "manual/stdlib/duration.md",
-      "block_index": 2,
-      "fence_info": "aivi",
-      "start_line": 41,
-      "end_line": 47,
-      "formatting_changed": false,
-      "syntax_problem_count": 0,
-      "lsp_problem_count": 5,
-      "compiler_problem_count": 5,
-      "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::ambiguous-literal-suffix",
-          "message": "literal suffix `dy` is ambiguous",
-          "rendered": "error[hir::ambiguous-literal-suffix]: literal suffix `dy` is ambiguous\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_2.aivi:7:34\n  |\n 7 | value trialPeriod : Duration = 14dy\n  |                                  ^^\n  = this suffixed literal matches multiple domain literal declarations\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_2.aivi:1:20\n  |\n 1 | use aivi.duration (Duration)\n  |                    --------\n  |                    note: matching literal suffix declared here\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_2.aivi:1:1\n  |\n 1 | use aivi.duration (Duration)\n  | -\n  | note: matching literal suffix declared here"
-        },
-        {
-          "severity": "error",
-          "code": "hir::ambiguous-literal-suffix",
-          "message": "literal suffix `hr` is ambiguous",
-          "rendered": "error[hir::ambiguous-literal-suffix]: literal suffix `hr` is ambiguous\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_2.aivi:6:34\n  |\n 6 | value backupWindow : Duration = 1hr\n  |                                  ^^\n  = this suffixed literal matches multiple domain literal declarations\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_2.aivi:1:20\n  |\n 1 | use aivi.duration (Duration)\n  |                    --------\n  |                    note: matching literal suffix declared here\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_2.aivi:1:1\n  |\n 1 | use aivi.duration (Duration)\n  | -\n  | note: matching literal suffix declared here"
-        },
-        {
-          "severity": "error",
-          "code": "hir::ambiguous-literal-suffix",
-          "message": "literal suffix `min` is ambiguous",
-          "rendered": "error[hir::ambiguous-literal-suffix]: literal suffix `min` is ambiguous\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_2.aivi:5:36\n  |\n 5 | value sessionLength : Duration = 30min\n  |                                    ^^^\n  = this suffixed literal matches multiple domain literal declarations\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_2.aivi:1:20\n  |\n 1 | use aivi.duration (Duration)\n  |                    --------\n  |                    note: matching literal suffix declared here\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_2.aivi:1:1\n  |\n 1 | use aivi.duration (Duration)\n  | -\n  | note: matching literal suffix declared here"
-        },
-        {
-          "severity": "error",
-          "code": "hir::ambiguous-literal-suffix",
-          "message": "literal suffix `ms` is ambiguous",
-          "rendered": "error[hir::ambiguous-literal-suffix]: literal suffix `ms` is ambiguous\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_2.aivi:3:32\n  |\n 3 | value debounce : Duration = 250ms\n  |                                ^^\n  = this suffixed literal matches multiple domain literal declarations\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_2.aivi:1:20\n  |\n 1 | use aivi.duration (Duration)\n  |                    --------\n  |                    note: matching literal suffix declared here\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_2.aivi:1:1\n  |\n 1 | use aivi.duration (Duration)\n  | -\n  | note: matching literal suffix declared here"
-        },
-        {
-          "severity": "error",
-          "code": "hir::ambiguous-literal-suffix",
-          "message": "literal suffix `sec` is ambiguous",
-          "rendered": "error[hir::ambiguous-literal-suffix]: literal suffix `sec` is ambiguous\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_2.aivi:4:32\n  |\n 4 | value retryDelay : Duration = 5sec\n  |                                ^^^\n  = this suffixed literal matches multiple domain literal declarations\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_2.aivi:1:20\n  |\n 1 | use aivi.duration (Duration)\n  |                    --------\n  |                    note: matching literal suffix declared here\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_2.aivi:1:1\n  |\n 1 | use aivi.duration (Duration)\n  | -\n  | note: matching literal suffix declared here"
-        }
-      ],
-      "suggested_snippet": "use aivi.duration (Duration)\n\nvalue debounce : Duration = 250ms\nvalue retryDelay : Duration = 5sec\nvalue sessionLength : Duration = 30min\nvalue backupWindow : Duration = 1hr\nvalue trialPeriod : Duration = 14dy\n"
-    },
-    {
-      "markdown_path": "manual/stdlib/duration.md",
-      "block_index": 4,
-      "fence_info": "aivi",
-      "start_line": 63,
-      "end_line": 68,
-      "formatting_changed": false,
-      "syntax_problem_count": 0,
-      "lsp_problem_count": 2,
-      "compiler_problem_count": 2,
-      "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::unknown-imported-name",
-          "message": "module `aivi.duration` does not export `millis`",
-          "rendered": "error[hir::unknown-imported-name]: module `aivi.duration` does not export `millis`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_4.aivi:3:5\n  |\n 3 |     millis\n  |     ^^^^^^\n  = this imported name is not exported by the target module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_4.aivi:1:1\n  |\n 1 | use aivi.duration (\n  | ---------------------------------------------\n  | note: declared by this `use` item"
-        },
-        {
-          "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `millis`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `millis`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_4.aivi:6:31\n  |\n 6 | value shortDelay : Duration = millis 150\n  |                               ^^^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `millis`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_4.aivi:1:31\n  |\n 1 | value shortDelay : Duration = millis 150\n  |                               ^^^^^^\n  = reported during Milestone 2 HIR lowering"
         }
       ],
-      "suggested_snippet": "use aivi.duration (\n    Duration\n    millis\n)\n\nvalue shortDelay : Duration = millis 150\n"
+      "suggested_snippet": "value shortDelay : Duration = millis 150\n"
     },
     {
       "markdown_path": "manual/stdlib/duration.md",
       "block_index": 6,
       "fence_info": "aivi",
-      "start_line": 80,
-      "end_line": 86,
+      "start_line": 74,
+      "end_line": 74,
       "formatting_changed": false,
       "syntax_problem_count": 0,
-      "lsp_problem_count": 2,
-      "compiler_problem_count": 2,
+      "lsp_problem_count": 1,
+      "compiler_problem_count": 1,
       "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::unknown-imported-name",
-          "message": "module `aivi.duration` does not export `trySeconds`",
-          "rendered": "error[hir::unknown-imported-name]: module `aivi.duration` does not export `trySeconds`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_6.aivi:4:5\n  |\n 4 |     trySeconds\n  |     ^^^^^^^^^^\n  = this imported name is not exported by the target module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_6.aivi:1:1\n  |\n 1 | use aivi.duration (\n  | -------------------------------------------------------------------\n  | note: declared by this `use` item"
-        },
         {
           "severity": "error",
           "code": "hir::unresolved-term-name",
           "message": "unknown term `trySeconds`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `trySeconds`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_6.aivi:7:54\n  |\n 7 | value pollInterval : Result DurationError Duration = trySeconds 10\n  |                                                      ^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
+          "rendered": "error[hir::unresolved-term-name]: unknown term `trySeconds`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_6.aivi:1:54\n  |\n 1 | value pollInterval : Result DurationError Duration = trySeconds 10\n  |                                                      ^^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
         }
       ],
-      "suggested_snippet": "use aivi.duration (\n    Duration\n    DurationError\n    trySeconds\n)\n\nvalue pollInterval : Result DurationError Duration = trySeconds 10\n"
+      "suggested_snippet": "value pollInterval : Result DurationError Duration = trySeconds 10\n"
     },
     {
       "markdown_path": "manual/stdlib/duration.md",
       "block_index": 7,
       "fence_info": "aivi",
-      "start_line": 95,
-      "end_line": 98,
+      "start_line": 83,
+      "end_line": 84,
       "formatting_changed": false,
       "syntax_problem_count": 0,
-      "lsp_problem_count": 2,
-      "compiler_problem_count": 2,
+      "lsp_problem_count": 0,
+      "compiler_problem_count": 1,
       "diagnostics": [
         {
           "severity": "error",
-          "code": "hir::ambiguous-literal-suffix",
-          "message": "literal suffix `min` is ambiguous",
-          "rendered": "error[hir::ambiguous-literal-suffix]: literal suffix `min` is ambiguous\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_7.aivi:3:31\n  |\n 3 | value totalWait : Duration = 1min + 30sec\n  |                               ^^^\n  = this suffixed literal matches multiple domain literal declarations\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_7.aivi:1:20\n  |\n 1 | use aivi.duration (Duration)\n  |                    --------\n  |                    note: matching literal suffix declared here\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_7.aivi:1:1\n  |\n 1 | use aivi.duration (Duration)\n  | -\n  | note: matching literal suffix declared here"
-        },
-        {
-          "severity": "error",
-          "code": "hir::ambiguous-literal-suffix",
-          "message": "literal suffix `sec` is ambiguous",
-          "rendered": "error[hir::ambiguous-literal-suffix]: literal suffix `sec` is ambiguous\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_7.aivi:3:39\n  |\n 3 | value totalWait : Duration = 1min + 30sec\n  |                                       ^^^\n  = this suffixed literal matches multiple domain literal declarations\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_7.aivi:1:20\n  |\n 1 | use aivi.duration (Duration)\n  |                    --------\n  |                    note: matching literal suffix declared here\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_7.aivi:1:1\n  |\n 1 | use aivi.duration (Duration)\n  | -\n  | note: matching literal suffix declared here"
+          "code": "hir::invalid-binary-operator",
+          "message": "operator `+` expects matching numeric operands, found `Duration` and `Duration`",
+          "rendered": "error[hir::invalid-binary-operator]: operator `+` expects matching numeric operands, found `Duration` and `Duration`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_7.aivi:1:30\n  |\n 1 | value totalWait : Duration = 1min + 30sec\n  |                              ^^^^^^^^^^^^\n  = both operands must resolve to the same numeric type here"
         }
       ],
-      "suggested_snippet": "use aivi.duration (Duration)\n\nvalue totalWait : Duration = 1min + 30sec\nvalue totalWaitMs : Int = totalWait.carrier\n"
+      "suggested_snippet": "value totalWait : Duration = 1min + 30sec\nvalue totalWaitMs : Int = totalWait.carrier\n"
     },
     {
       "markdown_path": "manual/stdlib/duration.md",
       "block_index": 8,
       "fence_info": "aivi",
-      "start_line": 106,
-      "end_line": 112,
+      "start_line": 92,
+      "end_line": 96,
       "formatting_changed": false,
       "syntax_problem_count": 0,
-      "lsp_problem_count": 6,
-      "compiler_problem_count": 6,
+      "lsp_problem_count": 0,
+      "compiler_problem_count": 4,
       "diagnostics": [
         {
           "severity": "error",
-          "code": "hir::ambiguous-literal-suffix",
-          "message": "literal suffix `min` is ambiguous",
-          "rendered": "error[hir::ambiguous-literal-suffix]: literal suffix `min` is ambiguous\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:6:35\n  |\n 6 | value isShorter : Bool = 30sec < 1min\n  |                                   ^^^\n  = this suffixed literal matches multiple domain literal declarations\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:1:20\n  |\n 1 | use aivi.duration (Duration)\n  |                    --------\n  |                    note: matching literal suffix declared here\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:1:1\n  |\n 1 | use aivi.duration (Duration)\n  | -\n  | note: matching literal suffix declared here"
+          "code": "hir::invalid-binary-operator",
+          "message": "operator `+` expects matching numeric operands, found `Duration` and `Duration`",
+          "rendered": "error[hir::invalid-binary-operator]: operator `+` expects matching numeric operands, found `Duration` and `Duration`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:1:26\n  |\n 1 | value total : Duration = 45sec + 15sec\n  |                          ^^^^^^^^^^^^^\n  = both operands must resolve to the same numeric type here"
         },
         {
           "severity": "error",
-          "code": "hir::ambiguous-literal-suffix",
-          "message": "literal suffix `ms` is ambiguous",
-          "rendered": "error[hir::ambiguous-literal-suffix]: literal suffix `ms` is ambiguous\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:5:31\n  |\n 5 | value doubled : Duration = 250ms * 2\n  |                               ^^\n  = this suffixed literal matches multiple domain literal declarations\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:1:20\n  |\n 1 | use aivi.duration (Duration)\n  |                    --------\n  |                    note: matching literal suffix declared here\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:1:1\n  |\n 1 | use aivi.duration (Duration)\n  | -\n  | note: matching literal suffix declared here"
+          "code": "hir::invalid-binary-operator",
+          "message": "operator `-` expects matching numeric operands, found `Duration` and `Duration`",
+          "rendered": "error[hir::invalid-binary-operator]: operator `-` expects matching numeric operands, found `Duration` and `Duration`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:2:30\n  |\n 2 | value remaining : Duration = total - 10sec\n  |                              ^^^^^^^^^^^^^\n  = both operands must resolve to the same numeric type here\nhelp: convert one operand so both sides share the same numeric type"
         },
         {
           "severity": "error",
-          "code": "hir::ambiguous-literal-suffix",
-          "message": "literal suffix `sec` is ambiguous",
-          "rendered": "error[hir::ambiguous-literal-suffix]: literal suffix `sec` is ambiguous\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:3:28\n  |\n 3 | value total : Duration = 45sec + 15sec\n  |                            ^^^\n  = this suffixed literal matches multiple domain literal declarations\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:1:20\n  |\n 1 | use aivi.duration (Duration)\n  |                    --------\n  |                    note: matching literal suffix declared here\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:1:1\n  |\n 1 | use aivi.duration (Duration)\n  | -\n  | note: matching literal suffix declared here"
+          "code": "hir::invalid-binary-operator",
+          "message": "operator `<` expects matching numeric operands, found `Duration` and `Duration`",
+          "rendered": "error[hir::invalid-binary-operator]: operator `<` expects matching numeric operands, found `Duration` and `Duration`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:4:26\n  |\n 4 | value isShorter : Bool = 30sec < 1min\n  |                          ^^^^^^^^^^^^\n  = both operands must resolve to the same numeric type here"
         },
         {
           "severity": "error",
-          "code": "hir::ambiguous-literal-suffix",
-          "message": "literal suffix `sec` is ambiguous",
-          "rendered": "error[hir::ambiguous-literal-suffix]: literal suffix `sec` is ambiguous\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:3:36\n  |\n 3 | value total : Duration = 45sec + 15sec\n  |                                    ^^^\n  = this suffixed literal matches multiple domain literal declarations\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:1:20\n  |\n 1 | use aivi.duration (Duration)\n  |                    --------\n  |                    note: matching literal suffix declared here\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:1:1\n  |\n 1 | use aivi.duration (Duration)\n  | -\n  | note: matching literal suffix declared here"
-        },
-        {
-          "severity": "error",
-          "code": "hir::ambiguous-literal-suffix",
-          "message": "literal suffix `sec` is ambiguous",
-          "rendered": "error[hir::ambiguous-literal-suffix]: literal suffix `sec` is ambiguous\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:4:40\n  |\n 4 | value remaining : Duration = total - 10sec\n  |                                        ^^^\n  = this suffixed literal matches multiple domain literal declarations\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:1:20\n  |\n 1 | use aivi.duration (Duration)\n  |                    --------\n  |                    note: matching literal suffix declared here\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:1:1\n  |\n 1 | use aivi.duration (Duration)\n  | -\n  | note: matching literal suffix declared here"
-        },
-        {
-          "severity": "error",
-          "code": "hir::ambiguous-literal-suffix",
-          "message": "literal suffix `sec` is ambiguous",
-          "rendered": "error[hir::ambiguous-literal-suffix]: literal suffix `sec` is ambiguous\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:6:28\n  |\n 6 | value isShorter : Bool = 30sec < 1min\n  |                            ^^^\n  = this suffixed literal matches multiple domain literal declarations\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:1:20\n  |\n 1 | use aivi.duration (Duration)\n  |                    --------\n  |                    note: matching literal suffix declared here\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:1:1\n  |\n 1 | use aivi.duration (Duration)\n  | -\n  | note: matching literal suffix declared here"
+          "code": "hir::type-mismatch",
+          "message": "expected `Int` but found `Duration`",
+          "rendered": "error[hir::type-mismatch]: expected `Int` but found `Duration`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_8.aivi:3:28\n  |\n 3 | value doubled : Duration = 250ms * 2\n  |                            ^^^^^\n  = found `Duration` here, expected `Int`"
         }
       ],
-      "suggested_snippet": "use aivi.duration (Duration)\n\nvalue total : Duration = 45sec + 15sec\nvalue remaining : Duration = total - 10sec\nvalue doubled : Duration = 250ms * 2\nvalue isShorter : Bool = 30sec < 1min\nvalue rawMs : Int = doubled.carrier\n"
-    },
-    {
-      "markdown_path": "manual/stdlib/duration.md",
-      "block_index": 10,
-      "fence_info": "aivi",
-      "start_line": 126,
-      "end_line": 131,
-      "formatting_changed": false,
-      "syntax_problem_count": 0,
-      "lsp_problem_count": 3,
-      "compiler_problem_count": 3,
-      "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::ambiguous-literal-suffix",
-          "message": "literal suffix `min` is ambiguous",
-          "rendered": "error[hir::ambiguous-literal-suffix]: literal suffix `min` is ambiguous\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_10.aivi:5:29\n  |\n 5 | value timeout : Duration = 2min\n  |                             ^^^\n  = this suffixed literal matches multiple domain literal declarations\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_10.aivi:1:20\n  |\n 1 | use aivi.duration (Duration)\n  |                    --------\n  |                    note: matching literal suffix declared here\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_10.aivi:1:1\n  |\n 1 | use aivi.duration (Duration)\n  | -\n  | note: matching literal suffix declared here"
-        },
-        {
-          "severity": "error",
-          "code": "hir::ambiguous-literal-suffix",
-          "message": "literal suffix `ms` is ambiguous",
-          "rendered": "error[hir::ambiguous-literal-suffix]: literal suffix `ms` is ambiguous\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_10.aivi:3:37\n  |\n 3 | value animationFrame : Duration = 16ms\n  |                                     ^^\n  = this suffixed literal matches multiple domain literal declarations\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_10.aivi:1:20\n  |\n 1 | use aivi.duration (Duration)\n  |                    --------\n  |                    note: matching literal suffix declared here\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_10.aivi:1:1\n  |\n 1 | use aivi.duration (Duration)\n  | -\n  | note: matching literal suffix declared here"
-        },
-        {
-          "severity": "error",
-          "code": "hir::ambiguous-literal-suffix",
-          "message": "literal suffix `sec` is ambiguous",
-          "rendered": "error[hir::ambiguous-literal-suffix]: literal suffix `sec` is ambiguous\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_10.aivi:4:36\n  |\n 4 | value autosaveEvery : Duration = 30sec\n  |                                    ^^^\n  = this suffixed literal matches multiple domain literal declarations\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_10.aivi:1:20\n  |\n 1 | use aivi.duration (Duration)\n  |                    --------\n  |                    note: matching literal suffix declared here\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/duration/block_10.aivi:1:1\n  |\n 1 | use aivi.duration (Duration)\n  | -\n  | note: matching literal suffix declared here"
-        }
-      ],
-      "suggested_snippet": "use aivi.duration (Duration)\n\nvalue animationFrame : Duration = 16ms\nvalue autosaveEvery : Duration = 30sec\nvalue timeout : Duration = 2min\nvalue timeoutMs : Int = timeout.carrier\n"
+      "suggested_snippet": "value total : Duration = 45sec + 15sec\nvalue remaining : Duration = total - 10sec\nvalue doubled : Duration = 250ms * 2\nvalue isShorter : Bool = 30sec < 1min\nvalue rawMs : Int = doubled.carrier\n"
     },
     {
       "markdown_path": "manual/stdlib/env.md",
@@ -5107,199 +4881,23 @@
     },
     {
       "markdown_path": "manual/stdlib/url.md",
-      "block_index": 1,
+      "block_index": 2,
       "fence_info": "aivi",
-      "start_line": 14,
-      "end_line": 26,
+      "start_line": 31,
+      "end_line": 50,
       "formatting_changed": false,
       "syntax_problem_count": 0,
-      "lsp_problem_count": 9,
-      "compiler_problem_count": 9,
+      "lsp_problem_count": 1,
+      "compiler_problem_count": 1,
       "diagnostics": [
         {
           "severity": "error",
-          "code": "hir::unknown-imported-name",
-          "message": "module `aivi.url` does not export `fragment`",
-          "rendered": "error[hir::unknown-imported-name]: module `aivi.url` does not export `fragment`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_1.aivi:10:5\n  |\n10 |     fragment\n  |     ^^^^^^^^\n  = this imported name is not exported by the target module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_1.aivi:1:1\n  |\n 1 | use aivi.url (\n  | ---------------------------------------------------------------------------------------------------------------------------------------\n  | note: declared by this `use` item"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unknown-imported-name",
-          "message": "module `aivi.url` does not export `host`",
-          "rendered": "error[hir::unknown-imported-name]: module `aivi.url` does not export `host`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_1.aivi:6:5\n  |\n 6 |     host\n  |     ^^^^\n  = this imported name is not exported by the target module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_1.aivi:1:1\n  |\n 1 | use aivi.url (\n  | ---------------------------------------------------------------------------------------------------------------------------------------\n  | note: declared by this `use` item"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unknown-imported-name",
-          "message": "module `aivi.url` does not export `parse`",
-          "rendered": "error[hir::unknown-imported-name]: module `aivi.url` does not export `parse`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_1.aivi:4:5\n  |\n 4 |     parse\n  |     ^^^^^\n  = this imported name is not exported by the target module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_1.aivi:1:1\n  |\n 1 | use aivi.url (\n  | ---------------------------------------------------------------------------------------------------------------------------------------\n  | note: declared by this `use` item"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unknown-imported-name",
-          "message": "module `aivi.url` does not export `path`",
-          "rendered": "error[hir::unknown-imported-name]: module `aivi.url` does not export `path`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_1.aivi:8:5\n  |\n 8 |     path\n  |     ^^^^\n  = this imported name is not exported by the target module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_1.aivi:1:1\n  |\n 1 | use aivi.url (\n  | ---------------------------------------------------------------------------------------------------------------------------------------\n  | note: declared by this `use` item"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unknown-imported-name",
-          "message": "module `aivi.url` does not export `port`",
-          "rendered": "error[hir::unknown-imported-name]: module `aivi.url` does not export `port`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_1.aivi:7:5\n  |\n 7 |     port\n  |     ^^^^\n  = this imported name is not exported by the target module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_1.aivi:1:1\n  |\n 1 | use aivi.url (\n  | ---------------------------------------------------------------------------------------------------------------------------------------\n  | note: declared by this `use` item"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unknown-imported-name",
-          "message": "module `aivi.url` does not export `query`",
-          "rendered": "error[hir::unknown-imported-name]: module `aivi.url` does not export `query`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_1.aivi:9:5\n  |\n 9 |     query\n  |     ^^^^^\n  = this imported name is not exported by the target module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_1.aivi:1:1\n  |\n 1 | use aivi.url (\n  | ---------------------------------------------------------------------------------------------------------------------------------------\n  | note: declared by this `use` item"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unknown-imported-name",
-          "message": "module `aivi.url` does not export `scheme`",
-          "rendered": "error[hir::unknown-imported-name]: module `aivi.url` does not export `scheme`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_1.aivi:5:5\n  |\n 5 |     scheme\n  |     ^^^^^^\n  = this imported name is not exported by the target module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_1.aivi:1:1\n  |\n 1 | use aivi.url (\n  | ---------------------------------------------------------------------------------------------------------------------------------------\n  | note: declared by this `use` item"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unknown-imported-name",
-          "message": "module `aivi.url` does not export `withPath`",
-          "rendered": "error[hir::unknown-imported-name]: module `aivi.url` does not export `withPath`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_1.aivi:11:5\n  |\n11 |     withPath\n  |     ^^^^^^^^\n  = this imported name is not exported by the target module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_1.aivi:1:1\n  |\n 1 | use aivi.url (\n  | ---------------------------------------------------------------------------------------------------------------------------------------\n  | note: declared by this `use` item"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unknown-imported-name",
-          "message": "module `aivi.url` does not export `withQuery`",
-          "rendered": "error[hir::unknown-imported-name]: module `aivi.url` does not export `withQuery`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_1.aivi:12:5\n  |\n12 |     withQuery\n  |     ^^^^^^^^^\n  = this imported name is not exported by the target module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_1.aivi:1:1\n  |\n 1 | use aivi.url (\n  | ---------------------------------------------------------------------------------------------------------------------------------------\n  | note: declared by this `use` item"
+          "code": "hir::unresolved-type-name",
+          "message": "unknown type `UrlError`",
+          "rendered": "error[hir::unresolved-type-name]: unknown type `UrlError`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_2.aivi:2:25\n  |\n 2 |     type Text -> Result UrlError Url\n  |                         ^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
         }
       ],
-      "suggested_snippet": "use aivi.url (\n    Url\n    UrlError\n    parse\n    scheme\n    host\n    port\n    path\n    query\n    fragment\n    withPath\n    withQuery\n)\n"
-    },
-    {
-      "markdown_path": "manual/stdlib/url.md",
-      "block_index": 3,
-      "fence_info": "aivi",
-      "start_line": 51,
-      "end_line": 57,
-      "formatting_changed": false,
-      "syntax_problem_count": 0,
-      "lsp_problem_count": 2,
-      "compiler_problem_count": 2,
-      "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::unknown-imported-name",
-          "message": "module `aivi.url` does not export `parse`",
-          "rendered": "error[hir::unknown-imported-name]: module `aivi.url` does not export `parse`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_3.aivi:4:5\n  |\n 4 |     parse\n  |     ^^^^^\n  = this imported name is not exported by the target module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_3.aivi:1:1\n  |\n 1 | use aivi.url (\n  | -----------------------------------------------\n  | note: declared by this `use` item"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unresolved-term-name",
-          "message": "unknown term `parse`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `parse`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_3.aivi:7:39\n  |\n 7 | value apiBase : Result UrlError Url = parse \"https://api.example.com/v1/users?page=1\"\n  |                                       ^^^^^\n  = reported during Milestone 2 HIR lowering"
-        }
-      ],
-      "suggested_snippet": "use aivi.url (\n    Url\n    UrlError\n    parse\n)\n\nvalue apiBase : Result UrlError Url = parse \"https://api.example.com/v1/users?page=1\"\n"
-    },
-    {
-      "markdown_path": "manual/stdlib/url.md",
-      "block_index": 6,
-      "fence_info": "aivi",
-      "start_line": 84,
-      "end_line": 93,
-      "formatting_changed": false,
-      "syntax_problem_count": 0,
-      "lsp_problem_count": 4,
-      "compiler_problem_count": 4,
-      "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::unknown-imported-name",
-          "message": "module `aivi.url` does not export `host`",
-          "rendered": "error[hir::unknown-imported-name]: module `aivi.url` does not export `host`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_6.aivi:3:5\n  |\n 3 |     host\n  |     ^^^^\n  = this imported name is not exported by the target module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_6.aivi:1:1\n  |\n 1 | use aivi.url (\n  | ----------------------------------------------------\n  | note: declared by this `use` item"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unknown-imported-name",
-          "message": "module `aivi.url` does not export `path`",
-          "rendered": "error[hir::unknown-imported-name]: module `aivi.url` does not export `path`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_6.aivi:4:5\n  |\n 4 |     path\n  |     ^^^^\n  = this imported name is not exported by the target module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_6.aivi:1:1\n  |\n 1 | use aivi.url (\n  | ----------------------------------------------------\n  | note: declared by this `use` item"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unknown-imported-name",
-          "message": "module `aivi.url` does not export `query`",
-          "rendered": "error[hir::unknown-imported-name]: module `aivi.url` does not export `query`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_6.aivi:5:5\n  |\n 5 |     query\n  |     ^^^^^\n  = this imported name is not exported by the target module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_6.aivi:1:1\n  |\n 1 | use aivi.url (\n  | ----------------------------------------------------\n  | note: declared by this `use` item"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unresolved-term-name",
-          "message": "unknown term `path`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `path`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_6.aivi:10:5\n  |\n10 |     path url\n  |     ^^^^\n  = reported during Milestone 2 HIR lowering"
-        }
-      ],
-      "suggested_snippet": "use aivi.url (\n    Url\n    host\n    path\n    query\n)\n\ntype Url -> Text\nfunc routeOnly = url =>\n    path url\n"
-    },
-    {
-      "markdown_path": "manual/stdlib/url.md",
-      "block_index": 9,
-      "fence_info": "aivi",
-      "start_line": 116,
-      "end_line": 128,
-      "formatting_changed": false,
-      "syntax_problem_count": 0,
-      "lsp_problem_count": 4,
-      "compiler_problem_count": 4,
-      "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::unknown-imported-name",
-          "message": "module `aivi.url` does not export `withPath`",
-          "rendered": "error[hir::unknown-imported-name]: module `aivi.url` does not export `withPath`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_9.aivi:3:5\n  |\n 3 |     withPath\n  |     ^^^^^^^^\n  = this imported name is not exported by the target module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_9.aivi:1:1\n  |\n 1 | use aivi.url (\n  | ---------------------------------------------------\n  | note: declared by this `use` item"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unknown-imported-name",
-          "message": "module `aivi.url` does not export `withQuery`",
-          "rendered": "error[hir::unknown-imported-name]: module `aivi.url` does not export `withQuery`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_9.aivi:4:5\n  |\n 4 |     withQuery\n  |     ^^^^^^^^^\n  = this imported name is not exported by the target module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_9.aivi:1:1\n  |\n 1 | use aivi.url (\n  | ---------------------------------------------------\n  | note: declared by this `use` item"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unresolved-term-name",
-          "message": "unknown term `withPath`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `withPath`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_9.aivi:9:5\n  |\n 9 |     withPath url \"/search\"\n  |     ^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unresolved-term-name",
-          "message": "unknown term `withQuery`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `withQuery`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_9.aivi:13:5\n  |\n13 |     withQuery (moveToSearchPath url) \"q=aivi\"\n  |     ^^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
-        }
-      ],
-      "suggested_snippet": "use aivi.url (\n    Url\n    withPath\n    withQuery\n)\n\ntype Url -> Url\nfunc moveToSearchPath = url =>\n    withPath url \"/search\"\n\ntype Url -> Url\nfunc toSearchPage = url =>\n    withQuery (moveToSearchPath url) \"q=aivi\"\n"
-    },
-    {
-      "markdown_path": "manual/stdlib/url.md",
-      "block_index": 11,
-      "fence_info": "aivi",
-      "start_line": 142,
-      "end_line": 149,
-      "formatting_changed": false,
-      "syntax_problem_count": 0,
-      "lsp_problem_count": 2,
-      "compiler_problem_count": 2,
-      "diagnostics": [
-        {
-          "severity": "error",
-          "code": "hir::unknown-imported-name",
-          "message": "module `aivi.url` does not export `withPath`",
-          "rendered": "error[hir::unknown-imported-name]: module `aivi.url` does not export `withPath`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_11.aivi:3:5\n  |\n 3 |     withPath\n  |     ^^^^^^^^\n  = this imported name is not exported by the target module\n  ::: /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_11.aivi:1:1\n  |\n 1 | use aivi.url (\n  | -------------------------------------\n  | note: declared by this `use` item"
-        },
-        {
-          "severity": "error",
-          "code": "hir::unresolved-term-name",
-          "message": "unknown term `withPath`",
-          "rendered": "error[hir::unresolved-term-name]: unknown term `withPath`\n --> /home/mendrik/desk/mendrik/aivi/stdlib/manual_snippets/stdlib/url/block_11.aivi:8:6\n  |\n 8 |     (withPath base \"/api/avatar\").carrier\n  |      ^^^^^^^^\n  = reported during Milestone 2 HIR lowering"
-        }
-      ],
-      "suggested_snippet": "use aivi.url (\n    Url\n    withPath\n)\n\ntype Url -> Text\nfunc avatarEndpoint = base =>\n    (withPath base \"/api/avatar\").carrier\n"
+      "suggested_snippet": "domain Url over Text = {\n    type Text -> Result UrlError Url\n    parse\n    type Url -> Option Text\n    scheme\n    type Url -> Option Text\n    host\n    type Url -> Option Int\n    port\n    type Url -> Text\n    path\n    type Url -> Option Text\n    query\n    type Url -> Option Text\n    fragment\n    type Url -> Text -> Url\n    withPath\n    type Url -> Text -> Url\n    withQuery\n}\n"
     }
   ]
 }

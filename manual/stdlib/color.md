@@ -3,7 +3,7 @@
 A small domain type for UI colors.
 
 `Color` wraps an `Int`, so you can pass colors around as a named type instead of a raw
-number. Importing the `Color` domain also brings its helper names into scope.
+number.
 
 ## Import
 
@@ -16,10 +16,7 @@ use aivi.color (Color)
 | Name | Type | Description |
 |------|------|-------------|
 | `Color` | domain over `Int` | A packed color value |
-| `argb` | `Int -> Color` | Build a color from one packed ARGB integer |
-| `red` / `green` / `blue` / `alpha` | `Color -> Int` | Read one color channel |
-| `withAlpha` / `withRed` / `withGreen` / `withBlue` | `Color -> Int -> Color` | Replace one channel |
-| `blend` | `Color -> Color -> Float -> Color` | Mix two colors |
+| `.carrier` | `Color -> Int` | The raw packed ARGB integer |
 
 ## Domain
 
@@ -48,8 +45,8 @@ domain Color over Int = {
 }
 ```
 
-`Color` is useful when a field should clearly mean “this is a color” rather than “this is
-just some integer”.
+`Color` is useful when a field should clearly mean "this is a color" rather than "this is
+just some integer".
 
 ```aivi
 use aivi.color (Color)
@@ -60,63 +57,31 @@ type Theme = {
 }
 ```
 
-### argb
+## `.carrier`
 
-```aivi
-```
-
-Construct a `Color` from one packed ARGB integer. This is the low-level constructor exposed
-by the module today.
-
-### red / green / blue / alpha
-
-```aivi
-```
-
-Read one channel from a color.
-
-### withAlpha / withRed / withGreen / withBlue
-
-```aivi
-```
-
-Return a new color with one channel replaced.
+Access the packed ARGB integer backing a `Color` value.
 
 ```aivi
 use aivi.color (Color)
 
-type Theme = { accent: Color }
-
-type Theme -> Color
-func dimAccent = theme =>
-    theme.accent.withAlpha 180
+type Color -> Int
+func toArgb = color =>
+    color.carrier
 ```
 
-### blend
+## Domain members
 
-```aivi
-```
+The members declared inside the `Color` domain -- `argb`, `red`, `green`, `blue`, `alpha`,
+`withAlpha`, `withRed`, `withGreen`, `withBlue`, `blend` -- are part of the domain's internal
+implementation. They are used by the runtime's theming layer and are not individually
+importable from user code.
 
-Blend two colors together. The `Float` controls how far the result moves from the first
-color toward the second.
-
-```aivi
-use aivi.color (Color)
-
-type Theme = {
-    accent: Color,
-    background: Color
-}
-
-type Theme -> Color
-func hoverColor = theme =>
-    theme.background.blend theme.accent 0.15
-```
+To manipulate colors in your own module, extract the packed integer with `.carrier`, apply
+arithmetic, and reconstruct as needed, or receive `Color` values from GTK theme lookups.
 
 ## Notes
 
 This module does not currently include named colors or a text parser such as `#RRGGBB`.
-Work with the packed integer form, or convert from text before reaching this module.
 
 Current limits:
 

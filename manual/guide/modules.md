@@ -10,9 +10,7 @@ use aivi.http (
     HttpResponse
 )
 
-use aivi.result (
-    isOk
-)
+use aivi.result (isOk)
 ```
 
 Imported names become available to the rest of the file.
@@ -27,9 +25,9 @@ use aivi.http (
     HttpResponse as Response
 )
 
-type Response -> Bool
+type Response Text -> Bool
 func isSuccess = resp =>
-    isOk resp.status
+    isOk resp
 ```
 
 ## Exporting names
