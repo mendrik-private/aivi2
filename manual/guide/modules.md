@@ -5,16 +5,14 @@ Each `.aivi` file is a module. Modules import names with `use` and expose names 
 ## Importing with `use`
 
 ```aivi
-use aivi.network (
-    http
-    socket
-    Request
-    Channel
+use aivi.http (
+    HttpError
+    HttpResponse
 )
 
-type PrimaryRequest = (Request Text)
-
-type ProviderChannel = (Channel Text Text)
+use aivi.result (
+    isOk
+)
 ```
 
 Imported names become available to the rest of the file.
@@ -24,14 +22,14 @@ Imported names become available to the rest of the file.
 Use `as` when you want a local name that differs from the exported one:
 
 ```aivi
-use aivi.network (
-    http as primaryHttp
-    Request as HttpRequest
+use aivi.http (
+    HttpError as FetchError
+    HttpResponse as Response
 )
 
-type RequestPayload = (HttpRequest Text)
-
-value selectedProvider = primaryHttp
+type Response -> Bool
+func isSuccess = resp =>
+    isOk resp.status
 ```
 
 ## Exporting names
@@ -68,20 +66,20 @@ export (Direction, opposite, startDirection)
 ## A small complete module
 
 ```aivi
-use aivi.network (
-    http
-    socket
+use aivi.text (
+    trim
+    toUpper
 )
 
 type Text -> Text -> Text
-func joinProviders = left right =>
+func joinLabels = left right =>
     "{left}/{right}"
 
-value primaryProvider = http
-value fallbackProvider = socket
-value providerPair = joinProviders primaryProvider fallbackProvider
+value primaryLabel = "primary"
+value fallbackLabel = "fallback"
+value labelPair = joinLabels primaryLabel fallbackLabel
 
-export providerPair
+export labelPair
 ```
 
 ## Typical module layout

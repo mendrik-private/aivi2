@@ -349,7 +349,7 @@ This keeps the reducer where the rules need coherence, but moves rendering and l
 
 ## Rendering with text and indices
 
-The board renders as text. Instead of nested loops, we use `matrixIndices` to generate coordinate sequences and `map` to transform them into glyphs:
+The board renders as text. Instead of nested loops, we use `indices` to generate coordinate sequences and `map` to transform them into glyphs:
 
 ```aivi
 type List Cell -> Cell -> Cell -> Int -> Int -> Text
@@ -376,7 +376,7 @@ func renderBoard = snake food => indices boardH
   |> join "\n"
 ```
 
-`matrixIndices boardW` produces `[0, 1, 2, ..., 29]`. The pipe maps each index through `cellGlyph body head food y` to produce a list of single-character strings, then `concat` joins them without a separator. The outer pipe does the same for rows, joining with newlines.
+`indices boardW` produces `[0, 1, 2, ..., 29]`. The pipe maps each index through `cellGlyph body head food y` to produce a list of single-character strings, then `concat` joins them without a separator. The outer pipe does the same for rows, joining with newlines.
 
 The expression `snake.cells` gives us the whole body list once in `renderBoard`, and `snake.head` gives us the head cell once. Those values are threaded through `renderRowAt` and `cellGlyph`, avoiding repeated conversions or unrelated `GameState` reads across all 600 cells.
 

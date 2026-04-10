@@ -63,10 +63,15 @@ The generated file contains:
 - A `type ApiAuth = ...` with auth variants matching the spec's security schemes.
 - A handle type alias (`type Petstore = Unit`).
 
-You can then import the generated types in your module:
+You can then import the generated types in your module. The generated module path matches the output file you passed to `aivi openapi-gen` — for example, if you wrote the output to `types/petstore.aivi`, import from that module:
 
 ```aivi
-use _
+use types.petstore (
+    Pet
+    NewPet
+    ApiError
+    ApiAuth
+)
 ```
 
 ## Authentication

@@ -63,7 +63,7 @@ use aivi.http (
     HttpSource
 )
 
-type List User = {
+type User = {
     id: Int,
     name: Text
 }
@@ -238,10 +238,8 @@ signal users : Signal (AsyncTracker HttpError (List User)) = rawUsers
 
 type Bool -> Option (List User) -> Bool
 func trackFirstLoad = hasFired newDone => hasFired
- ||> True   -> True
- ||> False  -> newDone
- ||> None   -> False
- ||> Some _ -> True
+ T|> True
+ F|> isSome newDone
 
 signal firstLoadDone : Signal Bool = users.done
  +|> False trackFirstLoad

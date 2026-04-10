@@ -89,7 +89,7 @@ type Theme = { accent: Color }
 
 type Theme -> Color
 func dimAccent = theme =>
-    withAlpha theme.accent 180
+    theme.accent.withAlpha 180
 ```
 
 ### blend
@@ -110,7 +110,7 @@ type Theme = {
 
 type Theme -> Color
 func hoverColor = theme =>
-    blend theme.background theme.accent 0.15
+    theme.background.blend theme.accent 0.15
 ```
 
 ## Notes

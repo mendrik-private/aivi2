@@ -113,7 +113,7 @@ This extracts `address.city.name` from the input and makes it available for down
 ```aivi
 type User -> Text
 func upperCityName = .address.city.name
-  |> toUpperCase
+  |> toUpper
 ```
 
 The same dotted-path idea is also available in selected-subject function headers:
@@ -144,7 +144,7 @@ Projection expressions work naturally as pipe stages:
 ```aivi
 value uppercasedCity = user
   |> { address.city.name: . }
-  |> toUpperCase
+  |> toUpper
 ```
 
 This is equivalent to the `.field` ambient projection form, but for deeper paths:
@@ -154,7 +154,7 @@ value uppercasedCity = user
   |> .address
   |> .city
   |> .name
-  |> toUpperCase
+  |> toUpper
 ```
 
 ## Patch removal

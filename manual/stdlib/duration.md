@@ -13,9 +13,10 @@ A `Duration` is a domain over `Int`, so construction is explicit; the carrier is
 use aivi.duration (
     Duration
     DurationError
-    trySeconds
 )
 ```
+
+Because `aivi.duration` declares `hoist`, the literal suffixes (`ms`, `sec`, `min`, `hr`, `dy`) and constructor helpers (`millis`, `trySeconds`) are available project-wide in every AIVI file without any `use` statement. Import `Duration` explicitly when you need the type name in annotations, and `DurationError` when you need to handle construction failures.
 
 ## Overview
 
@@ -60,10 +61,7 @@ values elsewhere in your program.
 Build a duration from a raw millisecond count.
 
 ```aivi
-use aivi.duration (
-    Duration
-    millis
-)
+use aivi.duration (Duration)
 
 value shortDelay : Duration = millis 150
 ```
@@ -80,7 +78,6 @@ A safe constructor for whole seconds. Use this when you want construction to rep
 use aivi.duration (
     Duration
     DurationError
-    trySeconds
 )
 
 value pollInterval : Result DurationError Duration = trySeconds 10

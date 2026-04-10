@@ -393,10 +393,8 @@ syntax:
 // A Bool that becomes True on the first success and never resets
 type Bool -> Option A -> Bool
 func trackFirstDone = hasFired newDone => hasFired
- ||> True   -> True
- ||> False  -> newDone
- ||> None   -> False
- ||> Some _ -> True
+ T|> True
+ F|> isSome newDone
 
 signal firstLoadDone : Signal Bool = users.done
  +|> False trackFirstDone

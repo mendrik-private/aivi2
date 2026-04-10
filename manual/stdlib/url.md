@@ -14,15 +14,6 @@ when you need the raw value again.
 use aivi.url (
     Url
     UrlError
-    parse
-    scheme
-    host
-    port
-    path
-    query
-    fragment
-    withPath
-    withQuery
 )
 ```
 
@@ -30,15 +21,15 @@ use aivi.url (
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `parse` | `Text -> Result UrlError Url` | Parse text into a typed URL |
-| `scheme` | `Url -> Option Text` | Read the scheme if present |
-| `host` | `Url -> Option Text` | Read the host if present |
-| `port` | `Url -> Option Int` | Read the port if present |
-| `path` | `Url -> Text` | Read the path part |
-| `query` | `Url -> Option Text` | Read the query text if present |
-| `fragment` | `Url -> Option Text` | Read the fragment text if present |
-| `withPath` | `Url -> Text -> Url` | Return a copy with a different path |
-| `withQuery` | `Url -> Text -> Url` | Return a copy with a different query |
+| `Url.parse` | `Text -> Result UrlError Url` | Parse text into a typed URL |
+| `.scheme` | `Url -> Option Text` | Read the scheme if present |
+| `.host` | `Url -> Option Text` | Read the host if present |
+| `.port` | `Url -> Option Int` | Read the port if present |
+| `.path` | `Url -> Text` | Read the path part |
+| `.query` | `Url -> Option Text` | Read the query text if present |
+| `.fragment` | `Url -> Option Text` | Read the fragment text if present |
+| `.withPath` | `Url -> Text -> Url` | Return a copy with a different path |
+| `.withQuery` | `Url -> Text -> Url` | Return a copy with a different query |
 
 ## `parse`
 
@@ -51,10 +42,9 @@ Use this when URL text comes from config, user input, or another external source
 use aivi.url (
     Url
     UrlError
-    parse
 )
 
-value apiBase : Result UrlError Url = parse "https://api.example.com/v1/users?page=1"
+value apiBase : Result UrlError Url = Url.parse "https://api.example.com/v1/users?page=1"
 ```
 
 ## `.carrier`
@@ -76,21 +66,18 @@ func rawAddress = url =>
 
 The accessors let you inspect one part at a time.
 
-- `scheme`, `host`, `port`, `query`, and `fragment` return `Option ...` because those parts
+- `.scheme`, `.host`, `.port`, `.query`, and `.fragment` return `Option ...` because those parts
   may be absent
-- `path` always returns `Text`
+- `.path` always returns `Text`
+
+All accessors are domain members and are called using dot notation on a `Url` value.
 
 ```aivi
-use aivi.url (
-    Url
-    host
-    path
-    query
-)
+use aivi.url (Url)
 
 type Url -> Text
 func routeOnly = url =>
-    path url
+    url.path
 ```
 
 The query is returned as plain text if present. This module does not split it into separate
@@ -113,19 +100,15 @@ Return a new `Url` with a different path.
 Return a new `Url` with a different query string.
 
 ```aivi
-use aivi.url (
-    Url
-    withPath
-    withQuery
-)
+use aivi.url (Url)
 
 type Url -> Url
 func moveToSearchPath = url =>
-    withPath url "/search"
+    url.withPath "/search"
 
 type Url -> Url
 func toSearchPage = url =>
-    withQuery (moveToSearchPath url) "q=aivi"
+    (url.withPath "/search").withQuery "q=aivi"
 ```
 
 ## Error type
@@ -139,14 +122,11 @@ Failed parses report a plain text error message.
 ## Example — keep URLs typed until the edge
 
 ```aivi
-use aivi.url (
-    Url
-    withPath
-)
+use aivi.url (Url)
 
 type Url -> Text
 func avatarEndpoint = base =>
-    (withPath base "/api/avatar").carrier
+    (base.withPath "/api/avatar").carrier
 ```
 
 ## Current limits

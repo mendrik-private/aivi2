@@ -90,7 +90,7 @@ The response body is decoded directly into `AppConfig` using the structural deco
 signal refreshTick : Signal Unit
 
 @source http.get "https://api.example.com/feed" with {
-    trigger: refreshTick,
+    refreshOn: refreshTick,
     timeout: 10s
 }
 signal feedResponse : Signal (Result HttpError (List FeedItem))
@@ -104,7 +104,7 @@ signal feedResponse : Signal (Result HttpError (List FeedItem))
 signal submitPayload : Signal CreateUserRequest
 
 @source http.post "https://api.example.com/users" with {
-    trigger: submitPayload,
+    refreshOn: submitPayload,
     body: submitPayload
 }
 signal createResult : Signal (Result HttpError User)
@@ -134,7 +134,7 @@ signal configText : Signal (Result FsError AppConfig)
 signal notesChanged : Signal FsEvent
 
 @source fs.read "/home/user/notes/index.md" with {
-    trigger: notesChanged
+    reloadOn: notesChanged
 }
 signal notesIndex : Signal (Result FsError Text)
 ```
@@ -177,12 +177,12 @@ signal users : Signal (Result DbError (List User))
 signal selectedTag : Signal Text
 
 @source db.live db "SELECT * FROM posts WHERE tag = $1" with {
-    params: [selectedTag]
+    refreshOn: selectedTag
 }
 signal taggedPosts : Signal (Result DbError (List Post))
 ```
 
-`params` is a list of signals. The query re-runs whenever any parameter changes.
+`refreshOn` re-executes the query whenever the trigger signal fires. Embed query parameters as literals in the SQL string, or construct the query string reactively from a derived signal.
 
 ---
 
@@ -191,26 +191,27 @@ signal taggedPosts : Signal (Result DbError (List Post))
 ### Subscribe to a signal
 
 ```aivi
-@source dbus.signal with {
-    destination: "org.freedesktop.NetworkManager",
-    path: "/org/freedesktop/NetworkManager",
+@source dbus.signal "/org/freedesktop/NetworkManager" with {
     interface: "org.freedesktop.DBus.Properties",
     member: "PropertiesChanged"
 }
 signal nmProperties : Signal (Result DbusError DbusMessage)
 ```
 
+The object path is the positional argument to `dbus.signal`. `interface` and `member` are named options.
+
 ### Call a method
 
 ```aivi
-@source dbus.method with {
-    destination: "org.freedesktop.NetworkManager",
+@source dbus.method "org.freedesktop.NetworkManager" with {
     path: "/org/freedesktop/NetworkManager",
     interface: "org.freedesktop.NetworkManager",
     member: "GetDevices"
 }
 signal devices : Signal (Result DbusError (List Text))
 ```
+
+The D-Bus destination (bus name) is the positional argument to `dbus.method`. Object path, interface, and member are named options.
 
 D-Bus method sources call the method on startup (or on a trigger) and decode the reply. Use `dbus.signal` for subscriptions to broadcasts; use `dbus.method` for one-shot or triggered queries.
 
@@ -260,7 +261,7 @@ signal refresh : Signal Unit = refreshClick | autoRefresh
   ||> _ _ => ()
 
 @source http.get "https://api.example.com/data" with {
-    trigger: refresh
+    refreshOn: refresh
 }
 signal data : Signal (Result HttpError (List Item))
 ```
