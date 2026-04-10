@@ -467,7 +467,7 @@ func cellKey = y x!
 signal placeCoord : Signal Coord
 signal restartClick : Signal Unit
 
-signal computerTurnRequest : Signal Phase = phase
+signal computerTurnRequest = phase
  ?|> phaseIsComputerPreparing
 
 @source timer.after 1ms with {
@@ -477,7 +477,7 @@ signal computerTurnRequest : Signal Phase = phase
 }
 signal computerTurnReady : Signal Unit
 
-signal computerAnimationStart : Signal Phase = phase
+signal computerAnimationStart = phase
  ?|> phaseStartsComputerAnimation
 
 @source timer.every 200ms with {
@@ -501,10 +501,12 @@ from state = {
     board: .board
     phase: .phase
     snapshot: .snapshot
+
     type Coord -> Bool
     legalAt coord: phaseAllowsHumanInput phase
      T|> humanCanPlace coord snapshot
      F|> False
+
     type Coord -> Text
     cellLabel coord: phaseAllowsHumanInput phase
      T|> renderCell coord (humanCanPlace coord snapshot) (phaseComputerTarget phase) (phaseShowsComputerTarget phase) (discAt board coord)
