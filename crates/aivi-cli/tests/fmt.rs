@@ -56,13 +56,15 @@ fn fmt_normalizes_reactive_update_items() {
     let input = TempFile::new(
         "fmt-reactive-update",
         concat!(
-            "signal total:Signal Int\n",
-            "signal ready:Signal Bool\n",
-            "when   ready=>total<-signal1+signal2\n",
-            "when ready and True=>total<-result{\n",
-            "next<-Ok signal1\n",
-            "next+signal2\n",
-            "}\n",
+            "signal left = 20\n",
+            "signal right = 22\n",
+            "signal ready = True\n",
+            "signal enabled = False\n",
+            "\n",
+            "signal total:Signal Int=ready|enabled\n",
+            "  ||>ready True=>left+right\n",
+            "  ||>enabled True=>left+right+1\n",
+            "  ||>_=>0\n",
         ),
     );
 
@@ -80,15 +82,15 @@ fn fmt_normalizes_reactive_update_items() {
     assert_eq!(
         String::from_utf8(output.stdout).expect("stdout should be utf-8"),
         concat!(
-            "signal total : Signal Int\n",
-            "signal ready : Signal Bool\n",
+            "signal left = 20\n",
+            "signal right = 22\n",
+            "signal ready = True\n",
+            "signal enabled = False\n",
             "\n",
-            "when ready => total <- signal1 + signal2\n",
-            "when ready and True => total <-\n",
-            "    result {\n",
-            "        next <- Ok signal1\n",
-            "        next + signal2\n",
-            "    }\n",
+            "signal total : Signal Int = ready | enabled\n",
+            "  ||> ready True => left + right\n",
+            "  ||> enabled True => left + right + 1\n",
+            "  ||> _ => 0\n",
         )
     );
 }
@@ -137,13 +139,10 @@ fn fmt_normalizes_pattern_armed_reactive_update_items() {
         "fmt-pattern-reactive-update",
         concat!(
             "type Direction=Up|Down\n",
-            "type Event=Turn Direction|Tick\n",
-            "signal heading:Signal Direction\n",
-            "signal tickSeen:Signal Bool\n",
-            "signal event=Turn Down\n",
-            "when event\n",
-            "  ||>Turn dir=>heading<-dir\n",
-            "  ||>Tick=>tickSeen<-True\n",
+            "signal event=Some 3\n",
+            "signal total:Signal Int=event\n",
+            "  ||>Some value=>value\n",
+            "  ||>_=>0\n",
         ),
     );
 
@@ -163,17 +162,11 @@ fn fmt_normalizes_pattern_armed_reactive_update_items() {
         concat!(
             "type Direction = Up | Down\n",
             "\n",
-            "type Event =\n",
-            "  | Turn Direction\n",
-            "  | Tick\n",
+            "signal event = Some 3\n",
             "\n",
-            "signal heading : Signal Direction\n",
-            "signal tickSeen : Signal Bool\n",
-            "signal event = Turn Down\n",
-            "\n",
-            "when event\n",
-            "  ||> Turn dir => heading <- dir\n",
-            "  ||> Tick => tickSeen <- True\n",
+            "signal total : Signal Int = event\n",
+            "  ||> Some value => value\n",
+            "  ||> _ => 0\n",
         )
     );
 }
@@ -183,9 +176,10 @@ fn fmt_normalizes_source_pattern_reactive_update_items() {
     let input = TempFile::new(
         "fmt-source-pattern-reactive-update",
         concat!(
-            "signal event:Signal Event\n",
-            "when keyDown(Key \"ArrowUp\")=>event<-Turn North\n",
-            "when tick _=>event<-Tick\n",
+            "signal incoming=Some 41\n",
+            "signal total:Signal Int=incoming\n",
+            "  ||>Some value=>value\n",
+            "  ||>_=>0\n",
         ),
     );
 
@@ -203,10 +197,11 @@ fn fmt_normalizes_source_pattern_reactive_update_items() {
     assert_eq!(
         String::from_utf8(output.stdout).expect("stdout should be utf-8"),
         concat!(
-            "signal event : Signal Event\n",
+            "signal incoming = Some 41\n",
             "\n",
-            "when keyDown (Key \"ArrowUp\") => event <- Turn North\n",
-            "when tick _ => event <- Tick\n",
+            "signal total : Signal Int = incoming\n",
+            "  ||> Some value => value\n",
+            "  ||> _ => 0\n",
         )
     );
 }

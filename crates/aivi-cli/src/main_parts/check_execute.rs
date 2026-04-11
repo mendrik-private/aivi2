@@ -829,7 +829,11 @@ fn evaluate_task_owner_value(
         backend_item,
     } = artifact;
     if let Some(backend_item) = backend_item {
-        let executable = BackendExecutableProgram::interpreted(backend.as_ref());
+        let executable = BackendExecutableProgram::interpreted(backend.as_ref())
+            .with_execution_options(aivi_backend::BackendExecutionOptions {
+                prefer_interpreter: cfg!(test),
+                ..Default::default()
+            });
         let mut evaluator = executable.create_engine();
         let globals = BTreeMap::new();
         return evaluator

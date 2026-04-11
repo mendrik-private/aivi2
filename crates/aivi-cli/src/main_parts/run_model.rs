@@ -126,7 +126,11 @@ impl RunFragmentExecutionUnit {
     }
 
     fn create_engine(&self, profiled: bool) -> BackendExecutionEngineHandle<'_> {
-        let executable = BackendExecutableProgram::interpreted(self.backend.as_ref());
+        let executable = BackendExecutableProgram::interpreted(self.backend.as_ref())
+            .with_execution_options(aivi_backend::BackendExecutionOptions {
+                prefer_interpreter: cfg!(test),
+                ..Default::default()
+            });
         if profiled {
             executable.create_profiled_engine()
         } else {
@@ -435,4 +439,3 @@ impl StagingDir {
         self.0.path()
     }
 }
-

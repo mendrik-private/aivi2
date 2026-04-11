@@ -7,7 +7,7 @@ func statusLabel = status => status
 
 value main =
     <Window title="Milestone 1">
-        <Box orientation={Vertical} spacing={12}>
+        <Box orientation="vertical" spacing={12}>
             <Label text="Frontend fixture corpus" />
             <Label text={statusLabel Idle} />
         </Box>

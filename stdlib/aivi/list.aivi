@@ -235,7 +235,9 @@ func pairWithIndex = index item =>
 
 type (Int -> A -> B) -> (List B) -> Int -> A -> (List B)
 func mapWithIndexStep = transform acc index item =>
-    append acc [transform index item]
+    append acc [
+        transform index item
+    ]
 
 type (Int -> A -> B) -> (List A) -> (List B)
 func mapWithIndex = transform items =>

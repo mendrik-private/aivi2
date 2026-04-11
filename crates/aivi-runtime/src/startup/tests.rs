@@ -164,6 +164,7 @@ fn manual_task_linked_runtime(lowered: &LoweredStack, owner_name: &str) -> Backe
         db_changed_routes: Vec::new().into_boxed_slice(),
         temporal_states: BTreeMap::new(),
         temporal_workers: BTreeMap::new(),
+        temporal_triggers_bootstrapped: false,
         db_commit_invalidation_sink: None,
         execution_context: SourceProviderContext::current(),
     }
@@ -2474,6 +2475,94 @@ signal burstScore : Signal Int =
             std::time::Duration::from_millis(50)
         ),
         0
+    );
+}
+
+#[test]
+fn linked_runtime_does_not_burst_initial_reactive_default_values() {
+    let lowered = lower_text(
+        "runtime-startup-burst-reactive-default.aivi",
+        r#"
+domain Duration over Int = {
+    literal ms : Int -> Duration
+}
+
+domain Retry over Int = {
+    literal times : Int -> Retry
+}
+
+provider custom.feed
+    wakeup: providerTrigger
+
+@source custom.feed
+signal click : Signal Int
+
+signal merged : Signal Int = click
+  ||> click value => value
+  ||> _           => 0
+
+signal burstMerged : Signal Int =
+    merged
+     |> burst 15ms 2times
+"#,
+    );
+    let assembly =
+        crate::assemble_hir_runtime(lowered.hir.module()).expect("runtime assembly should build");
+    let mut linked = link_backend_runtime(
+        assembly,
+        &lowered.core,
+        std::sync::Arc::new(lowered.backend.clone()),
+    )
+    .expect("burst signals fed by reactive defaults should link successfully");
+
+    let first = linked
+        .tick_with_source_lifecycle()
+        .expect("initial reactive default tick should succeed");
+    let port = activation_port_for_owner(&linked, lowered.hir.module(), &first, "click");
+    let burst_signal = signal_handle(&linked, lowered.hir.module(), "burstMerged");
+
+    assert_eq!(
+        linked.runtime().current_value(burst_signal).unwrap(),
+        None,
+        "initial reactive default values must not arm burst replays before any upstream event fires"
+    );
+    assert_eq!(
+        pump_for_commit_count(
+            &mut linked,
+            burst_signal,
+            std::time::Duration::from_millis(80)
+        ),
+        0
+    );
+
+    port.publish(DetachedRuntimeValue::from_runtime_owned(RuntimeValue::Int(
+        9,
+    )))
+    .expect("reactive burst source publication should queue");
+    let publication = linked
+        .tick_with_source_lifecycle()
+        .expect("reactive burst publication tick should succeed");
+    assert_eq!(
+        publication
+            .scheduler()
+            .committed()
+            .iter()
+            .filter(|&&signal| signal == burst_signal)
+            .count(),
+        0
+    );
+    assert_eq!(
+        pump_until_commit_count(
+            &mut linked,
+            burst_signal,
+            std::time::Duration::from_millis(250),
+            2
+        ),
+        2
+    );
+    assert_eq!(
+        linked.runtime().current_value(burst_signal).unwrap(),
+        Some(&RuntimeValue::Int(9))
     );
 }
 

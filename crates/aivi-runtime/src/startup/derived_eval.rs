@@ -43,15 +43,39 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
             .get(&signal)
             .cloned()
             .ok_or(BackendRuntimeError::UnknownDerivedSignal { signal })?;
-        let expected_inputs = binding.dependency_items.len()
-            + usize::from(binding.source_input.is_some())
-            + binding.temporal_helpers.len();
+        let expected_inputs = binding.runtime_dependency_count;
         if inputs.len() != expected_inputs {
             return Err(BackendRuntimeError::DerivedDependencyArityMismatch {
                 signal,
                 expected: expected_inputs,
                 found: inputs.len(),
             });
+        }
+
+        if let Some(helper) = self.updated_temporal_helper(&binding, &inputs) {
+            let Some(value) = inputs.value(helper.dependency_index).cloned() else {
+                return Ok(self.suppressed_derived_update(binding.backend_item));
+            };
+            let globals = self.build_signal_globals(binding.backend_item, &inputs);
+            let binding_item = binding.item;
+            let binding_pipeline_ids = binding.pipeline_ids.clone();
+            let mut engine = BackendExecutableProgram::interpreted(self.backend).create_engine();
+            return self.apply_pipelines_from(
+                signal,
+                binding_item,
+                binding_pipeline_ids.as_ref(),
+                Some(TemporalResumePoint {
+                    pipeline_position: helper.pipeline_position,
+                    stage_offset: helper.stage_offset + 1,
+                }),
+                value,
+                &globals,
+                &mut *engine,
+            );
+        }
+
+        if !binding.temporal_trigger_dependencies.is_empty() {
+            return Ok(self.suppressed_derived_update(binding.backend_item));
         }
 
         // If no upstream dependency changed this tick and the signal already has a committed
@@ -80,28 +104,10 @@ impl TryDerivedNodeEvaluator<RuntimeValue> for LinkedDerivedEvaluator<'_> {
         }
 
         let binding_item = binding.item;
-        let mut engine = BackendExecutableProgram::interpreted(self.backend).create_engine();
-        if let Some(helper) = self.updated_temporal_helper(&binding, &inputs) {
-            let Some(value) = inputs.value(helper.dependency_index).cloned() else {
-                return Ok(self.suppressed_derived_update(binding.backend_item));
-            };
-            return self.apply_pipelines_from(
-                signal,
-                binding_item,
-                binding.pipeline_ids.as_ref(),
-                Some(TemporalResumePoint {
-                    pipeline_position: helper.pipeline_position,
-                    stage_offset: helper.stage_offset + 1,
-                }),
-                value,
-                &globals,
-                &mut *engine,
-            );
-        }
-
         let value =
             self.evaluate_derived_value(signal, &binding, &dependency_environment, &globals)?;
 
+        let mut engine = BackendExecutableProgram::interpreted(self.backend).create_engine();
         self.apply_pipelines_from(
             signal,
             binding_item,
@@ -418,6 +424,63 @@ impl LinkedDerivedEvaluator<'_> {
                 self.evaluate_fallback_derived_value(signal, binding, dependency_environment, globals)
             }
         }
+    }
+
+    fn schedule_temporal_triggered_signals(
+        &mut self,
+        committed: &[SignalHandle],
+    ) -> Result<(), BackendRuntimeError> {
+        if committed.is_empty() {
+            return Ok(());
+        }
+        let committed = committed.iter().copied().collect::<BTreeSet<_>>();
+        let mut engine = BackendExecutableProgram::interpreted(self.backend).create_engine();
+        for (&signal, binding) in self.derived_signals.iter() {
+            if binding.temporal_trigger_dependencies.is_empty()
+                || !binding
+                    .temporal_trigger_dependencies
+                    .iter()
+                    .any(|dependency| committed.contains(dependency))
+            {
+                continue;
+            }
+            let Some(value) = self.evaluate_temporal_trigger_value(signal, binding)? else {
+                continue;
+            };
+            let _ = self.apply_pipelines_from(
+                signal,
+                binding.item,
+                binding.pipeline_ids.as_ref(),
+                None,
+                value,
+                self.committed_signals,
+                &mut *engine,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn evaluate_temporal_trigger_value(
+        &mut self,
+        signal: DerivedHandle,
+        binding: &LinkedDerivedSignal,
+    ) -> Result<Option<RuntimeValue>, BackendRuntimeError> {
+        let mut globals = self.committed_signals.clone();
+        globals.remove(&binding.backend_item);
+        let mut dependency_environment = Vec::with_capacity(binding.dependency_items.len());
+        for (index, dependency) in binding.dependency_items.iter().copied().enumerate() {
+            let Some(value) = self.committed_signals.get(&dependency) else {
+                return Ok(None);
+            };
+            let layout = binding
+                .dependency_layouts
+                .get(index)
+                .copied()
+                .expect("linked derived signal should preserve dependency layouts");
+            dependency_environment.push(stage_subject_value(self.backend, layout, value));
+        }
+        self.evaluate_derived_value(signal, binding, &dependency_environment, &globals)
+            .map(Some)
     }
 
     fn evaluate_reactive_seed_value(

@@ -15,6 +15,7 @@ fn fixture_path(relative: &str) -> PathBuf {
 }
 
 struct TempFile {
+    root: PathBuf,
     path: PathBuf,
 }
 
@@ -24,12 +25,11 @@ impl TempFile {
             .duration_since(UNIX_EPOCH)
             .expect("clock should be after unix epoch")
             .as_nanos();
-        let path = env::temp_dir().join(format!(
-            "aivi-{prefix}-{}-{unique}.{extension}",
-            std::process::id()
-        ));
+        let root = env::temp_dir().join(format!("aivi-{prefix}-{}-{unique}", std::process::id()));
+        fs::create_dir_all(&root).expect("temporary file directory should be creatable");
+        let path = root.join(format!("main.{extension}"));
         fs::write(&path, contents).expect("temporary file should be writable");
-        Self { path }
+        Self { root, path }
     }
 
     fn path(&self) -> &Path {
@@ -39,7 +39,7 @@ impl TempFile {
 
 impl Drop for TempFile {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        let _ = fs::remove_dir_all(&self.root);
     }
 }
 
@@ -77,12 +77,13 @@ fn compile_accepts_reactive_update_programs() {
         concat!(
             "signal left = 20\n",
             "signal right = 22\n",
-            "signal total = 0\n",
             "signal ready = True\n",
             "signal enabled = False\n",
             "\n",
-            "when ready => total <- left + right\n",
-            "when ready and enabled => total <- left + right + 1\n",
+            "signal total : Signal Int = ready | enabled\n",
+            "  ||> ready True => left + right\n",
+            "  ||> enabled True => left + right + 1\n",
+            "  ||> _ => 0\n",
         ),
     );
     let output_dir = TempDir::new("compile-reactive-update");
@@ -238,11 +239,9 @@ fn compile_accepts_pattern_armed_reactive_update_program() {
         "aivi",
         concat!(
             "signal event = Some 3\n",
-            "signal total = 0\n",
-            "signal tickSeen = False\n",
-            "when event\n",
-            "  ||> Some value => total <- value\n",
-            "  ||> None => tickSeen <- True\n",
+            "signal total : Signal Int = event\n",
+            "  ||> Some value => value\n",
+            "  ||> _ => 0\n",
         ),
     );
     let output_dir = TempDir::new("compile-pattern-reactive-update");
@@ -485,9 +484,9 @@ fn compile_accepts_source_pattern_reactive_update_program() {
         "aivi",
         concat!(
             "signal incoming : Signal (Option Int)\n",
-            "signal total : Signal Int = 0\n",
-            "\n",
-            "when incoming (Some value) => total <- value\n",
+            "signal total : Signal Int = incoming\n",
+            "  ||> Some value => value\n",
+            "  ||> _ => 0\n",
         ),
     );
     let output_dir = TempDir::new("compile-source-pattern-reactive-update");

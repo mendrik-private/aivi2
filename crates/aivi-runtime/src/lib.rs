@@ -67,6 +67,7 @@ pub use startup::{
     LinkedSourceBinding, LinkedSourceLifecycleAction, LinkedSourceOption, LinkedSourceTickOutcome,
     LinkedTaskBinding, LinkedTaskExecutionBinding, LinkedTaskExecutionBlocker,
     LinkedTaskWorkerError, LinkedTaskWorkerOutcome, link_backend_runtime,
+    set_native_kernel_plans_enabled,
 };
 pub use task_executor::{
     CustomCapabilityCommandExecutor, RuntimeTaskExecutionError, execute_runtime_db_task_plan,

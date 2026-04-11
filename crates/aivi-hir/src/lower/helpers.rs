@@ -340,6 +340,7 @@ fn is_known_module(module: &str) -> bool {
             | "aivi.regex"
             | "aivi.http"
             | "aivi.bigint"
+            | "aivi.bits"
             | "aivi.nonEmpty"
             | "aivi.matrix"
             | "aivi.option"
@@ -1401,6 +1402,74 @@ fn known_import_metadata(module: &str, member: &str) -> Option<ImportBindingMeta
                 arrow_import_type(
                     primitive_import_type(BuiltinType::BigInt),
                     primitive_import_type(BuiltinType::Bool),
+                ),
+            ),
+        )),
+        // Bitwise intrinsics
+        ("aivi.bits", "and") => Some(intrinsic_import_value(
+            IntrinsicValue::BitAnd,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Int),
+                arrow_import_type(
+                    primitive_import_type(BuiltinType::Int),
+                    primitive_import_type(BuiltinType::Int),
+                ),
+            ),
+        )),
+        ("aivi.bits", "or") => Some(intrinsic_import_value(
+            IntrinsicValue::BitOr,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Int),
+                arrow_import_type(
+                    primitive_import_type(BuiltinType::Int),
+                    primitive_import_type(BuiltinType::Int),
+                ),
+            ),
+        )),
+        ("aivi.bits", "xor") => Some(intrinsic_import_value(
+            IntrinsicValue::BitXor,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Int),
+                arrow_import_type(
+                    primitive_import_type(BuiltinType::Int),
+                    primitive_import_type(BuiltinType::Int),
+                ),
+            ),
+        )),
+        ("aivi.bits", "not") => Some(intrinsic_import_value(
+            IntrinsicValue::BitNot,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Int),
+                primitive_import_type(BuiltinType::Int),
+            ),
+        )),
+        ("aivi.bits", "shiftLeft") => Some(intrinsic_import_value(
+            IntrinsicValue::ShiftLeft,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Int),
+                arrow_import_type(
+                    primitive_import_type(BuiltinType::Int),
+                    primitive_import_type(BuiltinType::Int),
+                ),
+            ),
+        )),
+        ("aivi.bits", "shiftRight") => Some(intrinsic_import_value(
+            IntrinsicValue::ShiftRight,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Int),
+                arrow_import_type(
+                    primitive_import_type(BuiltinType::Int),
+                    primitive_import_type(BuiltinType::Int),
+                ),
+            ),
+        )),
+        ("aivi.bits", "shiftRightUnsigned") => Some(intrinsic_import_value(
+            IntrinsicValue::ShiftRightUnsigned,
+            arrow_import_type(
+                primitive_import_type(BuiltinType::Int),
+                arrow_import_type(
+                    primitive_import_type(BuiltinType::Int),
+                    primitive_import_type(BuiltinType::Int),
                 ),
             ),
         )),

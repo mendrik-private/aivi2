@@ -18,7 +18,7 @@ use aivi.fs (
     Deleted
 )
 
-value homePath : Path = "/home/user"
+value homePath : Option Path = None
 value badPath : PathError = InvalidPath "/not/valid/\000"
 value missingPath : PathError = PathNotFound "/etc/missing"
 value notFound : FsError = NotFound "/tmp/missing.txt"
@@ -31,11 +31,11 @@ value changedEvt : FsEvent = Changed
 value deletedEvt : FsEvent = Deleted
 
 type FileRef = {
-    path: Path,
+    path: Option Path,
     label: Text
 }
 
 value configFile : FileRef = {
-    path: "/etc/app.conf",
+    path: None,
     label: "config"
 }

@@ -156,11 +156,13 @@ pub struct LinkedDerivedSignal {
     pub backend_item: BackendItemId,
     pub body_kernel: Option<KernelId>,
     pub eval_lane: LinkedEvalLane,
+    pub runtime_dependency_count: usize,
     pub dependency_items: Box<[BackendItemId]>,
     pub dependency_layouts: Box<[aivi_backend::LayoutId]>,
     pub source_input: Option<InputHandle>,
     /// Backend pipeline IDs that must be applied to the body result in order.
     pub pipeline_ids: Box<[BackendPipelineId]>,
+    pub temporal_trigger_dependencies: Box<[SignalHandle]>,
     pub temporal_helpers: Box<[LinkedTemporalHelper]>,
 }
 

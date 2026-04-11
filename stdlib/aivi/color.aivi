@@ -1,22 +1,29 @@
+use aivi.bits (
+    and
+    or
+    shiftLeft
+    shiftRightUnsigned
+)
+
 domain Color over Int = {
     type Int -> Color
-    argb
-    type Color -> Int
-    red
-    type Color -> Int
-    green
-    type Color -> Int
-    blue
-    type Color -> Int
-    alpha
-    type Color -> Int -> Color
-    withAlpha
-    type Color -> Int -> Color
-    withRed
-    type Color -> Int -> Color
-    withGreen
-    type Color -> Int -> Color
-    withBlue
+    argb n = n
+    type Int
+    alpha = and (shiftRightUnsigned self 24) 255
+    type Int
+    red = and (shiftRightUnsigned self 16) 255
+    type Int
+    green = and (shiftRightUnsigned self 8) 255
+    type Int
+    blue = and self 255
+    type Int -> Color
+    withAlpha a = or (and self 16777215) (shiftLeft a 24)
+    type Int -> Color
+    withRed r = or (and self 4278255615) (shiftLeft r 16)
+    type Int -> Color
+    withGreen g = or (and self 4294902015) (shiftLeft g 8)
+    type Int -> Color
+    withBlue b = or (and self 4294967040) b
     type Color -> Color -> Float -> Color
     blend
 }

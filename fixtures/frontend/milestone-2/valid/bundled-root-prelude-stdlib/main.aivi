@@ -56,14 +56,12 @@ use aivi.matrix (
     rows
 )
 
-type NameSignal =
-  | Signal Text
+type NameSignal = Signal Text
 
-type CountTask =
-  | Task Text Int
+type CountTask = Task Text Int
 
 type CheckedName =
-  | Validation Text Text
+  Validation Text Text
 
 value maybeName : Option Text = Some "Ada"
 value missingName : Option Text = None
@@ -159,23 +157,31 @@ value filteredCounts : List Int =
 value foldedMaybeName : Text = foldOption "guest" punctuate maybeName
 value mappedMaybeCount : Int = mapOr 0 addOne (Some 2)
 value maybeCountSmall : Bool = isSomeAnd smallerThanThree (Some 2)
-value indexedLabels : List (Int, Text) = indexed [
-    "Ada",
-    "Grace"
-]
-value indexedCounts : List Int = mapWithIndex addIndex [
-    10,
-    20,
-    30
-]
-value countedWithIndices : Int = reduceWithIndex addIndexedTotal 0 [
-    10,
-    20,
-    30
-]
+
+value indexedLabels : List (Int, Text) =
+    indexed [
+        "Ada",
+        "Grace"
+    ]
+
+value indexedCounts : List Int =
+    mapWithIndex addIndex [
+        10,
+        20,
+        30
+    ]
+
+value countedWithIndices : Int =
+    reduceWithIndex addIndexedTotal 0 [
+        10,
+        20,
+        30
+    ]
+
 value mappedGridRows : Result MatrixError (List (List Int)) = init 2 2 gridCell
  ||> Err error -> Err error
  ||> Ok matrix -> Ok (rows (map addOne matrix))
+
 value reducedGridTotal : Result MatrixError Int = init 2 2 gridCell
  ||> Err error -> Err error
  ||> Ok matrix -> Ok (reduce add 0 matrix)

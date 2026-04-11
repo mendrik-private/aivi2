@@ -306,6 +306,7 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                     HirSignalBindingKind::Derived {
                         signal: derived,
                         dependencies: Vec::new().into_boxed_slice(),
+                        temporal_trigger_dependencies: Vec::new().into_boxed_slice(),
                         temporal_helpers,
                     },
                     source_input,
@@ -394,12 +395,20 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                 HirSignalBindingKind::Derived {
                     signal: derived,
                     dependencies,
+                    temporal_trigger_dependencies,
                     temporal_helpers,
                 } => {
                     let mut resolved = resolve_signal_dependencies(
                         self.module,
                         binding.item,
                         &signal.signal_dependencies,
+                        &public_signals,
+                        &mut errors,
+                    );
+                    let mut resolved_temporal_triggers = resolve_signal_dependencies(
+                        self.module,
+                        binding.item,
+                        &signal.temporal_input_dependencies,
                         &public_signals,
                         &mut errors,
                     );
@@ -417,19 +426,33 @@ impl<'a> HirRuntimeAssemblyBuilder<'a> {
                             }),
                         }
                     }
+                    let mut graph_dependencies = resolved
+                        .iter()
+                        .copied()
+                        .filter(|dependency| !resolved_temporal_triggers.contains(dependency))
+                        .collect::<Vec<_>>();
                     if let Some(source_input) = binding.source_input {
-                        push_unique_signal(&mut resolved, source_input.as_signal());
+                        if temporal_helpers.is_empty() {
+                            push_unique_signal(&mut graph_dependencies, source_input.as_signal());
+                        } else {
+                            push_unique_signal(
+                                &mut resolved_temporal_triggers,
+                                source_input.as_signal(),
+                            );
+                        }
                     }
                     for &helper in temporal_helpers.iter() {
-                        push_unique_signal(&mut resolved, helper.as_signal());
+                        push_unique_signal(&mut graph_dependencies, helper.as_signal());
                     }
                     if let Err(err) =
-                        graph_builder.define_derived(*derived, resolved.iter().copied())
+                        graph_builder.define_derived(*derived, graph_dependencies.iter().copied())
                     {
                         errors.push(HirRuntimeAdapterError::GraphBuild(err));
                         continue;
                     }
-                    *dependencies = resolved.into_boxed_slice();
+                    *dependencies = graph_dependencies.into_boxed_slice();
+                    *temporal_trigger_dependencies =
+                        resolved_temporal_triggers.into_boxed_slice();
                 }
                 HirSignalBindingKind::Reactive {
                     signal: reactive,
@@ -1228,6 +1251,16 @@ impl HirSignalBinding {
         }
     }
 
+    pub fn temporal_trigger_dependencies(&self) -> &[SignalHandle] {
+        match &self.kind {
+            HirSignalBindingKind::Derived {
+                temporal_trigger_dependencies,
+                ..
+            } => temporal_trigger_dependencies,
+            HirSignalBindingKind::Input { .. } | HirSignalBindingKind::Reactive { .. } => &[],
+        }
+    }
+
     pub fn reactive_updates(&self) -> &[HirReactiveUpdateBinding] {
         match &self.kind {
             HirSignalBindingKind::Reactive { clauses, .. } => clauses,
@@ -1260,6 +1293,7 @@ pub enum HirSignalBindingKind {
     Derived {
         signal: DerivedHandle,
         dependencies: Box<[SignalHandle]>,
+        temporal_trigger_dependencies: Box<[SignalHandle]>,
         temporal_helpers: Box<[InputHandle]>,
     },
     Reactive {

@@ -287,7 +287,7 @@ value liveUsersQuery : Task Text (List DbRow) = pure []
 signal liveConnection : Signal (Result DbError Connection)
 
 @source db.live liveUsersQuery with {
-    refreshOn: userTable.changed,
+    refreshOn: usersChanged,
     activeWhen: dbEnabled
 }
 signal liveUsers : Signal (Result DbError (List DbRow))

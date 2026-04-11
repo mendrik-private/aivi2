@@ -214,6 +214,25 @@ impl BackendLinkedRuntime {
         } else {
             self.runtime.try_tick(&mut evaluator)?
         };
+        if self.temporal_triggers_bootstrapped {
+            let committed = self.committed_signal_snapshots()?;
+            let runtime_committed = materialize_detached_globals(&committed);
+            let mut trigger_evaluator = LinkedDerivedEvaluator {
+                backend: self.backend.as_ref(),
+                signal_items_by_handle: &self.signal_items_by_handle,
+                derived_signals: &self.derived_signals,
+                native_kernel_plans: &mut native_kernel_plans,
+                reactive_signals: &self.reactive_signals,
+                reactive_clauses: &self.reactive_clauses,
+                linked_recurrence_signals: &self.linked_recurrence_signals,
+                committed_signals: &runtime_committed,
+                temporal_states: &mut temporal_states,
+                pending_temporal_schedules: &mut pending_temporal_schedules,
+            };
+            trigger_evaluator.schedule_temporal_triggered_signals(outcome.committed())?;
+        } else {
+            self.temporal_triggers_bootstrapped = true;
+        }
         self.temporal_states = temporal_states;
         self.arm_pending_temporal_schedules(pending_temporal_schedules)?;
         Ok(outcome)

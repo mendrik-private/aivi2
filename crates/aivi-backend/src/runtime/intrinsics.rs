@@ -1090,6 +1090,40 @@ fn evaluate_intrinsic_value(
             let b = expect_intrinsic_bigint(kernel, expr, value, 1, b)?;
             Ok(RuntimeValue::Bool(a < b))
         }
+        (IntrinsicValue::BitAnd, [a, b]) => {
+            let a = expect_intrinsic_i64(kernel, expr, value, 0, a)?;
+            let b = expect_intrinsic_i64(kernel, expr, value, 1, b)?;
+            Ok(RuntimeValue::Int(a & b))
+        }
+        (IntrinsicValue::BitOr, [a, b]) => {
+            let a = expect_intrinsic_i64(kernel, expr, value, 0, a)?;
+            let b = expect_intrinsic_i64(kernel, expr, value, 1, b)?;
+            Ok(RuntimeValue::Int(a | b))
+        }
+        (IntrinsicValue::BitXor, [a, b]) => {
+            let a = expect_intrinsic_i64(kernel, expr, value, 0, a)?;
+            let b = expect_intrinsic_i64(kernel, expr, value, 1, b)?;
+            Ok(RuntimeValue::Int(a ^ b))
+        }
+        (IntrinsicValue::BitNot, [a]) => {
+            let a = expect_intrinsic_i64(kernel, expr, value, 0, a)?;
+            Ok(RuntimeValue::Int(!a))
+        }
+        (IntrinsicValue::ShiftLeft, [a, b]) => {
+            let a = expect_intrinsic_i64(kernel, expr, value, 0, a)?;
+            let b = expect_intrinsic_i64(kernel, expr, value, 1, b)?;
+            Ok(RuntimeValue::Int(a << (b as u32)))
+        }
+        (IntrinsicValue::ShiftRight, [a, b]) => {
+            let a = expect_intrinsic_i64(kernel, expr, value, 0, a)?;
+            let b = expect_intrinsic_i64(kernel, expr, value, 1, b)?;
+            Ok(RuntimeValue::Int(a >> (b as u32)))
+        }
+        (IntrinsicValue::ShiftRightUnsigned, [a, b]) => {
+            let a = expect_intrinsic_i64(kernel, expr, value, 0, a)?;
+            let b = expect_intrinsic_i64(kernel, expr, value, 1, b)?;
+            Ok(RuntimeValue::Int(((a as u64) >> (b as u32)) as i64))
+        }
         _ => unreachable!("intrinsic arity should be enforced before evaluation"),
     }
 }

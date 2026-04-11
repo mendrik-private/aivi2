@@ -1800,6 +1800,18 @@ impl<'a> GateTypeContext<'a> {
                     arrow(primitive(BuiltinType::BigInt), primitive(BuiltinType::Bool)),
                 )
             }
+            IntrinsicValue::BitAnd
+            | IntrinsicValue::BitOr
+            | IntrinsicValue::BitXor
+            | IntrinsicValue::ShiftLeft
+            | IntrinsicValue::ShiftRight
+            | IntrinsicValue::ShiftRightUnsigned => arrow(
+                primitive(BuiltinType::Int),
+                arrow(primitive(BuiltinType::Int), primitive(BuiltinType::Int)),
+            ),
+            IntrinsicValue::BitNot => {
+                arrow(primitive(BuiltinType::Int), primitive(BuiltinType::Int))
+            }
         }
     }
 

@@ -1,0 +1,88 @@
+use aivi.bits (
+    and
+    or
+    xor
+    not
+    shiftLeft
+    shiftRight
+    shiftRightUnsigned
+)
+
+/** Bitwise AND of two integers. */
+type Int -> Int -> Int
+func bitAnd = a b =>
+    and a b
+
+/** Bitwise OR of two integers. */
+type Int -> Int -> Int
+func bitOr = a b =>
+    or a b
+
+/** Bitwise XOR of two integers. */
+type Int -> Int -> Int
+func bitXor = a b =>
+    xor a b
+
+/** Bitwise NOT (complement) of an integer. */
+type Int -> Int
+func bitNot = a =>
+    not a
+
+/** Shift left: a << b */
+type Int -> Int -> Int
+func shiftLeftBy = a b =>
+    shiftLeft a b
+
+/** Arithmetic shift right: a >> b (sign-extending) */
+type Int -> Int -> Int
+func shiftRightBy = a b =>
+    shiftRight a b
+
+/** Logical shift right: a >>> b (zero-filling) */
+type Int -> Int -> Int
+func shiftRightUnsignedBy = a b =>
+    shiftRightUnsigned a b
+
+@test
+value bits_and_basic : Task Text Bool = pure (bitAnd 255 15 == 15)
+
+@test
+value bits_and_zero : Task Text Bool = pure (bitAnd 171 0 == 0)
+
+@test
+value bits_or_basic : Task Text Bool = pure (bitOr 240 15 == 255)
+
+@test
+value bits_xor_basic : Task Text Bool = pure (bitXor 255 15 == 240)
+
+@test
+value bits_not_zero : Task Text Bool = pure (bitNot 0 == -1)
+
+@test
+value bits_shift_left : Task Text Bool = pure (shiftLeftBy 1 8 == 256)
+
+@test
+value bits_shift_right : Task Text Bool = pure (shiftRightBy 256 8 == 1)
+
+@test
+value bits_shift_right_unsigned : Task Text Bool = pure (shiftRightUnsignedBy 65280 8 == 255)
+
+@test
+value bits_mask_byte : Task Text Bool = pure (bitAnd (shiftRightUnsignedBy 16711680 16) 255 == 255)
+
+export (
+    and
+    or
+    xor
+    not
+    shiftLeft
+    shiftRight
+    shiftRightUnsigned
+    bitAnd
+    bitOr
+    bitXor
+    bitNot
+    shiftLeftBy
+    shiftRightBy
+    shiftRightUnsignedBy
+)

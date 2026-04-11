@@ -517,8 +517,14 @@ impl<'a> LinkBuilder<'a> {
                 })
                 .collect::<Vec<_>>();
             let temporal_helpers = self.collect_linked_temporal_helpers(binding, item);
-            let mut expected_runtime_dependencies = backend_dependencies.clone();
-            if let Some(source_input) = binding.source_input {
+            let mut expected_runtime_dependencies = backend_dependencies
+                .iter()
+                .copied()
+                .filter(|dependency| !binding.temporal_trigger_dependencies().contains(dependency))
+                .collect::<Vec<_>>();
+            if binding.temporal_trigger_dependencies().is_empty()
+                && let Some(source_input) = binding.source_input
+            {
                 expected_runtime_dependencies.push(source_input.as_signal());
             }
             expected_runtime_dependencies.extend(
@@ -548,11 +554,16 @@ impl<'a> LinkBuilder<'a> {
                     backend_item,
                     body_kernel,
                     eval_lane,
+                    runtime_dependency_count: binding.dependencies().len(),
                     dependency_items: info.dependencies.clone().into_boxed_slice(),
                     dependency_layouts,
                     source_input: binding.source_input,
                     pipeline_ids: item
                         .pipelines.to_vec()
+                        .into_boxed_slice(),
+                    temporal_trigger_dependencies: binding
+                        .temporal_trigger_dependencies()
+                        .to_vec()
                         .into_boxed_slice(),
                     temporal_helpers: temporal_helpers.into_boxed_slice(),
                 },
@@ -719,6 +730,9 @@ impl<'a> LinkBuilder<'a> {
         let Some(kernel) = kernel else {
             return LinkedEvalLane::Fallback;
         };
+        if !native_kernel_plans_enabled() {
+            return LinkedEvalLane::Fallback;
+        }
         let Some(native_plan) = aivi_backend::NativeKernelPlan::compile(backend, kernel) else {
             return LinkedEvalLane::Fallback;
         };

@@ -14,6 +14,22 @@ fn fixture_path(relative: &str) -> PathBuf {
         .join(relative)
 }
 
+fn isolated_fixture_path(relative: &str) -> (TempDir, PathBuf) {
+    let source = fixture_path(relative);
+    let dir = TempDir::new("check-fixture");
+    let file_name = source
+        .file_name()
+        .expect("fixture path should end in a file name");
+    let text = fs::read_to_string(&source).expect("fixture source should be readable");
+    let path = dir.write(
+        file_name
+            .to_str()
+            .expect("fixture file names should be valid UTF-8"),
+        &text,
+    );
+    (dir, path)
+}
+
 fn stdlib_path(relative: &str) -> PathBuf {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -812,7 +828,7 @@ fn check_accepts_pipe_stage_memo_fixture() {
 
 #[test]
 fn check_reports_regex_validation_from_hir() {
-    let path = fixture_path("milestone-1/invalid/regex_invalid_quantifier.aivi");
+    let (_dir, path) = isolated_fixture_path("milestone-1/invalid/regex_invalid_quantifier.aivi");
     let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
         .arg("check")
         .arg(&path)
@@ -840,7 +856,7 @@ fn check_reports_regex_validation_from_hir() {
 
 #[test]
 fn check_reports_non_exhaustive_case_from_hir() {
-    let path = fixture_path("milestone-1/invalid/pattern_non_exhaustive_sum.aivi");
+    let (_dir, path) = isolated_fixture_path("milestone-1/invalid/pattern_non_exhaustive_sum.aivi");
     let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
         .arg("check")
         .arg(&path)
@@ -1640,8 +1656,13 @@ fn check_reports_source_option_constructor_application_mismatch_from_hir() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("hir::ambiguous-literal-suffix"),
-        "expected ambiguous-literal-suffix diagnostic for conflicting domain constructor applications, got stderr: {stderr}"
+        stderr.contains("hir::source-option-type-mismatch"),
+        "expected source-option type-mismatch diagnostic for conflicting constructor applications, got stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("this expression proves `Map Int Text`")
+            || stderr.contains("this source option expression proves `Map Int Text`"),
+        "expected explicit proved-type detail for conflicting constructor applications, got stderr: {stderr}"
     );
 }
 

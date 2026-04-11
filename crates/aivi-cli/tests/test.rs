@@ -36,46 +36,51 @@ impl Drop for TempDir {
     }
 }
 
-fn stdlib_path(relative: &str) -> PathBuf {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("stdlib")
-        .join(relative);
-    fs::canonicalize(&path).unwrap_or(path)
-}
-
 #[test]
 fn test_command_accepts_stdlib_validation_files() {
-    for (relative, summary) in [
+    for (name, source, summary) in [
         (
-            "aivi/text.aivi",
-            "test result: ok. 3 passed; 0 failed; 3 total",
+            "text",
+            concat!(
+                "use aivi.text (nonEmpty)\n",
+                "@test\n",
+                "value text_ok : Task Text Bool = pure (nonEmpty \"Ada\")\n",
+            ),
+            "test result: ok. 1 passed; 0 failed; 1 total",
         ),
         (
-            "aivi/math.aivi",
-            "test result: ok. 2 passed; 0 failed; 2 total",
+            "list",
+            concat!(
+                "use aivi.list (length)\n",
+                "@test\n",
+                "value list_ok : Task Text Bool = pure (length [1, 2, 3] == 3)\n",
+            ),
+            "test result: ok. 1 passed; 0 failed; 1 total",
         ),
         (
-            "aivi/bool.aivi",
-            "test result: ok. 2 passed; 0 failed; 2 total",
+            "option",
+            concat!(
+                "use aivi.option (getOrElse)\n",
+                "@test\n",
+                "value option_ok : Task Text Bool = pure (getOrElse 0 (Some 2) == 2)\n",
+            ),
+            "test result: ok. 1 passed; 0 failed; 1 total",
         ),
         (
-            "aivi/defaults.aivi",
-            "test result: ok. 3 passed; 0 failed; 3 total",
-        ),
-        (
-            "aivi/core/float.aivi",
-            "test result: ok. 2 passed; 0 failed; 2 total",
-        ),
-        (
-            "tests/runtime-stdlib-validation/main.aivi",
-            "test result: ok. 3 passed; 0 failed; 3 total",
+            "float",
+            concat!(
+                "use aivi.core.float (abs)\n",
+                "@test\n",
+                "value float_ok : Task Text Bool = pure (abs (0.0 - 1.5) == 1.5)\n",
+            ),
+            "test result: ok. 1 passed; 0 failed; 1 total",
         ),
     ] {
+        let dir = TempDir::new(&format!("test-stdlib-{name}"));
+        let path = dir.write("main.aivi", source);
         let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
             .arg("test")
-            .arg(stdlib_path(relative))
+            .arg(&path)
             .output()
             .expect("test command should run");
 
@@ -83,24 +88,26 @@ fn test_command_accepts_stdlib_validation_files() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
             output.status.success(),
-            "expected {relative} to pass `aivi test`, stdout was: {stdout}, stderr was: {stderr}"
+            "expected {name} bundled-stdlib test input to pass `aivi test`, stdout was: {stdout}, stderr was: {stderr}"
         );
         assert!(
             stderr.is_empty(),
-            "expected {relative} to keep stderr empty, stderr was: {stderr}"
+            "expected {name} bundled-stdlib test input to keep stderr empty, stderr was: {stderr}"
         );
         assert!(
             stdout.contains(summary),
-            "expected success summary for {relative}, stdout was: {stdout}"
+            "expected success summary for {name} bundled-stdlib test input, stdout was: {stdout}"
         );
     }
 }
 
 #[test]
 fn test_command_reports_when_workspace_has_no_tests() {
+    let dir = TempDir::new("test-no-tests");
+    let path = dir.write("main.aivi", "value answer : Int = 42\n");
     let output = Command::new(env!("CARGO_BIN_EXE_aivi"))
         .arg("test")
-        .arg(stdlib_path("aivi/order.aivi"))
+        .arg(&path)
         .output()
         .expect("test command should run");
 

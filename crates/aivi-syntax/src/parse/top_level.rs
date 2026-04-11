@@ -63,8 +63,11 @@ impl<'a> Parser<'a> {
                 kind if kind.is_top_level_keyword() => self.parse_item_without_decorators(start),
                 _ => self.parse_error_item(start),
             };
-            let next_cursor = item.token_range().end();
-            self.cursor = if next_cursor > start {
+            let item_token_range = item.token_range();
+            let next_cursor = self
+                .prev_significant_in_range(item_token_range.start(), item_token_range.end())
+                .map(|index| index + 1);
+            self.cursor = if let Some(next_cursor) = next_cursor.filter(|next| *next > start) {
                 next_cursor
             } else {
                 start + 1

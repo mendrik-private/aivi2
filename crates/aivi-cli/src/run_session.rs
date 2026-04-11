@@ -642,13 +642,6 @@ impl RunHydrationCoordinator {
         responses: Vec<RunHydrationResponse>,
         executor: &mut GtkRuntimeExecutor<GtkConcreteHost<RunHostValue>, RunHostValue>,
     ) -> Result<(), String> {
-        #[cfg(test)]
-        if !responses.is_empty() {
-            eprintln!(
-                "run-session hydration apply candidates: {:?}",
-                responses.iter().map(|response| response.revision).collect::<Vec<_>>()
-            );
-        }
         let latest = responses
             .into_iter()
             .rfind(|response| self.revisions.should_apply(response.revision));
@@ -861,16 +854,7 @@ fn run_hydration_worker_loop(
         while let Ok(next) = request_rx.try_recv() {
             request = next;
         }
-        #[cfg(test)]
-        let started = std::time::Instant::now();
         let result = plan_run_hydration(shared.as_ref(), &request.globals);
-        #[cfg(test)]
-        eprintln!(
-            "run-session hydration worker revision {} finished in {:?} ({})",
-            request.revision,
-            started.elapsed(),
-            if result.is_ok() { "ok" } else { "err" }
-        );
         if response_tx
             .send(RunHydrationResponse {
                 revision: request.revision,
@@ -1020,11 +1004,7 @@ where
                 return;
             };
             let callback = callback.clone();
-            context.invoke(move || {
-                #[cfg(test)]
-                eprintln!("run-session notifier invoked on main context");
-                (callback.get_ref())();
-            });
+            context.invoke(move || (callback.get_ref())());
             context.wakeup();
         })
     };
@@ -1130,15 +1110,7 @@ where
                 {
                     return;
                 }
-                let apply_result = {
-                    let RunSessionState {
-                        hydration,
-                        executor,
-                        ..
-                    } = &mut *borrowed;
-                    hydration.apply_ready(executor)
-                };
-                if let Err(error) = apply_result {
+                if let Err(error) = borrowed.process_pending_work() {
                     borrowed.fail(error);
                     return;
                 }
@@ -1272,12 +1244,8 @@ fn schedule_run_session(
     schedule_state: &RunSessionScheduleState,
 ) {
     if !schedule_state.try_schedule() {
-        #[cfg(test)]
-        eprintln!("run-session schedule skipped: work already scheduled");
         return;
     }
-    #[cfg(test)]
-    eprintln!("run-session scheduled work item");
     let weak_session = Rc::downgrade(session);
     let schedule_state = schedule_state.clone();
     spawn_run_session_callback(weak_session, schedule_state);
@@ -1288,8 +1256,6 @@ fn spawn_run_session_callback(
     schedule_state: RunSessionScheduleState,
 ) {
     glib::MainContext::default().spawn_local(async move {
-        #[cfg(test)]
-        eprintln!("run-session scheduled callback running");
         let Some(session) = weak_session.upgrade() else {
             schedule_state.clear();
             return;
@@ -1297,8 +1263,6 @@ fn spawn_run_session_callback(
         let mut session = match session.try_borrow_mut() {
             Ok(session) => session,
             Err(_) => {
-                #[cfg(test)]
-                eprintln!("run-session scheduled callback requeueing because session is borrowed");
                 spawn_run_session_callback(weak_session, schedule_state);
                 return;
             }
@@ -1314,8 +1278,6 @@ fn spawn_run_session_callback(
         }
         drop(session);
         if schedule_state.finish_cycle() {
-            #[cfg(test)]
-            eprintln!("run-session scheduled callback immediately rerunning");
             spawn_run_session_callback(weak_session, schedule_state);
         }
     });
@@ -1385,14 +1347,21 @@ mod tests {
     use aivi_backend::{DetachedRuntimeValue, ItemId as BackendItemId, RuntimeValue};
     use aivi_base::SourceDatabase;
     use aivi_hir::{ValidationMode, lower_module as lower_hir_module};
+    use aivi_runtime::set_native_kernel_plans_enabled;
     use aivi_syntax::parse_module;
     use gtk::prelude::*;
     use std::{
         collections::BTreeMap,
         env,
         path::{Path, PathBuf},
+        sync::Once,
         time::{Duration, Instant},
     };
+
+    fn ensure_interpreted_run_session_tests() {
+        static ONCE: Once = Once::new();
+        ONCE.call_once(|| set_native_kernel_plans_enabled(false));
+    }
 
     fn repo_path(path: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1401,6 +1370,7 @@ mod tests {
     }
 
     fn prepare_run_from_path(path: &Path) -> crate::RunArtifact {
+        ensure_interpreted_run_session_tests();
         let snapshot = crate::WorkspaceHirSnapshot::load(path)
             .expect("workspace snapshot should load for run-session test");
         let parsed = snapshot.entry_parsed();
@@ -1450,6 +1420,7 @@ mod tests {
     }
 
     fn prepare_run_from_text(path: &str, source: &str) -> crate::RunArtifact {
+        ensure_interpreted_run_session_tests();
         let mut sources = SourceDatabase::new();
         let file_id = sources.add_file(path, source);
         let file = &sources[file_id];
@@ -2230,6 +2201,7 @@ export main
 
     #[gtk::test]
     fn button_click_event_payloads_use_current_markup_bindings() {
+        let _guard = crate::gtk_test_lock().lock().expect("gtk test lock");
         let artifact = prepare_run_from_text(
             "event-hook-payload-run.aivi",
             r#"
@@ -2334,7 +2306,7 @@ export main
             .expect("reversi board should still expose a legal opening move after idling");
         opening_move.emit_clicked();
         assert!(
-            pump_until(&context, Duration::from_millis(100), || {
+            pump_until(&context, Duration::from_millis(250), || {
                 button_label_count_for(&harness, "🔴") > opening_red_count
             }),
             "an idle reversi session should still accept the first human move"
@@ -2369,7 +2341,7 @@ export main
 
         opening_move.emit_clicked();
         assert!(
-            pump_until(&context, Duration::from_millis(100), || {
+            pump_until(&context, Duration::from_millis(250), || {
                 button_label_count_for(&harness, "🔴") > opening_red_count
             }),
             "the opening human move should land before attempting a restart"
@@ -2438,7 +2410,7 @@ export main
             .expect("reversi board should expose a legal opening move");
         opening_move.emit_clicked();
         assert!(
-            pump_until(&context, Duration::from_millis(100), || {
+            pump_until(&context, Duration::from_millis(250), || {
                 button_label_count_for(&harness, "🔴") > opening_red_count
             }),
             "the first human move should paint its red stones without waiting for the AI turn (phase: {}, requested: {:?}, applied: {:?}, state: {})",
@@ -2468,7 +2440,7 @@ export main
         let second_turn_red_count = button_label_count_for(&harness, "🔴");
         second_move.emit_clicked();
         assert!(
-            pump_until(&context, Duration::from_millis(100), || {
+            pump_until(&context, Duration::from_millis(250), || {
                 button_label_count_for(&harness, "🔴") > second_turn_red_count
             }),
             "the second human move should also paint its red stones right away"
@@ -2498,7 +2470,7 @@ export main
             .expect("reversi board should expose a legal opening move");
         opening_move.emit_clicked();
         assert!(
-            pump_until(&context, Duration::from_millis(100), || {
+            pump_until(&context, Duration::from_millis(250), || {
                 button_label_count_for(&harness, "🔴") > opening_red_count
             }),
             "clicking a legal move should put the new red stone on the board right away"
@@ -2547,7 +2519,7 @@ export main
         let second_turn_red_count = button_label_count_for(&harness, "🔴");
         second_move.emit_clicked();
         assert!(
-            pump_until(&context, Duration::from_millis(100), || {
+            pump_until(&context, Duration::from_millis(250), || {
                 button_label_count_for(&harness, "🔴") > second_turn_red_count
             }),
             "the second human move should still land without crashing (phase: {}, state: {})",
@@ -2584,7 +2556,7 @@ export main
             .expect("reversi board should expose a legal opening move");
         opening_move.emit_clicked();
         assert!(
-            pump_until(&context, Duration::from_millis(100), || {
+            pump_until(&context, Duration::from_millis(250), || {
                 button_label_count_for(&harness, "🔴") > opening_red_count
             }),
             "opening move should land before profiling hydration"

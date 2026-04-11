@@ -1,7 +1,11 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
-    sync::{Arc, mpsc},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -49,3 +53,13 @@ include!("link_builder.rs");
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+
+static NATIVE_KERNEL_PLANS_ENABLED: AtomicBool = AtomicBool::new(true);
+
+pub fn set_native_kernel_plans_enabled(enabled: bool) {
+    NATIVE_KERNEL_PLANS_ENABLED.store(enabled, Ordering::Release);
+}
+
+fn native_kernel_plans_enabled() -> bool {
+    NATIVE_KERNEL_PLANS_ENABLED.load(Ordering::Acquire)
+}

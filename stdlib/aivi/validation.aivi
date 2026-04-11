@@ -3,8 +3,7 @@ use aivi.nonEmpty (
     appendNel
 )
 
-type Errors E =
-  | NonEmptyList E
+type Errors E = NonEmptyList E
 
 type NonEmptyList E -> (NonEmptyList E) -> (Validation (NonEmptyList E) (A, B))
 func zipBothInvalid = le re =>

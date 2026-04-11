@@ -77,7 +77,7 @@ use aivi.path (
 use aivi.color (Color)
 
 type LeadingName =
-  | NonEmptyList Text
+  NonEmptyList Text
 
 type User = {
     name: Text,
@@ -97,7 +97,7 @@ value names : NonEmptyList Text = singleton "Ada"
 value nameHead : Text = nelHead names
 value nameList : List Text = nelToList names
 value longerNames : NonEmptyList Text = nelCons "Grace" names
-value errors : Errors Text = singleton "field required"
+value errors : NonEmptyList Text = singleton "field required"
 
 value numbers : List Int = [
     1,

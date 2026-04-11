@@ -27,6 +27,7 @@ pub fn link_backend_runtime(
         db_changed_routes: linked.db_changed_routes,
         temporal_states: BTreeMap::new(),
         temporal_workers: BTreeMap::new(),
+        temporal_triggers_bootstrapped: false,
         db_commit_invalidation_sink: None,
         execution_context: SourceProviderContext::current(),
     };
@@ -55,6 +56,7 @@ pub struct BackendLinkedRuntime {
     db_changed_routes: Box<[LinkedDbChangedRoute]>,
     temporal_states: BTreeMap<TemporalStageKey, RuntimeValue>,
     temporal_workers: BTreeMap<TemporalStageKey, TemporalWorkerHandle>,
+    temporal_triggers_bootstrapped: bool,
     db_commit_invalidation_sink: Option<DbCommitInvalidationSink>,
     execution_context: SourceProviderContext,
 }

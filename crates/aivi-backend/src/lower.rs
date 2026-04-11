@@ -317,6 +317,23 @@ impl<'a> ProgramLowerer<'a> {
                 })
                 .map_err(|overflow| arena_overflow("items", overflow))?;
             self.item_map.insert(core_id, item_id);
+            // Domain member items have deterministic names: "domain#<HIR_id>::member#<index>::<name>".
+            // Build an index so the evaluator and codegen can prefer compiled bodies over the Rust fallback.
+            if let Some(rest) = item.name.strip_prefix("domain#") {
+                if let Some((domain_raw_str, rest)) = rest.split_once("::member#") {
+                    if let Some((member_raw_str, _)) = rest.split_once("::") {
+                        if let (Ok(domain_raw), Ok(member_idx)) = (
+                            domain_raw_str.parse::<u32>(),
+                            member_raw_str.parse::<usize>(),
+                        ) {
+                            let hir_domain = aivi_hir::ItemId::from_raw(domain_raw);
+                            self.program
+                                .domain_member_items_mut()
+                                .insert((hir_domain, member_idx), item_id);
+                        }
+                    }
+                }
+            }
         }
         Ok(())
     }

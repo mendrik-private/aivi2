@@ -3,7 +3,7 @@ use std::{fs, path::PathBuf};
 use aivi_base::SourceDatabase;
 
 use super::*;
-use crate::{ItemKind, TokenKind, lex_module};
+use crate::{Formatter, ItemKind, TokenKind, lex_module};
 
 fn load(input: &str) -> (SourceDatabase, ParsedModule) {
     let mut sources = SourceDatabase::new();
@@ -153,6 +153,29 @@ fn lexer_distinguishes_line_and_doc_comments_as_trivia() {
     );
     assert!(comment_kinds.iter().all(|kind| kind.is_trivia()));
     assert!(lexed.diagnostics().is_empty());
+}
+
+#[test]
+fn parser_preserves_comments_between_top_level_items() {
+    let (_, parsed) = load(
+        r#"signal one : Signal Int
+
+// keep this comment with the following signal
+signal two : Signal Int
+"#,
+    );
+
+    assert!(!parsed.has_errors());
+    let Item::Signal(item) = &parsed.module.items[1] else {
+        panic!("expected second item to be a signal");
+    };
+    assert_eq!(
+        item.base.leading_comments,
+        vec!["// keep this comment with the following signal"]
+    );
+
+    let formatted = Formatter.format(&parsed.module);
+    assert!(formatted.contains("// keep this comment with the following signal"));
 }
 
 #[test]

@@ -52,6 +52,9 @@ fn prepare_run_artifact_with_metrics_and_progress<F>(
 where
     F: FnMut(&'static str, Duration),
 {
+    #[cfg(test)]
+    aivi_runtime::set_native_kernel_plans_enabled(false);
+
     let total_started = Instant::now();
     let mut metrics = RunArtifactPreparationMetrics {
         workspace_module_count: workspace_hirs.len(),

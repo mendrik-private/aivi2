@@ -12,246 +12,342 @@ func __aivi_option_getOrElse:
 func __aivi_list_keepSome:
   params = [item: A]
   body = closure2
+func __aivi_result_withDefault:
+  params = [fallback: A, result: Result E A]
+  body = closure3
 func __aivi_list_keepFirst:
   params = [found: Option A, item: A]
-  body = closure3
+  body = closure4
 func __aivi_list_lengthStep:
   params = [total: Int, item: A]
-  body = closure4
+  body = closure5
 func __aivi_list_length:
   params = [items: List A]
-  body = closure5
+  body = closure6
 func __aivi_list_head:
   params = [items: List A]
-  body = closure6
+  body = closure7
 func __aivi_list_tailState:
   params = [items: List A, item: A, seenFirst: Bool]
-  body = closure7
+  body = closure8
 func __aivi_list_tailStep:
   params = [state: { seenFirst: Bool, items: List A }, item: A]
-  body = closure8
+  body = closure9
 func __aivi_list_tailItems:
   params = [items: List A, seenFirst: Bool]
-  body = closure9
+  body = closure10
 func __aivi_list_tailFromState:
   params = [state: { seenFirst: Bool, items: List A }]
-  body = closure10
+  body = closure11
 func __aivi_list_tail:
   params = [items: List A]
-  body = closure11
+  body = closure12
+func __aivi_list_tailOrEmpty:
+  params = [items: List A]
+  body = closure13
+func __aivi_list_nonEmpty:
+  params = [items: List A]
+  body = closure14
 func __aivi_list_anyStep:
   params = [predicate: A -> Bool, found: Bool, item: A]
-  body = closure12
+  body = closure15
 func __aivi_list_any:
   params = [predicate: A -> Bool, items: List A]
-  body = closure13
+  body = closure16
 func __aivi_binary_eq:
   params = [left: A, right: A]
-  body = closure14
+  body = closure17
 func __aivi_binary_neq:
   params = [left: A, right: A]
-  body = closure15
+  body = closure18
 func __aivi_nel_singleton:
   params = [item: A]
-  body = closure16
+  body = closure19
 func __aivi_nel_cons:
   params = [item: A, nel: NonEmptyList A]
-  body = closure17
+  body = closure20
 func __aivi_nel_head:
   params = [nel: NonEmptyList A]
-  body = closure18
+  body = closure21
 func __aivi_nel_toList:
   params = [nel: NonEmptyList A]
-  body = closure19
+  body = closure22
 func __aivi_nel_fromHeadTail:
   params = [h: A, t: List A]
-  body = closure20
-func __aivi_nel_lengthStep:
-  params = [acc: Int, ignored: A]
-  body = closure21
-func __aivi_nel_tailLength:
-  params = [t: List A]
-  body = closure22
+  body = closure23
 func __aivi_nel_length:
   params = [nel: NonEmptyList A]
-  body = closure23
+  body = closure24
+func __aivi_nel_lastStep:
+  params = [prev: A, item: A]
+  body = closure25
+func __aivi_nel_lastOf:
+  params = [h: A, t: List A]
+  body = closure26
+func __aivi_nel_last:
+  params = [nel: NonEmptyList A]
+  body = closure27
+func __aivi_nel_mapNel:
+  params = [transform: A -> B, nel: NonEmptyList A]
+  body = closure28
+func __aivi_nel_appendNel:
+  params = [left: NonEmptyList A, right: NonEmptyList A]
+  body = closure29
 func __aivi_nel_initAppendPrev:
   params = [items: List A, prev: Option A]
-  body = closure24
+  body = closure30
 func __aivi_nel_initAccum:
   params = [items: List A, prev: Option A, item: A]
-  body = closure25
+  body = closure31
 func __aivi_nel_initStep:
   params = [state: (List A, Option A), item: A]
-  body = closure26
+  body = closure32
 func __aivi_nel_initExtract:
   params = [state: (List A, Option A)]
-  body = closure27
+  body = closure33
 func __aivi_nel_init:
   params = [nel: NonEmptyList A]
-  body = closure28
+  body = closure34
+func __aivi_nel_fromListStep:
+  params = [acc: Option NonEmptyList A, item: A]
+  body = closure35
+func __aivi_nel_fromList:
+  params = [items: List A]
+  body = closure36
 func __aivi_option_map:
   params = [transform: A -> B, opt: Option A]
-  body = closure29
-func __aivi_list_containsStep:
-  params = [eq: A -> Bool, found: Bool, item: A]
-  body = closure30
+  body = closure37
 func __aivi_list_contains:
-  params = [eq: A -> A -> Bool, target: A, items: List A]
-  body = closure31
+  params = [predicate: A -> Bool, items: List A]
+  body = closure38
 func __aivi_list_mapStep:
   params = [transform: A -> B, acc: List B, item: A]
-  body = closure32
+  body = closure39
 func __aivi_list_map:
   params = [transform: A -> B, items: List A]
-  body = closure33
+  body = closure40
 func __aivi_list_flatMapStep:
   params = [transform: A -> List B, acc: List B, item: A]
-  body = closure34
+  body = closure41
 func __aivi_list_flatMap:
   params = [transform: A -> List B, items: List A]
-  body = closure35
+  body = closure42
 func __aivi_list_filterAppend:
   params = [predicate: A -> Bool, acc: List A, item: A]
-  body = closure36
+  body = closure43
 func __aivi_list_filter:
   params = [predicate: A -> Bool, items: List A]
-  body = closure37
+  body = closure44
 func __aivi_list_countStep:
   params = [predicate: A -> Bool, acc: Int, item: A]
-  body = closure38
+  body = closure45
 func __aivi_list_count:
   params = [predicate: A -> Bool, items: List A]
-  body = closure39
+  body = closure46
 func __aivi_list_sumStep:
   params = [acc: Int, item: Int]
-  body = closure40
+  body = closure47
 func __aivi_list_sum:
   params = [items: List Int]
-  body = closure41
+  body = closure48
 func __aivi_list_maxPick:
   params = [gt: A -> A -> Bool, item: A, prev: A]
-  body = closure42
+  body = closure49
 func __aivi_list_maximumStep:
   params = [gt: A -> A -> Bool, best: Option A, item: A]
-  body = closure43
+  body = closure50
 func __aivi_list_maximum:
   params = [gt: A -> A -> Bool, items: List A]
-  body = closure44
+  body = closure51
 func __aivi_list_rangeDesc:
   params = [current: Int, acc: List Int]
-  body = closure45
+  body = closure52
 func __aivi_list_range:
   params = [n: Int]
-  body = closure46
+  body = closure53
 func __aivi_text_joinFirst:
   params = [sep: Text, result: Text, item: Text]
-  body = closure47
+  body = closure54
 func __aivi_text_joinNext:
   params = [sep: Text, result: Text, item: Text]
-  body = closure48
+  body = closure55
 func __aivi_text_joinPick:
   params = [isFirst: Bool, sep: Text, result: Text, item: Text]
-  body = closure49
+  body = closure56
 func __aivi_text_joinStep:
   params = [sep: Text, state: (Bool, Text), item: Text]
-  body = closure50
+  body = closure57
 func __aivi_text_joinExtract:
   params = [state: (Bool, Text)]
-  body = closure51
+  body = closure58
 func __aivi_text_join:
   params = [sep: Text, items: List Text]
-  body = closure52
+  body = closure59
 func __aivi_matrix_rows:
   params = [matrix: Matrix A]
-  body = closure53
+  body = closure60
 func __aivi_matrix_width:
   params = [matrix: Matrix A]
-  body = closure54
+  body = closure61
 func __aivi_matrix_height:
   params = [matrix: Matrix A]
-  body = closure55
+  body = closure62
 func __aivi_listAt_match:
   params = [matches: Bool, idx: Int, item: A]
-  body = closure56
+  body = closure63
 func __aivi_listAt_check:
   params = [target: Int, idx: Int, found: Option A, item: A]
-  body = closure57
+  body = closure64
 func __aivi_listAt_step:
   params = [target: Int, state: (Int, Option A), item: A]
-  body = closure58
+  body = closure65
 func __aivi_listAt_extract:
   params = [state: (Int, Option A)]
-  body = closure59
+  body = closure66
 func __aivi_listAt:
   params = [target: Int, items: List A]
-  body = closure60
+  body = closure67
 func __aivi_matrix_atRow:
   params = [rowOpt: Option List A, x: Int]
-  body = closure61
+  body = closure68
 func __aivi_matrix_at:
   params = [matrix: Matrix A, x: Int, y: Int]
-  body = closure62
+  body = closure69
 func __aivi_listReplace_pick:
   params = [matches: Bool, newVal: A, idx: Int, result: List A, item: A]
-  body = closure63
+  body = closure70
 func __aivi_listReplace_check:
   params = [target: Int, newVal: A, idx: Int, result: List A, item: A]
-  body = closure64
+  body = closure71
 func __aivi_listReplace_step:
   params = [target: Int, newVal: A, state: (Int, List A), item: A]
-  body = closure65
+  body = closure72
 func __aivi_listReplace_extract:
   params = [state: (Int, List A)]
-  body = closure66
+  body = closure73
 func __aivi_listReplace:
   params = [target: Int, newVal: A, items: List A]
-  body = closure67
+  body = closure74
 func __aivi_matrix_doReplace:
   params = [x: Int, y: Int, w: Int, h: Int, data: List List A, value: A]
-  body = closure68
+  body = closure75
 func __aivi_matrix_boundsCheck:
   params = [xOk: Bool, yOk: Bool, xLt: Bool, yLt: Bool, x: Int, y: Int, w: Int, h: Int, data: List List A, value: A]
-  body = closure69
+  body = closure76
 func __aivi_matrix_boundsCheck2:
   params = [yOk: Bool, xLt: Bool, yLt: Bool, x: Int, y: Int, w: Int, h: Int, data: List List A, value: A]
-  body = closure70
+  body = closure77
 func __aivi_matrix_boundsCheck3:
   params = [xLt: Bool, yLt: Bool, x: Int, y: Int, w: Int, h: Int, data: List List A, value: A]
-  body = closure71
+  body = closure78
 func __aivi_matrix_boundsCheck4:
   params = [yLt: Bool, x: Int, y: Int, w: Int, h: Int, data: List List A, value: A]
-  body = closure72
+  body = closure79
 func __aivi_matrix_replaceCoord:
   params = [matrix: Matrix A, x: Int, y: Int, value: A]
-  body = closure73
+  body = closure80
 func __aivi_matrix_replaceAt:
   params = [matrix: Matrix A, coord: (Int, Int), value: A]
-  body = closure74
+  body = closure81
 func __aivi_matrix_validateFirstRow:
   params = [rowIdx: Int, expectedWidth: Int, row: List A]
-  body = closure75
+  body = closure82
 func __aivi_matrix_validateLengthMatch:
   params = [matches: Bool, rowIdx: Int, expectedWidth: Int, row: List A]
-  body = closure76
+  body = closure83
 func __aivi_matrix_validateSubsequentRow:
   params = [isFirst: Bool, rowIdx: Int, expectedWidth: Int, row: List A]
-  body = closure77
+  body = closure84
 func __aivi_matrix_validateRow:
   params = [prevError: Option MatrixError, rowIdx: Int, expectedWidth: Int, row: List A]
-  body = closure78
+  body = closure85
 func __aivi_matrix_fromRowsStep:
   params = [state: (Int, Int, Option MatrixError), row: List A]
-  body = closure79
+  body = closure86
 func __aivi_matrix_fromRowsDecide:
   params = [error: Option MatrixError, rowCount: Int, width: Int, inputRows: List List A]
-  body = closure80
+  body = closure87
 func __aivi_matrix_fromRowsFinish:
   params = [inputRows: List List A, state: (Int, Int, Option MatrixError)]
-  body = closure81
+  body = closure88
 func __aivi_matrix_fromRows:
   params = [inputRows: List List A]
-  body = closure82
+  body = closure89
+func __aivi_matrix_initCellAt:
+  params = [build: Int -> Int -> A, y: Int, x: Int]
+  body = closure90
+func __aivi_matrix_buildRow:
+  params = [width: Int, build: Int -> Int -> A, y: Int]
+  body = closure91
+func __aivi_matrix_buildRows:
+  params = [width: Int, height: Int, build: Int -> Int -> A]
+  body = closure92
+func __aivi_matrix_initHeight:
+  params = [width: Int, height: Int, build: Int -> Int -> A]
+  body = closure93
+func __aivi_matrix_init:
+  params = [width: Int, height: Int, build: Int -> Int -> A]
+  body = closure94
+func __aivi_matrix_filled:
+  params = [w: Int, h: Int, build: Int -> Int -> A]
+  body = closure95
+func __aivi_matrix_countCell:
+  params = [predicate: A -> Bool, total: Int, item: A]
+  body = closure96
+func __aivi_matrix_countRow:
+  params = [predicate: A -> Bool, total: Int, row: List A]
+  body = closure97
+func __aivi_matrix_count:
+  params = [predicate: A -> Bool, matrix: Matrix A]
+  body = closure98
+func __aivi_list_findTry:
+  params = [predicate: A -> Bool, item: A]
+  body = closure99
+func __aivi_list_findStep:
+  params = [predicate: A -> Bool, acc: Option A, item: A]
+  body = closure100
+func __aivi_list_find:
+  params = [predicate: A -> Bool, items: List A]
+  body = closure101
+func __aivi_list_takeHelp:
+  params = [n: Int, count: Int, acc: List A, item: A]
+  body = closure102
+func __aivi_list_takeStep:
+  params = [n: Int, state: (Int, List A), item: A]
+  body = closure103
+func __aivi_list_takeExtract:
+  params = [state: (Int, List A)]
+  body = closure104
+func __aivi_list_take:
+  params = [n: Int, items: List A]
+  body = closure105
+func __aivi_list_sortByInsertFalse:
+  params = [cmp: A -> A -> Bool, newItem: A, current: A, acc: List A]
+  body = closure106
+func __aivi_list_sortByInsertStep:
+  params = [cmp: A -> A -> Bool, newItem: A, state: (Bool, List A), current: A]
+  body = closure107
+func __aivi_list_sortByInsertFinish:
+  params = [cmp: A -> A -> Bool, newItem: A, state: (Bool, List A)]
+  body = closure108
+func __aivi_list_sortByInsert:
+  params = [cmp: A -> A -> Bool, newItem: A, sorted: List A]
+  body = closure109
+func __aivi_list_sortByStep:
+  params = [cmp: A -> A -> Bool, sorted: List A, item: A]
+  body = closure110
+func __aivi_list_sortBy:
+  params = [cmp: A -> A -> Bool, items: List A]
+  body = closure111
+func __aivi_text_isEmpty:
+  params = [text: Text]
+  body = closure112
+func __aivi_text_nonEmpty:
+  params = [text: Text]
+  body = closure113
+func domain#47::member#0::lift:
+  params = [items: List A]
+  body = closure114
 closures:
   closure0 add owner=0 root=expr2 kind=item-body
     params = [x:#0:Int, y:#1:Int]
@@ -259,163 +355,227 @@ closures:
     params = [fallback:#2:A, opt:#3:Option A]
   closure2 __aivi_list_keepSome owner=2 root=expr9 kind=item-body
     params = [item:#5:A]
-  closure3 __aivi_list_keepFirst owner=3 root=expr17 kind=item-body
-    params = [found:#6:Option A, item:#7:A]
-  closure4 __aivi_list_lengthStep owner=4 root=expr20 kind=item-body
-    params = [total:#8:Int, item:#9:A]
-  closure5 __aivi_list_length owner=5 root=expr27 kind=item-body
-    params = [items:#10:List A]
-  closure6 __aivi_list_head owner=6 root=expr34 kind=item-body
-    params = [items:#11:List A]
-  closure7 __aivi_list_tailState owner=7 root=expr46 kind=item-body
-    params = [items:#12:List A, item:#13:A, seenFirst:#14:Bool]
-  closure8 __aivi_list_tailStep owner=8 root=expr53 kind=item-body
-    params = [state:#15:{ seenFirst: Bool, items: List A }, item:#16:A]
-  closure9 __aivi_list_tailItems owner=9 root=expr59 kind=item-body
-    params = [items:#19:List A, seenFirst:#20:Bool]
-  closure10 __aivi_list_tailFromState owner=10 root=expr65 kind=item-body
-    params = [state:#21:{ seenFirst: Bool, items: List A }]
-  closure11 __aivi_list_tail owner=11 root=expr77 kind=item-body
-    params = [items:#24:List A]
-  closure12 __aivi_list_anyStep owner=12 root=expr83 kind=item-body
-    params = [predicate:#25:A -> Bool, found:#26:Bool, item:#27:A]
-  closure13 __aivi_list_any owner=13 root=expr92 kind=item-body
-    params = [predicate:#28:A -> Bool, items:#29:List A]
-  closure14 __aivi_binary_eq owner=14 root=expr95 kind=item-body
-    params = [left:#30:A, right:#31:A]
-  closure15 __aivi_binary_neq owner=15 root=expr98 kind=item-body
-    params = [left:#32:A, right:#33:A]
-  closure16 __aivi_nel_singleton owner=16 root=expr102 kind=item-body
-    params = [item:#34:A]
-  closure17 __aivi_nel_cons owner=17 root=expr112 kind=item-body
-    params = [item:#35:A, nel:#36:NonEmptyList A]
-  closure18 __aivi_nel_head owner=18 root=expr115 kind=item-body
-    params = [nel:#39:NonEmptyList A]
-  closure19 __aivi_nel_toList owner=19 root=expr122 kind=item-body
-    params = [nel:#42:NonEmptyList A]
-  closure20 __aivi_nel_fromHeadTail owner=20 root=expr126 kind=item-body
-    params = [h:#45:A, t:#46:List A]
-  closure21 __aivi_nel_lengthStep owner=21 root=expr129 kind=item-body
-    params = [acc:#47:Int, ignored:#48:A]
-  closure22 __aivi_nel_tailLength owner=22 root=expr136 kind=item-body
-    params = [t:#49:List A]
-  closure23 __aivi_nel_length owner=23 root=expr141 kind=item-body
+  closure3 __aivi_result_withDefault owner=3 root=expr13 kind=item-body
+    params = [fallback:#6:A, result:#7:Result E A]
+  closure4 __aivi_list_keepFirst owner=4 root=expr21 kind=item-body
+    params = [found:#9:Option A, item:#10:A]
+  closure5 __aivi_list_lengthStep owner=5 root=expr24 kind=item-body
+    params = [total:#11:Int, item:#12:A]
+  closure6 __aivi_list_length owner=6 root=expr31 kind=item-body
+    params = [items:#13:List A]
+  closure7 __aivi_list_head owner=7 root=expr38 kind=item-body
+    params = [items:#14:List A]
+  closure8 __aivi_list_tailState owner=8 root=expr50 kind=item-body
+    params = [items:#15:List A, item:#16:A, seenFirst:#17:Bool]
+  closure9 __aivi_list_tailStep owner=9 root=expr57 kind=item-body
+    params = [state:#18:{ seenFirst: Bool, items: List A }, item:#19:A]
+  closure10 __aivi_list_tailItems owner=10 root=expr63 kind=item-body
+    params = [items:#22:List A, seenFirst:#23:Bool]
+  closure11 __aivi_list_tailFromState owner=11 root=expr69 kind=item-body
+    params = [state:#24:{ seenFirst: Bool, items: List A }]
+  closure12 __aivi_list_tail owner=12 root=expr81 kind=item-body
+    params = [items:#27:List A]
+  closure13 __aivi_list_tailOrEmpty owner=13 root=expr87 kind=item-body
+    params = [items:#28:List A]
+  closure14 __aivi_list_nonEmpty owner=14 root=expr93 kind=item-body
+    params = [items:#30:List A]
+  closure15 __aivi_list_anyStep owner=15 root=expr99 kind=item-body
+    params = [predicate:#31:A -> Bool, found:#32:Bool, item:#33:A]
+  closure16 __aivi_list_any owner=16 root=expr108 kind=item-body
+    params = [predicate:#34:A -> Bool, items:#35:List A]
+  closure17 __aivi_binary_eq owner=17 root=expr111 kind=item-body
+    params = [left:#36:A, right:#37:A]
+  closure18 __aivi_binary_neq owner=18 root=expr114 kind=item-body
+    params = [left:#38:A, right:#39:A]
+  closure19 __aivi_nel_singleton owner=19 root=expr118 kind=item-body
+    params = [item:#41:A]
+  closure20 __aivi_nel_cons owner=20 root=expr127 kind=item-body
+    params = [item:#42:A, nel:#43:NonEmptyList A]
+  closure21 __aivi_nel_head owner=21 root=expr132 kind=item-body
+    params = [nel:#44:NonEmptyList A]
+  closure22 __aivi_nel_toList owner=22 root=expr135 kind=item-body
+    params = [nel:#47:NonEmptyList A]
+  closure23 __aivi_nel_fromHeadTail owner=23 root=expr142 kind=item-body
+    params = [h:#48:A, t:#49:List A]
+  closure24 __aivi_nel_length owner=24 root=expr147 kind=item-body
     params = [nel:#50:NonEmptyList A]
-  closure24 __aivi_nel_initAppendPrev owner=24 root=expr149 kind=item-body
-    params = [items:#53:List A, prev:#54:Option A]
-  closure25 __aivi_nel_initAccum owner=25 root=expr157 kind=item-body
-    params = [items:#56:List A, prev:#57:Option A, item:#58:A]
-  closure26 __aivi_nel_initStep owner=26 root=expr164 kind=item-body
-    params = [state:#59:(List A, Option A), item:#60:A]
-  closure27 __aivi_nel_initExtract owner=27 root=expr167 kind=item-body
-    params = [state:#63:(List A, Option A)]
-  closure28 __aivi_nel_init owner=28 root=expr184 kind=item-body
-    params = [nel:#66:NonEmptyList A]
-  closure29 __aivi_option_map owner=29 root=expr192 kind=item-body
-    params = [transform:#69:A -> B, opt:#70:Option A]
-  closure30 __aivi_list_containsStep owner=30 root=expr198 kind=item-body
-    params = [eq:#72:A -> Bool, found:#73:Bool, item:#74:A]
-  closure31 __aivi_list_contains owner=31 root=expr209 kind=item-body
-    params = [eq:#75:A -> A -> Bool, target:#76:A, items:#77:List A]
-  closure32 __aivi_list_mapStep owner=32 root=expr216 kind=item-body
-    params = [transform:#78:A -> B, acc:#79:List B, item:#80:A]
-  closure33 __aivi_list_map owner=33 root=expr225 kind=item-body
-    params = [transform:#81:A -> B, items:#82:List A]
-  closure34 __aivi_list_flatMapStep owner=34 root=expr231 kind=item-body
-    params = [transform:#83:A -> List B, acc:#84:List B, item:#85:A]
-  closure35 __aivi_list_flatMap owner=35 root=expr240 kind=item-body
-    params = [transform:#86:A -> List B, items:#87:List A]
-  closure36 __aivi_list_filterAppend owner=36 root=expr250 kind=item-body
-    params = [predicate:#88:A -> Bool, acc:#89:List A, item:#90:A]
-  closure37 __aivi_list_filter owner=37 root=expr259 kind=item-body
-    params = [predicate:#91:A -> Bool, items:#92:List A]
-  closure38 __aivi_list_countStep owner=38 root=expr267 kind=item-body
-    params = [predicate:#93:A -> Bool, acc:#94:Int, item:#95:A]
-  closure39 __aivi_list_count owner=39 root=expr276 kind=item-body
-    params = [predicate:#96:A -> Bool, items:#97:List A]
-  closure40 __aivi_list_sumStep owner=40 root=expr279 kind=item-body
-    params = [acc:#98:Int, item:#99:Int]
-  closure41 __aivi_list_sum owner=41 root=expr286 kind=item-body
-    params = [items:#100:List Int]
-  closure42 __aivi_list_maxPick owner=42 root=expr297 kind=item-body
-    params = [gt:#101:A -> A -> Bool, item:#102:A, prev:#103:A]
-  closure43 __aivi_list_maximumStep owner=43 root=expr307 kind=item-body
-    params = [gt:#104:A -> A -> Bool, best:#105:Option A, item:#106:A]
-  closure44 __aivi_list_maximum owner=44 root=expr316 kind=item-body
-    params = [gt:#108:A -> A -> Bool, items:#109:List A]
-  closure45 __aivi_list_rangeDesc owner=45 root=expr331 kind=item-body
-    params = [current:#110:Int, acc:#111:List Int]
-  closure46 __aivi_list_range owner=46 root=expr342 kind=item-body
-    params = [n:#112:Int]
-  closure47 __aivi_text_joinFirst owner=47 root=expr345 kind=item-body
-    params = [sep:#113:Text, result:#114:Text, item:#115:Text]
-  closure48 __aivi_text_joinNext owner=48 root=expr354 kind=item-body
-    params = [sep:#116:Text, result:#117:Text, item:#118:Text]
-  closure49 __aivi_text_joinPick owner=49 root=expr366 kind=item-body
-    params = [isFirst:#119:Bool, sep:#120:Text, result:#121:Text, item:#122:Text]
-  closure50 __aivi_text_joinStep owner=50 root=expr374 kind=item-body
-    params = [sep:#123:Text, state:#124:(Bool, Text), item:#125:Text]
-  closure51 __aivi_text_joinExtract owner=51 root=expr377 kind=item-body
-    params = [state:#128:(Bool, Text)]
-  closure52 __aivi_text_join owner=52 root=expr391 kind=item-body
-    params = [sep:#131:Text, items:#132:List Text]
-  closure53 __aivi_matrix_rows owner=53 root=expr394 kind=item-body
-    params = [matrix:#133:Matrix A]
-  closure54 __aivi_matrix_width owner=54 root=expr397 kind=item-body
-    params = [matrix:#137:Matrix A]
-  closure55 __aivi_matrix_height owner=55 root=expr400 kind=item-body
-    params = [matrix:#141:Matrix A]
-  closure56 __aivi_listAt_match owner=56 root=expr414 kind=item-body
-    params = [matches:#145:Bool, idx:#146:Int, item:#147:A]
-  closure57 __aivi_listAt_check owner=57 root=expr430 kind=item-body
-    params = [target:#148:Int, idx:#149:Int, found:#150:Option A, item:#151:A]
-  closure58 __aivi_listAt_step owner=58 root=expr438 kind=item-body
-    params = [target:#153:Int, state:#154:(Int, Option A), item:#155:A]
-  closure59 __aivi_listAt_extract owner=59 root=expr441 kind=item-body
-    params = [state:#158:(Int, Option A)]
-  closure60 __aivi_listAt owner=60 root=expr455 kind=item-body
-    params = [target:#161:Int, items:#162:List A]
-  closure61 __aivi_matrix_atRow owner=61 root=expr462 kind=item-body
-    params = [rowOpt:#163:Option List A, x:#164:Int]
-  closure62 __aivi_matrix_at owner=62 root=expr471 kind=item-body
-    params = [matrix:#166:Matrix A, x:#167:Int, y:#168:Int]
-  closure63 __aivi_listReplace_pick owner=63 root=expr491 kind=item-body
-    params = [matches:#172:Bool, newVal:#173:A, idx:#174:Int, result:#175:List A, item:#176:A]
-  closure64 __aivi_listReplace_check owner=64 root=expr500 kind=item-body
-    params = [target:#177:Int, newVal:#178:A, idx:#179:Int, result:#180:List A, item:#181:A]
-  closure65 __aivi_listReplace_step owner=65 root=expr509 kind=item-body
-    params = [target:#182:Int, newVal:#183:A, state:#184:(Int, List A), item:#185:A]
-  closure66 __aivi_listReplace_extract owner=66 root=expr512 kind=item-body
-    params = [state:#188:(Int, List A)]
-  closure67 __aivi_listReplace owner=67 root=expr527 kind=item-body
-    params = [target:#191:Int, newVal:#192:A, items:#193:List A]
-  closure68 __aivi_matrix_doReplace owner=68 root=expr548 kind=item-body
-    params = [x:#194:Int, y:#195:Int, w:#196:Int, h:#197:Int, data:#198:List List A, value:#199:A]
-  closure69 __aivi_matrix_boundsCheck owner=69 root=expr562 kind=item-body
-    params = [xOk:#201:Bool, yOk:#202:Bool, xLt:#203:Bool, yLt:#204:Bool, x:#205:Int, y:#206:Int, w:#207:Int, h:#208:Int, data:#209:List List A, value:#210:A]
-  closure70 __aivi_matrix_boundsCheck2 owner=70 root=expr575 kind=item-body
-    params = [yOk:#211:Bool, xLt:#212:Bool, yLt:#213:Bool, x:#214:Int, y:#215:Int, w:#216:Int, h:#217:Int, data:#218:List List A, value:#219:A]
-  closure71 __aivi_matrix_boundsCheck3 owner=71 root=expr587 kind=item-body
-    params = [xLt:#220:Bool, yLt:#221:Bool, x:#222:Int, y:#223:Int, w:#224:Int, h:#225:Int, data:#226:List List A, value:#227:A]
-  closure72 __aivi_matrix_boundsCheck4 owner=72 root=expr598 kind=item-body
-    params = [yLt:#228:Bool, x:#229:Int, y:#230:Int, w:#231:Int, h:#232:Int, data:#233:List List A, value:#234:A]
-  closure73 __aivi_matrix_replaceCoord owner=73 root=expr620 kind=item-body
-    params = [matrix:#235:Matrix A, x:#236:Int, y:#237:Int, value:#238:A]
-  closure74 __aivi_matrix_replaceAt owner=74 root=expr628 kind=item-body
-    params = [matrix:#242:Matrix A, coord:#243:(Int, Int), value:#244:A]
-  closure75 __aivi_matrix_validateFirstRow owner=75 root=expr634 kind=item-body
-    params = [rowIdx:#247:Int, expectedWidth:#248:Int, row:#249:List A]
-  closure76 __aivi_matrix_validateLengthMatch owner=76 root=expr656 kind=item-body
-    params = [matches:#250:Bool, rowIdx:#251:Int, expectedWidth:#252:Int, row:#253:List A]
-  closure77 __aivi_matrix_validateSubsequentRow owner=77 root=expr673 kind=item-body
-    params = [isFirst:#254:Bool, rowIdx:#255:Int, expectedWidth:#256:Int, row:#257:List A]
-  closure78 __aivi_matrix_validateRow owner=78 root=expr691 kind=item-body
-    params = [prevError:#258:Option MatrixError, rowIdx:#259:Int, expectedWidth:#260:Int, row:#261:List A]
-  closure79 __aivi_matrix_fromRowsStep owner=79 root=expr699 kind=item-body
-    params = [state:#263:(Int, Int, Option MatrixError), row:#264:List A]
-  closure80 __aivi_matrix_fromRowsDecide owner=80 root=expr711 kind=item-body
-    params = [error:#268:Option MatrixError, rowCount:#269:Int, width:#270:Int, inputRows:#271:List List A]
-  closure81 __aivi_matrix_fromRowsFinish owner=81 root=expr719 kind=item-body
-    params = [inputRows:#273:List List A, state:#274:(Int, Int, Option MatrixError)]
-  closure82 __aivi_matrix_fromRows owner=82 root=expr733 kind=item-body
-    params = [inputRows:#278:List List A]
+  closure25 __aivi_nel_lastStep owner=25 root=expr148 kind=item-body
+    params = [prev:#51:A, item:#52:A]
+  closure26 __aivi_nel_lastOf owner=26 root=expr155 kind=item-body
+    params = [h:#53:A, t:#54:List A]
+  closure27 __aivi_nel_last owner=27 root=expr163 kind=item-body
+    params = [nel:#55:NonEmptyList A]
+  closure28 __aivi_nel_mapNel owner=28 root=expr171 kind=item-body
+    params = [transform:#58:A -> B, nel:#59:NonEmptyList A]
+  closure29 __aivi_nel_appendNel owner=29 root=expr181 kind=item-body
+    params = [left:#60:NonEmptyList A, right:#61:NonEmptyList A]
+  closure30 __aivi_nel_initAppendPrev owner=30 root=expr189 kind=item-body
+    params = [items:#62:List A, prev:#63:Option A]
+  closure31 __aivi_nel_initAccum owner=31 root=expr197 kind=item-body
+    params = [items:#65:List A, prev:#66:Option A, item:#67:A]
+  closure32 __aivi_nel_initStep owner=32 root=expr204 kind=item-body
+    params = [state:#68:(List A, Option A), item:#69:A]
+  closure33 __aivi_nel_initExtract owner=33 root=expr207 kind=item-body
+    params = [state:#72:(List A, Option A)]
+  closure34 __aivi_nel_init owner=34 root=expr221 kind=item-body
+    params = [nel:#75:NonEmptyList A]
+  closure35 __aivi_nel_fromListStep owner=35 root=expr240 kind=item-body
+    params = [acc:#76:Option NonEmptyList A, item:#77:A]
+  closure36 __aivi_nel_fromList owner=36 root=expr247 kind=item-body
+    params = [items:#79:List A]
+  closure37 __aivi_option_map owner=37 root=expr255 kind=item-body
+    params = [transform:#80:A -> B, opt:#81:Option A]
+  closure38 __aivi_list_contains owner=38 root=expr259 kind=item-body
+    params = [predicate:#83:A -> Bool, items:#84:List A]
+  closure39 __aivi_list_mapStep owner=39 root=expr266 kind=item-body
+    params = [transform:#85:A -> B, acc:#86:List B, item:#87:A]
+  closure40 __aivi_list_map owner=40 root=expr275 kind=item-body
+    params = [transform:#88:A -> B, items:#89:List A]
+  closure41 __aivi_list_flatMapStep owner=41 root=expr281 kind=item-body
+    params = [transform:#90:A -> List B, acc:#91:List B, item:#92:A]
+  closure42 __aivi_list_flatMap owner=42 root=expr290 kind=item-body
+    params = [transform:#93:A -> List B, items:#94:List A]
+  closure43 __aivi_list_filterAppend owner=43 root=expr300 kind=item-body
+    params = [predicate:#95:A -> Bool, acc:#96:List A, item:#97:A]
+  closure44 __aivi_list_filter owner=44 root=expr309 kind=item-body
+    params = [predicate:#98:A -> Bool, items:#99:List A]
+  closure45 __aivi_list_countStep owner=45 root=expr317 kind=item-body
+    params = [predicate:#100:A -> Bool, acc:#101:Int, item:#102:A]
+  closure46 __aivi_list_count owner=46 root=expr326 kind=item-body
+    params = [predicate:#103:A -> Bool, items:#104:List A]
+  closure47 __aivi_list_sumStep owner=47 root=expr329 kind=item-body
+    params = [acc:#105:Int, item:#106:Int]
+  closure48 __aivi_list_sum owner=48 root=expr336 kind=item-body
+    params = [items:#107:List Int]
+  closure49 __aivi_list_maxPick owner=49 root=expr347 kind=item-body
+    params = [gt:#108:A -> A -> Bool, item:#109:A, prev:#110:A]
+  closure50 __aivi_list_maximumStep owner=50 root=expr357 kind=item-body
+    params = [gt:#111:A -> A -> Bool, best:#112:Option A, item:#113:A]
+  closure51 __aivi_list_maximum owner=51 root=expr366 kind=item-body
+    params = [gt:#115:A -> A -> Bool, items:#116:List A]
+  closure52 __aivi_list_rangeDesc owner=52 root=expr381 kind=item-body
+    params = [current:#117:Int, acc:#118:List Int]
+  closure53 __aivi_list_range owner=53 root=expr392 kind=item-body
+    params = [n:#119:Int]
+  closure54 __aivi_text_joinFirst owner=54 root=expr395 kind=item-body
+    params = [sep:#120:Text, result:#121:Text, item:#122:Text]
+  closure55 __aivi_text_joinNext owner=55 root=expr404 kind=item-body
+    params = [sep:#123:Text, result:#124:Text, item:#125:Text]
+  closure56 __aivi_text_joinPick owner=56 root=expr416 kind=item-body
+    params = [isFirst:#126:Bool, sep:#127:Text, result:#128:Text, item:#129:Text]
+  closure57 __aivi_text_joinStep owner=57 root=expr424 kind=item-body
+    params = [sep:#130:Text, state:#131:(Bool, Text), item:#132:Text]
+  closure58 __aivi_text_joinExtract owner=58 root=expr427 kind=item-body
+    params = [state:#135:(Bool, Text)]
+  closure59 __aivi_text_join owner=59 root=expr441 kind=item-body
+    params = [sep:#138:Text, items:#139:List Text]
+  closure60 __aivi_matrix_rows owner=60 root=expr444 kind=item-body
+    params = [matrix:#140:Matrix A]
+  closure61 __aivi_matrix_width owner=61 root=expr447 kind=item-body
+    params = [matrix:#144:Matrix A]
+  closure62 __aivi_matrix_height owner=62 root=expr450 kind=item-body
+    params = [matrix:#148:Matrix A]
+  closure63 __aivi_listAt_match owner=63 root=expr464 kind=item-body
+    params = [matches:#152:Bool, idx:#153:Int, item:#154:A]
+  closure64 __aivi_listAt_check owner=64 root=expr480 kind=item-body
+    params = [target:#155:Int, idx:#156:Int, found:#157:Option A, item:#158:A]
+  closure65 __aivi_listAt_step owner=65 root=expr488 kind=item-body
+    params = [target:#160:Int, state:#161:(Int, Option A), item:#162:A]
+  closure66 __aivi_listAt_extract owner=66 root=expr491 kind=item-body
+    params = [state:#165:(Int, Option A)]
+  closure67 __aivi_listAt owner=67 root=expr505 kind=item-body
+    params = [target:#168:Int, items:#169:List A]
+  closure68 __aivi_matrix_atRow owner=68 root=expr512 kind=item-body
+    params = [rowOpt:#170:Option List A, x:#171:Int]
+  closure69 __aivi_matrix_at owner=69 root=expr521 kind=item-body
+    params = [matrix:#173:Matrix A, x:#174:Int, y:#175:Int]
+  closure70 __aivi_listReplace_pick owner=70 root=expr541 kind=item-body
+    params = [matches:#179:Bool, newVal:#180:A, idx:#181:Int, result:#182:List A, item:#183:A]
+  closure71 __aivi_listReplace_check owner=71 root=expr550 kind=item-body
+    params = [target:#184:Int, newVal:#185:A, idx:#186:Int, result:#187:List A, item:#188:A]
+  closure72 __aivi_listReplace_step owner=72 root=expr559 kind=item-body
+    params = [target:#189:Int, newVal:#190:A, state:#191:(Int, List A), item:#192:A]
+  closure73 __aivi_listReplace_extract owner=73 root=expr562 kind=item-body
+    params = [state:#195:(Int, List A)]
+  closure74 __aivi_listReplace owner=74 root=expr577 kind=item-body
+    params = [target:#198:Int, newVal:#199:A, items:#200:List A]
+  closure75 __aivi_matrix_doReplace owner=75 root=expr598 kind=item-body
+    params = [x:#201:Int, y:#202:Int, w:#203:Int, h:#204:Int, data:#205:List List A, value:#206:A]
+  closure76 __aivi_matrix_boundsCheck owner=76 root=expr612 kind=item-body
+    params = [xOk:#208:Bool, yOk:#209:Bool, xLt:#210:Bool, yLt:#211:Bool, x:#212:Int, y:#213:Int, w:#214:Int, h:#215:Int, data:#216:List List A, value:#217:A]
+  closure77 __aivi_matrix_boundsCheck2 owner=77 root=expr625 kind=item-body
+    params = [yOk:#218:Bool, xLt:#219:Bool, yLt:#220:Bool, x:#221:Int, y:#222:Int, w:#223:Int, h:#224:Int, data:#225:List List A, value:#226:A]
+  closure78 __aivi_matrix_boundsCheck3 owner=78 root=expr637 kind=item-body
+    params = [xLt:#227:Bool, yLt:#228:Bool, x:#229:Int, y:#230:Int, w:#231:Int, h:#232:Int, data:#233:List List A, value:#234:A]
+  closure79 __aivi_matrix_boundsCheck4 owner=79 root=expr648 kind=item-body
+    params = [yLt:#235:Bool, x:#236:Int, y:#237:Int, w:#238:Int, h:#239:Int, data:#240:List List A, value:#241:A]
+  closure80 __aivi_matrix_replaceCoord owner=80 root=expr670 kind=item-body
+    params = [matrix:#242:Matrix A, x:#243:Int, y:#244:Int, value:#245:A]
+  closure81 __aivi_matrix_replaceAt owner=81 root=expr678 kind=item-body
+    params = [matrix:#249:Matrix A, coord:#250:(Int, Int), value:#251:A]
+  closure82 __aivi_matrix_validateFirstRow owner=82 root=expr684 kind=item-body
+    params = [rowIdx:#254:Int, expectedWidth:#255:Int, row:#256:List A]
+  closure83 __aivi_matrix_validateLengthMatch owner=83 root=expr706 kind=item-body
+    params = [matches:#257:Bool, rowIdx:#258:Int, expectedWidth:#259:Int, row:#260:List A]
+  closure84 __aivi_matrix_validateSubsequentRow owner=84 root=expr723 kind=item-body
+    params = [isFirst:#261:Bool, rowIdx:#262:Int, expectedWidth:#263:Int, row:#264:List A]
+  closure85 __aivi_matrix_validateRow owner=85 root=expr741 kind=item-body
+    params = [prevError:#265:Option MatrixError, rowIdx:#266:Int, expectedWidth:#267:Int, row:#268:List A]
+  closure86 __aivi_matrix_fromRowsStep owner=86 root=expr749 kind=item-body
+    params = [state:#270:(Int, Int, Option MatrixError), row:#271:List A]
+  closure87 __aivi_matrix_fromRowsDecide owner=87 root=expr761 kind=item-body
+    params = [error:#275:Option MatrixError, rowCount:#276:Int, width:#277:Int, inputRows:#278:List List A]
+  closure88 __aivi_matrix_fromRowsFinish owner=88 root=expr769 kind=item-body
+    params = [inputRows:#280:List List A, state:#281:(Int, Int, Option MatrixError)]
+  closure89 __aivi_matrix_fromRows owner=89 root=expr783 kind=item-body
+    params = [inputRows:#285:List List A]
+  closure90 __aivi_matrix_initCellAt owner=90 root=expr787 kind=item-body
+    params = [build:#286:Int -> Int -> A, y:#287:Int, x:#288:Int]
+  closure91 __aivi_matrix_buildRow owner=91 root=expr796 kind=item-body
+    params = [width:#289:Int, build:#290:Int -> Int -> A, y:#291:Int]
+  closure92 __aivi_matrix_buildRows owner=92 root=expr805 kind=item-body
+    params = [width:#292:Int, height:#293:Int, build:#294:Int -> Int -> A]
+  closure93 __aivi_matrix_initHeight owner=93 root=expr825 kind=item-body
+    params = [width:#295:Int, height:#296:Int, build:#297:Int -> Int -> A]
+  closure94 __aivi_matrix_init owner=94 root=expr839 kind=item-body
+    params = [width:#298:Int, height:#299:Int, build:#300:Int -> Int -> A]
+  closure95 __aivi_matrix_filled owner=95 root=expr861 kind=item-body
+    params = [w:#301:Int, h:#302:Int, build:#303:Int -> Int -> A]
+  closure96 __aivi_matrix_countCell owner=96 root=expr869 kind=item-body
+    params = [predicate:#304:A -> Bool, total:#305:Int, item:#306:A]
+  closure97 __aivi_matrix_countRow owner=97 root=expr876 kind=item-body
+    params = [predicate:#307:A -> Bool, total:#308:Int, row:#309:List A]
+  closure98 __aivi_matrix_count owner=98 root=expr885 kind=item-body
+    params = [predicate:#310:A -> Bool, matrix:#311:Matrix A]
+  closure99 __aivi_list_findTry owner=99 root=expr893 kind=item-body
+    params = [predicate:#312:A -> Bool, item:#313:A]
+  closure100 __aivi_list_findStep owner=100 root=expr902 kind=item-body
+    params = [predicate:#314:A -> Bool, acc:#315:Option A, item:#316:A]
+  closure101 __aivi_list_find owner=101 root=expr911 kind=item-body
+    params = [predicate:#318:A -> Bool, items:#319:List A]
+  closure102 __aivi_list_takeHelp owner=102 root=expr927 kind=item-body
+    params = [n:#320:Int, count:#321:Int, acc:#322:List A, item:#323:A]
+  closure103 __aivi_list_takeStep owner=103 root=expr935 kind=item-body
+    params = [n:#324:Int, state:#325:(Int, List A), item:#326:A]
+  closure104 __aivi_list_takeExtract owner=104 root=expr938 kind=item-body
+    params = [state:#329:(Int, List A)]
+  closure105 __aivi_list_take owner=105 root=expr952 kind=item-body
+    params = [n:#331:Int, items:#332:List A]
+  closure106 __aivi_list_sortByInsertFalse owner=106 root=expr975 kind=item-body
+    params = [cmp:#333:A -> A -> Bool, newItem:#334:A, current:#335:A, acc:#336:List A]
+  closure107 __aivi_list_sortByInsertStep owner=107 root=expr990 kind=item-body
+    params = [cmp:#337:A -> A -> Bool, newItem:#338:A, state:#339:(Bool, List A), current:#340:A]
+  closure108 __aivi_list_sortByInsertFinish owner=108 root=expr998 kind=item-body
+    params = [cmp:#343:A -> A -> Bool, newItem:#344:A, state:#345:(Bool, List A)]
+  closure109 __aivi_list_sortByInsert owner=109 root=expr1015 kind=item-body
+    params = [cmp:#348:A -> A -> Bool, newItem:#349:A, sorted:#350:List A]
+  closure110 __aivi_list_sortByStep owner=110 root=expr1020 kind=item-body
+    params = [cmp:#351:A -> A -> Bool, sorted:#352:List A, item:#353:A]
+  closure111 __aivi_list_sortBy owner=111 root=expr1029 kind=item-body
+    params = [cmp:#354:A -> A -> Bool, items:#355:List A]
+  closure112 __aivi_text_isEmpty owner=112 root=expr1032 kind=item-body
+    params = [text:#356:Text]
+  closure113 __aivi_text_nonEmpty owner=113 root=expr1038 kind=item-body
+    params = [text:#357:Text]
+  closure114 domain#47::member#0::lift owner=114 root=expr1039 kind=item-body
+    params = [items:#40:List A]

@@ -439,6 +439,25 @@ impl<'a> KernelEvaluator<'a> {
                             values.push(value)
                         }
                         KernelExprKind::DomainMember(handle) => {
+                            // Prefer a compiled body when one exists for this domain member.
+                            if let Some(item_id) = self
+                                .program
+                                .domain_member_item(handle.domain, handle.member_index)
+                            {
+                                if let Some(item) = self.program.items().get(item_id) {
+                                    if let Some(body_kernel) = item.body {
+                                        values.push(RuntimeValue::Callable(
+                                            RuntimeCallable::ItemBody {
+                                                item: item_id,
+                                                kernel: body_kernel,
+                                                parameters: item.parameters.clone(),
+                                                bound_arguments: Vec::new(),
+                                            },
+                                        ));
+                                        continue;
+                                    }
+                                }
+                            }
                             let (parameters, result) =
                                 callable_signature(self.program, expr.layout);
                             values.push(RuntimeValue::Callable(RuntimeCallable::DomainMember {
@@ -3159,5 +3178,12 @@ fn intrinsic_value_arity(value: IntrinsicValue) -> usize {
         | IntrinsicValue::BigIntEq
         | IntrinsicValue::BigIntGt
         | IntrinsicValue::BigIntLt => 2,
+        IntrinsicValue::BitNot => 1,
+        IntrinsicValue::BitAnd
+        | IntrinsicValue::BitOr
+        | IntrinsicValue::BitXor
+        | IntrinsicValue::ShiftLeft
+        | IntrinsicValue::ShiftRight
+        | IntrinsicValue::ShiftRightUnsigned => 2,
     }
 }

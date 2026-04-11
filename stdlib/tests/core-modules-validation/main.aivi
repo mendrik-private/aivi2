@@ -76,9 +76,13 @@ use aivi.math (
 
 use aivi.list (length)
 
+type Text -> Int -> Int
+func chooseNumber = ignored number =>
+    number
+
 value fnIdentity : Int = identity 42
 value fnConst : Int = const 7 "ignored"
-value fnFlip : Int = flip const "ignored" 99
+value fnFlip : Int = flip chooseNumber 99 "ignored"
 value fnCompose : Int = compose negateInt abs (0 - 5)
 value fnAndThen : Int = andThen abs negateInt (0 - 3)
 value fnAlways : Int = always 100 True

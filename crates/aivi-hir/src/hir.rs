@@ -429,6 +429,14 @@ pub enum IntrinsicValue {
     BigIntEq,
     BigIntGt,
     BigIntLt,
+    // Bitwise intrinsics (pure/synchronous)
+    BitAnd,
+    BitOr,
+    BitXor,
+    BitNot,
+    ShiftLeft,
+    ShiftRight,
+    ShiftRightUnsigned,
 }
 
 impl fmt::Display for IntrinsicValue {
@@ -577,6 +585,13 @@ impl fmt::Display for IntrinsicValue {
             Self::BigIntEq => f.write_str("aivi.bigint.eq"),
             Self::BigIntGt => f.write_str("aivi.bigint.gt"),
             Self::BigIntLt => f.write_str("aivi.bigint.lt"),
+            Self::BitAnd => f.write_str("aivi.bits.and"),
+            Self::BitOr => f.write_str("aivi.bits.or"),
+            Self::BitXor => f.write_str("aivi.bits.xor"),
+            Self::BitNot => f.write_str("aivi.bits.not"),
+            Self::ShiftLeft => f.write_str("aivi.bits.shiftLeft"),
+            Self::ShiftRight => f.write_str("aivi.bits.shiftRight"),
+            Self::ShiftRightUnsigned => f.write_str("aivi.bits.shiftRightUnsigned"),
         }
     }
 }

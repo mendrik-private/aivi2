@@ -582,6 +582,7 @@ signal derived = base
             &backend,
             BackendExecutionOptions {
                 eagerly_compile_signals: true,
+                prefer_interpreter: false,
             },
         );
 

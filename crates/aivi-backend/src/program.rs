@@ -1,7 +1,8 @@
-use std::fmt;
+use std::{collections::HashMap, fmt};
 
 use aivi_base::SourceSpan;
 use aivi_core::Arena;
+use aivi_hir::ItemId as HirItemId;
 
 use crate::{
     DecodePlanId, DecodeStepId, ItemId, KernelId, LayoutId, PipelineId, SourceId,
@@ -17,6 +18,9 @@ pub struct Program {
     layouts: Arena<LayoutId, Layout>,
     sources: Arena<SourceId, SourcePlan>,
     decode_plans: Arena<DecodePlanId, DecodePlan>,
+    /// Maps `(HIR domain ItemId, member index)` → backend `ItemId` for domain members
+    /// that have compiled bodies. Populated during backend lowering for fast dispatch.
+    domain_member_items: HashMap<(HirItemId, usize), ItemId>,
 }
 
 impl Default for Program {
@@ -28,6 +32,7 @@ impl Default for Program {
             layouts: Arena::new(),
             sources: Arena::new(),
             decode_plans: Arena::new(),
+            domain_member_items: HashMap::new(),
         }
     }
 }
@@ -87,6 +92,16 @@ impl Program {
 
     pub fn item_name(&self, item: ItemId) -> &str {
         &self.items[item].name
+    }
+
+    /// Returns the backend `ItemId` for a domain member that has a compiled body,
+    /// keyed by the HIR domain `ItemId` and the member's zero-based index.
+    pub fn domain_member_item(&self, domain: HirItemId, member_index: usize) -> Option<ItemId> {
+        self.domain_member_items.get(&(domain, member_index)).copied()
+    }
+
+    pub fn domain_member_items_mut(&mut self) -> &mut HashMap<(HirItemId, usize), ItemId> {
+        &mut self.domain_member_items
     }
 
     pub fn pretty(&self) -> String {

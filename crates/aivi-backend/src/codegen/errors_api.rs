@@ -395,6 +395,18 @@ enum IntrinsicCallPlan {
     BytesAppend,
     BytesRepeat,
     BytesSlice,
+    BitBinary(BitBinaryOp),
+    BitNot,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BitBinaryOp {
+    And,
+    Or,
+    Xor,
+    ShiftLeft,
+    ShiftRight,
+    ShiftRightUnsigned,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

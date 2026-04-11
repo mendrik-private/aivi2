@@ -75,6 +75,9 @@ pub struct BackendExecutionOptions {
     /// Precompile dedicated signal body kernels when the JIT engine is created instead of waiting
     /// for the first call site to touch them.
     pub eagerly_compile_signals: bool,
+    /// Force the backend to use the interpreter even when the executable program could create a
+    /// lazy JIT engine.
+    pub prefer_interpreter: bool,
 }
 
 impl BackendExecutionEngine for KernelEvaluator<'_> {
@@ -221,7 +224,11 @@ impl<'a> BackendExecutableProgram<'a> {
     }
 
     pub fn engine_kind(&self) -> BackendExecutionEngineKind {
-        BackendExecutionEngineKind::Jit
+        if self.execution_options.prefer_interpreter {
+            BackendExecutionEngineKind::Interpreter
+        } else {
+            BackendExecutionEngineKind::Jit
+        }
     }
 
     pub fn compiled_object(&self) -> Option<&CompiledProgram> {
@@ -233,16 +240,24 @@ impl<'a> BackendExecutableProgram<'a> {
     }
 
     pub fn create_engine(&self) -> BackendExecutionEngineHandle<'a> {
-        Box::new(LazyJitExecutionEngine::new(
-            self.program,
-            self.execution_options,
-        ))
+        if self.execution_options.prefer_interpreter {
+            Box::new(KernelEvaluator::new(self.program))
+        } else {
+            Box::new(LazyJitExecutionEngine::new(
+                self.program,
+                self.execution_options,
+            ))
+        }
     }
 
     pub fn create_profiled_engine(&self) -> BackendExecutionEngineHandle<'a> {
-        Box::new(LazyJitExecutionEngine::new_profiled(
-            self.program,
-            self.execution_options,
-        ))
+        if self.execution_options.prefer_interpreter {
+            Box::new(KernelEvaluator::new_profiled(self.program))
+        } else {
+            Box::new(LazyJitExecutionEngine::new_profiled(
+                self.program,
+                self.execution_options,
+            ))
+        }
     }
 }
