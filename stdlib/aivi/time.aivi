@@ -1,4 +1,9 @@
-use aivi.time (nowMs, monotonicMs, format, parse)
+use aivi.time (
+    nowMs
+    monotonicMs
+    format
+    parse
+)
 
 type EpochMs = Int
 
@@ -24,8 +29,8 @@ func parseIso = text =>
 
 value msPerSecond : Int = 1000
 value msPerMinute : Int = 60000
-value msPerHour   : Int = 3600000
-value msPerDay    : Int = 86400000
+value msPerHour : Int = 3600000
+value msPerDay : Int = 86400000
 
 type Int -> Int
 func toSeconds = ms =>
@@ -75,30 +80,4 @@ value time_fromSeconds : Task Text Bool = pure (fromSeconds 3 == 3000)
 @test
 value time_elapsed : Task Text Bool = pure (elapsed 1000 4000 == 3000)
 
-export (
-    EpochMs
-    nowMs
-    monotonicMs
-    format
-    parse
-    isoPattern
-    datePattern
-    timePattern
-    formatIso
-    formatDate
-    formatTime
-    parseIso
-    msPerSecond
-    msPerMinute
-    msPerHour
-    msPerDay
-    toSeconds
-    toMinutes
-    toHours
-    toDays
-    fromSeconds
-    fromMinutes
-    fromHours
-    fromDays
-    elapsed
-)
+export (EpochMs, nowMs, monotonicMs, format, parse, isoPattern, datePattern, timePattern, formatIso, formatDate, formatTime, parseIso, msPerSecond, msPerMinute, msPerHour, msPerDay, toSeconds, toMinutes, toHours, toDays, fromSeconds, fromMinutes, fromHours, fromDays, elapsed)

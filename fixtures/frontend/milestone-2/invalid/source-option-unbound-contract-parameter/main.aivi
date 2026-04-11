@@ -3,8 +3,7 @@ type HttpError =
 
 type Session = { token: Text }
 
-type Box A =
-  | Box A
+type Box A = Box A
 
 value emptyBody = Box None
 

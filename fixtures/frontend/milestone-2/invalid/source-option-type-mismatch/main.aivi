@@ -1,6 +1,5 @@
-domain Duration over Int = {
+domain Duration over Int
     suffix sec : Int = value => Duration value
-}
 
 @source timer.every 120 with {
     immediate: 1,

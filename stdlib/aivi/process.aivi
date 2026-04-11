@@ -29,5 +29,4 @@ type ProcessTask = (Task ProcessError ProcessOutput)
 // @source usage pattern:
 // @source process.run { command: "git", args: ["status"] }
 // signal gitStatus : Signal (Result ProcessError ProcessOutput)
-
 export (ProcessSource, ProcessError, SpawnFailed, ProcessTimeout, NonZeroExit, ProcessProtocolError, ProcessStatus, Exited, Killed, ProcessOutput, ProcessConfig, ProcessTask)

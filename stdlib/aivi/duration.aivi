@@ -7,48 +7,37 @@ use aivi.arithmetic (
 
 type DurationError = Text
 
-domain Duration over Int = {
+domain Duration over Int
     suffix ms : Int = n => Duration n
     suffix sec : Int = n => Duration (mul n 1000)
     suffix min : Int = n => Duration (mul n 60000)
     suffix hr : Int = n => Duration (mul n 3600000)
     suffix dy : Int = n => Duration (mul n 86400000)
-
-    type Int -> Duration
-    millis n = Duration n
-
-    type Duration -> Int
-    toMillis duration = duration.carrier
-
-    type Duration -> Int
-    toSeconds duration = div duration.carrier 1000
-
-    type Duration -> Int
-    toMinutes duration = div duration.carrier 60000
-
-    type Duration -> Int
-    toHours duration = div duration.carrier 3600000
-
-    type Duration -> Int
-    toDays duration = div duration.carrier 86400000
-
-    type Int -> Result DurationError Duration
-    trySeconds seconds = seconds < 0
-     T|> Err "Duration cannot be negative"
-     F|> Ok (Duration (mul seconds 1000))
-
-    type Duration -> Duration -> Duration
-    (+) left right = Duration (left.carrier + right.carrier)
-
-    type Duration -> Duration -> Duration
-    (-) left right = Duration (left.carrier - right.carrier)
-
-    type Duration -> Int -> Duration
-    (*) duration n = Duration (mul duration.carrier n)
-
-    type Duration -> Duration -> Bool
-    (<) left right = left.carrier < right.carrier
-}
+    millis : Int -> Duration
+    millis = n => Duration n
+    toMillis : Duration -> Int
+    toMillis = duration => duration.carrier
+    toSeconds : Duration -> Int
+    toSeconds = duration => div duration.carrier 1000
+    toMinutes : Duration -> Int
+    toMinutes = duration => div duration.carrier 60000
+    toHours : Duration -> Int
+    toHours = duration => div duration.carrier 3600000
+    toDays : Duration -> Int
+    toDays = duration => div duration.carrier 86400000
+    trySeconds : Int -> Result DurationError Duration
+    trySeconds = seconds =>
+        seconds < 0
+        T|> Err "Duration cannot be negative"
+        F|> Ok (Duration (mul seconds 1000))
+    (+) : Duration -> Duration -> Duration
+    (+) = left right => Duration (left.carrier + right.carrier)
+    (-) : Duration -> Duration -> Duration
+    (-) = left right => Duration (left.carrier - right.carrier)
+    (*) : Duration -> Int -> Duration
+    (*) = duration n => Duration (mul duration.carrier n)
+    (<) : Duration -> Duration -> Bool
+    (<) = left right => left.carrier < right.carrier
 
 export DurationError
 export Duration

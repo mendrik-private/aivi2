@@ -39,5 +39,4 @@ type PortalTask A = (Task PortalError A)
 // Screenshot:
 // @source portal.screenshot
 // signal screenshot : Signal (Result PortalError PortalScreenshotResult)
-
 export (PortalError, PortalUnavailable, UserCancelled, PortalPermissionDenied, PortalDecodeFailed, PortalFileFilter, PortalFileSelection, SingleFile, MultipleFiles, SelectionCancelled, PortalUriResult, UriOpened, UriOpenCancelled, UriOpenFailed, PortalScreenshotResult, ScreenshotBytes, ScreenshotCancelled, PortalTask)

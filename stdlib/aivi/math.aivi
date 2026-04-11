@@ -94,7 +94,7 @@ func fromDigitsStep = acc d =>
 
 type List Int -> Int
 func fromDigits = ds => ds
-    |> reduce fromDigitsStep 0
+  |> reduce fromDigitsStep 0
 
 type Int -> Int -> Bool
 func checkDivisor = n d => n % d == 0

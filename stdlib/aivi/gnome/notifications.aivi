@@ -11,7 +11,7 @@ type Notification = {
 }
 
 type NotificationError =
-  | NotificationFailed Text
+  NotificationFailed Text
 
 type NotificationResponse =
   | ActionTriggered Text

@@ -6,43 +6,31 @@ type HttpError =
   | RequestFailure Text
 
 type HttpSource = Unit
+
 type Url = Text
+
 type ContentType = Text
+
 type StatusCode = Int
+
 type Header = (Text, Text)
+
 type HttpHeaders = (Map Text Text)
+
 type HttpQuery = (Map Text Text)
+
 type HttpResponse A = (Result HttpError A)
 
 type DecodeMode =
   | Strict
   | Permissive
 
-domain Retry over Int = {
+domain Retry over Int
     suffix times : Int = n => Retry n
-}
 
 value contentTypeJson : ContentType = "application/json"
 value contentTypeForm : ContentType = "application/x-www-form-urlencoded"
 value contentTypePlain : ContentType = "text/plain; charset=utf-8"
 value contentTypeHtml : ContentType = "text/html; charset=utf-8"
 
-export (
-    HttpError, Timeout, DecodeFailure, RequestFailure,
-    HttpSource,
-    Url,
-    ContentType,
-    StatusCode,
-    Header,
-    HttpHeaders,
-    HttpQuery,
-    HttpResponse,
-    DecodeMode,
-    Strict,
-    Permissive,
-    Retry,
-    contentTypeJson,
-    contentTypeForm,
-    contentTypePlain,
-    contentTypeHtml
-)
+export (HttpError, Timeout, DecodeFailure, RequestFailure, HttpSource, Url, ContentType, StatusCode, Header, HttpHeaders, HttpQuery, HttpResponse, DecodeMode, Strict, Permissive, Retry, contentTypeJson, contentTypeForm, contentTypePlain, contentTypeHtml)

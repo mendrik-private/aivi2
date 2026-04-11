@@ -128,10 +128,7 @@ func scanKeep = scan cell =>
 
 type RayScan -> Bool -> RayScan
 func scanStop = scan valid =>
-    scan <| {
-        scanning: False,
-        valid: valid,
-    }
+    scan <| { scanning: False }
 
 type RayScan -> Coord -> Disc -> Disc -> RayScan
 func scanStepHit = scan cell hit disc => hit == otherDisc disc

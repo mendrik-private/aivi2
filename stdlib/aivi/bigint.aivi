@@ -74,19 +74,18 @@ func lessThan = a b =>
     lt a b
 
 type BigInt -> BigInt -> Bool
-func greaterOrEqual = a b =>
-    gt a b
-    T|> True
-    F|> bigEq a b
+func greaterOrEqual = a b => gt a b
+ T|> True
+ F|> bigEq a b
 
 type BigInt -> BigInt -> Bool
-func lessOrEqual = a b =>
-    lt a b
-    T|> True
-    F|> bigEq a b
+func lessOrEqual = a b => lt a b
+ T|> True
+ F|> bigEq a b
 
 // Constants
 value zero : BigInt = fromInt 0
+
 value one : BigInt = fromInt 1
 value negOne : BigInt = neg (fromInt 1)
 
@@ -105,16 +104,14 @@ func isNegative = n =>
 
 // Factorial (recursive — unbounded BigInt result)
 type BigInt -> BigInt
-func factHelper = n =>
-    bigEq n zero
-    T|> one
-    F|> mul n (factHelper (sub n one))
+func factHelper = n => bigEq n zero
+ T|> one
+ F|> mul n (factHelper (sub n one))
 
 type Int -> BigInt
-func factorial = n =>
-    n <= 0
-    T|> one
-    F|> factHelper (fromInt n)
+func factorial = n => n <= 0
+ T|> one
+ F|> factHelper (fromInt n)
 
 @test
 value bigint_fromInt_basic : Task Text Bool = pure (bigEq (fromInt 42) (fromInt 42))
@@ -137,43 +134,4 @@ value bigint_neg_check : Task Text Bool = pure (isNegative (neg (fromInt 1)))
 @test
 value bigint_toText_basic : Task Text Bool = pure (toText (fromInt 42) == "42")
 
-export (
-    fromInt
-    fromText
-    toInt
-    toText
-    add
-    sub
-    mul
-    div
-    bigMod
-    pow
-    neg
-    bigAbs
-    cmp
-    bigEq
-    gt
-    lt
-    parse
-    fromInteger
-    plus
-    minus
-    times
-    dividedBy
-    remainder
-    raiseTo
-    negate
-    absolute
-    equals
-    greaterThan
-    lessThan
-    greaterOrEqual
-    lessOrEqual
-    zero
-    one
-    negOne
-    isZero
-    isPositive
-    isNegative
-    factorial
-)
+export (fromInt, fromText, toInt, toText, add, sub, mul, div, bigMod, pow, neg, bigAbs, cmp, bigEq, gt, lt, parse, fromInteger, plus, minus, times, dividedBy, remainder, raiseTo, negate, absolute, equals, greaterThan, lessThan, greaterOrEqual, lessOrEqual, zero, one, negOne, isZero, isPositive, isNegative, factorial)

@@ -14,8 +14,4 @@ type FsEvent =
 
 type FsSource = Unit
 
-export (
-    FsError, NotFound, PermissionDenied, ReadFailed, WriteFailed, FsProtocolError,
-    FsSource,
-    FsEvent, Created, Changed, Deleted
-)
+export (FsError, NotFound, PermissionDenied, ReadFailed, WriteFailed, FsProtocolError, FsSource, FsEvent, Created, Changed, Deleted)

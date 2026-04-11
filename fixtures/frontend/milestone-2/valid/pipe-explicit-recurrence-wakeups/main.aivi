@@ -1,10 +1,8 @@
-domain Duration over Int = {
+domain Duration over Int
     suffix sec : Int = value => Duration value
-}
 
-domain Retry over Int = {
+domain Retry over Int
     suffix times : Int = value => Retry value
-}
 
 func step = x =>
     x

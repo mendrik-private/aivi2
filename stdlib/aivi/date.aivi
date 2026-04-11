@@ -1,4 +1,9 @@
-use aivi.text (padStart, fromInt, parseInt, split)
+use aivi.text (
+    padStart
+    fromInt
+    parseInt
+    split
+)
 
 type Year = Int
 
@@ -12,13 +17,17 @@ type Minute = Int
 
 type Second = Int
 
-type Date = Date year:Year month:Month day:Day
+type Date =
+  Date year:Year month:Month day:Day
 
-type TimeOfDay = TimeOfDay hour:Hour minute:Minute second:Second
+type TimeOfDay =
+  TimeOfDay hour:Hour minute:Minute second:Second
 
-type DateTime = DateTime date:Date time:TimeOfDay
+type DateTime =
+  DateTime date:Date time:TimeOfDay
 
-type ZonedDateTime = ZonedDateTime dateTime:DateTime zone:Text
+type ZonedDateTime =
+  ZonedDateTime dateTime:DateTime zone:Text
 
 type DayOfWeek =
   | Monday
@@ -29,25 +38,19 @@ type DayOfWeek =
   | Saturday
   | Sunday
 
-domain DateDelta over Int = {
+domain DateDelta over Int
     suffix dy : Int = n => DateDelta n
     suffix wk : Int = n => DateDelta (n * 7)
-
-    type Int -> DateDelta
-    days n = DateDelta n
-
-    type DateDelta -> DateDelta -> DateDelta
-    (+) left right = DateDelta (left.carrier + right.carrier)
-
-    type DateDelta -> DateDelta -> DateDelta
-    (-) left right = DateDelta (left.carrier - right.carrier)
-
-    type DateDelta -> Int -> DateDelta
-    (*) delta n = DateDelta (delta.carrier * n)
-
-    type DateDelta -> DateDelta -> Bool
-    (<) left right = left.carrier < right.carrier
-}
+    days : Int -> DateDelta
+    days = n => DateDelta n
+    (+) : DateDelta -> DateDelta -> DateDelta
+    (+) = left right => DateDelta (left.carrier + right.carrier)
+    (-) : DateDelta -> DateDelta -> DateDelta
+    (-) = left right => DateDelta (left.carrier - right.carrier)
+    (*) : DateDelta -> Int -> DateDelta
+    (*) = delta n => DateDelta (delta.carrier * n)
+    (<) : DateDelta -> DateDelta -> Bool
+    (<) = left right => left.carrier < right.carrier
 
 type Date -> Year
 func getYear = date => date
@@ -185,7 +188,6 @@ func toZoned = dt zone =>
     ZonedDateTime dt zone
 
 value midnight : TimeOfDay = TimeOfDay 0 0 0
-
 value epoch : Date = Date 1970 1 1
 
 @test
@@ -219,8 +221,7 @@ value date_toIso : Task Text Bool = pure (dateToIso (Date 2024 6 15) == "2024-06
 value date_timeToIso : Task Text Bool = pure (timeToIso (TimeOfDay 14 30 0) == "14:30:00")
 
 @test
-value date_dateTimeToIso : Task Text Bool =
-    pure (dateTimeToIso (DateTime (Date 2024 6 15) (TimeOfDay 14 30 0)) == "2024-06-15T14:30:00")
+value date_dateTimeToIso : Task Text Bool = pure (dateTimeToIso (DateTime (Date 2024 6 15) (TimeOfDay 14 30 0)) == "2024-06-15T14:30:00")
 
 @test
 value date_getYear : Task Text Bool = pure (getYear (Date 2024 6 15) == 2024)
@@ -237,52 +238,4 @@ value date_dayOfWeekName : Task Text Bool = pure (dayOfWeekName Monday == "Monda
 @test
 value date_dayOfWeekIndex : Task Text Bool = pure (dayOfWeekIndex Friday == 5)
 
-export (
-    Year
-    Month
-    Day
-    Hour
-    Minute
-    Second
-    Date
-    TimeOfDay
-    DateTime
-    ZonedDateTime
-    DayOfWeek
-    DateDelta
-    Monday
-    Tuesday
-    Wednesday
-    Thursday
-    Friday
-    Saturday
-    Sunday
-    getYear
-    getMonth
-    getDay
-    getHour
-    getMinute
-    getSecond
-    getDate
-    getTime
-    getDateTime
-    getZone
-    isLeapYear
-    daysInFeb
-    daysInMonth
-    pad2
-    pad4
-    dateToIso
-    timeToIso
-    dateTimeToIso
-    zonedToIso
-    dateEq
-    dateLt
-    dayOfWeekName
-    dayOfWeekShort
-    dayOfWeekIndex
-    toDateTime
-    toZoned
-    midnight
-    epoch
-)
+export (Year, Month, Day, Hour, Minute, Second, Date, TimeOfDay, DateTime, ZonedDateTime, DayOfWeek, DateDelta, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday, getYear, getMonth, getDay, getHour, getMinute, getSecond, getDate, getTime, getDateTime, getZone, isLeapYear, daysInFeb, daysInMonth, pad2, pad4, dateToIso, timeToIso, dateTimeToIso, zonedToIso, dateEq, dateLt, dayOfWeekName, dayOfWeekShort, dayOfWeekIndex, toDateTime, toZoned, midnight, epoch)

@@ -1,11 +1,7 @@
-domain Duration over Int = {
+domain Duration over Int
     suffix ms : Int = value => Duration value
-    type Duration -> Int -> Duration
-    (*)
-}
+    (*) : Duration -> Int -> Duration
 
-domain Path over Text = {
+domain Path over Text
     suffix root : Text = value => Path value
-    type Path -> Text -> Path
-    (/)
-}
+    (/) : Path -> Text -> Path

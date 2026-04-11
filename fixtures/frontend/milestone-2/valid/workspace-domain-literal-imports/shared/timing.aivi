@@ -1,8 +1,6 @@
-domain Duration over Int = {
+domain Duration over Int
     suffix ms : Int = value => Duration value
     suffix sec : Int = value => Duration value
-    type Duration -> Duration -> Duration
-    (+)
-}
+    (+) : Duration -> Duration -> Duration
 
 export Duration

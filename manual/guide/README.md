@@ -47,7 +47,7 @@ A score and a player ID are both integers — but they are not the same thing. D
 
 | Page | Description |
 | --- | --- |
-| [domains.md](domains.md) | Declaring domains, literal suffixes, named members, operators, generics, and the `.carrier` accessor |
+| [domains.md](domains.md) | Declaring domains, suffix constructors, named members, operators, generics, and the `.carrier` accessor |
 
 ---
 
@@ -115,4 +115,3 @@ Classes and modules provide the extensibility layer. Read these after the five c
 > It is a sidecar: reach for it when you need to know what a specific module exports,
 > not as the primary way to learn the language. The five stories above are the language;
 > the stdlib is the toolbox.
-

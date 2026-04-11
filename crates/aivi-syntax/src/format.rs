@@ -1747,12 +1747,10 @@ impl Formatter {
             return vec![header];
         };
 
-        header.push_str(" = {");
         let mut lines = vec![header];
         for member in &body.members {
             lines.extend(self.format_domain_member(member));
         }
-        lines.push("}".to_owned());
         lines
     }
 
@@ -1865,13 +1863,14 @@ impl Formatter {
 
     fn format_domain_member(&self, member: &DomainMember) -> Vec<String> {
         let mut lines = Vec::new();
+        let member_name = self.format_domain_member_name(&member.name);
 
         // Suffix members keep their authored `suffix ms : Int = ...` surface.
         if matches!(member.name, DomainMemberName::Literal(_)) {
             let mut header = format!(
                 "{}{}",
                 spaces(INDENT_WIDTH),
-                self.format_domain_member_name(&member.name)
+                member_name
             );
             if let Some(annotation) = &member.annotation {
                 header.push_str(" : ");
@@ -1900,9 +1899,9 @@ impl Formatter {
             return lines;
         }
 
-        // Signature members: emit `type TypeExpr` line if annotated
+        // Signature members: emit a same-name annotation line in the canonical domain surface.
         if let Some(annotation) = &member.annotation {
-            let prefix = format!("{}type ", spaces(INDENT_WIDTH));
+            let prefix = format!("{}{} : ", spaces(INDENT_WIDTH), member_name);
             let force_break = self.should_force_type_break(display_width(&prefix), annotation);
             let block = self.format_type_block(annotation, force_break);
             if block.is_inline() {
@@ -1919,32 +1918,51 @@ impl Formatter {
         let mut header = format!(
             "{}{}",
             spaces(INDENT_WIDTH),
-            self.format_domain_member_name(&member.name)
+            member_name
         );
-        for parameter in &member.parameters {
-            header.push(' ');
-            header.push_str(&parameter.text);
-        }
 
         let Some(body) = &member.body else {
-            // Declaration-only: just the name
-            lines.push(header);
+            if member.annotation.is_none() {
+                lines.push(header);
+            }
             return lines;
         };
 
-        let force_break =
-            self.should_force_expr_break(display_width(&format!("{header} = ")), body);
-        let block = self.format_expr_block(body, force_break);
-        if block.is_inline() {
-            lines.push(format!(
-                "{header} = {}",
-                block.inline_text().expect("inline block")
-            ));
-        } else if block.starts_with_delimiter() {
-            lines.extend(block.prefixed(&format!("{header} = ")).into_lines());
+        if member.parameters.is_empty() {
+            let force_break =
+                self.should_force_expr_break(display_width(&format!("{header} = ")), body);
+            let block = self.format_expr_block(body, force_break);
+            if block.is_inline() {
+                lines.push(format!(
+                    "{header} = {}",
+                    block.inline_text().expect("inline block")
+                ));
+            } else if block.starts_with_delimiter() {
+                lines.extend(block.prefixed(&format!("{header} = ")).into_lines());
+            } else {
+                lines.push(format!("{header} ="));
+                lines.extend(block.indented(INDENT_WIDTH * 2).into_lines());
+            }
         } else {
-            lines.push(format!("{header} ="));
-            lines.extend(block.indented(INDENT_WIDTH * 2).into_lines());
+            header.push_str(" =");
+            for parameter in &member.parameters {
+                header.push(' ');
+                header.push_str(&parameter.text);
+            }
+            header.push_str(" =>");
+            let force_break = self.should_force_expr_break(INDENT_WIDTH * 2, body);
+            let block = self.format_expr_block(body, force_break);
+            if block.is_inline() {
+                lines.push(format!(
+                    "{header} {}",
+                    block.inline_text().expect("inline block")
+                ));
+            } else if block.starts_with_delimiter() {
+                lines.extend(block.prefixed(&format!("{header} ")).into_lines());
+            } else {
+                lines.push(header);
+                lines.extend(block.indented(INDENT_WIDTH * 2).into_lines());
+            }
         }
         lines
     }
@@ -3998,17 +4016,13 @@ value view =
         assert_eq!(
             formatted,
             concat!(
-                "domain Duration over Int = {\n",
+                "domain Duration over Int\n",
                 "    suffix ms : Int = value => Duration value\n",
-                "    type Duration -> Int -> Duration\n",
-                "    (*)\n",
-                "}\n",
+                "    (*) : Duration -> Int -> Duration\n",
                 "\n",
-                "domain Path over Text = {\n",
+                "domain Path over Text\n",
                 "    suffix root : Text = value => Path value\n",
-                "    type Path -> Text -> Path\n",
-                "    (/)\n",
-                "}\n",
+                "    (/) : Path -> Text -> Path\n",
             )
         );
     }
@@ -4042,10 +4056,9 @@ value view =
             concat!(
                 "type Builder = Int -> Duration\n",
                 "\n",
-                "domain Duration over Int = {\n",
-                "    type Builder\n",
-                "    make raw = raw\n",
-                "}\n",
+                "domain Duration over Int\n",
+                "    make : Builder\n",
+                "    make = raw => raw\n",
             )
         );
     }
@@ -4104,10 +4117,8 @@ value view =
         assert_eq!(
             formatted,
             concat!(
-                "domain Bucket over Int = {\n",
-                "    type Bucket -> Int -> Bucket\n",
-                "    (%)\n",
-                "}\n",
+                "domain Bucket over Int\n",
+                "    (%) : Bucket -> Int -> Bucket\n",
             )
         );
     }
@@ -4120,9 +4131,8 @@ value view =
         assert_eq!(
             formatted,
             concat!(
-                "domain Duration over Int = {\n",
+                "domain Duration over Int\n",
                 "    suffix ms : Int = value => Duration value\n",
-                "}\n",
                 "\n",
                 "value delay : Duration = 250ms\n",
                 "value applied = wrap 250ms\n",

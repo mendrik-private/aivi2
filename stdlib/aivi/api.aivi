@@ -19,9 +19,4 @@ type ApiSource = Unit
 
 type ApiResponse A = (Result ApiError A)
 
-export (
-    ApiError, ApiTimeout, ApiDecodeFailure, ApiRequestFailure, ApiUnauthorized, ApiNotFound, ApiServerError,
-    ApiAuth, BearerToken, BasicAuth, ApiKey, ApiKeyQuery, OAuth2,
-    ApiSource,
-    ApiResponse
-)
+export (ApiError, ApiTimeout, ApiDecodeFailure, ApiRequestFailure, ApiUnauthorized, ApiNotFound, ApiServerError, ApiAuth, BearerToken, BasicAuth, ApiKey, ApiKeyQuery, OAuth2, ApiSource, ApiResponse)

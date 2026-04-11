@@ -1,8 +1,8 @@
 type UserDraft =
-  | UserDraft Text Text Int
+  UserDraft Text Text Int
 
 type NamePair =
-  | NamePair Text Text
+  NamePair Text Text
 
 signal nameText = "Ada"
 signal emailText = "ada@example.com"

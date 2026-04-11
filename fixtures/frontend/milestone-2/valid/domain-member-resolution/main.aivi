@@ -1,22 +1,15 @@
-domain Duration over Int = {
+domain Duration over Int
     suffix ms : Int = value => Duration value
-    type Int -> Duration
-    make
-    type Duration -> Int
-    millis duration = duration.carrier
-}
+    make : Int -> Duration
+    millis : Duration -> Int
+    millis = duration => duration.carrier
 
-domain Count over Int = {
-    type Int -> Count
-    make
-}
+domain Count over Int
+    make : Int -> Count
 
-domain NonEmpty A over List A = {
-    type A -> NonEmpty A
-    singleton
-    type NonEmpty A -> A
-    head
-}
+domain NonEmpty A over List A
+    singleton : A -> NonEmpty A
+    head : NonEmpty A -> A
 
 value delay : Duration = make 250
 value delayMillis : Int = millis delay

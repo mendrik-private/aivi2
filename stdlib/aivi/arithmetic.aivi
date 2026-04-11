@@ -1,29 +1,34 @@
-/** Integer arithmetic intrinsics — pure, wrapping semantics **/
+use aivi.arithmetic (
+    add
+    sub
+    mul
+    div
+    mod
+    neg
+)
 
-use aivi.arithmetic (add, sub, mul, div, mod, neg)
-
-/** Add two integers **/
 type Int -> Int -> Int
-func intAdd = a b => add a b
+func intAdd = a b =>
+    add a b
 
-/** Subtract two integers **/
 type Int -> Int -> Int
-func intSub = a b => sub a b
+func intSub = a b =>
+    sub a b
 
-/** Multiply two integers **/
 type Int -> Int -> Int
-func intMul = a b => mul a b
+func intMul = a b =>
+    mul a b
 
-/** Integer (truncating) division **/
 type Int -> Int -> Int
-func intDiv = a b => div a b
+func intDiv = a b =>
+    div a b
 
-/** Integer remainder **/
 type Int -> Int -> Int
-func intMod = a b => mod a b
+func intMod = a b =>
+    mod a b
 
-/** Negate an integer **/
 type Int -> Int
-func intNeg = a => neg a
+func intNeg = a =>
+    neg a
 
 export (intAdd, intSub, intMul, intDiv, intMod, intNeg)

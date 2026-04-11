@@ -1,6 +1,4 @@
-use aivi.list (
-    length
-)
+use aivi.list (length)
 
 type Int -> Int -> Int
 func add = total x =>
@@ -20,39 +18,39 @@ func nonNegative = n => n >= 0
  F|> Err "negative"
 
 value transformed : Int = 20
- |> #before before + 1 #after
- |> after + before
+  |> #before before + 1 #after
+  |> after + before
 
 value tapped : Int = 20
- | #current current + 1 #same
- |> same + current
+  | #current current + 1 #same
+  |> same + current
 
 value gated : Option Int = 2
  ?|> #candidate candidate > 0 #kept
- |> kept
+  |> kept
 
 value caseMemo : Int = Ready 2
  ||> #input Ready value -> value + 1 #resolved
- ||> Missing -> 0 #resolved
- |> resolved
+ ||> Missing            -> 0 #resolved
+  |> resolved
 
 value truthyMemo : Int = Some 2
  T|> #input . + 1 #resolved
  F|> 0 #resolved
- |> resolved
+  |> resolved
 
 value mapped : List Int = [1, 2, 3]
  *|> #source . + length source #result
- |> result
+  |> result
 
 value joined : Int = [1, 2, 3]
  *|> . + 1
  <|* #mapped reduce add 0 mapped #total
- |> total
+  |> total
 
 value validated : Result Text Int = 2
  !|> #candidate nonNegative candidate #checked
- |> checked
+  |> checked
 
 signal source : Signal Int = 1
 
@@ -63,16 +61,16 @@ signal deltaValue : Signal Int = source
  -|> #current current
 
 signal delayedValue : Signal Int = source
- |> delay 10ms #later
- | later
+  |> delay 10ms #later
+  | later
 
 signal burstValue : Signal Int = source
- |> burst 10ms 3times #later
- | later
+  |> burst 10ms 3times #later
+  | later
 
 signal accumulated : Signal Int = source
  +|> #event 0 addEvent #total
- | total
+  | total
 
 @recur.timer 5
 signal recurred : Signal Int = 0

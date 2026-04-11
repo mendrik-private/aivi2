@@ -1,10 +1,8 @@
-domain Duration over Int = {
+domain Duration over Int
     suffix ms : Int = value => Duration value
-    type Duration -> Duration -> Duration
-    (+)
-    type Duration -> Int
-    toInt duration = duration.carrier
-}
+    (+) : Duration -> Duration -> Duration
+    toInt : Duration -> Int
+    toInt = duration => duration.carrier
 
 value total : Duration = 10ms + 5ms
 value raw : Int = toInt total

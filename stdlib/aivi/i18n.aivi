@@ -1,4 +1,7 @@
-use aivi.i18n (tr, trn)
+use aivi.i18n (
+    tr
+    trn
+)
 
 type Text -> Text
 func translate = t =>
@@ -8,9 +11,4 @@ type Text -> Text -> Int -> Text
 func translatePlural = singular plural count =>
     trn singular plural count
 
-export (
-    tr
-    trn
-    translate
-    translatePlural
-)
+export (tr, trn, translate, translatePlural)

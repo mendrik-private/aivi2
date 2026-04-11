@@ -2,8 +2,7 @@ class Ready A = {
     ready : A -> Bool
 }
 
-type Blob =
-  | Blob Bytes
+type Blob = Blob Bytes
 
 instance Ready Blob = {
     ready blob = blob and True

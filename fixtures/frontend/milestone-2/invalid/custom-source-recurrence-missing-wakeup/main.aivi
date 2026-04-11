@@ -1,4 +1,5 @@
-func step = x=>    x
+func step = x =>
+    x
 
 @source custom.feed 0
 signal broken : Signal Int = 0

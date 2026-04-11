@@ -3,8 +3,7 @@ type HttpError =
 
 type Session = { token: Text }
 
-type Pair A =
-  | Pair A (Option A)
+type Pair A = Pair A (Option A)
 
 value requestBody = Pair 1 None
 

@@ -22,5 +22,4 @@ type ClipboardWriteTask = (Task ClipboardError Unit)
 //
 // Task usage for writing (not @source — write is imperative):
 // Use clipboardWrite from aivi.gtk (not available yet — future work)
-
 export (ClipboardError, ClipboardUnavailable, ClipboardEmpty, ClipboardTypeMismatch, ClipboardWriteFailed, ClipboardContent, TextContent, UriListContent, ImageContent, HtmlContent, EmptyClipboard, ClipboardTask, ClipboardWriteTask)

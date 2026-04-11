@@ -2,8 +2,7 @@ class Eq A = {
     (==) : A -> A -> Bool
 }
 
-type Blob =
-  | Blob Bytes
+type Blob = Blob Bytes
 
 type Blob -> Blob -> Bool
 func blobEquals = left right =>
@@ -21,8 +20,7 @@ class Compare A = {
     same : A -> A -> Bool
 }
 
-type Label =
-  | Label Text
+type Label = Label Text
 
 instance Compare Label = {
     same left right = left == right

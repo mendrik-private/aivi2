@@ -30,12 +30,11 @@ This declares a `Score` domain whose runtime carrier is `Int`.
 
 ## Literal suffixes
 
-A domain can define literal suffixes:
+A domain can define integer suffix constructors:
 
 ```aivi
-domain Score over Int = {
-    literal pts : Int -> Score
-}
+domain Score over Int
+    suffix pts : Int = n => Score n
 
 value highScore : Score = 9000pts
 ```
@@ -44,14 +43,13 @@ Suffixes must be explicit and unambiguous. In current AIVI they must also be at 
 
 ## Operators and named members
 
-Domains can attach operators and named methods inside a block body:
+Domains can attach operators and named methods directly under the declaration:
 
 ```aivi
-domain Score over Int = {
-    literal pts : Int -> Score
-    type Score -> Score -> Score
-    (+)
-}
+domain Score over Int
+    suffix pts : Int = n => Score n
+    (+) : Score -> Score -> Score
+    (+) = left right => Score (left.carrier + right.carrier)
 ```
 
 That lets you write domain-aware expressions such as:
@@ -61,45 +59,31 @@ value total : Score = 10pts + 5pts
 value raw : Int = total.carrier
 ```
 
-Callable members can also carry authored bodies. Declare the type first, then add a binding line with the implementation:
+Callable members use the same two-line pattern: annotate the member, then bind it.
 
 ```aivi
-domain Score over Int = {
-    type Int -> Score
-    fromRaw raw = raw
-}
+domain Score over Int
+    fromRaw : Int -> Score
+    fromRaw = raw => Score raw
 ```
 
-Inside the authored body, the current domain is implemented against its carrier representation. That means `fromRaw raw = raw` is valid for `Score over Int`, while callers still see `fromRaw : Int -> Score`.
+The body is checked against the carrier view of the domain, while callers still see the nominal signature.
 
-## Block body syntax
+## `self` and receiver-style members
 
-When a domain has multiple members, group them inside `= { ... }`:
-
-```aivi
-domain Score over Int = {
-    literal pts : Int -> Score
-    type Score -> Score -> Bool
-    (<)
-}
-```
-
-Each member follows the same rules as a standalone member line — the `= { ... }` form simply groups them together and makes the scope visual.
-
-Authored bodies work inside blocks too. Inside an authored body, `self` refers to the domain-typed receiver — its type is implicit and omitted from the annotation:
+When a member operates on the current domain value, you can write it in receiver style with `self`:
 
 ```aivi
-domain Snake over List Cell = {
-    type List Cell -> Snake
-    fromCells cells = cells
-    type Cell
+domain Snake over List Cell
+    fromCells : List Cell -> Snake
+    fromCells = cells => Snake cells
+    head : Cell
     head = getOrElse (Cell 0 0) (listHead self)
-    type Int
+    length : Int
     length = listLength self
-}
 ```
 
-`fromCells` is a constructor — it takes a carrier value and wraps it. Since it does not use `self`, its annotation stays explicit. `head` and `length` operate on an existing `Snake`, so they use `self` and their annotations omit `Snake ->` from the first position.
+`fromCells` stays explicit because it constructs a `Snake` from a carrier value. `head` and `length` use `self`, so their receiver is implicit in the annotation.
 
 ## Generic domains
 
@@ -116,9 +100,8 @@ This is useful when you want stronger guarantees than the carrier type alone can
 Every domain has a built-in `.carrier` accessor that returns the underlying carrier value at zero cost. You do not need to declare it — the compiler synthesizes it automatically:
 
 ```aivi
-domain Score over Int = {
-    literal pts : Int -> Score
-}
+domain Score over Int
+    suffix pts : Int = n => Score n
 
 value raw : Int = (100pts).carrier
 ```
@@ -138,9 +121,8 @@ Unlike user-defined domain members, `.carrier` is always available on every doma
 | Form | Meaning |
 | --- | --- |
 | `domain Name over Carrier` | Declare a domain |
-| `literal pts : Int -> Score` | Add a literal suffix |
-| `(+) : D -> D -> D` | Add an operator |
-| `member : T` + `member x = expr` | Add an authored callable member |
+| `suffix pts : Int = expr` | Add an integer suffix constructor |
+| `(+) : D -> D -> D` + `(+) = x y => expr` | Add an operator |
+| `member : T` + `member = x => expr` | Add an authored callable member |
 | `self` | Implicit domain-typed receiver in authored bodies |
-| `domain Name over Carrier = { ... }` | Group domain members in a block |
 | `.carrier` | Built-in accessor returning the carrier value (always available) |

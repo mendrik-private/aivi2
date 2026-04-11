@@ -39,5 +39,4 @@ type ImageData = {
 // Task usage for one-shot loads:
 // type Text -> Task ImageError ImageData
 // Use loadImage from aivi.gtk (future work — requires GDK texture)
-
 export (ImageError, ImageNotFound, ImageDecodeFailed, UnsupportedFormat, ImageUnavailable, ImageFormat, Png, Jpeg, Webp, Svg, Gif, UnknownFormat, ImageSize, ImageMetadata, ImageTask, ImageData)

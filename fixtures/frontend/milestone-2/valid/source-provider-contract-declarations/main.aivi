@@ -1,9 +1,8 @@
 type Mode =
   | Stream
 
-domain Duration over Int = {
+domain Duration over Int
     suffix ms : Int = value => Duration value
-}
 
 provider custom.feed
     argument path : Text

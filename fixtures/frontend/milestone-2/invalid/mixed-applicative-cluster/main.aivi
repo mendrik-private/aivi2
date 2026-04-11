@@ -1,5 +1,5 @@
 type NamePair =
-  | NamePair Text Text
+  NamePair Text Text
 
 value first : (Option Text) = Some "Ada"
 

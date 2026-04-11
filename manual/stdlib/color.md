@@ -21,28 +21,17 @@ use aivi.color (Color)
 ## Domain
 
 ```aivi
-domain Color over Int = {
-    type Int -> Color
-    argb
-    type Color -> Int
-    red
-    type Color -> Int
-    green
-    type Color -> Int
-    blue
-    type Color -> Int
-    alpha
-    type Color -> Int -> Color
-    withAlpha
-    type Color -> Int -> Color
-    withRed
-    type Color -> Int -> Color
-    withGreen
-    type Color -> Int -> Color
-    withBlue
-    type Color -> Color -> Float -> Color
-    blend
-}
+domain Color over Int
+    argb : Int -> Color
+    red : Color -> Int
+    green : Color -> Int
+    blue : Color -> Int
+    alpha : Color -> Int
+    withAlpha : Color -> Int -> Color
+    withRed : Color -> Int -> Color
+    withGreen : Color -> Int -> Color
+    withBlue : Color -> Int -> Color
+    blend : Color -> Color -> Float -> Color
 ```
 
 `Color` is useful when a field should clearly mean "this is a color" rather than "this is
@@ -71,8 +60,8 @@ func toArgb = color =>
 
 ## Domain members
 
-The members declared inside the `Color` domain -- `argb`, `red`, `green`, `blue`, `alpha`,
-`withAlpha`, `withRed`, `withGreen`, `withBlue`, `blend` -- are part of the domain's internal
+The members declared inside the `Color` domain — `argb`, `red`, `green`, `blue`, `alpha`,
+`withAlpha`, `withRed`, `withGreen`, `withBlue`, `blend` — are part of the domain's internal
 implementation. They are used by the runtime's theming layer and are not individually
 importable from user code.
 

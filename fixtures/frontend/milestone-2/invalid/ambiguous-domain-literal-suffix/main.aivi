@@ -1,9 +1,7 @@
-domain Duration over Int = {
+domain Duration over Int
     suffix ms : Int = value => Duration value
-}
 
-domain Milliseconds over Int = {
+domain Milliseconds over Int
     suffix ms : Int = value => Milliseconds value
-}
 
 value delay = 250ms

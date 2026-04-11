@@ -1,6 +1,5 @@
 @tagged
-type Banner =
-  | Banner Text
+type Banner = Banner Text
 
 type Banner -> Text
 @memoized

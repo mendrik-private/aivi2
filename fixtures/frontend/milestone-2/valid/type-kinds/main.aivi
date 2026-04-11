@@ -22,20 +22,14 @@ type TagSet = (Set Text)
 
 type PendingProfiles = (Task HttpError (Map Text Profile))
 
-domain ResourceId A over A = {
-    type A -> ResourceId A
-    wrap
-}
+domain ResourceId A over A
+    wrap : A -> ResourceId A
 
-domain HeaderBag over Map Text Text = {
-    type Text -> HeaderBag -> Option Text
-    lookup
-}
+domain HeaderBag over Map Text Text
+    lookup : Text -> HeaderBag -> Option Text
 
-domain Tags over Set Text = {
-    type Text -> Tags -> Bool
-    contains
-}
+domain Tags over Set Text
+    contains : Text -> Tags -> Bool
 
 type ResourceText = (ResourceId Text)
 

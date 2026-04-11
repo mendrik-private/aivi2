@@ -11,13 +11,11 @@ type DecodeMode =
   | Strict
   | Permissive
 
-domain Duration over Int = {
+domain Duration over Int
     suffix sec : Int = value => Duration value
-}
 
-domain Repeat over Int = {
+domain Repeat over Int
     suffix times : Int = value => Repeat value
-}
 
 @source http.get "/users" with {
     decode: Strict,

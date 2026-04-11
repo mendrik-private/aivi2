@@ -5,8 +5,7 @@ use aivi.network (
 
 type Bool = True | False
 
-type Vec2 =
-  | Vec2 Int Int
+type Vec2 = Vec2 Int Int
 
 type Result A = Err Text | Ok A
 

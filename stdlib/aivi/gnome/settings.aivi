@@ -5,16 +5,12 @@ type SettingsError =
   | SettingsUnavailable
 
 // Domain type for GSettings schema IDs (e.g. "org.gnome.desktop.interface")
-domain SettingsSchema over Text = {
-    type Text -> Result SettingsError SettingsSchema
-    parse
-}
+domain SettingsSchema over Text
+    parse : Text -> Result SettingsError SettingsSchema
 
 // Domain type for settings key paths
-domain SettingsKey over Text = {
-    type Text -> SettingsKey
-    make
-}
+domain SettingsKey over Text
+    make : Text -> SettingsKey
 
 // Typed setting values
 type SettingValue =
@@ -32,5 +28,4 @@ type SettingsTask A = (Task SettingsError A)
 //
 // @source gsettings.watch "org.gnome.desktop.interface" "text-scaling-factor"
 // signal textScale : Signal (Result SettingsError Float)
-
 export (SettingsError, SchemaNotFound, KeyNotFound, TypeMismatch, SettingsUnavailable, SettingsSchema, SettingsKey, SettingValue, SettingBool, SettingInt, SettingFloat, SettingText, SettingList, SettingsTask)

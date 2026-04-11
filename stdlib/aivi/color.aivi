@@ -5,36 +5,25 @@ use aivi.bits (
     shiftRightUnsigned
 )
 
-domain Color over Int = {
-    type Int -> Color
-    argb n = Color n
-
-    type Color -> Int
-    alpha color = and (shiftRightUnsigned color.carrier 24) 255
-
-    type Color -> Int
-    red color = and (shiftRightUnsigned color.carrier 16) 255
-
-    type Color -> Int
-    green color = and (shiftRightUnsigned color.carrier 8) 255
-
-    type Color -> Int
-    blue color = and color.carrier 255
-
-    type Color -> Int -> Color
-    withAlpha color a = Color (or (and color.carrier 16777215) (shiftLeft a 24))
-
-    type Color -> Int -> Color
-    withRed color r = Color (or (and color.carrier 4278255615) (shiftLeft r 16))
-
-    type Color -> Int -> Color
-    withGreen color g = Color (or (and color.carrier 4294902015) (shiftLeft g 8))
-
-    type Color -> Int -> Color
-    withBlue color b = Color (or (and color.carrier 4294967040) b)
-
-    type Color -> Color -> Float -> Color
-    blend
-}
+domain Color over Int
+    argb : Int -> Color
+    argb = n => Color n
+    alpha : Color -> Int
+    alpha = color => and (shiftRightUnsigned color.carrier 24) 255
+    red : Color -> Int
+    red = color => and (shiftRightUnsigned color.carrier 16) 255
+    green : Color -> Int
+    green = color => and (shiftRightUnsigned color.carrier 8) 255
+    blue : Color -> Int
+    blue = color => and color.carrier 255
+    withAlpha : Color -> Int -> Color
+    withAlpha = color a => Color (or (and color.carrier 16777215) (shiftLeft a 24))
+    withRed : Color -> Int -> Color
+    withRed = color r => Color (or (and color.carrier 4278255615) (shiftLeft r 16))
+    withGreen : Color -> Int -> Color
+    withGreen = color g => Color (or (and color.carrier 4294902015) (shiftLeft g 8))
+    withBlue : Color -> Int -> Color
+    withBlue = color b => Color (or (and color.carrier 4294967040) b)
+    blend : Color -> Color -> Float -> Color
 
 export Color

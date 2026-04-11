@@ -19,7 +19,7 @@ type MatrixError =
   | RaggedRows Int Int Int
 
 type Matrix A =
-  | MkMatrix Int Int (List (List A))
+  MkMatrix Int Int (List (List A))
 
 type MatrixIndex = (Int, Int)
 
@@ -71,14 +71,8 @@ func raggedRowsError = rowIndex expected row =>
 
 type Int -> RowValidationState -> (List A) -> Bool -> RowValidationState
 func finishRowValidation = expected state row matches => matches
- T|> {
-        rowIndex: state.rowIndex + 1,
-        error: None
-    }
- F|> {
-        rowIndex: state.rowIndex + 1,
-        error: Some (raggedRowsError state.rowIndex expected row)
-    }
+ T|> { rowIndex: state.rowIndex + 1, error: None }
+ F|> { rowIndex: state.rowIndex + 1, error: Some (raggedRowsError state.rowIndex expected row) }
 
 type Int -> RowValidationState -> (List A) -> RowValidationState
 func validateRowWidth = expected state row => state.error
@@ -160,8 +154,8 @@ func rebuildWithRow = matrix y newRow =>
 
 type Matrix A -> Int -> Int -> A -> (Option (Matrix A))
 func replaceAtCoords = matrix x y value => row matrix y
- ||> None            -> None
- ||> Some targetRow  -> optionFlatMap (rebuildWithRow matrix y) (setRowCell targetRow x value)
+ ||> None           -> None
+ ||> Some targetRow -> optionFlatMap (rebuildWithRow matrix y) (setRowCell targetRow x value)
 
 type Matrix A -> (Int, Int) -> A -> (Option (Matrix A))
 func replaceAt = matrix coord value => coord
@@ -256,7 +250,4 @@ func filled = w h build => w < 0 or h < 0
  T|> MkMatrix 0 0 []
  F|> MkMatrix w h (buildRows w h build)
 
-export (MatrixError, NegativeWidth, NegativeHeight, RaggedRows,
-        Matrix, MatrixIndex, init, fromRows, filled, width, height, rows, row, at, replaceAt,
-        coord, mapWithIndex, reduceWithIndex, coords, entries, positionsWhere, count, modifyAt,
-        replaceMany, indices)
+export (MatrixError, NegativeWidth, NegativeHeight, RaggedRows, Matrix, MatrixIndex, init, fromRows, filled, width, height, rows, row, at, replaceAt, coord, mapWithIndex, reduceWithIndex, coords, entries, positionsWhere, count, modifyAt, replaceMany, indices)

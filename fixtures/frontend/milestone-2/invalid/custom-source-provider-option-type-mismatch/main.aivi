@@ -1,6 +1,5 @@
-domain Duration over Int = {
+domain Duration over Int
     suffix ms : Int = value => Duration value
-}
 
 provider custom.feed
     option timeout : Duration

@@ -20,41 +20,21 @@ type LogSource = Unit
 type LogSink = (LogEntry -> (Task LogError Unit))
 
 value levelDebug : Text = "DEBUG"
-value levelInfo  : Text = "INFO"
-value levelWarn  : Text = "WARN"
+value levelInfo : Text = "INFO"
+value levelWarn : Text = "WARN"
 value levelError : Text = "ERROR"
 value levelFatal : Text = "FATAL"
 
 type LogLevel -> Text
-func levelToText = level =>
-    level
-    ||> Debug -> "DEBUG"
-    ||> Info  -> "INFO"
-    ||> Warn  -> "WARN"
-    ||> Error -> "ERROR"
-    ||> Fatal -> "FATAL"
+func levelToText = level => level
+ ||> Debug -> "DEBUG"
+ ||> Info  -> "INFO"
+ ||> Warn  -> "WARN"
+ ||> Error -> "ERROR"
+ ||> Fatal -> "FATAL"
 
 type Text -> Text -> (Text, Text)
 func kv = k v =>
     (k, v)
 
-export (
-    LogLevel
-    Debug
-    Info
-    Warn
-    Error
-    Fatal
-    LogContext
-    LogEntry
-    LogError
-    LogSource
-    LogSink
-    levelDebug
-    levelInfo
-    levelWarn
-    levelError
-    levelFatal
-    levelToText
-    kv
-)
+export (LogLevel, Debug, Info, Warn, Error, Fatal, LogContext, LogEntry, LogError, LogSource, LogSink, levelDebug, levelInfo, levelWarn, levelError, levelFatal, levelToText, kv)

@@ -1,4 +1,5 @@
-func collect = items=>    items
+func collect = items =>
+    items
 
 value users = []
 

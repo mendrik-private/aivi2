@@ -1,5 +1,5 @@
 type UserDraft =
-  | UserDraft Text Text
+  UserDraft Text Text
 
 signal nameText = "Ada"
 signal emailText = "ada@example.com"

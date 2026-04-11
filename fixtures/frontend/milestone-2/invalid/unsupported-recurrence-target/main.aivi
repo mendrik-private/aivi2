@@ -1,4 +1,5 @@
-func step = x=>    x
+func step = x =>
+    x
 
 value broken : Int = 0
  @|> step

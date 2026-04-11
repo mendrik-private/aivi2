@@ -1,7 +1,8 @@
 type User = { email: Text }
 
 type List Text -> Text
-func joinEmails = items=>    "joined"
+func joinEmails = items =>
+    "joined"
 
 value users : List User = [
     { email: "ada@example.com" }

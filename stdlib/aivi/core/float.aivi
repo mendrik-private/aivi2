@@ -1,4 +1,14 @@
-use aivi.core.float (floor, abs, round, fromInt, toInt, ceil, sqrt, toText, parseText)
+use aivi.core.float (
+    floor
+    abs
+    round
+    fromInt
+    toInt
+    ceil
+    sqrt
+    toText
+    parseText
+)
 
 value pi : Float = 3.141592653589793
 value e : Float = 2.718281828459045
@@ -103,10 +113,7 @@ func roundTo = places n =>
 
 type Float -> Float -> Float -> Float -> Float -> Float
 func cubicBezier = p0 p1 p2 p3 t =>
-    p0 * (1.0 - t) * (1.0 - t) * (1.0 - t)
-    + 3.0 * p1 * t * (1.0 - t) * (1.0 - t)
-    + 3.0 * p2 * t * t * (1.0 - t)
-    + p3 * t * t * t
+    p0 * (1.0 - t) * (1.0 - t) * (1.0 - t) + 3.0 * p1 * t * (1.0 - t) * (1.0 - t) + 3.0 * p2 * t * t * (1.0 - t) + p3 * t * t * t
 
 @test
 value max_prefers_greater : Task Text Bool = pure (max 3.5 2.0 == 3.5)

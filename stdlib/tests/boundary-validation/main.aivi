@@ -333,7 +333,9 @@ signal logger : LogSource
 signal entropy : RandomSource
 
 value healthCheck : Task Text Text = api.get "/health"
+
 signal cargoToml : Signal (Result FsError Text) = workspaceFiles.read "Cargo.toml"
+
 value fsExistsTask : Task Text Bool = workspaceFiles.exists "Cargo.toml"
 value stdoutTask : Task Text Unit = console.stdoutWrite "stdout"
 value stderrTask : Task Text Unit = console.stderrWrite "stderr"
@@ -345,19 +347,11 @@ value randomIntTask : Task Text Int = entropy.int 1 10
 value envListTask : Task Text (List (Text, Text)) = hostEnv.list ""
 
 signal cliArgs : Signal (List Text) = runtime.args
-
 signal cliCwd : Signal Text = runtime.cwd
-
 signal cliToken : Signal (Option Text) = hostEnv.get "ACCESS_TOKEN"
-
 signal stdinText : Signal Text = console.read
-
 signal homeDir : Signal Text = systemPaths.home
-
 signal configHomeDir : Signal Text = systemPaths.configHome
-
 signal dataHomeDir : Signal Text = systemPaths.dataHome
-
 signal cacheHomeDir : Signal Text = systemPaths.cacheHome
-
 signal tempDir : Signal Text = systemPaths.tempDir

@@ -1,22 +1,14 @@
-domain Duration over Int = {
+domain Duration over Int
     suffix ms : Int = value => Duration value
-    type Duration -> Duration -> Duration
-    (+)
-}
+    (+) : Duration -> Duration -> Duration
 
-domain Path over Text = {
+domain Path over Text
     suffix root : Text = value => Path value
-    type Path -> Text -> Path
-    (/)
-}
+    (/) : Path -> Text -> Path
 
-domain NonEmpty A over List A = {
-    type List A -> Option (NonEmpty A)
-    fromList
-    type NonEmpty A -> A
-    head
-    type NonEmpty A -> List A
-    tail
-}
+domain NonEmpty A over List A
+    fromList : List A -> Option (NonEmpty A)
+    head : NonEmpty A -> A
+    tail : NonEmpty A -> List A
 
 export Path

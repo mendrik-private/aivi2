@@ -11,13 +11,11 @@ type Map K V =
   | EmptyMap
   | Entry K V (Map K V)
 
-domain Duration over Int = {
+domain Duration over Int
     suffix sec : Int = value => Duration value
-}
 
-domain Retry over Int = {
+domain Retry over Int
     suffix times : Int = value => Retry value
-}
 
 @source http.get "/users" with {
     headers: Entry "Authorization" "Bearer demo" EmptyMap,

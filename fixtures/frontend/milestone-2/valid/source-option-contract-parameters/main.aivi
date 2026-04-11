@@ -4,7 +4,7 @@ type HttpError =
 type Session = { token: Text }
 
 type Credentials =
-  | Credentials Text Text
+  Credentials Text Text
 
 type DecodeMode =
   | Strict

@@ -1,5 +1,4 @@
-domain Distance over Int = {
+domain Distance over Int
     suffix m : Int = value => Distance value
-}
 
 value walk = 3m

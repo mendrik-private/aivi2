@@ -1,5 +1,4 @@
-type User =
-  | User Text Int
+type User = User Text Int
 
 type LoadState =
   | NotAsked

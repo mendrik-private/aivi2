@@ -44,6 +44,4 @@ value nonEmpty_rejects_empty : Task Text Bool = pure (nonEmpty empty == False)
 @test
 value concat_empty_list : Task Text Bool = pure (isEmpty (concat []))
 
-export (BytesDecodeError, InvalidUtf8, BytesEncoding, Utf8, Base64, Hex, BytesTask,
-        empty, length, get, slice, append, fromText, toText, repeat,
-        isEmpty, nonEmpty, concat)
+export (BytesDecodeError, InvalidUtf8, BytesEncoding, Utf8, Base64, Hex, BytesTask, empty, length, get, slice, append, fromText, toText, repeat, isEmpty, nonEmpty, concat)

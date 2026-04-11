@@ -4,7 +4,7 @@ type Screen =
   | Failed Text
 
 type NamePair =
-  | NamePair Text Text
+  NamePair Text Text
 
 value first = Some "Ada"
 value last = None

@@ -147,22 +147,21 @@ func cellEq = target candidate =>
 The snake is a non-empty list of cells, but we want richer operations than a plain list provides. This is where **domains** come in:
 
 ```aivi
-domain Snake over NonEmptyList Cell = {
-    type NonEmptyList Cell -> Snake
-    fromCells cells = cells
-    type Cell
+domain Snake over NonEmptyList Cell
+    fromCells : NonEmptyList Cell -> Snake
+    fromCells = cells => Snake cells
+    head : Cell
     head = nelHead self
-    type Cell -> Bool
-    contains cell = listContains (cellEq cell) (toList self)
-    type Int
+    contains : Cell -> Bool
+    contains = cell => listContains (cellEq cell) (toList self)
+    length : Int
     length = nelLength self
-    type Cell -> Snake
-    grow cell = cons cell self
-    type Cell -> Snake
-    move cell = fromHeadTail cell (nelInit self)
-    type Direction -> Cell
-    nextHead dir = moveDir dir (nelHead self)
-}
+    grow : Cell -> Snake
+    grow = cell => cons cell self
+    move : Cell -> Snake
+    move = cell => fromHeadTail cell (nelInit self)
+    nextHead : Direction -> Cell
+    nextHead = dir => moveDir dir (nelHead self)
 ```
 
 A domain wraps a carrier type (`NonEmptyList Cell`) with a semantic name (`Snake`) and domain-specific operations. Inside the body, `self` refers to the domain-typed receiver, so `nelHead self` unwraps a `Snake` as the underlying `NonEmptyList Cell`. You call these operations with dot notation: `st.snake.head`, `st.snake.contains h`, `st.snake.grow h`.

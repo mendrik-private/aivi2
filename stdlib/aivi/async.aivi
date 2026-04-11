@@ -1,55 +1,28 @@
 hoist
 
-/** Lifecycle state of an async source signal.
- **
- ** Use with `+|>` to track loading, success, and failure from any
- ** `Result`-producing signal without reaching into the scheduler.
- **
- ** Fields are plain record projections, so once you have a
- ** `Signal (AsyncTracker E A)` you can project directly:
- **
- **   signal users : Signal (AsyncTracker HttpError (List User)) = rawUsers
- **     +|> initialUsers step
- **
- **   // users.pending : Signal Bool
- **   // users.done    : Signal (Option (List User))
- **   // users.error   : Signal (Option HttpError)
- **/
 type AsyncTracker E A = {
     pending: Bool,
     done: Option A,
     error: Option E
 }
 
-/** Step function for use with `+|>`.
- **
- ** On `Ok a`:  clears pending and error, sets done to `Some a`.
- ** On `Err e`: clears pending, preserves the last `done` value so a stale
- **             successful result is still available while the error is shown.
- **/
 type AsyncTracker E A -> Result E A -> AsyncTracker E A
-func step = current result =>
-    result
-    ||> Ok a  -> { pending: False, done: Some a, error: None }
-    ||> Err e -> { pending: False, done: current.done, error: Some e }
+func step = current result => result
+ ||> Ok a  -> { pending: False, done: Some a, error: None }
+ ||> Err e -> { pending: False, done: current.done, error: Some e }
 
-/** Returns `True` while the first result has not yet arrived. **/
 type AsyncTracker E A -> Bool
 func isPending = tracker =>
     tracker.pending
 
-/** Returns `True` when at least one successful result has arrived. **/
 type AsyncTracker E A -> Bool
-func isDone = tracker =>
-    tracker.done
-    ||> None   -> False
-    ||> Some _ -> True
+func isDone = tracker => tracker.done
+ ||> None   -> False
+ ||> Some _ -> True
 
-/** Returns `True` when the most recent result was a failure. **/
 type AsyncTracker E A -> Bool
-func isFailed = tracker =>
-    tracker.error
-    ||> None   -> False
-    ||> Some _ -> True
+func isFailed = tracker => tracker.error
+ ||> None   -> False
+ ||> Some _ -> True
 
 export (AsyncTracker, step, isPending, isDone, isFailed)

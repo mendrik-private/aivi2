@@ -1,5 +1,5 @@
 type NamePair =
-  | NamePair Text Text
+  NamePair Text Text
 
 signal firstName = "Ada"
 signal lastName = "Lovelace"

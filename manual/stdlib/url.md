@@ -28,30 +28,20 @@ use aivi.url (
 ## Domain
 
 ```aivi
-domain Url over Text = {
-    type Text -> Result UrlError Url
-    parse
-    type Url -> Option Text
-    scheme
-    type Url -> Option Text
-    host
-    type Url -> Option Int
-    port
-    type Url -> Text
-    path
-    type Url -> Option Text
-    query
-    type Url -> Option Text
-    fragment
-    type Url -> Text -> Url
-    withPath
-    type Url -> Text -> Url
-    withQuery
-}
+domain Url over Text
+    parse : Text -> Result UrlError Url
+    scheme : Url -> Option Text
+    host : Url -> Option Text
+    port : Url -> Option Int
+    path : Url -> Text
+    query : Url -> Option Text
+    fragment : Url -> Option Text
+    withPath : Url -> Text -> Url
+    withQuery : Url -> Text -> Url
 ```
 
-The domain members -- `parse`, `scheme`, `host`, `port`, `path`, `query`, `fragment`,
-`withPath`, `withQuery` -- are part of the domain's internal implementation and are not
+The domain members — `parse`, `scheme`, `host`, `port`, `path`, `query`, `fragment`,
+`withPath`, `withQuery` — are part of the domain's internal implementation and are not
 individually importable from user code. Use `Url` as an opaque validated type and access
 `.carrier` when the raw text is required.
 

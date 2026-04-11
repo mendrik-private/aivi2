@@ -187,18 +187,17 @@ Rules:
 
 ```aivi
 domain Duration over Int
-    literal ms : Int -> Duration
-    literal sec : Int -> Duration
-    type Int -> Duration
-    millis raw = raw
-    type Int
-    value = self
+    suffix ms : Int = n => Duration n
+    suffix sec : Int = n => Duration (n * 1000)
+    millis : Int -> Duration
+    millis = raw => Duration raw
+    toMillis : Duration -> Int
+    toMillis = duration => duration.carrier
 
 domain Url over Text
-    type Text -> Result UrlError Url
-    parse
-    type Url -> Text
-    value
+    parse : Text -> Result UrlError Url
+    scheme : Url -> Option Text
+    host : Url -> Option Text
 ```
 
 Rules:
@@ -207,13 +206,13 @@ Rules:
 - Construction is explicit.
 - Unwrapping is explicit.
 - No implicit casts to/from the carrier.
-- Callable domain members are declared with a `type TypeExpr` annotation line immediately before the member name line.
+- Domain members use ordinary same-name annotations: `member : TypeExpr`.
 - Callable domain members participate in ordinary term lookup.
-- Callable domain members may include an authored body of the form `name arg1 arg2 = expr` on the same line as the member name.
-- Authored bodies may use the contextual keyword `self` to refer to the domain-typed receiver. When `self` is used, the type annotation omits the domain type from the first position (it is implicit). When `self` is not used, the annotation is the full type.
+- Callable domain members may include an authored body of the form `name = expr`. When the body is function-shaped, the canonical surface is `name = arg1 arg2 => expr`.
+- Authored bodies may use the contextual keyword `self` to refer to the domain-typed receiver. When `self` is used, the type annotation may omit the domain type from the first position because it is implicit. When `self` is not used, the annotation is the full type.
 - Authored bodies are checked against the carrier view of the current domain, while the public signature remains nominal.
-- Bodyless members keep their full type annotation including the domain type where applicable.
-- Literal suffix declarations remain declaration-only and use `literal name : TypeExpr` syntax.
+- Bodyless members stay as annotation-only declarations.
+- Domain suffixes use `suffix name : BaseType = expr` syntax.
 - Unary domain methods can also be projected with `value.member`.
 - Domain projection is still explicit member dispatch; it does not imply implicit carrier casts.
 

@@ -7,8 +7,7 @@ type User = {
     name: Text
 }
 
-type Key =
-  | Key Text
+type Key = Key Text
 
 type FsWatchEvent =
   | Created
@@ -30,13 +29,11 @@ type StreamMode =
 type Map K V =
   | EmptyMap
 
-domain Duration over Int = {
+domain Duration over Int
     suffix sec : Int = value => Duration value
-}
 
-domain Retry over Int = {
+domain Retry over Int
     suffix times : Int = value => Retry value
-}
 
 value authHeaders : Map Text Text = EmptyMap
 
