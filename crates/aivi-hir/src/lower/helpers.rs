@@ -279,7 +279,7 @@ fn domain_member_surface_name(name: &syn::DomainMemberName) -> String {
         syn::DomainMemberName::Signature(syn::ClassMemberName::Operator(operator)) => {
             format!("({})", operator.text)
         }
-        syn::DomainMemberName::Literal(identifier) => format!("literal {}", identifier.text),
+        syn::DomainMemberName::Literal(identifier) => format!("suffix {}", identifier.text),
     }
 }
 
@@ -291,7 +291,7 @@ fn domain_member_surface_key(name: &syn::DomainMemberName) -> String {
         syn::DomainMemberName::Signature(syn::ClassMemberName::Operator(operator)) => {
             format!("operator:{}", operator.text)
         }
-        syn::DomainMemberName::Literal(identifier) => format!("literal:{}", identifier.text),
+        syn::DomainMemberName::Literal(identifier) => format!("suffix:{}", identifier.text),
     }
 }
 

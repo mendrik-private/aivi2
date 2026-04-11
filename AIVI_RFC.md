@@ -520,7 +520,7 @@ Accepted surface forms:
 - decimal literals: ASCII decimal digits with trailing `d`, optionally with one fractional part — `19d`, `19.25d`
 - BigInt literals: ASCII decimal digits with trailing `n` — `123n`
 - adjacent negative literal forms are accepted for built-in numeric families and compact-suffix domain candidates — `-1`, `-3.4`, `-19d`, `-123n`, `-250ms`
-- compact `digits + suffix` is a domain literal suffix candidate only when the suffix is at least two ASCII letters and does not match a built-in non-`Int` literal form: `250ms`, `10sec`, `3min`
+- compact `digits + suffix` is a domain suffix candidate only when the suffix is at least two ASCII letters and does not match a built-in non-`Int` literal form: `250ms`, `10sec`, `3min`
 - spacing is semantic: `250ms` is one suffixed literal candidate; `250 ms` is ordinary application; `-3` is a negative literal form but `- 3` is not
 - leading zeroes do not introduce octal or any other alternate base; `007` is decimal
 - exact one-letter alphabetic compact suffixes are reserved for built-in numeric literal families and future core numeric extensions
@@ -534,7 +534,7 @@ Not part of the literal grammar:
 - built-in hex, binary, or octal integer forms
 - exponent notation
 
-A compact suffix form is well-typed only when exactly one current-module domain literal suffix claims that suffix and accepts the base integer family. Otherwise the literal is rejected as unresolved or ambiguous.
+A compact suffix form is well-typed only when exactly one current-module domain suffix claims that suffix and accepts the base integer family. Otherwise the literal is rejected as unresolved or ambiguous.
 
 ### 6.2.2 Executable numeric literal slice
 
@@ -2574,20 +2574,19 @@ A domain is not a type alias. A domain is not subtyping. A domain does not imply
 
 ```aivi
 domain Duration over Int
-    literal ms : Int -> Duration
-    type Int -> Duration
-    millis raw = raw
-    type Int -> Result DurationError Duration
-    parse
-    type Duration -> Int
-    value duration = duration
+    suffix ms : Int = n => Duration n
+    millis : Int -> Duration
+    millis = raw => Duration raw
+    parse : Int -> Result DurationError Duration
+    toMillis : Duration -> Int
+    toMillis = duration => duration.carrier
 ```
 
 ### 20.2 Core meaning
 
 A domain introduces a nominal type over a carrier type while preserving explicit construction and elimination. The domain owns:
 
-- literal suffixes
+- suffix constructors
 - smart construction
 - carrier access
 - domain-local operators
@@ -2595,7 +2594,7 @@ A domain introduces a nominal type over a carrier type while preserving explicit
 
 ### 20.3 Relation to opaque and branded types
 
-Use `domain` when the nominal wrapper carries domain-owned literal, parsing, decode, or operator surfaces. Use `type` when an ordinary ADT or record suffices.
+Use `domain` when the nominal wrapper carries domain-owned suffix, parsing, decode, or operator surfaces. Use `type` when an ordinary ADT or record suffices.
 
 ### 20.4 Construction and elimination
 
@@ -2603,44 +2602,40 @@ A domain may be introduced only through domain-owned constructors or smart const
 
 ```aivi
 domain Url over Text
-    type Text -> Result UrlError Url
-    parse
-    type Url -> Text
-    value
+    parse : Text -> Result UrlError Url
+    raw : Url -> Text
+    raw = url => url.carrier
 
 domain Duration over Int
-    type Int -> Duration
-    millis
-    type Int -> Result DurationError Duration
-    trySeconds
-    type Duration -> Int
-    value
+    millis : Int -> Duration
+    trySeconds : Int -> Result DurationError Duration
+    toMillis : Duration -> Int
 ```
 
 Construction is explicit. Unwrapping is explicit. Unsafe construction should remain internal or be spelled as such.
 
 Callable domain members enter ordinary term lookup when in scope. No projection syntax for domains in v1.
 
-Callable members may also carry authored bodies: place a `type TypeExpr` annotation line immediately before the member name, and write the body on the same line as the name (`name arg1 arg2 = expr`). Inside authored bodies, the contextual keyword `self` refers to the domain-typed receiver. When `self` appears in the body, the type annotation omits the domain type from its first position (it becomes implicit). When `self` is not used (e.g. constructors), the annotation is the full type. Bodyless members always keep their full annotation. Authored bodies are typechecked against the carrier view of the current domain, while the surface signature stays nominal.
+Callable members may also carry authored bodies: annotate the member with `name : TypeExpr`, then bind it with `name = expr` or the canonical function-shaped form `name = arg1 arg2 => expr`. Inside authored bodies, the contextual keyword `self` refers to the domain-typed receiver. When `self` appears in the body, the annotation may omit the domain type from its first position because the receiver is implicit. When `self` is not used (e.g. constructors), the annotation is the full type. Bodyless members keep only their annotation. Authored bodies are typechecked against the carrier view of the current domain, while the surface signature stays nominal.
 
-### 20.5 Literal suffixes
+### 20.5 Suffix constructors
 
 ```aivi
 domain Duration over Int
-    literal ms : Int -> Duration
-    literal sec : Int -> Duration
-    literal min : Int -> Duration
+    suffix ms : Int = n => Duration n
+    suffix sec : Int = n => Duration (n * 1000)
+    suffix min : Int = n => Duration (n * 60000)
 ```
 
 Enables `250ms`, `10sec`, `3min` as typed `Duration` values.
 
-Literal-suffix rules:
+Suffix rules:
 
 - domain suffix names must be at least two ASCII letters long
 - single-letter alphabetic suffixes are reserved for built-in numeric literal families
 - compact `digits + suffix` is a suffix literal candidate; spaced forms are ordinary application
-- only integer-family domain suffix literals are supported
-- suffix resolution is compile-time only, against current-module domain literal declarations only
+- only integer-family domain suffixes are supported
+- suffix resolution is compile-time only, against current-module domain suffix declarations only
 - no match is an error; more than one current-module match is an ambiguity error
 - imported modules do not extend the literal-suffix search space
 
@@ -2655,19 +2650,15 @@ Examples:
 
 ```aivi
 domain Duration over Int
-    literal ms : Int -> Duration
-    type Duration -> Duration -> Duration
-    (+)
-    type Duration -> Duration -> Duration
-    (-)
-    type Duration -> Int -> Duration
-    (*)
-    type Duration -> Ordering
-    compare
+    suffix ms : Int = n => Duration n
+    (+) : Duration -> Duration -> Duration
+    (+) = left right => Duration (left.carrier + right.carrier)
+    (-) : Duration -> Duration -> Duration
+    (*) : Duration -> Int -> Duration
+    compare : Duration -> Duration -> Ordering
 
 domain Path over Text
-    type Path -> Text -> Path
-    (/)
+    (/) : Path -> Text -> Path
 ```
 
 Operator rules:
@@ -2689,12 +2680,9 @@ Domains attach invariants stronger than the carrier type:
 
 ```aivi
 domain NonEmpty A over List A
-    type List A -> Option (NonEmpty A)
-    fromList
-    type NonEmpty A -> A
-    head
-    type NonEmpty A -> List A
-    tail
+    fromList : List A -> Option (NonEmpty A)
+    head : NonEmpty A -> A
+    tail : NonEmpty A -> List A
 ```
 
 ### 20.8 Parameterized domains
@@ -2743,44 +2731,38 @@ For literal/decode/operator failures, diagnostics should explain whether the fai
 
 ```aivi
 domain Duration over Int
-    literal ms : Int -> Duration
-    literal sec : Int -> Duration
-    type Duration -> Int
-    value
-    type Duration -> Duration -> Duration
-    (+)
+    suffix ms : Int = n => Duration n
+    suffix sec : Int = n => Duration (n * 1000)
+    toMillis : Duration -> Int
+    (+) : Duration -> Duration -> Duration
+    (+) = left right => Duration (left.carrier + right.carrier)
 ```
 
 #### Url
 
 ```aivi
 domain Url over Text
-    type Text -> Result UrlError Url
-    parse
-    type Url -> Text
-    value
+    parse : Text -> Result UrlError Url
+    raw : Url -> Text
+    raw = url => url.carrier
 ```
 
 #### Path
 
 ```aivi
 domain Path over Text
-    type Path -> Text
-    value
-    type Path -> Text -> Path
-    (/)
+    raw : Path -> Text
+    raw = path => path.carrier
+    (/) : Path -> Text -> Path
 ```
 
 #### NonEmpty
 
 ```aivi
 domain NonEmpty A over List A
-    type List A -> Option (NonEmpty A)
-    fromList
-    type NonEmpty A -> A
-    head
-    type NonEmpty A -> List A
-    tail
+    fromList : List A -> Option (NonEmpty A)
+    head : NonEmpty A -> A
+    tail : NonEmpty A -> List A
 ```
 
 ### 20.14 Design boundary
@@ -2788,10 +2770,10 @@ domain NonEmpty A over List A
 The implemented v1 domain slice:
 
 - declarations, callable members, explicit construction and carrier access, explicit decode surfaces, and domain-local operators are in scope
-- literal suffixes are current-module integer-family surfaces only
+- suffix constructors are current-module integer-family surfaces only
 - no implicit casts
 - no projection syntax
-- literal patterns remain on the existing integer/text-only slice; domain literal pattern widening is deferred
+- literal patterns remain on the existing integer/text-only slice; domain suffix pattern widening is deferred
 
 ---
 

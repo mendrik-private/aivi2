@@ -368,7 +368,7 @@ impl<'a> Parser<'a> {
                         self.source_span_of_token(keyword_index),
                         "expected `over` followed by the carrier type",
                     )
-                    .with_help("syntax: domain <Name> over <CarrierType> = { ... }"),
+                    .with_help("syntax: domain <Name> over <CarrierType>"),
             );
             None
         };
