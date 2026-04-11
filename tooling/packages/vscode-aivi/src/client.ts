@@ -14,11 +14,26 @@ export function createClient(
 ): LanguageClient {
   const config = getConfig();
 
+  // The aivi binary links against GTK4/libwayland even for headless
+  // subcommands like `lsp`. Prevent display-server interaction by
+  // clearing Wayland/X11 env vars — otherwise the child process can
+  // corrupt the compositor's keyboard state, causing "stuck key"
+  // auto-repeat in the editor.
+  const lspEnv: Record<string, string> = { ...process.env } as Record<
+    string,
+    string
+  >;
+  delete lspEnv["WAYLAND_DISPLAY"];
+  delete lspEnv["WAYLAND_SOCKET"];
+  delete lspEnv["DISPLAY"];
+  delete lspEnv["GDK_BACKEND"];
+
   const serverOptions: ServerOptions = {
     run: {
       command: config.compilerPath,
       args: ["lsp", ...config.compilerArgs],
       transport: TransportKind.stdio,
+      options: { env: lspEnv },
     },
     debug: {
       command: config.compilerPath,
@@ -31,6 +46,7 @@ export function createClient(
         ...config.compilerArgs,
       ],
       transport: TransportKind.stdio,
+      options: { env: lspEnv },
     },
   };
 
