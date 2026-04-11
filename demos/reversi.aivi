@@ -320,26 +320,26 @@ signal restartClick : Signal Unit
 signal computerTurnRequest = phase
  ?|> phaseIsPreparing
 
-signal computerFlashSchedule : Signal ComputerFlashSchedule = computerTurnRequest | restartClick
+signal computerFlashSchedule = computerTurnRequest | restartClick
   ||> computerTurnRequest _ => ArmComputerFlash
-  ||> restartClick _        => CancelComputerFlash
-  ||> _                     => CancelComputerFlash
+  ||> restartClick _ => CancelComputerFlash
+  ||> _ => CancelComputerFlash
 
 // Reversi animation must stay click-driven. Do not rewrite this to use a timer source.
-signal delayedComputerFlash : Signal ComputerFlashSchedule = computerFlashSchedule
+signal delayedComputerFlash = computerFlashSchedule
   |> burst 120ms 5times
 
 signal computerFlashTick : Signal Event = delayedComputerFlash
-  ||> ArmComputerFlash    => ComputerFlash
+  ||> ArmComputerFlash => ComputerFlash
   ||> CancelComputerFlash => Idle
 
 signal event = placeCell | computerFlashTick | restartClick
-  ||> placeCell cell                  => Click cell
+  ||> placeCell cell => Click cell
   ||> computerFlashTick computerEvent => computerEvent
-  ||> restartClick _                  => Reset
-  ||> _                               => Idle
+  ||> restartClick _ => Reset
+  ||> _ => Idle
 
-signal state : Signal State = event
+signal state = event
  +|> (stateFor (openingBoard 0) HumanReady) step
 
 value main =
