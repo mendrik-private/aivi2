@@ -91,8 +91,97 @@ pub(crate) fn extend_pipe_env_with_stage_memos(
     {
         env.locals.insert(binding, ty);
     }
+    extend_pipe_env_with_stage_result_memo(env, stage, result_subject);
+}
+
+pub(crate) fn extend_pipe_env_with_stage_result_memo(
+    env: &mut GateExprEnv,
+    stage: &PipeStage,
+    result_subject: &GateType,
+) {
     if let Some(binding) = stage.result_memo {
         env.locals.insert(binding, result_subject.clone());
+    }
+}
+
+fn extend_pipe_env_with_fanout_segment_memos(
+    env: &mut GateExprEnv,
+    segment: &crate::PipeFanoutSegment<'_>,
+    stage_env: &GateExprEnv,
+    input_subject: &GateType,
+    result_subject: &GateType,
+    typing: &mut GateTypeContext<'_>,
+) {
+    let Some(carrier) = input_subject.fanout_carrier() else {
+        return;
+    };
+    let Some(element_subject) = input_subject.fanout_element() else {
+        return;
+    };
+    let Some(mapped_element_type) = typing
+        .infer_pipe_body(segment.map_expr(), stage_env, element_subject)
+        .ty
+    else {
+        return;
+    };
+    let mapped_collection_type = typing.apply_fanout_plan(
+        FanoutPlanner::plan(FanoutStageKind::Map, carrier),
+        mapped_element_type,
+    );
+
+    if let Some(binding) = segment.map_stage().result_memo {
+        env.locals.insert(binding, mapped_collection_type.clone());
+    }
+    for stage in segment.filter_stages() {
+        if let Some(binding) = stage.result_memo {
+            env.locals.insert(binding, mapped_collection_type.clone());
+        }
+    }
+    if let Some(join_stage) = segment.join_stage()
+        && let Some(binding) = join_stage.result_memo
+    {
+        env.locals.insert(binding, result_subject.clone());
+    }
+}
+
+fn extend_pipe_env_with_subject_stage_memos(
+    env: &mut GateExprEnv,
+    subject_stage: &crate::PipeSubjectStage<'_>,
+    stage_env: &GateExprEnv,
+    input_subject: &GateType,
+    result_subject: &GateType,
+    typing: &mut GateTypeContext<'_>,
+) {
+    match subject_stage {
+        crate::PipeSubjectStage::Single { stage, .. } => {
+            extend_pipe_env_with_stage_memos(env, stage, input_subject, result_subject);
+        }
+        crate::PipeSubjectStage::FanoutSegment(segment) => {
+            extend_pipe_env_with_fanout_segment_memos(
+                env,
+                segment,
+                stage_env,
+                input_subject,
+                result_subject,
+                typing,
+            );
+        }
+        crate::PipeSubjectStage::TruthyFalsyPair(pair) => {
+            extend_pipe_env_with_stage_memos(
+                env,
+                pair.start_stage(),
+                input_subject,
+                result_subject,
+            );
+        }
+        crate::PipeSubjectStage::CaseRun(run) => {
+            extend_pipe_env_with_stage_memos(
+                env,
+                run.start_stage(),
+                input_subject,
+                result_subject,
+            );
+        }
     }
 }
 
@@ -224,11 +313,13 @@ impl<'pipe> PipeSubjectWalker<'pipe> {
                                 if let (Some(input_subject), Some(result_subject)) =
                                     (current_subject.as_ref(), new_subject.as_ref())
                                 {
-                                    extend_pipe_env_with_stage_memos(
+                                    extend_pipe_env_with_subject_stage_memos(
                                         &mut self.env,
-                                        start_stage,
+                                        subject_stage,
+                                        &stage_env,
                                         input_subject,
                                         result_subject,
+                                        typing,
                                     );
                                 }
                                 self.current = new_subject;
@@ -248,11 +339,13 @@ impl<'pipe> PipeSubjectWalker<'pipe> {
                             if let (Some(input_subject), Some(result_subject)) =
                                 (current_subject.as_ref(), new_subject.as_ref())
                             {
-                                extend_pipe_env_with_stage_memos(
+                                extend_pipe_env_with_subject_stage_memos(
                                     &mut self.env,
-                                    start_stage,
+                                    subject_stage,
+                                    &stage_env,
                                     input_subject,
                                     result_subject,
+                                    typing,
                                 );
                             }
                             self.current = new_subject;

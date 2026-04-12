@@ -9,7 +9,8 @@ use crate::{
     },
     validate::{
         GateExprEnv, GateIssue, GateType, GateTypeContext, PipeSubjectStepOutcome,
-        PipeSubjectWalker, walk_expr_tree,
+        PipeSubjectWalker, extend_pipe_env_with_stage_result_memo, pipe_stage_expr_env,
+        walk_expr_tree,
     },
 };
 
@@ -386,13 +387,25 @@ pub(crate) fn elaborate_fanout_segment(
         }
     };
 
+    let mapped_collection_type = typing.apply_fanout_plan(
+        FanoutPlanner::plan(FanoutStageKind::Map, carrier),
+        mapped_element_type.clone(),
+    );
+    let mut segment_env = env.clone();
+    extend_pipe_env_with_stage_result_memo(
+        &mut segment_env,
+        segment.map_stage(),
+        &mapped_collection_type,
+    );
     let mut filters = Vec::new();
     for (offset, stage) in segment.filter_stages().enumerate() {
         let PipeStageKind::Gate { expr } = stage.kind else {
             unreachable!("validated fan-out filters must use `?|>`");
         };
         let stage_index = segment.map_stage_index() + 1 + offset;
-        match lower_fanout_filter_predicate(module, expr, env, &mapped_element_type, typing) {
+        let filter_env = pipe_stage_expr_env(&segment_env, stage, &mapped_collection_type);
+        match lower_fanout_filter_predicate(module, expr, &filter_env, &mapped_element_type, typing)
+        {
             Ok(runtime_predicate) => {
                 filters.push(FanoutFilterPlan {
                     stage_index,
@@ -410,6 +423,7 @@ pub(crate) fn elaborate_fanout_segment(
                 });
             }
         }
+        extend_pipe_env_with_stage_result_memo(&mut segment_env, stage, &mapped_collection_type);
     }
     if !blockers.is_empty() {
         return FanoutSegmentOutcome::Blocked(BlockedFanoutSegment {
@@ -418,10 +432,6 @@ pub(crate) fn elaborate_fanout_segment(
         });
     }
 
-    let mapped_collection_type = typing.apply_fanout_plan(
-        FanoutPlanner::plan(FanoutStageKind::Map, carrier),
-        mapped_element_type.clone(),
-    );
     let mut result_type = mapped_collection_type.clone();
     let mut join = None;
 
@@ -429,7 +439,8 @@ pub(crate) fn elaborate_fanout_segment(
         let join_expr = segment
             .join_expr()
             .expect("join stage index implies a join expression");
-        let join_info = typing.infer_pipe_body(join_expr, env, &mapped_collection_type);
+        let join_env = pipe_stage_expr_env(&segment_env, stage, &mapped_collection_type);
+        let join_info = typing.infer_pipe_body(join_expr, &join_env, &mapped_collection_type);
         let mut join_blockers = join_info
             .issues
             .into_iter()
@@ -454,7 +465,7 @@ pub(crate) fn elaborate_fanout_segment(
         let runtime_expr = match lower_gate_pipe_body_runtime_expr(
             module,
             join_expr,
-            env,
+            &join_env,
             &collection_subject,
             typing,
         ) {
@@ -883,6 +894,92 @@ value joinedEmails:Text =
                     GateType::List(Box::new(GateType::Primitive(BuiltinType::Text)))
                 );
                 assert_eq!(plan.result_type, GateType::Primitive(BuiltinType::Text));
+            }
+            other => panic!("expected planned joined fan-out segment, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn elaborates_joined_fanout_with_join_subject_memo() {
+        let lowered = lower_text(
+            "fanout-join-subject-memo.aivi",
+            r#"
+use aivi.list (length)
+
+value joinedTotal:Int =
+    [1, 2, 3]
+     *|> . + 1
+     <|* #mapped length mapped
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "fan-out join subject memo example should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_fanouts(lowered.module());
+        let joined = report
+            .segments()
+            .iter()
+            .find(|segment| item_name(lowered.module(), segment.owner) == "joinedTotal")
+            .expect("expected joined fan-out segment using a join subject memo");
+
+        match &joined.outcome {
+            FanoutSegmentOutcome::Planned(plan) => {
+                let join = plan
+                    .join
+                    .as_ref()
+                    .expect("joined fan-out should record `<|*`");
+                assert_eq!(
+                    join.collection_subject,
+                    GateType::List(Box::new(GateType::Primitive(BuiltinType::Int)))
+                );
+                assert_eq!(join.result_type, GateType::Primitive(BuiltinType::Int));
+            }
+            other => panic!("expected planned joined fan-out segment, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn elaborates_joined_fanout_with_filter_memos_before_join() {
+        let lowered = lower_text(
+            "fanout-filter-memos-before-join.aivi",
+            r#"
+use aivi.list (length)
+
+value joinedTotal:Int =
+    [1, 2, 3]
+     *|> . + 1
+     ?|> #values length values > 0 #filtered
+     <|* length filtered
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "fan-out filter memo example should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_fanouts(lowered.module());
+        let joined = report
+            .segments()
+            .iter()
+            .find(|segment| item_name(lowered.module(), segment.owner) == "joinedTotal")
+            .expect("expected joined fan-out segment using filter memos");
+
+        match &joined.outcome {
+            FanoutSegmentOutcome::Planned(plan) => {
+                assert_eq!(plan.filters.len(), 1);
+                let join = plan
+                    .join
+                    .as_ref()
+                    .expect("joined fan-out should record `<|*`");
+                assert_eq!(
+                    join.collection_subject,
+                    GateType::List(Box::new(GateType::Primitive(BuiltinType::Int)))
+                );
+                assert_eq!(join.result_type, GateType::Primitive(BuiltinType::Int));
             }
             other => panic!("expected planned joined fan-out segment, found {other:?}"),
         }

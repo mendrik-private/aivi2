@@ -2757,6 +2757,104 @@ value maybeJoined:Option Text =
     }
 
     #[test]
+    fn gate_after_joined_fanout_can_use_map_result_memo() {
+        let lowered = lower_text(
+            "gate-after-fanout-map-memo.aivi",
+            r#"
+use aivi.list (length)
+
+type User = {
+    email: Text
+}
+
+fun joinEmails:Text = items:List Text=>    "joined"
+
+value users:List User = [
+    { email: "ada@example.com" }
+]
+
+value maybeJoined:Option Text =
+    users
+     *|> .email #emails
+     <|* joinEmails
+     ?|> length emails > 0
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "gate-after-fanout-map-memo example should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_gates(lowered.module());
+        let ordinary = report
+            .stages()
+            .iter()
+            .find(|stage| item_name(lowered.module(), stage.owner) == "maybeJoined")
+            .expect("expected ordinary gate after joined fanout with a map memo");
+
+        match &ordinary.outcome {
+            GateStageOutcome::Ordinary(stage) => {
+                assert_eq!(stage.input_subject, GateType::Primitive(BuiltinType::Text));
+                assert_eq!(
+                    stage.result_type,
+                    GateType::Option(Box::new(GateType::Primitive(BuiltinType::Text)))
+                );
+            }
+            other => panic!("expected ordinary gate after joined fanout map memo, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gate_after_joined_fanout_can_use_join_result_memo() {
+        let lowered = lower_text(
+            "gate-after-fanout-join-memo.aivi",
+            r#"
+type User = {
+    email: Text
+}
+
+fun joinEmails:Text = items:List Text=>    "joined"
+
+value users:List User = [
+    { email: "ada@example.com" }
+]
+
+value maybeJoined:Option Text =
+    users
+     *|> .email
+     <|* joinEmails #joined
+     ?|> joined == "joined"
+"#,
+        );
+        assert!(
+            !lowered.has_errors(),
+            "gate-after-fanout-join-memo example should lower cleanly: {:?}",
+            lowered.diagnostics()
+        );
+
+        let report = elaborate_gates(lowered.module());
+        let ordinary = report
+            .stages()
+            .iter()
+            .find(|stage| item_name(lowered.module(), stage.owner) == "maybeJoined")
+            .expect("expected ordinary gate after joined fanout with a join memo");
+
+        match &ordinary.outcome {
+            GateStageOutcome::Ordinary(stage) => {
+                assert_eq!(stage.input_subject, GateType::Primitive(BuiltinType::Text));
+                assert_eq!(
+                    stage.result_type,
+                    GateType::Option(Box::new(GateType::Primitive(BuiltinType::Text)))
+                );
+            }
+            other => {
+                panic!("expected ordinary gate after joined fanout join memo, found {other:?}")
+            }
+        }
+    }
+
+    #[test]
     fn skips_joined_fanout_filter_gates() {
         let lowered = lower_text(
             "gate-inside-fanout-join.aivi",

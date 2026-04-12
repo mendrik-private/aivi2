@@ -5741,25 +5741,50 @@ impl Validator<'_> {
             return None;
         }
         let mapped_element_type = body_info.ty?;
+        let mapped_collection_type = typing.apply_fanout_plan(
+            FanoutPlanner::plan(FanoutStageKind::Map, carrier),
+            mapped_element_type.clone(),
+        );
+        let mut segment_env = env.clone();
+        extend_pipe_env_with_stage_result_memo(
+            &mut segment_env,
+            segment.map_stage(),
+            &mapped_collection_type,
+        );
         for stage in segment.filter_stages() {
             let PipeStageKind::Gate { expr } = stage.kind else {
                 unreachable!("validated fan-out filters must use `?|>`");
             };
-            self
-                .validate_fanout_filter_stage(stage.span, expr, env, &mapped_element_type, typing)?;
+            let filter_env = pipe_stage_expr_env(&segment_env, stage, &mapped_collection_type);
+            self.validate_fanout_filter_stage(
+                stage.span,
+                expr,
+                &filter_env,
+                &mapped_element_type,
+                typing,
+            )?;
+            extend_pipe_env_with_stage_result_memo(
+                &mut segment_env,
+                stage,
+                &mapped_collection_type,
+            );
         }
-        let mapped_collection_type = typing.apply_fanout_plan(
-            FanoutPlanner::plan(FanoutStageKind::Map, carrier),
-            mapped_element_type,
-        );
         match segment.join_expr() {
             Some(join_expr) => self.validate_fanin_stage(
-                segment
-                    .join_stage()
-                    .expect("join expression implies join stage")
-                    .span,
+                {
+                    let join_stage = segment
+                        .join_stage()
+                        .expect("join expression implies join stage");
+                    join_stage.span
+                },
                 join_expr,
-                env,
+                &pipe_stage_expr_env(
+                    &segment_env,
+                    segment
+                        .join_stage()
+                        .expect("join expression implies join stage"),
+                    &mapped_collection_type,
+                ),
                 &mapped_collection_type,
                 typing,
             ),

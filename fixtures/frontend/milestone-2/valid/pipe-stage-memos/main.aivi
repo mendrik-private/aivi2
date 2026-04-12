@@ -48,6 +48,16 @@ value joined : Int = [1, 2, 3]
  <|* #mapped reduce add 0 mapped #total
   |> total
 
+value joinedWithMapMemo : Option Int = [1, 2, 3]
+ *|> . + 1 #mapped
+ <|* reduce add 0
+ ?|> length mapped > 0
+
+value joinedWithJoinMemo : Option Int = [1, 2, 3]
+ *|> . + 1
+ <|* reduce add 0 #total
+ ?|> total > 0
+
 value validated : Result Text Int = 2
  !|> #candidate nonNegative candidate #checked
   |> checked

@@ -6466,16 +6466,33 @@ impl<'a> GateTypeContext<'a> {
     ) -> Option<GateType> {
         let carrier = self.fanout_carrier(subject)?;
         let element_subject = subject.fanout_element().cloned()?;
+        let map_env = pipe_stage_expr_env(env, segment.map_stage(), subject);
         let mapped_element_type = self
-            .infer_pipe_body(segment.map_expr(), env, &element_subject)
+            .infer_pipe_body(segment.map_expr(), &map_env, &element_subject)
             .ty?;
         let mapped_collection_type = self.apply_fanout_plan(
             FanoutPlanner::plan(FanoutStageKind::Map, carrier),
             mapped_element_type,
         );
+        let mut segment_env = env.clone();
+        extend_pipe_env_with_stage_result_memo(
+            &mut segment_env,
+            segment.map_stage(),
+            &mapped_collection_type,
+        );
+        for stage in segment.filter_stages() {
+            extend_pipe_env_with_stage_result_memo(&mut segment_env, stage, &mapped_collection_type);
+        }
         if let Some(join_expr) = segment.join_expr() {
+            let join_env = pipe_stage_expr_env(
+                &segment_env,
+                segment
+                    .join_stage()
+                    .expect("join expression implies join stage"),
+                &mapped_collection_type,
+            );
             let join_value_type = self
-                .infer_pipe_body(join_expr, env, &mapped_collection_type)
+                .infer_pipe_body(join_expr, &join_env, &mapped_collection_type)
                 .ty?;
             Some(self.apply_fanout_plan(
                 FanoutPlanner::plan(FanoutStageKind::Join, carrier),
