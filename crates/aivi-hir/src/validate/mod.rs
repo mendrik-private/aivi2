@@ -43,7 +43,7 @@ pub(crate) use crate::typecheck_context::{
     GateExprEnv, GateIssue, GateProjectionStep, GateTypeContext, PipeFunctionSignatureMatch,
     PipeSubjectStepOutcome, PipeSubjectWalker, PolyTypeBindings, TruthyFalsyPairStages,
     ValidateStageSubject, extend_pipe_env_with_stage_memos, gate_env_for_function,
-    pipe_stage_expr_env, truthy_falsy_pair_stages,
+    pipe_stage_expr_env,
 };
 pub use crate::typecheck_context::{
     GateType, TypeBinding, TypeConstructorBinding, TypeConstructorHead, case_pattern_field_types,

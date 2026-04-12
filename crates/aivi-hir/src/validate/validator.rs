@@ -5078,78 +5078,116 @@ impl Validator<'_> {
                                 expr: pipe.head,
                                 env: env.clone(),
                             });
-                            let stages = pipe.stages.iter().collect::<Vec<_>>();
                             let mut current = self.infer_case_expr_type(pipe.head, &env, typing);
-                            let mut stage_index = 0usize;
-                            while stage_index < stages.len() {
-                                let stage = stages[stage_index];
-                                match &stage.kind {
-                                    PipeStageKind::Transform { expr } => {
-                                        work.push(CaseExhaustivenessWork::Expr {
-                                            expr: *expr,
-                                            env: env.clone(),
-                                        });
-                                        current = current.as_ref().and_then(|subject| {
-                                            typing.infer_transform_stage(*expr, &env, subject)
-                                        });
-                                        stage_index += 1;
-                                    }
-                                    PipeStageKind::Tap { expr } => {
-                                        work.push(CaseExhaustivenessWork::Expr {
-                                            expr: *expr,
-                                            env: env.clone(),
-                                        });
-                                        stage_index += 1;
-                                    }
-                                    PipeStageKind::Gate { expr } => {
-                                        work.push(CaseExhaustivenessWork::Expr {
-                                            expr: *expr,
-                                            env: env.clone(),
-                                        });
-                                        current = current.as_ref().and_then(|subject| {
-                                            typing.infer_gate_stage(*expr, &env, subject)
-                                        });
-                                        stage_index += 1;
-                                    }
-                                    PipeStageKind::Map { expr } => {
-                                        work.push(CaseExhaustivenessWork::Expr {
-                                            expr: *expr,
-                                            env: env.clone(),
-                                        });
-                                        current = current.as_ref().and_then(|subject| {
-                                            typing.infer_fanout_map_stage(*expr, &env, subject)
-                                        });
-                                        stage_index += 1;
-                                    }
-                                    PipeStageKind::FanIn { expr } => {
-                                        work.push(CaseExhaustivenessWork::Expr {
-                                            expr: *expr,
-                                            env: env.clone(),
-                                        });
-                                        current = current.as_ref().and_then(|subject| {
-                                            typing.infer_fanin_stage(*expr, &env, subject)
-                                        });
-                                        stage_index += 1;
-                                    }
-                                    PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
-                                        let Some(pair) =
-                                            truthy_falsy_pair_stages(&stages, stage_index)
-                                        else {
-                                            let branch_expr = match &stage.kind {
-                                                PipeStageKind::Truthy { expr }
-                                                | PipeStageKind::Falsy { expr } => *expr,
-                                                _ => unreachable!(
-                                                    "truthy/falsy branch extraction should stay aligned"
-                                                ),
-                                            };
+                            for semantic_stage in pipe.semantic_stages() {
+                                match semantic_stage {
+                                    crate::PipeSemanticStage::Single { stage, .. } => match &stage.kind {
+                                        PipeStageKind::Transform { expr } => {
                                             work.push(CaseExhaustivenessWork::Expr {
-                                                expr: branch_expr,
+                                                expr: *expr,
+                                                env: env.clone(),
+                                            });
+                                            current = current.as_ref().and_then(|subject| {
+                                                typing.infer_transform_stage(*expr, &env, subject)
+                                            });
+                                        }
+                                        PipeStageKind::Tap { expr } => {
+                                            work.push(CaseExhaustivenessWork::Expr {
+                                                expr: *expr,
+                                                env: env.clone(),
+                                            });
+                                        }
+                                        PipeStageKind::Gate { expr } => {
+                                            work.push(CaseExhaustivenessWork::Expr {
+                                                expr: *expr,
+                                                env: env.clone(),
+                                            });
+                                            current = current.as_ref().and_then(|subject| {
+                                                typing.infer_gate_stage(*expr, &env, subject)
+                                            });
+                                        }
+                                        PipeStageKind::Map { expr } => {
+                                            work.push(CaseExhaustivenessWork::Expr {
+                                                expr: *expr,
+                                                env: env.clone(),
+                                            });
+                                            current = current.as_ref().and_then(|subject| {
+                                                typing.infer_fanout_map_stage(*expr, &env, subject)
+                                            });
+                                        }
+                                        PipeStageKind::FanIn { expr } => {
+                                            work.push(CaseExhaustivenessWork::Expr {
+                                                expr: *expr,
+                                                env: env.clone(),
+                                            });
+                                            current = current.as_ref().and_then(|subject| {
+                                                typing.infer_fanin_stage(*expr, &env, subject)
+                                            });
+                                        }
+                                        PipeStageKind::Truthy { expr }
+                                        | PipeStageKind::Falsy { expr } => {
+                                            work.push(CaseExhaustivenessWork::Expr {
+                                                expr: *expr,
                                                 env: env.clone(),
                                             });
                                             current = None;
-                                            stage_index += 1;
-                                            continue;
-                                        };
+                                        }
+                                        PipeStageKind::Apply { expr }
+                                        | PipeStageKind::RecurStart { expr }
+                                        | PipeStageKind::RecurStep { expr }
+                                        | PipeStageKind::Validate { expr }
+                                        | PipeStageKind::Previous { expr }
+                                        | PipeStageKind::Diff { expr } => {
+                                            work.push(CaseExhaustivenessWork::Expr {
+                                                expr: *expr,
+                                                env: env.clone(),
+                                            });
+                                            current = None;
+                                        }
+                                        PipeStageKind::Delay { duration } => {
+                                            work.push(CaseExhaustivenessWork::Expr {
+                                                expr: *duration,
+                                                env: env.clone(),
+                                            });
+                                            current = current.as_ref().and_then(|subject| {
+                                                typing
+                                                    .infer_delay_stage_info(*duration, &env, subject)
+                                                    .ty
+                                            });
+                                        }
+                                        PipeStageKind::Burst { every, count } => {
+                                            work.push(CaseExhaustivenessWork::Expr {
+                                                expr: *every,
+                                                env: env.clone(),
+                                            });
+                                            work.push(CaseExhaustivenessWork::Expr {
+                                                expr: *count,
+                                                env: env.clone(),
+                                            });
+                                            current = current.as_ref().and_then(|subject| {
+                                                typing
+                                                    .infer_burst_stage_info(
+                                                        *every, *count, &env, subject,
+                                                    )
+                                                    .ty
+                                            });
+                                        }
+                                        PipeStageKind::Accumulate { seed, step } => {
+                                            work.push(CaseExhaustivenessWork::Expr {
+                                                expr: *seed,
+                                                env: env.clone(),
+                                            });
+                                            work.push(CaseExhaustivenessWork::Expr {
+                                                expr: *step,
+                                                env: env.clone(),
+                                            });
+                                            current = None;
+                                        }
+                                        PipeStageKind::Case { .. } => {
+                                            unreachable!("semantic stage iterator groups case runs")
+                                        }
+                                    },
+                                    crate::PipeSemanticStage::TruthyFalsyPair(pair) => {
                                         work.push(CaseExhaustivenessWork::Expr {
                                             expr: pair.falsy_expr,
                                             env: env.clone(),
@@ -5161,26 +5199,15 @@ impl Validator<'_> {
                                         current = current.as_ref().and_then(|subject| {
                                             typing.infer_truthy_falsy_pair(&pair, &env, subject)
                                         });
-                                        stage_index = pair.next_index;
                                     }
-                                    PipeStageKind::Case { .. } => {
-                                        let case_start = stage_index;
-                                        while stage_index < stages.len()
-                                            && matches!(
-                                                stages[stage_index].kind,
-                                                PipeStageKind::Case { .. }
-                                            )
-                                        {
-                                            stage_index += 1;
-                                        }
-                                        let case_stages = &stages[case_start..stage_index];
+                                    crate::PipeSemanticStage::CaseRun(case_run) => {
                                         if let Some(subject) = current.clone() {
                                             self.validate_pipe_case_run(
-                                                case_stages,
+                                                &case_run,
                                                 &subject,
                                                 typing,
                                             );
-                                            for case_stage in case_stages.iter().rev() {
+                                            for case_stage in case_run.stages().rev() {
                                                 let PipeStageKind::Case { pattern, body } =
                                                     &case_stage.kind
                                                 else {
@@ -5194,7 +5221,7 @@ impl Validator<'_> {
                                                 });
                                             }
                                         } else {
-                                            for case_stage in case_stages.iter().rev() {
+                                            for case_stage in case_run.stages().rev() {
                                                 let PipeStageKind::Case { body, .. } =
                                                     &case_stage.kind
                                                 else {
@@ -5207,61 +5234,6 @@ impl Validator<'_> {
                                             }
                                         }
                                         current = None;
-                                    }
-                                    PipeStageKind::Apply { expr }
-                                    | PipeStageKind::RecurStart { expr }
-                                    | PipeStageKind::RecurStep { expr }
-                                    | PipeStageKind::Validate { expr }
-                                    | PipeStageKind::Previous { expr }
-                                    | PipeStageKind::Diff { expr } => {
-                                        work.push(CaseExhaustivenessWork::Expr {
-                                            expr: *expr,
-                                            env: env.clone(),
-                                        });
-                                        current = None;
-                                        stage_index += 1;
-                                    }
-                                    PipeStageKind::Delay { duration } => {
-                                        work.push(CaseExhaustivenessWork::Expr {
-                                            expr: *duration,
-                                            env: env.clone(),
-                                        });
-                                        current = current.as_ref().and_then(|subject| {
-                                            typing
-                                                .infer_delay_stage_info(*duration, &env, subject)
-                                                .ty
-                                        });
-                                        stage_index += 1;
-                                    }
-                                    PipeStageKind::Burst { every, count } => {
-                                        work.push(CaseExhaustivenessWork::Expr {
-                                            expr: *every,
-                                            env: env.clone(),
-                                        });
-                                        work.push(CaseExhaustivenessWork::Expr {
-                                            expr: *count,
-                                            env: env.clone(),
-                                        });
-                                        current = current.as_ref().and_then(|subject| {
-                                            typing
-                                                .infer_burst_stage_info(
-                                                    *every, *count, &env, subject,
-                                                )
-                                                .ty
-                                        });
-                                        stage_index += 1;
-                                    }
-                                    PipeStageKind::Accumulate { seed, step } => {
-                                        work.push(CaseExhaustivenessWork::Expr {
-                                            expr: *seed,
-                                            env: env.clone(),
-                                        });
-                                        work.push(CaseExhaustivenessWork::Expr {
-                                            expr: *step,
-                                            env: env.clone(),
-                                        });
-                                        current = None;
-                                        stage_index += 1;
                                     }
                                 }
                             }
@@ -5459,7 +5431,7 @@ impl Validator<'_> {
 
     fn validate_pipe_case_run(
         &mut self,
-        case_stages: &[&crate::hir::PipeStage],
+        case_run: &crate::PipeCaseStageRun<'_>,
         subject: &GateType,
         typing: &mut GateTypeContext<'_>,
     ) {
@@ -5468,7 +5440,7 @@ impl Validator<'_> {
         };
         let mut covered = HashSet::new();
         let mut has_catch_all = false;
-        for stage in case_stages {
+        for stage in case_run.stages() {
             let PipeStageKind::Case { pattern, .. } = &stage.kind else {
                 continue;
             };
@@ -5495,10 +5467,7 @@ impl Validator<'_> {
         if missing.is_empty() {
             return;
         }
-        let span = case_stages
-            .first()
-            .map(|stage| stage.span)
-            .unwrap_or_default();
+        let span = case_run.start_stage().span;
         self.emit_non_exhaustive_case_diagnostic(CaseSiteKind::PipeCase, span, subject, &missing);
     }
 
@@ -5912,7 +5881,7 @@ impl Validator<'_> {
                     stage_index += 1;
                 }
                 PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
-                    let pair = truthy_falsy_pair_stages(&stages, stage_index)?;
+                    let pair = crate::PipeTruthyFalsyPair::at(&stages, stage_index)?;
                     current = typing.infer_truthy_falsy_pair(&pair, env, &current)?;
                     stage_index = pair.next_index;
                 }
@@ -6257,7 +6226,8 @@ impl Validator<'_> {
                     advance_by: 1,
                 },
                 PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
-                    let Some(pair) = truthy_falsy_pair_stages(&all_stages, stage_index) else {
+                    let Some(pair) = crate::PipeTruthyFalsyPair::at(&all_stages, stage_index)
+                    else {
                         return PipeSubjectStepOutcome::Continue {
                             new_subject: None,
                             advance_by: 1,
@@ -6383,7 +6353,8 @@ impl Validator<'_> {
                     advance_by: 1,
                 },
                 PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
-                    let Some(pair) = truthy_falsy_pair_stages(&all_stages, stage_index) else {
+                    let Some(pair) = crate::PipeTruthyFalsyPair::at(&all_stages, stage_index)
+                    else {
                         return PipeSubjectStepOutcome::Continue {
                             new_subject: None,
                             advance_by: 1,
@@ -6512,7 +6483,8 @@ impl Validator<'_> {
                     advance_by: 1,
                 },
                 PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
-                    let Some(pair) = truthy_falsy_pair_stages(&all_stages, stage_index) else {
+                    let Some(pair) = crate::PipeTruthyFalsyPair::at(&all_stages, stage_index)
+                    else {
                         return PipeSubjectStepOutcome::Continue {
                             new_subject: None,
                             advance_by: 1,

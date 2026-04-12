@@ -19,7 +19,7 @@ use crate::{
     validate::{
         GateExprEnv, GateIssue, GateType, GateTypeContext, PipeFunctionSignatureMatch,
         PipeSubjectStepOutcome, PipeSubjectWalker, extend_pipe_env_with_stage_memos,
-        gate_env_for_function, pipe_stage_expr_env, truthy_falsy_pair_stages, walk_expr_tree,
+        gate_env_for_function, pipe_stage_expr_env, walk_expr_tree,
     },
 };
 
@@ -546,7 +546,8 @@ fn collect_gate_pipe(
                     advance_by: 1,
                 },
                 PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
-                    let Some(pair) = truthy_falsy_pair_stages(&all_stages, stage_index) else {
+                    let Some(pair) = crate::PipeTruthyFalsyPair::at(&all_stages, stage_index)
+                    else {
                         return PipeSubjectStepOutcome::Continue {
                             new_subject: None,
                             advance_by: 1,

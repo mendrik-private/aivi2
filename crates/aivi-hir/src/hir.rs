@@ -1955,6 +1955,183 @@ pub struct PipeFanoutSegment<'a> {
     stages: &'a NonEmpty<PipeStage>,
 }
 
+/// Presentation-free structural view of one truthy/falsy branch pair inside a pipe.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PipeTruthyFalsyPair<'a> {
+    pub truthy_index: usize,
+    pub truthy_stage: &'a PipeStage,
+    pub truthy_expr: ExprId,
+    pub falsy_index: usize,
+    pub falsy_stage: &'a PipeStage,
+    pub falsy_expr: ExprId,
+    pub next_index: usize,
+}
+
+impl<'a> PipeTruthyFalsyPair<'a> {
+    pub fn at(stages: &[&'a PipeStage], index: usize) -> Option<Self> {
+        let first = *stages.get(index)?;
+        let second = *stages.get(index + 1)?;
+        match (&first.kind, &second.kind) {
+            (
+                PipeStageKind::Truthy { expr: truthy_expr },
+                PipeStageKind::Falsy { expr: falsy_expr },
+            ) => Some(Self {
+                truthy_index: index,
+                truthy_stage: first,
+                truthy_expr: *truthy_expr,
+                falsy_index: index + 1,
+                falsy_stage: second,
+                falsy_expr: *falsy_expr,
+                next_index: index + 2,
+            }),
+            (
+                PipeStageKind::Falsy { expr: falsy_expr },
+                PipeStageKind::Truthy { expr: truthy_expr },
+            ) => Some(Self {
+                truthy_index: index + 1,
+                truthy_stage: second,
+                truthy_expr: *truthy_expr,
+                falsy_index: index,
+                falsy_stage: first,
+                falsy_expr: *falsy_expr,
+                next_index: index + 2,
+            }),
+            _ => None,
+        }
+    }
+
+    pub fn start_stage_index(&self) -> usize {
+        self.truthy_index.min(self.falsy_index)
+    }
+
+    pub fn start_stage(&self) -> &'a PipeStage {
+        if self.truthy_index < self.falsy_index {
+            self.truthy_stage
+        } else {
+            self.falsy_stage
+        }
+    }
+}
+
+/// Presentation-free structural view of one consecutive `||>` case run inside a pipe.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PipeCaseStageRun<'a> {
+    start_index: usize,
+    stages: Vec<&'a PipeStage>,
+}
+
+impl<'a> PipeCaseStageRun<'a> {
+    pub fn at(stages: &[&'a PipeStage], start_index: usize) -> Option<Self> {
+        let start_stage = *stages.get(start_index)?;
+        if !matches!(start_stage.kind, PipeStageKind::Case { .. }) {
+            return None;
+        }
+        let mut run_stages = vec![start_stage];
+        let mut index = start_index + 1;
+        while let Some(stage) = stages.get(index).copied() {
+            if !matches!(stage.kind, PipeStageKind::Case { .. }) {
+                break;
+            }
+            run_stages.push(stage);
+            index += 1;
+        }
+        Some(Self {
+            start_index,
+            stages: run_stages,
+        })
+    }
+
+    pub fn start_stage_index(&self) -> usize {
+        self.start_index
+    }
+
+    pub fn stage_count(&self) -> usize {
+        self.stages.len()
+    }
+
+    pub fn start_stage(&self) -> &'a PipeStage {
+        self.stages
+            .first()
+            .copied()
+            .expect("case runs must contain at least one stage")
+    }
+
+    pub fn stages(&self) -> impl DoubleEndedIterator<Item = &'a PipeStage> + '_ {
+        self.stages.iter().copied()
+    }
+
+    pub fn stage_slice(&self) -> &[&'a PipeStage] {
+        &self.stages
+    }
+
+    pub fn next_stage_index(&self) -> usize {
+        self.start_index + self.stage_count()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PipeSemanticStage<'a> {
+    Single {
+        stage_index: usize,
+        stage: &'a PipeStage,
+    },
+    TruthyFalsyPair(PipeTruthyFalsyPair<'a>),
+    CaseRun(PipeCaseStageRun<'a>),
+}
+
+impl<'a> PipeSemanticStage<'a> {
+    pub fn start_stage_index(&self) -> usize {
+        match self {
+            Self::Single { stage_index, .. } => *stage_index,
+            Self::TruthyFalsyPair(pair) => pair.start_stage_index(),
+            Self::CaseRun(run) => run.start_stage_index(),
+        }
+    }
+
+    pub fn next_stage_index(&self) -> usize {
+        match self {
+            Self::Single { stage_index, .. } => stage_index + 1,
+            Self::TruthyFalsyPair(pair) => pair.next_index,
+            Self::CaseRun(run) => run.next_stage_index(),
+        }
+    }
+
+    pub fn start_stage(&self) -> &'a PipeStage {
+        match self {
+            Self::Single { stage, .. } => stage,
+            Self::TruthyFalsyPair(pair) => pair.start_stage(),
+            Self::CaseRun(run) => run.start_stage(),
+        }
+    }
+}
+
+struct PipeSemanticStages<'a> {
+    stages: Vec<&'a PipeStage>,
+    next_index: usize,
+}
+
+impl<'a> Iterator for PipeSemanticStages<'a> {
+    type Item = PipeSemanticStage<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let stage_index = self.next_index;
+        let stage = *self.stages.get(stage_index)?;
+        let semantic_stage = match &stage.kind {
+            PipeStageKind::Case { .. } => PipeCaseStageRun::at(&self.stages, stage_index)
+                .map(PipeSemanticStage::CaseRun)
+                .unwrap_or(PipeSemanticStage::Single { stage_index, stage }),
+            PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
+                PipeTruthyFalsyPair::at(&self.stages, stage_index)
+                    .map(PipeSemanticStage::TruthyFalsyPair)
+                    .unwrap_or(PipeSemanticStage::Single { stage_index, stage })
+            }
+            _ => PipeSemanticStage::Single { stage_index, stage },
+        };
+        self.next_index = semantic_stage.next_stage_index();
+        Some(semantic_stage)
+    }
+}
+
 impl<'a> PipeFanoutSegment<'a> {
     pub fn map_stage_index(&self) -> usize {
         self.map_stage_index
@@ -2116,6 +2293,23 @@ impl fmt::Display for PipeRecurrenceShapeError {
 impl Error for PipeRecurrenceShapeError {}
 
 impl PipeExpr {
+    pub fn case_stage_run(&self, start_index: usize) -> Option<PipeCaseStageRun<'_>> {
+        let stages = self.stages.iter().collect::<Vec<_>>();
+        PipeCaseStageRun::at(&stages, start_index)
+    }
+
+    pub fn truthy_falsy_pair(&self, index: usize) -> Option<PipeTruthyFalsyPair<'_>> {
+        let stages = self.stages.iter().collect::<Vec<_>>();
+        PipeTruthyFalsyPair::at(&stages, index)
+    }
+
+    pub fn semantic_stages(&self) -> impl Iterator<Item = PipeSemanticStage<'_>> + '_ {
+        PipeSemanticStages {
+            stages: self.stages.iter().collect::<Vec<_>>(),
+            next_index: 0,
+        }
+    }
+
     pub fn fanout_segment(&self, map_stage_index: usize) -> Option<PipeFanoutSegment<'_>> {
         let stages = self.stages.iter().collect::<Vec<_>>();
         let map_stage = stages.get(map_stage_index).copied()?;
@@ -2343,6 +2537,154 @@ mod pipe_stage_kind_tests {
                 body: ExprId::from_raw(23),
             }
         );
+    }
+
+    #[test]
+    fn finds_truthy_falsy_pairs_regardless_of_order() {
+        let truthy_stage = PipeStage {
+            span: SourceSpan::default(),
+            subject_memo: None,
+            result_memo: None,
+            kind: PipeStageKind::Truthy {
+                expr: ExprId::from_raw(1),
+            },
+        };
+        let falsy_stage = PipeStage {
+            span: SourceSpan::default(),
+            subject_memo: None,
+            result_memo: None,
+            kind: PipeStageKind::Falsy {
+                expr: ExprId::from_raw(2),
+            },
+        };
+        let pair = PipeTruthyFalsyPair::at(&[&truthy_stage, &falsy_stage], 0)
+            .expect("truthy then falsy should form a pair");
+        assert_eq!(pair.start_stage_index(), 0);
+        assert_eq!(pair.start_stage(), &truthy_stage);
+        assert_eq!(pair.truthy_expr, ExprId::from_raw(1));
+        assert_eq!(pair.falsy_expr, ExprId::from_raw(2));
+
+        let reversed = PipeTruthyFalsyPair::at(&[&falsy_stage, &truthy_stage], 0)
+            .expect("falsy then truthy should form a pair");
+        assert_eq!(reversed.start_stage_index(), 0);
+        assert_eq!(reversed.start_stage(), &falsy_stage);
+        assert_eq!(reversed.truthy_expr, ExprId::from_raw(1));
+        assert_eq!(reversed.falsy_expr, ExprId::from_raw(2));
+    }
+
+    #[test]
+    fn groups_consecutive_case_stages() {
+        let make_case = |pattern_raw: u32, body_raw: u32| PipeStage {
+            span: SourceSpan::default(),
+            subject_memo: None,
+            result_memo: None,
+            kind: PipeStageKind::Case {
+                pattern: PatternId::from_raw(pattern_raw),
+                body: ExprId::from_raw(body_raw),
+            },
+        };
+        let pipe = PipeExpr {
+            head: ExprId::from_raw(0),
+            stages: NonEmpty::new(
+                make_case(1, 11),
+                vec![
+                    make_case(2, 12),
+                    PipeStage {
+                        span: SourceSpan::default(),
+                        subject_memo: None,
+                        result_memo: None,
+                        kind: PipeStageKind::Transform {
+                            expr: ExprId::from_raw(99),
+                        },
+                    },
+                ],
+            ),
+            result_block_desugaring: false,
+        };
+        let run = pipe
+            .case_stage_run(0)
+            .expect("leading case stages should form a run");
+        assert_eq!(run.start_stage_index(), 0);
+        assert_eq!(run.stage_count(), 2);
+        assert_eq!(run.next_stage_index(), 2);
+        assert_eq!(
+            run.stages()
+                .map(|stage| match stage.kind {
+                    PipeStageKind::Case { body, .. } => body,
+                    _ => unreachable!("case run helper should only expose case stages"),
+                })
+                .collect::<Vec<_>>(),
+            vec![ExprId::from_raw(11), ExprId::from_raw(12)]
+        );
+        assert!(pipe.case_stage_run(2).is_none());
+    }
+
+    #[test]
+    fn iterates_semantic_stages_with_grouping() {
+        let make_case = |pattern_raw: u32, body_raw: u32| PipeStage {
+            span: SourceSpan::default(),
+            subject_memo: None,
+            result_memo: None,
+            kind: PipeStageKind::Case {
+                pattern: PatternId::from_raw(pattern_raw),
+                body: ExprId::from_raw(body_raw),
+            },
+        };
+        let pipe = PipeExpr {
+            head: ExprId::from_raw(0),
+            stages: NonEmpty::new(
+                PipeStage {
+                    span: SourceSpan::default(),
+                    subject_memo: None,
+                    result_memo: None,
+                    kind: PipeStageKind::Transform {
+                        expr: ExprId::from_raw(10),
+                    },
+                },
+                vec![
+                    PipeStage {
+                        span: SourceSpan::default(),
+                        subject_memo: None,
+                        result_memo: None,
+                        kind: PipeStageKind::Truthy {
+                            expr: ExprId::from_raw(11),
+                        },
+                    },
+                    PipeStage {
+                        span: SourceSpan::default(),
+                        subject_memo: None,
+                        result_memo: None,
+                        kind: PipeStageKind::Falsy {
+                            expr: ExprId::from_raw(12),
+                        },
+                    },
+                    make_case(1, 21),
+                    make_case(2, 22),
+                ],
+            ),
+            result_block_desugaring: false,
+        };
+        let semantics = pipe
+            .semantic_stages()
+            .map(|stage| match stage {
+                PipeSemanticStage::Single { stage_index, stage } => match &stage.kind {
+                    PipeStageKind::Transform { .. } => ("transform", stage_index, stage.span),
+                    _ => unreachable!("test should only leave transform as a single stage"),
+                },
+                PipeSemanticStage::TruthyFalsyPair(pair) => (
+                    "truthy-falsy",
+                    pair.start_stage_index(),
+                    pair.start_stage().span,
+                ),
+                PipeSemanticStage::CaseRun(run) => {
+                    ("case-run", run.start_stage_index(), run.start_stage().span)
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(semantics.len(), 3);
+        assert_eq!(semantics[0].0, "transform");
+        assert_eq!(semantics[1].0, "truthy-falsy");
+        assert_eq!(semantics[2].0, "case-run");
     }
 }
 

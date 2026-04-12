@@ -467,26 +467,7 @@ pub(crate) struct TruthyFalsySubjectPlan {
     pub(crate) falsy_payload: Option<GateType>,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct TruthyFalsyPairStages<'a> {
-    pub(crate) truthy_index: usize,
-    pub(crate) truthy_stage: &'a crate::hir::PipeStage,
-    pub(crate) truthy_expr: ExprId,
-    pub(crate) falsy_index: usize,
-    pub(crate) falsy_stage: &'a crate::hir::PipeStage,
-    pub(crate) falsy_expr: ExprId,
-    pub(crate) next_index: usize,
-}
-
-pub(crate) fn truthy_falsy_pair_start_stage<'a>(
-    pair: &TruthyFalsyPairStages<'a>,
-) -> &'a crate::hir::PipeStage {
-    if pair.truthy_index < pair.falsy_index {
-        pair.truthy_stage
-    } else {
-        pair.falsy_stage
-    }
-}
+pub(crate) type TruthyFalsyPairStages<'a> = crate::PipeTruthyFalsyPair<'a>;
 
 pub fn case_pattern_field_types(
     module: &Module,

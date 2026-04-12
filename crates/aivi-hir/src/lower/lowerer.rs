@@ -8259,10 +8259,8 @@ impl<'a> Lowerer<'a> {
                             }
                         }
                         PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
-                            if let Some(pair) = crate::typecheck_context::truthy_falsy_pair_stages(
-                                &stages,
-                                stage_index,
-                            ) {
+                            if let Some(pair) = crate::PipeTruthyFalsyPair::at(&stages, stage_index)
+                            {
                                 let first_stage = stages[stage_index];
                                 let mut pair_env = pipe_env.clone();
                                 if let Some(binding) = first_stage.subject_memo {

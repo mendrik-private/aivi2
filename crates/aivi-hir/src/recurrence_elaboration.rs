@@ -17,7 +17,7 @@ use crate::{
     },
     validate::{
         GateExprEnv, GateIssue, GateType, GateTypeContext, PipeSubjectStepOutcome,
-        PipeSubjectWalker, gate_env_for_function, truthy_falsy_pair_stages, walk_expr_tree,
+        PipeSubjectWalker, gate_env_for_function, walk_expr_tree,
     },
 };
 
@@ -817,7 +817,7 @@ fn infer_recurrence_input_subject(
                 advance_by: 1,
             },
             PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
-                let Some(pair) = truthy_falsy_pair_stages(&all_stages, stage_index) else {
+                let Some(pair) = crate::PipeTruthyFalsyPair::at(&all_stages, stage_index) else {
                     return PipeSubjectStepOutcome::Continue {
                         new_subject: None,
                         advance_by: 1,

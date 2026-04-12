@@ -26,7 +26,7 @@ use crate::{
     validate::{
         GateEqualityEvidence, GateExprEnv, GateIssue, GateProjectionStep, GateRecordField,
         GateType, GateTypeContext, PolyTypeBindings, ValidateStageSubject,
-        extend_pipe_env_with_stage_memos, pipe_stage_expr_env, truthy_falsy_pair_stages,
+        extend_pipe_env_with_stage_memos, pipe_stage_expr_env,
     },
 };
 
@@ -2986,120 +2986,257 @@ impl<'a> GeneralExprElaborator<'a> {
             self.lower_result_block_source_expr(pipe.head, env, ambient, result_block_error)?;
         let mut current = head.ty.clone();
         let mut pipe_env = env.clone();
-        let stages = pipe.stages.iter().collect::<Vec<_>>();
-        let mut lowered = Vec::with_capacity(stages.len());
-        let mut stage_index = 0usize;
-        while stage_index < stages.len() {
-            let stage = stages[stage_index];
-            match &stage.kind {
-                PipeStageKind::Transform { expr } => {
-                    let stage_env = pipe_stage_expr_env(&pipe_env, stage, &current);
-                    let mode = self
-                        .typing
-                        .infer_transform_stage_mode(*expr, &stage_env, &current);
-                    let result_subject = self
-                        .typing
-                        .infer_transform_stage(*expr, &stage_env, &current)
-                        .ok_or_else(|| {
+        let mut lowered = Vec::with_capacity(pipe.stages.len());
+        let stage_count = pipe.stages.len();
+        for semantic_stage in pipe.semantic_stages() {
+            let next_stage_index = semantic_stage.next_stage_index();
+            match semantic_stage {
+                crate::PipeSemanticStage::Single { stage, .. } => match &stage.kind {
+                    PipeStageKind::Transform { expr } => {
+                        let stage_env = pipe_stage_expr_env(&pipe_env, stage, &current);
+                        let mode = self
+                            .typing
+                            .infer_transform_stage_mode(*expr, &stage_env, &current);
+                        let result_subject = self
+                            .typing
+                            .infer_transform_stage(*expr, &stage_env, &current)
+                            .ok_or_else(|| {
+                                vec![GeneralExprBlocker::UnknownExprType { span: stage.span }]
+                            })?;
+                        let body_expected = (next_stage_index == stage_count)
+                            .then(|| {
+                                self.inline_pipe_stage_result_body_type(&current, final_expected)
+                            })
+                            .flatten();
+                        let body = self.lower_body_expr(
+                            *expr,
+                            &stage_env,
+                            Some(current.gate_payload()),
+                            body_expected.as_ref(),
+                        )?;
+                        lowered.push(GateRuntimePipeStage {
+                            span: stage.span,
+                            subject_memo: stage.subject_memo,
+                            result_memo: stage.result_memo,
+                            input_subject: current.gate_payload().clone(),
+                            result_subject: result_subject.clone(),
+                            kind: GateRuntimePipeStageKind::Transform { mode, expr: body },
+                        });
+                        extend_pipe_env_with_stage_memos(
+                            &mut pipe_env,
+                            stage,
+                            &current,
+                            &result_subject,
+                        );
+                        current = result_subject;
+                    }
+                    PipeStageKind::Tap { expr } => {
+                        let stage_env = pipe_stage_expr_env(&pipe_env, stage, &current);
+                        let body = self.lower_body_expr(
+                            *expr,
+                            &stage_env,
+                            Some(current.gate_payload()),
+                            None,
+                        )?;
+                        lowered.push(GateRuntimePipeStage {
+                            span: stage.span,
+                            subject_memo: stage.subject_memo,
+                            result_memo: stage.result_memo,
+                            input_subject: current.gate_payload().clone(),
+                            result_subject: current.clone(),
+                            kind: GateRuntimePipeStageKind::Tap { expr: body },
+                        });
+                        extend_pipe_env_with_stage_memos(&mut pipe_env, stage, &current, &current);
+                    }
+                    PipeStageKind::Gate { expr } => {
+                        let stage_env = pipe_stage_expr_env(&pipe_env, stage, &current);
+                        let predicate = self.lower_body_expr(
+                            *expr,
+                            &stage_env,
+                            Some(current.gate_payload()),
+                            Some(&GateType::Primitive(crate::BuiltinType::Bool)),
+                        )?;
+                        let result_subject = self
+                            .typing
+                            .infer_gate_stage(*expr, &stage_env, &current)
+                            .ok_or_else(|| {
+                                vec![GeneralExprBlocker::UnknownExprType { span: stage.span }]
+                            })?;
+                        let plan = GatePlanner::plan(self.typing.gate_carrier(&current));
+                        if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary)
+                            && current.is_signal()
+                        {
+                            break;
+                        }
+                        lowered.push(GateRuntimePipeStage {
+                            span: stage.span,
+                            subject_memo: stage.subject_memo,
+                            result_memo: stage.result_memo,
+                            input_subject: current.clone(),
+                            result_subject: result_subject.clone(),
+                            kind: GateRuntimePipeStageKind::Gate {
+                                predicate,
+                                emits_negative_update: plan.emits_negative_update(),
+                            },
+                        });
+                        extend_pipe_env_with_stage_memos(
+                            &mut pipe_env,
+                            stage,
+                            &current,
+                            &result_subject,
+                        );
+                        current = result_subject;
+                    }
+                    PipeStageKind::Map { expr } => {
+                        if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary) {
+                            break;
+                        }
+                        let stage_env = pipe_stage_expr_env(&pipe_env, stage, &current);
+                        let element = current.fanout_element().ok_or_else(|| {
                             vec![GeneralExprBlocker::UnknownExprType { span: stage.span }]
                         })?;
-                    let body_expected = (stage_index + 1 == stages.len())
-                        .then(|| self.inline_pipe_stage_result_body_type(&current, final_expected))
-                        .flatten();
-                    let body = self.lower_body_expr(
-                        *expr,
-                        &stage_env,
-                        Some(current.gate_payload()),
-                        body_expected.as_ref(),
-                    )?;
-                    lowered.push(GateRuntimePipeStage {
-                        span: stage.span,
-                        subject_memo: stage.subject_memo,
-                        result_memo: stage.result_memo,
-                        input_subject: current.gate_payload().clone(),
-                        result_subject: result_subject.clone(),
-                        kind: GateRuntimePipeStageKind::Transform { mode, expr: body },
-                    });
-                    extend_pipe_env_with_stage_memos(
-                        &mut pipe_env,
-                        stage,
-                        &current,
-                        &result_subject,
-                    );
-                    current = result_subject;
-                    stage_index += 1;
-                }
-                PipeStageKind::Tap { expr } => {
-                    let stage_env = pipe_stage_expr_env(&pipe_env, stage, &current);
-                    let body = self.lower_body_expr(
-                        *expr,
-                        &stage_env,
-                        Some(current.gate_payload()),
-                        None,
-                    )?;
-                    lowered.push(GateRuntimePipeStage {
-                        span: stage.span,
-                        subject_memo: stage.subject_memo,
-                        result_memo: stage.result_memo,
-                        input_subject: current.gate_payload().clone(),
-                        result_subject: current.clone(),
-                        kind: GateRuntimePipeStageKind::Tap { expr: body },
-                    });
-                    extend_pipe_env_with_stage_memos(&mut pipe_env, stage, &current, &current);
-                    stage_index += 1;
-                }
-                PipeStageKind::Gate { expr } => {
-                    let stage_env = pipe_stage_expr_env(&pipe_env, stage, &current);
-                    let predicate = self.lower_body_expr(
-                        *expr,
-                        &stage_env,
-                        Some(current.gate_payload()),
-                        Some(&GateType::Primitive(crate::BuiltinType::Bool)),
-                    )?;
-                    let result_subject = self
-                        .typing
-                        .infer_gate_stage(*expr, &stage_env, &current)
-                        .ok_or_else(|| {
-                            vec![GeneralExprBlocker::UnknownExprType { span: stage.span }]
-                        })?;
-                    let plan = GatePlanner::plan(self.typing.gate_carrier(&current));
-                    if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary)
-                        && current.is_signal()
-                    {
-                        break;
+                        let body = self.lower_body_expr(*expr, &stage_env, Some(element), None)?;
+                        let result_subject = self
+                            .typing
+                            .infer_fanout_map_stage_info(*expr, &stage_env, &current)
+                            .ty
+                            .ok_or_else(|| {
+                                vec![GeneralExprBlocker::UnknownExprType { span: stage.span }]
+                            })?;
+                        lowered.push(GateRuntimePipeStage {
+                            span: stage.span,
+                            subject_memo: stage.subject_memo,
+                            result_memo: stage.result_memo,
+                            input_subject: current.gate_payload().clone(),
+                            result_subject: result_subject.clone(),
+                            kind: GateRuntimePipeStageKind::FanOut { map_expr: body },
+                        });
+                        extend_pipe_env_with_stage_memos(
+                            &mut pipe_env,
+                            stage,
+                            &current,
+                            &result_subject,
+                        );
+                        current = result_subject;
                     }
-                    lowered.push(GateRuntimePipeStage {
-                        span: stage.span,
-                        subject_memo: stage.subject_memo,
-                        result_memo: stage.result_memo,
-                        input_subject: current.clone(),
-                        result_subject: result_subject.clone(),
-                        kind: GateRuntimePipeStageKind::Gate {
-                            predicate,
-                            emits_negative_update: plan.emits_negative_update(),
-                        },
-                    });
-                    extend_pipe_env_with_stage_memos(
-                        &mut pipe_env,
-                        stage,
-                        &current,
-                        &result_subject,
-                    );
-                    current = result_subject;
-                    stage_index += 1;
-                }
-                PipeStageKind::Case { .. } => {
-                    let case_start = stage_index;
-                    while stage_index < stages.len()
-                        && matches!(stages[stage_index].kind, PipeStageKind::Case { .. })
-                    {
-                        stage_index += 1;
+                    PipeStageKind::Apply { .. } => {
+                        return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
+                            span: stage.span,
+                            kind: GateRuntimeUnsupportedKind::PipeStage(
+                                GateRuntimeUnsupportedPipeStageKind::Apply,
+                            ),
+                        }]);
                     }
-                    let stage_expected = (stage_index == stages.len())
+                    PipeStageKind::FanIn { expr } => {
+                        if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary) {
+                            break;
+                        }
+                        let stage_env = pipe_stage_expr_env(&pipe_env, stage, &current);
+                        let body = self.lower_body_expr(
+                            *expr,
+                            &stage_env,
+                            Some(current.gate_payload()),
+                            None,
+                        )?;
+                        let result_subject = self
+                            .typing
+                            .infer_fanin_stage_info(*expr, &stage_env, &current)
+                            .ty
+                            .ok_or_else(|| {
+                                vec![GeneralExprBlocker::UnknownExprType { span: stage.span }]
+                            })?;
+                        lowered.push(GateRuntimePipeStage {
+                            span: stage.span,
+                            subject_memo: stage.subject_memo,
+                            result_memo: stage.result_memo,
+                            input_subject: current.gate_payload().clone(),
+                            result_subject: result_subject.clone(),
+                            kind: GateRuntimePipeStageKind::Transform {
+                                mode: PipeTransformMode::Replace,
+                                expr: body,
+                            },
+                        });
+                        extend_pipe_env_with_stage_memos(
+                            &mut pipe_env,
+                            stage,
+                            &current,
+                            &result_subject,
+                        );
+                        current = result_subject;
+                    }
+                    PipeStageKind::RecurStart { .. } => {
+                        if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary) {
+                            break;
+                        }
+                        return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
+                            span: stage.span,
+                            kind: GateRuntimeUnsupportedKind::PipeStage(
+                                GateRuntimeUnsupportedPipeStageKind::RecurStart,
+                            ),
+                        }]);
+                    }
+                    PipeStageKind::RecurStep { .. } => {
+                        if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary) {
+                            break;
+                        }
+                        return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
+                            span: stage.span,
+                            kind: GateRuntimeUnsupportedKind::PipeStage(
+                                GateRuntimeUnsupportedPipeStageKind::RecurStep,
+                            ),
+                        }]);
+                    }
+                    PipeStageKind::Validate { .. } => {
+                        if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary)
+                            && current.is_signal()
+                        {
+                            break;
+                        }
+                        let lowered_stage =
+                            self.lower_validate_stage(stage, &pipe_env, &current)?;
+                        let result_subject = lowered_stage.result_subject.clone();
+                        lowered.push(lowered_stage);
+                        extend_pipe_env_with_stage_memos(
+                            &mut pipe_env,
+                            stage,
+                            &current,
+                            &result_subject,
+                        );
+                        current = result_subject;
+                    }
+                    PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
+                        return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
+                            span: stage.span,
+                            kind: GateRuntimeUnsupportedKind::PipeStage(
+                                GateRuntimeUnsupportedPipeStageKind::Truthy,
+                            ),
+                        }]);
+                    }
+                    PipeStageKind::Previous { .. }
+                    | PipeStageKind::Diff { .. }
+                    | PipeStageKind::Delay { .. }
+                    | PipeStageKind::Burst { .. }
+                    | PipeStageKind::Accumulate { .. } => {
+                        if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary) {
+                            break;
+                        }
+                        return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
+                            span: stage.span,
+                            kind: GateRuntimeUnsupportedKind::PipeStage(
+                                GateRuntimeUnsupportedPipeStageKind::RecurStart,
+                            ),
+                        }]);
+                    }
+                    PipeStageKind::Case { .. } => {
+                        unreachable!("semantic stage iterator groups case runs")
+                    }
+                },
+                crate::PipeSemanticStage::CaseRun(case_run) => {
+                    let stage_expected = (case_run.next_stage_index() == stage_count)
                         .then(|| final_expected.cloned())
                         .flatten();
                     let lowered_stage = self.lower_case_stage(
-                        &stages[case_start..stage_index],
+                        &case_run,
                         &pipe_env,
                         &current,
                         stage_expected.as_ref(),
@@ -3107,23 +3244,15 @@ impl<'a> GeneralExprElaborator<'a> {
                     )?;
                     extend_pipe_env_with_stage_memos(
                         &mut pipe_env,
-                        stages[case_start],
+                        case_run.start_stage(),
                         &current,
                         &lowered_stage.result_subject,
                     );
                     current = lowered_stage.result_subject.clone();
                     lowered.push(lowered_stage);
                 }
-                PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
-                    let Some(pair) = truthy_falsy_pair_stages(&stages, stage_index) else {
-                        return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
-                            span: stage.span,
-                            kind: GateRuntimeUnsupportedKind::PipeStage(
-                                GateRuntimeUnsupportedPipeStageKind::Truthy,
-                            ),
-                        }]);
-                    };
-                    let stage_expected = (pair.next_index == stages.len())
+                crate::PipeSemanticStage::TruthyFalsyPair(pair) => {
+                    let stage_expected = (pair.next_index == stage_count)
                         .then(|| final_expected.cloned())
                         .flatten();
                     let lowered_stage = self.lower_truthy_falsy_stage(
@@ -3134,147 +3263,12 @@ impl<'a> GeneralExprElaborator<'a> {
                     )?;
                     extend_pipe_env_with_stage_memos(
                         &mut pipe_env,
-                        crate::typecheck_context::truthy_falsy_pair_start_stage(&pair),
+                        pair.start_stage(),
                         &current,
                         &lowered_stage.result_subject,
                     );
                     current = lowered_stage.result_subject.clone();
                     lowered.push(lowered_stage);
-                    stage_index = pair.next_index;
-                }
-                PipeStageKind::Map { expr } => {
-                    if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary) {
-                        break;
-                    }
-                    let stage_env = pipe_stage_expr_env(&pipe_env, stage, &current);
-                    let element = current.fanout_element().ok_or_else(|| {
-                        vec![GeneralExprBlocker::UnknownExprType { span: stage.span }]
-                    })?;
-                    let body = self.lower_body_expr(*expr, &stage_env, Some(element), None)?;
-                    let result_subject = self
-                        .typing
-                        .infer_fanout_map_stage_info(*expr, &stage_env, &current)
-                        .ty
-                        .ok_or_else(|| {
-                            vec![GeneralExprBlocker::UnknownExprType { span: stage.span }]
-                        })?;
-                    lowered.push(GateRuntimePipeStage {
-                        span: stage.span,
-                        subject_memo: stage.subject_memo,
-                        result_memo: stage.result_memo,
-                        input_subject: current.gate_payload().clone(),
-                        result_subject: result_subject.clone(),
-                        kind: GateRuntimePipeStageKind::FanOut { map_expr: body },
-                    });
-                    extend_pipe_env_with_stage_memos(
-                        &mut pipe_env,
-                        stage,
-                        &current,
-                        &result_subject,
-                    );
-                    current = result_subject;
-                    stage_index += 1;
-                }
-                PipeStageKind::Apply { .. } => {
-                    return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
-                        span: stage.span,
-                        kind: GateRuntimeUnsupportedKind::PipeStage(
-                            GateRuntimeUnsupportedPipeStageKind::Apply,
-                        ),
-                    }]);
-                }
-                PipeStageKind::FanIn { expr } => {
-                    if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary) {
-                        break;
-                    }
-                    let stage_env = pipe_stage_expr_env(&pipe_env, stage, &current);
-                    let body = self.lower_body_expr(
-                        *expr,
-                        &stage_env,
-                        Some(current.gate_payload()),
-                        None,
-                    )?;
-                    let result_subject = self
-                        .typing
-                        .infer_fanin_stage_info(*expr, &stage_env, &current)
-                        .ty
-                        .ok_or_else(|| {
-                            vec![GeneralExprBlocker::UnknownExprType { span: stage.span }]
-                        })?;
-                    lowered.push(GateRuntimePipeStage {
-                        span: stage.span,
-                        subject_memo: stage.subject_memo,
-                        result_memo: stage.result_memo,
-                        input_subject: current.gate_payload().clone(),
-                        result_subject: result_subject.clone(),
-                        kind: GateRuntimePipeStageKind::Transform {
-                            mode: PipeTransformMode::Replace,
-                            expr: body,
-                        },
-                    });
-                    extend_pipe_env_with_stage_memos(
-                        &mut pipe_env,
-                        stage,
-                        &current,
-                        &result_subject,
-                    );
-                    current = result_subject;
-                    stage_index += 1;
-                }
-                PipeStageKind::RecurStart { .. } => {
-                    if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary) {
-                        break;
-                    }
-                    return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
-                        span: stage.span,
-                        kind: GateRuntimeUnsupportedKind::PipeStage(
-                            GateRuntimeUnsupportedPipeStageKind::RecurStart,
-                        ),
-                    }]);
-                }
-                PipeStageKind::RecurStep { .. } => {
-                    if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary) {
-                        break;
-                    }
-                    return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
-                        span: stage.span,
-                        kind: GateRuntimeUnsupportedKind::PipeStage(
-                            GateRuntimeUnsupportedPipeStageKind::RecurStep,
-                        ),
-                    }]);
-                }
-                PipeStageKind::Validate { .. } => {
-                    if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary)
-                        && current.is_signal()
-                    {
-                        break;
-                    }
-                    let lowered_stage = self.lower_validate_stage(stage, &pipe_env, &current)?;
-                    let result_subject = lowered_stage.result_subject.clone();
-                    lowered.push(lowered_stage);
-                    extend_pipe_env_with_stage_memos(
-                        &mut pipe_env,
-                        stage,
-                        &current,
-                        &result_subject,
-                    );
-                    current = result_subject;
-                    stage_index += 1;
-                }
-                PipeStageKind::Previous { .. }
-                | PipeStageKind::Diff { .. }
-                | PipeStageKind::Delay { .. }
-                | PipeStageKind::Burst { .. }
-                | PipeStageKind::Accumulate { .. } => {
-                    if matches!(mode, PipeLoweringMode::PrefixBeforeSchedulerBoundary) {
-                        break;
-                    }
-                    return Err(vec![GeneralExprBlocker::UnsupportedRuntimeExpr {
-                        span: stage.span,
-                        kind: GateRuntimeUnsupportedKind::PipeStage(
-                            GateRuntimeUnsupportedPipeStageKind::RecurStart,
-                        ),
-                    }]);
                 }
             }
         }
@@ -3286,24 +3280,20 @@ impl<'a> GeneralExprElaborator<'a> {
 
     fn lower_case_stage(
         &mut self,
-        stages: &[&crate::PipeStage],
+        case_run: &crate::PipeCaseStageRun<'_>,
         env: &GateExprEnv,
         subject: &GateType,
         expected: Option<&GateType>,
         result_block_error: Option<&GateType>,
     ) -> Result<GateRuntimePipeStage, Vec<GeneralExprBlocker>> {
-        let mut arms = Vec::with_capacity(stages.len());
+        let mut arms = Vec::with_capacity(case_run.stage_count());
         let mut result_subject = None::<GateType>;
         let mut blockers = Vec::new();
-        let Some(case_start) = stages.first().copied() else {
-            return Err(vec![GeneralExprBlocker::UnknownExprType {
-                span: SourceSpan::default(),
-            }]);
-        };
+        let case_start = case_run.start_stage();
         let case_env = pipe_stage_expr_env(env, case_start, subject);
         let branch_subject = subject.gate_payload().clone();
         let branch_expected = self.inline_pipe_stage_result_body_type(subject, expected);
-        for stage in stages {
+        for stage in case_run.stages() {
             let PipeStageKind::Case { pattern, body } = &stage.kind else {
                 continue;
             };
@@ -3344,7 +3334,7 @@ impl<'a> GeneralExprElaborator<'a> {
         }
         let result_subject = result_subject.ok_or_else(|| {
             vec![GeneralExprBlocker::UnknownExprType {
-                span: stages.first().map(|stage| stage.span).unwrap_or_default(),
+                span: case_start.span,
             }]
         })?;
         let result_subject = if subject.is_signal() {
@@ -3353,7 +3343,7 @@ impl<'a> GeneralExprElaborator<'a> {
             result_subject
         };
         Ok(GateRuntimePipeStage {
-            span: join_stage_spans(stages),
+            span: join_stage_spans(case_run.stage_slice()),
             subject_memo: case_start.subject_memo,
             result_memo: case_start.result_memo,
             input_subject: branch_subject,
@@ -3364,13 +3354,13 @@ impl<'a> GeneralExprElaborator<'a> {
 
     fn lower_truthy_falsy_stage(
         &mut self,
-        pair: &crate::validate::TruthyFalsyPairStages<'_>,
+        pair: &crate::PipeTruthyFalsyPair<'_>,
         env: &GateExprEnv,
         subject: &GateType,
         expected: Option<&GateType>,
     ) -> Result<GateRuntimePipeStage, Vec<GeneralExprBlocker>> {
         let branch_expected = self.inline_pipe_stage_result_body_type(subject, expected);
-        let pair_start = crate::typecheck_context::truthy_falsy_pair_start_stage(pair);
+        let pair_start = pair.start_stage();
         let pair_env = pipe_stage_expr_env(env, pair_start, subject);
         let plan = self
             .typing

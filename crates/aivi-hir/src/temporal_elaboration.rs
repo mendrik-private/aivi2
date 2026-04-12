@@ -5,7 +5,7 @@ use crate::{
     gate_elaboration::{GateElaborationBlocker, lower_gate_runtime_expr},
     validate::{
         GateExprEnv, GateType, GateTypeContext, PipeSubjectStepOutcome, PipeSubjectWalker,
-        gate_env_for_function, truthy_falsy_pair_stages, walk_expr_tree,
+        gate_env_for_function, walk_expr_tree,
     },
 };
 
@@ -341,7 +341,8 @@ fn collect_temporal_pipe(
                     advance_by: 1,
                 },
                 PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
-                    let Some(pair) = truthy_falsy_pair_stages(&all_stages, stage_index) else {
+                    let Some(pair) = crate::PipeTruthyFalsyPair::at(&all_stages, stage_index)
+                    else {
                         return PipeSubjectStepOutcome::Continue {
                             new_subject: None,
                             advance_by: 1,
