@@ -792,82 +792,68 @@ fn infer_recurrence_input_subject(
     env: &GateExprEnv,
     typing: &mut GateTypeContext<'_>,
 ) -> Option<GateType> {
-    // Collect the limited stage slice once so the truthy/falsy pair helper can
-    // index into it by position.  The walker is constructed with the same limit
-    // so it only iterates over these prefix stages (PA-M1).
-    let all_stages = pipe
-        .stages
-        .iter()
-        .take(prefix_stage_count)
-        .collect::<Vec<_>>();
     PipeSubjectWalker::new_with_limit(pipe, env, typing, prefix_stage_count).walk(
         typing,
-        |stage_index, stage, current, current_env, typing| match &stage.kind {
-            PipeStageKind::Gate { expr } => PipeSubjectStepOutcome::Continue {
-                new_subject: current.and_then(|s| typing.infer_gate_stage(*expr, current_env, s)),
-                advance_by: 1,
-            },
-            PipeStageKind::Map { expr } => PipeSubjectStepOutcome::Continue {
-                new_subject: current
-                    .and_then(|s| typing.infer_fanout_map_stage(*expr, current_env, s)),
-                advance_by: 1,
-            },
-            PipeStageKind::FanIn { expr } => PipeSubjectStepOutcome::Continue {
-                new_subject: current.and_then(|s| typing.infer_fanin_stage(*expr, current_env, s)),
-                advance_by: 1,
-            },
-            PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
-                let Some(pair) = crate::PipeTruthyFalsyPair::at(&all_stages, stage_index) else {
-                    return PipeSubjectStepOutcome::Continue {
-                        new_subject: None,
-                        advance_by: 1,
-                    };
-                };
-                let new_subject =
-                    current.and_then(|s| typing.infer_truthy_falsy_pair(&pair, current_env, s));
-                let advance = pair.next_index.saturating_sub(stage_index).max(1);
-                PipeSubjectStepOutcome::Continue {
-                    new_subject,
-                    advance_by: advance,
+        |stage, current, current_env, typing| match stage {
+            crate::PipeSubjectStage::Single { stage, .. } => match &stage.kind {
+                PipeStageKind::Gate { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_gate_stage(*expr, current_env, s)),
+                },
+                PipeStageKind::Map { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_fanout_map_stage(*expr, current_env, s)),
+                },
+                PipeStageKind::FanIn { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_fanin_stage(*expr, current_env, s)),
+                },
+                // Recurrence boundary stages and unhandled case/apply stages should
+                // never appear within the prefix (the caller computes prefix_stage_count
+                // to exclude them), but stop cleanly if one is encountered.
+                PipeStageKind::Case { .. }
+                | PipeStageKind::Apply { .. }
+                | PipeStageKind::RecurStart { .. }
+                | PipeStageKind::RecurStep { .. }
+                | PipeStageKind::Validate { .. }
+                | PipeStageKind::Accumulate { .. } => PipeSubjectStepOutcome::Stop,
+                PipeStageKind::Previous { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_previous_stage_info(*expr, current_env, s).ty),
+                },
+                PipeStageKind::Diff { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_diff_stage_info(*expr, current_env, s).ty),
+                },
+                PipeStageKind::Delay { duration } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_delay_stage_info(*duration, current_env, s).ty),
+                },
+                PipeStageKind::Burst { every, count } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current.and_then(|s| {
+                        typing
+                            .infer_burst_stage_info(*every, *count, current_env, s)
+                            .ty
+                    }),
+                },
+                PipeStageKind::Truthy { .. }
+                | PipeStageKind::Falsy { .. }
+                | PipeStageKind::Transform { .. }
+                | PipeStageKind::Tap { .. } => {
+                    unreachable!(
+                        "subject walker groups truthy/falsy pairs and consumes transform/tap"
+                    )
                 }
-            }
-            // Recurrence boundary stages and unhandled case/apply stages should
-            // never appear within the prefix (the caller computes prefix_stage_count
-            // to exclude them), but stop cleanly if one is encountered.
-            PipeStageKind::Case { .. }
-            | PipeStageKind::Apply { .. }
-            | PipeStageKind::RecurStart { .. }
-            | PipeStageKind::RecurStep { .. }
-            | PipeStageKind::Validate { .. }
-            | PipeStageKind::Accumulate { .. } => PipeSubjectStepOutcome::Stop,
-            PipeStageKind::Previous { expr } => PipeSubjectStepOutcome::Continue {
+            },
+            crate::PipeSubjectStage::TruthyFalsyPair(pair) => PipeSubjectStepOutcome::Continue {
                 new_subject: current
-                    .and_then(|s| typing.infer_previous_stage_info(*expr, current_env, s).ty),
-                advance_by: 1,
+                    .and_then(|s| typing.infer_truthy_falsy_pair(pair, current_env, s)),
             },
-            PipeStageKind::Diff { expr } => PipeSubjectStepOutcome::Continue {
+            crate::PipeSubjectStage::FanoutSegment(segment) => PipeSubjectStepOutcome::Continue {
                 new_subject: current
-                    .and_then(|s| typing.infer_diff_stage_info(*expr, current_env, s).ty),
-                advance_by: 1,
+                    .and_then(|s| typing.infer_fanout_segment_result_type(segment, current_env, s)),
             },
-            PipeStageKind::Delay { duration } => PipeSubjectStepOutcome::Continue {
-                new_subject: current
-                    .and_then(|s| typing.infer_delay_stage_info(*duration, current_env, s).ty),
-                advance_by: 1,
-            },
-            PipeStageKind::Burst { every, count } => PipeSubjectStepOutcome::Continue {
-                new_subject: current.and_then(|s| {
-                    typing
-                        .infer_burst_stage_info(*every, *count, current_env, s)
-                        .ty
-                }),
-                advance_by: 1,
-            },
-            // Transform and Tap are handled by PipeSubjectWalker before the
-            // callback is invoked; they can never reach this arm.
-            PipeStageKind::Transform { .. } | PipeStageKind::Tap { .. } => {
-                unreachable!("Transform/Tap are consumed by PipeSubjectWalker before the callback")
-            }
+            crate::PipeSubjectStage::CaseRun(_) => PipeSubjectStepOutcome::Stop,
         },
     )
 }

@@ -228,32 +228,61 @@ fn collect_truthy_falsy_pipe(
     typing: &mut GateTypeContext<'_>,
     truthy_falsy_stages: &mut Vec<TruthyFalsyStageElaboration>,
 ) {
-    let all_stages = pipe.stages.iter().collect::<Vec<_>>();
     PipeSubjectWalker::new(pipe, env, typing).walk(
         typing,
-        |stage_index, stage, current, current_env, typing| match &stage.kind {
-            PipeStageKind::Gate { expr } => PipeSubjectStepOutcome::Continue {
-                new_subject: current.and_then(|s| typing.infer_gate_stage(*expr, current_env, s)),
-                advance_by: 1,
+        |stage, current, current_env, typing| match stage {
+            crate::PipeSubjectStage::Single { stage, .. } => match &stage.kind {
+                PipeStageKind::Gate { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_gate_stage(*expr, current_env, s)),
+                },
+                PipeStageKind::Map { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_fanout_map_stage(*expr, current_env, s)),
+                },
+                PipeStageKind::FanIn { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_fanin_stage(*expr, current_env, s)),
+                },
+                PipeStageKind::Case { .. }
+                | PipeStageKind::Apply { .. }
+                | PipeStageKind::RecurStart { .. }
+                | PipeStageKind::RecurStep { .. }
+                | PipeStageKind::Validate { .. }
+                | PipeStageKind::Accumulate { .. } => {
+                    PipeSubjectStepOutcome::Continue { new_subject: None }
+                }
+                PipeStageKind::Previous { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_previous_stage_info(*expr, current_env, s).ty),
+                },
+                PipeStageKind::Diff { expr } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_diff_stage_info(*expr, current_env, s).ty),
+                },
+                PipeStageKind::Delay { duration } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current
+                        .and_then(|s| typing.infer_delay_stage_info(*duration, current_env, s).ty),
+                },
+                PipeStageKind::Burst { every, count } => PipeSubjectStepOutcome::Continue {
+                    new_subject: current.and_then(|s| {
+                        typing
+                            .infer_burst_stage_info(*every, *count, current_env, s)
+                            .ty
+                    }),
+                },
+                PipeStageKind::Truthy { .. }
+                | PipeStageKind::Falsy { .. }
+                | PipeStageKind::Transform { .. }
+                | PipeStageKind::Tap { .. } => {
+                    unreachable!(
+                        "subject walker groups truthy/falsy pairs and consumes transform/tap"
+                    )
+                }
             },
-            PipeStageKind::Map { expr } => PipeSubjectStepOutcome::Continue {
-                new_subject: current
-                    .and_then(|s| typing.infer_fanout_map_stage(*expr, current_env, s)),
-                advance_by: 1,
-            },
-            PipeStageKind::FanIn { expr } => PipeSubjectStepOutcome::Continue {
-                new_subject: current.and_then(|s| typing.infer_fanin_stage(*expr, current_env, s)),
-                advance_by: 1,
-            },
-            PipeStageKind::Truthy { .. } | PipeStageKind::Falsy { .. } => {
-                let Some(pair) = crate::PipeTruthyFalsyPair::at(&all_stages, stage_index) else {
-                    return PipeSubjectStepOutcome::Continue {
-                        new_subject: None,
-                        advance_by: 1,
-                    };
-                };
+            crate::PipeSubjectStage::TruthyFalsyPair(pair) => {
                 let outcome = elaborate_truthy_falsy_pair(
-                    &pair,
+                    pair,
                     current,
                     current_env,
                     if pipe_expr == root_expr {
@@ -274,49 +303,19 @@ fn collect_truthy_falsy_pipe(
                     falsy_expr: pair.falsy_expr,
                     outcome: outcome.clone(),
                 });
-                let advance = pair.next_index.saturating_sub(stage_index).max(1);
                 PipeSubjectStepOutcome::Continue {
                     new_subject: match outcome {
                         TruthyFalsyStageOutcome::Planned(plan) => Some(plan.result_type),
                         TruthyFalsyStageOutcome::Blocked(_) => None,
                     },
-                    advance_by: advance,
                 }
             }
-            PipeStageKind::Case { .. }
-            | PipeStageKind::Apply { .. }
-            | PipeStageKind::RecurStart { .. }
-            | PipeStageKind::RecurStep { .. }
-            | PipeStageKind::Validate { .. }
-            | PipeStageKind::Accumulate { .. } => PipeSubjectStepOutcome::Continue {
-                new_subject: None,
-                advance_by: 1,
-            },
-            PipeStageKind::Previous { expr } => PipeSubjectStepOutcome::Continue {
+            crate::PipeSubjectStage::FanoutSegment(segment) => PipeSubjectStepOutcome::Continue {
                 new_subject: current
-                    .and_then(|s| typing.infer_previous_stage_info(*expr, current_env, s).ty),
-                advance_by: 1,
+                    .and_then(|s| typing.infer_fanout_segment_result_type(segment, current_env, s)),
             },
-            PipeStageKind::Diff { expr } => PipeSubjectStepOutcome::Continue {
-                new_subject: current
-                    .and_then(|s| typing.infer_diff_stage_info(*expr, current_env, s).ty),
-                advance_by: 1,
-            },
-            PipeStageKind::Delay { duration } => PipeSubjectStepOutcome::Continue {
-                new_subject: current
-                    .and_then(|s| typing.infer_delay_stage_info(*duration, current_env, s).ty),
-                advance_by: 1,
-            },
-            PipeStageKind::Burst { every, count } => PipeSubjectStepOutcome::Continue {
-                new_subject: current.and_then(|s| {
-                    typing
-                        .infer_burst_stage_info(*every, *count, current_env, s)
-                        .ty
-                }),
-                advance_by: 1,
-            },
-            PipeStageKind::Transform { .. } | PipeStageKind::Tap { .. } => {
-                unreachable!("PipeSubjectWalker handles Transform and Tap internally")
+            crate::PipeSubjectStage::CaseRun(_) => {
+                PipeSubjectStepOutcome::Continue { new_subject: None }
             }
         },
     );

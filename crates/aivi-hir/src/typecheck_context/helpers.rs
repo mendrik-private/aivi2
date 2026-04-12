@@ -98,16 +98,11 @@ pub(crate) fn extend_pipe_env_with_stage_memos(
 
 /// Outcome of one step in a `PipeSubjectWalker` iteration.
 ///
-/// Returned by per-stage callbacks to tell the walker how to advance and what
-/// the new subject type is after the stage (PA-M1).
+/// Returned by per-stage callbacks to tell the walker what the new subject type
+/// is after the current grouped subject stage (PA-M1).
 pub(crate) enum PipeSubjectStepOutcome {
-    /// The stage was handled; `new_subject` is the subject type after the
-    /// stage and `advance_by` is how many stage slots to skip (usually 1, but
-    /// fanout segments span multiple slots).
-    Continue {
-        new_subject: Option<GateType>,
-        advance_by: usize,
-    },
+    /// The stage was handled; `new_subject` is the subject type after it.
+    Continue { new_subject: Option<GateType> },
     /// Stop walking at this stage index (e.g. when hitting a recurrence
     /// boundary or a stage kind the caller cannot handle).
     Stop,
@@ -123,15 +118,18 @@ pub(crate) enum PipeSubjectStepOutcome {
 ///
 /// # Usage
 /// ```ignore
-/// PipeSubjectWalker::new(pipe, env, typing).walk(|stage_index, stage, current, typing| {
-///     match &stage.kind {
-///         PipeStageKind::Gate { expr } => PipeSubjectStepOutcome::Continue { … },
+/// PipeSubjectWalker::new(pipe, env, typing).walk(|stage, current, typing| {
+///     match stage {
+///         crate::PipeSubjectStage::Single { stage, .. } => match &stage.kind {
+///             PipeStageKind::Gate { expr } => PipeSubjectStepOutcome::Continue { … },
+///             _ => PipeSubjectStepOutcome::Stop,
+///         },
 ///         _ => PipeSubjectStepOutcome::Stop,
 ///     }
 /// });
 /// ```
 pub(crate) struct PipeSubjectWalker<'pipe> {
-    stages: Vec<&'pipe PipeStage>,
+    stages: Vec<crate::PipeSubjectStage<'pipe>>,
     current: Option<GateType>,
     env: GateExprEnv,
 }
@@ -142,7 +140,7 @@ impl<'pipe> PipeSubjectWalker<'pipe> {
         env: &GateExprEnv,
         typing: &mut GateTypeContext<'_>,
     ) -> Self {
-        let stages = pipe.stages.iter().collect::<Vec<_>>();
+        let stages = pipe.subject_stages().collect::<Vec<_>>();
         let current = typing.infer_expr(pipe.head, env, None).ty;
         Self {
             stages,
@@ -162,7 +160,7 @@ impl<'pipe> PipeSubjectWalker<'pipe> {
         typing: &mut GateTypeContext<'_>,
         limit: usize,
     ) -> Self {
-        let stages = pipe.stages.iter().take(limit).collect::<Vec<_>>();
+        let stages = pipe.subject_stages_with_limit(limit).collect::<Vec<_>>();
         let current = typing.infer_expr(pipe.head, env, None).ty;
         Self {
             stages,
@@ -183,70 +181,81 @@ impl<'pipe> PipeSubjectWalker<'pipe> {
     ) -> Option<GateType>
     where
         F: FnMut(
-            usize,             // stage_index
-            &'pipe PipeStage,  // stage
+            &crate::PipeSubjectStage<'pipe>,
             Option<&GateType>, // current subject (before this stage)
             &GateExprEnv,      // current pipe environment
             &mut GateTypeContext<'_>,
         ) -> PipeSubjectStepOutcome,
     {
-        let mut stage_index = 0usize;
-        while stage_index < self.stages.len() {
-            let stage = self.stages[stage_index];
-            match &stage.kind {
-                PipeStageKind::Transform { expr } => {
-                    if let Some(subject) = self.current.clone() {
-                        let stage_env = pipe_stage_expr_env(&self.env, stage, &subject);
-                        self.current = typing.infer_transform_stage(*expr, &stage_env, &subject);
-                        if let Some(result_subject) = self.current.as_ref() {
-                            extend_pipe_env_with_stage_memos(
-                                &mut self.env,
-                                stage,
-                                &subject,
-                                result_subject,
-                            );
+        for subject_stage in &self.stages {
+            let start_stage = subject_stage.start_stage();
+            match subject_stage {
+                crate::PipeSubjectStage::Single { stage, .. } => match &stage.kind {
+                    PipeStageKind::Transform { expr } => {
+                        if let Some(subject) = self.current.clone() {
+                            let stage_env = pipe_stage_expr_env(&self.env, stage, &subject);
+                            self.current = typing.infer_transform_stage(*expr, &stage_env, &subject);
+                            if let Some(result_subject) = self.current.as_ref() {
+                                extend_pipe_env_with_stage_memos(
+                                    &mut self.env,
+                                    stage,
+                                    &subject,
+                                    result_subject,
+                                );
+                            }
                         }
                     }
-                    stage_index += 1;
-                }
-                PipeStageKind::Tap { expr } => {
-                    if let Some(subject) = self.current.clone() {
-                        let stage_env = pipe_stage_expr_env(&self.env, stage, &subject);
-                        let _ = typing.infer_pipe_body(*expr, &stage_env, &subject);
-                        extend_pipe_env_with_stage_memos(&mut self.env, stage, &subject, &subject);
-                        self.current = Some(subject);
+                    PipeStageKind::Tap { expr } => {
+                        if let Some(subject) = self.current.clone() {
+                            let stage_env = pipe_stage_expr_env(&self.env, stage, &subject);
+                            let _ = typing.infer_pipe_body(*expr, &stage_env, &subject);
+                            extend_pipe_env_with_stage_memos(&mut self.env, stage, &subject, &subject);
+                            self.current = Some(subject);
+                        }
                     }
-                    stage_index += 1;
-                }
+                    _ => {
+                        let current_subject = self.current.clone();
+                        let stage_env = current_subject.as_ref().map_or_else(
+                            || self.env.clone(),
+                            |subject| pipe_stage_expr_env(&self.env, start_stage, subject),
+                        );
+                        match on_stage(subject_stage, current_subject.as_ref(), &stage_env, typing) {
+                            PipeSubjectStepOutcome::Continue { new_subject } => {
+                                if let (Some(input_subject), Some(result_subject)) =
+                                    (current_subject.as_ref(), new_subject.as_ref())
+                                {
+                                    extend_pipe_env_with_stage_memos(
+                                        &mut self.env,
+                                        start_stage,
+                                        input_subject,
+                                        result_subject,
+                                    );
+                                }
+                                self.current = new_subject;
+                            }
+                            PipeSubjectStepOutcome::Stop => break,
+                        }
+                    }
+                },
                 _ => {
                     let current_subject = self.current.clone();
                     let stage_env = current_subject.as_ref().map_or_else(
                         || self.env.clone(),
-                        |subject| pipe_stage_expr_env(&self.env, stage, subject),
+                        |subject| pipe_stage_expr_env(&self.env, start_stage, subject),
                     );
-                    match on_stage(
-                        stage_index,
-                        stage,
-                        current_subject.as_ref(),
-                        &stage_env,
-                        typing,
-                    ) {
-                        PipeSubjectStepOutcome::Continue {
-                            new_subject,
-                            advance_by,
-                        } => {
+                    match on_stage(subject_stage, current_subject.as_ref(), &stage_env, typing) {
+                        PipeSubjectStepOutcome::Continue { new_subject } => {
                             if let (Some(input_subject), Some(result_subject)) =
                                 (current_subject.as_ref(), new_subject.as_ref())
                             {
                                 extend_pipe_env_with_stage_memos(
                                     &mut self.env,
-                                    stage,
+                                    start_stage,
                                     input_subject,
                                     result_subject,
                                 );
                             }
                             self.current = new_subject;
-                            stage_index += advance_by;
                         }
                         PipeSubjectStepOutcome::Stop => break,
                     }

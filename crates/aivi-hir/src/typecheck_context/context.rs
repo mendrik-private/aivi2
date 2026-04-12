@@ -6453,10 +6453,10 @@ impl<'a> GateTypeContext<'a> {
         self.infer_fanout_map_stage_info(expr_id, env, subject).ty
     }
 
-    /// Infer only the result type for a joined fanout segment, without building
-    /// filter plans or join plans.  Used by `validate_gate_pipe` to advance the
-    /// subject type past a `*|> … <|*` segment without re-running the full
-    /// `elaborate_fanout_segment` pass that `validate_fanout_semantics` already
+    /// Infer only the result type for a full fanout segment, without building
+    /// filter plans or join plans. Used by grouped subject walkers to advance
+    /// the subject type past `*|>` map/filter(/join) runs without re-running
+    /// the full `elaborate_fanout_segment` pass that validation already
     /// performed (PA-H2).
     pub(crate) fn infer_fanout_segment_result_type(
         &mut self,
