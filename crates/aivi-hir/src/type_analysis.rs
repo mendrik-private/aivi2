@@ -4,7 +4,7 @@ use aivi_typing::RecurrenceTargetEvidence;
 use crate::{
     hir::{
         ApplicativeSpineHead, BuiltinTerm, ControlNode, ExprKind, MarkupAttributeValue,
-        MarkupNodeKind, Module, PipeStageKind, TextSegment,
+        MarkupNodeKind, Module, TextSegment,
     },
     ids::{ControlNodeId, ExprId, ImportId, ItemId, MarkupNodeId},
     typecheck_context::GateType,
@@ -238,52 +238,11 @@ pub(crate) fn walk_expr_tree(
                     }
                     ExprKind::Pipe(pipe) => {
                         for stage in pipe.stages.iter().rev() {
-                            match &stage.kind {
-                                PipeStageKind::Transform { expr }
-                                | PipeStageKind::Gate { expr }
-                                | PipeStageKind::Map { expr }
-                                | PipeStageKind::Apply { expr }
-                                | PipeStageKind::Tap { expr }
-                                | PipeStageKind::FanIn { expr }
-                                | PipeStageKind::Truthy { expr }
-                                | PipeStageKind::Falsy { expr }
-                                | PipeStageKind::RecurStart { expr }
-                                | PipeStageKind::RecurStep { expr }
-                                | PipeStageKind::Validate { expr }
-                                | PipeStageKind::Previous { expr }
-                                | PipeStageKind::Diff { expr }
-                                | PipeStageKind::Delay { duration: expr } => {
-                                    work.push(ExprWalkWork::Expr {
-                                        expr: *expr,
-                                        is_root: false,
-                                    });
-                                }
-                                PipeStageKind::Accumulate { seed, step } => {
-                                    work.push(ExprWalkWork::Expr {
-                                        expr: *step,
-                                        is_root: false,
-                                    });
-                                    work.push(ExprWalkWork::Expr {
-                                        expr: *seed,
-                                        is_root: false,
-                                    });
-                                }
-                                PipeStageKind::Burst { every, count } => {
-                                    work.push(ExprWalkWork::Expr {
-                                        expr: *count,
-                                        is_root: false,
-                                    });
-                                    work.push(ExprWalkWork::Expr {
-                                        expr: *every,
-                                        is_root: false,
-                                    });
-                                }
-                                PipeStageKind::Case { body, .. } => {
-                                    work.push(ExprWalkWork::Expr {
-                                        expr: *body,
-                                        is_root: false,
-                                    });
-                                }
+                            for input in stage.expr_inputs().rev() {
+                                work.push(ExprWalkWork::Expr {
+                                    expr: input.expr,
+                                    is_root: false,
+                                });
                             }
                         }
                         work.push(ExprWalkWork::Expr {

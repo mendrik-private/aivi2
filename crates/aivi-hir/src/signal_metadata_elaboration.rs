@@ -6,8 +6,8 @@ use crate::{
     ApplicativeSpineHead, ClusterId, ControlNode, ControlNodeId, CustomSourceContractMetadata,
     DecoratorPayload, ExprId, ExprKind, ImportBindingMetadata, ImportId, ImportValueType, Item,
     ItemId, MarkupAttributeValue, MarkupNodeId, MarkupNodeKind, Module, PatternId, PatternKind,
-    PipeStageKind, ProjectionBase, ResolutionState, SignalItem, SourceDecorator,
-    SourceLifecycleDependencies, SourceMetadata, SourceProviderRef, TermResolution, TextSegment,
+    ProjectionBase, ResolutionState, SignalItem, SourceDecorator, SourceLifecycleDependencies,
+    SourceMetadata, SourceProviderRef, TermResolution, TextSegment,
 };
 
 /// Populates `signal_dependencies` and `source_metadata` on every
@@ -135,12 +135,7 @@ fn compute_temporal_input_dependencies(module: &Module, item: &SignalItem) -> Ve
     let ExprKind::Pipe(pipe) = &module.exprs()[body].kind else {
         return Vec::new();
     };
-    let has_temporal = pipe.stages.iter().any(|stage| {
-        matches!(
-            stage.kind,
-            PipeStageKind::Delay { .. } | PipeStageKind::Burst { .. }
-        )
-    });
+    let has_temporal = pipe.stages.iter().any(|stage| stage.is_temporal_boundary());
     if !has_temporal {
         return Vec::new();
     }
@@ -149,37 +144,14 @@ fn compute_temporal_input_dependencies(module: &Module, item: &SignalItem) -> Ve
     // and do not participate in synchronous evaluation order.
     let mut work = vec![DependencyWork::Expr(pipe.head)];
     for stage in pipe.stages.iter() {
-        if matches!(
-            stage.kind,
-            PipeStageKind::Delay { .. } | PipeStageKind::Burst { .. }
-        ) {
+        if stage.is_temporal_boundary() {
             break;
         }
-        match &stage.kind {
-            PipeStageKind::Transform { expr }
-            | PipeStageKind::Gate { expr }
-            | PipeStageKind::Map { expr }
-            | PipeStageKind::Apply { expr }
-            | PipeStageKind::Tap { expr }
-            | PipeStageKind::FanIn { expr }
-            | PipeStageKind::Truthy { expr }
-            | PipeStageKind::Falsy { expr }
-            | PipeStageKind::RecurStart { expr }
-            | PipeStageKind::RecurStep { expr }
-            | PipeStageKind::Validate { expr }
-            | PipeStageKind::Previous { expr }
-            | PipeStageKind::Diff { expr } => {
-                work.push(DependencyWork::Expr(*expr));
-            }
-            PipeStageKind::Case { pattern, body } => {
-                work.push(DependencyWork::Pattern(*pattern));
-                work.push(DependencyWork::Expr(*body));
-            }
-            PipeStageKind::Accumulate { seed, step } => {
-                work.push(DependencyWork::Expr(*seed));
-                work.push(DependencyWork::Expr(*step));
-            }
-            PipeStageKind::Delay { .. } | PipeStageKind::Burst { .. } => unreachable!(),
+        for pattern in stage.pattern_inputs() {
+            work.push(DependencyWork::Pattern(pattern.pattern));
+        }
+        for input in stage.expr_inputs() {
+            work.push(DependencyWork::Expr(input.expr));
         }
     }
     collect_signal_dependencies(module, work)
@@ -433,35 +405,11 @@ fn collect_signal_deps_internal(
                     ExprKind::Pipe(pipe) => {
                         work.push(DependencyWork::Expr(pipe.head));
                         for stage in pipe.stages.iter() {
-                            match &stage.kind {
-                                PipeStageKind::Transform { expr }
-                                | PipeStageKind::Gate { expr }
-                                | PipeStageKind::Map { expr }
-                                | PipeStageKind::Apply { expr }
-                                | PipeStageKind::Tap { expr }
-                                | PipeStageKind::FanIn { expr }
-                                | PipeStageKind::Truthy { expr }
-                                | PipeStageKind::Falsy { expr }
-                                | PipeStageKind::RecurStart { expr }
-                                | PipeStageKind::RecurStep { expr }
-                                | PipeStageKind::Validate { expr }
-                                | PipeStageKind::Previous { expr }
-                                | PipeStageKind::Diff { expr }
-                                | PipeStageKind::Delay { duration: expr } => {
-                                    work.push(DependencyWork::Expr(*expr))
-                                }
-                                PipeStageKind::Accumulate { seed, step } => {
-                                    work.push(DependencyWork::Expr(*seed));
-                                    work.push(DependencyWork::Expr(*step));
-                                }
-                                PipeStageKind::Burst { every, count } => {
-                                    work.push(DependencyWork::Expr(*every));
-                                    work.push(DependencyWork::Expr(*count));
-                                }
-                                PipeStageKind::Case { pattern, body } => {
-                                    work.push(DependencyWork::Expr(*body));
-                                    work.push(DependencyWork::Pattern(*pattern));
-                                }
+                            for input in stage.expr_inputs() {
+                                work.push(DependencyWork::Expr(input.expr));
+                            }
+                            for pattern in stage.pattern_inputs() {
+                                work.push(DependencyWork::Pattern(pattern.pattern));
                             }
                         }
                     }

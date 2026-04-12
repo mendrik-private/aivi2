@@ -5610,65 +5610,8 @@ impl<'a> Lowerer<'a> {
     }
 
     fn hoist_pipe_stage(&mut self, mut stage: PipeStage, owner: &LambdaOwnerContext) -> PipeStage {
-        stage.kind = match stage.kind {
-            PipeStageKind::Transform { expr } => PipeStageKind::Transform {
-                expr: self.hoist_expr(expr, owner),
-            },
-            PipeStageKind::Gate { expr } => PipeStageKind::Gate {
-                expr: self.hoist_expr(expr, owner),
-            },
-            PipeStageKind::Case { pattern, body } => {
-                self.hoist_pattern(pattern, owner);
-                PipeStageKind::Case {
-                    pattern,
-                    body: self.hoist_expr(body, owner),
-                }
-            }
-            PipeStageKind::Map { expr } => PipeStageKind::Map {
-                expr: self.hoist_expr(expr, owner),
-            },
-            PipeStageKind::Apply { expr } => PipeStageKind::Apply {
-                expr: self.hoist_expr(expr, owner),
-            },
-            PipeStageKind::Tap { expr } => PipeStageKind::Tap {
-                expr: self.hoist_expr(expr, owner),
-            },
-            PipeStageKind::FanIn { expr } => PipeStageKind::FanIn {
-                expr: self.hoist_expr(expr, owner),
-            },
-            PipeStageKind::Truthy { expr } => PipeStageKind::Truthy {
-                expr: self.hoist_expr(expr, owner),
-            },
-            PipeStageKind::Falsy { expr } => PipeStageKind::Falsy {
-                expr: self.hoist_expr(expr, owner),
-            },
-            PipeStageKind::RecurStart { expr } => PipeStageKind::RecurStart {
-                expr: self.hoist_expr(expr, owner),
-            },
-            PipeStageKind::RecurStep { expr } => PipeStageKind::RecurStep {
-                expr: self.hoist_expr(expr, owner),
-            },
-            PipeStageKind::Validate { expr } => PipeStageKind::Validate {
-                expr: self.hoist_expr(expr, owner),
-            },
-            PipeStageKind::Previous { expr } => PipeStageKind::Previous {
-                expr: self.hoist_expr(expr, owner),
-            },
-            PipeStageKind::Accumulate { seed, step } => PipeStageKind::Accumulate {
-                seed: self.hoist_expr(seed, owner),
-                step: self.hoist_expr(step, owner),
-            },
-            PipeStageKind::Diff { expr } => PipeStageKind::Diff {
-                expr: self.hoist_expr(expr, owner),
-            },
-            PipeStageKind::Delay { duration } => PipeStageKind::Delay {
-                duration: self.hoist_expr(duration, owner),
-            },
-            PipeStageKind::Burst { every, count } => PipeStageKind::Burst {
-                every: self.hoist_expr(every, owner),
-                count: self.hoist_expr(count, owner),
-            },
-        };
+        stage.for_each_pattern_mut(|pattern| self.hoist_pattern(*pattern, owner));
+        stage.for_each_expr_mut(|expr| *expr = self.hoist_expr(*expr, owner));
         stage
     }
 
@@ -6637,34 +6580,8 @@ impl<'a> Lowerer<'a> {
         stage: &PipeStage,
         captures: &HashMap<BindingId, BindingId>,
     ) {
-        match &stage.kind {
-            PipeStageKind::Transform { expr }
-            | PipeStageKind::Gate { expr }
-            | PipeStageKind::Map { expr }
-            | PipeStageKind::Apply { expr }
-            | PipeStageKind::Tap { expr }
-            | PipeStageKind::FanIn { expr }
-            | PipeStageKind::Truthy { expr }
-            | PipeStageKind::Falsy { expr }
-            | PipeStageKind::RecurStart { expr }
-            | PipeStageKind::RecurStep { expr }
-            | PipeStageKind::Validate { expr }
-            | PipeStageKind::Previous { expr }
-            | PipeStageKind::Diff { expr }
-            | PipeStageKind::Delay { duration: expr } => {
-                self.rewrite_captured_bindings_expr(*expr, captures);
-            }
-            PipeStageKind::Case { body, .. } => {
-                self.rewrite_captured_bindings_expr(*body, captures);
-            }
-            PipeStageKind::Accumulate { seed, step } => {
-                self.rewrite_captured_bindings_expr(*seed, captures);
-                self.rewrite_captured_bindings_expr(*step, captures);
-            }
-            PipeStageKind::Burst { every, count } => {
-                self.rewrite_captured_bindings_expr(*every, captures);
-                self.rewrite_captured_bindings_expr(*count, captures);
-            }
+        for input in stage.expr_inputs() {
+            self.rewrite_captured_bindings_expr(input.expr, captures);
         }
     }
 
@@ -6934,34 +6851,8 @@ impl<'a> Lowerer<'a> {
     }
 
     fn rewrite_subject_shorthand_stage(&mut self, stage: &PipeStage, binding: BindingId) {
-        match &stage.kind {
-            PipeStageKind::Transform { expr }
-            | PipeStageKind::Gate { expr }
-            | PipeStageKind::Map { expr }
-            | PipeStageKind::Apply { expr }
-            | PipeStageKind::Tap { expr }
-            | PipeStageKind::FanIn { expr }
-            | PipeStageKind::Truthy { expr }
-            | PipeStageKind::Falsy { expr }
-            | PipeStageKind::RecurStart { expr }
-            | PipeStageKind::RecurStep { expr }
-            | PipeStageKind::Validate { expr }
-            | PipeStageKind::Previous { expr }
-            | PipeStageKind::Diff { expr }
-            | PipeStageKind::Delay { duration: expr } => {
-                self.rewrite_subject_shorthand_expr(*expr, binding, true);
-            }
-            PipeStageKind::Case { body, .. } => {
-                self.rewrite_subject_shorthand_expr(*body, binding, true);
-            }
-            PipeStageKind::Accumulate { seed, step } => {
-                self.rewrite_subject_shorthand_expr(*seed, binding, true);
-                self.rewrite_subject_shorthand_expr(*step, binding, true);
-            }
-            PipeStageKind::Burst { every, count } => {
-                self.rewrite_subject_shorthand_expr(*every, binding, true);
-                self.rewrite_subject_shorthand_expr(*count, binding, true);
-            }
+        for input in stage.expr_inputs() {
+            self.rewrite_subject_shorthand_expr(input.expr, binding, true);
         }
     }
 

@@ -466,60 +466,21 @@ impl Validator<'_> {
                     self.require_expr(expr.span, "expression", "pipe head", pipe.head);
                     for stage in pipe.stages.iter() {
                         self.check_span("pipe stage", stage.span);
-                        match &stage.kind {
-                            PipeStageKind::Transform { expr }
-                            | PipeStageKind::Gate { expr }
-                            | PipeStageKind::Map { expr }
-                            | PipeStageKind::Apply { expr }
-                            | PipeStageKind::Tap { expr }
-                            | PipeStageKind::FanIn { expr }
-                            | PipeStageKind::Truthy { expr }
-                            | PipeStageKind::Falsy { expr }
-                            | PipeStageKind::RecurStart { expr }
-                            | PipeStageKind::RecurStep { expr }
-                            | PipeStageKind::Validate { expr }
-                            | PipeStageKind::Previous { expr }
-                            | PipeStageKind::Diff { expr }
-                            | PipeStageKind::Delay { duration: expr } => {
-                                self.require_expr(
-                                    stage.span,
-                                    "pipe stage",
-                                    "stage expression",
-                                    *expr,
-                                );
-                            }
-                            PipeStageKind::Accumulate { seed, step } => {
-                                self.require_expr(
-                                    stage.span,
-                                    "pipe stage",
-                                    "accumulate seed",
-                                    *seed,
-                                );
-                                self.require_expr(
-                                    stage.span,
-                                    "pipe stage",
-                                    "accumulate step",
-                                    *step,
-                                );
-                            }
-                            PipeStageKind::Burst { every, count } => {
-                                self.require_expr(
-                                    stage.span,
-                                    "pipe stage",
-                                    "burst interval",
-                                    *every,
-                                );
-                                self.require_expr(stage.span, "pipe stage", "burst count", *count);
-                            }
-                            PipeStageKind::Case { pattern, body } => {
-                                self.require_pattern(
-                                    stage.span,
-                                    "pipe stage",
-                                    "case pattern",
-                                    *pattern,
-                                );
-                                self.require_expr(stage.span, "pipe stage", "case body", *body);
-                            }
+                        for pattern in stage.pattern_inputs() {
+                            self.require_pattern(
+                                stage.span,
+                                "pipe stage",
+                                pattern.role.validator_label(),
+                                pattern.pattern,
+                            );
+                        }
+                        for input in stage.expr_inputs() {
+                            self.require_expr(
+                                stage.span,
+                                "pipe stage",
+                                input.role.validator_label(),
+                                input.expr,
+                            );
                         }
                     }
                 }

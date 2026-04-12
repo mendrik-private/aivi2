@@ -1598,6 +1598,34 @@ impl PipeStage {
     pub const fn supports_memos(&self) -> bool {
         true
     }
+
+    pub const fn operator_symbol(&self) -> &'static str {
+        self.kind.operator_symbol()
+    }
+
+    pub const fn law_family(&self) -> PipeOperatorFamily {
+        self.kind.law_family()
+    }
+
+    pub fn expr_inputs(&self) -> PipeStageExprInputs {
+        self.kind.expr_inputs()
+    }
+
+    pub fn pattern_inputs(&self) -> PipeStagePatternInputs {
+        self.kind.pattern_inputs()
+    }
+
+    pub fn for_each_expr_mut(&mut self, f: impl FnMut(&mut ExprId)) {
+        self.kind.for_each_expr_mut(f);
+    }
+
+    pub fn for_each_pattern_mut(&mut self, f: impl FnMut(&mut PatternId)) {
+        self.kind.for_each_pattern_mut(f);
+    }
+
+    pub const fn is_temporal_boundary(&self) -> bool {
+        self.kind.is_temporal_boundary()
+    }
 }
 
 /// Typed runtime semantics for one `|>` transform stage after elaboration.
@@ -1628,6 +1656,285 @@ pub enum PipeStageKind {
     Diff { expr: ExprId },
     Delay { duration: ExprId },
     Burst { every: ExprId, count: ExprId },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PipeOperatorFamily {
+    PlainComposition,
+    PredicateOrSumElimination,
+    CollectionFanoutPrimitive,
+    ValidationSequencePrimitive,
+    TemporalPrimitive,
+    RecurrencePrimitive,
+    InternalHigherKinded,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PipeStageExprInputRole {
+    StageExpr,
+    CaseBody,
+    AccumulateSeed,
+    AccumulateStep,
+    BurstInterval,
+    BurstCount,
+}
+
+impl PipeStageExprInputRole {
+    pub const fn validator_label(self) -> &'static str {
+        match self {
+            Self::StageExpr => "stage expression",
+            Self::CaseBody => "case body",
+            Self::AccumulateSeed => "accumulate seed",
+            Self::AccumulateStep => "accumulate step",
+            Self::BurstInterval => "burst interval",
+            Self::BurstCount => "burst count",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PipeStageExprInput {
+    pub role: PipeStageExprInputRole,
+    pub expr: ExprId,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PipeStagePatternInputRole {
+    CasePattern,
+}
+
+impl PipeStagePatternInputRole {
+    pub const fn validator_label(self) -> &'static str {
+        match self {
+            Self::CasePattern => "case pattern",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PipeStagePatternInput {
+    pub role: PipeStagePatternInputRole,
+    pub pattern: PatternId,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PipeStageExprInputs {
+    inputs: [Option<PipeStageExprInput>; 2],
+    front: usize,
+    back: usize,
+}
+
+impl PipeStageExprInputs {
+    const fn one(input: PipeStageExprInput) -> Self {
+        Self {
+            inputs: [Some(input), None],
+            front: 0,
+            back: 1,
+        }
+    }
+
+    const fn two(first: PipeStageExprInput, second: PipeStageExprInput) -> Self {
+        Self {
+            inputs: [Some(first), Some(second)],
+            front: 0,
+            back: 2,
+        }
+    }
+}
+
+impl Iterator for PipeStageExprInputs {
+    type Item = PipeStageExprInput;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.front < self.back {
+            let next = self.inputs[self.front];
+            self.front += 1;
+            if next.is_some() {
+                return next;
+            }
+        }
+        None
+    }
+}
+
+impl DoubleEndedIterator for PipeStageExprInputs {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        while self.front < self.back {
+            self.back -= 1;
+            let next = self.inputs[self.back];
+            if next.is_some() {
+                return next;
+            }
+        }
+        None
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PipeStagePatternInputs {
+    input: Option<PipeStagePatternInput>,
+}
+
+impl PipeStagePatternInputs {
+    const fn empty() -> Self {
+        Self { input: None }
+    }
+
+    const fn one(input: PipeStagePatternInput) -> Self {
+        Self { input: Some(input) }
+    }
+}
+
+impl Iterator for PipeStagePatternInputs {
+    type Item = PipeStagePatternInput;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.input.take()
+    }
+}
+
+impl DoubleEndedIterator for PipeStagePatternInputs {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.input.take()
+    }
+}
+
+impl PipeStageKind {
+    pub const fn operator_symbol(&self) -> &'static str {
+        match self {
+            Self::Transform { .. } => "|>",
+            Self::Gate { .. } => "?|>",
+            Self::Case { .. } => "||>",
+            Self::Map { .. } => "*|>",
+            Self::Apply { .. } => "&|>",
+            Self::Tap { .. } => "|",
+            Self::FanIn { .. } => "<|*",
+            Self::Truthy { .. } => "T|>",
+            Self::Falsy { .. } => "F|>",
+            Self::RecurStart { .. } => "@|>",
+            Self::RecurStep { .. } => "<|@",
+            Self::Validate { .. } => "!|>",
+            Self::Previous { .. } => "~|>",
+            Self::Accumulate { .. } => "+|>",
+            Self::Diff { .. } => "-|>",
+            Self::Delay { .. } => "|> delay",
+            Self::Burst { .. } => "|> burst",
+        }
+    }
+
+    pub const fn law_family(&self) -> PipeOperatorFamily {
+        match self {
+            Self::Transform { .. } | Self::Tap { .. } => PipeOperatorFamily::PlainComposition,
+            Self::Gate { .. } | Self::Case { .. } | Self::Truthy { .. } | Self::Falsy { .. } => {
+                PipeOperatorFamily::PredicateOrSumElimination
+            }
+            Self::Map { .. } | Self::FanIn { .. } => PipeOperatorFamily::CollectionFanoutPrimitive,
+            Self::Validate { .. } => PipeOperatorFamily::ValidationSequencePrimitive,
+            Self::Previous { .. }
+            | Self::Accumulate { .. }
+            | Self::Diff { .. }
+            | Self::Delay { .. }
+            | Self::Burst { .. } => PipeOperatorFamily::TemporalPrimitive,
+            Self::RecurStart { .. } | Self::RecurStep { .. } => {
+                PipeOperatorFamily::RecurrencePrimitive
+            }
+            Self::Apply { .. } => PipeOperatorFamily::InternalHigherKinded,
+        }
+    }
+
+    pub fn expr_inputs(&self) -> PipeStageExprInputs {
+        match self {
+            Self::Transform { expr }
+            | Self::Gate { expr }
+            | Self::Map { expr }
+            | Self::Apply { expr }
+            | Self::Tap { expr }
+            | Self::FanIn { expr }
+            | Self::Truthy { expr }
+            | Self::Falsy { expr }
+            | Self::RecurStart { expr }
+            | Self::RecurStep { expr }
+            | Self::Validate { expr }
+            | Self::Previous { expr }
+            | Self::Diff { expr }
+            | Self::Delay { duration: expr } => PipeStageExprInputs::one(PipeStageExprInput {
+                role: PipeStageExprInputRole::StageExpr,
+                expr: *expr,
+            }),
+            Self::Case { body, .. } => PipeStageExprInputs::one(PipeStageExprInput {
+                role: PipeStageExprInputRole::CaseBody,
+                expr: *body,
+            }),
+            Self::Accumulate { seed, step } => PipeStageExprInputs::two(
+                PipeStageExprInput {
+                    role: PipeStageExprInputRole::AccumulateSeed,
+                    expr: *seed,
+                },
+                PipeStageExprInput {
+                    role: PipeStageExprInputRole::AccumulateStep,
+                    expr: *step,
+                },
+            ),
+            Self::Burst { every, count } => PipeStageExprInputs::two(
+                PipeStageExprInput {
+                    role: PipeStageExprInputRole::BurstInterval,
+                    expr: *every,
+                },
+                PipeStageExprInput {
+                    role: PipeStageExprInputRole::BurstCount,
+                    expr: *count,
+                },
+            ),
+        }
+    }
+
+    pub fn pattern_inputs(&self) -> PipeStagePatternInputs {
+        match self {
+            Self::Case { pattern, .. } => PipeStagePatternInputs::one(PipeStagePatternInput {
+                role: PipeStagePatternInputRole::CasePattern,
+                pattern: *pattern,
+            }),
+            _ => PipeStagePatternInputs::empty(),
+        }
+    }
+
+    pub fn for_each_expr_mut(&mut self, mut f: impl FnMut(&mut ExprId)) {
+        match self {
+            Self::Transform { expr }
+            | Self::Gate { expr }
+            | Self::Map { expr }
+            | Self::Apply { expr }
+            | Self::Tap { expr }
+            | Self::FanIn { expr }
+            | Self::Truthy { expr }
+            | Self::Falsy { expr }
+            | Self::RecurStart { expr }
+            | Self::RecurStep { expr }
+            | Self::Validate { expr }
+            | Self::Previous { expr }
+            | Self::Diff { expr }
+            | Self::Delay { duration: expr } => f(expr),
+            Self::Case { body, .. } => f(body),
+            Self::Accumulate { seed, step } => {
+                f(seed);
+                f(step);
+            }
+            Self::Burst { every, count } => {
+                f(every);
+                f(count);
+            }
+        }
+    }
+
+    pub fn for_each_pattern_mut(&mut self, mut f: impl FnMut(&mut PatternId)) {
+        if let Self::Case { pattern, .. } = self {
+            f(pattern);
+        }
+    }
+
+    pub const fn is_temporal_boundary(&self) -> bool {
+        matches!(self, Self::Delay { .. } | Self::Burst { .. })
+    }
 }
 
 /// Presentation-free structural view of one fan-out segment inside a pipe.
@@ -1890,6 +2197,152 @@ impl PipeExpr {
                 stages: &self.stages,
             })),
         }
+    }
+}
+
+#[cfg(test)]
+mod pipe_stage_kind_tests {
+    use super::*;
+
+    #[test]
+    fn classifies_pipe_stage_families() {
+        assert_eq!(
+            PipeStageKind::Transform {
+                expr: ExprId::from_raw(0),
+            }
+            .law_family(),
+            PipeOperatorFamily::PlainComposition
+        );
+        assert_eq!(
+            PipeStageKind::Case {
+                pattern: PatternId::from_raw(0),
+                body: ExprId::from_raw(1),
+            }
+            .law_family(),
+            PipeOperatorFamily::PredicateOrSumElimination
+        );
+        assert_eq!(
+            PipeStageKind::Map {
+                expr: ExprId::from_raw(0),
+            }
+            .law_family(),
+            PipeOperatorFamily::CollectionFanoutPrimitive
+        );
+        assert_eq!(
+            PipeStageKind::Validate {
+                expr: ExprId::from_raw(0),
+            }
+            .law_family(),
+            PipeOperatorFamily::ValidationSequencePrimitive
+        );
+        assert_eq!(
+            PipeStageKind::Delay {
+                duration: ExprId::from_raw(0),
+            }
+            .law_family(),
+            PipeOperatorFamily::TemporalPrimitive
+        );
+        assert_eq!(
+            PipeStageKind::RecurStart {
+                expr: ExprId::from_raw(0),
+            }
+            .law_family(),
+            PipeOperatorFamily::RecurrencePrimitive
+        );
+        assert_eq!(
+            PipeStageKind::Apply {
+                expr: ExprId::from_raw(0),
+            }
+            .law_family(),
+            PipeOperatorFamily::InternalHigherKinded
+        );
+    }
+
+    #[test]
+    fn preserves_declared_expr_input_order() {
+        let seed = ExprId::from_raw(11);
+        let step = ExprId::from_raw(12);
+        let stage = PipeStageKind::Accumulate { seed, step };
+        let inputs = stage.expr_inputs().collect::<Vec<_>>();
+        assert_eq!(
+            inputs,
+            vec![
+                PipeStageExprInput {
+                    role: PipeStageExprInputRole::AccumulateSeed,
+                    expr: seed,
+                },
+                PipeStageExprInput {
+                    role: PipeStageExprInputRole::AccumulateStep,
+                    expr: step,
+                },
+            ]
+        );
+        assert_eq!(
+            stage
+                .expr_inputs()
+                .rev()
+                .map(|input| input.expr)
+                .collect::<Vec<_>>(),
+            vec![step, seed]
+        );
+    }
+
+    #[test]
+    fn exposes_case_patterns_and_temporal_boundaries() {
+        let case = PipeStageKind::Case {
+            pattern: PatternId::from_raw(7),
+            body: ExprId::from_raw(9),
+        };
+        assert_eq!(
+            case.pattern_inputs().collect::<Vec<_>>(),
+            vec![PipeStagePatternInput {
+                role: PipeStagePatternInputRole::CasePattern,
+                pattern: PatternId::from_raw(7),
+            }]
+        );
+        assert_eq!(
+            case.expr_inputs().collect::<Vec<_>>(),
+            vec![PipeStageExprInput {
+                role: PipeStageExprInputRole::CaseBody,
+                expr: ExprId::from_raw(9),
+            }]
+        );
+        assert!(!case.is_temporal_boundary());
+        assert!(
+            PipeStageKind::Delay {
+                duration: ExprId::from_raw(3),
+            }
+            .is_temporal_boundary()
+        );
+        assert!(
+            PipeStageKind::Burst {
+                every: ExprId::from_raw(4),
+                count: ExprId::from_raw(5),
+            }
+            .is_temporal_boundary()
+        );
+    }
+
+    #[test]
+    fn mutates_stage_inputs_through_shared_helpers() {
+        let mut stage = PipeStage {
+            span: SourceSpan::default(),
+            subject_memo: None,
+            result_memo: None,
+            kind: PipeStageKind::Case {
+                pattern: PatternId::from_raw(2),
+                body: ExprId::from_raw(3),
+            },
+        };
+        stage.for_each_pattern_mut(|pattern| *pattern = PatternId::from_raw(pattern.as_raw() + 10));
+        stage.for_each_expr_mut(|expr| *expr = ExprId::from_raw(expr.as_raw() + 20));
+        assert_eq!(
+            stage.kind,
+            PipeStageKind::Case {
+                pattern: PatternId::from_raw(12),
+                body: ExprId::from_raw(23),
+            }
+        );
     }
 }
 
