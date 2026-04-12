@@ -927,7 +927,7 @@ impl GateType {
         }
     }
 
-    fn expand_transparent_import_alias(&self) -> Option<GateType> {
+    pub(crate) fn expand_transparent_import_alias(&self) -> Option<GateType> {
         let Self::OpaqueImport {
             arguments,
             definition: Some(definition),

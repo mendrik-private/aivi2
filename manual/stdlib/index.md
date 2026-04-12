@@ -32,11 +32,11 @@ After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first
 | --- | --- | --- |
 | [aivi.prelude](prelude.md) | Convenience re-exports and built-in types | `Option`, `Result`, `Signal`, `Eq`, `Ord`, `Functor` |
 | [aivi.async](async.md) | Async operation lifecycle tracker | `AsyncTracker`, `step`, `isPending`, `isDone`, `isFailed` |
-| [aivi.option](option.md) | Values that may be missing | `map`, `withDefault`, `andThen`, `fromResult` |
-| [aivi.result](result.md) | Success-or-error values | `map`, `mapErr`, `andThen`, `onOk`, `onErr` |
-| [aivi.validation](validation.md) | Accumulating validation for independent inputs | `zipValidation`, `andThen`, `onValid`, `onInvalid` |
+| [aivi.option](option.md) | Values that may be missing | `getOrElse`, `map`, `flatMap`, `toResult` |
+| [aivi.result](result.md) | Success-or-error values | `withDefault`, `map`, `mapErr`, `flatMap` |
+| [aivi.validation](validation.md) | Accumulating validation for independent inputs | `getOrElse`, `mapErr`, `zipValidation`, `fold` |
 | [aivi.core.either](either.md) | Disjoint union holding one of two alternatives | `Left`, `Right`, `mapLeft`, `mapRight` |
-| [aivi.list](list.md) | Purely functional list operations | `map`, `filter`, `fold`, `append`, `flatten` |
+| [aivi.list](list.md) | Purely functional list operations | `map`, `filter`, `reduce`, `append`, `flatten` |
 | [aivi.nonEmpty](nonEmpty.md) | Non-empty list guaranteed at the type level | `head`, `last`, `singleton`, `cons`, `fromList` |
 | [aivi.pair](pair.md) | Two-element tuples | `first`, `second`, `mapFirst`, `mapSecond` |
 | [aivi.matrix](matrix.md) | Rectangular 2D collections | `init`, `fromRows`, `width`, `height`, `rows` |
@@ -44,8 +44,10 @@ After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first
 | [aivi.core.set](set.md) | Unordered set for any `Eq` type | `singleton`, `member`, `insert`, `union` |
 | [aivi.core.range](range.md) | Inclusive integer range `[start, end]` | `start`, `end`, `toList`, `contains` |
 | [aivi.core.fn](fn.md) | Higher-order function combinators | `compose`, `const`, `flip`, `combine` |
+| [aivi.arithmetic](arithmetic.md) | Compiler-backed integer arithmetic intrinsics | `add`, `sub`, `mul`, `div`, `mod`, `neg` |
 | [aivi.order](order.md) | Comparison utilities parameterised by a comparator | `compare`, `minOf`, `maxOf`, `descending` |
 | [aivi.bool](bool.md) | Boolean helpers | `and`, `or`, `not`, `all`, `any` |
+| [aivi.bits](bits.md) | Compiler-backed bitwise integer intrinsics | `and`, `or`, `xor`, `not`, `shiftLeft` |
 | [aivi.defaults](defaults.md) | Default values for common types | `defaultText`, `defaultInt`, `defaultBool` |
 | [aivi.math](math.md) | Integer arithmetic utilities | `abs`, `clamp`, `min`, `max`, `gcd` |
 | [aivi.core.float](float.md) | IEEE 754 double-precision helpers | `floor`, `ceil`, `round`, `sqrt`, `pi` |
@@ -53,6 +55,7 @@ After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first
 | [aivi.text](text.md) | Text manipulation | `length`, `contains`, `trim`, `split`, `toUpper` |
 | [aivi.regex](regex.md) | Regular-expression matching and replacement | `matches`, `hasMatch`, `replaceFirst`, `allMatches` |
 | [aivi.core.bytes](bytes.md) | Byte sequence operations | `fromText`, `toText`, `slice`, `append` |
+| [aivi.data.json](json.md) | JSON text helpers plus structural JSON types | `validate`, `get`, `pretty`, `Json` |
 | [aivi.duration](duration.md) | Typed time spans | `ms`, `sec`, `min`, `hr`, `millis` |
 | [aivi.time](time.md) | Clock, timestamp, and formatting helpers | `nowMs`, `monotonicMs`, `format`, `parse` |
 | [aivi.timer](timer.md) | Marker types for timer-backed signals | `immediate` |
@@ -65,6 +68,7 @@ After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first
 | [aivi.process](process.md) | Process vocabulary and `ProcessSource` | `command`, `args`, `workingDir`, `env` |
 | [aivi.url](url.md) | Typed URLs with explicit parsing | `parse`, `scheme`, `host`, `path` |
 | [aivi.http](http.md) | HTTP vocabulary and `HttpSource` | `HttpSource`, `Request`, `Response` |
+| [aivi.api](api.md) | OpenAPI capability auth and error vocabulary | `ApiAuth`, `ApiError`, `ApiResponse` |
 | [aivi.auth](auth.md) | OAuth 2.0 / PKCE sign-in records | `OAuthConfig`, `OAuthToken`, `SignInState` |
 | [aivi.db](db.md) | Database vocabulary and `DbSource` | `query`, `commit`, `DbSource` |
 | [aivi.imap](imap.md) | Mailbox and folder types for IMAP integrations | `FolderSummary`, `MailEvent`, `lastSyncedAt` |
@@ -117,6 +121,8 @@ After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first
 - [`aivi.core.set`](/stdlib/set) — collections of unique values.
 - [`aivi.core.range`](/stdlib/range) — numeric ranges.
 - [`aivi.core.fn`](/stdlib/fn) — small function and pipeline helpers.
+- [`aivi.arithmetic`](/stdlib/arithmetic) — compiler-backed integer arithmetic intrinsics.
+- [`aivi.bits`](/stdlib/bits) — compiler-backed bitwise integer intrinsics.
 
 ### Numbers, text, and data
 
@@ -126,6 +132,7 @@ After [`aivi.prelude`](/stdlib/prelude), the modules most people reach for first
 - [`aivi.text`](/stdlib/text) — text helpers.
 - [`aivi.regex`](/stdlib/regex) — regular-expression matching and replacement.
 - [`aivi.core.bytes`](/stdlib/bytes) — byte buffers.
+- [`aivi.data.json`](/stdlib/json) — JSON text helpers plus structural JSON types.
 
 ### Time, randomness, and scheduling
 
@@ -150,6 +157,7 @@ The linked pages spell out which functions exist today.
 
 - [`aivi.url`](/stdlib/url) — typed URLs and helpers for their parts.
 - [`aivi.http`](/stdlib/http) — HTTP vocabulary plus `HttpSource`.
+- [`aivi.api`](/stdlib/api) — auth and error vocabulary shared by `@source api`.
 - [`aivi.auth`](/stdlib/auth) — OAuth / PKCE sign-in records and state types.
 - [`aivi.db`](/stdlib/db) — database vocabulary plus `DbSource`.
 - [`aivi.imap`](/stdlib/imap) — mailbox types for current integrations and future source capabilities.

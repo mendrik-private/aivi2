@@ -11,7 +11,7 @@ Overview of the AIVI standard library modules. All modules live in `stdlib/aivi/
 | `option` | `Option A` type — `Some A \| None` |
 | `result` | `Result A E` type — `Ok A \| Err E` |
 | `either` | `Either A B` — left/right union |
-| `pair` | `Pair A B` — product type |
+| `pair` | `Pair A B` — product type with preferred `first` / `second` / `mapFirst` / `mapSecond` names and compatibility aliases `fst` / `snd` / `mapFst` / `mapSnd` |
 | `validation` | Accumulating validation type |
 
 ## Collections
@@ -31,9 +31,12 @@ Overview of the AIVI standard library modules. All modules live in `stdlib/aivi/
 |--------|-------------|
 | `text` | `Text` — UTF-8 string operations |
 | `bigint` | `BigInt` — arbitrary-precision integers |
+| `arithmetic` | Compiler-backed named integer arithmetic intrinsics (`add`, `sub`, `mul`, `div`, `mod`, `neg`) |
+| `bits` | Compiler-backed named bitwise intrinsics (`and`, `or`, `xor`, `not`, shifts) |
 | `math` | Mathematical functions |
 | `regex` | Regular expressions |
 | `random` | Pseudo-random number generation |
+| `data/json` | Structural `Json` vocabulary plus task-backed text helpers like `validate`, `get`, `pretty` |
 
 ## Time & Duration
 
@@ -76,6 +79,7 @@ Overview of the AIVI standard library modules. All modules live in `stdlib/aivi/
 |--------|-------------|
 | `db` | SQLite database access |
 | `dbus` | D-Bus method calls and signals |
+| `api` | Shared auth/error vocabulary for `@source api` and generated OpenAPI handles |
 | `imap` | IMAP email client |
 | `smtp` | SMTP email sending |
 | `url` | URL parsing and construction |
@@ -107,12 +111,15 @@ Overview of the AIVI standard library modules. All modules live in `stdlib/aivi/
 - `List` operations
 - `Eq`, `Ord`, `Functor`, `Foldable`, common operators
 - `contains` — takes an explicit `eq` comparator: `contains eq list value`
+- pair helpers `first`, `second`, `mapFirst`, `mapSecond` plus compatibility aliases
 
 Recent ergonomics additions:
 
 - `aivi.option`: `fold`, `mapOr`, `isSomeAnd`
 - `aivi.list`: `indexed`, `mapWithIndex`, `reduceWithIndex`, `filterMap`
 - `aivi.matrix`: `coord`, `coords`, `entries`, `positionsWhere`, `count`, `modifyAt`, `replaceMany`
-- `aivi.prelude`: ambient `foldOption`, `mapOr`, `isSomeAnd`, `indexed`, `mapWithIndex`, `reduceWithIndex`, `count`, `findMap`
+- `aivi.pair`: preferred `first`, `second`, `mapFirst`, `mapSecond` aliases over older `fst`, `snd`, `mapFst`, `mapSnd`
+- low-level compiler-backed modules now documented in the manual: `aivi.api`, `aivi.arithmetic`, `aivi.bits`, `aivi.data.json`
+- `aivi.prelude`: ambient `foldOption`, `mapOr`, `isSomeAnd`, `indexed`, `mapWithIndex`, `reduceWithIndex`, `count`, `findMap`, `first`, `second`, `mapFirst`, `mapSecond`
 
 *See also: [indexed-collections.md](indexed-collections.md), [type-system.md](type-system.md), [signal-model.md](signal-model.md)*

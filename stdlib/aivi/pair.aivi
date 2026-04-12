@@ -1,24 +1,40 @@
 hoist
 
 type (A, B) -> A
-func fst = pair => pair
+func first = pair => pair
  ||> (a, _) -> a
 
+type (A, B) -> A
+func fst = pair =>
+    first pair
+
 type (A, B) -> B
-func snd = pair => pair
+func second = pair => pair
  ||> (_, b) -> b
+
+type (A, B) -> B
+func snd = pair =>
+    second pair
 
 type (A, B) -> (B, A)
 func swap = pair => pair
  ||> (a, b) -> (b, a)
 
 type (A -> C) -> (A, B) -> (C, B)
-func mapFst = transform pair => pair
+func mapFirst = transform pair => pair
  ||> (a, b) -> (transform a, b)
 
+type (A -> C) -> (A, B) -> (C, B)
+func mapFst = transform pair =>
+    mapFirst transform pair
+
 type (B -> C) -> (A, B) -> (A, C)
-func mapSnd = transform pair => pair
+func mapSecond = transform pair => pair
  ||> (a, b) -> (a, transform b)
+
+type (B -> C) -> (A, B) -> (A, C)
+func mapSnd = transform pair =>
+    mapSecond transform pair
 
 type (A -> C) -> (B -> D) -> (A, B) -> (C, D)
 func mapBoth = transformFst transformSnd pair => pair
@@ -36,10 +52,38 @@ type A -> (A, A)
 func duplicate = item =>
     (item, item)
 
+type Int -> Int
+func increment = n =>
+    n + 1
+
+type Text -> Text
+func appendBang = text =>
+    "{text}!"
+
+@test
+value first_returns_left_item : Task Text Bool =
+    pure (first (42, "Ada") == 42)
+
+@test
+value second_returns_right_item : Task Text Bool =
+    pure (second (42, "Ada") == "Ada")
+
+@test
+value mapFirst_transforms_only_left_item : Task Text Bool =
+    pure (mapFirst increment (41, "Ada") == (42, "Ada"))
+
+@test
+value mapSecond_transforms_only_right_item : Task Text Bool =
+    pure (mapSecond appendBang (42, "Ada") == (42, "Ada!"))
+
+export first
 export fst
+export second
 export snd
 export swap
+export mapFirst
 export mapFst
+export mapSecond
 export mapSnd
 export mapBoth
 export fromPair

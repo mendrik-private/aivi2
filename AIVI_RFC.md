@@ -3320,7 +3320,7 @@ The AIVI standard library is organized into two tiers.
 | `aivi.nonEmpty` | Non-empty list type `NonEmptyList A` |
 | `aivi.option` | `Option A` combinators |
 | `aivi.order` | `Ordering` type and comparison helpers |
-| `aivi.pair` | Pair/tuple utilities |
+| `aivi.pair` | Pair/tuple utilities; prefer `first` / `second` / `mapFirst` / `mapSecond` while compatibility aliases `fst` / `snd` / `mapFst` / `mapSnd` remain available |
 | `aivi.result` | `Result E A` combinators |
 | `aivi.text` | Text join and interpolation helpers |
 | `aivi.validation` | `Validation E A` for error accumulation |
@@ -3533,7 +3533,75 @@ type BytesDecodeError =
   | UnexpectedEnd
 ```
 
-### 29.10 `aivi.data.json`
+### 29.10 `aivi.api`
+
+Shared auth and error vocabulary for `@source api` declarations and generated OpenAPI capability
+handles. `aivi.api` is intentionally a small pure type module: it does not perform requests itself.
+
+Catalog module: `aivi.api`.
+
+```aivi
+type ApiError =
+  | ApiTimeout
+  | ApiDecodeFailure Text
+  | ApiRequestFailure Text
+  | ApiUnauthorized
+  | ApiNotFound
+  | ApiServerError Text
+
+type ApiAuth =
+  | BearerToken Text
+  | BasicAuth Text Text
+  | ApiKey Text
+  | ApiKeyQuery Text
+  | OAuth2 Text
+
+type ApiSource = Unit
+type ApiResponse A = Result ApiError A
+```
+
+`ApiKeyQuery` is the query-parameter auth variant. `BearerToken` and `OAuth2` currently lower to
+bearer-style authorization headers in the runtime provider.
+
+### 29.11 `aivi.arithmetic`
+
+Named integer arithmetic intrinsics resolved by the compiler. The ordinary operator surface
+(`+`, `-`, `*`, `/`) remains the primary AIVI style; use `aivi.arithmetic` when you need the same
+operations as first-class functions.
+
+Catalog module: `aivi.arithmetic`.
+
+| Intrinsic | Type |
+|---|---|
+| `ArithmeticAdd` | `Int -> Int -> Int` |
+| `ArithmeticSub` | `Int -> Int -> Int` |
+| `ArithmeticMul` | `Int -> Int -> Int` |
+| `ArithmeticDiv` | `Int -> Int -> Int` |
+| `ArithmeticMod` | `Int -> Int -> Int` |
+| `ArithmeticNeg` | `Int -> Int` |
+
+Surface exports: `add`, `sub`, `mul`, `div`, `mod`, `neg`.
+
+### 29.12 `aivi.bits`
+
+Named bitwise integer intrinsics resolved by the compiler. These stay as a low-level compatibility
+surface for bit-manipulation work on `Int`.
+
+Catalog module: `aivi.bits`.
+
+| Intrinsic | Type |
+|---|---|
+| `BitsAnd` | `Int -> Int -> Int` |
+| `BitsOr` | `Int -> Int -> Int` |
+| `BitsXor` | `Int -> Int -> Int` |
+| `BitsNot` | `Int -> Int` |
+| `BitsShiftLeft` | `Int -> Int -> Int` |
+| `BitsShiftRight` | `Int -> Int -> Int` |
+| `BitsShiftRightUnsigned` | `Int -> Int -> Int` |
+
+Surface exports: `and`, `or`, `xor`, `not`, `shiftLeft`, `shiftRight`, `shiftRightUnsigned`.
+
+### 29.13 `aivi.data.json`
 
 JSON intrinsics backed by `serde_json` in the CLI runtime. The current executable surface uses
 `Task Text A` compatibility helpers over raw JSON text fragments. This is **not** the long-term
@@ -3551,15 +3619,31 @@ Catalog module: `aivi.data.json`.
 | `JsonPretty` | `Text -> Task Text Text` | Pretty-print with 2-space indent |
 | `JsonMinify` | `Text -> Task Text Text` | Remove insignificant whitespace |
 
-The module file exports the `JsonError` ADT:
+The module file also exports structural JSON vocabulary:
+
+```aivi
+type Json =
+  | JsonNull
+  | JsonBool Bool
+  | JsonNumber Float
+  | JsonString Text
+  | JsonArray (List Json)
+  | JsonObject (Dict Text Json)
+```
+
+plus the predicates `isNull`, `isObject`, `isArray`, `isBool`, `isNumber`, and `isString`.
+
+The `JsonError` ADT is:
 
 ```aivi
 type JsonError =
-  | InvalidJson
-  | MissingKey
-  | IndexOutOfBounds
-  | WrongType
+  | InvalidJson Text
+  | MissingKey Text
+  | IndexOutOfBounds Int
+  | WrongType Text
 ```
+
+`JsonPath` is currently `List Text`.
 
 Values returned by `JsonGet` and `JsonAt` are raw JSON text fragments (not decoded), so callers can
 pipe into further JSON operations or decode with typed helpers. This fragment-oriented workflow is

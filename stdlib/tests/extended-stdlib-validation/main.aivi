@@ -21,13 +21,12 @@ use aivi.math (
 )
 
 use aivi.pair (
-    fst
-    snd
+    first
+    second
     swap
-    mapFst
-    mapSnd
+    mapFirst
+    mapSecond
     mapBoth as pairMapBoth
-    fromPair
     toPair
     duplicate
 )
@@ -177,9 +176,9 @@ value betweenYes : Bool = between 1 10 5
 value betweenNo : Bool = between 1 10 15
 value dividesYes : Bool = divides 3 9
 value dividesNo : Bool = divides 3 7
-value testPair : (Int, Text) = fromPair 42 "hello"
-value firstItem : Int = fst testPair
-value secondItem : Text = snd testPair
+value testPair : (Int, Text) = toPair 42 "hello"
+value firstItem : Int = first testPair
+value secondItem : Text = second testPair
 value swappedPair : (Text, Int) = swap testPair
 value duplicated : (Int, Int) = duplicate 5
 
@@ -191,8 +190,8 @@ type Text -> Text
 func upperFirst = t =>
     append t "!"
 
-value mappedFst : (Int, Text) = mapFst doubleNum testPair
-value mappedSnd : (Int, Text) = mapSnd upperFirst testPair
+value mappedFst : (Int, Text) = mapFirst doubleNum testPair
+value mappedSnd : (Int, Text) = mapSecond upperFirst testPair
 value mappedBoth : (Int, Text) = pairMapBoth doubleNum upperFirst testPair
 value emptyText : Bool = isEmpty ""
 value nonEmptyText : Bool = nonEmpty "hello"

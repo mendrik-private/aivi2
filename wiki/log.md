@@ -10,6 +10,13 @@ Parse with: `grep "^## \[" log.md | tail -10`
 Read syntax/parser/HIR lowering and docs around expression lambdas. Added [anonymous-lambdas.md](anonymous-lambdas.md).  
 Captured explicit `x => ...`, narrow `. == value` shorthand, and hoisting-to-hidden-functions implementation model.
 
+## [2026-04-12] ingest | audit followups
+
+Documented the audit follow-up slice in the wiki.  
+Added [codebase-audit-2026-04-12.md](codebase-audit-2026-04-12.md), corrected the `compile` vs `build`
+execution boundary in [cli.md](cli.md), and updated [stdlib.md](stdlib.md) for low-level modules and
+the preferred `first` / `second` pair naming surface.
+
 ## [2026-04-06] ingest | Initial wiki seeded from codebase
 
 Seeded wiki from source files in `src/`, `crates/`, `manual/`, `stdlib/`, `syntax.md`, `AIVI_RFC.md`.  

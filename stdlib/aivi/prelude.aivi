@@ -105,10 +105,14 @@ use aivi.bool (
 )
 
 use aivi.pair (
+    first as pairFirst
     fst as pairFst
+    second as pairSecond
     snd as pairSnd
     swap as pairSwap
+    mapFirst as pairMapFirst
     mapFst as pairMapFst
+    mapSecond as pairMapSecond
     mapSnd as pairMapSnd
     mapBoth as pairMapBoth
     duplicate as pairDuplicate
@@ -355,8 +359,16 @@ func boolFromInt = n =>
     boolFromInt n
 
 type (A, B) -> A
+func first = pair =>
+    pairFirst pair
+
+type (A, B) -> A
 func fst = pair =>
     pairFst pair
+
+type (A, B) -> B
+func second = pair =>
+    pairSecond pair
 
 type (A, B) -> B
 func snd = pair =>
@@ -367,8 +379,16 @@ func swap = pair =>
     pairSwap pair
 
 type (A -> B) -> (A, C) -> (B, C)
+func mapFirst = f pair =>
+    pairMapFirst f pair
+
+type (A -> B) -> (A, C) -> (B, C)
 func mapFst = f pair =>
     pairMapFst f pair
+
+type (B -> C) -> (A, B) -> (A, C)
+func mapSecond = f pair =>
+    pairMapSecond f pair
 
 type (B -> C) -> (A, B) -> (A, C)
 func mapSnd = f pair =>
@@ -382,4 +402,4 @@ type A -> (A, A)
 func duplicate = item =>
     pairDuplicate item
 
-export (Int, Float, Decimal, BigInt, Bool, Text, Unit, Ordering, List, Option, Result, Validation, Signal, Task, Eq, Default, Functor, Ord, Semigroup, Monoid, Bifunctor, Traversable, Filterable, Applicative, Monad, Foldable, isSome, isNone, getOrElse, foldOption, mapOr, isSomeAnd, mapOption, filterOption, flatMapOption, zipOptions, withDefault, isOk, isErr, mapResult, foldResult, flatMapResult, length, head, at, last, indexed, mapWithIndex, reduceWithIndex, tailOrEmpty, isEmpty, nonEmpty, flatten, reverse, replaceAt, take, drop, sum, contains, any, all, count, find, findMap, min, max, minOf, maxOf, comparing, join, textIsEmpty, textNonEmpty, surround, abs, negate, sign, isEven, isOdd, square, clamp, between, divides, not, xor, implies, boolFromInt, fst, snd, swap, mapFst, mapSnd, mapPair, duplicate)
+export (Int, Float, Decimal, BigInt, Bool, Text, Unit, Ordering, List, Option, Result, Validation, Signal, Task, Eq, Default, Functor, Ord, Semigroup, Monoid, Bifunctor, Traversable, Filterable, Applicative, Monad, Foldable, isSome, isNone, getOrElse, foldOption, mapOr, isSomeAnd, mapOption, filterOption, flatMapOption, zipOptions, withDefault, isOk, isErr, mapResult, foldResult, flatMapResult, length, head, at, last, indexed, mapWithIndex, reduceWithIndex, tailOrEmpty, isEmpty, nonEmpty, flatten, reverse, replaceAt, take, drop, sum, contains, any, all, count, find, findMap, min, max, minOf, maxOf, comparing, join, textIsEmpty, textNonEmpty, surround, abs, negate, sign, isEven, isOdd, square, clamp, between, divides, not, xor, implies, boolFromInt, first, fst, second, snd, swap, mapFirst, mapFst, mapSecond, mapSnd, mapPair, duplicate)

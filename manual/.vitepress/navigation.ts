@@ -133,9 +133,12 @@ const stdlibSections: DocGroup[] = [
     text: 'Numbers, Text & Data',
     collapsed: true,
     items: [
+      { text: 'Arithmetic Intrinsics', link: '/stdlib/arithmetic' },
+      { text: 'Bitwise Intrinsics', link: '/stdlib/bits' },
       { text: 'Math', link: '/stdlib/math' },
       { text: 'Floating-Point Numbers', link: '/stdlib/float' },
       { text: 'Big Integers', link: '/stdlib/bigint' },
+      { text: 'JSON', link: '/stdlib/json' },
       { text: 'Text Processing', link: '/stdlib/text' },
       { text: 'Regular Expressions', link: '/stdlib/regex' },
       { text: 'Byte Buffers', link: '/stdlib/bytes' },
@@ -170,6 +173,7 @@ const stdlibSections: DocGroup[] = [
     items: [
       { text: 'URLs', link: '/stdlib/url' },
       { text: 'HTTP', link: '/stdlib/http' },
+      { text: 'API Vocabulary', link: '/stdlib/api' },
       { text: 'Authentication', link: '/stdlib/auth' },
       { text: 'Databases', link: '/stdlib/db' },
       { text: 'IMAP', link: '/stdlib/imap' },
@@ -234,4 +238,3 @@ export const sidebar: DefaultTheme.SidebarMulti = {
     }),
   ],
 }
-
