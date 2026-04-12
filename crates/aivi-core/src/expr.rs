@@ -60,12 +60,20 @@ pub enum Reference {
     HirItem(HirItemId),
     SumConstructor(SumConstructorHandle),
     DomainMember(DomainMemberHandle),
-    BuiltinClassMember(BuiltinClassMemberIntrinsic),
+    ExecutableEvidence(ExecutableClassMember),
     Builtin(BuiltinTerm),
     IntrinsicValue(IntrinsicValue),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub type ExecutableClassMember = ExecutableEvidence<crate::ItemId, BuiltinClassMemberIntrinsic>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ExecutableEvidence<Item, Builtin> {
+    Authored(Item),
+    Builtin(Builtin),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BuiltinClassMemberIntrinsic {
     StructuralEq,
     Compare {
@@ -88,7 +96,7 @@ pub enum BuiltinClassMemberIntrinsic {
     FilterMap(BuiltinFilterableCarrier),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BuiltinFunctorCarrier {
     List,
     Option,
@@ -98,13 +106,13 @@ pub enum BuiltinFunctorCarrier {
     Task,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BuiltinBifunctorCarrier {
     Result,
     Validation,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BuiltinApplicativeCarrier {
     List,
     Option,
@@ -114,7 +122,7 @@ pub enum BuiltinApplicativeCarrier {
     Task,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BuiltinApplyCarrier {
     List,
     Option,
@@ -124,7 +132,7 @@ pub enum BuiltinApplyCarrier {
     Task,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BuiltinMonadCarrier {
     List,
     Option,
@@ -132,7 +140,7 @@ pub enum BuiltinMonadCarrier {
     Task,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BuiltinFoldableCarrier {
     List,
     Option,
@@ -140,7 +148,7 @@ pub enum BuiltinFoldableCarrier {
     Validation,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BuiltinTraversableCarrier {
     List,
     Option,
@@ -148,19 +156,19 @@ pub enum BuiltinTraversableCarrier {
     Validation,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BuiltinFilterableCarrier {
     List,
     Option,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BuiltinAppendCarrier {
     Text,
     List,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BuiltinOrdSubject {
     Int,
     Float,

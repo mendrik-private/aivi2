@@ -28,6 +28,7 @@ A persistent, LLM-maintained knowledge base for the AIVI compiler project.
 | [stdlib.md](stdlib.md) | Standard library modules overview |
 | [indexed-collections.md](indexed-collections.md) | Indexed list/matrix ergonomics, implemented ADT companion bodies, and deferred indexed-HKT work |
 | [openapi-source.md](openapi-source.md) | OpenAPI capability handle: `@source api`, codegen, auth |
+| [uniform-elegance-refactor.md](uniform-elegance-refactor.md) | Hard refactor contract for unifying executable evidence, stdlib surface, docs, and laws |
 
 | [demo-audit.md](demo-audit.md) | Snake & Reversi audit — issues found and fixed |
 | [codebase-audit-2026-04-12.md](codebase-audit-2026-04-12.md) | Codebase-wide audit covering JIT/AOT boundary, crate hotspots, stdlib/manual drift, naming pressure, and follow-up outcomes |

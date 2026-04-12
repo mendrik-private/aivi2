@@ -57,11 +57,12 @@ pub use kernel::{
     BuiltinClassMemberIntrinsic, BuiltinFilterableCarrier, BuiltinFoldableCarrier,
     BuiltinFunctorCarrier, BuiltinMonadCarrier, BuiltinOrdSubject, BuiltinTerm,
     BuiltinTraversableCarrier, CallingConvention, CallingConventionKind, DecimalLiteral,
-    FloatLiteral, InlinePipeCaseArm, InlinePipeConstructor, InlinePipeExpr, InlinePipePattern,
-    InlinePipePatternKind, InlinePipeRecordPatternField, InlinePipeStage, InlinePipeStageKind,
-    InlinePipeTruthyFalsyBranch, IntegerLiteral, Kernel, KernelExpr, KernelExprKind, KernelOrigin,
-    KernelOriginKind, MapEntry, ParameterRole, ProjectionBase, RecordExprField, SubjectRef,
-    SuffixedIntegerLiteral, TextLiteral, TextSegment, UnaryOperator, describe_expr_kind,
+    ExecutableEvidence, FloatLiteral, InlinePipeCaseArm, InlinePipeConstructor, InlinePipeExpr,
+    InlinePipePattern, InlinePipePatternKind, InlinePipeRecordPatternField, InlinePipeStage,
+    InlinePipeStageKind, InlinePipeTruthyFalsyBranch, IntegerLiteral, Kernel, KernelExpr,
+    KernelExprKind, KernelOrigin, KernelOriginKind, MapEntry, ParameterRole, ProjectionBase,
+    RecordExprField, SubjectRef, SuffixedIntegerLiteral, TextLiteral, TextSegment, UnaryOperator,
+    describe_expr_kind,
 };
 pub use layout::{
     AbiPassMode, Layout, LayoutKind, PrimitiveType, RecordFieldLayout, VariantLayout,

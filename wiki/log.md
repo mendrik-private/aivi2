@@ -17,6 +17,11 @@ Added [codebase-audit-2026-04-12.md](codebase-audit-2026-04-12.md), corrected th
 execution boundary in [cli.md](cli.md), and updated [stdlib.md](stdlib.md) for low-level modules and
 the preferred `first` / `second` pair naming surface.
 
+## [2026-04-12] add | uniform elegance refactor contract
+
+Codified the non-negotiable invariants, forbidden end states, and done criteria for the Wadler-driven cleanup backlog.  
+Added [uniform-elegance-refactor.md](uniform-elegance-refactor.md) so the refactor cannot stop at dual paths, doc drift, or partial stdlib cleanup.
+
 ## [2026-04-06] ingest | Initial wiki seeded from codebase
 
 Seeded wiki from source files in `src/`, `crates/`, `manual/`, `stdlib/`, `syntax.md`, `AIVI_RFC.md`.  
@@ -293,3 +298,10 @@ Confirmed that imported `Date` values already support structural `==`, while inf
 because ordering lowers through `Ord.compare` and the current checker only treats builtin or
 same-module `Ord` instances as dependable. Updated [equality-semantics.md](equality-semantics.md)
 with the current `Date` / `Duration` comparison split.
+
+## [2026-04-12] ingest | executable evidence unification
+
+Updated the wiki to match the executable-evidence refactor for class members.
+
+- `wiki/type-system.md` now describes imported unary higher-kinded execution through authored executable evidence
+- `wiki/indexed-collections.md` now frames `Matrix` participation in `map` / `reduce` through authored executable evidence instead of hidden callable lowering

@@ -58,7 +58,7 @@ pub(crate) fn capture_free_bindings(
             | ExprKind::Reference(Reference::HirItem(_))
             | ExprKind::Reference(Reference::SumConstructor(_))
             | ExprKind::Reference(Reference::DomainMember(_))
-            | ExprKind::Reference(Reference::BuiltinClassMember(_))
+            | ExprKind::Reference(Reference::ExecutableEvidence(_))
             | ExprKind::Reference(Reference::Builtin(_))
             | ExprKind::Reference(Reference::IntrinsicValue(_)) => {}
             ExprKind::Reference(Reference::Local(binding)) => {

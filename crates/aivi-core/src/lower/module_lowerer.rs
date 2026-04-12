@@ -2106,10 +2106,20 @@ impl<'a> ModuleLowerer<'a> {
                             "same-module instance member body was not seeded into typed-core lowering",
                         )
                     })?;
-                return Ok(Reference::Item(lowered));
+                return Ok(Reference::ExecutableEvidence(
+                    crate::ExecutableEvidence::Authored(lowered),
+                ));
             }
             aivi_hir::ClassMemberImplementation::ImportedInstance { import } => {
-                return self.lower_import_reference(owner, import);
+                let reference = self.lower_import_reference(owner, import)?;
+                let Reference::Item(item) = reference else {
+                    return Err(unsupported(
+                        "imported instance member did not lower to an executable typed-core item",
+                    ));
+                };
+                return Ok(Reference::ExecutableEvidence(
+                    crate::ExecutableEvidence::Authored(item),
+                ));
             }
             aivi_hir::ClassMemberImplementation::Builtin => {}
         }
@@ -2118,204 +2128,100 @@ impl<'a> ModuleLowerer<'a> {
             ("Eq", "==", _) | ("Setoid", "equals", _) => {
                 BuiltinClassMemberIntrinsic::StructuralEq
             }
-            (
-                "Semigroup",
-                "append",
-                TypeBinding::Type(aivi_hir::GateType::Primitive(aivi_hir::BuiltinType::Text)),
-            ) => BuiltinClassMemberIntrinsic::Append(BuiltinAppendCarrier::Text),
-            ("Semigroup", "append", TypeBinding::Type(aivi_hir::GateType::List(_))) => {
-                BuiltinClassMemberIntrinsic::Append(BuiltinAppendCarrier::List)
-            }
-            (
-                "Monoid",
-                "empty",
-                TypeBinding::Type(aivi_hir::GateType::Primitive(aivi_hir::BuiltinType::Text)),
-            ) => BuiltinClassMemberIntrinsic::Empty(BuiltinAppendCarrier::Text),
-            ("Monoid", "empty", TypeBinding::Type(aivi_hir::GateType::List(_))) => {
-                BuiltinClassMemberIntrinsic::Empty(BuiltinAppendCarrier::List)
-            }
-            ("Functor", "map", TypeBinding::Constructor(binding)) => match binding.head() {
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::List) => {
-                    BuiltinClassMemberIntrinsic::Map(BuiltinFunctorCarrier::List)
-                }
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Option) => {
-                    BuiltinClassMemberIntrinsic::Map(BuiltinFunctorCarrier::Option)
-                }
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Result) => {
-                    BuiltinClassMemberIntrinsic::Map(BuiltinFunctorCarrier::Result)
-                }
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Validation) => {
-                    BuiltinClassMemberIntrinsic::Map(BuiltinFunctorCarrier::Validation)
-                }
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Signal) => {
-                    BuiltinClassMemberIntrinsic::Map(BuiltinFunctorCarrier::Signal)
-                }
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Task) => {
-                    BuiltinClassMemberIntrinsic::Map(BuiltinFunctorCarrier::Task)
-                }
-                _ => {
-                    return Err(unsupported(
+            ("Semigroup", "append", _) => crate::builtin_append_intrinsic(
+                self.builtin_executable_carrier_from_type_binding(&dispatch.subject)
+                    .ok_or_else(|| unsupported(
+                        "runtime lowering only supports append for Text and List",
+                    ))?,
+            )
+            .map_err(unsupported)?,
+            ("Monoid", "empty", _) => crate::builtin_empty_intrinsic(
+                self.builtin_executable_carrier_from_type_binding(&dispatch.subject)
+                    .ok_or_else(|| unsupported(
+                        "runtime lowering only supports empty for Text and List",
+                    ))?,
+            )
+            .map_err(unsupported)?,
+            ("Functor", "map", _) => crate::builtin_map_intrinsic(
+                self.builtin_executable_carrier_from_type_binding(&dispatch.subject)
+                    .ok_or_else(|| unsupported(
                         "runtime lowering only supports map for List, Option, Result, Validation, Signal, and Task",
-                    ));
-                }
-            },
-            ("Bifunctor", "bimap", TypeBinding::Constructor(binding)) => {
-                let Some(carrier) = self.builtin_bifunctor_carrier(binding.head()) else {
-                    return Err(unsupported(
+                    ))?,
+            )
+            .map_err(unsupported)?,
+            ("Bifunctor", "bimap", _) => crate::builtin_bimap_intrinsic(
+                self.builtin_executable_carrier_from_type_binding(&dispatch.subject)
+                    .ok_or_else(|| unsupported(
                         "runtime lowering only supports bimap for Result and Validation",
-                    ));
-                };
-                BuiltinClassMemberIntrinsic::Bimap(carrier)
-            }
-            ("Applicative", "pure", TypeBinding::Constructor(binding)) => match binding.head() {
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::List) => {
-                    BuiltinClassMemberIntrinsic::Pure(BuiltinApplicativeCarrier::List)
-                }
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Option) => {
-                    BuiltinClassMemberIntrinsic::Pure(BuiltinApplicativeCarrier::Option)
-                }
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Result) => {
-                    BuiltinClassMemberIntrinsic::Pure(BuiltinApplicativeCarrier::Result)
-                }
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Validation) => {
-                    BuiltinClassMemberIntrinsic::Pure(BuiltinApplicativeCarrier::Validation)
-                }
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Signal) => {
-                    BuiltinClassMemberIntrinsic::Pure(BuiltinApplicativeCarrier::Signal)
-                }
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Task) => {
-                    BuiltinClassMemberIntrinsic::Pure(BuiltinApplicativeCarrier::Task)
-                }
-                _ => {
-                    return Err(unsupported(
+                    ))?,
+            )
+            .map_err(unsupported)?,
+            ("Applicative", "pure", _) => crate::builtin_pure_intrinsic(
+                self.builtin_executable_carrier_from_type_binding(&dispatch.subject)
+                    .ok_or_else(|| unsupported(
                         "runtime lowering only supports pure for List, Option, Result, Validation, Signal, and Task",
-                    ));
-                }
-            },
-            ("Apply", "apply", TypeBinding::Constructor(binding)) => match binding.head() {
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::List) => {
-                    BuiltinClassMemberIntrinsic::Apply(BuiltinApplyCarrier::List)
-                }
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Option) => {
-                    BuiltinClassMemberIntrinsic::Apply(BuiltinApplyCarrier::Option)
-                }
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Result) => {
-                    BuiltinClassMemberIntrinsic::Apply(BuiltinApplyCarrier::Result)
-                }
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Validation) => {
-                    BuiltinClassMemberIntrinsic::Apply(BuiltinApplyCarrier::Validation)
-                }
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Signal) => {
-                    BuiltinClassMemberIntrinsic::Apply(BuiltinApplyCarrier::Signal)
-                }
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Task) => {
-                    BuiltinClassMemberIntrinsic::Apply(BuiltinApplyCarrier::Task)
-                }
-                _ => {
-                    return Err(unsupported(
+                    ))?,
+            )
+            .map_err(unsupported)?,
+            ("Apply", "apply", _) => crate::builtin_apply_intrinsic(
+                self.builtin_executable_carrier_from_type_binding(&dispatch.subject)
+                    .ok_or_else(|| unsupported(
                         "runtime lowering only supports apply for List, Option, Result, Validation, Signal, and Task",
-                    ));
-                }
-            },
-            ("Chain", "chain", TypeBinding::Constructor(binding)) => {
-                let Some(carrier) = self.builtin_monad_carrier(binding.head()) else {
-                    return Err(unsupported(
+                    ))?,
+            )
+            .map_err(unsupported)?,
+            ("Chain", "chain", _) => crate::builtin_chain_intrinsic(
+                self.builtin_executable_carrier_from_type_binding(&dispatch.subject)
+                    .ok_or_else(|| unsupported(
                         "runtime lowering only supports chain for List, Option, Result, and Task",
-                    ));
-                };
-                BuiltinClassMemberIntrinsic::Chain(carrier)
-            }
-            ("Monad", "join", TypeBinding::Constructor(binding)) => {
-                let Some(carrier) = self.builtin_monad_carrier(binding.head()) else {
-                    return Err(unsupported(
+                    ))?,
+            )
+            .map_err(unsupported)?,
+            ("Monad", "join", _) => crate::builtin_join_intrinsic(
+                self.builtin_executable_carrier_from_type_binding(&dispatch.subject)
+                    .ok_or_else(|| unsupported(
                         "runtime lowering only supports join for List, Option, Result, and Task",
-                    ));
-                };
-                BuiltinClassMemberIntrinsic::Join(carrier)
-            }
-            ("Foldable", "reduce", TypeBinding::Constructor(binding)) => match binding.head() {
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::List) => {
-                    BuiltinClassMemberIntrinsic::Reduce(BuiltinFoldableCarrier::List)
-                }
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Option) => {
-                    BuiltinClassMemberIntrinsic::Reduce(BuiltinFoldableCarrier::Option)
-                }
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Result) => {
-                    BuiltinClassMemberIntrinsic::Reduce(BuiltinFoldableCarrier::Result)
-                }
-                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Validation) => {
-                    BuiltinClassMemberIntrinsic::Reduce(BuiltinFoldableCarrier::Validation)
-                }
-                _ => {
-                    return Err(unsupported(
+                    ))?,
+            )
+            .map_err(unsupported)?,
+            ("Foldable", "reduce", _) => crate::builtin_reduce_intrinsic(
+                self.builtin_executable_carrier_from_type_binding(&dispatch.subject)
+                    .ok_or_else(|| unsupported(
                         "runtime lowering only supports reduce for List, Option, Result, and Validation",
-                    ));
-                }
-            },
-            ("Traversable", "traverse", TypeBinding::Constructor(binding)) => {
-                let Some(traversable) = self.builtin_traversable_carrier(binding.head()) else {
-                    return Err(unsupported(
+                    ))?,
+            )
+            .map_err(unsupported)?,
+            ("Traversable", "traverse", _) => crate::builtin_traverse_intrinsic(
+                self.builtin_executable_carrier_from_type_binding(&dispatch.subject)
+                    .ok_or_else(|| unsupported(
                         "runtime lowering only supports traverse for List, Option, Result, and Validation",
-                    ));
-                };
-                let Some(applicative) = self.builtin_applicative_carrier_from_gate_type(expr_ty)
-                else {
-                    return Err(unsupported(
+                    ))?,
+                self.builtin_executable_carrier_from_gate_type(expr_ty)
+                    .ok_or_else(|| unsupported(
                         "runtime lowering only supports traverse results in List, Option, Result, Validation, and Signal applicatives",
-                    ));
-                };
-                BuiltinClassMemberIntrinsic::Traverse {
-                    traversable,
-                    applicative,
-                }
-            }
-            ("Filterable", "filterMap", TypeBinding::Constructor(binding)) => {
-                let Some(carrier) = self.builtin_filterable_carrier(binding.head()) else {
-                    return Err(unsupported(
+                    ))?,
+            )
+            .map_err(unsupported)?,
+            ("Filterable", "filterMap", _) => crate::builtin_filter_map_intrinsic(
+                self.builtin_executable_carrier_from_type_binding(&dispatch.subject)
+                    .ok_or_else(|| unsupported(
                         "runtime lowering only supports filterMap for List and Option",
-                    ));
-                };
-                BuiltinClassMemberIntrinsic::FilterMap(carrier)
-            }
+                    ))?,
+            )
+            .map_err(unsupported)?,
             ("Ord", "compare", _) => {
                 let ordering_item =
                     self.ordering_item_from_gate_type(expr_ty).ok_or_else(|| {
                         unsupported("runtime lowering could not recover the Ordering result type")
                     })?;
-                let subject = match &dispatch.subject {
-                    TypeBinding::Type(aivi_hir::GateType::Primitive(
-                        aivi_hir::BuiltinType::Int,
-                    )) => BuiltinOrdSubject::Int,
-                    TypeBinding::Type(aivi_hir::GateType::Primitive(
-                        aivi_hir::BuiltinType::Float,
-                    )) => BuiltinOrdSubject::Float,
-                    TypeBinding::Type(aivi_hir::GateType::Primitive(
-                        aivi_hir::BuiltinType::Decimal,
-                    )) => BuiltinOrdSubject::Decimal,
-                    TypeBinding::Type(aivi_hir::GateType::Primitive(
-                        aivi_hir::BuiltinType::BigInt,
-                    )) => BuiltinOrdSubject::BigInt,
-                    TypeBinding::Type(aivi_hir::GateType::Primitive(
-                        aivi_hir::BuiltinType::Bool,
-                    )) => BuiltinOrdSubject::Bool,
-                    TypeBinding::Type(aivi_hir::GateType::Primitive(
-                        aivi_hir::BuiltinType::Text,
-                    )) => BuiltinOrdSubject::Text,
-                    TypeBinding::Type(aivi_hir::GateType::OpaqueItem { name, .. })
-                        if name == "Ordering" =>
-                    {
-                        BuiltinOrdSubject::Ordering
-                    }
-                    _ => {
-                        return Err(unsupported(
+                crate::builtin_compare_intrinsic(
+                    self.builtin_executable_carrier_from_type_binding(&dispatch.subject)
+                        .ok_or_else(|| unsupported(
                             "runtime lowering only supports compare for Int, Float, Decimal, BigInt, Bool, Text, and Ordering",
-                        ));
-                    }
-                };
-                BuiltinClassMemberIntrinsic::Compare {
-                    subject,
+                        ))?,
                     ordering_item,
-                }
+                )
+                .map_err(unsupported)?
             }
             _ => {
                 return Err(unsupported(
@@ -2323,7 +2229,9 @@ impl<'a> ModuleLowerer<'a> {
                 ));
             }
         };
-        Ok(Reference::BuiltinClassMember(intrinsic))
+        Ok(Reference::ExecutableEvidence(
+            crate::ExecutableEvidence::Builtin(intrinsic),
+        ))
     }
 
     fn class_member_names(
@@ -2387,89 +2295,77 @@ impl<'a> ModuleLowerer<'a> {
         }
     }
 
-    fn builtin_bifunctor_carrier(
+    fn builtin_executable_carrier_from_type_binding(
         &self,
-        head: TypeConstructorHead,
-    ) -> Option<BuiltinBifunctorCarrier> {
-        match head {
-            TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Result) => {
-                Some(BuiltinBifunctorCarrier::Result)
+        binding: &TypeBinding,
+    ) -> Option<crate::BuiltinExecutableCarrier> {
+        match binding {
+            TypeBinding::Type(aivi_hir::GateType::Primitive(aivi_hir::BuiltinType::Int)) => {
+                Some(crate::BuiltinExecutableCarrier::Int)
             }
-            TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Validation) => {
-                Some(BuiltinBifunctorCarrier::Validation)
+            TypeBinding::Type(aivi_hir::GateType::Primitive(aivi_hir::BuiltinType::Float)) => {
+                Some(crate::BuiltinExecutableCarrier::Float)
             }
+            TypeBinding::Type(aivi_hir::GateType::Primitive(aivi_hir::BuiltinType::Decimal)) => {
+                Some(crate::BuiltinExecutableCarrier::Decimal)
+            }
+            TypeBinding::Type(aivi_hir::GateType::Primitive(aivi_hir::BuiltinType::BigInt)) => {
+                Some(crate::BuiltinExecutableCarrier::BigInt)
+            }
+            TypeBinding::Type(aivi_hir::GateType::Primitive(aivi_hir::BuiltinType::Bool)) => {
+                Some(crate::BuiltinExecutableCarrier::Bool)
+            }
+            TypeBinding::Type(aivi_hir::GateType::Primitive(aivi_hir::BuiltinType::Text)) => {
+                Some(crate::BuiltinExecutableCarrier::Text)
+            }
+            TypeBinding::Type(aivi_hir::GateType::List(_)) => {
+                Some(crate::BuiltinExecutableCarrier::List)
+            }
+            TypeBinding::Type(aivi_hir::GateType::OpaqueItem { name, .. }) if name == "Ordering" => {
+                Some(crate::BuiltinExecutableCarrier::Ordering)
+            }
+            TypeBinding::Constructor(binding) => match binding.head() {
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::List) => {
+                    Some(crate::BuiltinExecutableCarrier::List)
+                }
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Option) => {
+                    Some(crate::BuiltinExecutableCarrier::Option)
+                }
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Result) => {
+                    Some(crate::BuiltinExecutableCarrier::Result)
+                }
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Validation) => {
+                    Some(crate::BuiltinExecutableCarrier::Validation)
+                }
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Signal) => {
+                    Some(crate::BuiltinExecutableCarrier::Signal)
+                }
+                TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Task) => {
+                    Some(crate::BuiltinExecutableCarrier::Task)
+                }
+                _ => None,
+            },
             _ => None,
         }
     }
 
-    fn builtin_traversable_carrier(
-        &self,
-        head: TypeConstructorHead,
-    ) -> Option<BuiltinTraversableCarrier> {
-        match head {
-            TypeConstructorHead::Builtin(aivi_hir::BuiltinType::List) => {
-                Some(BuiltinTraversableCarrier::List)
-            }
-            TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Option) => {
-                Some(BuiltinTraversableCarrier::Option)
-            }
-            TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Result) => {
-                Some(BuiltinTraversableCarrier::Result)
-            }
-            TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Validation) => {
-                Some(BuiltinTraversableCarrier::Validation)
-            }
-            _ => None,
-        }
-    }
-
-    fn builtin_filterable_carrier(
-        &self,
-        head: TypeConstructorHead,
-    ) -> Option<BuiltinFilterableCarrier> {
-        match head {
-            TypeConstructorHead::Builtin(aivi_hir::BuiltinType::List) => {
-                Some(BuiltinFilterableCarrier::List)
-            }
-            TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Option) => {
-                Some(BuiltinFilterableCarrier::Option)
-            }
-            _ => None,
-        }
-    }
-
-    fn builtin_monad_carrier(&self, head: TypeConstructorHead) -> Option<BuiltinMonadCarrier> {
-        match head {
-            TypeConstructorHead::Builtin(aivi_hir::BuiltinType::List) => {
-                Some(BuiltinMonadCarrier::List)
-            }
-            TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Option) => {
-                Some(BuiltinMonadCarrier::Option)
-            }
-            TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Result) => {
-                Some(BuiltinMonadCarrier::Result)
-            }
-            TypeConstructorHead::Builtin(aivi_hir::BuiltinType::Task) => {
-                Some(BuiltinMonadCarrier::Task)
-            }
-            _ => None,
-        }
-    }
-
-    fn builtin_applicative_carrier_from_gate_type(
+    fn builtin_executable_carrier_from_gate_type(
         &self,
         ty: &aivi_hir::GateType,
-    ) -> Option<BuiltinApplicativeCarrier> {
+    ) -> Option<crate::BuiltinExecutableCarrier> {
         let mut current = ty;
         while let aivi_hir::GateType::Arrow { result, .. } = current {
             current = result.as_ref();
         }
         match current {
-            aivi_hir::GateType::List(_) => Some(BuiltinApplicativeCarrier::List),
-            aivi_hir::GateType::Option(_) => Some(BuiltinApplicativeCarrier::Option),
-            aivi_hir::GateType::Result { .. } => Some(BuiltinApplicativeCarrier::Result),
-            aivi_hir::GateType::Validation { .. } => Some(BuiltinApplicativeCarrier::Validation),
-            aivi_hir::GateType::Signal(_) => Some(BuiltinApplicativeCarrier::Signal),
+            aivi_hir::GateType::List(_) => Some(crate::BuiltinExecutableCarrier::List),
+            aivi_hir::GateType::Option(_) => Some(crate::BuiltinExecutableCarrier::Option),
+            aivi_hir::GateType::Result { .. } => Some(crate::BuiltinExecutableCarrier::Result),
+            aivi_hir::GateType::Validation { .. } => {
+                Some(crate::BuiltinExecutableCarrier::Validation)
+            }
+            aivi_hir::GateType::Signal(_) => Some(crate::BuiltinExecutableCarrier::Signal),
+            aivi_hir::GateType::Task { .. } => Some(crate::BuiltinExecutableCarrier::Task),
             _ => None,
         }
     }

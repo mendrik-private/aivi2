@@ -2,7 +2,7 @@
 
 ## Draft v1.0 — implementation-facing resolved pass
 
-> Status: normative working draft with implementation choices merged. Working: surface parsing, name resolution, HIR, type/kind checking, constraint resolution, closed-ADT and record lowering, `Eq`/`Functor`/`Applicative` class and instance checking, Cranelift AOT codegen, GTK/libadwaita widget bridge, signal graph scheduling, source provider catalog (HTTP, fs, timer, D-Bus, process), and CLI execute/fmt/check. Known open gaps: HKT end-to-end through Cranelift, `Monad`/`Chain` lowering, signal merge runtime wiring, `&|>` typed-core lowering. Sections §26–§28 cover the CLI, LSP, and pre-stdlib implementation gaps.
+> Status: normative working draft with implementation choices merged. Working: surface parsing, name resolution, HIR, type/kind checking, constraint resolution, closed-ADT and record lowering, `Eq`/`Functor`/`Applicative` class and instance checking, Cranelift AOT codegen, GTK/libadwaita widget bridge, signal graph scheduling, source provider catalog (HTTP, fs, timer, D-Bus, process), and CLI execute/fmt/check. Known open gaps: HKT end-to-end through native Cranelift lowering, signal merge runtime wiring, `&|>` typed-core lowering. Sections §26–§28 cover the CLI, LSP, and pre-stdlib implementation gaps.
 
 ---
 
@@ -777,7 +777,7 @@ Parser-accurate rules:
 - overlapping instances are not allowed
 - orphan instances are **fully disallowed**
 - instance search is compile-time only
-- user-authored instance lookup is implemented for imported unary heads that lower to hidden callables; multi-parameter indexed heads remain deferred
+- user-authored instance lookup is implemented for imported unary heads that lower to authored executable evidence; multi-parameter indexed heads remain deferred
 - unary `instance` blocks with indented member bindings are the implemented surface, including constraint-prefixed instance heads such as `instance Eq A => Eq (Option A)`; imported unary evidence selection works when the checker can choose one concrete candidate
 - instance bodies are checked directly against the class-member arrow types with explicit local parameter bindings
 
@@ -809,17 +809,14 @@ Typed core lowers the builtin runtime-supported class-member surface to intrinsi
 - `compare`
 - structural equality
 
-Instance members lower as hidden callable items per `(instance, member)`. Overloaded references point to those hidden callables, including imported unary higher-kinded uses when evidence selection is concrete enough.
+Instance members lower into first-class executable evidence per `(instance, member)`. Builtin carriers use builtin executable evidence intrinsics, while authored instances use authored executable evidence that points at hidden lowered item bodies, including imported unary higher-kinded uses when evidence selection is concrete enough.
 
 ### 7.2 Core instances
 
-- `Option` implements builtin `Functor`, `Apply`, `Applicative`, `Foldable`, `Traversable`, and `Filterable`
-- `Result E` implements builtin `Functor`, `Bifunctor`, `Apply`, `Applicative`, `Foldable`, and `Traversable`
-- `List` implements builtin `Functor`, `Apply`, `Applicative`, `Foldable`, `Traversable`, and `Filterable`
-- `Validation E` implements builtin `Functor`, `Bifunctor`, `Apply`, `Applicative`, `Foldable`, and `Traversable`
-- `Signal` implements builtin `Functor`, `Apply`, and `Applicative`
-- `Task E` has builtin executable `Applicative` support today; broader checker-level `Functor` / `Apply` / `Chain` / `Monad` matching is still not runtime-backed
-- `List`, `Option`, and `Result E` have builtin executable `Chain` / `Monad` member lowering for `chain` and `join`
+- The canonical builtin executable class/carrier registry lives in `aivi_core::builtin_executable_class_support` and is mirrored in `manual/guide/typeclasses.md`.
+- `Signal` remains builtin `Functor`, `Apply`, and `Applicative` only; it is intentionally not `Chain` / `Monad`.
+- `Validation E` remains builtin `Functor`, `Bifunctor`, `Apply`, `Applicative`, `Foldable`, and `Traversable`, but not `Chain` / `Monad`.
+- `Task E` has builtin executable `Functor`, `Apply`, `Applicative`, `Chain`, and `Monad` support.
 - `Eq` is compiler-provided for the structural cases in §7.3
 - current `Default` evidence is narrower than general imported instance resolution: builtin `Option` defaulting comes from `use aivi.defaults (Option)`, `Text` / `Int` / `Bool` omission can use `use aivi.defaults (defaultText, defaultInt, defaultBool)`, and other cases are still limited to same-module `Default` instances
 
@@ -2209,7 +2206,7 @@ Effects enter through:
 - may fail with `E`
 - may succeed with `A`
 - is schedulable by the runtime
-- has builtin executable support for `Applicative` today; broader `Functor`/`Apply`/`Monad` support remains deferred at runtime lowering
+- follows the canonical executable class-support registry described in §7.2, including builtin `Functor`/`Apply`/`Applicative`/`Chain`/`Monad` support
 
 Runtime execution uses linked task bindings plus scheduler-owned hidden completion inputs. A direct top-level task value lowers to a `TaskRuntimeSpec`; a worker thread evaluates the linked backend item body and publishes its result through a typed completion port back into the scheduler.
 

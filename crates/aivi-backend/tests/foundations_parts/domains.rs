@@ -42,7 +42,9 @@ signal slowWindows : Signal Window =
         KernelExprKind::Apply { callee, arguments } => {
             assert_eq!(arguments.len(), 2);
             match &predicate_kernel.exprs()[*callee].kind {
-                KernelExprKind::BuiltinClassMember(crate::BuiltinClassMemberIntrinsic::StructuralEq) => {}
+                KernelExprKind::ExecutableEvidence(ExecutableEvidence::Builtin(
+                    crate::BuiltinClassMemberIntrinsic::StructuralEq,
+                )) => {}
                 other => panic!(
                     "expected outer comparison to lower through structural equality, found {other:?}"
                 ),
@@ -54,10 +56,12 @@ signal slowWindows : Signal Window =
                 } => {
                     assert_eq!(compare_args.len(), 2);
                     match &predicate_kernel.exprs()[*callee].kind {
-                        KernelExprKind::Item(_) => {}
-                        KernelExprKind::BuiltinClassMember(
-                            crate::BuiltinClassMemberIntrinsic::Compare { .. },
+                        KernelExprKind::ExecutableEvidence(
+                            ExecutableEvidence::Authored(_),
                         ) => {}
+                        KernelExprKind::ExecutableEvidence(ExecutableEvidence::Builtin(
+                            crate::BuiltinClassMemberIntrinsic::Compare { .. },
+                        )) => {}
                         other => panic!(
                             "expected Ord-backed inner compare callee, found {other:?}"
                         ),

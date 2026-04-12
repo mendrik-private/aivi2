@@ -1450,9 +1450,25 @@ fn validate_kernel(
                     });
                 }
             }
+            KernelExprKind::ExecutableEvidence(evidence) => {
+                if let crate::ExecutableEvidence::Authored(item) = evidence {
+                    if !program.items().contains(*item) {
+                        errors.push(ValidationError::KernelUnknownItemRef {
+                            kernel: kernel_id,
+                            expr: expr_id,
+                            item: *item,
+                        });
+                    }
+                    if !kernel.global_items.contains(item) {
+                        errors.push(ValidationError::KernelGlobalDependencyMissing {
+                            kernel: kernel_id,
+                            item: *item,
+                        });
+                    }
+                }
+            }
             KernelExprKind::SumConstructor(_)
             | KernelExprKind::DomainMember(_)
-            | KernelExprKind::BuiltinClassMember(_)
             | KernelExprKind::Builtin(_)
             | KernelExprKind::IntrinsicValue(_)
             | KernelExprKind::Integer(_)

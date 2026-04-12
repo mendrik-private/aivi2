@@ -455,7 +455,7 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                         }
                     }
                     KernelExprKind::DomainMember(_)
-                    | KernelExprKind::BuiltinClassMember(_)
+                    | KernelExprKind::ExecutableEvidence(_)
                     | KernelExprKind::Builtin(_) => {
                         errors.push(self.unsupported_expression(
                             kernel_id,
@@ -3309,15 +3309,20 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                     arguments,
                 )
                 .map(DirectApplyPlan::Intrinsic),
-            KernelExprKind::BuiltinClassMember(intrinsic) => self
-                .require_compilable_builtin_class_member_call(
-                    kernel_id,
-                    expr_id,
-                    callee,
-                    *intrinsic,
-                    arguments,
-                )
-                .map(DirectApplyPlan::Builtin),
+            KernelExprKind::ExecutableEvidence(evidence) => match evidence {
+                crate::ExecutableEvidence::Authored(item) => {
+                    self.require_compilable_item_call(kernel_id, expr_id, *item, arguments)
+                }
+                crate::ExecutableEvidence::Builtin(intrinsic) => self
+                    .require_compilable_builtin_class_member_call(
+                        kernel_id,
+                        expr_id,
+                        callee,
+                        *intrinsic,
+                        arguments,
+                    )
+                    .map(DirectApplyPlan::Builtin),
+            },
             _ => Err(self.unsupported_expression(
                 kernel_id,
                 expr_id,
@@ -8998,7 +9003,7 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                         | KernelExprKind::Environment(_)
                         | KernelExprKind::Item(_)
                         | KernelExprKind::DomainMember(_)
-                        | KernelExprKind::BuiltinClassMember(_)
+                        | KernelExprKind::ExecutableEvidence(_)
                         | KernelExprKind::Projection { .. }
                         | KernelExprKind::Pipe(_) => {
                             return Ok(None);
@@ -9155,7 +9160,9 @@ impl<'a, M: Module> CraneliftCompiler<'a, M> {
                                         tasks.push(Task::Visit(*argument));
                                     }
                                 }
-                                KernelExprKind::BuiltinClassMember(intrinsic) => {
+                                KernelExprKind::ExecutableEvidence(
+                                    crate::ExecutableEvidence::Builtin(intrinsic),
+                                ) => {
                                     let Some(expected_arity) =
                                         static_builtin_class_member_arity(*intrinsic)
                                     else {

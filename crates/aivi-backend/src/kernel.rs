@@ -1,7 +1,7 @@
 use std::fmt;
 
 use aivi_base::SourceSpan;
-use aivi_core::Arena;
+use aivi_core::{Arena, ExecutableEvidence as SharedExecutableEvidence};
 use aivi_hir::{DomainMemberHandle, IntrinsicValue, PipeTransformMode, SumConstructorHandle};
 
 use crate::{
@@ -21,111 +21,13 @@ pub enum BuiltinTerm {
     Invalid,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum BuiltinClassMemberIntrinsic {
-    StructuralEq,
-    Compare {
-        subject: BuiltinOrdSubject,
-        ordering_item: aivi_hir::ItemId,
-    },
-    Append(BuiltinAppendCarrier),
-    Empty(BuiltinAppendCarrier),
-    Map(BuiltinFunctorCarrier),
-    Bimap(BuiltinBifunctorCarrier),
-    Pure(BuiltinApplicativeCarrier),
-    Apply(BuiltinApplyCarrier),
-    Chain(BuiltinMonadCarrier),
-    Join(BuiltinMonadCarrier),
-    Reduce(BuiltinFoldableCarrier),
-    Traverse {
-        traversable: BuiltinTraversableCarrier,
-        applicative: BuiltinApplicativeCarrier,
-    },
-    FilterMap(BuiltinFilterableCarrier),
-}
+pub use aivi_core::{
+    BuiltinAppendCarrier, BuiltinApplicativeCarrier, BuiltinApplyCarrier, BuiltinBifunctorCarrier,
+    BuiltinClassMemberIntrinsic, BuiltinFilterableCarrier, BuiltinFoldableCarrier,
+    BuiltinFunctorCarrier, BuiltinMonadCarrier, BuiltinOrdSubject, BuiltinTraversableCarrier,
+};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum BuiltinFunctorCarrier {
-    List,
-    Option,
-    Result,
-    Validation,
-    Signal,
-    Task,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum BuiltinBifunctorCarrier {
-    Result,
-    Validation,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum BuiltinApplicativeCarrier {
-    List,
-    Option,
-    Result,
-    Validation,
-    Signal,
-    Task,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum BuiltinApplyCarrier {
-    List,
-    Option,
-    Result,
-    Validation,
-    Signal,
-    Task,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum BuiltinMonadCarrier {
-    List,
-    Option,
-    Result,
-    Task,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum BuiltinFoldableCarrier {
-    List,
-    Option,
-    Result,
-    Validation,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum BuiltinTraversableCarrier {
-    List,
-    Option,
-    Result,
-    Validation,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum BuiltinFilterableCarrier {
-    List,
-    Option,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum BuiltinAppendCarrier {
-    Text,
-    List,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum BuiltinOrdSubject {
-    Int,
-    Float,
-    Decimal,
-    BigInt,
-    Bool,
-    Text,
-    Ordering,
-}
+pub type ExecutableEvidence = SharedExecutableEvidence<ItemId, BuiltinClassMemberIntrinsic>;
 
 impl fmt::Display for BuiltinTerm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -534,7 +436,7 @@ pub enum KernelExprKind {
     Item(ItemId),
     SumConstructor(SumConstructorHandle),
     DomainMember(DomainMemberHandle),
-    BuiltinClassMember(BuiltinClassMemberIntrinsic),
+    ExecutableEvidence(ExecutableEvidence),
     Builtin(BuiltinTerm),
     IntrinsicValue(IntrinsicValue),
     Integer(IntegerLiteral),
@@ -720,9 +622,12 @@ pub fn describe_expr_kind(kind: &KernelExprKind) -> String {
                 handle.domain_name, handle.member_name
             )
         }
-        KernelExprKind::BuiltinClassMember(intrinsic) => {
-            format!("builtin-class-member {intrinsic:?}")
-        }
+        KernelExprKind::ExecutableEvidence(evidence) => match evidence {
+            ExecutableEvidence::Authored(item) => format!("executable-evidence item{item}"),
+            ExecutableEvidence::Builtin(intrinsic) => {
+                format!("builtin-class-member {intrinsic:?}")
+            }
+        },
         KernelExprKind::Builtin(term) => format!("builtin {term}"),
         KernelExprKind::IntrinsicValue(value) => format!("intrinsic {value}"),
         KernelExprKind::Integer(integer) => integer.raw.to_string(),

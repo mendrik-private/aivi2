@@ -122,7 +122,7 @@ These correspond to the `Builtin*Carrier` types in `crates/aivi-core/src/expr.rs
 ### Current imported-instance slice
 
 - Imported unary user-authored higher-kinded instances are executable today for ordinary member lookup such as `map` and `reduce`
-- This path works through hidden callable lowering, not through expanding the builtin carrier table
+- This path works through authored executable evidence, not through expanding the builtin carrier table
 - `aivi.matrix` uses this mechanism to expose ambient `map` / `reduce` via user-authored `Functor` / `Foldable` instances
 - Multi-parameter indexed heads are still a deferred design problem; the current executable evidence path is clearly unary
 

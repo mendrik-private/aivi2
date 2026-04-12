@@ -68,7 +68,7 @@ Important rules:
 
 - Builtin carrier lowering is still the main executable slice for `List`, `Option`, `Result`, `Validation`, `Signal`, and `Task`
 - Imported unary user-authored higher-kinded instances are executable for ordinary member lookup such as `map` and `reduce`
-- The path works through hidden callable lowering rather than adding a new builtin carrier
+- The path works through authored executable evidence rather than adding a new builtin carrier
 - This is enough for `Matrix` to participate in ambient `map` / `reduce` today
 
 ## Deferred proposals

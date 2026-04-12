@@ -50,9 +50,10 @@ Bifunctor
 
 ## Builtin executable support
 
-In this section, **executable support** means the current compiler lowers class-member use to dedicated builtin intrinsics in `aivi-core`.
-If a carrier is not listed here for a class, that class is **not** runtime-backed for that carrier today, even if parser, HIR, or checker support exists for related syntax.
+In this section, **executable support** means the current compiler lowers class-member use to first-class executable evidence in `aivi-core`.
+Builtin carriers use builtin executable evidence intrinsics; authored instances use authored executable evidence that points at their lowered item bodies. If a carrier is not listed here for a builtin class, that class is **not** runtime-backed for that carrier today, even if parser, HIR, or checker support exists for related syntax.
 
+<!-- BEGIN builtin-executable-support -->
 | Builtin carrier | Functor | Apply | Applicative | Monad | Foldable | Traversable | Filterable | Bifunctor |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `List` | yes | yes | yes | yes | yes | yes | yes | — |
@@ -60,13 +61,14 @@ If a carrier is not listed here for a class, that class is **not** runtime-backe
 | `Result E` | yes | yes | yes | yes | yes | yes | — | yes |
 | `Validation E` | yes | yes | yes | — | yes | yes | — | yes |
 | `Signal` | yes | yes | yes | — | — | — | — | — |
-| `Task E` | — | — | yes | — | — | — | — | — |
+| `Task E` | yes | yes | yes | yes | — | — | — | — |
 
-- The `Monad` column means builtin executable lowering for `chain` and `join`.
-- `Task E` has builtin executable `Functor`, `Apply`, `Applicative`, `Chain`, and `Monad` support.
+- The `Monad` column means builtin executable lowering for `chain` and `join`; `Chain` uses the same registry entries.
+- `—` means the canonical executable-support registry marks that builtin class/carrier pair unsupported.
 - `Signal` is intentionally **not** a `Monad`: executable signals keep a static dependency graph.
 - `Validation E` is intentionally **not** a `Monad`: independent accumulation stays applicative (`&|>` / `zipValidation`), while dependent `!|>` checks are a dedicated pipe primitive rather than class-backed `bind`.
-- There is no builtin executable `Foldable` or `Traversable` support for `Signal` or `Task` in the current slice.
+- Traverse result applicatives are builtin-supported for `List`, `Option`, `Result`, `Validation`, and `Signal`, but not for `Task`.
+<!-- END builtin-executable-support -->
 
 ## Comparison classes
 
@@ -111,7 +113,7 @@ You do not need to author separate domain members for `<`, `>`, `<=`, or `>=`; t
 - Same-module and imported use of ordinary first-order instances such as `Eq Date` or `Ord Calendar`
 - Unary `instance` blocks for higher-kinded heads such as `instance Applicative Option`
 - Partially applied heads such as `instance Functor (Result Text)`
-- Same-module and imported use of unary higher-kinded members such as `map` and `reduce`, which lower to hidden callable items when the checker can choose concrete evidence
+- Same-module and imported use of unary higher-kinded members such as `map` and `reduce`, which lower to authored executable evidence when the checker can choose concrete evidence
 - Bundled stdlib carriers can rely on this path; `aivi.matrix` exposes ambient `map` / `reduce` through user-authored `Functor` / `Foldable` instances rather than a new builtin carrier
 
 ### Not end to end today
@@ -119,7 +121,7 @@ You do not need to author separate domain members for `<`, `>`, `<=`, or `>=`; t
 - Multi-parameter indexed-style higher-kinded instance heads are not yet proven end to end
 - Declaring a new higher-kinded class or instance does **not** create new builtin runtime support for arbitrary carriers
 
-In practice, unary user-authored higher-kinded classes and instances are trustworthy today for imported execution through the current hidden-callable lowering path, but indexed / multi-parameter evidence remains a design frontier rather than a finished executable slice.
+In practice, unary user-authored higher-kinded classes and instances are trustworthy today for imported execution through the current executable-evidence lowering path, but indexed / multi-parameter evidence remains a design frontier rather than a finished executable slice.
 
 ## Related pages
 

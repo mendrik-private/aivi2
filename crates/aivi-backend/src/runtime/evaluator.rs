@@ -467,8 +467,8 @@ impl<'a> KernelEvaluator<'a> {
                                 bound_arguments: Vec::new(),
                             }))
                         }
-                        KernelExprKind::BuiltinClassMember(intrinsic) => {
-                            values.push(runtime_class_member_value(*intrinsic))
+                        KernelExprKind::ExecutableEvidence(evidence) => {
+                            values.push(self.runtime_executable_evidence_value(*evidence)?)
                         }
                         KernelExprKind::Builtin(term) => values.push(map_builtin(*term)),
                         KernelExprKind::IntrinsicValue(value) => {
@@ -1672,6 +1672,31 @@ impl<'a> KernelEvaluator<'a> {
                 )
             }
         }
+    }
+
+    fn runtime_executable_evidence_value(
+        &self,
+        evidence: crate::ExecutableEvidence,
+    ) -> Result<RuntimeValue, EvaluationError> {
+        Ok(match evidence {
+            crate::ExecutableEvidence::Authored(item) => {
+                let item_decl = self
+                    .program
+                    .items()
+                    .get(item)
+                    .expect("validated backend kernels keep authored executable evidence aligned");
+                let kernel = item_decl
+                    .body
+                    .ok_or(EvaluationError::MissingItemBody { item })?;
+                RuntimeValue::Callable(RuntimeCallable::ItemBody {
+                    item,
+                    kernel,
+                    parameters: item_decl.parameters.clone(),
+                    bound_arguments: Vec::new(),
+                })
+            }
+            crate::ExecutableEvidence::Builtin(intrinsic) => runtime_class_member_value(intrinsic),
+        })
     }
 
     fn compare_builtin_subject(

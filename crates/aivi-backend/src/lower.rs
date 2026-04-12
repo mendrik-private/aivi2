@@ -21,34 +21,24 @@ use aivi_typing::{
 };
 
 use crate::{
-    AbiParameter, AbiPassMode, AbiResult, BigIntLiteral, BinaryOperator,
-    BuiltinAppendCarrier as BackendBuiltinAppendCarrier,
-    BuiltinApplicativeCarrier as BackendBuiltinApplicativeCarrier,
-    BuiltinApplyCarrier as BackendBuiltinApplyCarrier,
-    BuiltinBifunctorCarrier as BackendBuiltinBifunctorCarrier,
-    BuiltinClassMemberIntrinsic as BackendBuiltinClassMemberIntrinsic,
-    BuiltinFilterableCarrier as BackendBuiltinFilterableCarrier,
-    BuiltinFoldableCarrier as BackendBuiltinFoldableCarrier,
-    BuiltinFunctorCarrier as BackendBuiltinFunctorCarrier,
-    BuiltinMonadCarrier as BackendBuiltinMonadCarrier,
-    BuiltinOrdSubject as BackendBuiltinOrdSubject, BuiltinTerm,
-    BuiltinTraversableCarrier as BackendBuiltinTraversableCarrier, CallingConvention,
-    CallingConventionKind, DecimalLiteral, DecodeExtraFieldPolicy, DecodeField,
+    AbiParameter, AbiPassMode, AbiResult, BigIntLiteral, BinaryOperator, BuiltinTerm,
+    CallingConvention, CallingConventionKind, DecimalLiteral, DecodeExtraFieldPolicy, DecodeField,
     DecodeFieldRequirement, DecodeMode, DecodePlan, DecodePlanId, DecodeStep, DecodeStepId,
     DecodeStepKind, DecodeSumStrategy, DecodeVariant, DomainDecodeSurface, DomainDecodeSurfaceKind,
-    EnvSlotId, FanoutCarrier, FanoutFilter, FanoutJoin, FanoutStage, FloatLiteral, GateStage,
-    InlinePipeCaseArm, InlinePipeConstructor, InlinePipeExpr, InlinePipePattern,
-    InlinePipePatternKind, InlinePipeRecordPatternField, InlinePipeStage, InlinePipeStageKind,
-    InlinePipeTruthyFalsyBranch, InlineSubjectId, IntegerLiteral, Item, ItemId, ItemKind, Kernel,
-    KernelExpr, KernelExprId, KernelExprKind, KernelId, KernelOrigin, KernelOriginKind, Layout,
-    LayoutId, LayoutKind, LoweringError::*, MapEntry, NonSourceWakeup, NonSourceWakeupCause,
-    ParameterRole, Pipeline, PipelineId, PipelineOrigin, PrimitiveType, Program, ProjectionBase,
-    RecordExprField, RecordFieldLayout, Recurrence, RecurrenceStage, RecurrenceTarget,
-    RecurrenceWakeupKind, SignalInfo, SourceArgumentKernel, SourceCancellationPolicy,
-    SourceInstanceId, SourceOptionBinding, SourceOptionKernel, SourcePlan, SourceProvider,
-    SourceReplacementPolicy, SourceStaleWorkPolicy, SourceTeardownPolicy, Stage, StageKind,
-    SubjectRef, SuffixedIntegerLiteral, TemporalStage, TextLiteral, TextSegment, TruthyFalsyBranch,
-    TruthyFalsyStage, UnaryOperator, ValidationError, VariantLayout, validate_program,
+    EnvSlotId, ExecutableEvidence as BackendExecutableEvidence, FanoutCarrier, FanoutFilter,
+    FanoutJoin, FanoutStage, FloatLiteral, GateStage, InlinePipeCaseArm, InlinePipeConstructor,
+    InlinePipeExpr, InlinePipePattern, InlinePipePatternKind, InlinePipeRecordPatternField,
+    InlinePipeStage, InlinePipeStageKind, InlinePipeTruthyFalsyBranch, InlineSubjectId,
+    IntegerLiteral, Item, ItemId, ItemKind, Kernel, KernelExpr, KernelExprId, KernelExprKind,
+    KernelId, KernelOrigin, KernelOriginKind, Layout, LayoutId, LayoutKind, LoweringError::*,
+    MapEntry, NonSourceWakeup, NonSourceWakeupCause, ParameterRole, Pipeline, PipelineId,
+    PipelineOrigin, PrimitiveType, Program, ProjectionBase, RecordExprField, RecordFieldLayout,
+    Recurrence, RecurrenceStage, RecurrenceTarget, RecurrenceWakeupKind, SignalInfo,
+    SourceArgumentKernel, SourceCancellationPolicy, SourceInstanceId, SourceOptionBinding,
+    SourceOptionKernel, SourcePlan, SourceProvider, SourceReplacementPolicy, SourceStaleWorkPolicy,
+    SourceTeardownPolicy, Stage, StageKind, SubjectRef, SuffixedIntegerLiteral, TemporalStage,
+    TextLiteral, TextSegment, TruthyFalsyBranch, TruthyFalsyStage, UnaryOperator, ValidationError,
+    VariantLayout, validate_program,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -1807,7 +1797,11 @@ impl<'a> ProgramLowerer<'a> {
                     }
                     core::Reference::SumConstructor(_) => {}
                     core::Reference::DomainMember(_) => {}
-                    core::Reference::BuiltinClassMember(_) => {}
+                    core::Reference::ExecutableEvidence(evidence) => {
+                        if let core::ExecutableEvidence::Authored(item) = evidence {
+                            globals.insert(self.require_item(*item, expr.span)?);
+                        }
+                    }
                     core::Reference::IntrinsicValue(_) => {}
                     core::Reference::HirItem(_) => {
                         return Err(UnresolvedItemReference { span: expr.span });
@@ -2065,10 +2059,11 @@ impl<'a> ProgramLowerer<'a> {
                                 core::Reference::DomainMember(handle) => {
                                     KernelExprKind::DomainMember(handle.clone())
                                 }
-                                core::Reference::BuiltinClassMember(intrinsic) => {
-                                    KernelExprKind::BuiltinClassMember(
-                                        map_builtin_class_member_intrinsic(*intrinsic),
-                                    )
+                                core::Reference::ExecutableEvidence(evidence) => {
+                                    KernelExprKind::ExecutableEvidence(map_executable_evidence(
+                                        *evidence,
+                                        |item| self.require_item(item, expr.span),
+                                    )?)
                                 }
                                 core::Reference::HirItem(_) => {
                                     return Err(UnresolvedItemReference { span: expr.span });
@@ -3798,163 +3793,18 @@ fn map_builtin_term(term: HirBuiltinTerm) -> BuiltinTerm {
     }
 }
 
-fn map_builtin_class_member_intrinsic(
-    intrinsic: core::BuiltinClassMemberIntrinsic,
-) -> BackendBuiltinClassMemberIntrinsic {
-    match intrinsic {
-        core::BuiltinClassMemberIntrinsic::StructuralEq => {
-            BackendBuiltinClassMemberIntrinsic::StructuralEq
+fn map_executable_evidence(
+    evidence: core::ExecutableEvidence<core::ItemId, core::BuiltinClassMemberIntrinsic>,
+    mut map_item: impl FnMut(core::ItemId) -> Result<ItemId, LoweringError>,
+) -> Result<BackendExecutableEvidence, LoweringError> {
+    Ok(match evidence {
+        core::ExecutableEvidence::Authored(item) => {
+            BackendExecutableEvidence::Authored(map_item(item)?)
         }
-        core::BuiltinClassMemberIntrinsic::Compare {
-            subject,
-            ordering_item,
-        } => BackendBuiltinClassMemberIntrinsic::Compare {
-            subject: map_builtin_ord_subject(subject),
-            ordering_item,
-        },
-        core::BuiltinClassMemberIntrinsic::Append(carrier) => {
-            BackendBuiltinClassMemberIntrinsic::Append(map_builtin_append_carrier(carrier))
+        core::ExecutableEvidence::Builtin(intrinsic) => {
+            BackendExecutableEvidence::Builtin(intrinsic)
         }
-        core::BuiltinClassMemberIntrinsic::Empty(carrier) => {
-            BackendBuiltinClassMemberIntrinsic::Empty(map_builtin_append_carrier(carrier))
-        }
-        core::BuiltinClassMemberIntrinsic::Map(carrier) => {
-            BackendBuiltinClassMemberIntrinsic::Map(map_builtin_functor_carrier(carrier))
-        }
-        core::BuiltinClassMemberIntrinsic::Bimap(carrier) => {
-            BackendBuiltinClassMemberIntrinsic::Bimap(map_builtin_bifunctor_carrier(carrier))
-        }
-        core::BuiltinClassMemberIntrinsic::Pure(carrier) => {
-            BackendBuiltinClassMemberIntrinsic::Pure(map_builtin_applicative_carrier(carrier))
-        }
-        core::BuiltinClassMemberIntrinsic::Apply(carrier) => {
-            BackendBuiltinClassMemberIntrinsic::Apply(map_builtin_apply_carrier(carrier))
-        }
-        core::BuiltinClassMemberIntrinsic::Chain(carrier) => {
-            BackendBuiltinClassMemberIntrinsic::Chain(map_builtin_monad_carrier(carrier))
-        }
-        core::BuiltinClassMemberIntrinsic::Join(carrier) => {
-            BackendBuiltinClassMemberIntrinsic::Join(map_builtin_monad_carrier(carrier))
-        }
-        core::BuiltinClassMemberIntrinsic::Reduce(carrier) => {
-            BackendBuiltinClassMemberIntrinsic::Reduce(map_builtin_foldable_carrier(carrier))
-        }
-        core::BuiltinClassMemberIntrinsic::Traverse {
-            traversable,
-            applicative,
-        } => BackendBuiltinClassMemberIntrinsic::Traverse {
-            traversable: map_builtin_traversable_carrier(traversable),
-            applicative: map_builtin_applicative_carrier(applicative),
-        },
-        core::BuiltinClassMemberIntrinsic::FilterMap(carrier) => {
-            BackendBuiltinClassMemberIntrinsic::FilterMap(map_builtin_filterable_carrier(carrier))
-        }
-    }
-}
-
-fn map_builtin_functor_carrier(
-    carrier: core::BuiltinFunctorCarrier,
-) -> BackendBuiltinFunctorCarrier {
-    match carrier {
-        core::BuiltinFunctorCarrier::List => BackendBuiltinFunctorCarrier::List,
-        core::BuiltinFunctorCarrier::Option => BackendBuiltinFunctorCarrier::Option,
-        core::BuiltinFunctorCarrier::Result => BackendBuiltinFunctorCarrier::Result,
-        core::BuiltinFunctorCarrier::Validation => BackendBuiltinFunctorCarrier::Validation,
-        core::BuiltinFunctorCarrier::Signal => BackendBuiltinFunctorCarrier::Signal,
-        core::BuiltinFunctorCarrier::Task => BackendBuiltinFunctorCarrier::Task,
-    }
-}
-
-fn map_builtin_bifunctor_carrier(
-    carrier: core::BuiltinBifunctorCarrier,
-) -> BackendBuiltinBifunctorCarrier {
-    match carrier {
-        core::BuiltinBifunctorCarrier::Result => BackendBuiltinBifunctorCarrier::Result,
-        core::BuiltinBifunctorCarrier::Validation => BackendBuiltinBifunctorCarrier::Validation,
-    }
-}
-
-fn map_builtin_applicative_carrier(
-    carrier: core::BuiltinApplicativeCarrier,
-) -> BackendBuiltinApplicativeCarrier {
-    match carrier {
-        core::BuiltinApplicativeCarrier::List => BackendBuiltinApplicativeCarrier::List,
-        core::BuiltinApplicativeCarrier::Option => BackendBuiltinApplicativeCarrier::Option,
-        core::BuiltinApplicativeCarrier::Result => BackendBuiltinApplicativeCarrier::Result,
-        core::BuiltinApplicativeCarrier::Validation => BackendBuiltinApplicativeCarrier::Validation,
-        core::BuiltinApplicativeCarrier::Signal => BackendBuiltinApplicativeCarrier::Signal,
-        core::BuiltinApplicativeCarrier::Task => BackendBuiltinApplicativeCarrier::Task,
-    }
-}
-
-fn map_builtin_apply_carrier(carrier: core::BuiltinApplyCarrier) -> BackendBuiltinApplyCarrier {
-    match carrier {
-        core::BuiltinApplyCarrier::List => BackendBuiltinApplyCarrier::List,
-        core::BuiltinApplyCarrier::Option => BackendBuiltinApplyCarrier::Option,
-        core::BuiltinApplyCarrier::Result => BackendBuiltinApplyCarrier::Result,
-        core::BuiltinApplyCarrier::Validation => BackendBuiltinApplyCarrier::Validation,
-        core::BuiltinApplyCarrier::Signal => BackendBuiltinApplyCarrier::Signal,
-        core::BuiltinApplyCarrier::Task => BackendBuiltinApplyCarrier::Task,
-    }
-}
-
-fn map_builtin_monad_carrier(carrier: core::BuiltinMonadCarrier) -> BackendBuiltinMonadCarrier {
-    match carrier {
-        core::BuiltinMonadCarrier::List => BackendBuiltinMonadCarrier::List,
-        core::BuiltinMonadCarrier::Option => BackendBuiltinMonadCarrier::Option,
-        core::BuiltinMonadCarrier::Result => BackendBuiltinMonadCarrier::Result,
-        core::BuiltinMonadCarrier::Task => BackendBuiltinMonadCarrier::Task,
-    }
-}
-
-fn map_builtin_foldable_carrier(
-    carrier: core::BuiltinFoldableCarrier,
-) -> BackendBuiltinFoldableCarrier {
-    match carrier {
-        core::BuiltinFoldableCarrier::List => BackendBuiltinFoldableCarrier::List,
-        core::BuiltinFoldableCarrier::Option => BackendBuiltinFoldableCarrier::Option,
-        core::BuiltinFoldableCarrier::Result => BackendBuiltinFoldableCarrier::Result,
-        core::BuiltinFoldableCarrier::Validation => BackendBuiltinFoldableCarrier::Validation,
-    }
-}
-
-fn map_builtin_traversable_carrier(
-    carrier: core::BuiltinTraversableCarrier,
-) -> BackendBuiltinTraversableCarrier {
-    match carrier {
-        core::BuiltinTraversableCarrier::List => BackendBuiltinTraversableCarrier::List,
-        core::BuiltinTraversableCarrier::Option => BackendBuiltinTraversableCarrier::Option,
-        core::BuiltinTraversableCarrier::Result => BackendBuiltinTraversableCarrier::Result,
-        core::BuiltinTraversableCarrier::Validation => BackendBuiltinTraversableCarrier::Validation,
-    }
-}
-
-fn map_builtin_filterable_carrier(
-    carrier: core::BuiltinFilterableCarrier,
-) -> BackendBuiltinFilterableCarrier {
-    match carrier {
-        core::BuiltinFilterableCarrier::List => BackendBuiltinFilterableCarrier::List,
-        core::BuiltinFilterableCarrier::Option => BackendBuiltinFilterableCarrier::Option,
-    }
-}
-
-fn map_builtin_append_carrier(carrier: core::BuiltinAppendCarrier) -> BackendBuiltinAppendCarrier {
-    match carrier {
-        core::BuiltinAppendCarrier::Text => BackendBuiltinAppendCarrier::Text,
-        core::BuiltinAppendCarrier::List => BackendBuiltinAppendCarrier::List,
-    }
-}
-
-fn map_builtin_ord_subject(subject: core::BuiltinOrdSubject) -> BackendBuiltinOrdSubject {
-    match subject {
-        core::BuiltinOrdSubject::Int => BackendBuiltinOrdSubject::Int,
-        core::BuiltinOrdSubject::Float => BackendBuiltinOrdSubject::Float,
-        core::BuiltinOrdSubject::Decimal => BackendBuiltinOrdSubject::Decimal,
-        core::BuiltinOrdSubject::BigInt => BackendBuiltinOrdSubject::BigInt,
-        core::BuiltinOrdSubject::Bool => BackendBuiltinOrdSubject::Bool,
-        core::BuiltinOrdSubject::Text => BackendBuiltinOrdSubject::Text,
-        core::BuiltinOrdSubject::Ordering => BackendBuiltinOrdSubject::Ordering,
-    }
+    })
 }
 
 fn map_unary_operator(operator: HirUnaryOperator) -> UnaryOperator {
